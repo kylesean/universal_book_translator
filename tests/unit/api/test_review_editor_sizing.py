@@ -56,3 +56,37 @@ def test_opening_the_editor_does_not_reflow_the_card_out_from_under_it() -> None
     assert edits, "the editor's double-click affordance disappeared"
     # The target pane's own gesture must be isolated from the card's.
     assert "onClick={(event) => event.stopPropagation()}" in source
+
+
+def test_the_review_labels_follow_the_selected_language() -> None:
+    """The ribbon read "Terminology / Formula / Numeric" in every locale.
+
+    Those names, the issue-kind chips, the block-type chip, the status badge,
+    the page chip and the inspector's severity were all hardcoded English (or a
+    raw engine enum upper-cased), so a Chinese operator got a页面 with an
+    English ruler across the top of every card.
+    """
+    view = _source(_REVIEW)
+    zh = _source(_REPO_ROOT / "web" / "src" / "i18n" / "translations" / "zh.ts")
+    en = _source(_REPO_ROOT / "web" / "src" / "i18n" / "translations" / "en.ts")
+    dictionary = _source(_REPO_ROOT / "web" / "src" / "i18n" / "types.ts")
+
+    # The labels come from the dictionary now, through one helper each, so a new
+    # call site cannot quietly reintroduce a literal.
+    for key in ("issueKinds", "blockTypes", "blockStatuses", "mqmSeverities"):
+        assert f"{key}: Record<string, string>" in dictionary, f"{key} is not typed"
+        assert key in zh and key in en, f"{key} is missing from a locale"
+    assert "issueLabel(t," in view
+    assert "blockTypeLabel(t," in view
+    assert "blockStatusLabel(t," in view
+    assert "mqmSeverityLabel(t," in view
+
+    # The hardcoded map is gone, and the raw-enum renders with it.
+    assert "ISSUE_LABELS" not in view
+    assert "{seg.block_type}" not in view
+    assert "{inspectorSegment.block_type}" not in view
+    assert "seg.status.toUpperCase()" not in view
+    assert "> 0 issues" not in view
+    # The engine identifiers the pane renders are all covered by the dictionary.
+    for identifier in ("narrative", "list_item", "needs_human", "mtqe_passed"):
+        assert identifier in zh or identifier in en

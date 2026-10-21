@@ -481,5 +481,24 @@ export interface TranslationDictionary {
     inspectorProvenance: string
     editHint: string
     cancelEdit: string
+    //: Names for the backend's issue kinds (``IssuesReport.counts`` keys).
+    //: These were a hardcoded English map in the view, so the ribbon read
+    //: "Terminology / Formula / Numeric …" in every locale.
+    issueKinds: Record<string, string>
+    //: Block types arrive from the engine as snake_case identifiers; the pane
+    //: used to render them raw ("narrative", "list_item").
+    blockTypes: Record<string, string>
+    //: Block statuses, likewise: the card badge used to show the raw enum
+    //: upper-cased ("NEEDS_HUMAN").
+    blockStatuses: Record<string, string>
+    //: MQM triage tiers ("critical" | "major" | "minor").
+    mqmSeverities: Record<string, string>
+    noIssues: string
+    pageLabel: string
+    errorFlags: string
+    loadFailed: string
+    loadMoreFailed: string
+    saveFailed: string
+    propagateFailed: string
   }
 }

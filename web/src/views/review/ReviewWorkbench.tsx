@@ -35,20 +35,23 @@ import { parseFailedDraft } from '@/lib/failedDraft'
 
 type Filter = 'issues' | 'all' | 'needs_human' | string
 
-//: Human labels for the backend's issue kinds (ribbon + card chips).
-const ISSUE_LABELS: Record<string, string> = {
-  terminology: 'Terminology',
-  formula: 'Formula',
-  numeric: 'Numeric',
-  omission: 'Omission',
-  fabrication: 'Fabrication',
-  repetition: 'Repetition',
-  structure: 'Structure',
-  echo: 'Echo',
-  review: 'Needs review',
-  critical: 'Critical',
-  render: 'Render/overflow',
-}
+//: Fallback label for an issue kind the dictionary does not name yet. The
+//: backend can add a kind before the console learns its translation; showing
+//: the raw key beats showing nothing. The known kinds live in the i18n tables
+//: (``t.review.issueKinds``) so the ribbon follows the selected language.
+const issueLabel = (t: ReturnType<typeof useI18n>['t'], kind: string): string =>
+  t.review.issueKinds[kind] ?? kind
+
+//: Same idea for block types and statuses, which arrive as engine identifiers.
+const blockTypeLabel = (t: ReturnType<typeof useI18n>['t'], kind: string): string =>
+  t.review.blockTypes[kind] ?? kind
+
+const blockStatusLabel = (t: ReturnType<typeof useI18n>['t'], status: string): string =>
+  t.review.blockStatuses[status] ?? status.toUpperCase()
+
+//: MQM triage tier, or an em dash when the block was never triaged.
+const mqmSeverityLabel = (t: ReturnType<typeof useI18n>['t'], severity: string | null): string =>
+  severity ? (t.review.mqmSeverities[severity] ?? severity) : '—'
 
 //: Segments fetched per request. The backend caps a single page at 500, so this
 //: is also the hard ceiling on one request; the list pages past it via
@@ -102,11 +105,11 @@ export function ReviewWorkbench() {
       setSaved({})
       setIssueCursor(0)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load workbench')
+      setError(err instanceof Error ? err.message : t.review.loadFailed)
     } finally {
       setLoading(false)
     }
-  }, [jobId, filter])
+  }, [jobId, filter, t])
 
   // Append the next window. The backend returns ``total`` with every page, so
   // the "load more" button can state how much is left instead of guessing.
@@ -126,11 +129,11 @@ export function ReviewWorkbench() {
       })
       setSegmentTotal(data.total)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load more segments')
+      setError(err instanceof Error ? err.message : t.review.loadMoreFailed)
     } finally {
       setLoadingMore(false)
     }
-  }, [jobId, filter, segments.length, loadingMore])
+  }, [jobId, filter, segments.length, loadingMore, t])
 
   useEffect(() => {
     void load()
@@ -231,7 +234,7 @@ export function ReviewWorkbench() {
       // "re-render" button) so a review session re-renders once, at the end.
       setReExportPending(true)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save revision')
+      setError(err instanceof Error ? err.message : t.review.saveFailed)
     } finally {
       setSaving((prev) => ({ ...prev, [segment.block_id]: false }))
     }
@@ -343,7 +346,7 @@ export function ReviewWorkbench() {
           <div className="flex items-center gap-2 text-xs font-mono flex-wrap">
             {ribbonCounts.length === 0 ? (
               <span className="text-[#15803d] flex items-center gap-1 font-medium">
-                <CheckCircle2 className="h-3.5 w-3.5" /> 0 issues
+                <CheckCircle2 className="h-3.5 w-3.5" /> {t.review.noIssues}
               </span>
             ) : (
               ribbonCounts.map(([kind, value]) => {
@@ -358,9 +361,9 @@ export function ReviewWorkbench() {
                         ? 'border-[#b45309] bg-[#b45309]/20 text-[#b45309] font-bold shadow-xs'
                         : 'border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-[var(--ink-secondary)] hover:border-[var(--paper-border-hover)] hover:text-[var(--ink-primary)]'
                     }`}
-                    title={isActive ? t.review.clearFilter : `${t.review.filterByIssueKind}: ${ISSUE_LABELS[kind] ?? kind}`}
+                    title={isActive ? t.review.clearFilter : `${t.review.filterByIssueKind}: ${issueLabel(t, kind)}`}
                   >
-                    <span>{ISSUE_LABELS[kind] ?? kind}</span>
+                    <span>{issueLabel(t, kind)}</span>
                     <span className="opacity-80 font-bold">{value}</span>
                     {isActive && <span className="ml-0.5 text-[10px] opacity-70">✕</span>}
                   </button>
@@ -377,7 +380,7 @@ export function ReviewWorkbench() {
                     : 'border-[#b45309]/40 bg-[#b45309]/10 text-[#b45309] hover:bg-[#b45309]/20'
                 }`}
               >
-                needs human {issues?.status.needs_human}
+                {blockStatusLabel(t, 'needs_human')} {issues?.status.needs_human}
               </button>
             )}
           </div>
@@ -402,7 +405,7 @@ export function ReviewWorkbench() {
         <div className="flex items-center gap-2">
           {filter !== 'issues' && filter !== 'needs_human' && filter !== 'all' && (
             <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] bg-[#b45309]/15 border border-[#b45309]/40 text-[#b45309] text-xs font-mono">
-              <span className="font-semibold">{ISSUE_LABELS[filter] ?? filter}</span>
+              <span className="font-semibold">{issueLabel(t, filter)}</span>
               <button
                 type="button"
                 onClick={() => setFilter('issues')}
@@ -552,11 +555,11 @@ export function ReviewWorkbench() {
                                     : 'bg-[var(--paper-border)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]'
                                 }`}
                               >
-                                Page {seg.page}
+                                {t.review.pageLabel.replace('{n}', String(seg.page))}
                               </button>
                             )}
                             <span className="text-xs px-1.5 py-0.2 rounded bg-[var(--paper-border)] text-[var(--ink-secondary)] font-semibold">
-                              {seg.block_type}
+                              {blockTypeLabel(t, seg.block_type)}
                             </span>
                           </div>
                           <div className="flex items-center gap-2">
@@ -565,7 +568,7 @@ export function ReviewWorkbench() {
                                 key={kind}
                                 className="text-xs px-1.5 py-0.5 rounded bg-[#b45309]/15 text-[#b45309] font-semibold"
                               >
-                                {ISSUE_LABELS[kind] ?? kind}
+                                {issueLabel(t, kind)}
                               </span>
                             ))}
                             {seg.mtqe_score !== null && (
@@ -579,7 +582,7 @@ export function ReviewWorkbench() {
                               </Badge>
                             ) : (
                               <Badge variant={seg.issues.length > 0 ? 'warning' : 'outline'} dot>
-                                {seg.status.toUpperCase()}
+                                {blockStatusLabel(t, seg.status)}
                               </Badge>
                             )}
                           </div>
@@ -889,7 +892,7 @@ export function ReviewWorkbench() {
                 {inspectorSegment.block_id}
               </div>
               <div className="text-xs text-[var(--ink-secondary)] font-mono mt-0.5">
-                {inspectorSegment.block_type} · P{inspectorSegment.page ?? '—'}
+                {blockTypeLabel(t, inspectorSegment.block_type)} · P{inspectorSegment.page ?? '—'}
               </div>
             </div>
 
@@ -912,7 +915,7 @@ export function ReviewWorkbench() {
               </div>
               <div className="py-1.5 flex justify-between">
                 <dt className="text-[var(--ink-muted)]">{t.review.inspectorSeverity}</dt>
-                <dd>{inspectorSegment.mqm_severity ?? '—'}</dd>
+                <dd>{mqmSeverityLabel(t, inspectorSegment.mqm_severity)}</dd>
               </div>
             </dl>
 
@@ -937,7 +940,7 @@ export function ReviewWorkbench() {
             {inspectorSegment.error_flags.length > 0 && (
               <div>
                 <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold mb-1">
-                  error_flags
+                  {t.review.errorFlags}
                 </div>
                 <ul className="space-y-0.5">
                   {inspectorSegment.error_flags.map((flag, index) => (
@@ -1108,7 +1111,7 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
       onReplaced(res.replacements)
       reloadTerms()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to propagate term')
+      setError(err instanceof Error ? err.message : t.review.propagateFailed)
     } finally {
       setBusy(false)
     }
