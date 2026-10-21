@@ -37,6 +37,41 @@ interface LogEntry {
   level: LogLevel
 }
 
+/**
+ * Console log lines per job, surviving a route change.
+ *
+ * The panel's state lived in the component, and Mission Control unmounts the
+ * moment the operator opens the review workbench. Coming back rebuilt an empty
+ * array and re-subscribed to `/stream`, which for a finished job answers with
+ * one snapshot plus one terminal frame — so a run that had produced a hundred
+ * lines came back showing two, and the buffer counter read "2/2" as if that
+ * were all there had ever been. Measured on the reference job: 2 lines after
+ * navigating away and back, both duplicates of the same final state.
+ *
+ * Kept outside React and keyed by job id so it also cannot leak one job's log
+ * into another's panel. Bounded like the in-component buffer was.
+ */
+const LOG_HISTORY = new Map<string, LogEntry[]>()
+const LOG_HISTORY_MAX_JOBS = 20
+const LOG_HISTORY_MAX_LINES = 400
+
+function historyFor(jobId: string | null): LogEntry[] {
+  if (!jobId) return []
+  return LOG_HISTORY.get(jobId) ?? []
+}
+
+function rememberLogs(jobId: string | null, entries: LogEntry[]): void {
+  if (!jobId) return
+  LOG_HISTORY.delete(jobId)
+  LOG_HISTORY.set(jobId, entries)
+  // Oldest-first eviction, mirroring the frame buffer's own bound.
+  while (LOG_HISTORY.size > LOG_HISTORY_MAX_JOBS) {
+    const oldest = LOG_HISTORY.keys().next()
+    if (oldest.done) break
+    LOG_HISTORY.delete(oldest.value)
+  }
+}
+
 export function MissionControl() {
   const { t } = useI18n()
   const toast = useToast()
@@ -46,7 +81,27 @@ export function MissionControl() {
   const onSelectJob = (id: string) => navigate(`/jobs/${id}`)
   const onInspectQuality = (id: string) => navigate(`/jobs/${id}/quality`)
   const onOpenReview = (id: string) => navigate(`/jobs/${id}/review`)
-  const [logs, setLogs] = useState<LogEntry[]>([])
+  // Seeded from the cross-route history so returning to this job restores what
+  // the stream had already said, instead of the two frames a terminal job still
+  // replays (see ``LOG_HISTORY``). The lazy initializer runs once per mount.
+  const [logs, setLogs] = useState<LogEntry[]>(() => historyFor(jobId ?? null))
+
+  // Every write goes through here so the in-memory history can never drift from
+  // what the panel shows. Two sinks, one update: state for this render, the map
+  // for the next mount.
+  // ``currentJobId`` is a dependency rather than a ref: the SSE effect below
+  // re-subscribes when the job changes anyway, so a stable identity buys
+  // nothing, and reading a ref during render is a real hydration hazard.
+  const appendLog = useCallback(
+    (entries: LogEntry[]) => {
+      setLogs((prev) => {
+        const next = [...prev, ...entries].slice(-LOG_HISTORY_MAX_LINES)
+        rememberLogs(currentJobId, next)
+        return next
+      })
+    },
+    [currentJobId]
+  )
   const [logSearch, setLogSearch] = useState('')
   const [logLevel, setLogLevel] = useState<'ALL' | LogLevel>('ALL')
   const [autoScroll, setAutoScroll] = useState(true)
@@ -119,6 +174,12 @@ export function MissionControl() {
 
   useEffect(() => {
     if (!currentJobId) return
+
+    // Switching jobs inside this view does not remount it, so the previous
+    // job's lines have to be swapped out explicitly — otherwise job B's panel
+    // opens showing job A's log above job B's first frame.
+    // oxlint-disable-next-line react/set-state-in-effect
+    setLogs(historyFor(currentJobId))
 
     let isMounted = true
     const applyStatus = (res: Record<string, unknown>) => {
@@ -226,7 +287,7 @@ export function MissionControl() {
           : frame.message
             ? `${frame.message} · ${counters}`
             : `${frame.status ?? 'running'} · ${counters}`
-        setLogs((prev) => [...prev.slice(-400), { text, level }])
+        appendLog([{ text, level }])
       },
       undefined,
       (connected: boolean) => {
@@ -239,7 +300,7 @@ export function MissionControl() {
       clearInterval(timer)
       unsubscribe()
     }
-  }, [currentJobId])
+  }, [currentJobId, appendLog])
 
   useEffect(() => {
     if (autoScroll && logContainerRef.current) {
@@ -251,10 +312,7 @@ export function MissionControl() {
     if (!currentJobId) return
     try {
       await cancelJob(currentJobId)
-      setLogs((prev) => [
-        ...prev,
-        { text: t.mission.logAborted, level: 'WARN' },
-      ])
+      appendLog([{ text: t.mission.logAborted, level: 'WARN' }])
     } catch (err) {
       toast.push(err instanceof Error ? err.message : 'Cancel failed', 'error')
     }
@@ -265,10 +323,7 @@ export function MissionControl() {
     setResuming(true)
     try {
       await resumeJob(currentJobId)
-      setLogs((prev) => [
-        ...prev,
-        { text: t.mission.logResumed, level: 'INFO' },
-      ])
+      appendLog([{ text: t.mission.logResumed, level: 'INFO' }])
       setStatusStr('submitted')
     } catch (err) {
       toast.push(err instanceof Error ? err.message : 'Resume failed', 'error')
@@ -312,10 +367,7 @@ export function MissionControl() {
     try {
       await deleteJob(jobId)
       if (jobId === currentJobId) {
-        setLogs((prev) => [
-          ...prev,
-          { text: t.mission.logDeleted, level: 'WARN' },
-        ])
+        appendLog([{ text: t.mission.logDeleted, level: 'WARN' }])
       }
       await refreshQueue()
     } catch (err) {
