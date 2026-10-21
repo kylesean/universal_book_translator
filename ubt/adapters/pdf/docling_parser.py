@@ -259,6 +259,19 @@ def configure_hf_environment(*, enrich: bool = False) -> None:
 #: An ordered-marker run must be at least this long to be re-typed as a list:
 #: a lone ``(2024) ...`` citation opens like a marker but is not a list item.
 _ORDERED_MARKER_MIN_RUN = 2
+
+#: How many times the *same* text must appear in a page-header/footer position
+#: before it is treated as running chrome rather than one-off content.
+#:
+#: The comparison is ``>=``, not ``>``: a running head recurs once per page it
+#: spans, and three occurrences is already repetition — a title-page credit line
+#: appears once, a real section heading is never re-emitted by the *layout*
+#: model in the header band at all. With the old strict ``> 3`` a head that
+#: spanned exactly three pages survived as a ``HEADING`` block in the main
+#: story, so "3.2 Unified FinFET compact model" and "Appendix Explicit surface
+#: potential model" were typeset as chapter-level headings mid-chapter, in the
+#: source language, three times each.
+_CHROME_REPEAT_MIN = 3
 #: Ordered-marker shapes (numbered ``(1)`` / ``1.`` / ``1)``, lettered ``a.`` /
 #: ``(a)``, CJK ``一、``). Bullets are deliberately excluded: Docling already
 #: types real bullet lists, so a bullet match here is more likely a symbol.
@@ -1245,7 +1258,7 @@ def map_iterated_items(
         region = None
         if label == DocItemLabel.PAGE_HEADER:
             text = (getattr(item, "text", "") or "").strip()
-            if not text or header_counts.get(chrome_key(text), 0) > 3:
+            if not text or header_counts.get(chrome_key(text), 0) >= _CHROME_REPEAT_MIN:
                 continue
             # Survivors (e.g. title-page credit lines) stay chrome and
             # never enter translation: backfilling them garbles the
@@ -1254,7 +1267,7 @@ def map_iterated_items(
             region = RegionKind.HEADER
         elif label == DocItemLabel.PAGE_FOOTER:
             text = (getattr(item, "text", "") or "").strip()
-            if not text or footer_counts.get(chrome_key(text), 0) > 3 or text.isdigit():
+            if not text or footer_counts.get(chrome_key(text), 0) >= _CHROME_REPEAT_MIN or text.isdigit():
                 continue
             # A repeating footer is chrome; a *one-off* footer that reads as a
             # sentence is a footnote paragraph the author wrote, and leaving it

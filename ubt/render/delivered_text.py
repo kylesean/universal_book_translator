@@ -169,6 +169,19 @@ def dropped_page_furniture(block: IRBlock) -> bool:
     """
     if str(getattr(block.block_type, "value", block.block_type) or "") != "heading":
         return False
+    # A heading block whose *region* is the page-furniture band came from the
+    # layout model's running head, not from the text flow. Typesetting it
+    # produces a chapter-level heading in the middle of a chapter, in the
+    # source language, once per page the head spans.
+    #
+    # Only when the block was left in the source language. ``--translate-chrome``
+    # exists so an operator can ask for the strip to be *translated*, and ingest
+    # clears ``skip_translate`` when they do; dropping the block then would
+    # silently discard a translation the run paid for, which is a worse defect
+    # than the untranslated band this rule removes.
+    region = str(getattr(block, "region", None) or "")
+    if region in ("header", "footer", "page_number") and block.skip_translate:
+        return True
     if _CHROME_HEADING_RE.match(delivered_text(block)):
         return True
     # The chrome is matched on the SOURCE text too: a translated heading no

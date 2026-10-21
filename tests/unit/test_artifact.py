@@ -30,6 +30,7 @@ from ubt.adapters.pdf.artifact_text import (
 )
 from ubt.core.ir.models import BlockType, IRBlock, make_element
 from ubt.core.qe.fast_pass import REHEARSAL_MARKER, strip_rehearsal_marker
+from ubt.model.ast import RegionKind
 from ubt.pipeline.artifact import DeliveredArtifact, delivered_artifact
 
 pytestmark = pytest.mark.fast
@@ -312,3 +313,37 @@ def _write_one_line_pdf(path: Path, text: str) -> None:
         f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
     ).encode()
     path.write_bytes(bytes(out))
+
+
+# --- running heads are not chapter headings --------------------------------
+# A header-band block that the policy left in the source language is running
+# chrome: typesetting it emitted "3.2 Unified FinFET compact model" (and
+# "Appendix Explicit surface potential model", and "References") as level-1
+# headings in the middle of the chapter, once per page the head spans — six
+# untranslated H1s on the reference chapter. The chrome opt-in must still work,
+# so the drop is conditioned on the block having been left untranslated.
+
+
+def _header_heading(*, skip_translate: bool) -> IRBlock:
+    element = make_element(
+        id="hdr",
+        spine_index=1,
+        block_type=BlockType.HEADING,
+        source_text="3.2 Unified FinFET compact model",
+        skip_translate=skip_translate,
+        region=RegionKind.HEADER,
+    )
+    return IRBlock(element=element, target_text="3.2 Unified FinFET compact model")
+
+
+def test_an_untranslated_running_head_is_not_typeset_as_a_heading() -> None:
+    from ubt.render.delivered_text import dropped_page_furniture
+
+    assert dropped_page_furniture(_header_heading(skip_translate=True))
+
+
+def test_the_chrome_opt_in_still_places_the_translated_head() -> None:
+    """``--translate-chrome`` clears ``skip_translate``; do not discard it."""
+    from ubt.render.delivered_text import dropped_page_furniture
+
+    assert not dropped_page_furniture(_header_heading(skip_translate=False))
