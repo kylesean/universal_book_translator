@@ -52,9 +52,23 @@ function deliverableLabel(key: string, fallback: string, t: ReturnType<typeof us
       return t.quality.visualReportJson
     case 'metrics':
       return t.quality.metricsJson
+    case 'html':
+      return t.quality.htmlView
+    case 'xliff':
+      return t.quality.xliffDoc
     default:
       return fallback
   }
+}
+
+/** The checklist's per-pillar verdict, translated. */
+function pillarStatusLabel(
+  t: ReturnType<typeof useI18n>['t'],
+  status: 'pass' | 'warn' | 'fail'
+): string {
+  if (status === 'pass') return t.quality.pillarStatusPass
+  if (status === 'warn') return t.quality.pillarStatusWarn
+  return t.quality.pillarStatusFail
 }
 
 /** A five-axis radar drawn as inline SVG (no chart dependency). */
@@ -496,22 +510,25 @@ export function QualityGateView() {
                 variant={isPassed ? 'success' : isWarning ? 'warning' : 'destructive'}
                 dot
               >
-                {isPassed ? 'PASS' : isWarning ? 'WARNING' : 'BLOCKED'}
+                {isPassed
+                  ? t.quality.verdictPass
+                  : isWarning
+                    ? t.quality.verdictWarning
+                    : t.quality.verdictBlocked}
               </Badge>
             </div>
             <p className="text-xs text-[var(--ink-secondary)] mt-0.5">
               {isPassed ? t.quality.allPassedDesc : t.quality.blockedDesc}
             </p>
             <div className="text-xs font-mono text-[var(--ink-muted)] mt-1.5">
-              pass rate {pct(summary.pass_rate)} ·{' '}
+              {t.quality.passRate.replace('{value}', pct(summary.pass_rate))} ·{' '}
               {score.qe_measured ? (
-                <span>avg QE {Number(score.avg_qe ?? 0).toFixed(3)}</span>
+                <span>
+                  {t.quality.avgQeValue.replace('{score}', Number(score.avg_qe ?? 0).toFixed(3))}
+                </span>
               ) : (
-                <span
-                  className="uppercase"
-                  title="No semantic scoring ran (heuristic QE engine); avg-QE fields are placeholders"
-                >
-                  QE not measured
+                <span className="uppercase" title={t.quality.qeNotMeasuredHint}>
+                  {t.quality.qeNotMeasured}
                 </span>
               )}
             </div>
@@ -535,7 +552,7 @@ export function QualityGateView() {
       {/* Formal Verification Checklist */}
       <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
         <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-          FORMAL VERIFICATION GATEWAYS (5 PILLARS)
+          {t.quality.pillarsTitle}
         </div>
         <div className="divide-y divide-[var(--paper-border)]">
           {pillars.map((item, idx) => (
@@ -564,7 +581,7 @@ export function QualityGateView() {
                     {item.metric}
                   </span>
                   <Badge variant={statusBadge(item.status)} dot>
-                    {item.status.toUpperCase()}
+                    {pillarStatusLabel(t, item.status)}
                   </Badge>
                 </div>
               </button>

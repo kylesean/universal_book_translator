@@ -225,6 +225,15 @@ export interface TranslationDictionary {
     noDeliverables: string
     deleteJob: string
     deleteConfirm: string
+    //: Job statuses shown as a badge on the header and in the queue rows.
+    //: Both used ``status.toUpperCase()``, so "COMPLETED" appeared in every
+    //: locale.
+    jobStatuses: Record<string, string>
+    //: Pipeline stage names, from the engine's stage identifiers.
+    stageNames: Record<string, string>
+    stageLine: string
+    qeHeuristicHint: string
+    avgQe: string
   }
   quality: {
     title: string
@@ -257,6 +266,23 @@ export interface TranslationDictionary {
     qualityReportJson: string
     visualReportJson: string
     metricsJson: string
+    //: The two companions the export stage writes by default. Their keys were
+    //: missing from the label switch, so the button fell back to the backend's
+    //: English `label` — the only two deliverables still untranslated.
+    htmlView: string
+    xliffDoc: string
+    //: Quality-gate verdict badge, and the report's pass-rate phrasing.
+    verdictPass: string
+    verdictWarning: string
+    verdictBlocked: string
+    passRate: string
+    avgQeValue: string
+    qeNotMeasured: string
+    qeNotMeasuredHint: string
+    pillarsTitle: string
+    pillarStatusPass: string
+    pillarStatusWarn: string
+    pillarStatusFail: string
     axisMath: string
     axisTerminology: string
     axisVisual: string
@@ -321,6 +347,9 @@ export interface TranslationDictionary {
     bibleStep1: string
     bibleStep2: string
     bibleStep3: string
+    //: The bible workflow's step badges and the empty-glossary row.
+    stepBadge: string
+    noTerms: string
   }
   doctor: {
     title: string
@@ -421,6 +450,10 @@ export interface TranslationDictionary {
     exposedWarning: string
     exposed: string
     loopbackOnly: string
+    //: Diagnostic verdict shown as a badge on every check row. The engine's
+    //: status codes ("OK" | "WARN" | "FAIL" | "SKIP") are stable, so they are
+    //: the translation key.
+    checkStatuses: Record<string, string>
   }
   review: {
     title: string

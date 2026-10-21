@@ -307,7 +307,7 @@ export function LanguageAssetsView() {
                 ) : filteredTerms.length === 0 ? (
                   <tr>
                     <td colSpan={3} className="py-6 text-center text-[var(--ink-muted)]">
-                      No glossary terms.
+                      {t.assets.noTerms}
                     </td>
                   </tr>
                 ) : (
@@ -567,18 +567,18 @@ export function LanguageAssetsView() {
                 {t.assets.bibleWorkflowDesc}
               </p>
               <div className="p-2.5 rounded bg-[var(--paper-subsurface)] border border-[var(--paper-border)] text-xs text-[var(--ink-secondary)] space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-xs font-mono">STEP 1</Badge>
-                  <span>{t.assets.bibleStep1}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-xs font-mono">STEP 2</Badge>
-                  <span>{t.assets.bibleStep2}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-xs font-mono">STEP 3</Badge>
-                  <span>{t.assets.bibleStep3}</span>
-                </div>
+                {[
+                  t.assets.bibleStep1,
+                  t.assets.bibleStep2,
+                  t.assets.bibleStep3,
+                ].map((step, index) => (
+                  <div key={step} className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs font-mono">
+                      {t.assets.stepBadge.replace('{n}', String(index + 1))}
+                    </Badge>
+                    <span>{step}</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>

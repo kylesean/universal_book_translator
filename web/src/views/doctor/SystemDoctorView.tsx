@@ -192,7 +192,7 @@ export function SystemDoctorView() {
                           dot
                           className="text-xs shrink-0"
                         >
-                          {check.status}
+                          {t.doctor.checkStatuses[check.status] ?? check.status}
                         </Badge>
                       </div>
                     ))}

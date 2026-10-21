@@ -37,6 +37,18 @@ interface LogEntry {
   level: LogLevel
 }
 
+//: Job status as a label. Both the header badge and the queue rows rendered
+//: ``status.toUpperCase()``, so an operator on the Chinese console read
+//: "COMPLETED" over a fully Chinese page. An unknown status falls back to its
+//: upper-cased identifier: a new engine state should still be visible.
+const jobStatusLabel = (t: ReturnType<typeof useI18n>['t'], status: string): string =>
+  t.mission.jobStatuses[status] ?? status.toUpperCase()
+
+//: Pipeline stage, or a status name when no stage event has arrived yet (a
+//: queued job reports no stage). Same fallback rule as above.
+const stageLabel = (t: ReturnType<typeof useI18n>['t'], stage: string): string =>
+  t.mission.stageNames[stage] ?? t.mission.jobStatuses[stage] ?? stage.toUpperCase()
+
 /**
  * Console log lines per job, surviving a route change.
  *
@@ -438,7 +450,7 @@ export function MissionControl() {
             </h1>
             {currentJobId && (
               <Badge variant={isCompleted ? 'success' : isFailed ? 'destructive' : 'info'} dot>
-                {statusStr.toUpperCase()}
+                {jobStatusLabel(t, statusStr)}
               </Badge>
             )}
             {currentJobId && isLiveStreaming && (
@@ -564,7 +576,7 @@ export function MissionControl() {
                     <td className="py-2 px-3">
                       <div className="flex items-center gap-1.5">
                         <Badge variant={statusVariant(job.status)} dot className="text-xs">
-                          {job.status.toUpperCase()}
+                          {jobStatusLabel(t, job.status)}
                         </Badge>
                         {/* A rehearsal ships echo text and a --pages run ships a
                             fragment; both used to look like a full real run in
@@ -640,7 +652,10 @@ export function MissionControl() {
         <div className="flex items-center justify-between text-xs font-mono uppercase text-[var(--ink-muted)] mb-2 px-1 font-semibold">
           <span>{t.mission.pipelineGraph}</span>
           <span className="text-[var(--ink-primary)] font-bold">
-            STAGE: {(derivedStage || statusStr).toUpperCase()}
+            {t.mission.stageLine.replace(
+              '{stage}',
+              stageLabel(t, derivedStage || statusStr)
+            )}
           </span>
         </div>
         <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-1.5">
@@ -722,9 +737,9 @@ export function MissionControl() {
           )}
           <div className="text-xs text-[#15803d] font-mono mt-1.5 font-medium">
             {qeMeasured ? (
-              `Avg QE ${avgQe.toFixed(3)}`
+              t.mission.avgQe.replace('{score}', avgQe.toFixed(3))
             ) : (
-              <span title="The heuristic QE engine scores nothing; enable qe_engine = 'tiered' for a semantic score.">
+              <span title={t.mission.qeHeuristicHint}>
                 {t.mission.qeNotMeasuredHeuristic}
               </span>
             )}
@@ -743,8 +758,8 @@ export function MissionControl() {
 
         <div className="p-4">
           <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.executionState}</div>
-          <div className="text-sm font-bold font-mono text-[var(--ink-primary)] mt-1 capitalize">
-            {statusStr}
+          <div className="text-sm font-bold font-mono text-[var(--ink-primary)] mt-1">
+            {jobStatusLabel(t, statusStr)}
           </div>
           <div className="text-xs text-[var(--ink-secondary)] mt-1.5 truncate">
             {isCompleted ? t.mission.stateCertified : t.mission.stateDrafting}
