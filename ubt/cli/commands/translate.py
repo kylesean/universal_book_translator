@@ -22,13 +22,17 @@ from ubt.core.config import (
 )
 from ubt.core.job_options import (
     RUN_REPORT_KINDS,
+    PriorOutput,
     deliverable_candidates,
     delivery_verdict_from_summary,
+    own_prior_deliverable,
     profile_name_is_valid,
     sidecar_path,
 )
 from ubt.core.log_config import setup_logging
 from ubt.core.presets import Preset
+
+logger = logging.getLogger(__name__)
 
 #: The shared language switch (ubt.cli.ui owns the UBT_UI_LANG rule; assess and
 #: translate both read it here rather than each keeping a copy).
@@ -124,12 +128,54 @@ def _same_file(left: Path, right: Path) -> bool:
         return False
 
 
+def _prior_output_from_ledger(
+    job_id: str | None,
+    db_dir: Path | None,
+) -> PriorOutput | None:
+    """The output a prior CLI run of ``job_id`` recorded, or ``None``.
+
+    The CLI ledger stores ``output_file`` in the job's metadata when a run
+    completes, so "is this file this very job's own deliverable?" is answerable
+    from disk — which is what the REST and MCP surfaces already ask through
+    :func:`~ubt.core.job_options.own_prior_deliverable`. Reading it here closes
+    the third surface.
+
+    Deliberately quiet and total: a missing ledger, an unreadable one, a job id
+    the operator mistyped, or a build that recorded no pointer must all mean
+    "nothing to authorize" — the caller then keeps the strict refusal. Only a
+    positive, well-formed record grants the exemption.
+    """
+    if not job_id:
+        return None
+    try:
+        from ubt.core.config import UBTConfig
+        from ubt.core.engine.ledger import SQLiteJobLedger
+
+        directory = db_dir if db_dir is not None else UBTConfig.from_env().db_dir
+        db_path = Path(directory) / f"{job_id}.sqlite"
+        if not db_path.exists():
+            return None
+        ledger = SQLiteJobLedger(db_path, read_only=True)
+        try:
+            recorded = ledger.get_job_metadata_value(job_id, "output_file")
+            source = ledger.get_job_source_path(job_id)
+        finally:
+            ledger.close()
+        if not recorded or not source:
+            return None
+        return PriorOutput(output_path=str(recorded), input_path=str(source))
+    except Exception as exc:  # noqa: BLE001 - no authorization is the safe answer
+        logger.debug("prior-output lookup for %r unavailable: %s", job_id, exc)
+        return None
+
+
 def _refuse_existing_output(
     output: Path | None,
     *,
     fresh: bool | None,
     input_path: Path,
     pages: str | None = None,
+    prior: PriorOutput | None = None,
 ) -> Path | None:
     """Mirror the API 409 / MCP ToolError overwrite guard on the CLI surface.
 
@@ -144,6 +190,14 @@ def _refuse_existing_output(
     ``pages`` must be the run's own page selection: a ``--pages`` run writes a
     scope-suffixed default name, and guarding the unscoped one would both
     protect a file this run will not touch and miss the one it will.
+
+    ``prior`` is the output this same job id already recorded. Overwrite is a
+    *re-run of one job*, not a licence to truncate any file the job could name,
+    and the REST and MCP surfaces have always drawn that line through
+    :func:`~ubt.core.job_options.own_prior_deliverable`. The CLI drew a stricter
+    one — refuse everything — so a legitimate re-run of a job that finished, and
+    therefore left its deliverable on disk, was refused here and accepted there.
+    The exemption is the same helper, on the same question.
     """
     from ubt.core.config import parse_page_ranges
 
@@ -164,7 +218,9 @@ def _refuse_existing_output(
         # loudly instead of overwriting the first delivery.
         if not fresh:
             for candidate in deliverable_candidates(None, input_path, pages=page_set):
-                if candidate.exists():
+                if candidate.exists() and not own_prior_deliverable(
+                    candidate, prior, input_path=input_path
+                ):
                     raise typer.BadParameter(
                         f"default output already exists; refusing to overwrite it: {candidate} "
                         "(pass --fresh to overwrite or -o to choose another path)"
@@ -181,7 +237,9 @@ def _refuse_existing_output(
             )
         return output
     for candidate in deliverable_candidates(output, input_path, pages=page_set):
-        if candidate.exists():
+        if candidate.exists() and not own_prior_deliverable(
+            candidate, prior, input_path=input_path
+        ):
             raise typer.BadParameter(
                 f"output path already exists; refusing to overwrite it: {candidate} "
                 "(pass --fresh to overwrite)"
@@ -193,9 +251,9 @@ def _delivery_verdict(summary: dict[str, Any]) -> tuple[str, str]:
     """The three-state delivery verdict from a quality-report summary.
 
     Thin CLI wrapper over the shared authority
-    :func:`ubt.core.job_options.delivery_verdict_from_summary` — the web
-    quality gate and the status surface consume the same rule, so four
-    facades answer "is this delivered" identically.
+    :func:`ubt.core.job_options.delivery_verdict_from_summary` — the CLI banner
+    and the console's quality gate consume the same rule, so both answer
+    "is this delivered" identically.
 
     Returns ``(state, message)`` where ``state`` is ``"passed"``,
     ``"warning"``, or ``"blocked"`` -- the PASSED / WARNING / BLOCKED
@@ -759,7 +817,13 @@ def translate(
                 border_style="yellow" if dry_run else "cyan",
             )
         )
-    output = _refuse_existing_output(output, fresh=fresh, input_path=input_path, pages=pages)
+    output = _refuse_existing_output(
+        output,
+        fresh=fresh,
+        input_path=input_path,
+        pages=pages,
+        prior=_prior_output_from_ledger(request.get("job_id"), db_dir),
+    )
     try:
         run_fn = _get_run_translation()
         result_path = asyncio.run(
