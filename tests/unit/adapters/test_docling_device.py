@@ -24,6 +24,10 @@ from ubt.core.ports import AdapterRuntimeConfig
 pytestmark = pytest.mark.fast
 
 
+class _ConverterBuilt(RuntimeError):
+    """Sentinel: the wiring under test completed, stop before real conversion."""
+
+
 def test_default_docling_device_is_auto() -> None:
     # ``auto`` keeps Docling's own probe, i.e. existing behaviour.
     os.environ.pop("UBT_DOCLING_DEVICE", None)
@@ -86,6 +90,11 @@ def test_cpu_device_pins_docling_pipeline_options(tmp_path: Path) -> None:
     # End-to-end through the parser: the device must land on the Docling
     # pipeline options the converter is built from. ``auto`` leaves Docling's
     # own probe in charge (no assignment).
+    #
+    # ``docling`` lives in the ``pdf`` / ``academic`` extras, not in ``dev`` —
+    # the install README/CONTRIBUTING document — so a missing Docling must skip
+    # this test, not fail the whole fast tier.
+    pytest.importorskip("docling", reason="needs the `pdf` or `academic` extra")
     from pdf_builders import write_text_pdf
 
     import ubt.adapters.pdf.docling_adapter as da
@@ -109,13 +118,17 @@ def test_cpu_device_pins_docling_pipeline_options(tmp_path: Path) -> None:
                 options = getattr(value, "pipeline_options", None)
                 if options is not None:
                     seen["device"] = options.accelerator_options.device
-        original_init(self, *args, **kwargs)
+        # The device is pinned onto the options *before* the converter is built,
+        # so stop here: constructing a real converter pulls model weights
+        # (network) and would test Docling, not this wiring.
+        raise _ConverterBuilt
 
     converter_cls.__init__ = spy_init
     try:
-        dp.extract_with_docling(pdf, None, symbols=da._docling_symbols, enrich=False, device="cpu")
-    except Exception:  # noqa: BLE001 - conversion may fail; the device is the assertion
-        pass
+        with pytest.raises(_ConverterBuilt):
+            dp.extract_with_docling(
+                pdf, None, symbols=da._docling_symbols, enrich=False, device="cpu"
+            )
     finally:
         converter_cls.__init__ = original_init
 

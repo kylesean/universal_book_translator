@@ -17,6 +17,7 @@ import subprocess
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
 from ubt.adapters.pdf.docling_blocks import (
@@ -1045,6 +1046,52 @@ def extract_with_docling(
     return map_iterated_items(items, doc, assets_dir, pdf_path=path)
 
 
+#: The ``DocItemLabel`` members this module compares against, and the string
+#: each one carries. ``DocItemLabel`` subclasses ``str``, so a plain string
+#: equals the corresponding member and hashes identically — a comparison
+#: against these names behaves exactly as the enum does.
+_DOC_ITEM_LABEL_VALUES: dict[str, str] = {
+    "EMPTY_VALUE": "empty_value",
+    "MARKER": "marker",
+    "CHECKBOX_SELECTED": "checkbox_selected",
+    "CHECKBOX_UNSELECTED": "checkbox_unselected",
+    "HANDWRITTEN_TEXT": "handwritten_text",
+    "PAGE_HEADER": "page_header",
+    "PAGE_FOOTER": "page_footer",
+    "PICTURE": "picture",
+    "TABLE": "table",
+    "CODE": "code",
+    "FORMULA": "formula",
+    "TITLE": "title",
+    "SECTION_HEADER": "section_header",
+    "FOOTNOTE": "footnote",
+    "CAPTION": "caption",
+    "LIST_ITEM": "list_item",
+    "TEXT": "text",
+}
+
+
+def _doc_item_labels() -> Any:
+    """``DocItemLabel``, or a string-compatible stand-in when Docling is absent.
+
+    The real enum is preferred so this module keeps matching whatever Docling
+    ships. But ``docling`` lives in the ``pdf``/``academic`` extras, not in
+    ``dev``, and the fast tier runs on a dev-only install — the documented
+    contract in ``tests/conftest.py``. ``map_iterated_items`` is a pure
+    mapper over duck-typed items (its own tests pass plain fakes whose
+    ``label`` is a string), so it never needs Docling to *import*; it only
+    needs the label names. Importing the enum unconditionally made this
+    function unusable without the optional extra, and the whole test file
+    failed to import rather than skipping.
+    """
+    try:
+        from docling_core.types.doc.labels import DocItemLabel
+
+        return DocItemLabel
+    except ImportError:
+        return SimpleNamespace(**_DOC_ITEM_LABEL_VALUES)
+
+
 def map_iterated_items(
     items: list[Any],
     doc: Any,
@@ -1059,7 +1106,7 @@ def map_iterated_items(
     - table text is rendered from TableFormer grid (never a raw dict repr);
     - text fully inside a picture bbox (in-figure labels) is excluded.
     """
-    from docling_core.types.doc.labels import DocItemLabel
+    DocItemLabel = _doc_item_labels()
 
     drop_labels = {
         DocItemLabel.EMPTY_VALUE,
@@ -1267,7 +1314,11 @@ def map_iterated_items(
             region = RegionKind.HEADER
         elif label == DocItemLabel.PAGE_FOOTER:
             text = (getattr(item, "text", "") or "").strip()
-            if not text or footer_counts.get(chrome_key(text), 0) >= _CHROME_REPEAT_MIN or text.isdigit():
+            if (
+                not text
+                or footer_counts.get(chrome_key(text), 0) >= _CHROME_REPEAT_MIN
+                or text.isdigit()
+            ):
                 continue
             # A repeating footer is chrome; a *one-off* footer that reads as a
             # sentence is a footnote paragraph the author wrote, and leaving it
