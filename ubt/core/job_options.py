@@ -598,7 +598,12 @@ def deliverable_candidates(
     return (resolve_target_output(output, input_path),)
 
 
-def own_prior_deliverable(target: Path, prior: PriorOutput | None) -> bool:
+def own_prior_deliverable(
+    target: Path,
+    prior: PriorOutput | None,
+    *,
+    input_path: Path | str | None = None,
+) -> bool:
     """Whether ``target`` is the exact deliverable a prior run of the SAME id resolved to.
 
     Overwrite is a *re-run of one job*, not a licence to truncate any file the
@@ -620,9 +625,23 @@ def own_prior_deliverable(target: Path, prior: PriorOutput | None) -> bool:
 
     The comparison is on the fully resolved path, so a different spelling of the
     same file matches and a different file does not.
+
+    ``input_path`` is the *current* run's source document. When given, it must
+    resolve to the same file the prior record names. Without that check the
+    question degrades to "did some job with this id ever write this path?", and
+    a record whose source was a different document licenses overwriting a file
+    that belongs to that other document — the record was only ever used to
+    derive the candidate *names*, which is not the same as identifying the
+    deliverable.
     """
     if prior is None or not prior.output_path or not prior.input_path:
         return False
+    if input_path is not None:
+        try:
+            if Path(prior.input_path).resolve() != Path(input_path).resolve():
+                return False
+        except (OSError, ValueError):
+            return False
     try:
         prior_out = Path(prior.output_path)
         # ``resolve_target_output`` takes the original string (a trailing slash

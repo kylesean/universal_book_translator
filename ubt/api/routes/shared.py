@@ -228,6 +228,8 @@ def is_own_prior_output(
     target_candidate: Path,
     job_queue: Any,
     manager: Any,
+    *,
+    input_path: Path | str | None = None,
 ) -> bool:
     """Whether ``target_candidate`` is the output recorded for ``requested_id``.
 
@@ -246,7 +248,7 @@ def is_own_prior_output(
         prior = job_queue.get(requested_id)
     if prior is None:
         prior = manager.get_job(requested_id)
-    return own_prior_deliverable(target_candidate, prior_output_of(prior))
+    return own_prior_deliverable(target_candidate, prior_output_of(prior), input_path=input_path)
 
 
 #: Local-only bind addresses. Anything else exposes the service to the network

@@ -342,7 +342,13 @@ def register_job_routes(
             if (
                 target_candidate is not None
                 and target_candidate.exists()
-                and not is_own_prior_output(requested_id, target_candidate, job_queue, manager)
+                and not is_own_prior_output(
+                    requested_id,
+                    target_candidate,
+                    job_queue,
+                    manager,
+                    input_path=resolved_in,
+                )
             ):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
@@ -364,7 +370,7 @@ def register_job_routes(
                 default_out_dir / f"{stem}_bilingual{resolved_in.suffix}",
             ):
                 if candidate.exists() and not is_own_prior_output(
-                    requested_id, candidate, job_queue, manager
+                    requested_id, candidate, job_queue, manager, input_path=resolved_in
                 ):
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,

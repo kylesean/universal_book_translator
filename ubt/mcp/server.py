@@ -162,10 +162,10 @@ def _check_job_id(job_id: str) -> str:
 def _check_lang(code: str, field: str) -> str:
     """Entry-layer language-code guard, same pattern the REST API enforces.
 
-    Defense in depth: the render-side ``sanitize_lang_tag`` already seals every
-    Typst interpolation, so this is not closing a live injection — it makes the
-    four entry points validate consistently instead of only the API, so a future
-    consumer that skips the render gate cannot reintroduce the class.
+    Defense in depth: the render-side ``typst_lang_arguments`` already seals
+    every Typst interpolation, so this is not closing a live injection — it makes
+    the four entry points validate consistently instead of only the API, so a
+    future consumer that skips the render gate cannot reintroduce the class.
     """
     if not LANG_CODE_RE.fullmatch(code):
         raise UBTError(
@@ -361,7 +361,9 @@ async def ubt_translate_book(
         if target_candidate.exists() and (
             not fresh
             or not own_prior_deliverable(
-                target_candidate, prior_output_of(_MANAGER.get_job(job_id) if job_id else None)
+                target_candidate,
+                prior_output_of(_MANAGER.get_job(job_id) if job_id else None),
+                input_path=resolved,
             )
         ):
             raise ToolError(f"output_path already exists; refusing to overwrite it: {output_path}")
