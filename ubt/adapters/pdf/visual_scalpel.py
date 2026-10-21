@@ -25,7 +25,35 @@ logger = logging.getLogger(__name__)
 # Standard points-to-DPI scale: 72 points per inch.
 # 150 DPI provides ~2.08x resolution, optimal for VLM OCR and symbol recognition.
 DEFAULT_SCALPEL_DPI: int = 150
+#: Margin grown around a box when the crop is a *prompt* — the L4 repair path
+#: reads it once to answer a question and is told which region it is looking at,
+#: so a little surrounding context is harmless and often useful.
 DEFAULT_BLEED_PT: float = 4.0
+
+#: Margin for a crop that becomes a *page* (a delivered asset the Typst renderer
+#: places). It must be zero-ish and is additionally clamped per side by
+#: :func:`delivered_crop_bleed`: the renderer rebuilds the page from the IR and
+#: has no source canvas, so any source ink inside the PNG is drawn onto the
+#: reader's page as part of the picture. A display equation's bbox sits as close
+#: as 0.15pt to the next text line in the two-column layouts this project
+#: targets, and the old blanket 4pt sliced that line in — the delivered PDF
+#: showed each formula welded to a half-cut English clause, while the reflowed
+#: translation of the same sentence sat directly below it, looking like a
+#: mistranslated fragment.
+DELIVERED_BLEED_PT: float = 1.0
+
+#: Tag folded into delivered asset filenames *and* (through
+#: :func:`ubt.adapters.pdf.analysis_cache.docling_identity`) into the block
+#: cache key. Both halves are load-bearing:
+#:
+#: * the filename, because the asset dir is keyed by the source PDF's sha alone,
+#:   so a re-run would otherwise replay the previous crop from the
+#:   ``not asset_path.exists()`` guard;
+#: * the cache key, because ``cached_blocks`` stores the finished IMAGE blocks
+#:   (whose ``source_text`` *is* the asset path). Invalidate only the file and a
+#:   cached run keeps pointing at the old name; invalidate only the cache and the
+#:   stale file is silently reused. A crop-policy change needs both.
+DELIVERED_CROP_POLICY_TAG: str = "tight"
 
 #: Resolution for *delivered* figure/formula/code crops (the PNGs the rebuilt
 #: page places). The VLM path above reads a crop once to answer a prompt, but a
@@ -41,7 +69,7 @@ FIGURE_ASSET_DPI: int = 300
 #: reused forever by the ``not asset_path.exists()`` guards; naming the DPI in
 #: the file makes a resolution change cut new files instead of replaying old
 #: ones (and leaves the old files harmless).
-FIGURE_ASSET_DPI_TAG = f"dpi{FIGURE_ASSET_DPI}"
+FIGURE_ASSET_DPI_TAG = f"dpi{FIGURE_ASSET_DPI}-{DELIVERED_CROP_POLICY_TAG}"
 
 
 def _compute_crop_coords(
@@ -186,6 +214,135 @@ def crop_block_pil(
         origin_y=origin_y,
     )
     return full_img.crop((x0, y0, x1, y1))
+
+
+#: Gap left between a delivered crop's edge and a neighbouring text line's ink.
+#: One raster pixel at 300 DPI is 0.24pt. A text rect is the *layout* box, and
+#: glyph ink can overshoot it by a fraction of a point, so the clearance used is
+#: a full point: the margin shrinks to the distance left, and a sub-pixel
+#: overshoot would still show the neighbour's glyph tops in the delivered image
+#: (measured on Eq. (3.1): a 0.83pt clearance with a 0.2pt guard still shipped a
+#: sliver of the line below). Shrinking the margin never enters the block's own
+#: region, so a generous guard cannot clip the block itself.
+_CLEARANCE_EPS_PT: float = 1.0
+
+
+def delivered_crop_insets(
+    pdf_path: Path | str,
+    page_num: int,
+    bbox: BoundingBox | tuple[float, float, float, float],
+    *,
+    cap: float = DELIVERED_BLEED_PT,
+) -> dict[str, float]:
+    """Per-side margin a *delivered* crop may grow without catching a neighbour.
+
+    A delivered crop is placed on a rebuilt page, so its margin is not free
+    space — it is a window onto the source page that can swallow the adjacent
+    paragraph. The extractor's bbox is the region its layout model assigned to
+    the block and already bounds that block's own ink (measured on the reference
+    chapter: a ``bleed_pt=0`` crop of an equation is pixel-identical to the inner
+    region of a padded one, apart from the padding itself). The safe margin is
+    therefore not a constant — it is the *clearance* to the nearest neighbouring
+    text run on each side.
+
+    Each side is measured only against runs that overlap the block on the
+    perpendicular axis, so a line that merely shares a page row with the block
+    (a wide equation's number, a two-column neighbour) does not shrink a side it
+    cannot reach.
+
+    Returns ``{"left", "right", "bottom", "top"}`` in points, each in
+    ``[0, cap]``. All four are ``cap`` when nothing else is near, which is the
+    common case (74 of 96 delivered crops on the reference chapter keep the
+    full margin; the other 22 are the ones that were shipping a sliced
+    neighbour).
+    """
+    from ubt.adapters.pdf.textgeom import extract_text_rects
+
+    if isinstance(bbox, BoundingBox):
+        bx0, by0, bx1, by1 = bbox.x0, bbox.y0, bbox.x1, bbox.y1
+    else:
+        bx0, by0, bx1, by1 = bbox
+    low_x, high_x = min(bx0, bx1), max(bx0, bx1)
+    low_y, high_y = min(by0, by1), max(by0, by1)
+
+    try:
+        rects = extract_text_rects(Path(pdf_path), page_num)
+    except Exception as exc:  # noqa: BLE001 - no geometry means the safe answer is "no margin"
+        # Fail closed: a crop with no margin is faithfully the block; one grown
+        # to the cap might carry a neighbour's sentence onto the page.
+        logger.debug("delivered crop insets unavailable for page %s: %s", page_num, exc)
+        return {"left": 0.0, "right": 0.0, "bottom": 0.0, "top": 0.0}
+
+    insets = {"left": cap, "right": cap, "bottom": cap, "top": cap}
+    for x0, y0, x1, y1 in rects:
+        if x1 <= x0 or y1 <= y0:
+            continue
+        if x1 > low_x and x0 < high_x:
+            if y1 <= low_y:
+                insets["bottom"] = min(insets["bottom"], max(0.0, low_y - y1 - _CLEARANCE_EPS_PT))
+            if y0 >= high_y:
+                insets["top"] = min(insets["top"], max(0.0, y0 - high_y - _CLEARANCE_EPS_PT))
+        if y1 > low_y and y0 < high_y:
+            if x1 <= low_x:
+                insets["left"] = min(insets["left"], max(0.0, low_x - x1 - _CLEARANCE_EPS_PT))
+            if x0 >= high_x:
+                insets["right"] = min(insets["right"], max(0.0, x0 - high_x - _CLEARANCE_EPS_PT))
+    return insets
+
+
+def delivered_crop_bleed(
+    pdf_path: Path | str,
+    page_num: int,
+    bbox: BoundingBox | tuple[float, float, float, float],
+) -> float:
+    """The scalar form of :func:`delivered_crop_insets` — the tightest side.
+
+    A caller that can only apply one margin gets the safe one. Callers that can
+    crop should use :func:`delivered_crop_pil`, which applies each side.
+    """
+    return min(delivered_crop_insets(pdf_path, page_num, bbox).values())
+
+
+@pdfium_serialized
+def delivered_crop_pil(
+    pdf_path: Path | str,
+    page_num: int,
+    bbox: BoundingBox | tuple[float, float, float, float],
+    dpi: int = FIGURE_ASSET_DPI,
+    bleed_pt: float = DELIVERED_BLEED_PT,
+) -> PILImage.Image:
+    """Crop a block for *delivery*: the block's own region, no neighbour's ink.
+
+    The single entry point for an asset that will be placed on a page. Use
+    :func:`crop_block_pil` only for a crop a model reads — its bleed is the
+    prompt margin and is not bounded by the page's later geometry.
+
+    ``bleed_pt`` caps each side; the effective margin per side is the smaller of
+    the cap and the clearance to the nearest neighbouring text run.
+    """
+    insets = delivered_crop_insets(pdf_path, page_num, bbox, cap=bleed_pt)
+    # Compose the per-side margins by cropping each side separately: the shared
+    # ``_compute_crop_coords`` takes one bleed for all four, and a crop grown on
+    # the tight side is exactly what sweeps in the neighbour's line.
+    padded = crop_block_pil(pdf_path, page_num, bbox, dpi=dpi, bleed_pt=bleed_pt)
+    scale = dpi / 72.0
+    pad_px = int(round(bleed_pt * scale))
+    pixels = {
+        "left": int(round(insets["left"] * scale)),
+        "right": int(round(insets["right"] * scale)),
+        "bottom": int(round(insets["bottom"] * scale)),
+        "top": int(round(insets["top"] * scale)),
+    }
+    width, height = padded.size
+    # ``crop_block_pil`` clamps at the page edge, so the actual padding on a side
+    # can be smaller than ``pad_px``; never crop past the real image.
+    left = min(max(0, pad_px - pixels["left"]), width)
+    right = min(max(0, pad_px - pixels["right"]), width - left)
+    top = min(max(0, pad_px - pixels["top"]), height)
+    bottom = min(max(0, pad_px - pixels["bottom"]), height - top)
+    if left or right or top or bottom:
+        padded = padded.crop((left, top, width - right, height - bottom))
+    return padded
 
 
 def crop_block_image(

@@ -95,6 +95,15 @@ def docling_identity() -> str:
         # a change to that cleaner changes the cached blocks. It was missing from
         # the identity, so a pruner fix was invisible on every cached re-run.
         "ubt.core.cleaners.lnds_pruner",
+        # ``visual_scalpel`` cuts every delivered asset, and the finished IMAGE
+        # blocks are themselves cached here — their ``source_text`` *is* the asset
+        # path. It was missing, so a crop-policy change (margins, DPI, the "tight"
+        # delivered-bleed clamp) left every previously-converted document
+        # replaying its old crops: a fix looked like a no-op on exactly the
+        # documents it was found on. Its ``FIGURE_ASSET_DPI_TAG`` also lands in
+        # the asset filename, which is the other half of the invalidation — see
+        # ``DELIVERED_CROP_POLICY_TAG``.
+        "ubt.adapters.pdf.visual_scalpel",
     )
 
 

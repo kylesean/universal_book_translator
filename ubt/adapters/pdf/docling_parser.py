@@ -1206,14 +1206,19 @@ def map_iterated_items(
                 try:
                     from ubt.adapters.pdf.visual_scalpel import (
                         FIGURE_ASSET_DPI,
-                        crop_block_pil,
+                        delivered_crop_pil,
                     )
 
                     # A delivered figure is zoomed and printed, so its crop is
                     # cut at print resolution (300), not the VLM-read 150: the
                     # source figures here are vector drawings, and this crop is
                     # the only raster that will ever exist for them.
-                    cropped = crop_block_pil(pdf_path, page_no, item_bbox, dpi=FIGURE_ASSET_DPI)
+                    #
+                    # ``delivered_crop_pil`` bounds each side's margin by the
+                    # clearance to the nearest neighbouring text, so a caption
+                    # sitting tight under a figure is not sliced into the picture
+                    # and drawn on the page as part of it.
+                    cropped = delivered_crop_pil(pdf_path, page_no, item_bbox, dpi=FIGURE_ASSET_DPI)
                     if getattr(cropped, "width", 0) >= 50 and getattr(cropped, "height", 0) >= 40:
                         assets_dir.mkdir(parents=True, exist_ok=True)
                         cropped.save(asset_path)

@@ -120,13 +120,19 @@ def crop_region_asset(
     prefix = _CROP_ASSET_PREFIXES[kind]
     asset_path = assets_dir / f"{prefix}_p{page_no}_{ordinal:04d}.{_figure_asset_dpi_tag()}.png"
     try:
-        from ubt.adapters.pdf.visual_scalpel import FIGURE_ASSET_DPI, crop_block_pil
+        from ubt.adapters.pdf.visual_scalpel import FIGURE_ASSET_DPI, delivered_crop_pil
 
         assets_dir.mkdir(parents=True, exist_ok=True)
         # Delivered at print resolution (see FIGURE_ASSET_DPI): the crop is the
         # only raster of this region — the renderer rebuilds the page from the IR
         # and has no source canvas.
-        cropped = crop_block_pil(pdf_path, page_no, bbox, dpi=FIGURE_ASSET_DPI)
+        #
+        # ``delivered_crop_pil``, never ``crop_block_pil``: this asset is placed
+        # on a page, so its margin is bounded per side by the clearance to the
+        # nearest neighbouring text run. The prompt-side ``DEFAULT_BLEED_PT`` is
+        # a *model* margin and would slice the next line into the picture, which
+        # the reader then sees welded to the equation.
+        cropped = delivered_crop_pil(pdf_path, page_no, bbox, dpi=FIGURE_ASSET_DPI)
         if getattr(cropped, "width", 0) < min_width_pt or getattr(cropped, "height", 0) < (
             min_height_pt
         ):
@@ -488,16 +494,33 @@ def table_to_markdown(table_item: Any, doc: Any = None) -> str:
     return ""
 
 
+#: Block types that may carry a *source-region crop* of an equation. Docling
+#: labels a formula it could not read ``FORMULA``, but the recovery path replaces
+#: that block with an ``IMAGE`` one (``crop_region_asset``), so both shapes reach
+#: the merge — the label is an artefact of *which* path produced the block, not
+#: of what the block is.
+_FORMULA_CROP_TYPES = frozenset({BlockType.FORMULA, BlockType.IMAGE})
+
+
 def resolve_overlapping_formula_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
-    """Merge consecutive FORMULA blocks on the same page whose bounding boxes overlap.
+    """Merge consecutive source-cropped blocks on a page whose boxes overlap.
 
     Docling's layout detector occasionally emits two vertically overlapping
-    FORMULA boxes for an equation paired with a commutative diagram (e.g.
-    equation (7) + top half of diagram in one box, and the diagram in a second
-    box). When both degrade to source-graphic witness crops, the overlapping
-    region renders twice. Merging vertically overlapping formula boxes into a
-    single union bounding box ensures the equation+diagram region is cropped
-    and rendered exactly once.
+    boxes for one equation (an equation paired with a commutative diagram, or a
+    tall equation split into a numerator box and a denominator box). When both
+    degrade to source-graphic witness crops, the overlapping region is cropped
+    and rendered twice: the delivered page shows the same equation twice, often
+    with only a fragment of it in the second copy.
+
+    Merging vertically overlapping boxes into a single union bounding box
+    ensures the region is cropped and rendered exactly once.
+
+    Both block *types* are accepted on purpose. A formula Docling *read* stays a
+    ``FORMULA``; one it could not read is replaced with an ``IMAGE`` block by
+    the crop recovery, and on the reference chapter that is every formula. Gating
+    on ``FORMULA`` alone therefore made this function a no-op for the exact
+    documents it was written for — the measured result was a duplicated
+    ``(A.14d)`` row and a second copy carrying only "bTc tan gθ + …".
     """
     if len(blocks) < 2:
         return blocks
@@ -505,8 +528,8 @@ def resolve_overlapping_formula_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
     for b in blocks:
         if (
             out
-            and b.block_type == BlockType.FORMULA
-            and out[-1].block_type == BlockType.FORMULA
+            and b.block_type in _FORMULA_CROP_TYPES
+            and out[-1].block_type in _FORMULA_CROP_TYPES
             and b.bbox is not None
             and out[-1].bbox is not None
             and b.bbox.page == out[-1].bbox.page
@@ -532,8 +555,6 @@ def resolve_overlapping_formula_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
                 )
                 out[-1].set_bbox(union_box)
                 out[-1].set_source_text(merged_txt)
-                if out[-1].target_text is not None:
-                    out[-1].target_text = merged_txt
                 continue
         out.append(b)
     return out
