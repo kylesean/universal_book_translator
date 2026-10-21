@@ -20,6 +20,7 @@ from ubt.api.routes.shared import (
 )
 from ubt.api.scope import ApiScope
 from ubt.api.security import resolve_secure_path, validate_job_id
+from ubt.core.engine.delivery_freshness import is_delivery_stale
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.job_options import delivery_verdict_from_summary
 
@@ -40,6 +41,25 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
     _job_is_running = scope.job_is_running
     _read_job_blocks = scope.read_job_blocks
     _managed_dir = scope.managed_dir
+
+    def _delivery_is_stale(job_id: str) -> bool:
+        """Whether this job's delivered files predate its ledger text.
+
+        Never raises: this runs on the download path, and a freshness probe
+        that failed here would replace every download with a 500. An
+        unreadable ledger reads as "not stale" — the download then behaves
+        exactly as it did before this marker existed, which is the right
+        degradation for a check whose only job is to catch a specific
+        mistake.
+        """
+        db_path = _job_db_path(job_id)
+        if not db_path.exists():
+            return False
+        try:
+            return is_delivery_stale(SQLiteJobLedger(db_path), job_id)
+        except Exception as exc:  # noqa: BLE001 - a probe must not break delivery
+            logger.warning("delivery freshness probe failed for %s: %s", job_id, exc)
+            return False
 
     @api_app.get(
         "/jobs/{job_id}/report",
@@ -268,7 +288,15 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
                         "media_type": media_type,
                     }
                 )
-        return JSONResponse({"job_id": valid_id, "deliverables": items})
+        return JSONResponse(
+            {
+                "job_id": valid_id,
+                "deliverables": items,
+                # Lets the console offer "re-render first" instead of opening a
+                # download that the guard below will refuse.
+                "stale": await asyncio.to_thread(_delivery_is_stale, valid_id),
+            }
+        )
 
     @api_app.get(
         "/jobs/{job_id}/download/{key}",
@@ -317,6 +345,26 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Deliverable not available: {key}",
             )
+        # Refuse a delivery the ledger has moved past. A human edit lands in the
+        # ledger; the file on disk was written by an earlier export. Serving it
+        # anyway is the worst failure mode this endpoint has: the customer
+        # receives a pre-edit draft, the reviewer believes their fix shipped,
+        # and nothing anywhere reports a problem. Failing closed turns that into
+        # a retryable error, and the console turns the error into a re-render.
+        #
+        # A job whose ledger predates the marker is not stale (see
+        # ``is_delivery_stale``); only a *recorded* mismatch blocks.
+        stale = await asyncio.to_thread(_delivery_is_stale, valid_id)
+        if stale:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "The delivered files predate the current text: this job has "
+                    "edits that were not re-rendered. Re-render the deliverable "
+                    "before downloading it."
+                ),
+            )
+
         _, media_type = DELIVERABLE_LABELS[key]
         return FileResponse(
             path=resolved,

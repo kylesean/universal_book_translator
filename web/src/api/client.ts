@@ -409,11 +409,18 @@ export function subscribeJobProgress(
 // Deliverables
 // --------------------------------------------------------------------------- //
 
-export async function listDeliverables(jobId: string): Promise<DeliverableItem[]> {
+export interface DeliverableListing {
+  items: DeliverableItem[]
+  /** True when the files on disk predate the job's ledger text. The download
+   *  endpoint refuses such a job with 409, so callers must re-render first. */
+  stale: boolean
+}
+
+export async function listDeliverables(jobId: string): Promise<DeliverableListing> {
   const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/deliverables`)
   if (!res.ok) throw await apiError(res, "Failed to list deliverables")
   const data = await res.json()
-  return data.deliverables ?? []
+  return { items: data.deliverables ?? [], stale: Boolean(data.stale) }
 }
 
 export function deliverableDownloadUrl(jobId: string, key: string): string {

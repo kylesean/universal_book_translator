@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 from ubt.core.atomic import atomic_write_text
 from ubt.core.cleaners.cjk_spacing import normalize_publishing_cjk
 from ubt.core.config import DualMode
+from ubt.core.engine.delivery_freshness import record_rendered_digest
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import NON_TERMINAL_STATUSES, SQLiteJobLedger
 from ubt.core.engine.reporter import (
@@ -1272,7 +1273,7 @@ async def _build_reports(
             usage,
             base_url=ctx.config.base_url,
             # The same attribution the budget preflight bills against (see
-            # ``pipeline._bill_run_usage``): the OCR-channel map merged with the
+            # ``pipeline._bill_session``): the OCR-channel map merged with the
             # router's per-model fallback endpoints. Passing only the former
             # priced a model that a local fallback endpoint actually served at
             # the primary endpoint's cloud rate, so the report and the budget
@@ -1596,6 +1597,14 @@ async def run_export_stage(
 
     if claims_finality:
         await asyncio.to_thread(ledger.finalize_job, actual_job_id, status="completed")
+
+    # Mark the delivered files as current. Recorded here — after the primary
+    # artifact, every companion, the visual gate's possible rewrite and the
+    # table appendix are all on disk — so a render that raised above leaves the
+    # previous digest in place and the job still reads stale. The download
+    # endpoint refuses a stale delivery, and a human edit is precisely what
+    # makes one stale.
+    await asyncio.to_thread(record_rendered_digest, ledger, actual_job_id)
 
     dual_suffix = f" | Complementary artifact: {secondary_path}" if secondary_path else ""
     # What the artifact actually is: the renderer's outcome when it rendered,

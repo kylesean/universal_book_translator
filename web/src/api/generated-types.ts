@@ -974,6 +974,11 @@ export interface components {
             job_id: string;
             /** Deliverables */
             deliverables: components["schemas"]["DeliverableItem"][];
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
         };
         /**
          * ExtractionStrategy

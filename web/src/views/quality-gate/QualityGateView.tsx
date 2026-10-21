@@ -169,7 +169,7 @@ export function QualityGateView() {
       })
 
     listDeliverables(jobId)
-      .then((items) => {
+      .then(({ items }) => {
         if (isMounted) setDeliverables(items)
       })
       .catch(() => {

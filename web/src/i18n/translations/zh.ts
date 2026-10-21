@@ -292,6 +292,9 @@ export const zh: TranslationDictionary = {
     stageLine: '阶段：{stage}',
     qeHeuristicHint: '启发式 QE 引擎不产出分数；如需语义评分请将 qe_engine 设为 tiered。',
     avgQe: '平均 QE {score}',
+    reRenderingBeforeDownload: '检测到未渲染的修改，正在重新渲染后下载…',
+    downloadFailed: '下载失败',
+    deliveryStaleBadge: '有修改未渲染',
   },
   quality: {
     title: '质量门禁与出版凭证 (Quality Gate)',

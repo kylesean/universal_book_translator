@@ -22,6 +22,7 @@ import {
   listJobs,
   listDeliverables,
   deliverableDownloadUrl,
+  reExportJob,
   subscribeJobProgress,
   type JobSummary,
   type PipelineStage,
@@ -346,19 +347,30 @@ export function MissionControl() {
 
   // Completed run → open the primary translated document in a new tab. The
   // deliverable list names what actually exists on disk, so no key guessing.
+  //
+  // A job with edits that were never re-rendered is refused by the download
+  // endpoint (409) — deliberately, because serving the pre-edit file silently
+  // is the worst outcome available. The user asked for their current text, so
+  // the console re-renders first and then downloads, turning a correctness
+  // guard into a slower click rather than an error they must decode.
   const handleDownload = async () => {
     if (!currentJobId || downloading) return
     setDownloading(true)
     try {
-      const items = await listDeliverables(currentJobId)
-      const primary = items.find((d) => d.key === 'primary') ?? items[0]
+      let listing = await listDeliverables(currentJobId)
+      if (listing.stale) {
+        toast.push(t.mission.reRenderingBeforeDownload, 'info')
+        await reExportJob(currentJobId)
+        listing = await listDeliverables(currentJobId)
+      }
+      const primary = listing.items.find((d) => d.key === 'primary') ?? listing.items[0]
       if (primary) {
         window.open(deliverableDownloadUrl(currentJobId, primary.key), '_blank')
       } else {
         toast.push(t.mission.noDeliverables, 'error')
       }
     } catch (err) {
-      toast.push(err instanceof Error ? err.message : 'Download failed', 'error')
+      toast.push(err instanceof Error ? err.message : t.mission.downloadFailed, 'error')
     } finally {
       setDownloading(false)
     }

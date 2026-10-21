@@ -234,6 +234,11 @@ export interface TranslationDictionary {
     stageLine: string
     qeHeuristicHint: string
     avgQe: string
+    //: Download is blocked while a job has un-re-rendered edits; the console
+    //: re-renders and retries rather than showing the 409.
+    reRenderingBeforeDownload: string
+    downloadFailed: string
+    deliveryStaleBadge: string
   }
   quality: {
     title: string

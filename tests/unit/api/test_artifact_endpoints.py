@@ -248,3 +248,54 @@ def test_in_flight_download_and_report_return_409(tmp_path: Path) -> None:
     rep_res = client.get("/jobs/test-inflight-409/report", headers=_AUTH)
     assert rep_res.status_code == 409
     assert "not yet generated" in rep_res.json()["detail"]
+
+
+def test_download_refuses_a_delivery_that_predates_the_ledger(tmp_path: Path) -> None:
+    """The worst failure this endpoint has: shipping the pre-edit file.
+
+    A human edit lands in the ledger; the PDF on disk was written by an earlier
+    export. Serving it silently means the customer gets the draft the reviewer
+    just corrected, and nothing anywhere reports a problem. Fail closed instead.
+    """
+    from ubt.core.engine.delivery_freshness import record_rendered_digest
+
+    config = _config(tmp_path)
+    _seed_job(config, tmp_path)
+    client = TestClient(create_app(config))
+
+    # A render happened, so the artifact is current.
+    with SQLiteJobLedger(config.db_dir / f"{_JOB}.sqlite") as ledger:
+        record_rendered_digest(ledger, _JOB)
+    fresh = client.get(f"/jobs/{_JOB}/download/primary", headers=_AUTH)
+    assert fresh.status_code == 200
+
+    # Now a reviewer edits a segment and never re-renders.
+    edit = client.post(
+        f"/jobs/{_JOB}/segments/b1", json={"target_text": "人工校订的译文"}, headers=_AUTH
+    )
+    assert edit.status_code == 200, edit.text
+
+    stale = client.get(f"/jobs/{_JOB}/download/primary", headers=_AUTH)
+    assert stale.status_code == 409, stale.text
+    assert "re-rendered" in stale.json()["detail"]
+
+    # The listing says so up front, so the console can offer "re-render first"
+    # instead of opening a download that would only fail.
+    listing = client.get(f"/jobs/{_JOB}/deliverables", headers=_AUTH)
+    assert listing.status_code == 200
+    assert listing.json()["stale"] is True
+
+
+def test_a_job_that_never_recorded_a_render_is_still_downloadable(tmp_path: Path) -> None:
+    """Jobs finished before this marker existed must not be blocked.
+
+    They have no baseline to compare against, and refusing them would break
+    every pre-existing deliverable — the marker only earns its keep once a
+    render has recorded one.
+    """
+    config = _config(tmp_path)
+    _seed_job(config, tmp_path)
+    client = TestClient(create_app(config))
+    res = client.get(f"/jobs/{_JOB}/download/primary", headers=_AUTH)
+    assert res.status_code == 200
+    assert client.get(f"/jobs/{_JOB}/deliverables", headers=_AUTH).json()["stale"] is False

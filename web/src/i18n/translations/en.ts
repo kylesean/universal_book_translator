@@ -314,6 +314,9 @@ export const en: TranslationDictionary = {
     qeHeuristicHint:
       "The heuristic QE engine scores nothing; enable qe_engine = 'tiered' for a semantic score.",
     avgQe: 'Avg QE {score}',
+    reRenderingBeforeDownload: 'Re-rendering your edits before download…',
+    downloadFailed: 'Download failed',
+    deliveryStaleBadge: 'Edits not rendered',
   },
   quality: {
     title: 'Quality Gate & Attestation',

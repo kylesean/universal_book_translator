@@ -634,6 +634,11 @@ class DeliverableListResponse(BaseModel):
 
     job_id: str
     deliverables: list[DeliverableItem]
+    #: True when the files on disk predate the job's current ledger text, i.e.
+    #: someone edited segments without re-rendering. The download endpoint
+    #: refuses such a job (409); this flag is how the console knows *before* it
+    #: opens a download the user would only see fail.
+    stale: bool = False
 
 
 class GlossaryResponse(BaseModel):
