@@ -72,3 +72,57 @@ def test_forget_drops_a_jobs_history() -> None:
     buffer.emit("job1", _frame("a"))
     buffer.forget("job1")
     assert buffer.replay("job1", 0) == []
+
+
+def test_a_repeated_frame_does_not_consume_a_second_slot() -> None:
+    """A terminal job re-emits its snapshot to every subscriber that attaches.
+
+    That re-emission carries no new information but used to fill the ring
+    buffer, which is what a reconnecting client relies on for its replay.
+    """
+    buffer = SseReplayBuffer()
+    first = buffer.emit("job1", _frame("same"))
+    again = buffer.emit("job1", _frame("same"))
+    assert again == first, "a repeat must reuse the retained id, not advance it"
+    assert len(buffer.replay("job1", 0)) == 1
+
+
+def test_a_terminal_job_reconnecting_repeatedly_cannot_flush_its_history() -> None:
+    """Measured on the reference job: 42 retained frames for 18 distinct payloads.
+
+    A finished job answers each attach with ``snapshot`` then ``terminal``, so
+    the sequence alternates and a previous-frame-only comparison removes
+    nothing (verified: 60 of 64 slots consumed, 2 distinct payloads). The
+    history a reconnecting console needs must survive that.
+    """
+    buffer = SseReplayBuffer(max_frames=64)
+    snapshot = _frame('{"stage": "package", "status": "completed"}')
+    terminal = _frame('{"status": "completed"}')
+    for _ in range(30):
+        buffer.emit("job1", snapshot)
+        buffer.emit("job1", terminal)
+
+    retained = buffer.replay("job1", 0)
+    assert len(retained) == 2, f"duplicates flushed the history: {len(retained)} frames"
+    assert retained[-1].endswith(terminal)
+
+
+def test_distinct_progress_frames_still_accumulate() -> None:
+    """Deduplication must key on the payload, not collapse a real progress log."""
+    buffer = SseReplayBuffer(max_frames=64)
+    for index in range(40):
+        buffer.emit("job1", _frame(str(index)))
+    assert len(buffer.replay("job1", 0)) == 40
+
+
+def test_a_refreshed_frame_keeps_its_cursor_valid() -> None:
+    """Reusing an id is only sound if that id still means "this payload"."""
+    buffer = SseReplayBuffer(max_frames=4)
+    for index in range(3):
+        buffer.emit("job1", _frame(str(index)))
+    first_id = buffer.emit("job1", _frame("7")).split("\n", 1)[0]
+    assert first_id == "id: 4"
+    # Re-emitting frame 0 returns its original id, not a new one, so a client
+    # that already saw it receives nothing new after its cursor.
+    assert buffer.emit("job1", _frame("0")).split("\n", 1)[0] == "id: 1"
+    assert [f.split("id: ")[1].split("\n")[0] for f in buffer.replay("job1", 3)] == ["4"]

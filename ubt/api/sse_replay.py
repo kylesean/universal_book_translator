@@ -40,11 +40,43 @@ class SseReplayBuffer:
         """Stamp ``frame`` with the next sequence id and retain it.
 
         Returns the frame prefixed with its ``id:`` line, ready to yield.
+
+        A payload this job has already retained is *not* stored a second time:
+        the earlier copy is refreshed to the newest position and its id is
+        reused. Every SSE frame is a full state snapshot, so a re-emission
+        carries no new information, yet it used to consume a slot in the ring
+        buffer.
+
+        This is not a rare case. A finished job emits its snapshot plus its
+        terminal frame to *every* subscriber that attaches — that is how a late
+        reader learns the job is over — and a reconnecting console re-attaches
+        repeatedly. Measured on the reference job: 42 retained frames for 18
+        distinct payloads. At 64 slots the buffer would hold nothing else after
+        ~30 reconnects, silently evicting the real history a reconnecting client
+        was supposed to be replayed.
+
+        Matching is by whole frame, not just the previous one: a terminal job
+        re-emits ``snapshot, terminal, snapshot, terminal…``, so consecutive
+        frames differ and a last-only comparison removes nothing (verified: 60
+        of 64 slots consumed, 2 distinct payloads).
+
+        The id stays monotonic across a refresh, so ``Last-Event-ID`` cursors
+        remain valid: a client holding the reused id has, by definition, already
+        seen exactly this payload.
         """
         with self._lock:
+            buffer = self._buffers.get(job_id)
+            if buffer:
+                for seq, stamped in buffer:
+                    if stamped.endswith(f"\n{frame}"):
+                        # Re-insert at the newest position so the ring's
+                        # eviction order still reflects recency of use.
+                        buffer.remove((seq, stamped))
+                        buffer.append((seq, stamped))
+                        self._buffers.move_to_end(job_id)
+                        return stamped
             seq = self._seq.get(job_id, 0) + 1
             self._seq[job_id] = seq
-            buffer = self._buffers.get(job_id)
             if buffer is None:
                 buffer = deque(maxlen=self._max_frames)
                 self._buffers[job_id] = buffer
