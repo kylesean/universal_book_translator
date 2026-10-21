@@ -12,8 +12,16 @@ from __future__ import annotations
 
 import pytest
 
+from ubt.core.ir.models import (
+    BlockStatus,
+    BlockType,
+    FlowID,
+    IRBlock,
+    make_element,
+)
 from ubt.core.qe.defect_taxonomy import TRANSIENT_FAILURE_PREFIXES
 from ubt.core.qe.error_summary import summarize_provider_error
+from ubt.model.ast import RegionKind
 
 pytestmark = pytest.mark.fast
 
@@ -62,31 +70,29 @@ def test_a_malformed_envelope_does_not_raise() -> None:
         summarize_provider_error(raw)
 
 
-def _block(**overrides):
-    """A minimal IRBlock: only the fields the checkpoint builder reads."""
-    from ubt.core.ir.models import BlockStatus, BlockType, FlowID, RegionKind, make_element
+def _block(*, target_text: str = "译文正文", repair_rounds: int = 2) -> IRBlock:
+    """A block carrying only the fields the checkpoint builder reads.
 
-    element = make_element(
-        id="b1",
-        spine_index=0,
-        block_type=BlockType.NARRATIVE,
-        flow_id=FlowID.MAIN_STORY,
-        region=RegionKind.BODY,
-        source_text="Original English prose",
-        bbox=None,
-    )
-    from ubt.core.ir.models import IRBlock
-
-    fields = dict(
-        element=element,
-        target_text="译文正文",
+    Constructed explicitly rather than from a ``dict`` splat: ``mypy --strict``
+    cannot check a ``**dict`` against ``IRBlock``'s fields, and it reported eleven
+    ``arg-type`` errors for a helper whose whole job is to be a valid block.
+    """
+    return IRBlock(
+        element=make_element(
+            id="b1",
+            spine_index=0,
+            block_type=BlockType.NARRATIVE,
+            flow_id=FlowID.MAIN_STORY,
+            region=RegionKind.BODY,
+            source_text="Original English prose",
+            bbox=None,
+        ),
+        target_text=target_text,
         status=BlockStatus.REPAIRED,
         mtqe_score=0.42,
-        repair_rounds=2,
+        repair_rounds=repair_rounds,
         error_flags=[],
     )
-    fields.update(overrides)
-    return IRBlock(**fields)
 
 
 def test_the_checkpoint_keeps_the_translation_and_a_short_reason() -> None:
