@@ -183,3 +183,68 @@ def test_the_prompt_crop_is_unaffected(tmp_path: Path) -> None:
     finally:
         visual_scalpel._PAGE_CACHE = None
     assert prompt_crop.height > delivered.height
+
+
+def test_a_bbox_that_reaches_into_the_next_line_drops_that_sliver(tmp_path: Path) -> None:
+    """Withholding the margin is not enough when the *box* already overlaps.
+
+    ``delivered_crop_insets`` can only refuse to grow a crop; it cannot move a
+    boundary the extractor placed. On Eq. (3.5) the assigned box ran 1.2pt into
+    the line below, so ``bottom: 0`` still baked that line's glyph tops into the
+    image — the delivered page showed a ghost line welded under the equation,
+    with the reflowed translation of that line directly below it.
+
+    Geometry alone cannot separate the two cases: the intruding line and a
+    formula's own glyphs have the same height and both overshoot the box, so the
+    cut has to be decided from the pixels, where a neighbour is a *detached*
+    band of ink and the block's own glyphs are continuous.
+    """
+    pdf = _tight_pdf(tmp_path)
+    lines = _lines(pdf)
+    lower, upper = lines[-1], lines[-2]
+
+    # The box for the upper line, extended down to swallow part of the line
+    # below it — what the reference chapter's extractor produced.
+    overlap_pt = 1.5
+    greedy = (upper[0], lower[3] - overlap_pt, upper[2], upper[3])
+
+    visual_scalpel._PAGE_CACHE = None
+    try:
+        trimmed = delivered_crop_pil(pdf, 1, greedy, dpi=300)
+        # The same box with the intruding sliver already excluded.
+        clean = delivered_crop_pil(pdf, 1, upper, dpi=300)
+    finally:
+        visual_scalpel._PAGE_CACHE = None
+
+    assert trimmed.height <= clean.height + 2, (
+        "the sliver of the line below is still in the delivered crop "
+        f"({trimmed.height}px vs {clean.height}px)"
+    )
+
+
+def test_a_formula_whose_own_glyphs_overshoot_keeps_them(tmp_path: Path) -> None:
+    """The trimming must not eat the block's own ink.
+
+    A first attempt tested the text-rect geometry and cut any run crossing an
+    edge. Eq. (A.15a)'s own glyphs overshoot their bbox by up to 1.5pt, so that
+    rule cropped the equation out of its own asset — the delivered image came
+    out blank. Ink that is continuous with the body is the block's; only a band
+    separated by whitespace is a neighbour.
+    """
+    pdf = _tight_pdf(tmp_path)
+    upper = _lines(pdf)[-2]
+
+    visual_scalpel._PAGE_CACHE = None
+    try:
+        crop = delivered_crop_pil(pdf, 1, upper, dpi=300)
+    finally:
+        visual_scalpel._PAGE_CACHE = None
+
+    grey = crop.convert("L")
+    width, height = grey.size
+    raw = grey.tobytes()
+    inked = [(value < 200) for value in raw]
+    assert sum(inked) > 100, "the crop lost the text it exists to show"
+    # Ink in the middle band, not just a stray edge: the glyphs survived.
+    middle = inked[(height // 3) * width : (2 * height // 3) * width]
+    assert sum(middle) > 50

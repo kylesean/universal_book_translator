@@ -53,7 +53,11 @@ DELIVERED_BLEED_PT: float = 1.0
 #:   (whose ``source_text`` *is* the asset path). Invalidate only the file and a
 #:   cached run keeps pointing at the old name; invalidate only the cache and the
 #:   stale file is silently reused. A crop-policy change needs both.
-DELIVERED_CROP_POLICY_TAG: str = "tight"
+#: ``tight`` -> ``tight2`` when the stray-band trim was added: a ``tight``
+#: asset was cut with the old rule and still carries the ghost line, so reusing
+#: it by name would hide the fix exactly the way the original ``-tight`` rename
+#: existed to prevent.
+DELIVERED_CROP_POLICY_TAG: str = "tight2"
 
 #: Resolution for *delivered* figure/formula/code crops (the PNGs the rebuilt
 #: page places). The VLM path above reads a crop once to answer a prompt, but a
@@ -303,6 +307,100 @@ def delivered_crop_bleed(
     return min(delivered_crop_insets(pdf_path, page_num, bbox).values())
 
 
+#: Blank pixel rows that separate a stray band from the block's own content.
+#: One at 300 DPI is 0.24pt; the ghost under Eq. (3.5) sat 40 rows of whitespace
+#: below the equation, while a formula's own glyph bands are flush against each
+#: other (0 rows). Four rows is ~1pt: enough to absorb antialiasing, far below
+#: the gap a real line of text leaves.
+_STRAY_BAND_GAP_PX: int = 4
+
+
+def _trim_detached_bands(
+    image: PILImage.Image, *, gap_px: int = _STRAY_BAND_GAP_PX
+) -> PILImage.Image:
+    """Drop stray ink bands at an edge that a blank gap separates from the body.
+
+    A delivered crop is a window onto the source page, and the extractor's box
+    sometimes reaches into the line below by a point or two. Withholding the
+    margin cannot help there — the ink is inside the box, not in its padding —
+    so the delivered page showed the equation with the next line's glyph tops
+    welded to its underside, reading as a ghost.
+
+    Geometry cannot decide this: the intruding line and the formula's own glyphs
+    have the same height and both overshoot the bbox, so a text-rect test either
+    cuts every formula or none. Pixels can. A neighbour forms a *separate* band
+    of ink with whitespace between it and the block; the block's own glyphs are
+    continuous. Measured on the reference chapter: the ghost under Eq. (3.5) is
+    separated by 40 blank rows, while Eq. (A.15a)'s own overshooting glyphs are
+    flush (0 rows).
+
+    Only the outermost band on each side is considered, and only while the body
+    is non-empty, so a crop that is one solid band is returned untouched.
+    """
+    # PIL only: ``numpy`` lives in the ``ocr``/``academic`` extras, and this
+    # module sits on the base render path — importing it here would make a
+    # plain `pip install ubt` fail to cut a figure.
+    grey = image.convert("L")
+    width, _ = grey.size
+    raw = grey.tobytes()
+    # ``tobytes`` is one byte per pixel for mode "L" (row-major). A row counts
+    # as inked when any pixel is darker than 200, the same threshold the rest of
+    # the visual gate uses for "ink" against a white page.
+    rows = [min(raw[y * width : (y + 1) * width]) < 200 for y in range(grey.size[1])]
+    if not any(rows) or all(rows):
+        return image
+
+    def _trim(axis_rows: list[bool], from_top: bool) -> int:
+        """How many rows to drop from this edge, keeping the body intact.
+
+        The body is the *widest* run of ink, not the first one: a stray band is
+        a sliver by definition (9 rows against the equation's 133 on Eq. (3.5)),
+        whereas the block can legitimately open with a small band of its own
+        (an accent, a superscript). Only a band at the extreme edge, separated
+        from the body by a blank gap, is dropped.
+        """
+        sequence = list(axis_rows if from_top else axis_rows[::-1])
+        # Leading blank rows are padding, not a band.
+        start = 0
+        while start < len(sequence) and not sequence[start]:
+            start += 1
+        if start >= len(sequence):
+            return 0
+        # Band boundaries, in trimmed coordinates.
+        bands: list[tuple[int, int]] = []
+        cursor = start
+        while cursor < len(sequence):
+            if not sequence[cursor]:
+                cursor += 1
+                continue
+            band_start = cursor
+            while cursor < len(sequence) and sequence[cursor]:
+                cursor += 1
+            bands.append((band_start, cursor))
+        if len(bands) < 2:
+            return 0
+        body_height = max(end - begin for begin, end in bands)
+        # The edge band must be both detached and smaller than the body.
+        edge_begin, edge_end = bands[0]
+        body_begin = next(begin for begin, end in bands if end - begin == body_height)
+        if edge_end - edge_begin >= body_height:
+            return 0
+        gap = body_begin - edge_end
+        if gap < gap_px:
+            return 0
+        return body_begin
+
+    top = _trim(rows, True)
+    bottom = _trim(rows, False)
+    width, height = image.size
+    if top:
+        image = image.crop((0, top, width, height))
+        height = image.size[1]
+    if bottom and bottom < height:
+        image = image.crop((0, 0, width, height - bottom))
+    return image
+
+
 @pdfium_serialized
 def delivered_crop_pil(
     pdf_path: Path | str,
@@ -342,7 +440,7 @@ def delivered_crop_pil(
     bottom = min(max(0, pad_px - pixels["bottom"]), height - top)
     if left or right or top or bottom:
         padded = padded.crop((left, top, width - right, height - bottom))
-    return padded
+    return _trim_detached_bands(padded)
 
 
 def crop_block_image(
