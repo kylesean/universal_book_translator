@@ -121,7 +121,13 @@ jobs:
         # clean `git diff` proves the committed bundle matches the source.
         run: |
           pnpm --dir web install --frozen-lockfile
-          python scripts/build_console_assets.py
+          # `uv run`, like every other Python step here: a bare `python` is the
+          # runner's system interpreter, which has none of this project's
+          # dependencies. That is not hypothetical -- the script imports
+          # `ubt.cli.jstoolchain`, and the eager `from ubt.cli.main import app`
+          # it used to trigger made this step die on `ModuleNotFoundError:
+          # typer` before it ever compared a bundle.
+          uv run python scripts/build_console_assets.py
           if ! git diff --exit-code --quiet ubt/api/static; then
             echo "::error::ubt/api/static is stale — run 'pnpm --dir web build && python scripts/build_console_assets.py' and commit the result."
             git diff --stat ubt/api/static
