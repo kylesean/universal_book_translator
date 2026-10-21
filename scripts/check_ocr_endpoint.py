@@ -28,9 +28,7 @@ import base64
 import json
 import os
 import re
-import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -53,29 +51,22 @@ DEFAULT_TIMEOUT_S = 300
 
 
 def _render_page(pdf: Path, page_no: int, dpi: int = 150) -> bytes:
-    with tempfile.TemporaryDirectory(prefix="ubt-probe-") as tmp:
-        stem = Path(tmp) / "page"
-        subprocess.run(
-            [
-                "pdftoppm",
-                "-png",
-                "-r",
-                str(dpi),
-                "-f",
-                str(page_no),
-                "-l",
-                str(page_no),
-                str(pdf),
-                str(stem),
-            ],
-            check=True,
-            capture_output=True,
-            timeout=120,
-        )
-        produced = sorted(Path(tmp).glob("page*.png"))
-        if not produced:
-            raise RuntimeError(f"pdftoppm produced no image for page {page_no}")
-        return produced[0].read_bytes()
+    """Rasterise one page with the engine the product itself uses.
+
+    This shelled out to ``pdftoppm``, a system binary no declared dependency
+    installs. The product moved to in-process ``pdf_oxide`` (a *base*
+    dependency) precisely to drop that subprocess, so the probe was exercising
+    a tool the translation run never calls — and on any machine without
+    poppler it could not run at all. CI's fast tier installs ``--extra dev``
+    only, so all three tests here failed with exit code 2 ("could not render
+    the page") rather than reporting anything about the endpoint.
+    """
+    from ubt.adapters.pdf.oxide_render import render_page_png
+
+    png = render_page_png(pdf, page_no, dpi)
+    if png is None:
+        raise RuntimeError(f"could not render page {page_no} of {pdf.name}")
+    return png
 
 
 def _post(endpoint: str, model: str, api_key: str, png: bytes, timeout: float) -> str:
@@ -151,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         png = _render_page(args.pdf, args.page)
-    except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
+    except (OSError, RuntimeError) as exc:
         print(f"FAIL  could not render the page: {exc}", file=sys.stderr)
         return 2
     print(f"raster   : {len(png) // 1024} KiB")
