@@ -31,6 +31,7 @@ import {
   type TermViolation,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
+import { parseFailedDraft } from '@/lib/failedDraft'
 
 type Filter = 'issues' | 'all' | 'needs_human' | string
 
@@ -510,6 +511,9 @@ export function ReviewWorkbench() {
                 const seg = segments[virtualRow.index]
                 const draft = drafts[seg.block_id] ?? seg.target_text
                 const dirty = draft !== seg.target_text
+                // The engine wraps a failed repair in <mark>; split the text
+                // from the reason so the pane shows a translation.
+                const failed = parseFailedDraft(seg.target_text)
                 const previewOpen = seg.page !== null && openPreviews[seg.page]
                 return (
                   <div
@@ -602,7 +606,15 @@ export function ReviewWorkbench() {
                               {editing[seg.block_id] ? (
                                 <textarea
                                   autoFocus
-                                  value={draft}
+                                  // Editing starts from the *translation*, not
+                                  // from the <mark> markup: saving what was on
+                                  // screen would have written the engine's
+                                  // wrapper back into the block as content.
+                                  value={
+                                    drafts[seg.block_id] !== undefined
+                                      ? draft
+                                      : failed.text
+                                  }
                                   onChange={(e) =>
                                     setDrafts((prev) => ({
                                       ...prev,
@@ -628,15 +640,30 @@ export function ReviewWorkbench() {
                                   className="w-full bg-transparent text-[var(--ink-primary)] text-xs resize-none focus:outline-none font-mono leading-relaxed placeholder:text-[var(--ink-muted)]"
                                 />
                               ) : (
-                                <div
-                                  onDoubleClick={() =>
-                                    setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
-                                  }
-                                  title={t.review.editHint}
-                                  className="min-h-[3rem] text-[var(--ink-primary)] text-xs font-mono leading-relaxed whitespace-pre-wrap cursor-text"
-                                >
-                                  {seg.target_text || '—'}
-                                </div>
+                                // A fragment, not a bare element: the pane needs
+                                // two siblings (the translation and the failure
+                                // notice), and a ternary arms only one.
+                                <>
+                                  <div
+                                    onDoubleClick={() =>
+                                      setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
+                                    }
+                                    title={t.review.editHint}
+                                    className="min-h-[3rem] text-[var(--ink-primary)] text-xs font-mono leading-relaxed whitespace-pre-wrap break-words cursor-text"
+                                  >
+                                    {failed.text || '—'}
+                                  </div>
+                                  {/* Why the repair failed, decoded and wrapped.
+                                      It used to sit inside the markup, where it
+                                      rendered as 828px of escaped JSON in a 446px
+                                      column. `break-words` + a bounded box keeps
+                                      a long reason inside the pane. */}
+                                  {failed.failed && (
+                                    <div className="mt-1.5 rounded border border-[#b45309]/30 bg-[#b45309]/5 px-2 py-1 text-[10px] font-mono text-[#b45309] break-words max-h-24 overflow-y-auto">
+                                      {t.review.failedDraftNotice}: {failed.reason}
+                                    </div>
+                                  )}
+                                </>
                               )}
                               {seg.issues.includes('terminology') && (
                                 <TermPanel

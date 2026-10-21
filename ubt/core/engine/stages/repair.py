@@ -16,6 +16,7 @@ from ubt.core.exceptions import BudgetExceededError, JobInterruptedError
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
 from ubt.core.qe.defect_taxonomy import REPAIR_ERROR_PREFIX
+from ubt.core.qe.error_summary import summarize_provider_error
 from ubt.core.qe.score_policy import is_shippable
 
 logger = logging.getLogger(__name__)
@@ -108,8 +109,14 @@ async def run_repair_stage(
         def _record_failure(cand: IRBlock, res: BaseException) -> dict[str, Any]:
             # Option B: Preserve draft/target with failure notice instead of bare source
             fallback_text = cand.target_text or cand.draft_text or ""
+            # The title keeps a one-line summary, not the provider's whole JSON
+            # envelope. The envelope was ~700 escaped characters on the reference
+            # job and the workbench renders target_text as plain text, so it broke
+            # out of a 446px column as an 828px line. The full detail is already
+            # on the ledger; this attribute exists to tell a human what happened.
+            summary = html.escape(summarize_provider_error(res), quote=True)
             target_str = (
-                f'<mark class="ubt-failed-draft" title="{REPAIR_ERROR_PREFIX} {html.escape(str(res))}">{fallback_text}</mark>'
+                f'<mark class="ubt-failed-draft" title="{summary}">{fallback_text}</mark>'
                 if fallback_text
                 else cand.source_text
             )

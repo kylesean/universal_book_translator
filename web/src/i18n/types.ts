@@ -429,6 +429,7 @@ export interface TranslationDictionary {
     sourceSegment: string
     targetSegment: string
     saveFeedback: string
+    failedDraftNotice: string
     sourceCanvas: string
     targetCanvas: string
     sourceCanvasAlt: string
