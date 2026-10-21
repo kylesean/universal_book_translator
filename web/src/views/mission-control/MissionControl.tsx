@@ -7,6 +7,7 @@ import {
   SplitSquareVertical,
   Activity,
   RotateCcw,
+  RefreshCw,
   Download,
   Trash2,
   AlertTriangle,
@@ -23,6 +24,7 @@ import {
   listDeliverables,
   deliverableDownloadUrl,
   reExportJob,
+  reparseJob,
   subscribeJobProgress,
   type JobSummary,
   type PipelineStage,
@@ -158,6 +160,10 @@ export function MissionControl() {
   const [resuming, setResuming] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  // Confirmation for the destructive re-parse: every block is discarded and
+  // the book re-translated at full cost, so it takes a typed phrase, not a click.
+  const [pendingReparse, setPendingReparse] = useState<string | null>(null)
+  const [reparsing, setReparsing] = useState(false)
   // The job's terminal error, as the engine phrased it for an operator. The
   // status payload always carried it and the console never read it, so a
   // failed job showed a red FAILED badge and nothing else — the operator had
@@ -399,6 +405,27 @@ export function MissionControl() {
     }
   }
 
+  // Rebuild the parse from the source document. This is the only way a
+  // parse-stage fix (block splitting, table reconstruction, formula and figure
+  // crops) reaches a job that already finished: re-rendering reuses the
+  // artefacts the old code produced, and resume deliberately keeps its
+  // checkpoints. It discards the ledger, so it is confirmed by phrase.
+  const confirmReparse = async () => {
+    const jobId = pendingReparse
+    setPendingReparse(null)
+    if (!jobId) return
+    setReparsing(true)
+    try {
+      await reparseJob(jobId)
+      toast.push(t.mission.reparseStarted, 'info')
+      await refreshQueue()
+    } catch (err) {
+      toast.push(err instanceof Error ? err.message : t.mission.reparseFailed, 'error')
+    } finally {
+      setReparsing(false)
+    }
+  }
+
   const pipelineStages: { key: PipelineStage; label: string }[] = [
     { key: 'extract', label: t.mission.stageExtract },
     { key: 'segment', label: t.mission.stageSegment },
@@ -452,6 +479,22 @@ export function MissionControl() {
         danger
         onConfirm={() => void confirmDeleteJob()}
         onCancel={() => setPendingDelete(null)}
+      />
+      <ConfirmDialog
+        // ``key`` remounts the dialog per job, so the typed phrase cannot
+        // survive into a second confirmation and let one click through.
+        key={pendingReparse ?? 'none'}
+        open={pendingReparse !== null}
+        title={t.mission.reparseTitle}
+        body={t.mission.reparseConfirm}
+        confirmLabel={t.mission.reparseAction}
+        cancelLabel={t.common.cancel}
+        danger
+        typeToConfirm={pendingReparse ?? ''}
+        typeToConfirmLabel={t.mission.reparseTypePrompt}
+        typeToConfirmMismatch={t.mission.reparseTypeMismatch}
+        onConfirm={() => void confirmReparse()}
+        onCancel={() => setPendingReparse(null)}
       />
       {/* Header bar */}
       <div className="flex items-center justify-between shrink-0 border-b border-[var(--paper-border)] pb-4">
@@ -512,6 +555,19 @@ export function MissionControl() {
             <Button onClick={handleResume} variant="secondary" size="sm" disabled={resuming}>
               <RotateCcw className={`h-3 w-3 mr-1 ${resuming ? 'animate-spin' : ''}`} />
               {resuming ? t.mission.resuming : t.mission.resumeCompile}
+            </Button>
+          )}
+
+          {currentJobId && isCompleted && (
+            <Button
+              onClick={() => setPendingReparse(currentJobId)}
+              variant="secondary"
+              size="sm"
+              disabled={reparsing}
+              title={t.mission.reparseHint}
+            >
+              <RefreshCw className={`h-3 w-3 mr-1 ${reparsing ? 'animate-spin' : ''}`} />
+              {reparsing ? t.mission.reparsing : t.mission.reparseAction}
             </Button>
           )}
 

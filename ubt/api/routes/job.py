@@ -745,6 +745,78 @@ def register_job_routes(
             }
         )
 
+    @api_app.post("/jobs/{job_id}/reparse", tags=["Jobs"])
+    async def reparse_job(
+        job_id: str, x_ubt_tenant: str | None = Header(default=None)
+    ) -> JSONResponse:
+        """Throw away a finished job's parse and rebuild it from the source file.
+
+        The one thing neither resume nor re-export can do. ``resume`` explicitly
+        refuses to re-fresh (it would discard the checkpoints it exists to keep),
+        and ``re-export`` only re-runs the export stage over the text already in
+        the ledger — so a fix to how the *source document* is parsed (block
+        splitting, table reconstruction, formula and figure crops) never reaches
+        a job that has finished. The delivered file keeps the old artefacts no
+        matter how many times it is re-rendered, because the ledger still names
+        the PNGs the old code cut.
+
+        This is expensive and destructive, and the API says so by requiring an
+        explicit call: every block is discarded and the whole book is
+        re-translated, incurring the provider cost of a first run. Human
+        revisions in the ledger are lost with it.
+
+        Only an in-session, terminal job can be re-parsed. Rebuilding the
+        request from the ledger alone would silently drop the model, preset and
+        output choices the run was made with — the same trap ``resume``
+        documents — so a job whose record is gone must be resubmitted.
+        """
+        valid_id = validate_job_id(job_id)
+        if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):
+            raise cross_tenant_404(valid_id)
+        if job_queue is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Re-parse is available in embedded mode; in queue mode "
+                    "resubmit the job with fresh=true."
+                ),
+            )
+        record = manager.get_job(valid_id)
+        if record is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"Job {valid_id} is not tracked by this server session; "
+                    "resubmit it with fresh=true to re-parse from the source."
+                ),
+            )
+        if record.status not in TERMINAL_JOB_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Job is {record.status}; only a finished job can be re-parsed.",
+            )
+        try:
+            manager.ensure_capacity()
+        except ServerCapacityError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+        # ``fresh`` discards the blocks; clearing the error/progress mirrors the
+        # resume path so the row does not show the previous run's failure while
+        # the new one is still starting.
+        record.request = record.request.model_copy(update={"fresh": True})
+        record.error = None
+        record.progress = ProgressSnapshot()
+        record.status = JobStatus.SUBMITTED
+        record.task = asyncio.create_task(manager.execute_job(record, scope.config))
+        return JSONResponse(
+            {
+                "job_id": valid_id,
+                "status": record.status,
+                "stream_url": f"/jobs/{valid_id}/stream",
+                "status_url": f"/jobs/{valid_id}/status",
+            }
+        )
+
     @api_app.delete(
         "/jobs/{job_id}",
         response_model=JobDeleteResponse,

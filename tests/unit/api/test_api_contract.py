@@ -140,11 +140,19 @@ def test_missing_and_wrong_keys_are_401(authed: TestClient) -> None:
 
 
 def test_correct_key_reaches_the_route(authed: TestClient) -> None:
-    # Auth passes and the request hits the route itself: unknown id is a 404
-    # from the handler, not a 401 from the gate.
-    response = authed.get("/jobs/does-not-exist/status", headers=_AUTH)
-    assert response.status_code == 404
-    assert "Job not found" in response.json()["detail"]
+    # Auth passes and the request reaches the handler. Assert on a route that
+    # must succeed for a valid key: an unknown-id 404 also holds when the whole
+    # authenticated surface is broken (e.g. a router that 404s everything), so
+    # it proves nothing about the gate letting a request through.
+    response = authed.get("/health", headers=_AUTH)
+    assert response.status_code == 200
+    assert response.json()["status"] == "healthy"
+
+    # And an authenticated route answers as its handler intends (404 for an
+    # unknown job, with the handler's detail rather than the auth gate's).
+    missing = authed.get("/jobs/does-not-exist/status", headers=_AUTH)
+    assert missing.status_code == 404
+    assert "Job not found" in missing.json()["detail"]
 
 
 def test_docs_surface_closes_when_keyed(authed: TestClient) -> None:
@@ -839,3 +847,52 @@ def test_job_submit_request_accepts_pdf_engine() -> None:
 
     req_auto = JobSubmitRequest(input_path="book.pdf", pdf_engine="auto")
     assert req_auto.pdf_engine == "auto"
+
+
+def test_reparse_is_the_one_way_a_finished_job_is_parsed_again(
+    authed: TestClient, tmp_path: Path
+) -> None:
+    """Re-rendering and resuming both keep the old parse; only this discards it.
+
+    A parse-stage fix (block splitting, table reconstruction, figure and formula
+    crops) cannot reach a finished job any other way: ``resume`` explicitly
+    refuses to re-fresh because that would throw away the checkpoints it exists
+    to keep, and a re-export re-runs only the export stage over the text the
+    ledger already holds — so the delivered file keeps the artefacts the old
+    code cut, however many times it is rendered.
+    """
+    doc = _write_doc(tmp_path)
+    job_id = authed.post("/jobs/submit", json={"input_path": str(doc)}, headers=_AUTH).json()[
+        "job_id"
+    ]
+    _await_terminal(authed, job_id)
+
+    res = authed.post(f"/jobs/{job_id}/reparse", headers=_AUTH)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["job_id"] == job_id
+    # It starts a new run rather than returning the finished one.
+    assert body["status"] in ("submitted", "queued", "running")
+
+    _await_terminal(authed, job_id)
+
+
+def test_reparse_refuses_a_job_that_is_still_running(authed: TestClient, tmp_path: Path) -> None:
+    """Discarding a live run's ledger would corrupt it from underneath."""
+    doc = _write_doc(tmp_path)
+    job_id = authed.post("/jobs/submit", json={"input_path": str(doc)}, headers=_AUTH).json()[
+        "job_id"
+    ]
+    # Submit and re-parse immediately: the run is certainly not finished yet.
+    res = authed.post(f"/jobs/{job_id}/reparse", headers=_AUTH)
+    assert res.status_code == 409
+    assert "only a finished job" in res.json()["detail"].lower()
+    _await_terminal(authed, job_id)
+
+
+def test_reparse_refuses_an_unknown_job(authed: TestClient) -> None:
+    """A job with no in-session record must be resubmitted, not silently
+    reconstructed: the ledger does not carry the model/preset/output choices,
+    so a rebuilt request would run a different job than the one asked for."""
+    res = authed.post("/jobs/unknownjob99/reparse", headers=_AUTH)
+    assert res.status_code == 404

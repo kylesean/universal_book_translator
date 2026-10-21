@@ -1871,8 +1871,11 @@ def test_submit_and_assess_read_the_live_config() -> None:
     submit = source[source.index("auto_rehearsal = False") :][:600]
     assert "scope.config" in submit, "the rehearsal decision must read the live config"
 
-    # And the worker itself, at both call sites (fresh submit and resume).
-    assert source.count("execute_job(record, scope.config)") == 2
+    # And the worker itself, at every call site (fresh submit, resume, re-parse).
+    # Every one must hand over ``scope.config``: the boot snapshot would run with
+    # the provider that existed when the server started, not the one the operator
+    # just saved.
+    assert source.count("execute_job(record, scope.config)") == 3
     assert "execute_job(record, app_config)" not in source
 
 
@@ -1993,3 +1996,52 @@ def test_the_panel_renders_failures_and_the_human_queue() -> None:
     # And the zero-fallback that produced "0/0 blocks" is gone from the log line.
     assert "frame.completed_blocks ?? completedRef.current" in source
     assert "${frame.completed_blocks ?? 0}/${frame.total_blocks ?? 0}" not in source
+
+
+def test_the_review_pane_does_not_render_the_failed_draft_markup() -> None:
+    """The engine's <mark> wrapper must not reach the operator as raw text.
+
+    ``repair.py`` wraps a failed draft in ``<mark class="ubt-failed-draft"
+    title="...">译文</mark>``. The workbench rendered ``target_text`` directly, so
+    the attribute — a full escaped JSON envelope — showed up as the translation,
+    overflowing its column (measured 828px of content in a 446px pane).
+    """
+    repo = _REPO_ROOT
+    view = repo / "web" / "src" / "views" / "review" / "ReviewWorkbench.tsx"
+    helper = repo / "web" / "src" / "lib" / "failedDraft.ts"
+    if not view.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    assert helper.exists(), "the markup needs a parser, not a raw render"
+    source = view.read_text(encoding="utf-8")
+    assert "parseFailedDraft" in source
+    assert "{failed.text || '—'}" in source
+    # The raw value must no longer render anywhere as the segment body.
+    assert "{seg.target_text || '—'}" not in source
+    # And the reason is shown in its own bounded, wrapping box.
+    assert "failedDraftNotice" in source
+    assert "break-words" in source
+
+    parser = helper.read_text(encoding="utf-8")
+    assert "ubt-failed-draft" in parser
+    # Entities in the attribute are decoded for display.
+    assert "&quot;" in parser
+
+
+def test_the_review_page_has_one_name_in_each_locale() -> None:
+    """It had two — "质检后编台" in the sidebar, "审校后编台" on the button.
+
+    Both were transliterations of "Workbench" that named neither the page nor
+    what it does: it walks the book block by block so a person can review and
+    edit each translation.
+    """
+    repo = _REPO_ROOT
+    zh = repo / "web" / "src" / "i18n" / "translations" / "zh.ts"
+    if not zh.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+    text = zh.read_text(encoding="utf-8")
+
+    assert "质检后编台" not in text
+    assert "审校后编台" not in text
+    # The replacement says what the page does.
+    assert "逐块审校台" in text

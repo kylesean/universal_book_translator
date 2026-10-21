@@ -289,6 +289,28 @@ export async function resumeJob(jobId: string): Promise<{ job_id: string; status
   return res.json()
 }
 
+/**
+ * Discard a finished job's parse and rebuild it from the source document.
+ *
+ * The one operation neither resume nor re-export can perform: a fix to how the
+ * source is *parsed* (block splitting, table reconstruction, formula and figure
+ * crops) never reaches a job that has already finished, because the ledger
+ * still names the artefacts the old code produced. Re-rendering reuses them.
+ *
+ * Destructive and expensive — every block is discarded and the book is
+ * re-translated, incurring the provider cost of a first run, and human
+ * revisions in the ledger go with it. Callers must confirm before invoking.
+ */
+export async function reparseJob(jobId: string): Promise<{ job_id: string; status: string }> {
+  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/reparse`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    throw await apiError(res, "Failed to re-parse job")
+  }
+  return res.json()
+}
+
 /** Remove a finished job's ledger and deliverables from the console. */
 export async function deleteJob(jobId: string): Promise<{ job_id: string }> {
   const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })

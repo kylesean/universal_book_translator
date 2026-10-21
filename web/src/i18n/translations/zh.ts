@@ -295,6 +295,16 @@ export const zh: TranslationDictionary = {
     reRenderingBeforeDownload: '检测到未渲染的修改，正在重新渲染后下载…',
     downloadFailed: '下载失败',
     deliveryStaleBadge: '有修改未渲染',
+    reparseAction: '重新解析源文件',
+    reparseTitle: '丢弃解析结果并重新翻译全书',
+    reparseConfirm:
+      '此操作会丢弃该账本中的全部分块，并从源文件重新解析、重新翻译整本书。花费与首次运行相同，耗时相同，且审校台做过的所有人工修改将被永久丢弃。仅当解析阶段的修复（分块切分、表格重建、图表与公式裁剪）必须作用到已完成的作业时才使用——单纯重新渲染只会复用旧解析产出的素材。',
+    reparseHint: '解析阶段的修复只能通过重新解析作用到已完成的作业；重新渲染复用的是旧素材。',
+    reparsing: '正在重新解析…',
+    reparseStarted: '已开始重新解析，全书将重新翻译。',
+    reparseFailed: '重新解析失败',
+    reparseTypePrompt: '请输入 {phrase} 以确认',
+    reparseTypeMismatch: '与作业 ID 不一致。',
   },
   quality: {
     title: '质量门禁与出版凭证 (Quality Gate)',

@@ -1173,6 +1173,95 @@
         }
       }
     },
+    "/jobs/{job_id}/reparse": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Reparse Job",
+        "description": "Throw away a finished job's parse and rebuild it from the source file.\n\nThe one thing neither resume nor re-export can do. ``resume`` explicitly\nrefuses to re-fresh (it would discard the checkpoints it exists to keep),\nand ``re-export`` only re-runs the export stage over the text already in\nthe ledger \u2014 so a fix to how the *source document* is parsed (block\nsplitting, table reconstruction, formula and figure crops) never reaches\na job that has finished. The delivered file keeps the old artefacts no\nmatter how many times it is re-rendered, because the ledger still names\nthe PNGs the old code cut.\n\nThis is expensive and destructive, and the API says so by requiring an\nexplicit call: every block is discarded and the whole book is\nre-translated, incurring the provider cost of a first run. Human\nrevisions in the ledger are lost with it.\n\nOnly an in-session, terminal job can be re-parsed. Rebuilding the\nrequest from the ledger alone would silently drop the model, preset and\noutput choices the run was made with \u2014 the same trap ``resume``\ndocuments \u2014 so a job whose record is gone must be resubmitted.",
+        "operationId": "reparse_job_jobs__job_id__reparse_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/jobs/{job_id}": {
       "delete": {
         "tags": [

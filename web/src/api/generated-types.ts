@@ -324,6 +324,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/jobs/{job_id}/reparse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reparse Job
+         * @description Throw away a finished job's parse and rebuild it from the source file.
+         *
+         *     The one thing neither resume nor re-export can do. ``resume`` explicitly
+         *     refuses to re-fresh (it would discard the checkpoints it exists to keep),
+         *     and ``re-export`` only re-runs the export stage over the text already in
+         *     the ledger — so a fix to how the *source document* is parsed (block
+         *     splitting, table reconstruction, formula and figure crops) never reaches
+         *     a job that has finished. The delivered file keeps the old artefacts no
+         *     matter how many times it is re-rendered, because the ledger still names
+         *     the PNGs the old code cut.
+         *
+         *     This is expensive and destructive, and the API says so by requiring an
+         *     explicit call: every block is discarded and the whole book is
+         *     re-translated, incurring the provider cost of a first run. Human
+         *     revisions in the ledger are lost with it.
+         *
+         *     Only an in-session, terminal job can be re-parsed. Rebuilding the
+         *     request from the ledger alone would silently drop the model, preset and
+         *     output choices the run was made with — the same trap ``resume``
+         *     documents — so a job whose record is gone must be resubmitted.
+         */
+        post: operations["reparse_job_jobs__job_id__reparse_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/jobs/{job_id}": {
         parameters: {
             query?: never;
@@ -2733,6 +2772,42 @@ export interface operations {
         };
     };
     resume_job_jobs__job_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-ubt-tenant"?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reparse_job_jobs__job_id__reparse_post: {
         parameters: {
             query?: never;
             header?: {

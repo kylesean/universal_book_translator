@@ -87,3 +87,43 @@ def test_every_deliverable_key_has_a_label() -> None:
     assert not missing, (
         f"these deliverable keys fall back to the backend's English label: {missing}"
     )
+
+
+def test_the_reparse_confirm_requires_the_job_id_to_be_typed() -> None:
+    """A destructive action must cost more than one click.
+
+    Re-parsing discards a paid ledger and re-translates the whole book. A plain
+    "are you sure" button is one stray Enter away from that, so the dialog takes
+    a phrase only it names. Both halves are pinned here: the dialog must disable
+    its confirm until the text matches, and the call site must actually pass one.
+    """
+    repo = _REPO_ROOT
+    dialog = _source(repo / "web" / "src" / "components" / "ui" / "ConfirmDialog.tsx")
+    view = _source(_VIEWS / "mission-control" / "MissionControl.tsx")
+
+    assert "typeToConfirm" in dialog, "ConfirmDialog has no phrase gate"
+    assert "disabled={!phraseOk}" in dialog, "the confirm button is never disabled"
+    assert "typed.trim() === typeToConfirm" in dialog, "the typed text is not compared"
+
+    marker = "onClick={() => setPendingReparse(currentJobId)}"
+    assert marker in view, "the re-parse entry point disappeared"
+    assert "typeToConfirm={pendingReparse ?? ''}" in view, (
+        "the re-parse dialog does not require the job id"
+    )
+    # Remounted per job, so a phrase typed for one cannot confirm another.
+    assert "key={pendingReparse ?? 'none'}" in view
+
+
+def test_the_console_says_re_parsing_is_expensive_and_destructive() -> None:
+    """The cost must be stated where the operator decides, not in a changelog."""
+    zh = _source(_REPO_ROOT / "web" / "src" / "i18n" / "translations" / "zh.ts")
+    en = _source(_REPO_ROOT / "web" / "src" / "i18n" / "translations" / "en.ts")
+
+    # Both locales must name the two things the operator is about to lose.
+    for text, words in (
+        (zh, ("花费", "人工修改")),
+        (en, ("cost", "human revision")),
+    ):
+        body = text[text.index("reparseConfirm:") :][:900]
+        for word in words:
+            assert word in body, f"reparseConfirm does not mention {word!r}"

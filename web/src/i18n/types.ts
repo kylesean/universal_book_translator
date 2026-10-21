@@ -239,6 +239,17 @@ export interface TranslationDictionary {
     reRenderingBeforeDownload: string
     downloadFailed: string
     deliveryStaleBadge: string
+    //: Re-parse: the only operation that rebuilds a finished job's parse, and
+    //: the only one that discards the ledger. Confirmed by typing the job id.
+    reparseAction: string
+    reparseTitle: string
+    reparseConfirm: string
+    reparseHint: string
+    reparsing: string
+    reparseStarted: string
+    reparseFailed: string
+    reparseTypePrompt: string
+    reparseTypeMismatch: string
   }
   quality: {
     title: string

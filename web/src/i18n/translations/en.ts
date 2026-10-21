@@ -317,6 +317,17 @@ export const en: TranslationDictionary = {
     reRenderingBeforeDownload: 'Re-rendering your edits before download…',
     downloadFailed: 'Download failed',
     deliveryStaleBadge: 'Edits not rendered',
+    reparseAction: 'Re-parse source',
+    reparseTitle: 'Discard the parse and re-translate the book',
+    reparseConfirm:
+      'Every block in this ledger is discarded and the source document is parsed and translated again from scratch. This costs the same provider spend as the first run, takes as long, and permanently discards every human revision made in the review workbench. Use it when a parse-stage fix (block splitting, table reconstruction, figure or formula crops) must reach a job that already finished — re-rendering only reuses the artefacts the old parse produced.',
+    reparseHint:
+      'Parse-stage fixes only reach a finished job through a re-parse; re-rendering reuses the old artefacts.',
+    reparsing: 'Re-parsing…',
+    reparseStarted: 'Re-parse started; the book will be translated again from scratch.',
+    reparseFailed: 'Re-parse failed',
+    reparseTypePrompt: 'Type {phrase} to confirm',
+    reparseTypeMismatch: 'That does not match the job id.',
   },
   quality: {
     title: 'Quality Gate & Attestation',
