@@ -11,6 +11,8 @@ import {
   Download,
   Trash2,
   AlertTriangle,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -121,6 +123,7 @@ export function MissionControl() {
   const [logSearch, setLogSearch] = useState('')
   const [logLevel, setLogLevel] = useState<'ALL' | LogLevel>('ALL')
   const [autoScroll, setAutoScroll] = useState(true)
+  const [isLogCollapsed, setIsLogCollapsed] = useState(false)
   const [isLiveStreaming, setIsLiveStreaming] = useState(false)
   const [statusStr, setStatusStr] = useState<string>('running')
   const [queuePosition, setQueuePosition] = useState<number | null>(null)
@@ -531,6 +534,13 @@ export function MissionControl() {
         ? 'extract'
         : (stage ?? '')
 
+  const activeStageRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (activeStageRef.current) {
+      activeStageRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+    }
+  }, [derivedStage])
+
   const statusVariant = (status: string): 'success' | 'warning' | 'destructive' | 'info' =>
     status === 'completed'
       ? 'success'
@@ -547,7 +557,7 @@ export function MissionControl() {
   })
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-8 py-6 space-y-5">
+    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto md:overflow-hidden px-4 md:px-8 py-4 md:py-6 space-y-4 md:space-y-5">
       <ConfirmDialog
         open={pendingCancel}
         title={t.mission.cancelTitle}
@@ -593,9 +603,9 @@ export function MissionControl() {
         onCancel={() => setPendingReparse(null)}
       />
       {/* Header bar */}
-      <div className="flex items-center justify-between shrink-0 border-b border-[var(--paper-border)] pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 border-b border-[var(--paper-border)] pb-4">
         <div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <h1 className="text-lg font-bold tracking-tight text-[var(--ink-primary)]">
               {t.mission.title}
             </h1>
@@ -611,7 +621,7 @@ export function MissionControl() {
               </span>
             )}
           </div>
-          <div className="text-xs text-[var(--ink-secondary)] font-mono mt-0.5">
+          <div className="text-xs text-[var(--ink-secondary)] font-mono mt-0.5 truncate">
             JOB:{' '}
             <span className="text-[var(--ink-primary)] font-semibold">
               {currentJobId ?? t.mission.noActiveJobTitle}
@@ -619,9 +629,9 @@ export function MissionControl() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           {currentJobId && isCompleted && (
-            <Button onClick={handleDownload} variant="primary" size="sm" disabled={downloading}>
+            <Button onClick={handleDownload} variant="primary" size="sm" disabled={downloading} className="h-9 sm:h-7 px-2.5 text-xs">
               <Download className="h-3.5 w-3.5 mr-1" />
               {t.mission.downloadPrimary}
             </Button>
@@ -632,6 +642,7 @@ export function MissionControl() {
             disabled={!currentJobId}
             variant="secondary"
             size="sm"
+            className="h-9 sm:h-7 px-2.5 text-xs"
           >
             <ShieldCheck className="h-3.5 w-3.5 mr-1 text-[#15803d]" />
             {t.mission.inspectGate}
@@ -642,13 +653,14 @@ export function MissionControl() {
             disabled={!currentJobId}
             variant="secondary"
             size="sm"
+            className="h-9 sm:h-7 px-2.5 text-xs"
           >
             <SplitSquareVertical className="h-3.5 w-3.5 mr-1 text-[var(--ink-secondary)]" />
             {t.mission.openWorkbench}
           </Button>
 
           {currentJobId && isFailed && (
-            <Button onClick={handleResume} variant="secondary" size="sm" disabled={resuming}>
+            <Button onClick={handleResume} variant="secondary" size="sm" disabled={resuming} className="h-9 sm:h-7 px-2.5 text-xs">
               <RotateCcw className={`h-3 w-3 mr-1 ${resuming ? 'animate-spin' : ''}`} />
               {resuming ? t.mission.resuming : t.mission.resumeCompile}
             </Button>
@@ -661,6 +673,7 @@ export function MissionControl() {
               size="sm"
               disabled={reparsing}
               title={t.mission.reparseHint}
+              className="h-9 sm:h-7 px-2.5 text-xs"
             >
               <RefreshCw className={`h-3 w-3 mr-1 ${reparsing ? 'animate-spin' : ''}`} />
               {reparsing ? t.mission.reparsing : t.mission.reparseAction}
@@ -673,6 +686,7 @@ export function MissionControl() {
               variant="danger"
               size="sm"
               disabled={cancelling}
+              className="h-9 sm:h-7 px-2.5 text-xs"
             >
               <Square className="h-3 w-3 mr-1" />
               {cancelling ? t.mission.cancelling : t.mission.cancelCompile}
@@ -710,46 +724,119 @@ export function MissionControl() {
               {t.mission.queueEmpty}
             </div>
           ) : (
-            <table className="w-full text-xs text-left">
-              <thead className="bg-[var(--paper-subsurface)] text-[var(--ink-muted)] font-mono border-b border-[var(--paper-border)] sticky top-0">
-                <tr>
-                  {[t.mission.colJob, t.mission.colFile, t.mission.colStatus, t.mission.colProgress, t.mission.colCost, t.mission.colUpdated].map(
-                    (label) => (
-                      <th
-                        key={label}
-                        className="py-2 px-3 font-semibold uppercase text-xs tracking-wider"
+            <>
+              {/* Desktop Table View (md+) */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-[var(--paper-subsurface)] text-[var(--ink-muted)] font-mono border-b border-[var(--paper-border)] sticky top-0">
+                    <tr>
+                      {[t.mission.colJob, t.mission.colFile, t.mission.colStatus, t.mission.colProgress, t.mission.colCost, t.mission.colUpdated].map(
+                        (label) => (
+                          <th
+                            key={label}
+                            className="py-2 px-3 font-semibold uppercase text-xs tracking-wider"
+                          >
+                            {label}
+                          </th>
+                        )
+                      )}
+                      <th className="py-2 px-3" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--paper-border)]">
+                    {jobs.map((job) => (
+                      <tr
+                        key={job.job_id}
+                        className={`transition-colors ${
+                          job.job_id === currentJobId
+                            ? 'bg-[var(--paper-subsurface)]'
+                            : 'hover:bg-[var(--paper-subsurface)]'
+                        }`}
                       >
-                        {label}
-                      </th>
-                    )
-                  )}
-                  <th className="py-2 px-3" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--paper-border)]">
+                        <td className="py-2 px-3 font-mono text-[var(--ink-primary)] truncate max-w-[9rem]">
+                          {job.job_id}
+                        </td>
+                        <td className="py-2 px-3 text-[var(--ink-secondary)] truncate max-w-[12rem]">
+                          {job.file_name}
+                        </td>
+                        <td className="py-2 px-3">
+                          <div className="flex items-center gap-1.5">
+                            <Badge variant={statusVariant(job.status)} dot className="text-xs">
+                              {jobStatusLabel(t, job.status)}
+                            </Badge>
+                            {/* A rehearsal ships echo text and a --pages run ships a
+                                fragment; both used to look like a full real run in
+                                this list. */}
+                            {job.rehearsal && (
+                              <Badge variant="outline" className="text-xs">
+                                {t.mission.rowRehearsal}
+                              </Badge>
+                            )}
+                            {job.page_scope && (
+                              <Badge variant="outline" className="text-xs font-mono">
+                                p{job.page_scope}
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2 px-3 font-mono text-[var(--ink-primary)]">
+                          {job.progress_percent.toFixed(1)}%
+                        </td>
+                        <td className="py-2 px-3 font-mono text-[#b45309]">
+                          {job.estimated_cost_usd === null || job.estimated_cost_usd === undefined
+                            ? '—'
+                            : `$${job.estimated_cost_usd.toFixed(3)}`}
+                        </td>
+                        <td className="py-2 px-3 font-mono text-xs text-[var(--ink-muted)]">
+                          {formatTimestamp(job.updated_at)}
+                        </td>
+                        <td className="py-2 px-3 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button
+                              onClick={() => onSelectJob(job.job_id)}
+                              variant="secondary"
+                              size="sm"
+                              className="text-xs h-6 px-2"
+                            >
+                              {t.mission.selectJob}
+                            </Button>
+                            <Button
+                              onClick={() => handleDeleteJob(job.job_id)}
+                              variant="secondary"
+                              size="sm"
+                              className="h-6 px-1.5 text-[#b91c1c] hover:bg-[#b91c1c]/10"
+                              title={t.mission.deleteJob}
+                              aria-label={t.mission.deleteJob}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile Card List (< md) */}
+              <div className="md:hidden divide-y divide-[var(--paper-border)]">
                 {jobs.map((job) => (
-                  <tr
+                  <div
                     key={job.job_id}
-                    className={`transition-colors ${
+                    className={`p-3 space-y-2 transition-colors ${
                       job.job_id === currentJobId
                         ? 'bg-[var(--paper-subsurface)]'
                         : 'hover:bg-[var(--paper-subsurface)]'
                     }`}
                   >
-                    <td className="py-2 px-3 font-mono text-[var(--ink-primary)] truncate max-w-[9rem]">
-                      {job.job_id}
-                    </td>
-                    <td className="py-2 px-3 text-[var(--ink-secondary)] truncate max-w-[12rem]">
-                      {job.file_name}
-                    </td>
-                    <td className="py-2 px-3">
-                      <div className="flex items-center gap-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-xs font-semibold text-[var(--ink-primary)] truncate">
+                        {job.job_id}
+                      </span>
+                      <div className="flex items-center gap-1 shrink-0">
                         <Badge variant={statusVariant(job.status)} dot className="text-xs">
                           {jobStatusLabel(t, job.status)}
                         </Badge>
-                        {/* A rehearsal ships echo text and a --pages run ships a
-                            fragment; both used to look like a full real run in
-                            this list. */}
                         {job.rehearsal && (
                           <Badge variant="outline" className="text-xs">
                             {t.mission.rowRehearsal}
@@ -761,43 +848,50 @@ export function MissionControl() {
                           </Badge>
                         )}
                       </div>
-                    </td>
-                    <td className="py-2 px-3 font-mono text-[var(--ink-primary)]">
-                      {job.progress_percent.toFixed(1)}%
-                    </td>
-                    <td className="py-2 px-3 font-mono text-[#b45309]">
-                      {job.estimated_cost_usd === null || job.estimated_cost_usd === undefined
-                        ? '—'
-                        : `$${job.estimated_cost_usd.toFixed(3)}`}
-                    </td>
-                    <td className="py-2 px-3 font-mono text-xs text-[var(--ink-muted)]">
-                      {formatTimestamp(job.updated_at)}
-                    </td>
-                    <td className="py-2 px-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Button
-                          onClick={() => onSelectJob(job.job_id)}
-                          variant="secondary"
-                          size="sm"
-                          className="text-xs h-6 px-2"
-                        >
-                          {t.mission.selectJob}
-                        </Button>
-                        <Button
-                          onClick={() => handleDeleteJob(job.job_id)}
-                          variant="secondary"
-                          size="sm"
-                          className="h-6 px-1.5 text-[#b91c1c] hover:bg-[#b91c1c]/10"
-                          title={t.mission.deleteJob}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="text-[var(--ink-secondary)] truncate flex-1" title={job.file_name}>
+                        {job.file_name}
+                      </span>
+                      <span className="font-mono text-[var(--ink-muted)] shrink-0">
+                        {formatTimestamp(job.updated_at)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs font-mono">
+                      <span className="text-[var(--ink-primary)] font-medium">
+                        {t.mission.colProgress}: {job.progress_percent.toFixed(1)}%
+                      </span>
+                      <span className="text-[#b45309]">
+                        {job.estimated_cost_usd === null || job.estimated_cost_usd === undefined
+                          ? '—'
+                          : `$${job.estimated_cost_usd.toFixed(3)}`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <Button
+                        onClick={() => onSelectJob(job.job_id)}
+                        variant={job.job_id === currentJobId ? 'primary' : 'secondary'}
+                        size="sm"
+                        className="flex-1 h-9 min-h-[38px] text-xs font-semibold"
+                      >
+                        {t.mission.selectJob}
+                      </Button>
+                      <Button
+                        onClick={() => handleDeleteJob(job.job_id)}
+                        variant="secondary"
+                        size="sm"
+                        className="h-9 min-h-[38px] px-3 text-[#b91c1c] hover:bg-[#b91c1c]/10 shrink-0"
+                        title={t.mission.deleteJob}
+                        aria-label={t.mission.deleteJob}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-1" />
+                        <span>{t.mission.deleteJob}</span>
+                      </Button>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -836,7 +930,7 @@ export function MissionControl() {
       ) : (
         <>
       {/* Slim Pipeline Stepper */}
-      <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shrink-0 shadow-2xs">
+      <div className="p-3 sm:p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shrink-0 shadow-2xs">
         <div className="flex items-center justify-between text-xs font-mono uppercase text-[var(--ink-muted)] mb-2 px-1 font-semibold">
           <span>{t.mission.pipelineGraph}</span>
           <span className="text-[var(--ink-primary)] font-bold">
@@ -846,7 +940,7 @@ export function MissionControl() {
             )}
           </span>
         </div>
-        <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-1.5">
+        <div className="flex md:grid md:grid-cols-9 gap-1.5 overflow-x-auto pb-1 md:pb-0 no-scrollbar">
           {pipelineStages.map((stage) => {
             const currentIndex = pipelineStages.findIndex((s) => s.key === derivedStage)
             const stageIndex = pipelineStages.findIndex((s) => s.key === stage.key)
@@ -857,7 +951,8 @@ export function MissionControl() {
             return (
               <div
                 key={stage.key}
-                className={`py-1.5 text-center text-xs font-mono font-medium rounded-[4px] border transition-colors ${
+                ref={isCurrent ? activeStageRef : undefined}
+                className={`flex-1 shrink-0 min-w-[80px] md:min-w-0 py-2 md:py-1.5 px-1.5 md:px-1 text-center text-xs font-mono font-medium rounded-[4px] border transition-colors ${
                   isCurrent
                     ? 'border-[var(--ink-primary)] bg-[var(--paper-subsurface)] text-[var(--ink-primary)] font-bold shadow-2xs'
                     : isDone
@@ -873,8 +968,8 @@ export function MissionControl() {
       </div>
 
       {/* Metric Tiles (Hairline Dividers, Flat Container) */}
-      <div className="grid grid-cols-4 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] divide-x divide-[var(--paper-border)] shrink-0 shadow-2xs">
-        <div className="p-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shrink-0 shadow-2xs overflow-hidden">
+        <div className="p-3 sm:p-4 border-r border-b md:border-b-0 border-[var(--paper-border)]">
           <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.progress}</div>
           <div className="text-xl font-bold font-mono text-[var(--ink-primary)] mt-0.5">
             {progressPct.toFixed(1)}%
@@ -887,7 +982,7 @@ export function MissionControl() {
           </div>
         </div>
 
-        <div className="p-4">
+        <div className="p-3 sm:p-4 border-b md:border-b-0 md:border-r border-[var(--paper-border)]">
           <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.completedPages}</div>
           {queuePosition !== null && (
             <div className="text-xs font-mono text-[var(--ink-secondary)] mt-1">
@@ -934,7 +1029,7 @@ export function MissionControl() {
           </div>
         </div>
 
-        <div className="p-4">
+        <div className="p-3 sm:p-4 border-r border-[var(--paper-border)]">
           <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.totalSpend}</div>
           <div className="text-xl font-bold font-mono text-[#b45309] mt-0.5">
             ${costUsd.toFixed(3)}
@@ -944,7 +1039,7 @@ export function MissionControl() {
           </div>
         </div>
 
-        <div className="p-4">
+        <div className="p-3 sm:p-4">
           <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.executionState}</div>
           <div className="text-sm font-bold font-mono text-[var(--ink-primary)] mt-1">
             {jobStatusLabel(t, statusStr)}
@@ -956,88 +1051,104 @@ export function MissionControl() {
       </div>
 
       {/* Real-time Compiler Log Output */}
-      <div className="flex-1 min-h-0 flex flex-col rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
-        <div className="h-9 px-3 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between gap-3 shrink-0">
+      <div className={`rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs flex flex-col ${isLogCollapsed ? 'shrink-0' : 'flex-1 min-h-0'}`}>
+        <div className="h-auto min-h-9 p-2 md:px-3 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex flex-wrap items-center justify-between gap-2 shrink-0">
           <div className="flex items-center gap-2 text-xs font-mono text-[var(--ink-secondary)]">
-            <Terminal className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
-            <span>{t.mission.liveStream}</span>
+            <button
+              type="button"
+              onClick={() => setIsLogCollapsed((prev) => !prev)}
+              className="flex items-center gap-1.5 hover:text-[var(--ink-primary)] transition-colors cursor-pointer select-none py-1 min-h-[36px]"
+              title={isLogCollapsed ? t.mission.expandLogs : t.mission.collapseLogs}
+            >
+              <Terminal className="h-3.5 w-3.5 text-[var(--ink-muted)] shrink-0" />
+              <span className="font-semibold">{t.mission.liveStream}</span>
+              {isLogCollapsed ? (
+                <ChevronDown className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
+              ) : (
+                <ChevronUp className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
+              )}
+            </button>
           </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={logSearch}
-              onChange={(e) => setLogSearch(e.target.value)}
-              placeholder={t.mission.logSearch}
-              className="h-6 w-40 px-2 rounded-[4px] bg-[var(--paper-surface)] border border-[var(--paper-border)] text-xs font-mono text-[var(--ink-primary)] placeholder:text-[var(--ink-muted)] focus:outline-none focus:border-[var(--paper-border-hover)]"
-            />
-            <div className="flex bg-[var(--paper-surface)] border border-[var(--paper-border)] rounded-[4px] p-0.5">
-              {(['ALL', 'INFO', 'WARN', 'ERROR'] as const).map((level) => (
-                <button
-                  key={level}
-                  onClick={() => setLogLevel(level)}
-                  className={`px-1.5 py-0.5 text-xs font-mono rounded-[3px] transition-colors ${
-                    logLevel === level
-                      ? 'bg-[var(--btn-bg)] text-[var(--btn-fg)]'
-                      : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
-                  }`}
-                >
-                  {level}
-                </button>
-              ))}
-            </div>
-            <label className="flex items-center gap-1 text-xs font-mono text-[var(--ink-muted)] cursor-pointer select-none">
+          {!isLogCollapsed && (
+            <div className="flex flex-wrap items-center gap-2">
               <input
-                type="checkbox"
-                checked={autoScroll}
-                onChange={(e) => setAutoScroll(e.target.checked)}
+                type="text"
+                value={logSearch}
+                onChange={(e) => setLogSearch(e.target.value)}
+                placeholder={t.mission.logSearch}
+                className="h-7 sm:h-6 w-32 sm:w-40 px-2 rounded-[4px] bg-[var(--paper-surface)] border border-[var(--paper-border)] text-xs font-mono text-[var(--ink-primary)] placeholder:text-[var(--ink-muted)] focus:outline-none focus:border-[var(--paper-border-hover)]"
               />
-              {t.mission.autoScroll}
-            </label>
-            <div className="text-xs font-mono text-[var(--ink-muted)]">
-              {filteredLogs.length}/{logs.length} {t.mission.bufferedLines}
-            </div>
-          </div>
-        </div>
-
-        <div
-          ref={logContainerRef}
-          className="flex-1 p-3 overflow-y-auto font-mono text-xs leading-relaxed text-[var(--ink-primary)] space-y-1 select-text bg-[var(--paper-surface)]"
-        >
-          {logs.length === 0 ? (
-            // A finished job has no live stream to wait for: the server drops
-            // terminal jobs from memory, so ``/stream`` answers 404 and this
-            // placeholder would sit on "waiting for the first frame" forever —
-            // on a job that already delivered its files. Say which case it is.
-            <div className="text-[var(--ink-muted)] italic">
-              {isTerminal ? t.mission.logUnavailableTerminal : t.mission.waitingStream}
-            </div>
-          ) : filteredLogs.length === 0 ? (
-            <div className="text-[var(--ink-muted)] italic">{t.mission.noMatch}</div>
-          ) : (
-            filteredLogs.map((log, idx) => {
-              const lineNo = (idx + 1).toString().padStart(3, '0')
-              return (
-                <div
-                  key={idx}
-                  className="flex gap-3 hover:bg-[var(--paper-subsurface)] px-1 py-0.5 rounded"
-                >
-                  <span className="text-[var(--ink-muted)] select-none text-xs">{lineNo}</span>
-                  <span
-                    className={
-                      log.level === 'ERROR'
-                        ? 'text-[var(--ink-rose)]'
-                        : log.level === 'WARN'
-                          ? 'text-[var(--ink-amber)]'
-                          : 'text-[var(--ink-primary)]'
-                    }
+              <div className="flex bg-[var(--paper-surface)] border border-[var(--paper-border)] rounded-[4px] p-0.5">
+                {(['ALL', 'INFO', 'WARN', 'ERROR'] as const).map((level) => (
+                  <button
+                    key={level}
+                    onClick={() => setLogLevel(level)}
+                    className={`px-1.5 py-0.5 text-xs font-mono rounded-[3px] transition-colors ${
+                      logLevel === level
+                        ? 'bg-[var(--btn-bg)] text-[var(--btn-fg)]'
+                        : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
+                    }`}
                   >
-                    {log.text}
-                  </span>
-                </div>
-              )
-            })
+                    {level}
+                  </button>
+                ))}
+              </div>
+              <label className="flex items-center gap-1 text-xs font-mono text-[var(--ink-muted)] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={autoScroll}
+                  onChange={(e) => setAutoScroll(e.target.checked)}
+                />
+                {t.mission.autoScroll}
+              </label>
+              <div className="text-xs font-mono text-[var(--ink-muted)] whitespace-nowrap">
+                {filteredLogs.length}/{logs.length} {t.mission.bufferedLines}
+              </div>
+            </div>
           )}
         </div>
+
+        {!isLogCollapsed && (
+          <div
+            ref={logContainerRef}
+            className="h-64 md:h-auto md:flex-1 p-3 overflow-y-auto font-mono text-xs leading-relaxed text-[var(--ink-primary)] space-y-1 select-text bg-[var(--paper-surface)]"
+          >
+            {logs.length === 0 ? (
+              // A finished job has no live stream to wait for: the server drops
+              // terminal jobs from memory, so ``/stream`` answers 404 and this
+              // placeholder would sit on "waiting for the first frame" forever —
+              // on a job that already delivered its files. Say which case it is.
+              <div className="text-[var(--ink-muted)] italic">
+                {isTerminal ? t.mission.logUnavailableTerminal : t.mission.waitingStream}
+              </div>
+            ) : filteredLogs.length === 0 ? (
+              <div className="text-[var(--ink-muted)] italic">{t.mission.noMatch}</div>
+            ) : (
+              filteredLogs.map((log, idx) => {
+                const lineNo = (idx + 1).toString().padStart(3, '0')
+                return (
+                  <div
+                    key={idx}
+                    className="flex gap-3 hover:bg-[var(--paper-subsurface)] px-1 py-0.5 rounded"
+                  >
+                    <span className="text-[var(--ink-muted)] select-none text-xs">{lineNo}</span>
+                    <span
+                      className={
+                        log.level === 'ERROR'
+                          ? 'text-[var(--ink-rose)]'
+                          : log.level === 'WARN'
+                            ? 'text-[var(--ink-amber)]'
+                            : 'text-[var(--ink-primary)]'
+                      }
+                    >
+                      {log.text}
+                    </span>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        )}
       </div>
         </>
       )}

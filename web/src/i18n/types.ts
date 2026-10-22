@@ -30,6 +30,8 @@ export interface TranslationDictionary {
     systemDoctor: string
     workbenches: string
     reviewWorkbench: string
+    toggleNavigation: string
+    closeNavigation: string
   }
   wizard: {
     title: string
@@ -261,6 +263,8 @@ export interface TranslationDictionary {
     deleteJob: string
     deleteConfirm: string
     deleteTypePrompt: string
+    collapseLogs: string
+    expandLogs: string
     //: Job statuses shown as a badge on the header and in the queue rows.
     //: Both used ``status.toUpperCase()``, so "COMPLETED" appeared in every
     //: locale.

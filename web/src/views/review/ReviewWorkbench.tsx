@@ -260,9 +260,17 @@ export function ReviewWorkbench() {
     virtualizer.scrollToIndex(issueIndices[next], { align: 'center' })
   }
 
-  // F8 / Shift+F8 walk the fault list (PRD §5.1).
+  // F8 / Shift+F8 walk the fault list (PRD §5.1). Escape closes the inspector.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && inspectorOpen) {
+        const active = document.activeElement
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+          return
+        }
+        setInspectorOpen(false)
+        return
+      }
       if (e.key !== 'F8') return
       e.preventDefault()
       jumpToIssue(e.shiftKey ? -1 : 1)
@@ -378,7 +386,7 @@ export function ReviewWorkbench() {
 
   const renderPreview = (page: number) => (
     <div className="mt-3 rounded-[6px] border border-[var(--paper-border)] bg-[var(--paper-subsurface)] overflow-hidden">
-      <div className="h-7 px-3 flex items-center justify-between text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] border-b border-[var(--paper-border)]">
+      <div className="h-8 px-3 flex items-center justify-between text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] border-b border-[var(--paper-border)]">
         <span>
           {t.review.previewPage} · P{page}
         </span>
@@ -386,9 +394,9 @@ export function ReviewWorkbench() {
           type="button"
           onClick={() => setPreviewBust(Date.now())}
           title={t.review.rerenderHint}
-          className="flex items-center gap-1 text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] font-mono transition-colors cursor-pointer"
+          className="min-h-[28px] md:min-h-0 flex items-center gap-1.5 px-2 py-1 md:py-0.5 rounded text-xs text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] font-mono transition-colors cursor-pointer hover:bg-[var(--paper-surface)]"
         >
-          <RefreshCw className="h-3 w-3" />
+          <RefreshCw className="h-3.5 w-3.5 md:h-3 md:w-3" />
           <span>{t.review.rerenderPage}</span>
         </button>
       </div>
@@ -414,14 +422,14 @@ export function ReviewWorkbench() {
     <div className="flex-1 flex min-h-0 overflow-hidden bg-[var(--paper-bg)] text-[var(--ink-primary)]">
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       {/* Precision Ribbon */}
-      <div className="min-h-11 px-6 py-2 border-b border-[var(--paper-border)] bg-[var(--paper-surface)] flex flex-wrap items-center justify-between gap-2 shrink-0 shadow-2xs">
-        <div className="flex items-center gap-3 flex-wrap">
+      <div className="min-h-11 px-3 md:px-6 py-2 border-b border-[var(--paper-border)] bg-[var(--paper-surface)] flex flex-wrap items-center justify-between gap-2 shrink-0 shadow-2xs">
+        <div className="flex items-center gap-2 md:gap-3 flex-wrap">
           <div className="flex items-center gap-1.5 text-xs font-bold text-[var(--ink-primary)]">
             <SplitSquareVertical className="h-4 w-4 text-[#15803d]" />
             <span>{t.review.title}</span>
           </div>
-          <div className="h-3 w-px bg-[var(--paper-border)]" />
-          <div className="flex items-center gap-2 text-xs font-mono flex-wrap">
+          <div className="h-3 w-px bg-[var(--paper-border)] hidden sm:block" />
+          <div className="flex items-center gap-1.5 md:gap-2 text-xs font-mono flex-wrap">
             {ribbonCounts.length === 0 ? (
               <span className="text-[#15803d] flex items-center gap-1 font-medium">
                 <CheckCircle2 className="h-3.5 w-3.5" /> {t.review.noIssues}
@@ -434,7 +442,7 @@ export function ReviewWorkbench() {
                     key={kind}
                     type="button"
                     onClick={() => setFilter(isActive ? 'issues' : kind)}
-                    className={`px-1.5 py-0.5 rounded border transition-colors cursor-pointer text-xs font-mono flex items-center gap-1 ${
+                    className={`min-h-[30px] md:min-h-0 px-2 py-1 md:py-0.5 rounded border transition-colors cursor-pointer text-xs font-mono flex items-center gap-1 ${
                       isActive
                         ? 'border-[#b45309] bg-[#b45309]/20 text-[#b45309] font-bold shadow-xs'
                         : 'border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-[var(--ink-secondary)] hover:border-[var(--paper-border-hover)] hover:text-[var(--ink-primary)]'
@@ -452,7 +460,7 @@ export function ReviewWorkbench() {
               <button
                 type="button"
                 onClick={() => setFilter(filter === 'needs_human' ? 'issues' : 'needs_human')}
-                className={`px-1.5 py-0.5 rounded border transition-colors cursor-pointer text-xs font-mono flex items-center gap-1 ${
+                className={`min-h-[30px] md:min-h-0 px-2 py-1 md:py-0.5 rounded border transition-colors cursor-pointer text-xs font-mono flex items-center gap-1 ${
                   filter === 'needs_human'
                     ? 'border-[#b45309] bg-[#b45309]/20 text-[#b45309] font-bold shadow-xs'
                     : 'border-[#b45309]/40 bg-[#b45309]/10 text-[#b45309] hover:bg-[#b45309]/20'
@@ -466,21 +474,21 @@ export function ReviewWorkbench() {
             <button
               onClick={() => jumpToIssue(-1)}
               title={t.review.prevIssue}
-              className="p-1 rounded hover:bg-[var(--paper-subsurface)] text-[var(--ink-muted)]"
+              className="p-1.5 md:p-1 min-h-[30px] min-w-[30px] md:min-h-0 md:min-w-0 flex items-center justify-center rounded hover:bg-[var(--paper-subsurface)] text-[var(--ink-muted)] cursor-pointer"
             >
-              <ChevronUp className="h-3.5 w-3.5" />
+              <ChevronUp className="h-4 w-4 md:h-3.5 md:w-3.5" />
             </button>
             <button
               onClick={() => jumpToIssue(1)}
               title={t.review.nextIssue}
-              className="p-1 rounded hover:bg-[var(--paper-subsurface)] text-[var(--ink-muted)]"
+              className="p-1.5 md:p-1 min-h-[30px] min-w-[30px] md:min-h-0 md:min-w-0 flex items-center justify-center rounded hover:bg-[var(--paper-subsurface)] text-[var(--ink-muted)] cursor-pointer"
             >
-              <ChevronDown className="h-3.5 w-3.5" />
+              <ChevronDown className="h-4 w-4 md:h-3.5 md:w-3.5" />
             </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {filter !== 'issues' && filter !== 'needs_human' && filter !== 'all' && (
             <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] bg-[#b45309]/15 border border-[#b45309]/40 text-[#b45309] text-xs font-mono">
               <span className="font-semibold">{issueLabel(t, filter)}</span>
@@ -488,7 +496,7 @@ export function ReviewWorkbench() {
                 type="button"
                 onClick={() => setFilter('issues')}
                 title={t.review.clearFilter}
-                className="hover:opacity-100 opacity-60 text-xs font-bold cursor-pointer"
+                className="hover:opacity-100 opacity-60 text-xs font-bold cursor-pointer p-0.5 min-h-[24px] min-w-[24px] flex items-center justify-center"
               >
                 ✕
               </button>
@@ -505,7 +513,7 @@ export function ReviewWorkbench() {
               <button
                 key={id}
                 onClick={() => setFilter(id)}
-                className={`px-2.5 py-1 text-xs rounded-[3px] transition-colors font-medium ${
+                className={`min-h-[30px] md:min-h-0 px-2.5 py-1 text-xs rounded-[3px] transition-colors font-medium cursor-pointer ${
                   filter === id
                     ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-2xs'
                     : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
@@ -519,7 +527,7 @@ export function ReviewWorkbench() {
           <div className="flex bg-[var(--paper-subsurface)] p-0.5 rounded-[4px] border border-[var(--paper-border)]">
             <button
               onClick={() => setViewMode('segments')}
-              className={`px-3 py-1 text-xs rounded-[3px] transition-colors font-medium ${
+              className={`min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-[3px] transition-colors font-medium cursor-pointer ${
                 viewMode === 'segments'
                   ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-2xs'
                   : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
@@ -529,7 +537,7 @@ export function ReviewWorkbench() {
             </button>
             <button
               onClick={() => setViewMode('visual_witness')}
-              className={`px-3 py-1 text-xs rounded-[3px] transition-colors font-medium ${
+              className={`min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-[3px] transition-colors font-medium cursor-pointer ${
                 viewMode === 'visual_witness'
                   ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-2xs'
                   : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
@@ -544,7 +552,7 @@ export function ReviewWorkbench() {
           <button
             onClick={() => void handleReExport()}
             disabled={reExporting}
-            className={`px-3 py-1 text-xs rounded-[4px] border transition-colors font-medium cursor-pointer disabled:cursor-wait ${
+            className={`min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-[4px] border transition-colors font-medium cursor-pointer disabled:cursor-wait ${
               reExportPending
                 ? 'border-[#b45309]/40 bg-[#b45309]/10 text-[#b45309] font-semibold'
                 : 'border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]'
@@ -601,7 +609,7 @@ export function ReviewWorkbench() {
                     key={seg.block_id}
                     data-index={virtualRow.index}
                     ref={virtualizer.measureElement}
-                    className="absolute top-0 left-0 w-full px-8"
+                    className="absolute top-0 left-0 w-full px-3 md:px-8"
                     style={{ transform: `translateY(${virtualRow.start}px)` }}
                   >
                     <div className="pb-4">
@@ -625,9 +633,12 @@ export function ReviewWorkbench() {
                             </span>
                             {seg.page !== null && (
                               <button
-                                onClick={() => togglePreview(seg.page)}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  togglePreview(seg.page)
+                                }}
                                 title={t.review.previewPage}
-                                className={`px-1.5 py-0.5 rounded text-xs font-semibold transition-colors ${
+                                className={`min-h-[28px] md:min-h-0 px-2 py-1 md:py-0.5 rounded text-xs font-semibold transition-colors cursor-pointer ${
                                   previewOpen
                                     ? 'bg-[var(--ink-primary)] text-[var(--paper-bg)]'
                                     : 'bg-[var(--paper-border)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]'
@@ -720,6 +731,7 @@ export function ReviewWorkbench() {
                                       setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
                                     } else if (e.key === 'Escape') {
                                       e.preventDefault()
+                                      e.stopPropagation()
                                       setDrafts((prev) => {
                                         const next = { ...prev }
                                         delete next[seg.block_id]
@@ -813,7 +825,7 @@ export function ReviewWorkbench() {
                                   }}
                                   variant="secondary"
                                   size="sm"
-                                  className="text-xs h-6 px-2.5"
+                                  className="text-xs h-7 md:h-6 px-2.5"
                                 >
                                   {t.review.cancelEdit}
                                 </Button>
@@ -823,7 +835,7 @@ export function ReviewWorkbench() {
                                 variant="primary"
                                 size="sm"
                                 disabled={!editing[seg.block_id] || !dirty || saving[seg.block_id]}
-                                className="text-xs h-6 px-2.5 font-bold"
+                                className="text-xs h-7 md:h-6 px-2.5 font-bold"
                               >
                                 {saving[seg.block_id] ? (
                                   <Loader2 className="h-3 w-3 mr-1 animate-spin" />
@@ -865,9 +877,9 @@ export function ReviewWorkbench() {
       ) : (
         /* Visual witness: source page vs the composed translation (PRD §5.1 mode B). */
         <div ref={witnessScrollRef} className="flex-1 overflow-y-auto">
-          <div className="max-w-6xl mx-auto w-full px-8 py-6">
+          <div className="max-w-6xl mx-auto w-full px-3 md:px-8 py-4 md:py-6">
             <div className="flex items-center justify-end">
-              <label className="flex items-center gap-1.5 text-xs text-[var(--ink-secondary)] cursor-pointer select-none">
+              <label className="flex items-center gap-1.5 text-xs text-[var(--ink-secondary)] cursor-pointer select-none py-1">
                 <input
                   type="checkbox"
                   checked={diffBlend}
@@ -904,9 +916,9 @@ export function ReviewWorkbench() {
                             type="button"
                             onClick={() => setPreviewBust(Date.now())}
                             title={t.review.rerenderHint}
-                            className="flex items-center gap-1 text-xs text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] font-mono transition-colors cursor-pointer"
+                            className="min-h-[28px] md:min-h-0 flex items-center gap-1.5 px-2 py-1 md:py-0.5 rounded text-xs text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] font-mono transition-colors cursor-pointer hover:bg-[var(--paper-surface)]"
                           >
-                            <RefreshCw className="h-3 w-3" />
+                            <RefreshCw className="h-3.5 w-3.5 md:h-3 md:w-3" />
                             <span>{t.review.rerenderPage}</span>
                           </button>
                         </div>
@@ -930,7 +942,7 @@ export function ReviewWorkbench() {
                             />
                           </div>
                         ) : (
-                          <div className="grid grid-cols-2 divide-x divide-[var(--paper-border)]">
+                          <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-[var(--paper-border)]">
                             <div className="bg-white">
                               <div className="px-3 py-1.5 text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] border-b border-[var(--paper-border)]">
                                 {t.review.sourceCanvas}
@@ -978,96 +990,113 @@ export function ReviewWorkbench() {
       </div>
 
       {inspectorOpen && inspectorSegment && (
-        <aside className="w-80 border-l border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-y-auto shrink-0 select-text">
-          <div className="h-11 px-4 border-b border-[var(--paper-border)] flex items-center justify-between">
-            <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-              {t.review.inspectorTitle}
-            </span>
-            <button
-              onClick={() => setInspectorOpen(false)}
-              className="text-xs font-mono text-[var(--ink-muted)] hover:text-[var(--ink-primary)]"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="p-4 space-y-3 text-xs">
-            <div>
-              <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-                {inspectorSegment.block_id}
-              </div>
-              <div className="text-xs text-[var(--ink-secondary)] font-mono mt-0.5">
-                {blockTypeLabel(t, inspectorSegment.block_type)} · P{inspectorSegment.page ?? '—'}
-              </div>
+        <>
+          {/* Mobile Overlay Backdrop (< md) */}
+          <div
+            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-xs md:hidden"
+            onClick={() => setInspectorOpen(false)}
+            aria-hidden="true"
+          />
+
+          {/* Inspector Panel: Fixed Bottom Sheet on Mobile (< md), Side-by-Side Column on Desktop (md+) */}
+          <aside className="fixed inset-x-0 bottom-0 z-50 max-h-[85vh] rounded-t-xl border-t border-[var(--paper-border)] shadow-2xl bg-[var(--paper-surface)] flex flex-col overflow-hidden overscroll-contain shrink-0 select-text pb-[env(safe-area-inset-bottom,0px)] md:static md:z-auto md:max-h-none md:h-full md:rounded-none md:border-t-0 md:w-80 md:border-l md:shadow-none md:pb-0">
+            {/* Grab Handle Indicator (Mobile Only) */}
+            <div className="md:hidden flex justify-center pt-2 pb-1 shrink-0">
+              <div className="w-10 h-1 rounded-full bg-[var(--paper-border)]" />
             </div>
 
-            <dl className="divide-y divide-[var(--paper-border)] text-xs font-mono">
-              <div className="py-1.5 flex justify-between">
-                <dt className="text-[var(--ink-muted)]">{t.review.inspectorQe}</dt>
-                <dd className="font-bold">
-                  {inspectorSegment.mtqe_score === null
-                    ? '—'
-                    : `${(inspectorSegment.mtqe_score * 100).toFixed(0)}%`}
-                </dd>
-              </div>
-              <div className="py-1.5 flex justify-between">
-                <dt className="text-[var(--ink-muted)]">{t.review.inspectorTmHit}</dt>
-                <dd>{inspectorSegment.tm_hit ? '✓' : '—'}</dd>
-              </div>
-              <div className="py-1.5 flex justify-between">
-                <dt className="text-[var(--ink-muted)]">{t.review.inspectorRepairs}</dt>
-                <dd>{inspectorSegment.repair_rounds}</dd>
-              </div>
-              <div className="py-1.5 flex justify-between">
-                <dt className="text-[var(--ink-muted)]">{t.review.inspectorSeverity}</dt>
-                <dd>{mqmSeverityLabel(t, inspectorSegment.mqm_severity)}</dd>
-              </div>
-            </dl>
-
-            {inspectorSegment.glossary_hits.length > 0 && (
+            <div className="h-11 px-4 border-b border-[var(--paper-border)] flex items-center justify-between shrink-0">
+              <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+                {t.review.inspectorTitle}
+              </span>
+              <button
+                type="button"
+                onClick={() => setInspectorOpen(false)}
+                className="w-8 h-8 min-h-[32px] min-w-[32px] flex items-center justify-center rounded text-xs font-mono text-[var(--ink-muted)] hover:text-[var(--ink-primary)] hover:bg-[var(--paper-subsurface)] transition-colors cursor-pointer"
+                aria-label={t.common.dismiss}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-4 space-y-3 text-xs overflow-y-auto flex-1">
               <div>
-                <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold mb-1">
-                  {t.review.inspectorGlossary}
+                <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+                  {inspectorSegment.block_id}
                 </div>
-                <div className="flex flex-wrap gap-1">
-                  {inspectorSegment.glossary_hits.map((term) => (
-                    <span
-                      key={term}
-                      className="px-1.5 py-0.5 rounded bg-[#15803d]/10 text-[#15803d] font-mono text-xs"
-                    >
-                      {term}
-                    </span>
-                  ))}
+                <div className="text-xs text-[var(--ink-secondary)] font-mono mt-0.5">
+                  {blockTypeLabel(t, inspectorSegment.block_type)} · P{inspectorSegment.page ?? '—'}
                 </div>
               </div>
-            )}
 
-            {inspectorSegment.error_flags.length > 0 && (
-              <div>
-                <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold mb-1">
-                  {t.review.errorFlags}
+              <dl className="divide-y divide-[var(--paper-border)] text-xs font-mono">
+                <div className="py-1.5 flex justify-between">
+                  <dt className="text-[var(--ink-muted)]">{t.review.inspectorQe}</dt>
+                  <dd className="font-bold">
+                    {inspectorSegment.mtqe_score === null
+                      ? '—'
+                      : `${(inspectorSegment.mtqe_score * 100).toFixed(0)}%`}
+                  </dd>
                 </div>
-                <ul className="space-y-0.5">
-                  {inspectorSegment.error_flags.map((flag, index) => (
-                    <li key={index} className="text-xs font-mono text-[var(--ink-secondary)] break-all">
-                      {flag}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+                <div className="py-1.5 flex justify-between">
+                  <dt className="text-[var(--ink-muted)]">{t.review.inspectorTmHit}</dt>
+                  <dd>{inspectorSegment.tm_hit ? '✓' : '—'}</dd>
+                </div>
+                <div className="py-1.5 flex justify-between">
+                  <dt className="text-[var(--ink-muted)]">{t.review.inspectorRepairs}</dt>
+                  <dd>{inspectorSegment.repair_rounds}</dd>
+                </div>
+                <div className="py-1.5 flex justify-between">
+                  <dt className="text-[var(--ink-muted)]">{t.review.inspectorSeverity}</dt>
+                  <dd>{mqmSeverityLabel(t, inspectorSegment.mqm_severity)}</dd>
+                </div>
+              </dl>
 
-            {Object.keys(inspectorSegment.provenance).length > 0 && (
-              <div>
-                <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold mb-1">
-                  {t.review.inspectorProvenance}
+              {inspectorSegment.glossary_hits.length > 0 && (
+                <div>
+                  <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold mb-1">
+                    {t.review.inspectorGlossary}
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {inspectorSegment.glossary_hits.map((term) => (
+                      <span
+                        key={term}
+                        className="px-1.5 py-0.5 rounded bg-[#15803d]/10 text-[#15803d] font-mono text-xs"
+                      >
+                        {term}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-                <pre className="text-xs font-mono text-[var(--ink-secondary)] whitespace-pre-wrap break-all bg-[var(--paper-subsurface)] rounded p-2">
-                  {JSON.stringify(inspectorSegment.provenance, null, 1)}
-                </pre>
-              </div>
-            )}
-          </div>
-        </aside>
+              )}
+
+              {inspectorSegment.error_flags.length > 0 && (
+                <div>
+                  <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold mb-1">
+                    {t.review.errorFlags}
+                  </div>
+                  <ul className="space-y-0.5">
+                    {inspectorSegment.error_flags.map((flag, index) => (
+                      <li key={index} className="text-xs font-mono text-[var(--ink-secondary)] break-all">
+                        {flag}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {Object.keys(inspectorSegment.provenance).length > 0 && (
+                <div>
+                  <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold mb-1">
+                    {t.review.inspectorProvenance}
+                  </div>
+                  <pre className="text-xs font-mono text-[var(--ink-secondary)] whitespace-pre-wrap break-all bg-[var(--paper-subsurface)] rounded p-2">
+                    {JSON.stringify(inspectorSegment.provenance, null, 1)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </aside>
+        </>
       )}
     </div>
   )
@@ -1294,7 +1323,7 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
                 variant="primary"
                 size="sm"
                 disabled={busy}
-                className={`text-xs h-6 px-2.5 font-bold ${violation.cascade_all <= 1 ? 'ml-auto' : ''}`}
+                className={`text-xs min-h-[28px] md:min-h-0 h-7 md:h-6 px-2.5 font-bold ${violation.cascade_all <= 1 ? 'ml-auto' : ''}`}
               >
                 {busy ? (
                   <Loader2 className="h-3 w-3 mr-1 animate-spin" />
@@ -1350,7 +1379,7 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
                     variant="primary"
                     size="sm"
                     disabled={busy}
-                    className="text-xs h-6 px-2.5 bg-[#b45309] hover:bg-[#92400e] text-white font-bold"
+                    className="text-xs min-h-[28px] md:min-h-0 h-7 md:h-6 px-2.5 bg-[#b45309] hover:bg-[#92400e] text-white font-bold"
                   >
                     {busy ? (
                       <Loader2 className="h-3 w-3 animate-spin mr-1" />
@@ -1364,7 +1393,7 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
                     variant="secondary"
                     size="sm"
                     disabled={busy}
-                    className="text-xs h-6 px-2.5"
+                    className="text-xs min-h-[28px] md:min-h-0 h-7 md:h-6 px-2.5"
                   >
                     {t.review.cascadeConfirmCancel}
                   </Button>

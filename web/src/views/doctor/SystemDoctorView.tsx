@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   CheckCircle2,
   RefreshCw,
@@ -55,6 +55,13 @@ export function SystemDoctorView() {
   const [defaultBusy, setDefaultBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const editorRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (editingProvider !== undefined && editorRef.current) {
+      editorRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [editingProvider])
 
   const load = useCallback(async (probe: boolean) => {
     setLoading(true)
@@ -122,9 +129,9 @@ export function SystemDoctorView() {
   const groups = Array.from(new Set(localized.map(({ check }) => check.group_code)))
 
   return (
-    <div className="flex-1 overflow-y-auto px-8 py-7 space-y-7 max-w-5xl mx-auto w-full">
+    <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-7 space-y-5 sm:space-y-7 max-w-5xl mx-auto w-full">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[var(--paper-border)] pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--paper-border)] pb-4">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-[var(--ink-primary)]">
             {t.doctor.title}
@@ -132,7 +139,13 @@ export function SystemDoctorView() {
           <p className="text-xs text-[var(--ink-secondary)] mt-1">{t.doctor.subtitle}</p>
         </div>
 
-        <Button onClick={handleTestPings} variant="secondary" size="sm" disabled={isPinging || loading}>
+        <Button
+          onClick={handleTestPings}
+          variant="secondary"
+          size="sm"
+          disabled={isPinging || loading}
+          className="self-start sm:self-auto min-h-[38px] sm:min-h-0"
+        >
           <RefreshCw className={`h-3 w-3 mr-1.5 ${isPinging || loading ? 'animate-spin' : ''}`} />
           {t.doctor.pingAll}
         </Button>
@@ -171,17 +184,17 @@ export function SystemDoctorView() {
                         key={`${groupCode}-${idx}`}
                         className="px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs"
                       >
-                        <div className="flex items-start gap-2.5">
+                        <div className="flex items-start gap-2.5 min-w-0 flex-1">
                           <CheckIcon status={check.status} />
-                          <div>
-                            <div className="font-semibold text-[var(--ink-primary)]">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-semibold text-[var(--ink-primary)] break-words">
                               {text.name}
                             </div>
-                            <div className="text-xs text-[var(--ink-secondary)] font-mono mt-0.5">
+                            <div className="text-xs text-[var(--ink-secondary)] font-mono mt-0.5 break-words">
                               {text.detail}
                             </div>
                             {text.fix && (
-                              <div className="text-xs text-[#b45309] mt-0.5">
+                              <div className="text-xs text-[#b45309] mt-0.5 break-words">
                                 {t.doctor.fixLabel}: {text.fix}
                               </div>
                             )}
@@ -225,7 +238,7 @@ export function SystemDoctorView() {
             column, showing "local-gemma4 is active" while the operator edited
             index-translate. Same data, twice on screen, one copy in the wrong
             place. */}
-        <div className="md:col-start-2 md:row-start-1">
+        <div ref={editorRef} className="md:col-start-2 md:row-start-1">
           {editingProvider !== undefined ? (
             <ProviderEditor
               name={editingProvider}
@@ -287,39 +300,39 @@ export function SystemDoctorView() {
           {runtime ? (
             <div className="p-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)]">
               <div className="type-group mb-2">{t.doctor.activeNow}</div>
-              <dl className="space-y-1 type-value font-mono">
-                <div className="flex justify-between gap-3">
-                  <dt className="text-[var(--ink-secondary)]">{t.doctor.providerLabel}</dt>
-                  <dd className="text-[var(--ink-primary)] font-semibold truncate">
+              <dl className="space-y-1.5 type-value font-mono">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-0.5 sm:gap-3">
+                  <dt className="text-[var(--ink-secondary)] shrink-0">{t.doctor.providerLabel}</dt>
+                  <dd className="text-[var(--ink-primary)] font-semibold truncate sm:text-right">
                     {runtime.active.provider || '—'}
                   </dd>
                 </div>
-                <div className="flex justify-between gap-3">
-                  <dt className="text-[var(--ink-secondary)]">{t.doctor.draftModel}</dt>
-                  <dd className="text-[var(--ink-primary)] font-semibold truncate">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-0.5 sm:gap-3">
+                  <dt className="text-[var(--ink-secondary)] shrink-0">{t.doctor.draftModel}</dt>
+                  <dd className="text-[var(--ink-primary)] font-semibold truncate sm:text-right">
                     {runtime.active.draft_model || t.doctor.notConfigured}
                   </dd>
                 </div>
-                <div className="flex justify-between gap-3">
-                  <dt className="text-[var(--ink-secondary)]">{t.doctor.repairModel}</dt>
-                  <dd className="text-[var(--ink-primary)] truncate">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-0.5 sm:gap-3">
+                  <dt className="text-[var(--ink-secondary)] shrink-0">{t.doctor.repairModel}</dt>
+                  <dd className="text-[var(--ink-primary)] truncate sm:text-right">
                     {runtime.active.repair_model || t.doctor.notConfigured}
                   </dd>
                 </div>
-                <div className="flex justify-between gap-3">
-                  <dt className="text-[var(--ink-secondary)]">{t.doctor.endpoint}</dt>
-                  <dd className="text-[var(--ink-primary)] truncate" title={runtime.active.base_url}>
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-0.5 sm:gap-3">
+                  <dt className="text-[var(--ink-secondary)] shrink-0">{t.doctor.endpoint}</dt>
+                  <dd className="text-[var(--ink-primary)] truncate sm:text-right" title={runtime.active.base_url}>
                     {runtime.active.base_url || '—'}
                   </dd>
                 </div>
-                <div className="flex justify-between gap-3">
-                  <dt className="text-[var(--ink-secondary)]">{t.doctor.capabilityProfile}</dt>
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-0.5 sm:gap-3">
+                  <dt className="text-[var(--ink-secondary)] shrink-0">{t.doctor.capabilityProfile}</dt>
                   <dd
-                    className={
+                    className={`truncate sm:text-right ${
                       runtime.active.matched_pattern
                         ? 'text-[var(--ink-primary)]'
                         : 'text-[#b45309] font-semibold'
-                    }
+                    }`}
                   >
                     {runtime.active.matched_pattern ?? t.doctor.noProfileMatch}
                   </dd>
@@ -392,9 +405,9 @@ export function SystemDoctorView() {
                 size="sm"
                 variant="ghost"
                 onClick={() => setEditingProvider(null)}
-                className="!h-6 !px-1.5 type-help"
+                className="!h-7 sm:!h-6 px-2 sm:!px-1.5 type-help"
               >
-                <Plus size={11} /> {t.doctor.addProvider}
+                <Plus size={12} className="sm:w-[11px] sm:h-[11px]" /> {t.doctor.addProvider}
               </Button>
             </div>
             {(runtime?.providers ?? []).filter((p) => p.declared).length === 0 ? (
@@ -406,13 +419,13 @@ export function SystemDoctorView() {
                 wire protocols and bare aliases (`chat`, `claude`, `responses`);
                 rendering all three put seven aliases above the six real
                 entries. Aliases are folded away below. */}
-            <div className="space-y-1">
+            <div className="space-y-1.5 sm:space-y-1">
               {(runtime?.providers ?? [])
                 .filter((p) => p.declared)
                 .map((p) => (
                   <div
                     key={p.name}
-                    className={`flex items-center justify-between gap-2 rounded-[4px] px-2 py-1 type-value font-mono ${
+                    className={`flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2 rounded-[4px] px-2.5 py-2 sm:px-2 sm:py-1 type-value font-mono ${
                       editingProvider === p.name
                         ? // The row the form above is editing. Without this the
                           // list highlighted only the *active* provider, so
@@ -421,70 +434,77 @@ export function SystemDoctorView() {
                           'bg-[var(--paper-subsurface)] border border-dashed border-[var(--ink-muted)]'
                         : p.active
                           ? 'bg-[#15803d]/10 border border-[#15803d]/25'
-                          : 'border border-transparent'
+                          : 'border border-[var(--paper-border)] sm:border-transparent'
                     }`}
                   >
-                    <span
-                      className={`truncate ${
-                        editingProvider === p.name
-                          ? 'font-semibold text-[var(--ink-primary)]'
-                          : p.active
-                            ? 'font-semibold text-[#15803d]'
-                            : 'text-[var(--ink-secondary)]'
-                      }`}
-                    >
-                      {p.name}
-                    </span>
-                    <span className="flex items-center gap-1.5 shrink-0">
-                      {/* Why this row cannot make a call, when it cannot. The
-                          block is still listed — it is declared, so the operator
-                          should see it — but silently, as it used to be, is how
-                          an unset ${VAR} stayed invisible. The variable name is
-                          not in this payload: it is shown in the form, which is
-                          where the fix happens. */}
-                      {p.credential_issue === 'unresolved_variable' ? (
-                        <span className="type-help text-[#b45309]">
-                          {t.doctor.credentialUnresolved}
-                        </span>
-                      ) : p.credential_issue === 'missing' ? (
-                        <span className="type-help text-[#b45309]">
-                          {t.doctor.credentialMissing}
-                        </span>
-                      ) : null}
-                      {p.is_free && (
-                        <span className="type-help text-[var(--ink-muted)]">
-                          {t.doctor.freeLabel}
-                        </span>
-                      )}
-                      {/* Which block the *file* names as default. Distinct from
-                          "active": UBT_PROVIDER or --provider outranks it, so an
-                          operator whose shell exported a provider had no way to
-                          see what the file would pick without it. */}
-                      {p.is_default ? (
-                        <span className="type-help font-semibold text-[var(--ink-primary)]">
-                          {t.doctor.defaultProviderLabel}
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => void handleMakeDefault(p.name)}
-                          disabled={defaultBusy === p.name}
-                          aria-label={`${t.doctor.activateProvider} ${p.name}`}
-                          className="type-help text-[var(--ink-muted)] hover:text-[var(--ink-primary)] disabled:opacity-50"
-                        >
-                          {t.doctor.activateProvider}
-                        </button>
-                      )}
-                      <span className="type-help text-[var(--ink-muted)] truncate max-w-[9rem]">
+                    <div className="flex items-center justify-between sm:justify-start gap-2 min-w-0">
+                      <span
+                        className={`truncate ${
+                          editingProvider === p.name
+                            ? 'font-semibold text-[var(--ink-primary)]'
+                            : p.active
+                              ? 'font-semibold text-[#15803d]'
+                              : 'text-[var(--ink-secondary)]'
+                        }`}
+                      >
+                        {p.name}
+                      </span>
+                      <span className="type-help text-[var(--ink-muted)] truncate sm:hidden">
                         {p.draft_model || p.api_mode || '—'}
+                      </span>
+                    </div>
+                    <span className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {/* Why this row cannot make a call, when it cannot. The
+                            block is still listed — it is declared, so the operator
+                            should see it — but silently, as it used to be, is how
+                            an unset ${VAR} stayed invisible. The variable name is
+                            not in this payload: it is shown in the form, which is
+                            where the fix happens. */}
+                        {p.credential_issue === 'unresolved_variable' ? (
+                          <span className="type-help text-[#b45309]">
+                            {t.doctor.credentialUnresolved}
+                          </span>
+                        ) : p.credential_issue === 'missing' ? (
+                          <span className="type-help text-[#b45309]">
+                            {t.doctor.credentialMissing}
+                          </span>
+                        ) : null}
+                        {p.is_free && (
+                          <span className="type-help text-[var(--ink-muted)]">
+                            {t.doctor.freeLabel}
+                          </span>
+                        )}
+                        {/* Which block the *file* names as default. Distinct from
+                            "active": UBT_PROVIDER or --provider outranks it, so an
+                            operator whose shell exported a provider had no way to
+                            see what the file would pick without it. */}
+                        {p.is_default ? (
+                          <span className="type-help font-semibold text-[var(--ink-primary)]">
+                            {t.doctor.defaultProviderLabel}
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void handleMakeDefault(p.name)}
+                            disabled={defaultBusy === p.name}
+                            aria-label={`${t.doctor.activateProvider} ${p.name}`}
+                            className="type-help text-[var(--ink-muted)] hover:text-[var(--ink-primary)] disabled:opacity-50 py-2 sm:py-0 px-1 min-h-[40px] sm:min-h-0 flex items-center cursor-pointer"
+                          >
+                            {t.doctor.activateProvider}
+                          </button>
+                        )}
+                        <span className="hidden sm:inline type-help text-[var(--ink-muted)] truncate max-w-[9rem]">
+                          {p.draft_model || p.api_mode || '—'}
+                        </span>
                       </span>
                       <button
                         type="button"
                         onClick={() => setEditingProvider(p.name)}
                         aria-label={`${t.doctor.editProvider} ${p.name}`}
-                        className="p-0.5 rounded text-[var(--ink-muted)] hover:text-[var(--ink-primary)]"
+                        className="p-2 sm:p-0.5 rounded text-[var(--ink-muted)] hover:text-[var(--ink-primary)] hover:bg-[var(--paper-subsurface)] shrink-0 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 flex items-center justify-center cursor-pointer"
                       >
-                        <Pencil size={11} />
+                        <Pencil size={13} className="sm:w-[11px] sm:h-[11px]" />
                       </button>
                     </span>
                   </div>
@@ -559,13 +579,13 @@ export function SystemDoctorView() {
       </div>
 
       {/* Security Boundary Panel */}
-      <div className="p-4 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] space-y-1.5 text-xs font-mono text-[var(--ink-secondary)] shadow-2xs">
+      <div className="p-4 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] space-y-1.5 text-xs font-mono text-[var(--ink-secondary)] shadow-2xs break-words">
         <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] mb-2 font-semibold">
           {t.doctor.securityBoundary}
         </div>
         {info ? (
           <>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className={info.is_loopback ? 'text-[#15803d]' : 'text-[#b45309]'}>
                 • {t.doctor.listenInterface}: {info.host}
               </span>
@@ -573,20 +593,20 @@ export function SystemDoctorView() {
                 {info.is_loopback ? t.doctor.loopbackOnly : t.doctor.exposed}
               </Badge>
             </div>
-            <div>• {t.doctor.authGate}: {info.auth_enabled ? t.doctor.enabled : t.doctor.disabled}</div>
-            <div>• {t.doctor.jobMode}: {info.job_mode}</div>
-            <div>• {t.doctor.dbDir}: {info.db_dir}</div>
+            <div className="break-words">• {t.doctor.authGate}: {info.auth_enabled ? t.doctor.enabled : t.doctor.disabled}</div>
+            <div className="break-words">• {t.doctor.jobMode}: {info.job_mode}</div>
+            <div className="break-words">• {t.doctor.dbDir}: {info.db_dir}</div>
             {info.disk_free_gb != null && (
               <div>• {t.doctor.diskFree}: {info.disk_free_gb} GB</div>
             )}
             {info.wal_status && (
-              <div>• {t.doctor.walStatus}: {info.wal_status}</div>
+              <div className="break-words">• {t.doctor.walStatus}: {info.wal_status}</div>
             )}
-            <div>
+            <div className="break-words">
               • {t.doctor.allowedRoots}:{' '}
               {info.allowed_bases.length === 0 ? '—' : info.allowed_bases.join(', ')}
             </div>
-            <div>• {t.doctor.forbiddenPaths}: /etc, /root, /var/run, ~/.ssh (Hard refusal)</div>
+            <div className="break-words">• {t.doctor.forbiddenPaths}: /etc, /root, /var/run, ~/.ssh (Hard refusal)</div>
             {!info.is_loopback && (
               <div className="text-[#b45309] pt-1">⚠ {t.doctor.exposedWarning}</div>
             )}

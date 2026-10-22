@@ -30,6 +30,8 @@ export const en: TranslationDictionary = {
     systemDoctor: 'Engine Doctor',
     workbenches: 'Workbenches',
     reviewWorkbench: 'Block Review',
+    toggleNavigation: 'Toggle navigation',
+    closeNavigation: 'Close navigation',
   },
   wizard: {
     title: 'New Translation Job',
@@ -328,6 +330,8 @@ export const en: TranslationDictionary = {
     deleteJob: 'Delete job history',
     deleteConfirm: "Delete this job's history and deliverables? This cannot be undone.",
     deleteTypePrompt: 'Type {phrase} to confirm deletion',
+    collapseLogs: 'Collapse logs',
+    expandLogs: 'Expand logs',
     jobStatuses: {
       submitted: 'Submitted',
       queued: 'Queued',

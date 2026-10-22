@@ -74,10 +74,9 @@ function pillarStatusLabel(
 
 /** A five-axis radar drawn as inline SVG (no chart dependency). */
 function RadarChart({ axes }: { axes: { label: string; value: number }[] }) {
-  const size = 200
-  const cx = size / 2
-  const cy = size / 2
-  const radius = 70
+  const cx = 110
+  const cy = 100
+  const radius = 60
   const point = (index: number, ratio: number): [number, number] => {
     const angle = ((-90 + index * (360 / axes.length)) * Math.PI) / 180
     return [cx + radius * ratio * Math.cos(angle), cy + radius * ratio * Math.sin(angle)]
@@ -88,7 +87,7 @@ function RadarChart({ axes }: { axes: { label: string; value: number }[] }) {
     .join(' ')
 
   return (
-    <svg viewBox={`0 0 ${size} ${size}`} className="w-52 h-52 shrink-0" role="img">
+    <svg viewBox="0 0 220 200" className="w-48 h-44 sm:w-56 sm:h-52 shrink-0 max-w-full" role="img">
       {[0.25, 0.5, 0.75, 1].map((ratio) => (
         <polygon
           key={ratio}
@@ -122,7 +121,7 @@ function RadarChart({ axes }: { axes: { label: string; value: number }[] }) {
         strokeWidth={1.4}
       />
       {axes.map((axis, index) => {
-        const [x, y] = point(index, 1.22)
+        const [x, y] = point(index, 1.25)
         return (
           <text
             key={axis.label}
@@ -301,7 +300,7 @@ export function QualityGateView() {
       status: (placeholder.corrupt_spans ?? 0) > 0 ? 'fail' : 'pass',
       score: clampScore(placeholder.retention_rate),
       detail: (
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs font-mono">
+        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs font-mono">
           <div className="flex justify-between">
             <dt className="text-[var(--ink-muted)]">{t.quality.metricMaskedSpans}</dt>
             <dd>{placeholder.masked_spans ?? 0}</dd>
@@ -339,30 +338,32 @@ export function QualityGateView() {
             <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
               {t.quality.termDriftTitle}
             </div>
-            <table className="w-full text-xs text-left font-mono">
-              <thead className="text-[var(--ink-muted)]">
-                <tr>
-                  <th className="py-1 pr-3 font-semibold">{t.quality.colTerm}</th>
-                  <th className="py-1 pr-3 font-semibold">{t.quality.colExpected}</th>
-                  <th className="py-1 pr-3 font-semibold">{t.quality.colOccurrences}</th>
-                  <th className="py-1 font-semibold">{t.quality.colDriftRate}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--paper-border)]">
-                {topDrifted.map((row) => (
-                  <tr key={`${row.source}-${row.expected}`}>
-                    <td className="py-1 pr-3 text-[var(--ink-primary)]">{row.source}</td>
-                    <td className="py-1 pr-3 text-[#15803d]">{row.expected}</td>
-                    <td className="py-1 pr-3">{row.occurrences ?? 0}</td>
-                    <td className="py-1 text-[#b45309]">
-                      {typeof row.drift_rate === 'number'
-                        ? `${(row.drift_rate * 100).toFixed(0)}%`
-                        : '—'}
-                    </td>
+            <div className="overflow-x-auto min-w-0">
+              <table className="w-full min-w-[340px] text-xs text-left font-mono">
+                <thead className="text-[var(--ink-muted)]">
+                  <tr>
+                    <th className="py-1 pr-3 font-semibold">{t.quality.colTerm}</th>
+                    <th className="py-1 pr-3 font-semibold">{t.quality.colExpected}</th>
+                    <th className="py-1 pr-3 font-semibold">{t.quality.colOccurrences}</th>
+                    <th className="py-1 font-semibold">{t.quality.colDriftRate}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-[var(--paper-border)]">
+                  {topDrifted.map((row) => (
+                    <tr key={`${row.source}-${row.expected}`}>
+                      <td className="py-1 pr-3 text-[var(--ink-primary)]">{row.source}</td>
+                      <td className="py-1 pr-3 text-[#15803d]">{row.expected}</td>
+                      <td className="py-1 pr-3">{row.occurrences ?? 0}</td>
+                      <td className="py-1 text-[#b45309]">
+                        {typeof row.drift_rate === 'number'
+                          ? `${(row.drift_rate * 100).toFixed(0)}%`
+                          : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         ),
     },
@@ -429,7 +430,7 @@ export function QualityGateView() {
             </>
           )}
           {flaggedPages.length > 0 && (
-            <div className="grid grid-cols-4 gap-2 pt-1 max-h-72 overflow-y-auto">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 max-h-72 overflow-y-auto">
               {flaggedPages.map((page) => (
                 <div
                   key={page}
@@ -460,7 +461,7 @@ export function QualityGateView() {
       status: (coverage.fail_closed_blocks ?? 0) > 0 ? 'fail' : 'pass',
       score: clampScore(coverage.render_coverage),
       detail: (
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs font-mono">
+        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs font-mono">
           {[
             ['rendered_blocks', coverage.rendered_blocks ?? 0],
             ['skipped_blocks', coverage.skipped_blocks ?? 0],
@@ -485,7 +486,7 @@ export function QualityGateView() {
       status: 'pass',
       score: 100,
       detail: (
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs font-mono">
+        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs font-mono">
           {[
             [t.quality.auditDraftModel, config.draft_model ?? '—'],
             [t.quality.auditRepairModel, config.repair_model ?? '—'],
@@ -541,9 +542,9 @@ export function QualityGateView() {
     status === 'pass' ? 'success' : status === 'warn' ? 'warning' : 'destructive'
 
   return (
-    <div className="flex-1 overflow-y-auto px-8 py-7 space-y-7 max-w-5xl mx-auto w-full">
+    <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-7 space-y-5 sm:space-y-7 max-w-5xl mx-auto w-full">
       {/* View Header */}
-      <div className="flex items-center justify-between border-b border-[var(--paper-border)] pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--paper-border)] pb-4">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-[var(--ink-primary)]">
             {t.quality.title}
@@ -599,17 +600,17 @@ export function QualityGateView() {
 
       {/* Decision Banner + Radar */}
       {hasReport && (
-      <div className="p-5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] flex items-center justify-between gap-6 shadow-2xs">
-        <div className="flex items-center gap-3.5">
+      <div className="p-4 sm:p-5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] flex flex-col md:flex-row items-start md:items-center justify-between gap-5 md:gap-6 shadow-2xs">
+        <div className="flex items-start sm:items-center gap-3.5">
           <div
-            className={`h-10 w-10 rounded-[6px] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] flex items-center justify-center ${
+            className={`h-10 w-10 rounded-[6px] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] flex items-center justify-center shrink-0 ${
               isPassed ? 'text-[#15803d]' : 'text-[#b91c1c]'
             }`}
           >
             {isPassed ? <CheckCircle2 className="h-6 w-6" /> : <AlertTriangle className="h-6 w-6" />}
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-bold text-[var(--ink-primary)]">
                 {isPassed ? t.quality.decisionReady : t.quality.decisionBlocked}
               </span>
@@ -660,8 +661,8 @@ export function QualityGateView() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="text-right">
+        <div className="flex flex-col sm:flex-row items-center justify-center md:justify-end gap-4 w-full md:w-auto pt-3 md:pt-0 border-t md:border-t-0 border-[var(--paper-border)]">
+          <div className="text-center sm:text-right">
             <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
               {t.quality.fidelityScore}
             </div>
@@ -687,7 +688,7 @@ export function QualityGateView() {
             <div key={idx}>
               <button
                 onClick={() => setExpanded(expanded === idx ? null : idx)}
-                className="w-full p-4 flex items-center justify-between hover:bg-[var(--paper-subsurface)] transition-colors text-left"
+                className="w-full p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4 hover:bg-[var(--paper-subsurface)] transition-colors text-left"
               >
                 <div className="flex items-start gap-2.5 min-w-0 flex-1">
                   {expanded === idx ? (
@@ -709,8 +710,8 @@ export function QualityGateView() {
                     must wrap and truncate rather than push the status badge into a
                     column three characters wide. It shrinks before the title does:
                     the title identifies the row, the metric explains it. */}
-                <div className="flex items-center gap-3 shrink-0 max-w-[45%] justify-end">
-                  <span className="font-mono text-xs text-[var(--ink-primary)] font-medium text-right leading-snug break-words">
+                <div className="flex items-center gap-3 shrink-0 w-full sm:w-auto sm:max-w-[45%] justify-between sm:justify-end pl-6 sm:pl-0">
+                  <span className="font-mono text-xs text-[var(--ink-primary)] font-medium text-left sm:text-right leading-snug break-words">
                     {item.metric}
                   </span>
                   <Badge variant={statusBadge(item.status)} dot className="shrink-0 whitespace-nowrap">
@@ -719,7 +720,7 @@ export function QualityGateView() {
                 </div>
               </button>
               {expanded === idx && (
-                <div className="px-4 pb-4 pl-11 text-[var(--ink-primary)]">{item.detail}</div>
+                <div className="px-4 pb-4 pl-8 sm:pl-11 text-[var(--ink-primary)] overflow-x-auto">{item.detail}</div>
               )}
             </div>
           ))}
@@ -728,7 +729,7 @@ export function QualityGateView() {
       )}
 
       {/* Deliverable Download Section */}
-      <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] p-5 space-y-4 shadow-2xs">
+      <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] p-4 sm:p-5 space-y-4 shadow-2xs">
         <div>
           <h3 className="text-xs font-bold text-[var(--ink-primary)] tracking-tight">
             {t.quality.deliverablesTitle}
@@ -753,14 +754,14 @@ export function QualityGateView() {
             {t.quality.noDeliverables}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
             {deliverables.map((item) => (
               <Button
                 key={item.key}
                 onClick={() => void handleDownload(item.key)}
                 disabled={downloadBusy}
                 variant="secondary"
-                className="h-10 justify-start px-3 text-xs"
+                className="h-10 justify-start px-3 text-xs w-full"
               >
                 {item.key === 'contract' ? (
                   <FileCheck2 className="h-3.5 w-3.5 mr-2 text-[#15803d]" />
