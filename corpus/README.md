@@ -83,6 +83,21 @@ those fragments is shorter than the echo, so this ceiling is an artifact of the
 mock, not of the delivered document -- do not read a nonzero value here as lost
 text. Re-derive after a renderer change, as with the ratio floors.
 
+A *second*, unrelated mock artifact accounts for the 1 on `paper-2609-22978` and
+`book-chapter-3`: a block the QE pass quarantines (`blocked_human`, which the
+contract counts as source-kept). The echo is `"[模拟翻译] " + source` and cannot
+emit `$...$`, so every block whose source carries a math symbol trips the
+*undelimited math* rule -- `source carries math symbols but the target has no
+$...$ span` -- on every rehearsal, and a critical flag surviving escalated repair
+quarantines the block. Measured: one each (`pdf_main#b0222`, a bibliography entry
+carrying `β0`; `pdf_main#b0169`, a paragraph carrying `Fth`/`Ag`). A real
+translation carries the LaTeX and never raises this flag, so the allowance is
+scoped to the mock and stays at 1 -- a real quarantine anywhere else still trips
+the gate at 0. This is the same kind of allowance as the fragment above: it is
+not slack for lost content, and it does not make the quarantine exempt from the
+contract (a quarantined block is source-kept *by design*, see
+`ubt/core/content/adapt.py`).
+
 `max_errors` follows the same fragment: a *space* failure -- source kept though
 the translation fits nowhere, ``render:no_fit`` -- is an ERROR (Axiom B), so a
 fragment the mock echo cannot fit contributes to **both** `max_source_kept` and

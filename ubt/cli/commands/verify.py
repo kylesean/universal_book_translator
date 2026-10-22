@@ -15,8 +15,9 @@ Usage::
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 from rich.console import Console
@@ -33,6 +34,9 @@ from ubt.core.content.verify import (
 )
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.job_options import job_id_is_valid
+
+if TYPE_CHECKING:
+    import subprocess
 
 console = Console()
 
@@ -265,6 +269,36 @@ class _CaseFailed(Exception):
         self.reason = reason
 
 
+#: The line the CLI prints for a pipeline failure (``translate.py``). Reading it
+#: first is what makes a corpus failure legible: taking the *last* lines of the
+#: output instead reported whichever warning happened to be emitted last, so a
+#: refused book read as "Using a slow image processor as ``use_fast`` is unset …".
+_FAILURE_BANNER = "Pipeline Execution Failed:"
+#: Rich's markup as it reaches a captured stream: the ANSI escapes, and the
+#: ``[bold red]``-style tags when colour is disabled.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_RICH_TAG_RE = re.compile(r"\[/?[a-z][a-z0-9 _#]*\]|\[/\]")
+
+
+def _failure_reason(proc: subprocess.CompletedProcess[str]) -> str:
+    """The one line worth reporting from a failed ``ubt translate``.
+
+    Prefers the pipeline's own error line, stripped of the Rich markup the
+    console adds. Falls back to the tail of stderr, then stdout, when the run
+    died before reaching the handler (an import error, a signal).
+    """
+    for stream in (proc.stderr or "", proc.stdout or ""):
+        for raw in stream.splitlines():
+            line = _RICH_TAG_RE.sub("", _ANSI_RE.sub("", raw)).strip()
+            if _FAILURE_BANNER in line:
+                _, _, detail = line.partition(_FAILURE_BANNER)
+                detail = detail.strip()
+                if detail:
+                    return detail
+    tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-6:]
+    return " / ".join(tail)
+
+
 def _run_document(document: Path, case_id: str) -> ReconciliationReport:
     """Translate one source document (dry-run) and return its delivery contract.
 
@@ -304,8 +338,9 @@ def _run_document(document: Path, case_id: str) -> ReconciliationReport:
         except (OSError, subprocess.SubprocessError) as exc:
             raise _CaseFailed(f"could not run translation: {exc}") from exc
         if proc.returncode != 0:
-            tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-6:]
-            raise _CaseFailed(f"translation failed (exit {proc.returncode}): {' / '.join(tail)}")
+            raise _CaseFailed(
+                f"translation failed (exit {proc.returncode}): {_failure_reason(proc)}"
+            )
         contract = contract_path_for_artifact(out_path)
         if not contract.exists():
             raise _CaseFailed(f"translation wrote no contract at {contract}")

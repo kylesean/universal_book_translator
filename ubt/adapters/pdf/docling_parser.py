@@ -1144,7 +1144,10 @@ def map_iterated_items(
     seen_handles: set[str] = set()
     last_kept_label: Any = None
     last_kept_page: int | None = None
-    page_lines_cache: dict[int, list[Any]] = {}
+    page_lines_cache: dict[int, tuple[list[Any], float]] = {}
+    #: TOC rows gathered from every DOCUMENT_INDEX item, merged with the PDF
+    #: outline and placed once after the loop (see that branch).
+    pending_toc: list[IRBlock] = []
     #: Text of every page, loaded once when the first reference entry appears.
     #: Docling's ``prov.page_no`` for a reference entry is not reliable (measured
     #: on arXiv 2609.20519: entries stamped page 12 have their text on another
@@ -1175,47 +1178,16 @@ def map_iterated_items(
             continue
 
         if label == getattr(DocItemLabel, "DOCUMENT_INDEX", "document_index"):
+            # Collected, not emitted: a contents section that spans pages arrives
+            # as one DOCUMENT_INDEX item per page, and merging the outline into
+            # each of them re-added every outline-only chapter once per page —
+            # arXiv 2608.25512 (a two-page contents) delivered 128 rows for 64
+            # entries, so every chapter printed twice. The merge happens once,
+            # after the loop.
             toc_blocks = _extract_document_index_blocks(
-                item, pdf_path, page_lines_cache, start_index=len(blocks) + 1
+                item, pdf_path, page_lines_cache, start_index=1
             )
-            # The outline supplies the top-level chapters Docling's TOC pass
-            # drops (see ``read_pdf_outline_entries``); the merge is additive.
-            #
-            # The merge then re-sorts by destination page. Appending the outline
-            # rows put every chapter *after* every section, so the delivered
-            # contents read "2.1, 2.2, … 1 Introduction, 2 Switch Transformer" —
-            # the chapter that contains a section printed below it. Measured on
-            # the gold corpus (switch-transformers): the TOC opened on "2.1".
-            toc_blocks.extend(
-                _extract_outline_only_blocks(
-                    pdf_path, toc_blocks, start_index=len(blocks) + len(toc_blocks) + 1
-                )
-            )
-            if toc_blocks:
-                # Stable: rows sharing a destination keep the order their source
-                # produced them in, so a sub-section never jumps above its
-                # chapter when both name the same page.
-                #
-                # The renumbering is not cosmetic: every downstream consumer
-                # orders blocks by ``spine_index`` (``analyze.bridge``,
-                # ``render_preflight``, the ledger), so reordering the list
-                # alone is undone on the next sort and the delivered contents
-                # still opened on "2.1". Ids are rebuilt from the new position
-                # too, so they stay consistent with the index they encode.
-                #
-                # The renumber starts *after* the blocks already emitted (the
-                # title page, authors, abstract and footnotes), never at 1:
-                # those slots are taken, and the ledger's
-                # ``ON CONFLICT(job_id, block_id) DO UPDATE`` made the clash
-                # silent — the TOC rows *overwrote* the front matter, so the
-                # delivered PDF opened on the contents page with no title,
-                # authors or abstract anywhere in it.
-                base = len(blocks)
-                ordered_toc = sorted(toc_blocks, key=_toc_sort_key)
-                for new_index, block in enumerate(ordered_toc, start=base + 1):
-                    block.set_spine_index(new_index)
-                    block.set_id(f"pdf_main#b{new_index:04d}")
-                blocks.extend(ordered_toc)
+            pending_toc.extend(toc_blocks)
             continue
 
         if label == DocItemLabel.PICTURE:
@@ -1553,6 +1525,41 @@ def map_iterated_items(
                     provenance=BlockProvenance(docling_span_split_tail=True),
                 )
             )
+
+    if pending_toc:
+        # The outline supplies the top-level chapters Docling's TOC pass drops
+        # (see ``read_pdf_outline_entries``); the merge is additive and runs
+        # once, over the rows of *every* DOCUMENT_INDEX item.
+        pending_toc.extend(
+            _extract_outline_only_blocks(pdf_path, pending_toc, start_index=len(pending_toc) + 1)
+        )
+        # Stable: rows sharing a destination keep the order their source
+        # produced them in, so a sub-section never jumps above its chapter when
+        # both name the same page. Appending the outline rows put every chapter
+        # *after* every section, so the delivered contents read "2.1, 2.2, … 1
+        # Introduction, 2 Switch Transformer" — the chapter that contains a
+        # section printed below it (measured on the gold corpus,
+        # switch-transformers: the TOC opened on "2.1").
+        #
+        # The renumbering is not cosmetic: every downstream consumer orders
+        # blocks by ``spine_index`` (``analyze.bridge``, ``render_preflight``,
+        # the ledger), so reordering the list alone is undone on the next sort
+        # and the delivered contents still opened on "2.1". Ids are rebuilt from
+        # the new position too, so they stay consistent with the index they
+        # encode.
+        #
+        # The renumber starts *after* the blocks already emitted (the title
+        # page, authors, abstract and footnotes), never at 1: those slots are
+        # taken, and the ledger's ``ON CONFLICT(job_id, block_id) DO UPDATE``
+        # made the clash silent — the TOC rows *overwrote* the front matter, so
+        # the delivered PDF opened on the contents page with no title, authors
+        # or abstract anywhere in it.
+        base = len(blocks)
+        ordered_toc = sorted(pending_toc, key=_toc_sort_key)
+        for new_index, block in enumerate(ordered_toc, start=base + 1):
+            block.set_spine_index(new_index)
+            block.set_id(f"pdf_main#b{new_index:04d}")
+        blocks.extend(ordered_toc)
 
     typed = type_docling_blocks(
         annotate_layout_metadata(drop_phantom_continuation_boxes(blocks), pdf_path)

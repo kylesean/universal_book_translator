@@ -201,3 +201,80 @@ def test_toc_renumbering_never_collides_with_the_blocks_it_follows(
     assert [b.source_text for b in toc] == ["4 Downstream Results", "4.1 Fine-Tuning"]
     assert toc[0].id == "pdf_main#b0003"
     assert toc[1].id == "pdf_main#b0004"
+
+
+# --------------------------------------------------------------------------
+# A contents section spanning several pages arrives as several items.
+# --------------------------------------------------------------------------
+
+
+def test_a_multi_page_contents_merges_the_outline_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every outline-only row is added once, not once per DOCUMENT_INDEX item.
+
+    arXiv 2608.25512's contents runs over pages 2-3, which Docling reports as
+    two items. The outline merge ran inside the per-item branch, so each item
+    re-added the whole outline: 128 rows for 64 entries, every chapter printed
+    twice in the delivered contents.
+    """
+    items: list[tuple[object, int]] = [
+        (_FakeDocItem("text", "The Greatest Paper", 1), 0),
+        (_FakeItem(), 0),
+        (_FakeItem(), 0),
+    ]
+
+    class _Doc:
+        pass
+
+    calls: list[int] = []
+
+    def fake_index(
+        item: object, pdf_path: object, cache: dict[int, list[object]], start_index: int
+    ) -> list[IRBlock]:
+        # Each page of the contents supplies its own half of the rows.
+        page = len(calls)
+        calls.append(page)
+        return [_row(f"{page + 1} Page {page + 1}", str(page + 10), start_index)]
+
+    def fake_outline(pdf_path: object, already: list[IRBlock], start_index: int) -> list[IRBlock]:
+        # Two outline-only chapters the Docling pass dropped.
+        return [
+            _row("A Appendix", "50", start_index),
+            _row("B Appendix", "51", start_index + 1),
+        ]
+
+    import ubt.adapters.pdf.docling_parser as dp
+
+    monkeypatch.setattr(dp, "_extract_document_index_blocks", fake_index)
+    monkeypatch.setattr(dp, "_extract_outline_only_blocks", fake_outline)
+
+    blocks = map_iterated_items(items, _Doc(), tmp_path / "toc-assets", pdf_path=None)
+
+    titles = [b.source_text for b in blocks if b.provenance.toc_entry]
+    assert titles == ["1 Page 1", "2 Page 2", "A Appendix", "B Appendix"], titles
+
+
+def test_outline_rows_with_the_same_title_but_different_pages_both_survive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dedup is on (title, destination), not title alone.
+
+    arXiv 2608.25512 lists "4.3.2 Temporal Composability" (p. 44) and
+    "7.3 Temporal Composability" (p. 79). Folding on the title alone deleted a
+    real section from the delivered contents.
+    """
+    from ubt.adapters.pdf.docling_outline import _extract_outline_only_blocks
+
+    already = [_row("Temporal Composability", "44", 1)]
+
+    monkeypatch.setattr(
+        "ubt.adapters.pdf.docling_outline.read_pdf_outline_entries",
+        lambda _p: [(1, "Temporal Composability", 44), (1, "Temporal Composability", 79)],
+    )
+
+    added = _extract_outline_only_blocks(Path("unused.pdf"), already, start_index=2)
+
+    assert [b.provenance.toc_page for b in added] == ["79"]

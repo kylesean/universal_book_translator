@@ -76,14 +76,69 @@ def read_pdf_outline_entries(
         doc.close()
 
 
+def _toc_rows_from_lines(
+    lines: list[Any],
+    width: float,
+) -> list[tuple[str, str, bool, Any, tuple[float, float, float, float]]]:
+    """``(title, page, has_leaders, line, box)`` for the TOC rows on one page.
+
+    Two shapes reach this function, and the page's own geometry decides which:
+
+    1. **Title and page number on one line** (``1.2.3 Title ......... 42``).
+       :func:`parse_toc_entry_line` reads it directly.
+    2. **Title and page number on separate lines**, which is what ``textgeom``
+       produces for a leader-dotted row: the dot-leader gutter splits the row
+       into a title line and a bare right-margin numeral. Per-line parsing finds
+       nothing here — measured on arXiv 2608.25512, where it returned 0 rows for
+       all 62 lines of a two-page contents section. The native reader already
+       solves this shape by pairing on the baseline
+       (:func:`ubt.adapters.pdf.reader_pdf._find_toc_pairs`); this reuses it
+       rather than growing a second pairing rule.
+
+    The fallback only runs when per-line parsing produced nothing, so a
+    single-line TOC keeps its existing (exact) reading and this cannot change it.
+    """
+    from ubt.adapters.pdf.docling_blocks import parse_toc_entry_line
+
+    rows: list[tuple[str, str, bool, Any, tuple[float, float, float, float]]] = []
+    for ln in lines:
+        parsed = parse_toc_entry_line(ln.text)
+        if parsed is None:
+            continue
+        title, toc_page, has_leaders = parsed
+        box = (float(ln.rect[0]), float(ln.rect[1]), float(ln.rect[2]), float(ln.rect[3]))
+        rows.append((title, toc_page, has_leaders, ln, box))
+    if rows:
+        return rows
+
+    from ubt.adapters.pdf.reader_pdf import _find_toc_pairs
+
+    for title_line, number_line, page in _find_toc_pairs(lines, width):
+        # The delivered row spans the whole line -- title through page number --
+        # so the renderer can redraw leaders and number in one box.
+        box = (
+            min(title_line.rect[0], number_line.rect[0]),
+            min(title_line.rect[1], number_line.rect[1]),
+            max(title_line.rect[2], number_line.rect[2]),
+            max(title_line.rect[3], number_line.rect[3]),
+        )
+        rows.append((title_line.text, page, True, title_line, box))
+    return rows
+
+
 def _extract_document_index_blocks(
     item: Any,
     pdf_path: Path | None,
-    page_lines_cache: dict[int, list[Any]],
+    page_lines_cache: dict[int, tuple[list[Any], float]],
     start_index: int,
 ) -> list[IRBlock]:
-    """Extract per-line TOC IRBlocks from a Docling DOCUMENT_INDEX item."""
-    from ubt.adapters.pdf.docling_blocks import parse_toc_entry_line
+    """Extract per-line TOC IRBlocks from a Docling DOCUMENT_INDEX item.
+
+    ``page_lines_cache`` holds ``(lines, page width)`` per page: the width is
+    what :func:`_toc_rows_from_lines`' baseline fallback needs to tell a
+    right-margin page number from a title, and the caller extracts the pair once
+    per page anyway.
+    """
     from ubt.adapters.pdf.textgeom import extract_lines
 
     out: list[IRBlock] = []
@@ -94,29 +149,27 @@ def _extract_document_index_blocks(
             continue
         if page_no not in page_lines_cache:
             try:
-                page_lines_cache[page_no] = extract_lines(pdf_path, page_no)[0]
+                lines, (width, _height) = extract_lines(pdf_path, page_no)
+                page_lines_cache[page_no] = (lines, width)
             except Exception as exc:
                 logger.debug("TOC line extraction failed on page %d: %s", page_no, exc)
-                page_lines_cache[page_no] = []
+                page_lines_cache[page_no] = ([], 0.0)
 
+        page_lines, width = page_lines_cache[page_no]
         p_left = float(getattr(prov_bbox, "l", 0.0))
         p_bottom = float(getattr(prov_bbox, "b", 0.0))
         p_right = float(getattr(prov_bbox, "r", 0.0))
         p_top = float(getattr(prov_bbox, "t", 0.0))
 
-        matched_lines = [
+        region_lines = [
             ln
-            for ln in page_lines_cache[page_no]
+            for ln in page_lines
             if (p_bottom - 6.0) <= (ln.rect[1] + ln.rect[3]) / 2.0 <= (p_top + 6.0)
             and ln.rect[0] >= p_left - 12.0
             and ln.rect[2] <= p_right + 12.0
         ]
-        matched_lines.sort(key=lambda ln: (-ln.rect[3], ln.rect[0]))
-        for ln in matched_lines:
-            parsed = parse_toc_entry_line(ln.text)
-            if parsed is None:
-                continue
-            title, toc_page, has_leaders = parsed
+        region_lines.sort(key=lambda ln: (-ln.rect[3], ln.rect[0]))
+        for title, toc_page, has_leaders, ln, box in _toc_rows_from_lines(region_lines, width):
             idx = start_index + len(out)
             out.append(
                 IRBlock(
@@ -128,10 +181,10 @@ def _extract_document_index_blocks(
                         source_text=normalize_academic_pdf_math(title),
                         bbox=BoundingBox(
                             page=page_no,
-                            x0=float(ln.rect[0]),
-                            y0=float(ln.rect[1]),
-                            x1=float(ln.rect[2]),
-                            y1=float(ln.rect[3]),
+                            x0=box[0],
+                            y0=box[1],
+                            x1=box[2],
+                            y1=box[3],
                         ),
                     ),
                     provenance=BlockProvenance(
@@ -216,17 +269,27 @@ def _extract_outline_only_blocks(
     entries = read_pdf_outline_entries(pdf_path)
     if not entries:
         return []
-    seen = {(b.source_text or "").strip().lower() for b in already}
+
+    # Keyed on title *and* destination page. Title alone is not unique in a
+    # real contents: arXiv 2608.25512 lists "4.3.2 Temporal Composability"
+    # (p. 44) and "7.3 Temporal Composability" (p. 79), and folding them
+    # together would silently drop a real section from the delivered contents.
+    # The destination is what tells two same-named rows apart, and both sides
+    # of this merge already carry it (``toc_page``).
+    def _key(title: str, page: str) -> tuple[str, str]:
+        return title.strip().lower(), page.strip()
+
+    seen = {_key(b.source_text or "", str(b.provenance.toc_page or "")) for b in already}
     out: list[IRBlock] = []
     for level, title, dest_page in entries:
-        key = title.strip().lower()
+        key = _key(title, str(dest_page))
         if key in seen:
             continue
         # The outline title and the Docling row often differ only by the
         # numeric prefix ('1 Introduction' vs 'Introduction'); match on the
         # stripped form too before adding a row.
         stripped = re.sub(r"^[0-9A-F]+\.?\s+", "", title).strip().lower()
-        if stripped and any(stripped == s for s in seen):
+        if stripped and any(stripped == t and str(dest_page) == p for t, p in seen):
             continue
         seen.add(key)
         idx = start_index + len(out)

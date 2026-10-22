@@ -51,6 +51,30 @@ _DRAFT_SOURCE_TAILS = (
 )
 _DRAFT_MINIMAL_ANCHOR = "Output ONLY the translation without any title, prefix, or commentary:\n\n"
 
+#: The repair builders' source heading and the sections that follow it. A
+#: repair prompt carries no draft marker, so without these the rehearsal echo
+#: fell through to ``prompt.strip()`` and replayed the whole scaffold. The tails
+#: are every heading the three repair builders emit after the source, in the
+#: order they can appear (``### Translation Draft with Error Spans`` is the
+#: infilling shape, ``### Problematic Draft`` / ``### Previous Draft`` the
+#: others).
+_REPAIR_SOURCE_MARKER = "### Original Source\n"
+_REPAIR_SOURCE_TAILS = (
+    "\n\n### Translation Draft with Error Spans",
+    "\n\n### Draft with Marked Errors",
+    "\n\n### Problematic Draft",
+    "\n\n### Previous Draft",
+    "\n\n### Issues to Fix",
+    "\n\n### Quality Critique Issues",
+)
+#: ``build_minimal_repair_prompt`` has no headings: it inlines the source after
+#: ``Source <language> text:`` and follows it with the draft's own defects. The
+#: language name is interpolated, so this one is a pattern rather than a literal.
+_REPAIR_MINIMAL_SOURCE_RE = re.compile(
+    r"Fix the draft translation below\. Source [^\n]*? text:\n\n"
+)
+_REPAIR_MINIMAL_TAIL = "\n\nDetected problems in the draft: "
+
 #: A source this short, with no sentence-ending punctuation, is a heading,
 #: label, or list item rather than prose: a model that expands it into a
 #: sentence/paragraph trips the QE length gate and the block falls back to the
@@ -97,6 +121,8 @@ _PROMPT_LAYOUT_PARTS: tuple[str, ...] = (
     _DRAFT_SOURCE_MARKER,
     *_DRAFT_SOURCE_TAILS,
     _DRAFT_MINIMAL_ANCHOR,
+    _REPAIR_SOURCE_MARKER,
+    *_REPAIR_SOURCE_TAILS,
     _SHORT_SOURCE_HINT,
     _EMPHASIS_RULE,
     _EMPHASIS_HINT,
@@ -142,12 +168,20 @@ def _short_source_hint(source_text: str, block_type: str | None = None) -> str:
 
 
 def draft_source_from_prompt(prompt: str) -> str:
-    """Recover the source span a draft prompt carried.
+    """Recover the source span a prompt carried, draft *or* repair.
 
     ``--dry-run`` previews a translation without a provider, so it has to read
     the block back out of the prompt it was handed. This is the one place that
     knows the markers: parsing them per surface let a builder's instruction tail
     leak into the "translation" the user saw.
+
+    The repair builders matter as much as the draft ones. The rehearsal provider
+    answers *every* request through this function, repair rounds included, and a
+    repair prompt carries no draft marker at all -- so the fallback returned the
+    whole prompt, and the "repaired" text became the prompt scaffold: measured
+    on the corpus as ``### [模拟翻译] Terminology Glossary … ### Original
+    Source … ### Previous Draft …``, which the QE pass then (correctly) flagged
+    as *prompt scaffold leaked into the target*.
     """
     if "<blocks>" in prompt:
         remainder = prompt.split("<blocks>", 1)[1]
@@ -163,6 +197,19 @@ def draft_source_from_prompt(prompt: str) -> str:
         return strip_emphasis_markers(remainder.strip())
     if _DRAFT_MINIMAL_ANCHOR in prompt:
         return strip_emphasis_markers(prompt.rsplit(_DRAFT_MINIMAL_ANCHOR, 1)[1].strip())
+    if _REPAIR_SOURCE_MARKER in prompt:
+        remainder = prompt.split(_REPAIR_SOURCE_MARKER, 1)[1]
+        for tail in _REPAIR_SOURCE_TAILS:
+            if tail in remainder:
+                remainder = remainder.split(tail, 1)[0]
+                break
+        return strip_emphasis_markers(remainder.strip())
+    minimal_repair = _REPAIR_MINIMAL_SOURCE_RE.search(prompt)
+    if minimal_repair is not None:
+        remainder = prompt[minimal_repair.end() :]
+        if _REPAIR_MINIMAL_TAIL in remainder:
+            remainder = remainder.split(_REPAIR_MINIMAL_TAIL, 1)[0]
+        return strip_emphasis_markers(remainder.strip())
     return prompt.strip()
 
 
