@@ -199,11 +199,17 @@ def merge_utf16_surrogates(codes: Sequence[int]) -> list[tuple[int, int]]:
     return out
 
 
+@pdfium_serialized
 def extract_char_styles(pdf_path: Path, page_no: int) -> list[CharStyle]:
     """Per-character box/text/style for one page, straight from pdfium.
 
     Characters arrive in content-stream order, which for a single block is
     reading order. A character with no box (a synthetic space) is skipped.
+
+    Serialized like every other pdfium entry point: ``pdfium_gate`` documents
+    that concurrent libpdfium access corrupts the native heap, and this one is
+    called per block from ``docling_crosscheck`` — i.e. exactly the parallel
+    path that made the lock necessary.
     """
     import ctypes
 

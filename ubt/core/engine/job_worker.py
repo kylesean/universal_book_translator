@@ -106,11 +106,39 @@ class JobWorker:
         self._event_source = event_source or self._default_event_source
         self._heartbeat_interval = max(1.0, lease_seconds / 3.0)
         self._stop = asyncio.Event()
+        #: Distinguishes "the process is going down" from "the user cancelled
+        #: this job". A terminal CANCELLED is never reclaimed by the queue, so
+        #: conflating the two killed every in-flight job on a restart.
+        self._shutting_down = False
         self.failed_jobs: int = 0
 
     def stop(self) -> None:
         """Ask every slot to exit after its current job."""
         self._stop.set()
+        self._shutting_down = True
+
+    async def shutdown(self) -> None:
+        """Stop claiming, requeue the in-flight jobs, then return.
+
+        The graceful path the CLI uses instead of letting ``asyncio.run`` cancel
+        the slots: a cancelled slot cannot tell a shutdown from a user cancel
+        (``asyncio.run`` cancels before the ``KeyboardInterrupt`` reaches the
+        caller — measured), and writing a terminal CANCELLED there permanently
+        kills a multi-hour job, because the queue never reclaims that status.
+        Setting the flag first means every slot's cancellation handler sees it
+        and calls ``release_claim`` instead.
+        """
+        self.stop()
+
+    def _note_shutdown(self) -> None:
+        """Record that the *cancellation* is a shutdown, not a user cancel.
+
+        ``asyncio.run`` cancels the slot tasks on Ctrl-C **before** the
+        ``KeyboardInterrupt`` reaches the CLI's ``except`` (measured), so a
+        cancelled slot cannot wait for ``stop()`` to have been called. The
+        entry point calls this from its own cancellation path.
+        """
+        self._shutting_down = True
 
     # -- pipeline wiring ------------------------------------------------------
     async def _default_event_source(
@@ -351,9 +379,31 @@ class JobWorker:
                 )
             return True
         except asyncio.CancelledError:
-            # Task is tearing down; shield the terminal write so it still lands
-            # off-loop rather than being cancelled mid-flight and leaving the job
-            # stuck in ``running``.
+            # Task is tearing down; shield the write so it still lands off-loop
+            # rather than being cancelled mid-flight and leaving the job stuck
+            # in ``running``.
+            #
+            # **A cancelled task is not always a user cancel.** Ctrl-C and
+            # ``asyncio.run`` shutdown cancel the slot tasks outright, and
+            # ``worker.stop()`` only sets a flag — it cannot prevent that. A
+            # terminal CANCELLED is never reclaimed by the queue, so treating
+            # shutdown as a user cancel permanently killed every in-flight
+            # multi-hour job: it had to be resubmitted from scratch. On a
+            # shutdown, hand the job back to QUEUED instead and let the next
+            # worker resume it from its ledger checkpoints.
+            if self._shutting_down:
+                with suppress(Exception):
+                    await asyncio.shield(
+                        self._q(
+                            self.queue.release_claim,
+                            job.job_id,
+                            owner,
+                            error="worker shutting down; job requeued",
+                            decrement_attempt=True,
+                        )
+                    )
+                logger.info("Job %s requeued: worker is shutting down", job.job_id)
+                raise
             with suppress(Exception):
                 await asyncio.shield(
                     self._q(
@@ -498,6 +548,7 @@ class JobWorker:
             # A slot may fail outside execute() (queue/claim bugs, custom slot
             # hooks). Do not orphan sibling slots that would otherwise keep
             # claiming and billing jobs after the worker call has failed.
+            self._note_shutdown()
             for slot in slots:
                 if not slot.done():
                     slot.cancel()
@@ -515,6 +566,7 @@ class JobWorker:
             await asyncio.gather(*slots)
         except BaseException:
             self._stop.set()
+            self._note_shutdown()
             for slot in slots:
                 if not slot.done():
                     slot.cancel()

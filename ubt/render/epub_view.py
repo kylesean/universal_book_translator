@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import html
 import mimetypes
-import time
 import zipfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -21,6 +20,21 @@ from ubt.core.atomic import atomic_write_path
 from ubt.core.ir.models import IRBlock
 from ubt.render.html_view import render_fragment
 from ubt.render.outputs import Composition
+
+#: ``dcterms:modified`` when the caller supplies none. EPUB 3 requires the
+#: element, and a wall-clock value made two renders of one document differ.
+REPRODUCIBLE_MODIFIED = "2000-01-01T00:00:00Z"
+#: ZIP entry timestamp (the earliest a ZIP can express). ``ZipInfo`` otherwise
+#: defaults to ``time.localtime()``, stamping the current time into every entry.
+REPRODUCIBLE_ZIP_DATE = (1980, 1, 1, 0, 0, 0)
+
+
+def _entry(name: str) -> zipfile.ZipInfo:
+    """A ``ZipInfo`` for ``name`` with a fixed timestamp."""
+    info = zipfile.ZipInfo(name, date_time=REPRODUCIBLE_ZIP_DATE)
+    info.compress_type = zipfile.ZIP_DEFLATED
+    return info
+
 
 _CONTAINER = (
     '<?xml version="1.0" encoding="utf-8"?>\n'
@@ -87,7 +101,7 @@ def _opf(
     (the composition time); the fallback exists only for direct library callers.
     """
     progression = "rtl" if direction == "rtl" else "ltr"
-    modified = modified or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    modified = modified or REPRODUCIBLE_MODIFIED
     image_items = "".join(
         f'    <item id="img{index}" href="{html.escape(href)}" '
         f'media-type="{html.escape(mimetypes.guess_type(href)[0] or "image/png")}"/>\n'
@@ -141,6 +155,7 @@ def compose_epub(
     lang: str = "en",
     direction: str = "ltr",
     doc_id: str = "",
+    modified: str | None = None,
 ) -> Composition:
     """Lower the delivered blocks to an EPUB 3 package, recording every placement.
 
@@ -152,10 +167,17 @@ def compose_epub(
     (deduplicated by content), listed in the OPF manifest, and referenced by the
     content document's ``<img src>``. The old package dropped them entirely —
     the reading system showed an empty box where every figure belonged.
+
+    **The package is byte-reproducible.** ``modified`` is the ``dcterms:modified``
+    timestamp (ISO-8601 UTC); ``None`` means :data:`REPRODUCIBLE_MODIFIED`. Every
+    ZIP entry is stamped :data:`REPRODUCIBLE_ZIP_DATE` instead of the current
+    time, because the default wrote the wall clock into both the OPF and the
+    archive and made two renders of one document differ in bytes.
     """
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     identifier = f"urn:ubt:{doc_id or 'document'}"
+    stamp = modified or REPRODUCIBLE_MODIFIED
 
     # Resolve + collect assets during lowering; the resolver also assigns the
     # in-package href, so render_fragment stays storage-agnostic.
@@ -182,17 +204,17 @@ def compose_epub(
         info = zipfile.ZipInfo("mimetype")
         info.compress_type = zipfile.ZIP_STORED
         archive.writestr(info, "application/epub+zip")
-        archive.writestr("META-INF/container.xml", _CONTAINER)
+        archive.writestr(_entry("META-INF/container.xml"), _CONTAINER)
         archive.writestr(
-            "OEBPS/content.opf",
-            _opf(identifier, title, lang, direction, tuple(packaged)),
+            _entry("OEBPS/content.opf"),
+            _opf(identifier, title, lang, direction, tuple(packaged), modified=stamp),
         )
-        archive.writestr("OEBPS/nav.xhtml", _nav(title, lang, direction))
+        archive.writestr(_entry("OEBPS/nav.xhtml"), _nav(title, lang, direction))
         # Without a stylesheet the reading system applies its own defaults, and
         # a reflowable book then arrives as one size of unindented text.
-        archive.writestr("OEBPS/style.css", _EPUB_CSS)
+        archive.writestr(_entry("OEBPS/style.css"), _EPUB_CSS)
         for href, data in packaged.items():
-            archive.writestr(f"OEBPS/{href}", data)
+            archive.writestr(_entry(f"OEBPS/{href}"), data)
         xhtml = (
             _XHTML_HEAD.format(
                 lang=lang,
@@ -203,7 +225,7 @@ def compose_epub(
             + fragment
             + _XHTML_TAIL
         )
-        archive.writestr("OEBPS/text.xhtml", xhtml)
+        archive.writestr(_entry("OEBPS/text.xhtml"), xhtml)
     return Composition(output_path=output, placements=placements)
 
 

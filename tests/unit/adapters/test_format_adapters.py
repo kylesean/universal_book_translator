@@ -19,7 +19,7 @@ from ubt.adapters.docx.adapter import DOCXAdapter
 from ubt.adapters.epub.adapter import EPUBAdapter
 from ubt.adapters.html.adapter import HTMLAdapter
 from ubt.adapters.markdown.adapter import _format_markdown_block
-from ubt.core.ir.models import IRBlock
+from ubt.core.ir.models import BlockType, IRBlock
 from ubt.model.ast import Heading, ListItem, Span
 
 pytestmark = pytest.mark.fast
@@ -144,7 +144,13 @@ async def test_epub_adapter_parses_and_renders(tmp_path: Path, epub_book: Path) 
     adapter = EPUBAdapter()
     manifest = await adapter.extract_manifest(epub_book)
     blocks = await _collect(adapter, epub_book)
-    assert len(blocks) == 6, "the epub fixture has exactly 6 blocks"
+    # 7, not 6: the fixture's figure is a direct child of <body>, which the EPUB
+    # wrapper folds into a synthetic <p>. Reading only that paragraph's *text*
+    # dropped the picture entirely (an <img> contributes none), so the block
+    # count was one short and the figure never reached the delivered book.
+    assert len(blocks) == 7, "the epub fixture has exactly 7 blocks"
+    figure_ids = [b.source_text for b in blocks if b.block_type is BlockType.IMAGE]
+    assert [Path(a).name for a in figure_ids] == ["fig.png"], figure_ids
     for block in blocks:
         if not block.skip_translate:
             block.target_text = f"tr:{block.source_text}"

@@ -170,11 +170,32 @@ def walk_markup_elements(
             continue
         if name == "p":
             flush()
+            # An image inside a paragraph is the standard HTML/EPUB figure
+            # shape (``<p><img src="fig1.png"></p>``). Taking only the
+            # paragraph's *text* dropped it entirely: an ``<img>`` contributes
+            # no text, so the block produced nothing and the picture was never
+            # visited — the ``img`` branch below only fires for a direct child.
+            images = child.find_all("img")
             text = _clean(child.get_text(" ", strip=True))
             if text:
                 out.append(
                     (Paragraph(id="", spine_index=0, span=Span(page=page), text=text), child)
                 )
+            for image in images:
+                src = str(image.get("src") or image.get("data-src") or "").strip()
+                if src:
+                    out.append(
+                        (
+                            Figure(
+                                id="",
+                                spine_index=0,
+                                span=Span(page=page),
+                                asset_id=resolve(src),
+                                confidence=Confidence.VERIFIED,
+                            ),
+                            image,
+                        )
+                    )
             continue
         if name in ("ul", "ol"):
             flush()

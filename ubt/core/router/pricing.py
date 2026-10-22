@@ -112,6 +112,41 @@ def _flatten_prices(raw: dict[str, Any], prefix: str = "") -> dict[str, dict[str
     return result
 
 
+def _price_entry_from_block(name: str, block: dict[str, Any]) -> PriceEntry | None:
+    """One ``PriceEntry`` from a ``prices.toml`` block, or ``None`` if unusable.
+
+    A block that omits ``input`` is **not** a free input rate. Defaulting it to
+    0.0 made a typo'd override (``output`` only) count as priced, so
+    ``estimate_cost_usd`` reported $0.00 for a run that really spent input
+    tokens — the one direction the price table must never be wrong in, because
+    the number feeds the budget cap and the delivery report. A malformed block is
+    skipped instead: the model then resolves as unpriced, which the cost
+    estimator already reports as unknown rather than as free.
+    """
+    if "input" not in block:
+        logger.warning(
+            "prices.toml entry %r has no 'input' rate; ignoring it so the model "
+            "reports as unpriced instead of free",
+            name,
+        )
+        return None
+    try:
+        inp = float(block["input"])
+        outp = float(block.get("output", 0.0))
+        cached = float(block.get("cached_input", inp))
+        discount = float(block.get("batch_discount", 0.5))
+    except (TypeError, ValueError):
+        logger.warning("prices.toml entry %r has a non-numeric rate; ignoring it", name)
+        return None
+    return PriceEntry(
+        input=inp,
+        output=outp,
+        cached_input=cached,
+        batch_discount=discount,
+        verified_at=str(block.get("verified_at", "")),
+    )
+
+
 @lru_cache(maxsize=1)
 def _read_shipped_prices() -> dict[str, PriceEntry]:
     """Read the bundled ubt/resources/prices.toml once."""
@@ -130,18 +165,9 @@ def _read_shipped_prices() -> dict[str, PriceEntry]:
     result: dict[str, PriceEntry] = {}
     for name, block in flat_prices.items():
         if isinstance(block, dict):
-            inp = float(block.get("input", 0.0))
-            outp = float(block.get("output", 0.0))
-            cached = float(block.get("cached_input", inp))
-            discount = float(block.get("batch_discount", 0.5))
-            v_at = str(block.get("verified_at", ""))
-            result[str(name)] = PriceEntry(
-                input=inp,
-                output=outp,
-                cached_input=cached,
-                batch_discount=discount,
-                verified_at=v_at,
-            )
+            entry = _price_entry_from_block(str(name), block)
+            if entry is not None:
+                result[str(name)] = entry
     return result
 
 
@@ -179,14 +205,9 @@ def _load_prices_cached(signature: tuple[str | None, int, int]) -> dict[str, Pri
     if isinstance(raw, dict):
         for name, block in _flatten_prices(raw).items():
             if isinstance(block, dict):
-                inp = float(block.get("input", 0.0))
-                table[str(name)] = PriceEntry(
-                    input=inp,
-                    output=float(block.get("output", 0.0)),
-                    cached_input=float(block.get("cached_input", inp)),
-                    batch_discount=float(block.get("batch_discount", 0.5)),
-                    verified_at=str(block.get("verified_at", "")),
-                )
+                entry = _price_entry_from_block(str(name), block)
+                if entry is not None:
+                    table[str(name)] = entry
     return table
 
 
@@ -659,12 +680,21 @@ def estimate_cost_usd(
     by the provider but cannot be sized here, so summing the measured ones
     would understate the job — and, worse, would let UBT_BUDGET_USD look
     satisfied on spend it never saw.
+
+    A **self-hosted** model is exempt from that: its bill is $0 by
+    construction, so an unreported usage block cannot hide a charge. Without the
+    exemption one local ``qwen3:8b`` call without a usage block made the whole
+    run's cost unknown, which the budget cap reads as "unenforceable" and stops.
     """
     total_cost = 0.0
     unmeasured = sorted(
         model
         for model, totals in model_totals.items()
         if int(totals.get("unmeasured_calls", 0) or 0)
+        and not (
+            endpoint_is_local(model_endpoint(model, base_url, endpoint_map))
+            and not billing_enabled_for_local_endpoints()
+        )
     )
     if unmeasured:
         novel = [model for model in unmeasured if model not in _models_warned_unmeasured]

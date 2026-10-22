@@ -14,6 +14,7 @@ from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.defect_taxonomy import has_structural_defect
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.qe.heuristic import glossary_violation_flag
+from ubt.core.qe.score_policy import shippable_threshold
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
 
 logger = logging.getLogger(__name__)
@@ -283,7 +284,12 @@ async def run_quality_gate_stage(
     if passed_updates:
         by_id = {b.id: b for b in drafted_blocks}
         pass_blocks = [by_id[u["block_id"]] for u in passed_updates if u["block_id"] in by_id]
-        audited = await _audit_pass_sample(qe_runner, pass_blocks, ctx.config.qe_threshold)
+        # The *shippable* bar, not the raw config value: releasing a sampled
+        # pass below SHIPPABLE_FLOOR would ship a draft that every other
+        # release path (repair, triage) refuses. One definition, one floor.
+        audited = await _audit_pass_sample(
+            qe_runner, pass_blocks, shippable_threshold(ctx.config.qe_threshold)
+        )
         demoted, scored = audited
         if demoted:
             demoted_ids = {b.id for b in demoted}

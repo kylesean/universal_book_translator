@@ -780,9 +780,53 @@ def sanitize_inline_html(text: str) -> str:
             out.append("<")
             i = lt + 1
             continue
+        # A ``DROP_WITH_CONTENT`` element loses its body too, not just its
+        # tags. Rewriting the open tag to "" left ``<style>p{color:red}</style>``
+        # as ``p{color:red}`` and ``<script>alert(1)</script>`` as ``alert(1)``
+        # in the Markdown deliverable — the docstring promises the element is
+        # dropped, and a stylesheet's text is not book content.
+        drop_name = _drop_with_content_name(match)
+        if drop_name is not None:
+            i = _skip_to_close(text, match.end(), drop_name)
+            continue
         out.append(_rewrite_inline_tag(match))
         i = match.end()
     return "".join(out)
+
+
+def _drop_with_content_name(match: re.Match[str]) -> str | None:
+    """The element name when this tag opens a drop-with-content element."""
+    if match.group(1):
+        return None  # a closing tag carries no body
+    name = match.group(2).lower()
+    if name in DROP_WITH_CONTENT or name in _SOURCE_DROP_TAGS or name in _SMIL_ANIMATION_TAGS:
+        return name
+    return None
+
+
+def _skip_to_close(text: str, start: int, name: str) -> int:
+    """Index just past the matching ``</name>``, or the end of the text.
+
+    Depth-aware so a nested same-name element does not end the skip early.
+    A missing close tag consumes the remainder: an unterminated ``<script>``
+    is a payload, and keeping the tail as prose is the failure this prevents.
+    """
+    opener = re.compile(rf"<{re.escape(name)}(?![A-Za-z0-9:-])", re.IGNORECASE)
+    closer = re.compile(rf"</{re.escape(name)}\s*>", re.IGNORECASE)
+    depth = 1
+    index = start
+    while depth and index < len(text):
+        next_open = opener.search(text, index)
+        next_close = closer.search(text, index)
+        if next_close is None:
+            return len(text)
+        if next_open is not None and next_open.start() < next_close.start():
+            depth += 1
+            index = next_open.end()
+            continue
+        depth -= 1
+        index = next_close.end()
+    return index
 
 
 def sanitize_html_fragment(text: str) -> str:
@@ -1061,6 +1105,14 @@ class _SourceTagScrubber:
     @classmethod
     def _scrub_attributes(cls, raw_tag: str) -> str:
         """``raw_tag`` unchanged, or re-rendered without its dangerous attributes."""
+        # A browser splits ``<img/src=x/onerror=alert(1)>`` on the slashes, so
+        # ``onerror`` IS an attribute there — but ``HTMLParser`` reads the whole
+        # ``x/onerror=alert(1)`` as the value of ``src``, so ``_scrub_attr_list``
+        # never sees an ``on*`` name and the tag ships unchanged. Normalise the
+        # slash separators first, exactly as the inline sanitizer already does
+        # (``_INLINE_SLASH_SEPARATOR_RE``), so the attribute list the scrubber
+        # judges is the one a browser will build.
+        raw_tag = _INLINE_SLASH_SEPARATOR_RE.sub(" ", raw_tag)
         kept = _scrub_attr_list(_collect_tag_attrs(raw_tag))
         if kept is None:
             return raw_tag
@@ -1068,12 +1120,18 @@ class _SourceTagScrubber:
         # ``<br/>``: a re-rendered tag must keep whichever form it arrived in or
         # the reading system rejects the whole member.
         self_closing = raw_tag.rstrip().endswith("/>")
-        tag_name = raw_tag[1:-1].split()[0].rstrip("/") if raw_tag[1:-1].split() else ""
+        # The name ends at the first delimiter, not at the first space: after the
+        # slash normalisation ``<img/src=x>`` is still ``<img/src=x>`` when
+        # nothing had to be removed, and splitting on whitespace alone carried
+        # ``/src=x`` into the rendered tag name.
+        body = raw_tag[1:-1] if self_closing else raw_tag[1:-1]
+        tag_name = re.match(r"[A-Za-z][A-Za-z0-9:-]*", body)
+        name = tag_name.group(0) if tag_name else ""
         rendered = "".join(
             f" {attr}" if value is None else f' {attr}="{_escape_attr(value)}"'
             for attr, value in kept
         )
-        return f"<{tag_name}{rendered}{' /' if self_closing else ''}>"
+        return f"<{name}{rendered}{' /' if self_closing else ''}>"
 
 
 def _raw_attr_names(raw_tag: str) -> list[str]:

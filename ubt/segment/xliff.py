@@ -284,24 +284,31 @@ def from_xliff(text: str) -> XliffDocument:
     original = (file_el.get("original") or "") if file_el is not None else ""
     segments: list[Segment] = []
     for unit in (el for el in root.iter() if _local(el.tag) == "unit"):
-        seg_el = next((child for child in unit if _local(child.tag) == "segment"), None)
-        if seg_el is None:
-            continue
-        source_el = next((child for child in seg_el if _local(child.tag) == "source"), None)
-        target_el = next((child for child in seg_el if _local(child.tag) == "target"), None)
-        placeholders: dict[str, Placeholder] = {}
-        source = _read_inline(source_el, placeholders) if source_el is not None else ""
-        target = _read_inline(target_el, placeholders) if target_el is not None else None
-        segments.append(
-            Segment(
-                id=unit.get("id") or "",
-                source=source,
-                placeholders=tuple(placeholders.values()),
-                target=target,
-                state=_STATE_IN.get(seg_el.get("state") or "", SegmentState.NEW),
-                qa=_read_qa(unit),
+        # XLIFF 2.1 lets one ``<unit>`` carry several ``<segment>`` children —
+        # that is exactly how a CAT tool records its own sentence splits. Taking
+        # only the first silently dropped every later sentence on import.
+        unit_id = unit.get("id") or ""
+        seg_elements = [child for child in unit if _local(child.tag) == "segment"]
+        for position, seg_el in enumerate(seg_elements):
+            source_el = next((child for child in seg_el if _local(child.tag) == "source"), None)
+            target_el = next((child for child in seg_el if _local(child.tag) == "target"), None)
+            placeholders: dict[str, Placeholder] = {}
+            source = _read_inline(source_el, placeholders) if source_el is not None else ""
+            target = _read_inline(target_el, placeholders) if target_el is not None else None
+            # The first segment keeps the bare unit id (a single-segment unit is
+            # the common case and its id is the one a caller already knows);
+            # later ones get a stable position suffix so the ids stay unique.
+            seg_id = unit_id if position == 0 else f"{unit_id}-{position}"
+            segments.append(
+                Segment(
+                    id=seg_id,
+                    source=source,
+                    placeholders=tuple(placeholders.values()),
+                    target=target,
+                    state=_STATE_IN.get(seg_el.get("state") or "", SegmentState.NEW),
+                    qa=_read_qa(unit),
+                )
             )
-        )
     return XliffDocument(
         src_lang=src_lang, trg_lang=trg_lang, original=original, segments=tuple(segments)
     )

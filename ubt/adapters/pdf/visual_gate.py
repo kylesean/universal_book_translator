@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from ubt.adapters.pdf import oxide_render, pdf_struct
+from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
 from ubt.core.policy.layout_policy import (
     QA_FULL_GATE_MAX_PAGES,
     QA_LONG_BOOK_SAMPLE,
@@ -359,6 +360,7 @@ def _is_content_char(char: str) -> bool:
     return unicodedata.category(char)[0] in ("L", "N")
 
 
+@pdfium_serialized
 def type_size_findings(
     pdf_path: Path,
     pages: Sequence[int],
@@ -367,6 +369,10 @@ def type_size_findings(
     collapsed_fraction: float = TYPE_COLLAPSED_FRACTION,
 ) -> list[VisualFinding]:
     """Flag pages whose typeset text is physically too small to read.
+
+    Serialized on ``PDFIUM_LOCK`` like every other pdfium caller (see
+    ``pdfium_gate``): this runs on every export, off the event loop, next to the
+    extraction threads.
 
     This is the check that was missing when an 83-page paper was delivered at 22
     pages with type down to 0.49pt. Every other tier passed: the character count
@@ -412,6 +418,13 @@ def type_size_findings(
                 try:
                     textpage = page.get_textpage()
                     try:
+                        # One entry per *character*, not per rect. The two
+                        # signatures below are stated over the page's content
+                        # glyphs, and a collapsed region packs hundreds of them
+                        # into one or two rects: a rect-counted share let the
+                        # exact page this audit exists for stay silent (measured
+                        # on a synthetic collapse: 0.75 of the glyphs tiny, 0.20
+                        # of the rects).
                         heights: list[float] = []
                         glyph_count = 0
                         rect_count = textpage.count_rects(0, -1)
@@ -425,7 +438,7 @@ def type_size_findings(
                             glyph_count += content
                             height = float(rect[3]) - float(rect[1])
                             if height > 0:
-                                heights.append(height)
+                                heights.extend([height] * content)
                     finally:
                         textpage.close()
                 finally:

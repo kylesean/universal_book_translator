@@ -252,6 +252,13 @@ class PageProbe:
 
     width_pt: float
     height_pt: float
+    #: The page's *unrotated* MediaBox width. ``get_rect`` returns user-space
+    #: rects that a ``/Rotate`` does not transform, while ``get_width`` returns
+    #: the rotated display size, so any x-axis comparison must use this one. On
+    #: a 90/270-degree portrait page the two differ by a whole dimension: the
+    #: gutter probe then looked for the right column past the page's edge and
+    #: scored every rotated two-column page as single-column prose.
+    unrotated_width_pt: float
     n_chars: int
     text: str
     n_rect_rows: int
@@ -268,6 +275,12 @@ def probe_pdfium_page(page: Any) -> PageProbe:
     """
     width = float(page.get_width())
     height = float(page.get_height())
+    # The frame the rects are in (see ``PageProbe.unrotated_width_pt``).
+    try:
+        mediabox = page.get_mediabox()
+        unrotated_width = float(mediabox[2]) - float(mediabox[0])
+    except Exception:  # a page with no readable MediaBox keeps the display size
+        unrotated_width = width
     textpage = page.get_textpage()
     try:
         n_chars = int(textpage.count_chars())
@@ -279,7 +292,7 @@ def probe_pdfium_page(page: Any) -> PageProbe:
         rects = tuple(textpage.get_rect(i) for i in range(n_rect_rows))
     finally:
         textpage.close()
-    return PageProbe(width, height, n_chars, text, n_rect_rows, rects)
+    return PageProbe(width, height, unrotated_width, n_chars, text, n_rect_rows, rects)
 
 
 @pdfium_serialized
@@ -306,7 +319,9 @@ def _pdfium_facts(pdf_path: Path) -> list[dict[str, Any]]:
                         "height_pt": probe.height_pt,
                         "n_chars": probe.n_chars,
                         "n_rect_rows": probe.n_rect_rows,
-                        "right_row_share": column_right_share(list(probe.rects), probe.width_pt),
+                        "right_row_share": column_right_share(
+                            list(probe.rects), probe.unrotated_width_pt
+                        ),
                         "formula_density": formula_debris_share(probe.text),
                     }
                 )

@@ -126,8 +126,25 @@ def test_fragment_is_idempotent() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_inline_drops_a_script_but_keeps_the_text() -> None:
-    assert sanitize_inline_html("<script>x</script>text") == "xtext"
+def test_inline_drops_a_script_with_its_body() -> None:
+    """``DROP_WITH_CONTENT`` means the element, not just its tags.
+
+    The old assertion pinned ``"xtext"`` — the script's *body* surviving as
+    prose. That is a real leak into the Markdown deliverable: a stylesheet's
+    ``p{color:red}`` or a script's payload is not book content, and the
+    docstring already promised the element was dropped.
+    """
+    assert sanitize_inline_html("<script>x</script>text") == "text"
+    assert sanitize_inline_html("<style>p{color:red}</style>text") == "text"
+
+
+def test_inline_drops_every_script_body_not_just_the_first() -> None:
+    assert sanitize_inline_html("<script>a</script>mid<script>b</script>end") == "midend"
+
+
+def test_inline_leaves_ordinary_markup_alone() -> None:
+    assert sanitize_inline_html("<b>bold</b> x") == "<b>bold</b> x"
+    assert sanitize_inline_html("a<b>c") == "a<b>c"
 
 
 def test_inline_rewrites_attributes_to_the_allowlist() -> None:

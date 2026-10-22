@@ -532,6 +532,14 @@ class TieredQERunner(BaseQERunner):
         if not pairs:
             return []
         base = await self.heuristic.score_pairs(pairs)
+        # ``_judged_any`` answers "did the judge produce a usable opinion for
+        # *this* batch", and the gate reads it to decide whether the scores it
+        # is about to store are judgements or heuristic bands. Leaving the
+        # previous batch's value in place made a batch nobody judged inherit the
+        # earlier one's answer: the gate then kept twelve discrete defect bands
+        # as if they were graded opinions, and ``score_source()`` labelled them
+        # ``llm_judge``.
+        self._judged_any = False
         if self.judge is None:
             return base
         ambiguous_idx = [

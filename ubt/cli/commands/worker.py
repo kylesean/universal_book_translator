@@ -1,16 +1,44 @@
 """CLI command for running persistent background job workers."""
 
+from __future__ import annotations
+
 import asyncio
 import os
+from contextlib import suppress
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 from rich.console import Console
 
 from ubt.cli.commands import resolve_db_dir
 
+if TYPE_CHECKING:
+    from ubt.core.engine.job_worker import JobWorker
+
 console = Console()
+
+
+async def _run_worker_until_signalled(worker: JobWorker) -> None:
+    """Run the worker until SIGINT/SIGTERM, then stop it gracefully.
+
+    ``worker.stop()`` is called from the *signal handler*, inside the loop,
+    before ``asyncio.run`` gets a chance to cancel the slots. That ordering is
+    the whole point: a cancelled slot asks ``_shutting_down`` to decide between
+    "requeue this job for the next worker" and "the user cancelled it", and a
+    terminal CANCELLED is never reclaimed by the queue.
+    """
+    import signal
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        with suppress(NotImplementedError, RuntimeError):
+            loop.add_signal_handler(sig, worker.stop)
+    try:
+        await worker.run_forever()
+    finally:
+        # Whatever ended the loop, the flag is set before the slots unwind.
+        worker.stop()
 
 
 def worker_command(
@@ -97,8 +125,10 @@ def worker_command(
                 f"[cyan]Worker {worker.worker_id} polling {queue_path} "
                 f"(concurrency={concurrency}). Ctrl-C to stop.[/]"
             )
-            asyncio.run(worker.run_forever())
+            asyncio.run(_run_worker_until_signalled(worker))
     except KeyboardInterrupt:
+        # Reached only if the signal landed outside the coroutine's own handler;
+        # the flag is already set by then in the normal path.
         worker.stop()
     finally:
         queue.close()

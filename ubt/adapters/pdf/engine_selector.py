@@ -157,7 +157,7 @@ def inspect_pdf_route_plan(
                         formula_pages += 1
                     if (
                         probe.n_rect_rows >= PROBE_MIN_ROWS
-                        and column_right_share(list(probe.rects), probe.width_pt)
+                        and column_right_share(list(probe.rects), probe.unrotated_width_pt)
                         > PROBE_COLUMN_SHARE
                     ):
                         multicolumn_pages += 1

@@ -138,6 +138,25 @@ class ApiScope:
     def job_db_path(self, valid_id: str) -> Path:
         return self.config.db_dir / f"{valid_id}.sqlite"
 
+    async def is_job_ledger(self, valid_id: str) -> bool:
+        """Whether ``db_dir/{valid_id}.sqlite`` is a real job ledger for this id.
+
+        ``validate_job_id`` constrains the *charset*, not the meaning: ``tm`` and
+        ``job_queue`` are legal ids that name the shared translation memory and
+        the live queue database. A route that only checks ``.exists()`` therefore
+        opens a *service* database through ``SQLiteJobLedger``, whose
+        ``user_version == 0`` path runs the whole ledger DDL and stamps version
+        1000 into it. A job ledger is one whose ``job_meta`` carries a row for
+        this id — the same test the delete route and the queue listing use.
+        """
+        from ubt.api.job_catalog import summarize_job
+
+        ledger_path = self.job_db_path(valid_id)
+        if not ledger_path.exists():
+            return False
+        summary = await asyncio.to_thread(summarize_job, ledger_path)
+        return summary is not None and str(summary.get("job_id")) == valid_id
+
     async def job_is_running(self, valid_id: str) -> bool:
         """True when the job is actively running (an interactive edit must not race it)."""
         from ubt.core.engine.job_queue import JobStatus as _JobStatus

@@ -865,6 +865,44 @@ class PipelineOrchestrator:
         adapter = self.custom_adapter or resolve_adapter(
             input_path, pdf_engine=self.config.pdf_engine
         )
+        # Everything below can refuse the run (a contradicting ``--output``
+        # suffix, a manifest that cannot be read), and an adapter may own
+        # subprocesses. ``run()``'s ``finally`` cannot close it because it never
+        # received the object, so a rejected request in a long-lived API/worker
+        # leaked one Docling/PDF child each. Close on any failure here.
+        try:
+            return await self._prepare_run_with_adapter(
+                adapter,
+                input_path=input_path,
+                output_path=output_path,
+                target_lang=target_lang,
+                profile_name=profile_name,
+                job_id=job_id,
+                start_chapter=start_chapter,
+                max_chapters=max_chapters,
+                source_lang=source_lang,
+                run_session=run_session,
+            )
+        except BaseException:
+            if self.custom_adapter is None:
+                await _close_adapter_off_loop(adapter, "prepare-failed")
+            raise
+
+    async def _prepare_run_with_adapter(
+        self,
+        adapter: DocumentAdapter,
+        *,
+        input_path: Path,
+        output_path: Path | None,
+        target_lang: str,
+        profile_name: str,
+        job_id: str | None,
+        start_chapter: int,
+        max_chapters: int | None,
+        source_lang: str,
+        run_session: _RunBillingSession,
+    ) -> _RunPreparation:
+        """The rest of ``_prepare_run`` once the adapter exists (see the caller)."""
         # The adapter decides the artifact format, so a contradicting ``--output``
         # is refused here -- before a single token is spent. A Markdown adapter
         # must never write Markdown into ``book.pdf`` and still report success.
@@ -1210,6 +1248,18 @@ class PipelineOrchestrator:
             await asyncio.shield(
                 _mark_failed_unless_completed(ledger, actual_job_id, status="failed")
             )
+            raise
+        except LedgerWriterLeaseLostError as exc:
+            # Another process owns this ledger now. Writing a terminal state here
+            # is exactly what the exception exists to prevent: the new owner is
+            # still running the job, and a ``failed`` row would make every status
+            # surface report a failure for work that is actively progressing. The
+            # write would also happen through a connection whose lease is gone.
+            #
+            # The work this process paid for is already durable in the ledger, so
+            # the new owner resumes from it. Only the queue row needs a decision,
+            # and the worker's own ``LeaseLostError`` branch makes it.
+            logger.warning("Pipeline stopped for job %s: %s", actual_job_id, exc)
             raise
         except (
             asyncio.CancelledError,

@@ -51,6 +51,7 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
     _artifact_path_async = scope.artifact_path_async
     _primary_output_file = scope.primary_output_file
     _job_db_path = scope.job_db_path
+    _is_job_ledger = scope.is_job_ledger
     _job_is_running = scope.job_is_running
     _read_job_blocks = scope.read_job_blocks
     _managed_dir = scope.managed_dir
@@ -150,7 +151,7 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
         valid_id = validate_job_id(job_id)
         if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):
             raise cross_tenant_404(valid_id)
-        if not _job_db_path(valid_id).exists():
+        if not await _is_job_ledger(valid_id):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {valid_id}"
             )
@@ -198,7 +199,7 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
         valid_id = validate_job_id(job_id)
         if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):
             raise cross_tenant_404(valid_id)
-        if not _job_db_path(valid_id).exists():
+        if not await _is_job_ledger(valid_id):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {valid_id}"
             )
@@ -248,7 +249,7 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
         valid_id = validate_job_id(job_id)
         if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):
             raise cross_tenant_404(valid_id)
-        if not _job_db_path(valid_id).exists():
+        if not await _is_job_ledger(valid_id):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {valid_id}"
             )
@@ -277,7 +278,7 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
         valid_id = validate_job_id(job_id)
         if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):
             raise cross_tenant_404(valid_id)
-        if not _job_db_path(valid_id).exists():
+        if not await _is_job_ledger(valid_id):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {valid_id}"
             )
@@ -383,7 +384,7 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
             raise cross_tenant_404(valid_id)
         if page < 1:
             raise HTTPException(status_code=UNPROCESSABLE_ENTITY, detail="page must be >= 1")
-        if not _job_db_path(valid_id).exists():
+        if not await _is_job_ledger(valid_id):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {valid_id}"
             )
