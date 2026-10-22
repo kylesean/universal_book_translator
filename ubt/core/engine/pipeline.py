@@ -1000,6 +1000,13 @@ class PipelineOrchestrator:
                 "draft_model": self.config.draft_model,
                 "repair_model": self.config.repair_model,
                 "qe_engine": self.config.qe_engine,
+                # Without this the report can say "nothing was scored" but not
+                # *why*, and the console could only offer the generic "QE not
+                # measured". The judge flag is the whole answer: the heuristic
+                # engine emits discrete defect bands (never a continuous score)
+                # unless the LLM judge is switched on, and that is a separate
+                # opt-in (UBT_QE_JUDGE_ENABLED).
+                "qe_judge_enabled": self.config.qe_judge_enabled,
                 "qe_threshold": self.config.qe_threshold,
                 "max_repair_rounds": self.config.max_repair_rounds,
                 "prompt_strategy": self.config.prompt_strategy,

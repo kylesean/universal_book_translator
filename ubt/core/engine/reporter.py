@@ -482,6 +482,10 @@ def build_quality_report(
             "draft_model",
             "repair_model",
             "qe_engine",
+            # Mirrors ``PipelineOrchestrator``'s snapshot: the console explains a
+            # missing QE average from these two, so a ledger read through this
+            # fallback must carry them too.
+            "qe_judge_enabled",
             "qe_threshold",
             "max_repair_rounds",
             "prompt_strategy",

@@ -445,3 +445,125 @@ def test_a_collapsed_region_warns_but_does_not_fail_closed() -> None:
     # on (the window is QA_FULL_GATE_MAX_PAGES); this is the existing contract,
     # not a property of the type codes.
     assert blocking_gate_tripped([finding], total_pages=400, enabled=True) == []
+
+
+def test_the_visual_report_carries_tiers_as_data_not_only_prose() -> None:
+    """The tier breakdown must be machine-readable, so a translated console can
+    render it.
+
+    ``skipped_reason`` is one English sentence assembled from the tier lists and
+    every skip note. The quality-gate UI rendered that sentence verbatim, so a
+    Chinese panel printed "像素校验已跳过: vlm judge disabled; tiers run:
+    geometry, type, pixel (not run: vlm)" — English in the middle of Chinese copy,
+    and long enough to squeeze the status badge into a two-character column. The
+    console now renders ``tiers_ran`` / ``tiers_skipped`` / ``skip_codes`` in its
+    own language, and falls back to ``skipped_reason`` only for logs and the CLI.
+    """
+    from ubt.adapters.pdf.visual_gate import VisualGateResult
+
+    result = VisualGateResult(
+        passed=True,
+        skipped_reason="vlm judge disabled; tiers run: geometry, type, pixel (not run: vlm)",
+        tiers_ran=("geometry", "type", "pixel"),
+        tiers_skipped=("vlm",),
+        skip_codes=("vlm_judge_disabled",),
+    )
+    payload = result.report_payload()
+
+    assert payload["tiers_ran"] == ["geometry", "type", "pixel"]
+    assert payload["tiers_skipped"] == ["vlm"]
+    assert payload["skip_codes"] == ["vlm_judge_disabled"]
+    # The prose stays: it is what the CLI and the server log print.
+    assert "not run: vlm" in payload["skipped_reason"]
+
+
+def test_an_unknown_skip_note_is_flagged_rather_than_invented() -> None:
+    """A new skip path must surface as "unknown", not silently reuse a code.
+
+    Returning the raw sentence as a code would hide the gap: the console would
+    print English and nobody would notice a code was missing.
+    """
+    from ubt.adapters.pdf.visual_gate import _skip_code
+
+    assert _skip_code("vlm judge disabled") == "vlm_judge_disabled"
+    assert _skip_code("page render failed (pdf_oxide); pixel checks skipped") == (
+        "page_render_failed"
+    )
+    assert _skip_code("some future note nobody mapped") == "unknown"
+
+
+def test_tier_lists_distinguish_a_render_failure_from_a_judge_miss() -> None:
+    """Both skip the pixel tiers differently; the lists must say which.
+
+    With zero rendered pages only ``geometry`` ran. With pages rendered but no
+    judge, the raster tiers ran and only the semantic tier was skipped. Collapsing
+    the two is the defect ``skipped_reason`` was introduced to prevent, so the
+    structured form must keep it too.
+    """
+    from ubt.adapters.pdf.visual_gate import _tier_lists
+
+    # Pages rendered, no judge: only the semantic tier is missing.
+    ran, skipped = _tier_lists((), rendered_pages=6)
+    assert ran == ["geometry", "type", "pixel"]
+    assert skipped == ["vlm"]
+
+    # Nothing rendered: the raster tiers could not run either.
+    ran, skipped = _tier_lists((), rendered_pages=0)
+    assert ran == ["geometry"]
+    assert skipped == ["type", "pixel", "vlm"]
+
+    # Everything ran, including the judge.
+    ran, skipped = _tier_lists((2,), rendered_pages=6)
+    assert ran == ["geometry", "type", "pixel", "vlm"]
+    assert skipped == []
+
+
+def test_every_skip_note_the_gate_emits_has_a_code_and_a_translation() -> None:
+    """No skip note may reach the console without a code and a translation.
+
+    The console renders ``skip_codes`` through its own dictionary. A note added
+    to ``skip_notes`` without a ``_SKIP_CODES`` entry reports ``unknown``, and a
+    code without a dictionary entry falls back to the raw code — either way the
+    Chinese UI leaks English, which is precisely the defect this replaced. This
+    is an AST scan for the two literal shapes the gate uses, so a new
+    ``skip_notes.append("…")`` fails here rather than in a translated panel.
+    """
+    import ast
+    import re
+    from pathlib import Path
+
+    from ubt.adapters.pdf.visual_gate import _SKIP_CODES
+
+    repo = Path(__file__).resolve().parents[3]
+    source = (repo / "ubt" / "adapters" / "pdf" / "visual_gate.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    emitted: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (
+            isinstance(func, ast.Attribute)
+            and func.attr == "append"
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "skip_notes"
+        ):
+            continue
+        if node.args and isinstance(node.args[0], ast.Constant):
+            emitted.add(str(node.args[0].value))
+
+    assert emitted, "no skip_notes.append(...) literal found; update this test"
+    missing = sorted(note for note in emitted if note not in _SKIP_CODES)
+    assert not missing, f"skip note(s) with no stable code: {missing}"
+
+    # …and every code of those notes must be translated in both dictionaries.
+    codes = {_SKIP_CODES[note] for note in emitted}
+    for lang in ("en", "zh"):
+        tsv = (repo / "web" / "src" / "i18n" / "translations" / f"{lang}.ts").read_text(
+            encoding="utf-8"
+        )
+        block = re.search(r"visualSkipCodes:\s*\{(.*?)\}", tsv, re.DOTALL)
+        assert block, f"{lang}.ts has no visualSkipCodes block"
+        for code in sorted(codes | {"unknown"}):
+            assert f"{code}:" in block.group(1), f"{lang}.ts is missing visualSkipCodes.{code}"

@@ -4,6 +4,7 @@ import { getProvider, saveProvider, type ProviderDetail } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import { InfoTip } from '@/components/ui/InfoTip'
 import { useI18n } from '@/i18n/useI18n'
+import type { TranslationDictionary } from '@/i18n/types'
 
 interface ProviderEditorProps {
   /** The provider block being edited; ``null`` starts a new one. */
@@ -61,7 +62,18 @@ const TEXT_FIELDS = [
 type TextField = (typeof TEXT_FIELDS)[number]['field']
 
 const API_MODES = ['openai-chat', 'openai-responses', 'anthropic-messages', 'gemini-native']
-const EXTRACTION_STRATEGIES = ['auto', 'xml_tag', 'raw', 'cp']
+const EXTRACTION_STRATEGIES = ['auto', 'xml_tag', 'raw', 'cp'] as const
+
+/** The `doctor` dictionary key holding the human label for each stored value. */
+const EXTRACTION_LABEL_KEYS: Record<
+  (typeof EXTRACTION_STRATEGIES)[number],
+  Extract<keyof TranslationDictionary['doctor'], `extraction${string}`>
+> = {
+  auto: 'extractionAuto',
+  xml_tag: 'extractionXmlTag',
+  raw: 'extractionRaw',
+  cp: 'extractionCp',
+}
 
 /**
  * Edit one `[providers.<name>]` block: endpoint, protocol, models, capability.
@@ -314,7 +326,13 @@ export function ProviderEditor({
               <span className="block mt-0.5 type-help text-[var(--ink-muted)]">
                 {t.doctor.credentialKeepHint}
               </span>
-            ) : null}
+            ) : (
+              // "sk-… or ${VAR}" read as one opaque placeholder. Both halves are
+              // things the operator may legitimately type, so name them.
+              <span className="block mt-0.5 type-help text-[var(--ink-muted)] leading-relaxed">
+                {t.doctor.credentialPlaceholderHint}
+              </span>
+            )}
           </label>
         ) : (
           <p className="type-help text-[#b45309] leading-relaxed">
@@ -356,18 +374,26 @@ export function ProviderEditor({
             </select>
           </label>
           <label className="block">
-            <span className="type-label text-[var(--ink-secondary)]">
-              {t.doctor.extractionStrategy}
+            <span className="flex items-center gap-1">
+              <span className="type-label text-[var(--ink-secondary)]">
+                {t.doctor.extractionStrategy}
+              </span>
+              <InfoTip label={t.doctor.extractionStrategy}>
+                {t.doctor.extractionStrategyHelp}
+              </InfoTip>
             </span>
             <select
               value={extraction}
               onChange={(event) => setExtraction(event.target.value)}
-              className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value font-mono"
+              className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value"
             >
               <option value="">—</option>
+              {/* The stored values are `xml_tag`/`raw`/`cp`/`auto` — protocol
+                  vocabulary an operator cannot act on. The label says what each
+                  one *does*; the value sent to the server is unchanged. */}
               {EXTRACTION_STRATEGIES.map((strategy) => (
                 <option key={strategy} value={strategy}>
-                  {strategy}
+                  {t.doctor[EXTRACTION_LABEL_KEYS[strategy]]}
                 </option>
               ))}
             </select>

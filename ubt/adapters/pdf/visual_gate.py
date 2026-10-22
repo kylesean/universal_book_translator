@@ -191,6 +191,16 @@ class VisualGateResult:
     vlm_pages: tuple[int, ...] = ()
     skipped_reason: str | None = None
     stats: dict[str, str | int | float] = field(default_factory=dict)
+    #: Which inspection tiers ran, and which did not. ``skipped_reason`` carries
+    #: the same facts as an English sentence, which forces every non-English
+    #: consumer to either show raw English or re-parse it. The console renders
+    #: these two lists in its own language; the sentence stays for logs and the
+    #: CLI.
+    tiers_ran: tuple[str, ...] = ()
+    tiers_skipped: tuple[str, ...] = ()
+    #: Why the judge tier was skipped, as a machine code (``vlm_judge_disabled``,
+    #: …) rather than prose.
+    skip_codes: tuple[str, ...] = ()
 
     def report_payload(self) -> dict[str, Any]:
         """Gate-owned half of the visual_report.json schema.
@@ -203,6 +213,9 @@ class VisualGateResult:
         return {
             "passed": self.passed,
             "skipped_reason": self.skipped_reason,
+            "tiers_ran": list(self.tiers_ran),
+            "tiers_skipped": list(self.tiers_skipped),
+            "skip_codes": list(self.skip_codes),
             "stats": dict(self.stats),
             "sampled_pages": list(self.sampled_pages),
             "vlm_pages": list(self.vlm_pages),
@@ -991,19 +1004,50 @@ def _tier_coverage(
     - ``pixel`` inspects the raster;
     - ``vlm`` only when pages were actually sent to the judge.
     """
-    no_render = rendered_pages == 0
+    ran, skipped = _tier_lists(vlm_pages, rendered_pages)
+    coverage = f"tiers run: {', '.join(ran)}"
+    if skipped:
+        coverage += f" (not run: {', '.join(skipped)})"
+    if rendered_pages == 0:
+        coverage += f"; raster tiers skipped: 0 of {sampled_pages} sampled page(s) rendered"
+    return coverage
+
+
+#: Stable machine codes for the skip notes the gate can emit. Every note below
+#: already had an English sentence; the code is what a translated console keys
+#: on, so adding a note without a code would silently fall back to English.
+_SKIP_CODES: dict[str, str] = {
+    "page render failed (pdf_oxide); pixel checks skipped": "page_render_failed",
+    "vlm judge disabled": "vlm_judge_disabled",
+}
+
+
+def _skip_code(note: str) -> str:
+    """The stable code for one skip note, or ``"unknown"``.
+
+    Unknown notes are reported rather than invented: an unmapped sentence is a
+    signal that a new skip path needs a code and a translation, and returning
+    the raw text as a "code" would hide that.
+    """
+    return _SKIP_CODES.get(note, "unknown")
+
+
+def _tier_lists(
+    vlm_pages: Sequence[int],
+    rendered_pages: int,
+) -> tuple[list[str], list[str]]:
+    """Which tiers ran and which did not — the structured form of ``coverage``.
+
+    Split out of :func:`_tier_coverage` so the report can carry the facts
+    separately from the English sentence built on them.
+    """
     ran: list[str] = ["geometry"]
-    if not no_render:
+    if rendered_pages > 0:
         ran.extend(["type", "pixel"])
     if vlm_pages:
         ran.append("vlm")
     skipped = [tier for tier in ("type", "pixel", "vlm") if tier not in ran]
-    coverage = f"tiers run: {', '.join(ran)}"
-    if skipped:
-        coverage += f" (not run: {', '.join(skipped)})"
-    if no_render:
-        coverage += f"; raster tiers skipped: 0 of {sampled_pages} sampled page(s) rendered"
-    return coverage
+    return ran, skipped
 
 
 async def run_visual_gate(
@@ -1166,6 +1210,7 @@ async def run_visual_gate(
         elif vlm_judge is None:
             skip_notes.append("vlm judge disabled")
     passed = not any(f.severity in ("major", "critical") for f in findings)
+    ran_tiers, skipped_tiers = _tier_lists(vlm_pages, len(pngs))
     coverage = _tier_coverage(
         vlm_pages,
         skip_notes,
@@ -1195,4 +1240,7 @@ async def run_visual_gate(
         vlm_pages=tuple(vlm_pages),
         skipped_reason="; ".join([*skip_notes, coverage]) if skip_notes else coverage,
         stats=stats,
+        tiers_ran=tuple(ran_tiers),
+        tiers_skipped=tuple(skipped_tiers),
+        skip_codes=tuple(_skip_code(note) for note in skip_notes),
     )

@@ -275,3 +275,49 @@ def test_a_restarted_run_resubscribes_its_stream() -> None:
     assert "streamGeneration" in view
     assert "}, [currentJobId, appendLog, streamGeneration])" in view
     assert view.count("setStreamGeneration((n) => n + 1)") == 2
+
+
+def test_the_visual_gate_tiers_are_named_in_both_locales() -> None:
+    """Every tier/code the visual gate can report must have a translation.
+
+    The quality-gate view used to print the backend's English
+    ``skipped_reason`` sentence verbatim — "vlm judge disabled; tiers run:
+    geometry, type, pixel (not run: vlm)" — inside an otherwise Chinese panel.
+    It now renders the structured ``tiers_ran``/``tiers_skipped``/``skip_codes``
+    through these maps, so a tier or code with no entry falls back to the raw
+    English token, which is the same leak with extra steps.
+    """
+    tiers = {"geometry", "type", "pixel", "vlm"}
+    codes = {"vlm_judge_disabled", "page_render_failed", "unknown"}
+
+    for locale in ("en", "zh"):
+        text = _source(_REPO_ROOT / "web" / "src" / "i18n" / "translations" / f"{locale}.ts")
+        tier_block = re.search(r"visualTierNames:\s*\{(.*?)\}", text, re.DOTALL)
+        code_block = re.search(r"visualSkipCodes:\s*\{(.*?)\}", text, re.DOTALL)
+        assert tier_block, f"{locale}.ts has no visualTierNames block"
+        assert code_block, f"{locale}.ts has no visualSkipCodes block"
+
+        missing_tiers = sorted(
+            t for t in tiers if re.search(rf"\b{t}:", tier_block.group(1)) is None
+        )
+        missing_codes = sorted(
+            c for c in codes if re.search(rf"\b{c}:", code_block.group(1)) is None
+        )
+        assert not missing_tiers, f"{locale}.ts is missing visualTierNames for {missing_tiers}"
+        assert not missing_codes, f"{locale}.ts is missing visualSkipCodes for {missing_codes}"
+
+
+def test_the_quality_gate_does_not_render_the_raw_skipped_reason() -> None:
+    """The English sentence must not reach the row header.
+
+    ``skipped_reason`` stays on the payload for logs and the CLI. Rendering it
+    in the console both leaked English and overflowed the row, pushing the
+    status badge into a two-character column.
+    """
+    source = _source(_VIEWS / "quality-gate" / "QualityGateView.tsx")
+    assert "${t.quality.visualGateSkipped}: ${visualSkipped}" not in source, (
+        "the quality gate is rendering the raw English skipped_reason again"
+    )
+    assert "skipCodes.map(skipLabel)" in source, (
+        "the metric must render translated skip codes, not the raw sentence"
+    )

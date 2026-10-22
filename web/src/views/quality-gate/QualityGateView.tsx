@@ -230,6 +230,19 @@ export function QualityGateView() {
     typeof visual?.skipped_reason === 'string' && visual.skipped_reason
       ? visual.skipped_reason
       : null
+  // The report now carries the tier facts as lists and skip reasons as stable
+  // codes; ``skipped_reason`` is the English sentence built from them, kept for
+  // logs and the CLI. Rendering that sentence here printed raw English inside a
+  // Chinese panel — and, because it listed every skipped tier, it was long
+  // enough to squeeze the status badge into a two-character column.
+  const tiersRan: string[] = Array.isArray(visual?.tiers_ran) ? visual.tiers_ran : []
+  const tiersSkipped: string[] = Array.isArray(visual?.tiers_skipped) ? visual.tiers_skipped : []
+  const skipCodes: string[] = Array.isArray(visual?.skip_codes) ? visual.skip_codes : []
+  /** One translated phrase per skipped tier, e.g. "未运行：语义视觉判定". */
+  const tierLabel = (tier: string): string =>
+    (t.quality.visualTierNames as Record<string, string>)[tier] ?? tier
+  const skipLabel = (code: string): string =>
+    (t.quality.visualSkipCodes as Record<string, string>)[code] ?? code
   const coverage = report?.render_coverage ?? {}
   const repair = report?.repair_breakdown ?? {}
   const config = report?.config_snapshot ?? {}
@@ -356,8 +369,13 @@ export function QualityGateView() {
     {
       title: t.quality.pillar3Title,
       desc: t.quality.pillar3Desc,
+      // A short, translated summary. The full tier breakdown and the reason live
+      // in the expanded detail — the row header must stay one line so the badge
+      // beside it is not squeezed.
       metric: visualSkipped
-        ? `${t.quality.visualGateSkipped}: ${visualSkipped}`
+        ? skipCodes.length > 0
+          ? `${t.quality.visualGateSkipped} · ${skipCodes.map(skipLabel).join('、')}`
+          : t.quality.visualGateSkipped
         : `${flaggedPages.length} ${t.quality.flaggedPages}`,
       // A skipped gate is not a passing gate. `visual_gate` reports
       // `skipped_reason` when the tooling or the artifact type prevents the
@@ -370,6 +388,24 @@ export function QualityGateView() {
       score: visualSkipped ? 0 : visualPassed === false ? 55 : flaggedPages.length > 0 ? 60 : 100,
       detail: (
         <div className="space-y-2">
+          {/* Which inspection tiers ran. This is the full statement the row
+              header summarizes; it wraps freely here, so it can afford the
+              names instead of a comma-separated code list. */}
+          {tiersRan.length > 0 && (
+            <div className="text-xs text-[var(--ink-secondary)]">
+              <span className="text-[var(--ink-muted)]">{t.quality.visualTiersRan}: </span>
+              {tiersRan.map(tierLabel).join(' · ')}
+              {tiersSkipped.length > 0 && (
+                <>
+                  <span className="text-[var(--ink-muted)]">
+                    {'  ·  '}
+                    {t.quality.visualTiersSkipped}:{' '}
+                  </span>
+                  {tiersSkipped.map(tierLabel).join(' · ')}
+                </>
+              )}
+            </div>
+          )}
           {visualFindings.length === 0 ? (
             <div className="text-xs text-[var(--ink-muted)]">{t.quality.noVisualFindings}</div>
           ) : (
@@ -596,6 +632,11 @@ export function QualityGateView() {
               {score.qe_measured ? (
                 <span>
                   {t.quality.avgQeValue.replace('{score}', Number(score.avg_qe ?? 0).toFixed(3))}
+                  {' · '}
+                  {t.quality.qeMeasuredOn.replace(
+                    '{count}',
+                    String(score.scored_blocks ?? 0)
+                  )}
                 </span>
               ) : (
                 <span className="uppercase" title={t.quality.qeNotMeasuredHint}>
@@ -603,6 +644,19 @@ export function QualityGateView() {
                 </span>
               )}
             </div>
+            {/* "QE not measured" on its own is a dead end: the reader cannot
+                tell whether something broke, what it would take to measure, or
+                whether it matters. Both causes are on the report — the engine
+                that ran and whether the judge was enabled — so state the reason
+                and the remedy instead of the bare status. */}
+            {!score.qe_measured && hasReport && (
+              <p className="text-xs text-[var(--ink-secondary)] mt-1.5 leading-relaxed max-w-xl">
+                {config.qe_judge_enabled
+                  ? t.quality.qeNotMeasuredWhyJudge
+                  : t.quality.qeNotMeasuredWhyHeuristic}{' '}
+                <span className="text-[var(--ink-muted)]">{t.quality.qeNotMeasuredHow}</span>
+              </p>
+            )}
           </div>
         </div>
 
@@ -635,13 +689,13 @@ export function QualityGateView() {
                 onClick={() => setExpanded(expanded === idx ? null : idx)}
                 className="w-full p-4 flex items-center justify-between hover:bg-[var(--paper-subsurface)] transition-colors text-left"
               >
-                <div className="flex items-start gap-2.5">
+                <div className="flex items-start gap-2.5 min-w-0 flex-1">
                   {expanded === idx ? (
                     <ChevronDown className="h-4 w-4 mt-0.5 text-[var(--ink-muted)] shrink-0" />
                   ) : (
                     <ChevronRight className="h-4 w-4 mt-0.5 text-[var(--ink-muted)] shrink-0" />
                   )}
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-xs font-semibold text-[var(--ink-primary)]">
                       {item.title}
                     </div>
@@ -650,11 +704,16 @@ export function QualityGateView() {
                     </div>
                   </div>
                 </div>
-                <div className="text-right flex items-center gap-3">
-                  <span className="font-mono text-xs text-[var(--ink-primary)] font-medium">
+                {/* The metric is a *sentence* for some pillars — pillar 3 says the
+                    pixel check was skipped and lists the tiers that did run — so it
+                    must wrap and truncate rather than push the status badge into a
+                    column three characters wide. It shrinks before the title does:
+                    the title identifies the row, the metric explains it. */}
+                <div className="flex items-center gap-3 shrink-0 max-w-[45%] justify-end">
+                  <span className="font-mono text-xs text-[var(--ink-primary)] font-medium text-right leading-snug break-words">
                     {item.metric}
                   </span>
-                  <Badge variant={statusBadge(item.status)} dot>
+                  <Badge variant={statusBadge(item.status)} dot className="shrink-0 whitespace-nowrap">
                     {pillarStatusLabel(t, item.status)}
                   </Badge>
                 </div>

@@ -407,6 +407,20 @@ export const en: TranslationDictionary = {
     deliveryStaleNote: 'These files predate your latest edits. Downloading re-renders them first.',
     noVerdictTitle: 'No verdict yet',
     visualGateSkipped: 'Pixel gate skipped',
+    visualTierNames: {
+      geometry: 'geometry overlap',
+      type: 'type size',
+      pixel: 'pixel ghosting',
+      vlm: 'semantic visual check',
+    },
+    visualSkipCodes: {
+      vlm_judge_disabled: 'visual judge not enabled',
+      page_render_failed: 'page render failed',
+      unknown: 'reason unknown',
+    },
+    visualTiersRan: 'Ran',
+    visualTiersSkipped: 'Not run',
+    visualFullyRan: 'All checks ran',
     noVerdictBody: 'The quality report for this job has not been written, so there is nothing to attest. This appears while a run is still going, or if the report failed to load. It is not a pass.',
     downloadFailed: 'Download failed',
     xliffDoc: 'Translation-ready XLIFF 2.1',
@@ -418,6 +432,13 @@ export const en: TranslationDictionary = {
     qeNotMeasured: 'QE not measured',
     qeNotMeasuredHint:
       'No semantic scoring ran (heuristic QE engine); avg-QE fields are placeholders',
+    qeNotMeasuredWhyHeuristic:
+      'This run used the zero-token heuristic check: it decides whether deterministic rules were violated, and reports a discrete verdict rather than an averageable quality score — hence no average QE.',
+    qeNotMeasuredWhyJudge:
+      'Quality scoring was enabled, but no translated block actually reached the scorer (all took the fast path, hit translation memory, or kept their source text), so there was nothing to average.',
+    qeNotMeasuredHow:
+      'To get an average QE, enable the LLM judge on the server (UBT_QE_JUDGE_ENABLED=true) and submit a new job — finished jobs are not rescored.',
+    qeMeasuredOn: 'scored {count} blocks',
     pillarsTitle: 'Formal verification gateways (5 pillars)',
     pillarStatusPass: 'Pass',
     pillarStatusWarn: 'Warn',
@@ -557,7 +578,9 @@ export const en: TranslationDictionary = {
     defaultProviderLabel: 'default',
     createProvider: 'Create',
     credentialField: 'Credential',
-    credentialPlaceholder: 'sk-… or ${VAR}',
+    credentialPlaceholder: 'paste the key, or ${ENV_VAR_NAME}',
+    credentialPlaceholderHint:
+      'Two ways: ① paste the key itself (starting with sk- etc.); ② write ${ENV_VAR_NAME} to read it from that environment variable at runtime, so no plaintext secret is stored in the file.',
     credentialKeepHint: 'Leave blank to keep the current credential.',
     credentialBlockedHint:
       'A credential cannot be written from the console on this deployment (reachable beyond loopback, or strict auth is on). Set it in ubt.toml or export UBT_LLM_API_KEY.',
@@ -576,23 +599,29 @@ export const en: TranslationDictionary = {
     save: 'Save',
     saving: 'Saving…',
     savedHint: 'Saved to ubt.toml. The next submitted job picks it up; no restart needed.',
-    capabilityTitle: 'Declared capability',
+    capabilityTitle: 'What this endpoint can do (tell the engine)',
     capabilityHelp:
-      'What this endpoint accepts on the wire. Every flag here is a statement you make, not a guess the engine makes from the model name.',
-    capabilitySystem: 'Independent system turn',
+      'The engine cannot detect these endpoint capabilities, so you state them. Blank means "unknown", and the engine then takes the most conservative path.',
+    capabilitySystem: 'Supports a separate system message',
     capabilitySystemNote:
-      'Some endpoints reject a separate system message. The engine cannot probe this: merging the system text into the user turn is a decision, not a parameter it can drop. If unsure, leave it as the safe default.',
-    capabilitySystemAccepted: 'accepted (send separately)',
-    capabilitySystemMerged: 'rejected (merge into user message)',
-    capabilityVision: 'Accepts image input',
+      'A system message is an instruction block sent before the text. Some endpoints require it to be folded into the user message. Picking the wrong one does not corrupt the translation — it only adds a wrapper. Leave the default if unsure.',
+    capabilitySystemAccepted: 'Yes (send as its own system message)',
+    capabilitySystemMerged: 'No (prepend it to the user message)',
+    capabilityVision: 'Supports image input',
     capabilityVisionNote:
-      'Image input is required for visual-scalpel repair, and it sends page images to the endpoint.',
-    capabilityUndeclared: 'not declared (safe default)',
+      'Formula-image repair and the visual quality check send page images to this endpoint. Unchecked, both are skipped.',
+    capabilityUndeclared: 'Unknown (take the conservative path)',
 
     baseUrl: 'Base URL',
     apiMode: 'Wire protocol',
     apiTimeout: 'Timeout (s)',
-    extractionStrategy: 'Output extraction',
+    extractionStrategy: 'How to read the reply',
+    extractionStrategyHelp:
+      'Model replies can carry explanations, reasoning, or markdown fences around the actual translation. This decides how the translation is cut out. "Auto" suits almost every endpoint.',
+    extractionAuto: 'Auto (look for an XML tag, then strip fences and lead-in)',
+    extractionXmlTag: 'Only the text inside <translation>',
+    extractionRaw: 'Use the reply verbatim (the endpoint already returns only the translation)',
+    extractionCp: 'Strip conversational wrapping (markdown fences, "Here is the translation:" lead-ins)',
     deploymentBackend: 'Self-hosted backend',
     deploymentBackendHelp:
       'Set only when a local stack serves this model: it enables one retry against localhost when a gateway answers "model not supported".',

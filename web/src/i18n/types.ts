@@ -326,6 +326,13 @@ export interface TranslationDictionary {
     deliveryStaleNote: string
     //: Rendered instead of a verdict when the report could not be loaded.
     visualGateSkipped: string
+    /** Tier names the visual gate reports in ``tiers_ran`` / ``tiers_skipped``. */
+    visualTierNames: Record<string, string>
+    /** Stable ``skip_codes`` from the visual report, rendered in this language. */
+    visualSkipCodes: Record<string, string>
+    visualTiersRan: string
+    visualTiersSkipped: string
+    visualFullyRan: string
     noVerdictTitle: string
     noVerdictBody: string
     downloadFailed: string
@@ -338,6 +345,11 @@ export interface TranslationDictionary {
     avgQeValue: string
     qeNotMeasured: string
     qeNotMeasuredHint: string
+    /** Why no QE average exists, and what turns it on. */
+    qeNotMeasuredWhyHeuristic: string
+    qeNotMeasuredWhyJudge: string
+    qeNotMeasuredHow: string
+    qeMeasuredOn: string
     pillarsTitle: string
     pillarStatusPass: string
     pillarStatusWarn: string
@@ -476,6 +488,11 @@ export interface TranslationDictionary {
     apiMode: string
     apiTimeout: string
     extractionStrategy: string
+    extractionStrategyHelp: string
+    extractionAuto: string
+    extractionXmlTag: string
+    extractionRaw: string
+    extractionCp: string
     deploymentBackend: string
     deploymentBackendHelp: string
     isFree: string
@@ -489,6 +506,7 @@ export interface TranslationDictionary {
     createProvider: string
     credentialField: string
     credentialPlaceholder: string
+    credentialPlaceholderHint: string
     credentialKeepHint: string
     credentialBlockedHint: string
     credentialUnknownHint: string

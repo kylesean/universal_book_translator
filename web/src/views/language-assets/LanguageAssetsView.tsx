@@ -614,11 +614,15 @@ export function LanguageAssetsView() {
                   t.assets.bibleStep2,
                   t.assets.bibleStep3,
                 ].map((step, index) => (
-                  <div key={step} className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-xs font-mono">
+                  <div key={step} className="flex items-start gap-2">
+                    {/* items-start + whitespace-nowrap: the badge is a label, not
+                        a column. With items-center the two-line step text
+                        vertically centred it, and the flex item was narrow enough
+                        that "步骤 3" broke between the word and the digit. */}
+                    <Badge variant="outline" className="text-xs font-mono shrink-0 whitespace-nowrap">
                       {t.assets.stepBadge.replace('{n}', String(index + 1))}
                     </Badge>
-                    <span>{step}</span>
+                    <span className="min-w-0">{step}</span>
                   </div>
                 ))}
               </div>
