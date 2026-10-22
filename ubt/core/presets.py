@@ -1,12 +1,15 @@
 """Quality presets: the single source of truth for user-facing policy bundles.
 
 A preset is a deterministic bundle over *quality* parameters — prompt depth,
-formula handling, exec mode. It never disables a correctness gate, and it
-never picks the render route: "how much care to spend translating" and "how
-to typeset the result" are orthogonal decisions, and bundling them made
-``--preset publication`` a silent footgun on figure/table-heavy documents.
-The render engine is not settable at all: every PDF is rebuilt from the semantic
-IR by the Typst publication renderer.
+formula handling, exec mode, and which PDF **parser** to use. It never disables
+a correctness gate and never picks a **model**: "how much care to spend
+translating" is a policy decision, while the model is the operator's.
+
+``pdf_engine`` is in the bundle because parser choice *is* a quality decision
+(pdfium is fast and geometry-only, docling is lossless and slow), and leaving it
+out made ``--preset fast`` still pay for a docling conversion. What stays out is
+the **render route**: every PDF is rebuilt from the semantic IR by the Typst
+publication renderer, and nothing selects otherwise.
 
 **Formula enrichment is not a quality gradient.** Only ``on`` runs the VLM math
 transcription; both ``auto`` and ``off`` end up cropping the source region

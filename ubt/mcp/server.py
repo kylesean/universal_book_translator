@@ -309,6 +309,10 @@ async def ubt_translate_book(
     preset: str | None = None,
     glossary: str | None = None,
     pages: str | None = None,
+    # Column count of the delivered layout (1 or 2). REST carries the same field
+    # and the CLI spells it ``--columns``; leaving it off this surface meant an
+    # agent could not set a layout the other two doors offered.
+    layout_columns: int | None = None,
     # Run scoping and resume controls — the same keys the REST payload carries.
     # ``start_chapter``/``max_chapters`` are run-only: they ride into
     # ``orchestrator.run`` via the shared ``run_kwargs_from_request``. ``fresh``
@@ -434,6 +438,7 @@ async def ubt_translate_book(
         "preset": preset,
         "glossary": str(_resolve_input(glossary)) if glossary else None,
         "pages": pages,
+        "layout_columns": layout_columns,
         "start_chapter": start_chapter,
         "max_chapters": max_chapters,
         "fresh": fresh,

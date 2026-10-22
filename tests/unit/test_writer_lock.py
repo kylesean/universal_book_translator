@@ -17,6 +17,7 @@ pin the contract:
 from __future__ import annotations
 
 import contextlib
+import os
 import sqlite3
 import subprocess
 import sys
@@ -159,18 +160,47 @@ def test_locks_on_different_ledgers_are_independent(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
+def _lock_row(db_path: Path, job_id: str = "job-a") -> sqlite3.Row | None:
+    """The ``job_locks`` row for ``job_id``, or ``None`` (the holder probe)."""
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        row: sqlite3.Row | None = conn.execute(
+            "SELECT * FROM job_locks WHERE job_id = ?", (job_id,)
+        ).fetchone()
+        return row
+    finally:
+        conn.close()
+
+
+def _held_row(db_path: Path, job_id: str = "job-a") -> sqlite3.Row:
+    """The row, asserting a holder exists (narrows the type for the caller)."""
+    row = _lock_row(db_path, job_id)
+    assert row is not None, "expected a live job_locks row"
+    return row
+
+
 def test_release_before_acquire_and_twice_after_are_no_ops(tmp_path: Path) -> None:
-    lock = LedgerWriterLock(tmp_path / "job.db", "job-a")
-    lock.release()  # never acquired
+    db_path = tmp_path / "job.db"
+    lock = LedgerWriterLock(db_path, "job-a")
+    lock.release()  # never acquired: must not create a row
+    assert not db_path.exists() or _lock_row(db_path) is None
+
     lock.acquire()
+    assert _held_row(db_path) is not None
     lock.release()
-    lock.release()  # already released
+    assert _lock_row(db_path) is None, "release must delete the row"
+    lock.release()  # already released: still no row, still no raise
+    assert _lock_row(db_path) is None
 
 
 def test_acquire_is_idempotent_on_one_instance(tmp_path: Path) -> None:
-    lock = LedgerWriterLock(tmp_path / "job.db", "job-a")
+    db_path = tmp_path / "job.db"
+    lock = LedgerWriterLock(db_path, "job-a")
     lock.acquire()
-    lock.acquire()  # must not conflict with itself
+    token = _held_row(db_path)["owner_token"]
+    lock.acquire()  # must not conflict with itself, and must not change owner
+    assert _held_row(db_path)["owner_token"] == token
     lock.release()
 
 
@@ -179,9 +209,13 @@ def test_release_frees_the_lock_for_a_new_writer(tmp_path: Path) -> None:
     holder = LedgerWriterLock(db_path, "job-a")
     holder.acquire()
     holder.release()
+
     successor = LedgerWriterLock(db_path, "job-a")
-    successor.acquire()
-    successor.release()
+    successor.acquire()  # the whole point: a released lock is acquirable
+    try:
+        assert _held_row(db_path)["owner_token"] == successor._token
+    finally:
+        successor.release()
 
 
 def test_a_dead_holders_expired_lease_is_reclaimed(tmp_path: Path) -> None:
@@ -203,16 +237,28 @@ def test_a_dead_holders_expired_lease_is_reclaimed(tmp_path: Path) -> None:
     conn.close()
 
     stale.acquire()  # must take over the expired lease
-    stale.release()
+    try:
+        row = _lock_row(db_path)
+        assert row is not None
+        assert row["owner_token"] != "dead-token", "the expired holder still owns the row"
+        assert int(row["owner_pid"]) == os.getpid()
+        assert float(row["lease_expires_at"]) > time.time()
+    finally:
+        stale.release()
 
 
 def test_context_manager_holds_then_releases(tmp_path: Path) -> None:
     db_path = tmp_path / "job.db"
     with LedgerWriterLock(db_path, "job-a"), pytest.raises(LedgerWriterLockConflictError):
         LedgerWriterLock(db_path, "job-a").acquire()
+    # The context manager released on exit, so the next writer can take it.
+    assert _lock_row(db_path) is None
     successor = LedgerWriterLock(db_path, "job-a")
     successor.acquire()
-    successor.release()
+    try:
+        assert _held_row(db_path) is not None
+    finally:
+        successor.release()
 
 
 def test_context_manager_releases_on_exception(tmp_path: Path) -> None:

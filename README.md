@@ -129,8 +129,8 @@ delivers the target only, and `auto` starts bilingual and lets the advisor step
 it down to target-only when the layout cannot pair cleanly. This is the only
 mode knob; effort and engine details are chosen by a **preset**
 (`publication` / `standard` / `publication_math` / `preview` / `fast`), which
-selects the prompt depth, formula handling and parser. Presets never pick a
-model or a render route.
+selects the prompt depth, formula handling and parser (a preset does pick
+`pdf_engine`, but never a model).
 
 Formula enrichment is not a quality gradient: only `publication_math` sets it
 to `on`, which runs the VLM math transcription to vector LaTeX (slow — roughly

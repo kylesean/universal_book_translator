@@ -22,40 +22,76 @@ def pkg_of(path: Path) -> str:
     return f"ubt.core.{parts[2]}" if parts[1] == "core" and len(parts) > 3 else f"ubt.{parts[1]}"
 
 
-def scan(path: Path):
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    top = []
+def _is_type_checking(node: ast.AST) -> bool:
+    """Whether this ``if`` is a ``TYPE_CHECKING`` guard (any spelling)."""
+    test = getattr(node, "test", None)
+    if isinstance(test, ast.Name):
+        return test.id == "TYPE_CHECKING"
+    if isinstance(test, ast.Attribute):
+        return test.attr == "TYPE_CHECKING"
+    return False
 
-    for node in tree.body:
-        if isinstance(node, ast.If) and getattr(node.test, "id", "") == "TYPE_CHECKING":
-            continue
-        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            top.append((node.lineno, node.module))
-        elif isinstance(node, ast.Import):
-            top += [(node.lineno, a.name) for a in node.names]
+
+def _resolve_relative(path: Path, level: int, module: str | None) -> str | None:
+    """Absolute module name for a ``from ..x import y`` (``level`` dots)."""
+    if level == 0:
+        return module
+    package = list(path.with_suffix("").parts)[:-1]
+    if level - 1 > len(package):
+        return module
+    base = package[: len(package) - (level - 1)] if level > 1 else package
+    parts = [*base, *([module] if module else [])]
+    return ".".join(parts) if parts else module
+
+
+def scan(path: Path):
+    """Module-level and function-level ``ubt`` imports, with TYPE_CHECKING excluded.
+
+    Module level means *any* import that runs at import time — including one
+    nested in a module-level ``try:`` or ``class`` body, which the previous
+    ``tree.body``-only walk could not see. A relative import is resolved to an
+    absolute name so it is judged by the same rule.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    top: list[tuple[int, str]] = []
+    lazy: list[tuple[int, str]] = []
 
     class V(ast.NodeVisitor):
-        depth = 0
-        lazy: list[tuple[int, str]] = []
+        def __init__(self) -> None:
+            self.fn_depth = 0
+            self.tc_depth = 0
 
-        def visit_FunctionDef(self, n):
-            self.depth += 1
+        def visit_If(self, n: ast.If) -> None:
+            guarded = _is_type_checking(n)
+            if guarded:
+                self.tc_depth += 1
             self.generic_visit(n)
-            self.depth -= 1
+            if guarded:
+                self.tc_depth -= 1
 
-        def _imp(self, node):
-            if self.depth and isinstance(node, ast.ImportFrom) and node.module:
-                self.lazy.append((node.lineno, node.module))
+        def visit_FunctionDef(self, n: ast.FunctionDef) -> None:
+            self.fn_depth += 1
+            self.generic_visit(n)
+            self.fn_depth -= 1
 
-        visit_ImportFrom = _imp
+        def visit_AsyncFunctionDef(self, n: ast.AsyncFunctionDef) -> None:
+            self.fn_depth += 1
+            self.generic_visit(n)
+            self.fn_depth -= 1
 
-        def visit_Import(self, node):
-            if self.depth:
-                self.lazy += [(node.lineno, a.name) for a in node.names]
+        def visit_ImportFrom(self, n: ast.ImportFrom) -> None:
+            if not self.tc_depth:
+                resolved = _resolve_relative(path, n.level, n.module)
+                if resolved:
+                    (lazy if self.fn_depth else top).append((n.lineno, resolved))
 
-    v = V()
-    v.visit(tree)
-    return top, v.lazy
+        def visit_Import(self, n: ast.Import) -> None:
+            if not self.tc_depth:
+                target = lazy if self.fn_depth else top
+                target.extend((n.lineno, a.name) for a in n.names)
+
+    V().visit(tree)
+    return top, lazy
 
 
 print("== 模块级 core→编译器包 ==")

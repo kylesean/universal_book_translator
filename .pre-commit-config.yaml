@@ -54,7 +54,7 @@ repos:
       # Coverage floor: a regression guard, not a quality target. The 2026-10
       # audit found ~2,500 lines of dead modules that every gate passed; the
       # floor plus tests/unit/test_no_orphaned_modules.py make that class of
-      # rot fail a push. 70% sits ~3pt under the fast-tier baseline (73%) so
+      # rot fail a push. 70% sits ~7pt under the fast-tier baseline (77%) so
       # ordinary work never trips it, but a large deletion-without-tests, a
       # new untested module, or an orphaned module does. (The earlier 58 was
       # 15pt under the baseline — a gap wide enough to hide ~4,700 uncovered

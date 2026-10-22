@@ -289,3 +289,61 @@ def _is_metadata_reference(node: ast.AST) -> bool:
     return (isinstance(node, ast.Attribute) and node.attr == "metadata") or (
         isinstance(node, ast.Name) and "metadata" in node.id
     )
+
+
+def _cli_translate_option_names() -> set[str]:
+    """The parameter names ``ubt translate`` accepts, read from its source.
+
+    AST rather than ``typer.main.get_command``: the command is registered by a
+    decorator on a plain function, and the decorator's return value is not the
+    ``Typer`` instance the public API wants. Reading the signature also keeps
+    this test free of Typer's internals.
+    """
+    import ast
+
+    from ubt.cli.commands import translate as translate_module
+
+    tree = ast.parse(inspect.getsource(translate_module))
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "translate":
+            args = node.args
+            return {a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]}
+    raise AssertionError("ubt.cli.commands.translate.translate was renamed")
+
+
+def test_a_layout_knob_offered_on_one_surface_is_offered_on_all_three() -> None:
+    """The three entry points must expose the same *user* knobs.
+
+    The earlier version of this file claimed "the three surfaces agree" while
+    reading no CLI at all and comparing two knobs one directionally. Measured
+    then: ``layout_columns`` was accepted by REST (``JobSubmitRequest``) and by
+    the CLI (``--columns``) but absent from the MCP tool, so an agent could not
+    set a layout the other two doors offered.
+
+    The knob list is deliberately explicit — a *new* user knob is added here in
+    the same commit that adds it to the surfaces, which is the point: the test
+    fails until all three agree.
+    """
+    from ubt.api.models import JobSubmitRequest
+
+    shared = ("layout_columns", "dual_mode", "preset", "pages")
+    rest = set(JobSubmitRequest.model_fields)
+    mcp = _mcp_tool_signature_names()
+    cli = _cli_translate_option_names()
+
+    missing_rest = [k for k in shared if k not in rest]
+    missing_mcp = [k for k in shared if k not in mcp]
+    # The CLI spells ``layout_columns`` as ``--columns``; the Typer name is
+    # ``columns``. That mapping is asserted here so a rename cannot silently
+    # pass.
+    cli_expected = {
+        "layout_columns": "columns",
+        "dual_mode": "dual_mode",
+        "preset": "preset",
+        "pages": "pages",
+    }
+    missing_cli = [k for k in shared if cli_expected[k] not in cli]
+
+    assert not missing_rest, f"REST is missing {missing_rest}"
+    assert not missing_mcp, f"MCP is missing {missing_mcp}"
+    assert not missing_cli, f"CLI is missing {missing_cli}"

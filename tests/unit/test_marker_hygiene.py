@@ -189,6 +189,10 @@ _FAST_SUBPROCESS_ALLOWLIST: dict[str, str] = {
     "tests/unit/render/test_typst_lang.py": "single-snippet typst compile",
     "tests/unit/core/test_import_isolation.py": "subprocess imports the package to prove isolation",
     "tests/unit/test_writer_lock.py": "subprocess holds the lock to prove cross-process exclusion",
+    # A hang cannot be observed in-process (the wedged thread keeps the lock
+    # forever), so each case runs in a throwaway interpreter with a hard
+    # timeout. Three short ``python -c`` starts, ~0.3s total.
+    "tests/unit/test_config_construction.py": "fresh interpreter per case to observe a deadlock",
 }
 
 _SUBPROCESS_CALLS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
@@ -223,7 +227,16 @@ def test_a_fast_module_that_shells_out_is_declared() -> None:
     undeclared: list[str] = []
     for path in sorted(_TESTS_ROOT.rglob("test_*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        if _INNER_LOOP_MARK not in _module_marks(tree):
+        # A module is in the inner loop if *any* of its tests is. Checking only
+        # the module-level ``pytestmark`` missed the modules that mark tests
+        # individually on purpose — ``test_typst_symbols`` does exactly that so
+        # its three ``slow`` probe tests are not dragged into ``-m fast`` — and
+        # those were the ones shelling out.
+        if _INNER_LOOP_MARK not in _module_marks(tree) and not any(
+            _INNER_LOOP_MARK
+            in (_module_marks(tree) | _mark_names(ast.Module(body=[func], type_ignores=[])))
+            for func in _test_functions(tree)
+        ):
             continue
         if _subprocess_calls(tree) == 0:
             continue
@@ -249,7 +262,12 @@ def test_the_subprocess_allowlist_has_no_stale_entries() -> None:
             stale.append(f"{rel} (missing)")
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        if _subprocess_calls(tree) == 0 or _INNER_LOOP_MARK not in _module_marks(tree):
+        fast_here = _INNER_LOOP_MARK in _module_marks(tree) or any(
+            _INNER_LOOP_MARK
+            in (_module_marks(tree) | _mark_names(ast.Module(body=[func], type_ignores=[])))
+            for func in _test_functions(tree)
+        )
+        if _subprocess_calls(tree) == 0 or not fast_here:
             stale.append(rel)
 
     assert stale == [], (

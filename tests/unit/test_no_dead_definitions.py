@@ -33,6 +33,7 @@ from __future__ import annotations
 import ast
 import re
 from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -72,12 +73,76 @@ def _iter_text_files() -> list[Path]:
     return files
 
 
+#: Decorators a framework calls without naming the function, so a definition
+#: carrying one is reached even though nothing in the tree mentions it. This is
+#: an allowlist of *reasons*, not a blanket skip: the old ``if
+#: node.decorator_list: continue`` exempted 183 module-level definitions —
+#: including every ``@dataclass`` — so a dead dataclass was invisible.
+_FRAMEWORK_DECORATORS = frozenset(
+    {
+        # Typer/Click command registration.
+        "command",
+        "callback",
+        # pytest fixtures and markers.
+        "fixture",
+        "pytest.fixture",
+        # Protocol hooks the runtime calls by attribute name.
+        "property",
+        "cached_property",
+        "setter",
+        "getter",
+        "deleter",
+        # pydantic field/model validators and serializers.
+        "field_validator",
+        "model_validator",
+        "field_serializer",
+        "model_serializer",
+        "validator",
+        "root_validator",
+        # A wrapper applied to the definition is not a *caller*: ``@dataclass``
+        # and ``@total_ordering`` generate code but nothing reaches the class,
+        # which is exactly the case the blanket skip used to hide.
+        "lru_cache",
+        "cache",
+        "functools.lru_cache",
+        "functools.cache",
+    }
+)
+
+
+def _decorator_name(node: ast.AST) -> str:
+    """Dotted name of one decorator expression (``x`` / ``x.y`` / ``x(...)``)."""
+    target = node.func if isinstance(node, ast.Call) else node
+    parts: list[str] = []
+    while isinstance(target, ast.Attribute):
+        parts.append(target.attr)
+        target = target.value
+    if isinstance(target, ast.Name):
+        parts.append(target.id)
+    return ".".join(reversed(parts))
+
+
+def _is_framework_reached(decorator_list: Sequence[ast.AST]) -> bool:
+    """Whether any decorator makes the framework, not a caller, invoke this."""
+    for decorator in decorator_list:
+        name = _decorator_name(decorator)
+        if name in _FRAMEWORK_DECORATORS:
+            return True
+        # ``@x.setter`` / ``@app.command`` / ``@pytest.mark.parametrize``: the
+        # last segment is the framework hook.
+        if name.rsplit(".", 1)[-1] in _FRAMEWORK_DECORATORS:
+            return True
+    return False
+
+
 def _definition_names(tree: ast.Module) -> list[tuple[str, int]]:
     """(name, lineno) for every module-level definition that could be dead."""
     found: list[tuple[str, int]] = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            if node.decorator_list:
+            # Only a *framework* decorator makes the definition reachable
+            # without a caller; ``@dataclass`` does not.
+            if _is_framework_reached(node.decorator_list):
                 continue
             name = node.name
         elif isinstance(node, ast.Assign):
