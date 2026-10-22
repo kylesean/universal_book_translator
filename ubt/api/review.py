@@ -75,7 +75,7 @@ _ISSUE_MARKERS: dict[str, tuple[str, ...]] = {
     ),
     "repetition": ("Repetitive loop hallucination", "loop hallucination", "repetition"),
     "structure": (
-        "html_tag_mismatch",
+        "html_structure_mismatch",
         "HTML delta failure",
         "Table grid mismatch",
         "repair_structural_failure",

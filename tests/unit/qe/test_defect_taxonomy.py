@@ -29,6 +29,7 @@ from ubt.core.cleaners.mask_tokens import UnmaskReport
 from ubt.core.qe.defect_taxonomy import (
     CRITICAL_DEFECT_MARKERS,
     ECHO_MARKERS,
+    FORMAT_ONLY_MARKERS,
     STRUCTURAL_DEFECT_MARKERS,
     has_critical_defect,
     has_structural_defect,
@@ -147,7 +148,7 @@ def test_echoes_are_critical(marker: str) -> None:
         "Glossary term violation",  # Major, not quarantine
         "Visual witness discrepancy",  # provenance-only
         "HTML delta failure",  # format-only
-        "html_tag_mismatch",
+        "html_structure_mismatch",
         "Target text suspiciously truncated",
         "Target text suspiciously inflated",
     ],
@@ -171,7 +172,7 @@ def test_unrelated_flags_are_not_critical() -> None:
     "flag",
     [
         "HTML delta failure",
-        "html_tag_mismatch",
+        "html_structure_mismatch",
         "Target text suspiciously truncated",
         "Target text suspiciously inflated",
     ],
@@ -404,3 +405,71 @@ def test_the_judge_cannot_raise_a_score_over_the_pass_line() -> None:
     )
     scores = asyncio.run(tiered.score_pairs([{"src": "a", "mt": "b"}]))
     assert scores == [QE_SCORE_STRUCTURAL_OTHER]
+
+
+# --------------------------------------------------------------------------- #
+# The table must name strings the pipeline actually emits
+# --------------------------------------------------------------------------- #
+
+#: Markers that are deliberately not emitted anywhere yet, or whose emit site is
+#: a different layer. Empty today; a marker belongs here only with a reason.
+_KNOWN_UNEMITTED: frozenset[str] = frozenset()
+
+#: Markers the pipeline emits through a shared constant rather than a literal.
+#: The constant *is* the emit site, so searching for the literal string would
+#: wrongly call these dead.
+_EMITTED_VIA_CONSTANT: frozenset[str] = frozenset(ECHO_MARKERS)
+
+
+def _sources() -> dict[Any, str]:
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[3] / "ubt"
+    return {
+        path: path.read_text(encoding="utf-8")
+        for path in root.rglob("*.py")
+        if path.name != "defect_taxonomy.py"
+    }
+
+
+def _is_emitted(marker: str, sources: dict[Any, str]) -> bool:
+    if marker in _EMITTED_VIA_CONSTANT:
+        return True
+    return any(marker in text for text in sources.values())
+
+
+def test_every_structural_marker_is_a_string_some_module_emits() -> None:
+    """A marker nobody emits is a hole in the table, not a classification.
+
+    ``STRUCTURAL_DEFECT_MARKERS`` listed ``html_tag_mismatch`` while the export
+    stage emits ``html_structure_mismatch``. The dead entry matched nothing, so a
+    target that lost its markup structure classified as "other structural
+    rejection" (0.70) and could be released by any threshold at or below it —
+    the exact failure the table exists to prevent, hidden by a spelling.
+    """
+    sources = _sources()
+    dead = [
+        marker
+        for marker in STRUCTURAL_DEFECT_MARKERS
+        if marker not in _KNOWN_UNEMITTED and not _is_emitted(marker, sources)
+    ]
+    assert dead == [], f"structural markers no module emits: {dead}"
+
+
+def test_every_format_only_marker_is_a_string_some_module_emits() -> None:
+    """``is_format_only`` only ever fires on a real emitted substring."""
+    sources = _sources()
+    dead = [
+        marker
+        for marker in FORMAT_ONLY_MARKERS
+        if marker not in _KNOWN_UNEMITTED and not _is_emitted(marker, sources)
+    ]
+    assert dead == [], f"format-only markers no module emits: {dead}"
+
+
+def test_a_structure_mismatch_is_a_deterministic_defect() -> None:
+    """The export stage's own flag must outrank a passing score."""
+    from ubt.core.qe.defect_taxonomy import classify_defect
+
+    flag = "html_structure_mismatch: expected <p> got <div>"
+    assert classify_defect([flag], score=0.95, threshold=0.70) == "DETERMINISTIC_DEFECT"

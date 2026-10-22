@@ -30,7 +30,12 @@ ECHO_MARKERS: tuple[str, ...] = (ECHO_MARKER, NEAR_ECHO_MARKER, UNTRANSLATED_RES
 # trusted even when the score looks acceptable, and must never be auto-passed.
 STRUCTURAL_DEFECT_MARKERS: tuple[str, ...] = (
     "Empty target text",
-    "html_tag_mismatch",
+    # The export stage's HTML-delta check emits ``html_structure_mismatch: …``.
+    # This table listed ``html_tag_mismatch``, which no module has ever emitted:
+    # the entry matched nothing, so a block whose target lost its markup
+    # structure fell through to "other structural rejection" (0.70) and could be
+    # released by any threshold at or below it.
+    "html_structure_mismatch",
     "HTML delta failure",
     "Prompt template XML artifacts",
     "Repetitive loop hallucination",
@@ -103,7 +108,7 @@ STRUCTURAL_DEFECT_MARKERS: tuple[str, ...] = (
 # return True and keep the cheap path live.
 FORMAT_ONLY_MARKERS: tuple[str, ...] = (
     "HTML delta failure",
-    "html_tag_mismatch",
+    "html_structure_mismatch",
     "Target text suspiciously truncated",
     "Target text suspiciously inflated",
 )
