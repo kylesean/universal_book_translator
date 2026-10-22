@@ -535,3 +535,96 @@ def test_the_editor_never_writes_outside_the_discovered_config(
     monkeypatch.setattr(provider_editor, "_config_path", lambda: target)
     assert provider_editor._config_path() == target
     assert provider_editor._config_path().parent == config_dir
+
+
+# --------------------------------------------------------------------------- #
+# A base_url rewrite must not silently downgrade a stored credential to
+# cleartext. `base_url` is writable on its own and an existing key is preserved
+# verbatim, so the two together sent the key to a remote host in the clear
+# without the form saying anything about a credential.
+# --------------------------------------------------------------------------- #
+
+
+def _write_block(tmp_path: Path, body: str, monkeypatch: pytest.MonkeyPatch) -> Path:
+    path = tmp_path / "ubt.toml"
+    path.write_text(body, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    return path
+
+
+_CREDENTIAL_BLOCK = """\
+[providers.demo]
+base_url = "https://api.example/v1"
+api_key = "sk-REAL-SECRET"
+draft_model = "demo-model"
+"""
+
+
+def test_a_plaintext_remote_base_url_is_refused_while_a_credential_is_stored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ubt.api.provider_editor import ProviderEditError, upsert_provider
+
+    path = _write_block(tmp_path, _CREDENTIAL_BLOCK, monkeypatch)
+    with pytest.raises(ProviderEditError, match="cleartext"):
+        upsert_provider("demo", {"base_url": "http://attacker.invalid/v1"})
+    # Nothing was written.
+    assert "attacker.invalid" not in path.read_text(encoding="utf-8")
+    assert "sk-REAL-SECRET" in path.read_text(encoding="utf-8")
+
+
+def test_an_https_remote_base_url_is_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ubt.api.provider_editor import upsert_provider
+
+    path = _write_block(tmp_path, _CREDENTIAL_BLOCK, monkeypatch)
+    upsert_provider("demo", {"base_url": "https://new.example/v1"})
+    text = path.read_text(encoding="utf-8")
+    assert 'base_url = "https://new.example/v1"' in text
+    assert "sk-REAL-SECRET" in text
+
+
+def test_a_loopback_plaintext_base_url_is_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A local model server has no wire to expose."""
+    from ubt.api.provider_editor import upsert_provider
+
+    path = _write_block(tmp_path, _CREDENTIAL_BLOCK, monkeypatch)
+    upsert_provider("demo", {"base_url": "http://127.0.0.1:8080/v1"})
+    assert 'base_url = "http://127.0.0.1:8080/v1"' in path.read_text(encoding="utf-8")
+
+
+def test_a_plaintext_url_without_a_stored_credential_is_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unauthenticated endpoint has nothing to expose."""
+    from ubt.api.provider_editor import upsert_provider
+
+    _write_block(
+        tmp_path,
+        '[providers.demo]\nbase_url = "https://api.example/v1"\ndraft_model = "m"\n',
+        monkeypatch,
+    )
+    upsert_provider("demo", {"base_url": "http://plain.example/v1"})
+    assert 'base_url = "http://plain.example/v1"' in (tmp_path / "ubt.toml").read_text(
+        encoding="utf-8"
+    )
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("http://127.0.0.1/v1", False),
+        ("http://localhost:8080/v1", False),
+        ("http://[::1]:8080/v1", False),
+        ("https://example.com/v1", False),
+        ("http://example.com/v1", True),
+        ("HTTP://EXAMPLE.COM/v1", True),
+    ],
+)
+def test_the_plaintext_predicate(url: str, expected: bool) -> None:
+    from ubt.api.provider_editor import _is_plaintext_nonlocal
+
+    assert _is_plaintext_nonlocal(url) is expected
