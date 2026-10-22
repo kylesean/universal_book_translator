@@ -11,7 +11,6 @@ manager) are overlaid with their in-memory progress, which is fresher than the
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -58,11 +57,6 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
     finally:
         ledger.close()
 
-    try:
-        quiet_seconds = max(0.0, time.time() - db_path.stat().st_mtime)
-    except OSError:
-        quiet_seconds = None
-
     total = int(snapshot.get("total", 0) or 0)
     completed = int(snapshot.get("completed", 0) or 0)
     failed = int(snapshot.get("failed", 0) or 0)
@@ -80,7 +74,7 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
         "target_lang": str(snapshot["target_lang"]),
         "status": _reportable_status(
             str(snapshot["status"]),
-            quiet_seconds=quiet_seconds,
+            has_live_writer=_has_live_writer(db_path, job_id),
             total=total,
             completed=completed,
         ),
@@ -102,19 +96,11 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
     }
 
 
-#: How long a per-job ledger may go unwritten before a non-terminal row is
-#: reported as interrupted. The same window MCP's ``ubt_status`` uses, and for
-#: the same reason: a live run in another process keeps writing checkpoints, so
-#: reporting that failed would make an operator restart a job still translating.
-LEDGER_STALENESS_SECONDS = 300.0
-
 #: ``job_meta.status`` values that end a job's life.
 _TERMINAL_LEDGER_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
-def _reportable_status(
-    stored: str, *, quiet_seconds: float | None, total: int, completed: int
-) -> str:
+def _reportable_status(stored: str, *, has_live_writer: bool, total: int, completed: int) -> str:
     """The status a listing may show, normalizing a ledger row left mid-run.
 
     ``job_meta.status`` has no ``running`` value: the row is written
@@ -125,17 +111,37 @@ def _reportable_status(
     same id — which does normalize — reported it failed.
 
     A terminal row is passed through. A row whose blocks are all accounted for is
-    completed. Otherwise the row is only called interrupted once the ledger has
-    gone quiet for :data:`LEDGER_STALENESS_SECONDS`; until then it may be a live
-    run in another process, and ``initialized`` is the honest answer.
+    completed — that is exactly the condition ``finalize_job("completed")`` is
+    guarded on, and the export stage finalizes *before* it records the rendered
+    digest, so a process lost in that window leaves a fully translated book
+    behind a row that still says ``initialized``. Any other row is ``running``
+    while a live writer holds the lease and ``failed`` once nothing does — the
+    same test ``/status`` applies
+    (:meth:`ubt.core.engine.writer_lock.LedgerWriterLock.lease_holder`).
+
+    The lease, not the file's mtime, is what makes this safe. A run spends
+    minutes inside one model call without writing a checkpoint, so a "quiet for
+    N minutes" rule calls a *working* job dead — measured: with a live lease held
+    and the ledger untouched for 1000s, an mtime rule reported ``failed`` where
+    ``/status`` correctly reported ``running``. Asking the lease covers the
+    reverse case for free: an expired lease is exactly what a crashed process
+    leaves behind.
     """
     if stored in _TERMINAL_LEDGER_STATUSES:
         return stored
     if total > 0 and completed >= total:
         return "completed"
-    if quiet_seconds is not None and quiet_seconds > LEDGER_STALENESS_SECONDS:
-        return "failed"
-    return stored
+    return "running" if has_live_writer else "failed"
+
+
+def _has_live_writer(db_path: Path, job_id: str) -> bool:
+    """Whether a live process holds this job's writer lease (never raises)."""
+    from ubt.core.engine.writer_lock import LedgerWriterLock
+
+    try:
+        return LedgerWriterLock.lease_holder(db_path, job_id) is not None
+    except Exception:  # noqa: BLE001 - a listing must not fail on a probe
+        return False
 
 
 def page_scope_label(pages: Any) -> str | None:

@@ -1,4 +1,4 @@
-"""`/jobs` must not report a crashed run as live.
+"""`/jobs` and `/status` must agree about one ledger.
 
 `job_meta.status` has no `running` value: the row is written `initialized` at
 ingest and stays that way for the whole run, so the column alone cannot tell a
@@ -7,9 +7,15 @@ so `/jobs` showed `initialized` (which the console renders as a live run) for a
 job that had crashed hours earlier, while `/status` for the same id — which does
 normalize — reported it failed.
 
-The rule here mirrors MCP's `ubt_status`: a non-terminal row is only called
-interrupted once the ledger has gone quiet, because a live run in another
-process keeps writing checkpoints.
+The rule is the one `/status` already applied: a terminal row passes through, a
+row whose blocks are all accounted for is completed, and anything else is
+`running` while a live writer holds the lease and `failed` once nothing does.
+
+**The lease, not the file's mtime.** A first attempt used "the ledger has not
+been written for N seconds" and was wrong in the one case that matters: a run
+spends minutes inside a single model call without writing a checkpoint, so a
+working job was reported dead. `test_a_live_writer_overrides_a_quiet_ledger`
+pins that, and is the reason the mtime rule must not come back.
 """
 
 from __future__ import annotations
@@ -20,8 +26,9 @@ from pathlib import Path
 
 import pytest
 
-from ubt.api.job_catalog import LEDGER_STALENESS_SECONDS, _reportable_status, summarize_job
+from ubt.api.job_catalog import _reportable_status, summarize_job
 from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.engine.writer_lock import LedgerWriterLock
 from ubt.core.ir.models import (
     BlockStatus,
     BookManifest,
@@ -32,6 +39,9 @@ from ubt.model.ast import Paragraph
 from ubt.model.span import Span
 
 pytestmark = pytest.mark.fast
+
+#: Longer than any lease, so a "quiet ledger" cannot be mistaken for a live one.
+_QUIET_FOR = 1000.0
 
 
 def _block(index: int, status: BlockStatus) -> IRBlock:
@@ -66,52 +76,81 @@ def _age(db: Path, seconds: float) -> None:
     os.utime(db, (stamp, stamp))
 
 
-def test_a_fresh_non_terminal_row_stays_as_stored(tmp_path: Path) -> None:
-    """It may be a live run in another process; `initialized` is the honest answer."""
-    db = _ledger(tmp_path, "freshjob", status="initialized", block=_block(1, BlockStatus.DRAFTED))
-    _age(db, 10)
-    assert _status(db) == "initialized"
-
-
-def test_a_quiet_non_terminal_row_is_reported_failed(tmp_path: Path) -> None:
+def test_a_crashed_row_is_reported_failed(tmp_path: Path) -> None:
     """The regression: a crashed run read as live forever."""
     db = _ledger(tmp_path, "deadjob", status="initialized", block=_block(1, BlockStatus.DRAFTED))
-    _age(db, LEDGER_STALENESS_SECONDS + 600)
+    _age(db, _QUIET_FOR)
     assert _status(db) == "failed"
 
 
+def test_a_live_writer_overrides_a_quiet_ledger(tmp_path: Path) -> None:
+    """The bug the mtime rule caused: a long model call is not a crash.
+
+    A run can sit inside one provider call for longer than any staleness window
+    without touching the ledger. The lease is the only honest signal.
+    """
+    db = _ledger(tmp_path, "longcall", status="initialized", block=_block(1, BlockStatus.DRAFTED))
+    _age(db, _QUIET_FOR)
+    lock = LedgerWriterLock(db, "longcall")
+    lock.acquire()
+    try:
+        assert _status(db) == "running"
+    finally:
+        lock.release()
+    # Once the lease is gone, nothing is working on it any more.
+    assert _status(db) == "failed"
+
+
+def test_a_live_writer_on_a_fresh_ledger_reads_running(tmp_path: Path) -> None:
+    db = _ledger(tmp_path, "livejob", status="initialized", block=_block(1, BlockStatus.DRAFTED))
+    lock = LedgerWriterLock(db, "livejob")
+    lock.acquire()
+    try:
+        assert _status(db) == "running"
+    finally:
+        lock.release()
+
+
 def test_a_terminal_row_is_passed_through(tmp_path: Path) -> None:
-    db = _ledger(tmp_path, "donejob", status="completed", block=_block(1, BlockStatus.MTQE_PASSED))
-    _age(db, LEDGER_STALENESS_SECONDS + 600)
-    assert _status(db) == "completed"
+    for stored in ("completed", "failed", "cancelled"):
+        block = _block(1, BlockStatus.MTQE_PASSED)
+        db = _ledger(tmp_path, f"{stored}job", status=stored, block=block)
+        _age(db, _QUIET_FOR)
+        assert _status(db) == stored
 
 
 def test_a_fully_processed_row_reads_completed_even_before_finalize(tmp_path: Path) -> None:
-    """Every block accounted for is a finished run whatever the row says."""
+    """Every block accounted for is a finished run whatever the row says.
+
+    That is exactly the condition ``finalize_job("completed")`` is guarded on,
+    and the export stage finalizes *before* it records the rendered digest, so a
+    process lost in that window leaves a fully translated book behind.
+    """
     db = _ledger(
         tmp_path, "allblocks", status="initialized", block=_block(1, BlockStatus.MTQE_PASSED)
     )
-    _age(db, 10)
+    _age(db, _QUIET_FOR)
     assert _status(db) == "completed"
 
 
 @pytest.mark.parametrize(
-    ("stored", "quiet", "total", "completed", "expected"),
+    ("stored", "live", "total", "completed", "expected"),
     [
-        ("completed", None, 0, 0, "completed"),
-        ("failed", 10.0, 5, 1, "failed"),
-        ("cancelled", 10.0, 5, 1, "cancelled"),
-        ("initialized", 10.0, 5, 1, "initialized"),
-        ("initialized", None, 5, 1, "initialized"),
-        ("initialized", 10_000.0, 5, 1, "failed"),
-        ("initialized", 10.0, 5, 5, "completed"),
-        ("initialized", 10_000.0, 0, 0, "failed"),
+        ("completed", False, 0, 0, "completed"),
+        ("failed", True, 5, 1, "failed"),
+        ("cancelled", True, 5, 1, "cancelled"),
+        ("initialized", True, 5, 1, "running"),
+        ("initialized", False, 5, 1, "failed"),
+        ("initialized", False, 5, 5, "completed"),
+        ("initialized", True, 5, 5, "completed"),
+        ("initialized", False, 0, 0, "failed"),
+        ("initialized", True, 0, 0, "running"),
     ],
 )
 def test_the_status_rule(
-    stored: str, quiet: float | None, total: int, completed: int, expected: str
+    stored: str, live: bool, total: int, completed: int, expected: str
 ) -> None:
     assert (
-        _reportable_status(stored, quiet_seconds=quiet, total=total, completed=completed)
+        _reportable_status(stored, has_live_writer=live, total=total, completed=completed)
         == expected
     )
