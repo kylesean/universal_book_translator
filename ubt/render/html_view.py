@@ -31,7 +31,13 @@ from ubt.model.ast import (
     Paragraph,
     Table,
 )
-from ubt.render.delivered_text import delivered_text, dropped_page_furniture, is_toc_entry
+from ubt.render.delivered_text import (
+    delivered_text,
+    dropped_page_furniture,
+    is_any_mark,
+    is_toc_entry,
+    unwrap_mark,
+)
 from ubt.render.inline_spans import SpanStyle, block_runs, styled_chunks
 from ubt.render.outputs import Composition, Placement
 
@@ -354,12 +360,19 @@ def element_text(block: IRBlock, translations: Mapping[str, str]) -> str:
 
     The ``translations`` override wins when present: an interactive PE edit is
     the most recent human decision, and it is plain text (no wrapper).
+
+    A wrapper is stripped from the override too. The export stage builds this
+    map with ``delivered_text``, but a map that reached the view by any other
+    route (an older caller, a ledger row written before that fix, a test
+    fixture) must not be able to smuggle pipeline markup onto the page just
+    because it arrived through the override branch. The rule is the same one
+    :func:`delivered_text` applies, so the two cannot disagree.
     """
     if _kept_in_source(block):
         return block.source_text or ""
     override = (translations.get(block.id) or "").strip()
     if override:
-        return override
+        return unwrap_mark(override).strip() if is_any_mark(override) else override
     return delivered_text(block)
 
 
