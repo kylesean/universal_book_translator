@@ -360,3 +360,35 @@ def test_unmapped_operator_dynamic_fallback() -> None:
     assert typstify_math(r"\tr(A)") == '#"tr" (A)'
     assert typstify_math(r"\diag(v)") == '#"diag" (v)'
     assert typstify_math(r"\sinc(x)") == '#"sinc" (x)'
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        # ``\limits`` is written glued to ``_`` in real LaTeX. ``\b`` never
+        # matched there, so the command survived to the unknown-command guard
+        # and printed ``#"limits"`` into the equation.
+        (r"\sum\limits_{i=1}^n i", "sum_(i=1)^n i"),
+        (r"\sum\nolimits_i x_i", "sum_i x_i"),
+        # Annotation commands have no glyph; they must vanish, not print.
+        (r"E = mc^2 \nonumber", None),
+        (r"E = mc^2 \notag", None),
+        # The starred operator form: ``*`` is part of the name.
+        (r"\operatorname*{argmax}_x f(x)", '#"argmax"_x f(x)'),
+        (r"\operatorname{rank} A", '#"rank" A'),
+    ],
+)
+def test_layout_and_operator_commands_never_print_their_own_name(
+    body: str, expected: str | None
+) -> None:
+    """A command Typst spells as an identifier must not reach the page as text.
+
+    These all *compile*, which is why no render gate caught them: the reader
+    saw ``∑ limits𝑛𝑖=1`` and ``E = mc² nonumber`` instead of a formula.
+    """
+    converted = typstify_math(body)
+    assert converted is not None
+    for command in ("limits", "nolimits", "nonumber", "notag", "operatorname"):
+        assert command not in converted, f"{command} leaked into {converted!r}"
+    if expected is not None:
+        assert converted == expected

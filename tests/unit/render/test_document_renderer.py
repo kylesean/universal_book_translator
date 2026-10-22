@@ -1562,3 +1562,53 @@ def test_prose_that_opens_with_a_figure_number_is_not_a_caption(tmp_path: Path) 
     ]
     out, _ = TypstDocumentRenderer().build_source(blocks, tmp_path / "build")
     assert "caption: [" not in out
+
+
+def test_two_figures_sharing_a_basename_both_survive(tmp_path: Path) -> None:
+    """Assets are named by content, not by basename.
+
+    The build directory is flat and Typst addresses images by name, so two
+    different pictures both called ``figure.png`` used to collide: the second
+    copy overwrote the first (or, at equal sizes, was skipped) and the first
+    figure silently rendered the second picture.
+    """
+    from PIL import Image
+
+    from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock, make_element
+
+    for sub, colour in (("a", "red"), ("b", "blue")):
+        (tmp_path / sub).mkdir()
+        Image.new("RGB", (300, 100), colour).save(tmp_path / sub / "figure.png")
+
+    def block(path: Path, index: int, y: float) -> IRBlock:
+        return IRBlock(
+            element=make_element(
+                id=f"pdf_main#img_{index:04d}",
+                spine_index=index,
+                block_type=BlockType.IMAGE,
+                flow_id=FlowID.CAPTION,
+                source_text=str(path),
+                bbox=BoundingBox(page=1, x0=10.0, y0=y, x1=200.0, y1=y + 80.0),
+                skip_translate=True,
+            ),
+            target_text=str(path),
+        )
+
+    blocks = [
+        block(tmp_path / "a" / "figure.png", 1, 10.0),
+        block(tmp_path / "b" / "figure.png", 2, 200.0),
+    ]
+    build = tmp_path / "build"
+    source, _stats = TypstDocumentRenderer().build_source(blocks, build)
+
+    copied = sorted(p.name for p in build.iterdir() if p.suffix == ".png")
+    assert len(copied) == 2, f"one picture overwrote the other: {copied}"
+    payloads = {(build / name).read_bytes() for name in copied}
+    assert len(payloads) == 2, "both figures must carry distinct bytes"
+    red = (tmp_path / "a" / "figure.png").read_bytes()
+    blue = (tmp_path / "b" / "figure.png").read_bytes()
+    assert payloads == {red, blue}
+    # Both names are referenced by the emitted source, so neither figure is
+    # drawn from the other's copy.
+    for name in copied:
+        assert f'image("{name}"' in source

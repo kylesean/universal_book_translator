@@ -450,3 +450,43 @@ def test_toc_rows_and_running_heads_are_not_promoted_to_section_headings(tmp_pat
     assert "<h1>1 引言</h1>" not in text, "a TOC row is not a section heading"
     assert text.count("<ol") == text.count("</ol>"), "the TOC list must be closed"
     assert text.count("<ul") == text.count("</ul>"), "list tags must balance"
+
+
+def _figure_block(tmp_path: Path) -> tuple[list[IRBlock], dict[str, str]]:
+    """One IMAGE block pointing at a real PNG the EPUB can package."""
+    from ubt.core.ir.models import BlockType, FlowID, make_element
+
+    image = tmp_path / "figure.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+    block = IRBlock(
+        element=make_element(
+            id="pdf_main#img_0001",
+            spine_index=1,
+            block_type=BlockType.IMAGE,
+            flow_id=FlowID.CAPTION,
+            source_text=str(image),
+            skip_translate=True,
+        ),
+        target_text=str(image),
+    )
+    return [block], {}
+
+
+def test_an_epub_with_a_figure_is_well_formed_xml(tmp_path: Path) -> None:
+    """XHTML has no void elements: an unterminated ``<img>`` breaks the package.
+
+    ``OEBPS/text.xhtml`` is ``application/xhtml+xml``, so a reader parses it as
+    XML. HTML5's ``<img ...>`` is legal markup but not well-formed XML, and a
+    strict reading system rejects the whole book.
+    """
+    import xml.etree.ElementTree as ET
+
+    blocks, translations = _figure_block(tmp_path)
+    out = tmp_path / "figure.epub"
+    compose_epub(blocks, translations, out, title="doc")
+
+    with zipfile.ZipFile(out) as archive:
+        text_xhtml = archive.read("OEBPS/text.xhtml").decode("utf-8")
+    assert "<img" in text_xhtml
+    # The assertion that failed before the fix: this raises ParseError.
+    ET.fromstring(text_xhtml)

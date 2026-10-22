@@ -267,7 +267,17 @@ def fuse_continuation_blocks(blocks: Sequence[IRBlock]) -> list[IRBlock]:
             continue
 
         joined_source = join_continuous_text([b.source_text for b in run_blocks])
-        joined_target = join_continuous_text([b.target_text for b in run_blocks if b.target_text])
+        # The fused target is all-or-nothing. Concatenating only the sub-blocks
+        # that already have a target silently deletes the rest: on a resumed run
+        # where one half of a page-spanning paragraph is still untranslated, the
+        # fused block would carry a translation of the first half and lose the
+        # second half's text entirely -- and because the two blocks are now one,
+        # a re-run never drafts the missing half. Leaving it empty sends the
+        # whole fused paragraph back through the draft stage instead.
+        complete = all((b.target_text or "").strip() for b in run_blocks)
+        joined_target = (
+            join_continuous_text([b.target_text or "" for b in run_blocks]) if complete else ""
+        )
 
         elem = _with_element_source(block.element, joined_source)
         elem = dataclasses.replace(elem, span=CompositeSpan(boxes=run.boxes))

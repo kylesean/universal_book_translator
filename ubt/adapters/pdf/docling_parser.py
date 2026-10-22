@@ -1930,6 +1930,7 @@ def _pages_without_text(
     path: Path,
     blocks: Sequence[IRBlock],
     page_range: tuple[int, int] | None,
+    page_scope: Sequence[int] | None = None,
 ) -> tuple[list[int], int]:
     """Pages in scope that carry no textual block, and the document's page count.
 
@@ -1937,6 +1938,13 @@ def _pages_without_text(
     layer to translate, which is exactly the page OCR exists for. Returns
     ``([], 0)`` when the PDF cannot be opened — the caller then has no evidence
     of a gap and must not invent one.
+
+    ``page_scope`` is the *actual* set of pages the run asked for, and it wins
+    over ``page_range``. The range is only the enclosing window of one extraction
+    chunk, so a non-contiguous selection (``--pages 1,50``) arrives as
+    ``(1, 50)``; treating that interval as the requirement reported pages 2-49
+    as unreadable and refused a run whose pages were all fine. ``None`` keeps
+    the range (or the whole document) as the requirement.
     """
     import pypdfium2 as pdfium
 
@@ -1951,9 +1959,13 @@ def _pages_without_text(
         except Exception as exc:
             logger.warning("Page-coverage probe: cannot open '%s': %s", path.name, exc)
             return [], 0
-    first = page_range[0] if page_range else 1
-    last = min(page_range[1], total) if page_range else total
-    return [p for p in range(first, last + 1) if p not in text_covered], total
+    if page_scope is not None:
+        required = sorted({p for p in page_scope if 1 <= p <= total})
+    else:
+        first = page_range[0] if page_range else 1
+        last = min(page_range[1], total) if page_range else total
+        required = list(range(first, last + 1))
+    return [p for p in required if p not in text_covered], total
 
 
 def vlm_fallback_missing_pages(
@@ -1965,8 +1977,14 @@ def vlm_fallback_missing_pages(
     ocr_model: str | None = None,
     page_range: tuple[int, int] | None = None,
     allow_page_upload: bool | None = None,
+    *,
+    page_scope: Sequence[int] | None = None,
 ) -> list[IRBlock]:
     """Transcribe missing pages or weak/mixed pages via vlm/ core.
+
+    ``page_scope`` is the run's actual page selection (``--pages``), passed
+    through so a non-contiguous choice is not widened to its enclosing range;
+    see :func:`_pages_without_text`.
 
     Four-tier fallback controlled by ``UBT_VLM_SCAN_FALLBACK``:
     - ``off`` (default): untouched blocks, 0 behavior change.
@@ -1992,7 +2010,7 @@ def vlm_fallback_missing_pages(
             # some scanned pages used to pass this branch because one text block
             # anywhere satisfied ``_has_text_content``, so those pages shipped
             # silently absent from the delivered book.
-            missing, total = _pages_without_text(path, blocks, page_range)
+            missing, total = _pages_without_text(path, blocks, page_range, page_scope=page_scope)
             return _reject_empty_book(
                 path,
                 blocks,
@@ -2020,9 +2038,13 @@ def vlm_fallback_missing_pages(
             logger.warning("VLM fallback: cannot open '%s': %s", path.name, exc)
             return blocks
 
-    first = page_range[0] if page_range else 1
-    last = min(page_range[1], total) if page_range else total
-    missing = [p for p in range(first, last + 1) if p not in text_covered]
+    if page_scope is not None:
+        required = sorted({p for p in page_scope if 1 <= p <= total})
+    else:
+        first = page_range[0] if page_range else 1
+        last = min(page_range[1], total) if page_range else total
+        required = list(range(first, last + 1))
+    missing = [p for p in required if p not in text_covered]
     proofread_pages: set[int] = set()
 
     if mode in (VlmFallbackMode.WEAK, VlmFallbackMode.ALL):

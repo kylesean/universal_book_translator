@@ -30,6 +30,7 @@ from ubt.core.ir.models import (
     IRBlock,
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
+from ubt.core.zip_safety import ZipReadBudget
 from ubt.model.ast import Table as ASTTable
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,56 @@ def _resolve_east_asia_font(target_lang: str | None) -> str | None:
 
 #: Dublin Core namespace on the ``docProps/core.xml`` title element.
 _DC_TITLE = "{http://purl.org/dc/elements/1.1/}title"
+
+#: Members a DOCX body parse must materialise. ``python-docx`` opens the package
+#: with a plain ``zipfile`` and reads every part it needs with no cap of its own,
+#: so these are the declared sizes that decide whether the body parse is safe.
+#: ``word/document.xml`` is the payload (a 500 KB member can declare 10 GB); the
+#: rest are the package scaffolding python-docx also unmarshals.
+_DOCX_BODY_MEMBERS = (
+    "word/document.xml",
+    "word/styles.xml",
+    "word/numbering.xml",
+    "word/settings.xml",
+)
+
+
+def _guard_package_size(path: Path) -> None:
+    """Refuse a DOCX whose body part declares a bomb-scale size.
+
+    ``python-docx`` decompresses whatever the central directory declares, so a
+    crafted ``word/document.xml`` takes the process down in ``Document(...)``
+    before any UBT code sees a block — the kernel OOM-kills it, and there is no
+    traceback to diagnose from. The zip budget in :mod:`ubt.core.zip_safety`
+    already guards every *member read* UBT performs itself (EPUB, TMX, XLIFF,
+    the core-properties title); this closes the one path where the read happens
+    inside a third-party loader.
+
+    The check is on the *declared* size, so it costs one central-directory
+    parse: no bytes are decompressed to make the decision. An unreadable or
+    non-zip file is left to ``python-docx`` to report, so its own error message
+    (which names the file) is not replaced by a zip error.
+    """
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(path) as zf:
+            budget = ZipReadBudget()
+            for name in _DOCX_BODY_MEMBERS:
+                try:
+                    info = zf.getinfo(name)
+                except KeyError:
+                    continue
+                if not budget.allow(name, info.file_size):
+                    raise DocumentParseError(
+                        f"Refusing to parse {path.name}: its {name} declares "
+                        f"{info.file_size} bytes, over the "
+                        f"{budget.max_member_bytes}-byte decompression cap for one "
+                        "archive member. A legitimate book body never reaches it; "
+                        "this is the shape of a zip bomb."
+                    )
+    except zipfile.BadZipFile:
+        return
 
 
 def _core_title(path: Path) -> str:
@@ -139,6 +190,7 @@ class DOCXAdapter(BaseDocumentAdapter):
 
     def _parse_blocks_sync(self, path: Path, chapter: ChapterMeta) -> list[IRBlock]:
         """Build the typed blocks from the DOCX document structure."""
+        _guard_package_size(path)
         doc = Document(str(path))
         pairs = walk_docx_elements(doc)
         elements = [p[0] for p in pairs]
@@ -356,6 +408,7 @@ class DOCXAdapter(BaseDocumentAdapter):
     ) -> Path:
         """Perform the actual document edit + atomic save."""
         source_path = Path(manifest.source_path)
+        _guard_package_size(source_path)
         doc = Document(str(source_path))
         pairs = walk_docx_elements(doc)
         elements = [p[0] for p in pairs]

@@ -21,7 +21,7 @@ import gc
 import importlib
 import importlib.util
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -175,8 +175,12 @@ class _PDFRenderStackMixin:
         path: Path,
         blocks: list[IRBlock],
         page_range: tuple[int, int] | None,
+        page_scope: Sequence[int] | None = None,
     ) -> list[IRBlock]:
         """Engine-specific per-chunk enrichment; default is a no-op.
+
+        ``page_scope`` is the run's own page selection when it is narrower than
+        ``page_range`` (a non-contiguous ``--pages``); see ``parse_stream``.
 
         Async so an override can off-load blocking work: Docling's textless-page
         VLM fallback (default OFF via ``UBT_VLM_SCAN_FALLBACK``) does network
@@ -253,7 +257,15 @@ class _PDFRenderStackMixin:
                 chunk_set = set(chunk_pages)
                 blocks = [b for b in blocks if b.bbox is None or b.bbox.page in chunk_set]
 
-            blocks = await self._post_extract_blocks(path, blocks, chunk_range)
+            blocks = await self._post_extract_blocks(
+                path,
+                blocks,
+                chunk_range,
+                # The run's own selection, not the chunk's enclosing window:
+                # ``--pages 1,50`` arrives as the range ``(1, 50)``, and treating
+                # that interval as required reported pages 2-49 as unreadable.
+                sorted(chunk_pages) if pages else None,
+            )
 
             # Re-key block IDs and spine indices so they are globally unique and monotonic across chunks
             if len(page_chunks) > 1:
@@ -382,6 +394,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         path: Path,
         blocks: list[IRBlock],
         page_range: tuple[int, int] | None,
+        page_scope: Sequence[int] | None = None,
     ) -> list[IRBlock]:
         """Textless-page VLM fallback (default OFF via UBT_VLM_SCAN_FALLBACK)."""
         return await asyncio.to_thread(
@@ -394,6 +407,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             self.ocr_model,
             page_range,
             self.allow_page_upload,
+            page_scope=page_scope,
         )
 
     def _extract_blocks_sync(
@@ -464,6 +478,8 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         ocr_model: str | None = None,
         page_range: tuple[int, int] | None = None,
         allow_page_upload: bool | None = None,
+        *,
+        page_scope: Sequence[int] | None = None,
     ) -> list[IRBlock]:
         """Transcribe missing/weak pages via vlm/ core (delegates to docling_parser)."""
         return vlm_fallback_missing_pages(
@@ -475,6 +491,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             ocr_model,
             page_range,
             allow_page_upload,
+            page_scope=page_scope,
         )
 
     def _resolve_formula_enrichment(self, path: Path | None = None) -> bool:

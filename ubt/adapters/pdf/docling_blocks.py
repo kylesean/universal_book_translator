@@ -521,6 +521,15 @@ def resolve_overlapping_formula_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
     on ``FORMULA`` alone therefore made this function a no-op for the exact
     documents it was written for — the measured result was a duplicated
     ``(A.14d)`` row and a second copy carrying only "bTc tan gθ + …".
+
+    **An ``IMAGE`` block's ``source_text`` is an asset path, not text.** The two
+    shapes therefore cannot share one merge rule: concatenating a ``FORMULA``'s
+    LaTeX with a path (or two paths) produced a value that names no file, and the
+    renderer turned the equation into a "[missing figure]" placeholder. Only two
+    ``FORMULA`` blocks merge their text; when either side is a crop, the survivor
+    keeps its own ``source_text`` and the loser is dropped — a read LaTeX formula
+    wins over a raster of the same region, because native math re-typesets while
+    a crop cannot.
     """
     if len(blocks) < 2:
         return blocks
@@ -534,8 +543,14 @@ def resolve_overlapping_formula_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
             and out[-1].bbox is not None
             and b.bbox.page == out[-1].bbox.page
         ):
-            prev_box = out[-1].bbox
+            prev = out[-1]
+            prev_box = prev.bbox
             cur_box = b.bbox
+            # Both were narrowed to non-None by the guard above; mypy cannot see
+            # it through ``out[-1]``, and ``prev`` is the same object.
+            if prev_box is None or cur_box is None:  # pragma: no cover - guard above
+                out.append(b)
+                continue
             y_overlap = min(prev_box.y1, cur_box.y1) - max(prev_box.y0, cur_box.y0)
             x_overlap = min(prev_box.x1, cur_box.x1) - max(prev_box.x0, cur_box.x0)
             if y_overlap > 2.0 and x_overlap > 10.0:
@@ -546,15 +561,28 @@ def resolve_overlapping_formula_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
                     x1=max(prev_box.x1, cur_box.x1),
                     y1=max(prev_box.y1, cur_box.y1),
                 )
-                prev_txt = (out[-1].source_text or "").strip()
-                cur_txt = (b.source_text or "").strip()
-                merged_txt = (
-                    f"{prev_txt}\n{cur_txt}".strip()
-                    if cur_txt and cur_txt not in prev_txt
-                    else prev_txt
-                )
-                out[-1].set_bbox(union_box)
-                out[-1].set_source_text(merged_txt)
+                prev_is_text = prev.block_type is BlockType.FORMULA
+                cur_is_text = b.block_type is BlockType.FORMULA
+                if prev_is_text and cur_is_text:
+                    prev_txt = (prev.source_text or "").strip()
+                    cur_txt = (b.source_text or "").strip()
+                    merged_txt = (
+                        f"{prev_txt}\n{cur_txt}".strip()
+                        if cur_txt and cur_txt not in prev_txt
+                        else prev_txt
+                    )
+                    prev.set_bbox(union_box)
+                    prev.set_source_text(merged_txt)
+                elif cur_is_text and not prev_is_text:
+                    # The crop came first and the read LaTeX second: keep the
+                    # LaTeX. Its own text is already the right payload, so this
+                    # is a drop of the previous block, not a rewrite.
+                    b.set_bbox(union_box)
+                    out[-1] = b
+                else:
+                    # Both crops, or a crop after a read formula: the earlier
+                    # block already carries the payload the page needs.
+                    prev.set_bbox(union_box)
                 continue
         out.append(b)
     return out

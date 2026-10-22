@@ -410,9 +410,12 @@ def _render_element(
         # shipping. The name is enough to correlate a figure with its block.
         asset_name = html.escape(Path(element.asset_id).name or element.asset_id)
         if asset_href:
+            # Self-closed on purpose: this fragment is also lowered into the
+            # EPUB's ``text.xhtml`` (``application/xhtml+xml``), where there are
+            # no void elements and a bare ``<img>`` is a well-formedness error.
             return (
                 f'<figure data-asset="{asset_name}">'
-                f'<img src="{html.escape(asset_href, quote=True)}" alt="">'
+                f'<img src="{html.escape(asset_href, quote=True)}" alt=""/>'
                 "</figure>"
             )
         return f'<figure class="figure-missing"><p>[figure: {asset_name}]</p></figure>'

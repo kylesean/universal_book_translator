@@ -26,6 +26,7 @@ Design notes that are load-bearing:
 
 from __future__ import annotations
 
+import hashlib
 import re
 import shutil
 from collections.abc import Iterable, Sequence
@@ -1840,10 +1841,7 @@ class TypstDocumentRenderer:
                     f"#block(text(size: 9pt, fill: luma(60))[{self._prose(figure.caption)}])"
                 )
             return f"#block(text(fill: luma(140), size: 9pt)[{note}])"
-        target = build_dir / resolved.name
-        if not target.exists() or target.stat().st_size != resolved.stat().st_size:
-            shutil.copy2(resolved, target)
-            self.stats.assets_copied += 1
+        target = self._copy_asset(resolved, build_dir)
         self.stats.figures += 1
         self.stats.blocks_rendered += 1
         # A graphic renders at its own physical width when that is narrower than
@@ -1869,6 +1867,28 @@ class TypstDocumentRenderer:
                 "  numbering: none,\n)"
             )
         return f'#figure(image("{target.name}", width: {width}), numbering: none)'
+
+    def _copy_asset(self, resolved: Path, build_dir: Path) -> Path:
+        """Copy one figure into ``build_dir`` under a content-addressed name.
+
+        The build directory is flat and Typst addresses assets by the name in
+        ``image("…")``, so two distinct pictures that share a basename (every
+        extractor writes ``figure.png`` or ``image1.png``) used to collide: the
+        second copy overwrote the first, or — when the sizes matched, because
+        the guard compared ``st_size`` — was skipped entirely, and the first
+        figure silently rendered the second picture.
+
+        Hashing the bytes makes the name a function of the content, so a
+        collision can only happen between identical files, where sharing one
+        copy is correct. The stem is kept readable for a human inspecting a
+        failed build; the digest is what disambiguates.
+        """
+        digest = hashlib.sha256(resolved.read_bytes()).hexdigest()[:16]
+        target = build_dir / f"{resolved.stem}-{digest}{resolved.suffix.lower()}"
+        if not target.exists():
+            shutil.copy2(resolved, target)
+            self.stats.assets_copied += 1
+        return target
 
     def _resolve_asset(self, asset: str) -> Path | None:
         """Absolute path of an extracted asset, or ``None`` when unresolvable."""

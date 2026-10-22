@@ -13,7 +13,14 @@ from ubt.adapters.pdf.page_chunking import (
     get_pdf_page_chunk_size,
 )
 from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
-from ubt.core.ir.models import BlockType, BookManifest, ChapterMeta, IRBlock, make_element
+from ubt.core.ir.models import (
+    BlockType,
+    BookManifest,
+    BoundingBox,
+    ChapterMeta,
+    IRBlock,
+    make_element,
+)
 
 pytestmark = pytest.mark.fast
 
@@ -202,3 +209,44 @@ async def test_docling_adapter_out_of_core_streaming(tmp_path: Path) -> None:
         assert yielded_chapters[0].blocks[0].id == "pdf_main#b0001"
         assert yielded_chapters[1].blocks[0].id == "pdf_main#b0002"
         assert mock_gc.call_count == 2
+
+
+def test_a_non_contiguous_page_selection_is_not_widened_to_its_range(
+    tmp_path: Path,
+) -> None:
+    """``--pages 1,4`` must require pages 1 and 4, not 1 through 4.
+
+    ``parse_stream`` extracts one chunk whose range is ``(1, 4)``, and the
+    coverage guard used to treat that interval as the requirement: pages 2-3
+    were never asked for, had no blocks, and the run was refused as a partial
+    read of a document it had read completely.
+    """
+    from pdf_builders import write_text_pdf
+
+    from ubt.adapters.pdf.docling_parser import _pages_without_text
+
+    pdf = write_text_pdf(
+        tmp_path / "four.pdf",
+        [["one"], ["two"], ["three"], ["four"]],
+    )
+    blocks = [
+        IRBlock(
+            element=make_element(
+                id=f"pdf_main#b{page:04d}",
+                spine_index=page,
+                block_type=BlockType.NARRATIVE,
+                source_text=f"page {page}",
+                bbox=BoundingBox(page=page, x0=10.0, y0=10.0, x1=200.0, y1=30.0),
+            )
+        )
+        for page in (1, 4)
+    ]
+
+    # Range only (the pre-fix behaviour): the pages in between look unread.
+    widened, total = _pages_without_text(pdf, blocks, (1, 4))
+    assert total == 4
+    assert widened == [2, 3], "the range form is what produced the false gap"
+
+    # The actual selection: nothing is missing.
+    exact, _ = _pages_without_text(pdf, blocks, (1, 4), page_scope=[1, 4])
+    assert exact == []

@@ -191,6 +191,16 @@ _LATEX_OPERATOR_RESCUE: dict[str, str] = {
     "displaystyle": "",
     "textstyle": "",
     "scriptstyle": "",
+    # Layout/annotation commands with no glyph. Left out, they fell through to
+    # the unknown-command guard and were emitted as ``#"nonumber"`` -- valid
+    # Typst that *prints the command name* into the equation, so no compile
+    # gate could catch it. ``\nonumber`` is on nearly every display equation
+    # of an ``align`` environment.
+    "nonumber": "",
+    "notag": "",
+    "displaylimits": "",
+    "hfill": "",
+    "noindent": "",
 }
 #: NOTE: ``\mathrm`` is deliberately NOT in the table above. It is handled by
 #: ``_TEXTLIKE_CMD_RE``, which preserves its argument as an upright label; a
@@ -223,12 +233,20 @@ def _rescue_operators(body: str) -> str:
     hints (``\\limits``, ``\\displaystyle``) drop out entirely. Applied only to
     commands absent from the symbol table, so it can never shadow a real
     mapping.
+
+    The lookahead is ``(?![A-Za-z])``, not ``\\b``: ``\\limits`` is almost
+    always written ``\\limits_{i=1}``, and ``s``/``_`` are both word
+    characters, so ``\\b`` never matched the production spelling. The command
+    then survived to the unknown-command guard and was printed into the
+    equation as ``#"limits"`` — valid Typst, so no compile gate caught it.
+    ``\\operatorname*`` (the starred operator form) is matched too; the ``*``
+    is part of the command name, not a multiplication.
     """
     for name, replacement in _LATEX_OPERATOR_RESCUE.items():
         if name == "operatorname":
-            body = re.sub(r"\\operatorname\{([^{}]*)\}", r"\1", body)
+            body = re.sub(r"\\operatorname\*?\s*\{([^{}]*)\}", r"\1", body)
             continue
-        body = re.sub(rf"\\{name}\b", replacement, body)
+        body = re.sub(rf"\\{name}(?![A-Za-z])", replacement, body)
     return body
 
 
