@@ -484,6 +484,7 @@ def render_fragment(
     *,
     asset_resolver: AssetResolver | None = None,
     bilingual: bool = False,
+    math_renderer: str = "katex",
 ) -> tuple[str, tuple[Placement, ...]]:
     """The element HTML and every placement, without the document wrapper.
 
@@ -503,8 +504,23 @@ def render_fragment(
     Unicode (the same guarantee the PDF renderer's degrade path gives), and a
     figure resolves through ``asset_resolver`` to an actual ``<img>`` instead of
     an empty ``<figure data-asset>`` box.
+
+    ``math_renderer`` selects how a formula is delivered:
+
+    * ``"katex"`` (the HTML companion) emits delimited LaTeX in a ``.math-tex``
+      span for the page's KaTeX auto-render to typeset, with the Unicode
+      reading in ``title``/``aria-label``.
+    * ``"unicode"`` (the EPUB companion) emits the Unicode reading as the
+      visible text. An EPUB cannot rely on a script: a reading system is
+      frequently offline, and shipping raw ``$$\\frac{a}{b}$$`` meant the
+      reader saw LaTeX source in the body. MathML would be the native answer but
+      requires a converter the package does not depend on, so the same
+      degradation the PDF renderer uses is the honest delivery.
     """
     from ubt.render.typst.math_transpiler import clean_math_fallback_text
+
+    if math_renderer not in ("katex", "unicode"):
+        raise ValueError(f"unknown math_renderer: {math_renderer!r}")
 
     resolve = asset_resolver or _default_asset_resolver
     parts: list[str] = []
@@ -553,12 +569,23 @@ def render_fragment(
             # only if the KaTeX CDN is unreachable.
             latex_body = _math_body_for_katex(text)
             fallback = clean_math_fallback_text(latex_body)
-            escaped_latex = html.escape(latex_body)
-            escaped_fallback = html.escape(fallback, quote=True)
-            parts.append(
-                f'<span class="math-tex" title="{escaped_fallback}" '
-                f'aria-label="{escaped_fallback}">$${escaped_latex}$$</span>'
-            )
+            if math_renderer == "unicode":
+                # EPUB: no script will run, so the Unicode reading must be the
+                # visible text. The LaTeX goes in ``title`` for a reader that
+                # wants to copy the source.
+                parts.append(
+                    f'<span class="math-tex math-unicode" '
+                    f'title="{html.escape(latex_body, quote=True)}" '
+                    f'data-latex="{html.escape(latex_body, quote=True)}">'
+                    f"{html.escape(fallback)}</span>"
+                )
+            else:
+                escaped_latex = html.escape(latex_body)
+                escaped_fallback = html.escape(fallback, quote=True)
+                parts.append(
+                    f'<span class="math-tex" title="{escaped_fallback}" '
+                    f'aria-label="{escaped_fallback}">$${escaped_latex}$$</span>'
+                )
             placements.append(
                 Placement(
                     block.id,
