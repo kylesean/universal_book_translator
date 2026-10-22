@@ -268,13 +268,29 @@ def _style_value_allowed(value: str) -> bool:
         url = match.group(2).strip()
         if url and not _url_scheme_allowed("src", url):
             return False
+        # A remote ``url()`` is a network fetch from the reader's device — a
+        # tracking beacon, and the channel CSS attribute-selector exfiltration
+        # uses. The same rule the stylesheet gate applies to ``@import``; an
+        # inline style is the smaller surface but not a different one.
+        if url and _url_is_remote(url):
+            return False
     return True
 
 
 def _url_is_remote(value: str) -> bool:
-    """True for an absolute/protocol-relative URL (anything that leaves the package)."""
+    """True for a URL that makes the reading device fetch over the network.
+
+    A ``data:`` URI is *inline bytes*, not a fetch — it never leaves the package,
+    so it is not remote. (It is still subject to :func:`_url_scheme_allowed`,
+    which already permits it for ``src`` and denies it for ``href``.)
+    """
     probe = _URL_CONTROL_RE.sub("", value).strip()
-    return probe.startswith("//") or bool(_SCHEME_RE.match(probe))
+    if probe.startswith("//"):
+        return True
+    match = _SCHEME_RE.match(probe)
+    if match is None:
+        return False
+    return match.group(1).lower() != "data"
 
 
 def scrub_css_text(css: str) -> str:
@@ -305,9 +321,15 @@ def scrub_css_text(css: str) -> str:
 
     def _gated(match: re.Match[str]) -> str:
         url = match.group(2).strip()
-        if not url or _url_scheme_allowed("src", url):
+        if not url:
             return match.group(0)
-        return 'url("")'
+        # A remote ``url()`` fetches from the network: tracking, and the channel
+        # CSS attribute-selector exfiltration uses. The docstring has always
+        # promised "remote targets go", but only ``@import`` was gated — a
+        # ``background: url(https://…)`` shipped verbatim.
+        if not _url_scheme_allowed("src", url) or _url_is_remote(url):
+            return 'url("")'
+        return match.group(0)
 
     return _CSS_URL_RE.sub(_gated, css)
 
@@ -1239,6 +1261,17 @@ class _AttributeCollector(HTMLParser):
             self.attrs = list(attrs)
 
 
+#: Attributes that make the reader's device *fetch* a URL while displaying the
+#: document. A remote value is a tracking beacon (and, for a form, an
+#: exfiltration channel), so it goes. ``href`` is deliberately absent: a
+#: hyperlink only fetches when the reader clicks it, which is the reader's
+#: decision, and stripping external references from a bibliography would be
+#: destroying content the source meant to keep.
+_LOADING_ATTR_NAMES = frozenset(
+    {"src", "poster", "action", "formaction", "data", "xlink:href", "background"}
+)
+
+
 def _scrub_attr_list(
     attrs: list[tuple[str, str | None]],
 ) -> list[tuple[str, str | None]] | None:
@@ -1258,6 +1291,15 @@ def _scrub_attr_list(
             removed = True
             continue
         if value and lowered in _URL_ATTR_NAMES and not _url_scheme_allowed(lowered, value):
+            removed = True
+            continue
+        # A *loading* attribute with a remote URL makes the reading device call
+        # out while the document is merely displayed: a tracking pixel in
+        # ``<img src>``, a beacon in ``poster``, a credential-harvesting
+        # ``<form action>``. The scrubber already dropped a remote ``<link>``
+        # and a remote ``@import`` for the same reason; these were the remaining
+        # doors, and the docstring's "remote targets go" was false for them.
+        if value and lowered in _LOADING_ATTR_NAMES and _url_is_remote(value):
             removed = True
             continue
         if value and lowered == "style" and not _style_value_allowed(value):
