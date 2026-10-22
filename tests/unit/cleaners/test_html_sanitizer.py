@@ -197,6 +197,52 @@ def test_scrub_is_idempotent() -> None:
     assert scrub_source_document(once) == once
 
 
+# --------------------------------------------------------------------------- #
+# RAWTEXT bodies are inert under BOTH parsers
+# --------------------------------------------------------------------------- #
+#
+# `<style>`, `<textarea>` and `<title>` bodies are RAWTEXT to an HTML5 parser, so
+# a `<` inside them is literal text there. An EPUB content document is XHTML —
+# XML, where those elements have no such special case and `<style><script>` is a
+# real `script` child that executes. The scrubber must be safe under the stricter
+# parser, because the same code path guards source EPUB members and source HTML.
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        "<style><script>alert(1)</script></style>",
+        '<textarea><img src="x" onerror="alert(1)"></textarea>',
+        "<svg><title><script>alert(1)</script></title></svg>",
+    ],
+)
+def test_a_rawtext_body_cannot_carry_a_live_element(markup: str) -> None:
+    """No child element may survive inside a RAWTEXT body."""
+    import xml.etree.ElementTree as ET
+
+    out = scrub_source_document(markup)
+    root = ET.fromstring(f'<root xmlns="http://www.w3.org/1999/xhtml">{out}</root>')
+    tags = [element.tag.split("}")[-1] for element in root.iter()]
+    assert "script" not in tags, out
+    assert "img" not in tags, out
+
+
+def test_a_clean_rawtext_body_is_byte_exact() -> None:
+    """Escaping must not rewrite CSS or titles that never had a tag-open char."""
+    for markup in (
+        "<style>p{color:red}</style>",
+        "<title>Chapter 1</title>",
+        '<textarea placeholder="notes"></textarea>',
+    ):
+        assert scrub_source_document(markup) == markup
+
+
+def test_a_style_body_still_gets_the_css_gate_after_neutralising() -> None:
+    """Neutralising `<` must not skip the remote-import policy."""
+    out = scrub_source_document("<style>@import url(https://evil/x.css);p{}</style>")
+    assert "@import" not in out
+
+
 def test_a_prose_lt_before_a_close_tag_does_not_eat_the_close() -> None:
     """``<b on the other hand</p>`` is prose, not a tag with attributes.
 

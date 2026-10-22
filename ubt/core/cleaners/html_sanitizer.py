@@ -1070,23 +1070,44 @@ class _SourceTagScrubber:
 
     @classmethod
     def _copy_raw_text(cls, markup: str, start: int, name: str, out: list[str]) -> int:
-        """Copy a raw-text element's body verbatim; return the index past its close.
+        """Copy a raw-text element's body, neutralised; return the index past its close.
 
-        ``<style>``/``<textarea>``/``<title>`` bodies are RAWTEXT: a ``<!--``
-        inside is CSS or literal text, not a comment. Scanning that body as
-        markup is what let ``<style><!--</style><img onerror=…>`` smuggle an
-        unscrubbed tag past the attribute scrubber. The first closing tag ends
-        the body, matching HTML; with none, the remainder is copied inert.
+        ``<style>``/``<textarea>``/``<title>`` bodies are RAWTEXT to an HTML5
+        parser: a ``<!--`` inside is CSS or literal text, not a comment. Scanning
+        that body as markup is what let ``<style><!--</style><img onerror=…>``
+        smuggle an unscrubbed tag past the attribute scrubber. The first closing
+        tag ends the body, matching HTML; with none, the remainder is copied.
+
+        The body is not copied *verbatim*, though. An EPUB content document is
+        XHTML — an XML parser, where ``<style>`` and ``<textarea>`` have no
+        RAWTEXT special case at all: ``<style><script>alert(1)</script></style>``
+        yields a ``script`` child element and executes, and
+        ``<textarea><img src=x onerror=…></textarea>`` yields a live ``img``.
+        This scrubber is the one place both a source EPUB member and a source
+        HTML document pass through, so it must be safe under the stricter of the
+        two parsers.
+
+        Escaping the tag-open character is the fix that is correct in both: in
+        XML, ``&lt;script>`` decodes to the *text* ``<script>`` (never an
+        element); in HTML5 RAWTEXT the escaped form is inert CSS or literal
+        text. Only ``<`` is escaped — ``&lt;`` already decodes to text under both
+        parsers, so escaping ``&`` would rewrite clean documents for no gain.
+        A body with no ``<`` is copied byte-for-byte, so scrubbing a clean book
+        stays provably a no-op.
         """
         closing = _closing_tag_re(name)
         match = closing.search(markup, start)
         transform = scrub_css_text if name == "style" else None
+
+        def _neutralise(body: str) -> str:
+            if "<" in body:
+                body = body.replace("<", "&lt;")
+            return transform(body) if transform is not None else body
+
         if match is None:
-            body = markup[start:]
-            out.append(transform(body) if transform is not None else body)
+            out.append(_neutralise(markup[start:]))
             return len(markup)
-        body = markup[start : match.start()]
-        out.append(transform(body) if transform is not None else body)
+        out.append(_neutralise(markup[start : match.start()]))
         out.append(match.group(0))
         return match.end()
 
