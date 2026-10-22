@@ -6,9 +6,12 @@ pipeline, and re-typeset the result as a new document laid out by Typst.
 
 Consistency defenses: a mined book bible (terms and names) and a structural +
 quality gate run on every job. Hierarchical chapter memory runs only on the
-multi-chapter long route — a single-chapter document (which is how every PDF is
-ingested), any document over 40 chapters, and academic profiles get no rolling
-summary. Deterministic glossary enforcement is short-document only.
+multi-chapter long route — a single-chapter document, any document over 40
+chapters, and academic profiles get no rolling summary. A PDF up to 50 pages is
+ingested as one chapter; a longer one is split into internal page chunks that
+the draft stage sees as multiple chapters. Deterministic glossary enforcement is
+short-document by default; the long route opts in with
+`UBT_DETERMINISTIC_GLOSSARY_LONG_ROUTE=true`.
 
 ## Install
 
@@ -25,10 +28,13 @@ key, the ledger directory, Typst and CJK fonts, and says what breaks.
 
 ## Quick start
 
-Set the credential and the models. Every setting has one canonical `UBT_*`
-variable, and `ubt config` prints the whole list with the variable that sets
+Set the credential and the models. Every config-model setting has one canonical
+`UBT_*` variable, and `ubt config` prints those with the variable that sets
 each one; a provider block in `ubt.toml` / `~/.config/ubt/config.toml` can
-supply the same values instead.
+supply the same values instead. A few process-level switches
+(`UBT_OUTPUT_DIR`, `UBT_ALLOW_NO_AUTH`, `UBT_UI_LANG`, `UBT_LOG_LEVEL`,
+`UBT_PDF_STREAM_CHUNK_SIZE`, `UBT_VLM_DRIVER`) are read directly and are not
+part of that table.
 
 ```bash
 export UBT_LLM_API_KEY=sk-...              # the outbound LLM key
@@ -47,7 +53,9 @@ ubt translate book.pdf -l zh
 ```
 
 `-l` is `--target-lang`; `-s` is `--source-lang` (default `en`). Without `-o`
-the deliverable is written to `<documents>/UBT/<stem>_bilingual.pdf`. The run
+the deliverable is written to `<documents>/UBT/<stem>_bilingual<suffix>` — or
+`<stem>_mono<suffix>` when the run resolves monolingual (for example
+`--profile paper`), with the suffix following the input format. The run
 prints a Job ID at start, and that id is the resume handle:
 
 ```
@@ -140,9 +148,10 @@ counted in the denominator.
 ### Visual gate
 
 Every export runs a zero-token gate over the rendered PDF and writes
-`{stem}_visual_report.json` beside the deliverable. Tiers, in the order they
-run: `geometry` (line overlap, out-of-bounds), `type` (glyph size), `pixel`
-(blank page, black blocks), and optionally `vlm`. The report's `skipped_reason`
+`{stem}_{ext}_visual_report.json` beside the deliverable (for example
+`book_mono_pdf_visual_report.json`). Tiers: `geometry` (line overlap,
+out-of-bounds), `type` (glyph size), `pixel` (blank page, black blocks), and
+optionally `vlm`. The report's `skipped_reason`
 names the tiers that ran and the ones that did not, so a missing tier is never
 mistaken for a pass.
 
@@ -180,11 +189,12 @@ Measured against the current implementation, not aspirational:
 - **Text expansion**: there is no fixed box to overflow — the page reflows and
   pagination changes — so a translation is never shrunk to fit a source box.
 - **Per format**: DOCX footnotes/endnotes, column settings and TOC fields are
-  not read; a whole PDF is ingested as one chapter, so per-chapter resume and
-  billing do not apply to it.
+  not read; a PDF up to 50 pages is ingested as one chapter, so per-chapter
+  resume and billing do not apply to it.
 - **Bilingual output**: `dual` pairs each block's source line above its
-  translation; headings and formulas come out monolingual. A complementary
-  mono/dual companion file is written alongside the primary artifact.
+  translation; headings and tables pair too, while formulas come out
+  monolingual. With `--emit-both`, a complementary mono/dual companion file is
+  written alongside the primary artifact (off by default).
 - **Exchange formats**: XLIFF 2.1 and TMX import exist but are not
   standards-complete (no TBX/SRX), so hand-off to external CAT tooling is
   limited.

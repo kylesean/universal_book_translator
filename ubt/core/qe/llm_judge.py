@@ -261,6 +261,10 @@ class LLMJudgeQERunner(BaseQERunner):
         """LLM opinions are not calibrated enough to rank repair candidates."""
         return False
 
+    def score_source(self) -> str:
+        """A graded judge opinion, distinct from the heuristic's discrete bands."""
+        return "llm_judge"
+
     async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
         if not pairs:
             return []
@@ -452,6 +456,16 @@ class TieredQERunner(BaseQERunner):
         must ask, or ``pass_sample`` and the judge would never run at all.
         """
         return True
+
+    def score_source(self) -> str:
+        """Name the leg that actually produced this run's scores.
+
+        A tiered run is two engines: when the judge answered at least one pair
+        the stored numbers include graded opinions, otherwise every number is a
+        heuristic band. Reporting a flat "tiered" would hide that distinction
+        from the audit artifact, which is the whole point of the label.
+        """
+        return "llm_judge" if self._judged_any else self.heuristic.score_source()
 
     def with_languages(self, source_lang: str, target_lang: str) -> TieredQERunner:
         heuristic = self.heuristic.with_languages(source_lang, target_lang)

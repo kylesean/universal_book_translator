@@ -292,8 +292,8 @@ python_files = ["test_*.py"]
 addopts = "-m 'not slow and not legacy_drift' --timeout=600"
 markers = [
     "network: marks tests that require network access (e.g. Docling HuggingFace model downloads)",
-    "slow: marks tests that spawn heavy subprocesses (typst compiles, pandoc, pdftoppm) or the oxide/pdftoppm render A/B comparison; deselect with -m 'not slow'",
-    "fast: pure-logic unit tests cheap enough for the per-edit inner loop; `pytest -m fast` runs the whole tier in ~52 s",
+    "slow: marks tests that spawn a heavy *long-running* subprocess or a render A/B comparison (full-document typst renders, pandoc, pdftoppm, `python -m ubt` end-to-end); deselect with -m 'not slow'. Short single-snippet typst compiles are allowed in `fast` when CI installs typst before the tier — see docs/guides/TESTING_STRATEGY.md",
+    "fast: offline unit tests cheap enough for the per-edit inner loop (a single-snippet typst compile is allowed; CI installs typst before this tier); `pytest -m fast` runs the whole tier in about a minute",
     # AGENTS.md §2: a legacy check that blocks work and costs more than 15 min of
     # archaeology moves here instead of being deleted or left red. Quarantine is not
     # amnesty — the full local suite (and the stage-1 CI job once activated,

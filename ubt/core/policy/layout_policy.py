@@ -315,7 +315,7 @@ QA_LONG_BOOK_SAMPLE = 10
 # Default 30 covers a 26-page textbook chapter (chapter-3实战).
 # Display/registry default only: ``router_mode.decide`` resolves the live
 # ``UBTConfig.short_max_pages`` at call time, because this constant is frozen at
-# import and its ``_env_int`` parse accepts 0/garbage the config field rejects.
+# import and ignores ``UBT_SHORT_MAX_PAGES`` entirely.
 SHORT_CHAIN_MAX_PAGES = 30
 
 # ---------------------------------------------------------------------------

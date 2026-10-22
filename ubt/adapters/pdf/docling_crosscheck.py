@@ -11,7 +11,7 @@ When a text block's IoU with physical text lines falls below the threshold
 (default 0.60), or when a block with text content has no physical lines under
 it, the block is gracefully demoted to PRESERVED_OPAQUE:
 - Its element confidence is set to Confidence.UNKNOWN.
-- Its skip_translate and policy_translate are set to False/True (skip translation).
+- Its skip_translate and policy_translate are set to True/False (skip translation).
 - Its provenance records the mismatch details.
 - The block is rendered as its source text (see
   ``document_renderer._block_text``), so the reader sees the original rather

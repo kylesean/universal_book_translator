@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Pre-1.0, no tags yet. Everything below is in the current tree.
+Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Changed
 
@@ -198,7 +198,8 @@ Pre-1.0, no tags yet. Everything below is in the current tree.
 - Prompt-cache reuse: the static-prefix prompt topology is implemented and the
   run's cache-hit rate is **measured and reported** (`cache_hit_rate`), but the
   RFC's ">85% reuse" is a *design target*, not an enforced guarantee — it is
-  provider-dependent (only the Anthropic transport reads cache usage today) and
+  provider-dependent (Anthropic, OpenAI chat/responses and Gemini all report
+  cache usage; a gateway that omits it reads 0) and
   no gate asserts it.
 - `ubt/render/epub_view.py` is a generic re-render *companion*; the **in-place**
   EPUB/DOCX injection lives in the format adapters (`adapters/epub`, `adapters/docx`).
@@ -221,7 +222,8 @@ Pre-1.0, no tags yet. Everything below is in the current tree.
   evidence, an explicit `--pdf-engine` always wins, and a scanned document still
   escapes to the OCR-capable engine rather than extracting nothing.
 - Presets select the PDF parser: `preview` / `fast` pin the lightweight fast
-  path, `publication` / `standard` keep quality-first probe routing.
+  path, `publication` / `standard` use the lossless docling engine (the probe
+  reports evidence, it no longer routes).
 - The fast tier's coverage floor is 70% (was 58, which was too far under the
   baseline to guard anything), it runs under xdist, and CI installs a
   checksum-pinned Typst *before* the tier so the render-contract tests execute
@@ -259,10 +261,13 @@ Pre-1.0, no tags yet. Everything below is in the current tree.
   so cancelling one job no longer aborts another's retry wait.
 - Inline math Docling strips out of a sentence is put back.
 - Dead configuration knobs were deleted (`table_render_mode="overlay"`,
-  `cover_mode`, several inert formula and render-mode fields), and one that was
-  silently ignored (`prices_file` in a config file) is now wired.
+  `cover_mode`, several inert formula and render-mode fields), and `prices_file`
+  is now honoured via `UBT_PRICES_FILE` (a `[defaults]` entry is rejected by the
+  provider allow-list).
 - Ledger and report durability: the most-read reports are written atomically,
-  the v13 to v14 migration keeps its data, and the schema carries the element's
+  the schema is a single flat baseline (`SCHEMA_VERSION = 1000`) and a pre-1000
+  database is refused with instructions rather than migrated in place, and the
+  schema carries the element's
   structural fields and canonical character range so a resumed run renders the
   same document as the original.
 - A file-based batch that fetched a block which stayed pending now fails loudly

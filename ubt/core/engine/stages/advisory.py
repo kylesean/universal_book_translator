@@ -172,7 +172,7 @@ async def run_difficulty_advisory_stage(
     """Step the render mode down on live repair burden. Yields no events.
 
     Only ``auto`` enforcement may move the user's choice, and only one notch
-    (inline -> alternating -> monolingual). The short chain fixed its mode in
+    (``dual`` -> ``mono``). The short chain fixed its mode in
     phase 1, so difficulty is recorded for the report but cannot downgrade.
     """
     config = ctx.config

@@ -206,6 +206,12 @@ def test_source_and_target_runs_are_merged_source_first() -> None:
 
 
 def test_a_bold_target_run_renders_as_strong() -> None:
-    text = "成本降低了 50.0%；随后"
+    """Plain bold rendering, with no full-width punctuation near the run.
+
+    The sibling test above exercises the *folded* fallback (``50.0%`` next to
+    ``；``); this one must take the exact-match branch, or neither test covers
+    the ordinary path.
+    """
+    text = "成本降低了 50.0% 随后"
     out = render_prose(text, _runs(("50.0%", True, False, False, None)))
     assert "#strong[50.0%]" in out

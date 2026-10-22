@@ -63,10 +63,10 @@ uv run pytest -m slow -q
   check all run with `pass_filenames: false`, so a push cannot pass just because
   the files you happened to touch are clean.
 - **Coverage floor 70%.** A regression guard, not a quality target: it sits about
-  3 points under the fast-tier baseline so ordinary work never trips it, but a
-  large deletion-without-tests or a new untested module does. Paired with
-  `tests/unit/test_no_orphaned_modules.py`, it catches the class of rot that
-  lint, types and tests alone let through.
+  7 points under the fast-tier baseline (measured ~77%) so ordinary work never
+  trips it, but a large deletion-without-tests or a new untested module does.
+  Paired with `tests/unit/test_no_orphaned_modules.py`, it catches the class of
+  rot that lint, types and tests alone let through.
 - **The layering invariant.** `scripts/dump_compiler_edges.py` is the acceptance
   tool for the rule in `ubt/core/ports.py`: no module-level `ubt.core` import of
   `ubt.pipeline` / `ubt.segment` / `ubt.translate`, no
@@ -101,12 +101,14 @@ uv run pytest -o addopts="" -q        # everything; also clears --timeout
 and `--timeout=600`. That is deliberate: it is how multi-minute live runs
 (e.g. large live model sweeps) are meant to be run.
 
-CI installs Typst and runs the slow tier for real: roughly 21 cases must run, 8
-skip and 6 parameterized cases collapse to zero. Three groups skip there on
-purpose, per the "slow tier" section of `docs/guides/TESTING_STRATEGY.md`:
-`test_pdf_engine_differential.py` (6 cases) needs the `pdf` extra, which CI does
-not install, so the two-engine differential guard only runs locally;
-`test_corpus_acceptance.py` (2 cases) and the parameterized
+CI installs Typst and runs the slow tier for real: roughly 26 cases must run, 8
+skip and 6 parameterized cases collapse to zero (40 collected). Three groups
+skip there on purpose, per the "slow tier" section of
+`docs/guides/TESTING_STRATEGY.md`:
+`test_pdf_engine_differential.py` (6 cases) needs the `pdf` extra, which the
+slow-tier CI job does not install — a separate `docling-engine` job installs it
+but runs only the fast tier — so the two-engine differential guard only runs
+locally; `test_corpus_acceptance.py` (2 cases) and the parameterized
 `test_publish_corpus_sweep.py` (6 cases) need the gitignored real-document
 corpus, so they collapse to zero. If those numbers disagree with a real run,
 trust the run: `uv run pytest -m slow -q -rs` prints the reasons.
@@ -150,7 +152,7 @@ often to track: a clone carries the code and tests, not those notes. Code and
 tests must therefore treat a missing `docs/` directory as normal, and `docs/` is
 excluded from the sdist too. The documents that ship are the root-level files:
 `README.md`, `ARCHITECTURE.md`, `GLOSSARY.md`, `CONTRIBUTING.md`,
-`CHANGELOG.md`.
+`CHANGELOG.md`, `SEMANTIC_JUDGE.md`, and `ubt.toml.example`.
 
 `docs/guides/TESTING_STRATEGY.md` is the authority on how tests are written and
 run; `docs/guides/CI_AND_QUALITY_GATES.md` is the authority on where the gates

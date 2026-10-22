@@ -330,7 +330,7 @@ def apply_config_overrides(base: UBTConfig, overrides: Mapping[str, Any]) -> UBT
     invalid enum/int is rejected here rather than surfacing mid-run.
     """
     from ubt.core.config import _env_supplied_field_names
-    from ubt.core.providers import load_layer, merge_provider_under
+    from ubt.core.providers import load_layer_config, merge_provider_under
 
     job_config = base.model_copy(deep=True)
     valid_fields = set(UBTConfig.model_fields)
@@ -340,8 +340,8 @@ def apply_config_overrides(base: UBTConfig, overrides: Mapping[str, Any]) -> UBT
     # the request's explicit values, with environment-pinned fields above it.
     # ``repair_model`` follows the effective draft via ``_check_invariants``,
     # which assignment re-runs — one owner, so both paths agree.
-    fields = load_layer(str(provider_name) if provider_name else None)
-    effective = merge_provider_under(overrides, fields, env_supplied=_env_supplied_field_names())
+    layer_cfg = load_layer_config(str(provider_name) if provider_name else None)
+    effective = merge_provider_under(overrides, layer_cfg, env_supplied=_env_supplied_field_names())
 
     for key, value in effective.items():
         if value is not None and key in valid_fields:

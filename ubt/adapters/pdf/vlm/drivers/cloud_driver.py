@@ -202,7 +202,7 @@ class CloudOcrDriver:
 
         raw_lines = [ln.strip() for ln in content.split("\n") if ln.strip()]
         vlm_lines = [
-            VlmLine(text=text, reading_index=i, confidence=1.0, measured_box=None)
+            VlmLine(text=text, confidence=1.0, measured_box=None)
             for i, text in enumerate(raw_lines)
         ]
 
@@ -273,7 +273,7 @@ class CloudOcrDriver:
                     img_w,
                     img_h,
                 )
-            for idx, item in enumerate(data["lines"]):
+            for item in data["lines"]:
                 text = str(item.get("text", "")).strip()
                 if not text:
                     continue
@@ -282,7 +282,6 @@ class CloudOcrDriver:
                 vlm_lines.append(
                     VlmLine(
                         text=text,
-                        reading_index=idx,
                         confidence=float(item.get("confidence", 1.0)),
                         measured_box=box,
                     )
@@ -290,7 +289,7 @@ class CloudOcrDriver:
 
         # 2. Baidu format: {"words_result": [{"words": ..., "location": {"left": ..., "top": ..., "width": ..., "height": ...}}]}
         elif "words_result" in data and isinstance(data["words_result"], list):
-            for idx, item in enumerate(data["words_result"]):
+            for item in data["words_result"]:
                 text = str(item.get("words", "")).strip()
                 if not text:
                     continue
@@ -303,14 +302,11 @@ class CloudOcrDriver:
                 )
                 raw_box = (left, t, left + w, t + h)
                 box = resolver.resolve_bbox(raw_box, coord_system="image_pixel", origin="top-left")
-                vlm_lines.append(
-                    VlmLine(text=text, reading_index=idx, confidence=1.0, measured_box=box)
-                )
+                vlm_lines.append(VlmLine(text=text, confidence=1.0, measured_box=box))
 
         # 3. Azure format: {"readResults": [{"lines": [{"text": ..., "boundingBox": [...]}]}]}
         elif "readResults" in data:
             results = data.get("readResults", [])
-            line_idx = 0
             for page_res in results:
                 for ln in page_res.get("lines", []):
                     text = str(ln.get("text", "")).strip()
@@ -325,21 +321,14 @@ class CloudOcrDriver:
                         box = resolver.resolve_bbox(
                             raw_box, coord_system="image_pixel", origin="top-left"
                         )
-                    vlm_lines.append(
-                        VlmLine(text=text, reading_index=line_idx, confidence=1.0, measured_box=box)
-                    )
-                    line_idx += 1
+                    vlm_lines.append(VlmLine(text=text, confidence=1.0, measured_box=box))
 
         else:
             # Flat text fallback
             raw_text = str(data.get("text") or data.get("result") or "")
-            for idx, ln in enumerate(raw_text.splitlines()):
+            for ln in raw_text.splitlines():
                 if ln.strip():
-                    vlm_lines.append(
-                        VlmLine(
-                            text=ln.strip(), reading_index=idx, confidence=1.0, measured_box=None
-                        )
-                    )
+                    vlm_lines.append(VlmLine(text=ln.strip(), confidence=1.0, measured_box=None))
 
         return PageTranscript(
             lines=tuple(vlm_lines),

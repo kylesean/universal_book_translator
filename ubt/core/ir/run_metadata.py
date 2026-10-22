@@ -13,8 +13,10 @@ the pipeline made during this run* lives here as a typed field. Keys that record
 what an adapter observed about the source document or the rendered artifact
 (``author``, ``opf_path``, ``page_kinds``, ``typst_version``, …) stay in
 ``manifest.metadata`` and are listed in :data:`ARTIFACT_METADATA_KEYS`. One key,
-one home: a run decision never goes back to the dict, and the dict never carries
-a key that is not declared there.
+one home: a run decision never goes back to the dict. The dict is not closed to
+other keys — an adapter may still record its own observation there (``page_count``
+and ``page_range`` are written by the PDF path) — but every key this module knows
+about has exactly one home.
 
 Field defaults are ``None`` and serialization goes through
 :meth:`RunMetadata.to_metadata_dict`, which drops unset fields: a key the run
@@ -41,7 +43,7 @@ ARTIFACT_METADATA_KEYS: Final[frozenset[str]] = frozenset(
         "boilerplate_footers",
         "is_page_slice_epub",
         "page_kinds",
-        # Render telemetry, consumed by the quality report and the visual gate.
+        # Render telemetry, consumed by the quality report and run metrics.
         "typst_version",
     }
 )

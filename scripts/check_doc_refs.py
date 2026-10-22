@@ -87,7 +87,12 @@ _KNOWN_FOREIGN_BARE_NAMES = frozenset(
 #: than living documentation. Their ``path:line`` citations are pinned to the
 #: snapshot they describe (an archived review names the HEAD it audited), so
 #: drifting from the current tree is expected and must not fail the check.
-_ARCHIVE_SUBDIRS = ("archive",)
+#:
+#: ``reviews/`` is here for the same reason as ``archive/``: each file is a
+#: dated record of one audit round, and rewriting its citations would falsify
+#: the record it exists to preserve. Living docs cite the current tree; those
+#: are the ones this check is for.
+_ARCHIVE_SUBDIRS = ("archive", "reviews")
 
 
 def _resolve(ref_file: str) -> Path | None:

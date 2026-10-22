@@ -884,13 +884,13 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
         judge = config.qe_judge_model or config.repair_model
         judge_provider = config.qe_judge_provider
         if judge_provider:
-            from ubt.core.providers import load_layer
+            from ubt.core.providers import load_layer_config
 
             try:
-                block = load_layer(judge_provider)
+                j_cfg = load_layer_config(judge_provider)
+                judge = str(j_cfg.repair_model or j_cfg.draft_model or judge) or judge
             except Exception:  # a broken block is reported by its own check
-                block = {}
-            judge = str(block.get("repair_model") or block.get("draft_model") or judge) or judge
+                pass
         record(
             "QE (tiered)",
             "OK",

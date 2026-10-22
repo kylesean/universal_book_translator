@@ -51,8 +51,18 @@ from pathlib import Path
 from typing import Any
 
 import tomlkit
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from ubt.core.atomic import atomic_write_text
+from ubt.core.config import (
+    VALID_API_MODES as _VALID_API_MODES,
+)
+from ubt.core.config import (
+    VALID_EXTRACTION_STRATEGIES as _VALID_EXTRACTION,
+)
+from ubt.core.config import (
+    VALID_REASONING_DIALECTS as _VALID_DIALECTS,
+)
 from ubt.core.exceptions import UBTError
 from ubt.core.providers import (
     PROTOCOL_ALIASES,
@@ -61,9 +71,136 @@ from ubt.core.providers import (
     _read_shipped_providers,
     credential_resolution,
     find_config_file,
-    load_defaults_block,
+    load_defaults_config,
 )
 from ubt.core.router.pricing import endpoint_is_local
+
+
+class ProviderEditModel(BaseModel):
+    """Pydantic V2 model for validating provider block edits."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    make_default: bool | None = Field(
+        default=None,
+        description=(
+            "Also write [defaults] provider = name. The console sends this when "
+            "creating a block, because a declared block that nothing points at is "
+            "still a rehearsal — the state a fresh install was stuck in"
+        ),
+    )
+    api_key: str | None = Field(
+        default=None,
+        description=(
+            "Credential for this provider block. Accepted only on a loopback, "
+            "non-strict deployment; elsewhere the request is refused and the "
+            "message says to use the environment or the file."
+        ),
+    )
+    base_url: str | None = Field(default=None, description="Endpoint base URL (http/https)")
+    api_mode: str | None = Field(
+        default=None, description="Wire protocol (openai-chat, openai-responses, …)"
+    )
+    draft_model: str | None = Field(default=None, description="Model id used for drafting")
+    repair_model: str | None = Field(default=None, description="Model id used for repair")
+    draft_reasoning_effort: str | None = Field(default=None, description="Draft reasoning effort")
+    repair_reasoning_effort: str | None = Field(default=None, description="Repair reasoning effort")
+    reasoning_dialect: str | None = Field(
+        default=None, description="How the responses protocol spells a reasoning effort"
+    )
+    supports_temperature: bool | None = Field(
+        default=None, description="Whether the endpoint accepts a temperature"
+    )
+    supports_reasoning_effort: bool | None = Field(
+        default=None, description="Whether the endpoint accepts a reasoning effort"
+    )
+    supports_system_prompt: bool | None = Field(
+        default=None, description="Whether the endpoint accepts a system turn"
+    )
+    supports_vision: bool | None = Field(
+        default=None, description="Whether the endpoint accepts image input"
+    )
+    extraction_strategy: str | None = Field(
+        default=None, description="How to recover the translation (auto, xml_tag, raw, cp)"
+    )
+    deployment_backend: str | None = Field(
+        default=None, description="Self-hosted stack serving this model (ollama, vllm, …)"
+    )
+    is_free: bool | None = Field(default=None, description="Declared free (no billable spend)")
+    api_timeout: float | None = Field(default=None, gt=0, description="Per-request timeout (s)")
+    fallback_models: list[str] | None = Field(
+        default=None, description="Ordered model fallback chain"
+    )
+
+    @field_validator(
+        "supports_temperature",
+        "supports_reasoning_effort",
+        "supports_system_prompt",
+        "supports_vision",
+        "is_free",
+        mode="before",
+    )
+    @classmethod
+    def _validate_bool_fields(cls, v: Any, info: Any) -> bool | None:
+        if v is None:
+            return None
+        if not isinstance(v, bool):
+            raise ValueError(f"{info.field_name} must be a boolean")
+        return v
+
+    @field_validator("api_timeout", mode="before")
+    @classmethod
+    def _validate_api_timeout(cls, v: Any) -> float | None:
+        if v is None:
+            return None
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
+            raise ValueError("api_timeout must be a positive number of seconds")
+        return float(v)
+
+    @field_validator("fallback_models", mode="before")
+    @classmethod
+    def _validate_fallback_models(cls, v: Any) -> list[str] | None:
+        if v is None:
+            return None
+        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            raise ValueError("fallback_models must be a list of model ids")
+        return [x for x in v if x.strip()]
+
+    @field_validator(
+        "api_key",
+        "base_url",
+        "api_mode",
+        "draft_model",
+        "repair_model",
+        "draft_reasoning_effort",
+        "repair_reasoning_effort",
+        "reasoning_dialect",
+        "extraction_strategy",
+        "deployment_backend",
+        mode="before",
+    )
+    @classmethod
+    def _validate_string_fields(cls, v: Any, info: Any) -> str | None:
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError(f"{info.field_name} must be a string")
+        cleaned = v.strip()
+        field = info.field_name
+        if field == "api_mode" and cleaned not in _VALID_API_MODES:
+            raise ValueError(f"api_mode must be one of {', '.join(sorted(_VALID_API_MODES))}")
+        if field == "extraction_strategy" and cleaned not in _VALID_EXTRACTION:
+            raise ValueError(
+                f"extraction_strategy must be one of {', '.join(sorted(_VALID_EXTRACTION))}"
+            )
+        if field == "reasoning_dialect" and cleaned not in _VALID_DIALECTS:
+            raise ValueError(
+                f"reasoning_dialect must be one of {', '.join(sorted(_VALID_DIALECTS))}"
+            )
+        if field == "base_url" and cleaned and not cleaned.startswith(("http://", "https://")):
+            raise ValueError("base_url must start with http:// or https://")
+        return cleaned
+
 
 #: What a credential is reported as. Never the value: the console needs to know
 #: whether one is configured, and a boolean plus this mask is the most that may
@@ -80,24 +217,8 @@ CREDENTIAL_MASK = "********"
 #: that selects *another* provider (``repair_provider``, ``qe_judge_provider``) or
 #: a global path (``db_dir``, ``prices_file``) — editing those from a provider
 #: form would silently reconfigure a different part of the engine.
-WRITABLE_FIELDS: tuple[str, ...] = (
-    "api_key",
-    "base_url",
-    "api_mode",
-    "draft_model",
-    "repair_model",
-    "draft_reasoning_effort",
-    "repair_reasoning_effort",
-    "reasoning_dialect",
-    "supports_temperature",
-    "supports_reasoning_effort",
-    "supports_system_prompt",
-    "supports_vision",
-    "extraction_strategy",
-    "deployment_backend",
-    "is_free",
-    "api_timeout",
-    "fallback_models",
+WRITABLE_FIELDS: tuple[str, ...] = tuple(
+    name for name in ProviderEditModel.model_fields if name != "make_default"
 )
 
 #: Fields an edit may *remove* rather than set, by submitting ``null``.
@@ -124,12 +245,6 @@ CLEARABLE_FIELDS: frozenset[str] = frozenset(
 #: operationally important (a block with no key and no environment variable
 #: cannot run) and reveals only a boolean.
 READABLE_FIELDS: tuple[str, ...] = (*WRITABLE_FIELDS, "api_key")
-
-_VALID_API_MODES = frozenset(
-    {"openai-chat", "openai-responses", "anthropic-messages", "gemini-native"}
-)
-_VALID_EXTRACTION = frozenset({"auto", "xml_tag", "raw", "cp"})
-_VALID_DIALECTS = frozenset({"nested", "flat"})
 
 #: Provider names are TOML bare keys in the path ``[providers.<name>]``, so the
 #: charset is the one tomlkit can write unquoted. Restricting it also keeps a
@@ -166,47 +281,25 @@ def _validate_name(name: str) -> str:
 
 
 def _coerce_value(field: str, value: Any) -> Any:
-    """Type-check one incoming value against the field it names.
+    """Type-check one incoming value against the field it names via ProviderEditModel.
 
     An unvalidated value here would be written to the TOML and then rejected by
     ``UBTConfig`` at the next job start — the operator would see a successful save
     and a broken engine. Rejecting at write time keeps the two in step.
     """
-    if field in {
-        "supports_temperature",
-        "supports_reasoning_effort",
-        "supports_system_prompt",
-        "supports_vision",
-        "is_free",
-    }:
-        if not isinstance(value, bool):
-            raise ProviderEditError(f"{field} must be a boolean")
-        return value
-    if field == "api_timeout":
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-            raise ProviderEditError("api_timeout must be a positive number of seconds")
-        return float(value)
-    if field == "fallback_models":
-        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
-            raise ProviderEditError("fallback_models must be a list of model ids")
-        return [v for v in value if v.strip()]
-    # Everything left is a string.
-    if not isinstance(value, str):
-        raise ProviderEditError(f"{field} must be a string")
-    cleaned = value.strip()
-    if field == "api_mode" and cleaned not in _VALID_API_MODES:
-        raise ProviderEditError(f"api_mode must be one of {', '.join(sorted(_VALID_API_MODES))}")
-    if field == "extraction_strategy" and cleaned not in _VALID_EXTRACTION:
-        raise ProviderEditError(
-            f"extraction_strategy must be one of {', '.join(sorted(_VALID_EXTRACTION))}"
-        )
-    if field == "reasoning_dialect" and cleaned not in _VALID_DIALECTS:
-        raise ProviderEditError(
-            f"reasoning_dialect must be one of {', '.join(sorted(_VALID_DIALECTS))}"
-        )
-    if field == "base_url" and cleaned and not cleaned.startswith(("http://", "https://")):
-        raise ProviderEditError("base_url must start with http:// or https://")
-    return cleaned
+    if field not in WRITABLE_FIELDS:
+        raise ProviderEditError(f"unknown field {field!r}")
+    try:
+        model = ProviderEditModel.model_validate({field: value})
+        return getattr(model, field)
+    except (ValidationError, ValueError) as exc:
+        if isinstance(exc, ValidationError):
+            err = exc.errors()[0]
+            msg = err["msg"]
+            if msg.startswith("Value error, "):
+                msg = msg[len("Value error, ") :]
+            raise ProviderEditError(msg) from exc
+        raise ProviderEditError(str(exc)) from exc
 
 
 def credential_write_allowed(*, is_loopback: bool, is_strict: bool) -> bool:
@@ -410,7 +503,7 @@ def default_provider_name() -> str | None:
     a separate fact the panel already surfaces as the active provider.
     """
     try:
-        declared = load_defaults_block().get("provider")
+        declared = load_defaults_config().provider
     except Exception:  # a malformed [defaults] is reported by the doctor, not here
         return None
     return str(declared) if declared else None

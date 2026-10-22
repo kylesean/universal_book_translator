@@ -24,6 +24,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
+from ubt.core.config import DefaultsConfig, ProviderConfig, UBTConfigFile
 from ubt.core.exceptions import UBTError
 
 logger = logging.getLogger(__name__)
@@ -42,83 +45,8 @@ class ProviderConfigError(UBTError):
 #: ``[providers.*]`` block.
 _SHIPPED_REGISTRY = Path(__file__).resolve().parent.parent / "resources" / "providers.toml"
 
-#: Fields a ``[providers.*]`` / ``[defaults]`` block may set. An explicit
-#: allow-list (not ``UBTConfig.model_fields``) keeps this module free of a
-#: circular import and, more importantly, keeps a block from reaching a secret
-#: or an unrelated knob.
-PROVIDER_ALLOWED_KEYS = frozenset(
-    {
-        "api_key",
-        "base_url",
-        "api_mode",
-        "draft_model",
-        "repair_model",
-        "draft_reasoning_effort",
-        "repair_reasoning_effort",
-        "fallback_models",
-        "chat_template_kwargs",
-        "extra_headers",
-        "api_timeout",
-        "prompt_caching_enabled",
-        "is_free",
-        "cost_per_mtok",
-        # Declared model capability. These describe what the endpoint accepts on
-        # the wire, so they belong next to the endpoint and model id that they
-        # describe — not in a package-wide table keyed by model-name substrings.
-        # ``supports_*`` are tri-state: an absent key means "not declared" and
-        # resolves to the conservative fallback, while an explicit ``false`` is a
-        # real statement that the endpoint rejects that parameter.
-        "supports_temperature",
-        "supports_reasoning_effort",
-        "supports_system_prompt",
-        "supports_vision",
-        "extraction_strategy",
-        "deployment_backend",
-        "reasoning_dialect",
-        "repair_provider",
-        "qe_judge_provider",
-        "ocr_api_key",
-        # Run-level, not provider-level, but a real ``UBTConfig`` field: the CLI
-        # (``--db-dir``) and ``UBT_DB_DIR`` both set it, so the ``[defaults]``
-        # block (documented as the config baseline) must accept it too or the
-        # same key is settable on every surface except the config file.
-        "db_dir",
-        # Which ``[providers.<name>]`` block is in force.
-        #
-        # Only meaningful in ``[defaults]`` (a provider block naming itself is
-        # circular, and ``load_layer`` reads this key from the defaults before it
-        # merges a block). Without it the file could describe ten providers and
-        # still not say which one runs: selection lived only in ``UBT_PROVIDER``
-        # or ``--provider``, so the console could edit a block but never make it
-        # the active one — the single most important setting on the page.
-        #
-        # Precedence is unchanged and still explicit-over-config: an explicit
-        # ``--provider`` or ``UBT_PROVIDER`` outranks this key, because
-        # ``from_env`` reads the environment *before* the file layer.
-        "provider",
-        # Run-level quality-gate knobs. Same reasoning as ``db_dir``: the
-        # ``[defaults]`` block is documented as the config baseline, so a user
-        # who wants the semantic judge on must be able to say so in a file
-        # rather than only through an exported environment variable. These are
-        # plain ``UBTConfig`` fields, not secrets, and not provider endpoints.
-        "qe_engine",
-        "qe_judge_enabled",
-        "qe_judge_pass_sample",
-        "qe_judge_sentences",
-        "qe_judge_model",
-        # Threshold and repair budget, so a config file can describe a whole
-        # quality policy instead of scattering it across the CLI and the env.
-        "qe_threshold",
-        "max_repair_rounds",
-        # Document-level terminology consistency. Set through the config file
-        # only — it is a policy decision ("re-translate drifted terms, up to N"),
-        # not a per-run experiment. Without these two, a user could not turn the
-        # feature on from a file at all: the values exist on ``UBTConfig`` and are
-        # read by the stage, but no documented surface could set them.
-        "consistency_enforce",
-        "consistency_max_repairs",
-    }
-)
+#: Fields a ``[providers.*]`` / ``[defaults]`` block may set, derived from ProviderConfig schema.
+PROVIDER_ALLOWED_KEYS: frozenset[str] = frozenset(ProviderConfig.model_fields.keys())
 
 #: Forbidden keys in outbound provider blocks. Inbound service auth uses UBT_API_KEY.
 PROVIDER_FORBIDDEN_KEYS = frozenset({"service_api_key"})
@@ -235,7 +163,7 @@ def _read_toml(custom_path: Path | str | None = None) -> dict[str, Any]:
 
 
 def _validate_block(label: str, fields: Mapping[str, Any]) -> dict[str, Any]:
-    """Reject invalid fields in a TOML block, then expand ``${VAR}``."""
+    """Reject invalid fields in a TOML block via ProviderConfig, then expand ``${VAR}``."""
     leaked = sorted(PROVIDER_FORBIDDEN_KEYS & set(fields))
     if leaked:
         raise ProviderConfigError(
@@ -248,7 +176,15 @@ def _validate_block(label: str, fields: Mapping[str, Any]) -> dict[str, Any]:
             f"{label} has unknown field(s) {', '.join(unknown)}; allowed: "
             f"{', '.join(sorted(PROVIDER_ALLOWED_KEYS))}"
         )
-    return {str(k): _expand_env_vars(v) for k, v in fields.items()}
+    expanded = {str(k): _expand_env_vars(v) for k, v in fields.items()}
+    try:
+        cfg = ProviderConfig.model_validate(expanded)
+    except ValidationError as exc:
+        raise ProviderConfigError(f"{label} configuration error: {exc}") from exc
+    return {
+        str(k): getattr(cfg, str(k)) if str(k) in cfg.model_fields_set else expanded[str(k)]
+        for k in fields
+    }
 
 
 @lru_cache(maxsize=1)
@@ -373,6 +309,12 @@ def load_provider_block(name: str, custom_path: Path | str | None = None) -> dic
     return fields
 
 
+def load_provider_config(name: str, custom_path: Path | str | None = None) -> ProviderConfig:
+    """Resolve ``name`` to a typed ProviderConfig model."""
+    fields = load_provider_block(name, custom_path)
+    return ProviderConfig.model_validate(fields)
+
+
 def credential_resolution(name: str, custom_path: Path | str | None = None) -> dict[str, Any]:
     """How this block's credential resolves, without revealing it.
 
@@ -448,6 +390,15 @@ def load_defaults_block(custom_path: Path | str | None = None) -> dict[str, Any]
     return _validate_block("[defaults]", defaults)
 
 
+def load_defaults_config(custom_path: Path | str | None = None) -> DefaultsConfig:
+    """The ``[defaults]`` baseline as a typed DefaultsConfig model."""
+    block = load_defaults_block(custom_path)
+    try:
+        return DefaultsConfig.model_validate(block)
+    except ValidationError as exc:
+        raise ProviderConfigError(f"[defaults] configuration error: {exc}") from exc
+
+
 def load_layer(provider_name: str | None, custom_path: Path | str | None = None) -> dict[str, Any]:
     """The ``[defaults]`` baseline with ``[providers.<name>]`` layered over it.
 
@@ -462,9 +413,32 @@ def load_layer(provider_name: str | None, custom_path: Path | str | None = None)
     return fields
 
 
+def load_layer_config(
+    provider_name: str | None, custom_path: Path | str | None = None
+) -> ProviderConfig:
+    """The ``[defaults]`` baseline with ``[providers.<name>]`` layered over it as ProviderConfig."""
+    fields = load_layer(provider_name, custom_path)
+    try:
+        return ProviderConfig.model_validate(fields)
+    except ValidationError as exc:
+        raise ProviderConfigError(f"provider layer error: {exc}") from exc
+
+
+def read_config_file(custom_path: Path | str | None = None) -> UBTConfigFile:
+    """Read the user configuration file into a typed UBTConfigFile model."""
+    raw = _read_toml(custom_path)
+    defaults = load_defaults_config(custom_path)
+    providers_raw = raw.get("providers", {})
+    providers_dict: dict[str, ProviderConfig] = {}
+    if isinstance(providers_raw, dict):
+        for name in providers_raw:
+            providers_dict[str(name)] = load_provider_config(str(name), custom_path)
+    return UBTConfigFile(defaults=defaults, providers=providers_dict)
+
+
 def merge_provider_under(
     explicit: Mapping[str, Any],
-    fields: Mapping[str, Any],
+    fields: Mapping[str, Any] | ProviderConfig,
     *,
     env_supplied: frozenset[str] | set[str] | None = None,
 ) -> dict[str, Any]:
@@ -480,7 +454,12 @@ def merge_provider_under(
     the block (or the caller) chose a repair distinct from its own draft — the
     same rule ``UBTConfig``'s validator enforces.
     """
-    layer = dict(fields)
+    if isinstance(fields, ProviderConfig):
+        layer = {
+            k: getattr(fields, k) for k in fields.model_fields_set if getattr(fields, k) is not None
+        }
+    else:
+        layer = {k: v for k, v in fields.items() if v is not None}
     if env_supplied:
         for key in list(layer):
             if key in env_supplied:
@@ -489,9 +468,7 @@ def merge_provider_under(
     if (
         "draft_model" in explicit
         and "repair_model" not in explicit
-        and not (
-            "repair_model" in fields and fields.get("repair_model") != fields.get("draft_model")
-        )
+        and not ("repair_model" in layer and layer.get("repair_model") != layer.get("draft_model"))
     ):
         merged.pop("repair_model", None)
     return merged

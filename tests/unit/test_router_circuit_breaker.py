@@ -103,23 +103,40 @@ async def test_circuit_cooldown_uses_failure_time_not_entry_time() -> None:
 
 @pytest.mark.asyncio
 async def test_router_unstructured_auth_error_fails_fast() -> None:
-    """Verify that an unstructured 401 error in string fails fast without running fallbacks."""
+    """An unstructured 401 must fail fast *without* trying a fallback model.
+
+    The "without fallbacks" half is the point: an auth failure applies to the
+    provider, so walking the chain would bill two more doomed calls. The earlier
+    version of this test only asserted that an error surfaced, which is also
+    true when every candidate is attempted.
+    """
     provider = MockModelProvider()
     router = ModelRouter(
         provider=provider,
         draft_model="auth-fail-model",
         fallback_models=["fallback-1", "fallback-2"],
     )
+    attempted: list[str] = []
+
+    async def fake_execute_single(
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        temperature: float,
+        reasoning_effort: str | None = None,
+        max_tokens: int | None = None,
+        **kwargs: object,
+    ) -> str:
+        attempted.append(model)
+        raise ModelProviderError("Model API error (401): Unauthorized")
 
     with (
-        patch.object(
-            router,
-            "_execute_single_model",
-            side_effect=ModelProviderError("Model API error (401): Unauthorized"),
-        ),
+        patch.object(router, "_execute_single_model", side_effect=fake_execute_single),
         pytest.raises(ModelProviderError, match="401"),
     ):
         await router._execute_with_retry("sys", "user", "auth-fail-model", 0.3)
+
+    assert attempted == ["auth-fail-model"], "an auth failure must not walk the fallback chain"
 
 
 @pytest.mark.asyncio

@@ -140,7 +140,7 @@ class SidecarOcrDriver:
             )
 
         vlm_lines: list[VlmLine] = []
-        for idx, item in enumerate(raw_lines):
+        for item in raw_lines:
             text = str(item.get("text", "")).strip()
             if not text:
                 continue
@@ -154,7 +154,6 @@ class SidecarOcrDriver:
             vlm_lines.append(
                 VlmLine(
                     text=text,
-                    reading_index=idx,
                     confidence=confidence,
                     measured_box=measured_box,
                 )

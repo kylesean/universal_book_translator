@@ -364,8 +364,6 @@ class DeepSeekOcrDriver:
         reply = self._request({"image_b64": base64.b64encode(buf.getvalue()).decode("ascii")})
         text = str(reply.get("text", ""))
         lines = tuple(
-            VlmLine(text=ln.strip(), reading_index=i)
-            for i, ln in enumerate(text.splitlines())
-            if ln.strip()
+            VlmLine(text=ln.strip()) for i, ln in enumerate(text.splitlines()) if ln.strip()
         )
         return PageTranscript(lines=lines, engine=self.name, measured_boxes=False)

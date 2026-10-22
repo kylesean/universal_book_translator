@@ -33,11 +33,20 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 from urllib.parse import urlsplit
 
-from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -122,6 +131,178 @@ TocMode = Literal["auto", "on", "off"]
 #: document. A stale ``UBT_TABLE_RENDER_MODE=overlay`` is rejected rather than
 #: silently reinterpreted.
 TableRenderMode = Literal["auto", "appendix", "skip"]
+
+
+#: Valid provider protocol/strategy vocabularies
+VALID_API_MODES = frozenset(
+    {"openai-chat", "openai-responses", "anthropic-messages", "gemini-native"}
+)
+VALID_EXTRACTION_STRATEGIES = frozenset({"auto", "xml_tag", "raw", "cp"})
+VALID_REASONING_DIALECTS = frozenset({"nested", "flat"})
+
+
+class ProviderConfig(BaseModel):
+    """Strongly typed model for a provider configuration block or [defaults] block."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+        populate_by_name=True,
+    )
+
+    api_key: str | SecretStr | None = None
+    base_url: str | None = None
+    api_mode: str | None = None
+    draft_model: str | None = None
+    repair_model: str | None = None
+    draft_reasoning_effort: str | None = None
+    repair_reasoning_effort: str | None = None
+    fallback_models: list[str] | None = None
+    chat_template_kwargs: dict[str, Any] = Field(default_factory=dict)
+    extra_headers: dict[str, str] = Field(default_factory=dict)
+    api_timeout: float | None = Field(default=None, gt=0)
+    prompt_caching_enabled: bool | None = None
+    is_free: bool | None = None
+    cost_per_mtok: tuple[float, float] | None = None
+    supports_temperature: bool | None = None
+    supports_reasoning_effort: bool | None = None
+    supports_system_prompt: bool | None = None
+    supports_vision: bool | None = None
+    extraction_strategy: str | None = None
+    deployment_backend: str | None = None
+    reasoning_dialect: str | None = None
+    repair_provider: str | None = None
+    qe_judge_provider: str | None = None
+    ocr_api_key: str | SecretStr | None = None
+    db_dir: str | Path | None = None
+    provider: str | None = None
+    qe_engine: str | None = None
+    qe_judge_enabled: bool | None = None
+    qe_judge_pass_sample: float | None = Field(default=None, ge=0.0, le=1.0)
+    qe_judge_sentences: bool | None = None
+    qe_judge_model: str | None = None
+    qe_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    max_repair_rounds: int | None = Field(default=None, ge=0)
+    consistency_enforce: Literal["off", "report", "repair"] | None = None
+    consistency_max_repairs: int | None = Field(default=None, ge=0)
+
+    @field_validator(
+        "supports_temperature",
+        "supports_reasoning_effort",
+        "supports_system_prompt",
+        "supports_vision",
+        "is_free",
+        "prompt_caching_enabled",
+        "qe_judge_enabled",
+        "qe_judge_sentences",
+        mode="before",
+    )
+    @classmethod
+    def _validate_bool_fields(cls, v: Any, info: Any) -> bool | None:
+        if v is None:
+            return None
+        if not isinstance(v, bool):
+            raise ValueError(f"{info.field_name} must be a boolean")
+        return v
+
+    @field_validator("api_timeout", mode="before")
+    @classmethod
+    def _validate_api_timeout(cls, v: Any) -> float | None:
+        if v is None:
+            return None
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
+            raise ValueError("api_timeout must be a positive number of seconds")
+        return float(v)
+
+    @field_validator("fallback_models", mode="before")
+    @classmethod
+    def _validate_fallback_models(cls, v: Any) -> list[str] | None:
+        if v is None:
+            return None
+        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            raise ValueError("fallback_models must be a list of model ids")
+        return [x for x in v if x.strip()]
+
+    @field_validator(
+        "api_key",
+        "ocr_api_key",
+        "base_url",
+        "api_mode",
+        "draft_model",
+        "repair_model",
+        "draft_reasoning_effort",
+        "repair_reasoning_effort",
+        "reasoning_dialect",
+        "extraction_strategy",
+        "deployment_backend",
+        "repair_provider",
+        "qe_judge_provider",
+        "provider",
+        "qe_judge_model",
+        mode="before",
+    )
+    @classmethod
+    def _validate_string_fields(cls, v: Any, info: Any) -> Any:
+        if v is None or isinstance(v, SecretStr):
+            return v
+        if not isinstance(v, str):
+            raise ValueError(f"{info.field_name} must be a string")
+        cleaned = v.strip()
+        field = info.field_name
+        if field == "api_mode":
+            lowered = cleaned.lower()
+            if lowered not in VALID_API_MODES:
+                raise ValueError(f"api_mode must be one of {', '.join(sorted(VALID_API_MODES))}")
+            return lowered
+        if field == "extraction_strategy":
+            lowered = cleaned.lower()
+            if lowered not in VALID_EXTRACTION_STRATEGIES:
+                raise ValueError(
+                    f"extraction_strategy must be one of {', '.join(sorted(VALID_EXTRACTION_STRATEGIES))}"
+                )
+            return lowered
+        if field == "reasoning_dialect":
+            lowered = cleaned.lower()
+            if lowered not in VALID_REASONING_DIALECTS:
+                raise ValueError(
+                    f"reasoning_dialect must be one of {', '.join(sorted(VALID_REASONING_DIALECTS))}"
+                )
+            return lowered
+        if field == "base_url" and cleaned and not cleaned.startswith(("http://", "https://")):
+            raise ValueError("base_url must start with http:// or https://")
+        return cleaned
+
+    @field_validator("qe_engine", mode="before")
+    @classmethod
+    def _validate_qe_engine(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError("qe_engine must be a string")
+        cleaned = v.strip().lower()
+        legacy = {
+            "comet": "heuristic",
+            "cometkiwi": "heuristic",
+            "neural": "heuristic",
+            "subprocess": "heuristic",
+        }
+        if cleaned in legacy:
+            return legacy[cleaned]
+        if cleaned not in {"heuristic", "tiered"}:
+            raise ValueError("qe_engine must be one of heuristic, tiered")
+        return cleaned
+
+
+DefaultsConfig = ProviderConfig
+
+
+class UBTConfigFile(BaseModel):
+    """Strongly typed model representing the entire ubt.toml configuration document."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
+    providers: dict[str, ProviderConfig] = Field(default_factory=dict)
 
 
 #: Default endpoint when no provider is selected and no UBT_BASE_URL is set.
@@ -859,8 +1040,8 @@ class UBTConfig(BaseSettings):
     # page numbers never translated) because a
     # stale or truncated chrome target would strip a legible running head and
     # repaint garbage. When on, ingest lets HEADER/FOOTER roles (never
-    # PAGE_NUMBER) reach the translator and the rigid engine paints them in
-    # their own band, still fail-closed on fit.
+    # PAGE_NUMBER) reach the translator, and the renderer typesets them as
+    # ordinary blocks.
     translate_chrome: bool = False
 
     # -- Prompt-strategy declaration (local test vs production) -----------------
@@ -1263,7 +1444,67 @@ class UBTConfig(BaseSettings):
         return parse_page_ranges(self.pages)
 
     @classmethod
-    def from_env(cls, bootstrap: bool = False, **overrides: Any) -> UBTConfig:
+    def from_provider_config(
+        cls,
+        provider_config: ProviderConfig,
+        *,
+        bootstrap: bool = False,
+        overrides: Mapping[str, Any] | None = None,
+        **extra_overrides: Any,
+    ) -> UBTConfig:
+        """Construct a UBTConfig instance from a typed ProviderConfig model."""
+        all_overrides = dict(overrides or {})
+        all_overrides.update(extra_overrides)
+        clean = {k: v for k, v in all_overrides.items() if v is not None}
+        from ubt.core.providers import merge_provider_under
+
+        clean = merge_provider_under(
+            clean, provider_config, env_supplied=_env_supplied_field_names()
+        )
+        cfg = cls(**clean)
+        if bootstrap:
+            cfg.bootstrap_runtime_environment()
+        return cfg
+
+    @classmethod
+    def from_config_file(
+        cls,
+        path: Path | str | None = None,
+        *,
+        provider: str | None = None,
+        bootstrap: bool = False,
+        overrides: Mapping[str, Any] | None = None,
+        **extra_overrides: Any,
+    ) -> UBTConfig:
+        """Construct a UBTConfig by loading and parsing a configuration file via Pydantic."""
+        from ubt.core.providers import load_layer_config, read_config_file
+
+        file_cfg = read_config_file(path)
+        all_overrides = dict(overrides or {})
+        all_overrides.update(extra_overrides)
+        provider_name = (
+            provider
+            or all_overrides.get("provider")
+            or os.getenv("UBT_PROVIDER")
+            or file_cfg.defaults.provider
+        )
+        layer_cfg = load_layer_config(str(provider_name) if provider_name else None, path)
+        if provider_name is not None:
+            all_overrides["provider"] = str(provider_name)
+        return cls.from_provider_config(
+            layer_cfg,
+            bootstrap=bootstrap,
+            overrides=all_overrides,
+        )
+
+    @classmethod
+    def from_env(
+        cls,
+        bootstrap: bool = False,
+        custom_path: Path | str | None = None,
+        overrides: Mapping[str, Any] | None = None,
+        **extra_overrides: Any,
+    ) -> UBTConfig:
         """Canonical constructor: ``[defaults]``, provider block, env, then overrides.
 
         None values are skipped, so optional CLI flags can be passed straight
@@ -1278,21 +1519,27 @@ class UBTConfig(BaseSettings):
         configuration: without it the file could declare ten providers and still
         not say which one runs, so selecting one was a CLI-only operation.
         """
-        from ubt.core.providers import load_defaults_block, load_layer, merge_provider_under
+        from ubt.core.providers import (
+            load_defaults_config,
+            load_layer_config,
+            merge_provider_under,
+        )
 
-        clean = {k: v for k, v in overrides.items() if v is not None}
+        all_overrides = dict(overrides or {})
+        all_overrides.update(extra_overrides)
+        clean = {k: v for k, v in all_overrides.items() if v is not None}
         provider_name = clean.get("provider") or os.getenv("UBT_PROVIDER")
         if not provider_name:
             # The file layer names the provider only when nothing more explicit
             # did. Read it from ``[defaults]`` alone: resolving it through
             # ``load_layer`` would need the answer it is trying to produce.
-            declared = load_defaults_block().get("provider")
+            declared = load_defaults_config(custom_path).provider
             provider_name = str(declared) if declared else None
-        fields = load_layer(str(provider_name) if provider_name else None)
+        layer_cfg = load_layer_config(str(provider_name) if provider_name else None, custom_path)
         # ``load_layer`` already carries ``provider`` when it came from
         # ``[defaults]``, so the selection survives the merge without a separate
         # assignment here — one owner for the key, not two that can disagree.
-        clean = merge_provider_under(clean, fields, env_supplied=_env_supplied_field_names())
+        clean = merge_provider_under(clean, layer_cfg, env_supplied=_env_supplied_field_names())
         cfg = cls(**clean)
         if bootstrap:
             cfg.bootstrap_runtime_environment()

@@ -82,10 +82,33 @@ def test_config_with_capability_override_does_not_deadlock(override: dict[str, s
 
 
 @pytest.mark.fast
-def test_ubt_config_from_env_defaults_to_no_bootstrap() -> None:
-    """Verify UBTConfig.from_env defaults to bootstrap=False and does not pollute registries."""
+def test_ubt_config_from_env_does_not_bootstrap_registries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``from_env()`` must not run the process-wide registry bootstrap.
+
+    ``from_env`` defaults ``bootstrap=False`` because the bootstrap mutates
+    process globals (custom pricing, free endpoints, capability profiles). A
+    config parsed for introspection — ``ubt config``, the doctor, a test — must
+    not leave those behind, and the earlier version of this test could not fail:
+    it asserted ``cfg is not None`` (always true) and then called the bootstrap
+    itself.
+    """
+    from ubt.core.router import pricing
+
+    sentinel = "http://sentinel.invalid/v1"
+    before = len(pricing._CUSTOM_FREE_ENDPOINTS)
+
+    monkeypatch.setenv("UBT_IS_FREE", "true")
+    monkeypatch.setenv("UBT_BASE_URL", sentinel)
+
     cfg = UBTConfig.from_env()
-    assert cfg is not None
-    # Verify local_endpoints can be bootstrapped without error
-    cfg_with_local = UBTConfig(local_endpoints="192.168.1.50:8000,10.0.0.1:8000")
-    cfg_with_local.bootstrap_runtime_environment()
+
+    assert cfg.is_free is True, "the environment value must reach the config"
+    assert len(pricing._CUSTOM_FREE_ENDPOINTS) == before, (
+        "from_env() bootstrapped process globals; it must only build a config"
+    )
+
+    # And the explicit opt-in is what does register them.
+    cfg.bootstrap_runtime_environment()
+    assert len(pricing._CUSTOM_FREE_ENDPOINTS) == before + 1

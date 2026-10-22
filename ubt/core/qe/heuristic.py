@@ -116,6 +116,10 @@ class MockQERunner(BaseQERunner):
     def __init__(self, default_score: float = 0.85) -> None:
         self.default_score = default_score
 
+    def score_source(self) -> str:
+        """Label a rehearsal's synthetic scores so no report reads them as measured."""
+        return "mock"
+
     async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
         scores: list[float] = []
         for p in pairs:
@@ -244,6 +248,10 @@ class HeuristicQERunner(BaseQERunner):
         """Always False: the twelve legend bands are a routing class, not a
         graded quality estimate, so they must never rank repair candidates."""
         return False
+
+    def score_source(self) -> str:
+        """The discrete defect-band engine, named as the report has always called it."""
+        return "heuristic"
 
     def glossary_violation(self, source_text: str, target_text: str) -> str | None:
         """Terminology defect flag for this pair, or ``None`` (granularity-free)."""

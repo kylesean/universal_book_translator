@@ -25,6 +25,7 @@ from ubt.core.config import UBTConfig
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.re_export import ReExportError, re_export_job
 from ubt.core.engine.writer_lock import LedgerWriterLock
+from ubt.core.exceptions import IntegrityViolationError, LedgerWriterLockConflictError
 from ubt.core.ir.models import (
     BlockStatus,
     BlockType,
@@ -105,11 +106,8 @@ async def test_re_export_refuses_non_terminal_blocks_instead_of_failing_them(
         "_default_collaborators",
         lambda config, router, qe: (dummy_router, dummy_qe),
     )
-    with pytest.raises(Exception) as excinfo:  # noqa: PT011 - exact type asserted below
+    with pytest.raises(IntegrityViolationError, match="non-terminal"):
         await re_export_job(db_path=db_path, job_id=_JOB, config=config)
-
-    # The refusal is the IntegrityViolationError the export stage raises.
-    assert "non-terminal" in str(excinfo.value)
     # The in-flight block must be untouched: not force-FAILED, still drafted.
     with SQLiteJobLedger(db_path, read_only=True) as ledger:
         row = ledger.get_block("b002", _JOB)
@@ -130,9 +128,10 @@ async def test_re_export_holds_the_writer_lock_against_a_live_run(
     lock = LedgerWriterLock(db_path, _JOB)
     lock.acquire()  # simulates the running owner
     try:
-        with pytest.raises(Exception) as excinfo:  # noqa: PT011
+        # A lock conflict is a distinct class from an integrity violation: the
+        # caller may retry the first and must not retry the second.
+        with pytest.raises(LedgerWriterLockConflictError, match="already being written"):
             await re_export_job(db_path=db_path, job_id=_JOB, config=config)
-        assert "already being written" in str(excinfo.value)
     finally:
         lock.release()
 

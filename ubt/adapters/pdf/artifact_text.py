@@ -139,9 +139,9 @@ def _present(expected: str, tokens: frozenset[str]) -> bool:
 def _expected(block: IRBlock, translations: Mapping[str, str]) -> str:
     """The text the artifact should carry for this block.
 
-    A leading rehearsal prefix is stripped to match the renderer, which never
-    places it (see :func:`ubt.core.qe.fast_pass.strip_rehearsal_marker`); without
-    this the audit demanded a marker the artifact is right not to contain.
+    A leading rehearsal prefix is stripped before comparison: a rehearsal may
+    render the marker or drop it, and the audit must not fail on that difference
+    (see :func:`ubt.core.qe.fast_pass.strip_rehearsal_marker`).
     """
     target = (translations.get(block.id) or "").strip()
     if target:

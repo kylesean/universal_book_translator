@@ -65,8 +65,8 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
     processed = completed + failed + needs_human + blocked_human
     # No ``source_path`` in the summary: the queue table only ever shows the
     # basename, and this route is unauthenticated by default. Echoing the
-    # absolute path (home directory included) is the same leak ``_public_report``
-    # and ``_public_artifact`` close on the other doors; here it never leaves
+    # absolute path (home directory included) is the same leak ``public_report``
+    # and ``public_artifact`` close on the other doors; here it never leaves
     # the database at all.
     return {
         "job_id": str(snapshot["job_id"]),

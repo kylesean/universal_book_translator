@@ -70,6 +70,21 @@ class BaseQERunner(ABC):
         """
         return True
 
+    def score_source(self) -> str:
+        """The engine label the quality report records for this run's scores.
+
+        A run's audit artifact has to say *what* produced its ``mtqe_score``
+        values, because the same number means different things depending on the
+        engine: a graded judge opinion, a discrete heuristic defect band, or a
+        rehearsal echo. The quality gate persists this on the job and the
+        reporter publishes it as ``qe_score_source``.
+
+        Concrete runners override this with a stable literal: deriving it from
+        the class name would let a rename silently change an audit string that
+        old reports already carry.
+        """
+        return "unknown"
+
     def may_be_calibrated(self) -> bool:
         """Whether it is worth *attempting* a scoring call to find out.
 

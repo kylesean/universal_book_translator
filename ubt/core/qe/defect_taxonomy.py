@@ -42,17 +42,16 @@ STRUCTURAL_DEFECT_MARKERS: tuple[str, ...] = (
     "Math span mismatch",
     "Undelimited math",
     "Hallucinated LaTeX",
-    # Masked-token loss: the model dropped/mutated a protects-math or
-    # delimiter-free (soup) span during drafting. The restoration reports a
-    # mismatch, so the target is corrupt even when FastPass scores it clean.
+    # Masked-token loss: the model dropped/mutated a protected span during
+    # drafting. The restoration reports a mismatch, so the target is corrupt
+    # even when FastPass scores it clean. ``PlaceholderEngine`` emits five
+    # namespaces (email, soup, math, citation, code) and every one is listed
+    # here so this table is genuinely the single source of truth: an unlisted
+    # namespace falls through to the "other structural rejection" band and is
+    # auto-passed at any threshold at or above it.
+    "email_token_corrupt",
     "math_token_corrupt",
     "soup_token_corrupt",
-    # Same class for the other two masker namespaces. The draft stage already
-    # keeps every unclean restore out of the auto-pass path by persisting it as
-    # REPAIR_PENDING, so these two markers are defence in depth: they keep the
-    # verdict fatal at ANY QE threshold and "major" at triage even if such a
-    # block reaches the gate by another route. All four masker namespaces are
-    # listed so this table is genuinely the single source of truth.
     "code_token_corrupt",
     "cite_token_corrupt",
     "Omission suspected",
@@ -119,6 +118,7 @@ FORMAT_ONLY_MARKERS: tuple[str, ...] = (
 # and the provenance-only "Visual witness discrepancy" marker.
 CRITICAL_DEFECT_MARKERS: tuple[str, ...] = (
     "Empty target text",
+    "email_token_corrupt",
     "math_token_corrupt",
     "soup_token_corrupt",
     "code_token_corrupt",

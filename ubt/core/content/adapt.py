@@ -107,14 +107,21 @@ def _text_node(block: IRBlock, order: int, region: SourceRegion | None) -> TextN
         reason = block.policy_reason or "skip_translate"
         disposition = TextDisposition.VERBATIM
     elif block.status is BlockStatus.BLOCKED_HUMAN:
-        # Quarantined for human post-editing: its ``target_text`` is a ``<mark>``
-        # wrapper around the *source*, not a translation, and the renderer
-        # deliberately typesets the source instead (see
-        # ``document_renderer._block_text``). So the reader gets the source.
-        # This branch must precede the target-truthiness test
-        # below, or the non-empty marker would be counted as delivered -- the
-        # defect that let 20 untranslated blocks report ``violations: []`` and
+        # Quarantined for human post-editing. The *contract* counts this as
+        # source-kept, and it must be counted here rather than falling through
+        # to the target-truthiness test below: the non-empty ``<mark>`` wrapper
+        # would otherwise be counted as delivered -- the defect that let 20
+        # untranslated blocks report ``violations: []`` and
         # ``source_kept_text: 0`` in arXiv 2610.02185.
+        #
+        # Note the renderers do NOT agree with this disposition, on purpose:
+        # the PDF/HTML/EPUB views typeset the rejected *draft* (fail-open, see
+        # ``document_renderer._block_text`` and
+        # ``delivered_text.is_placeholder``) rather than the source, so the
+        # reader gets the best translation available while the audit still says
+        # "not verified". ``kept_in_source`` answers "does the delivery have a
+        # verified translation?", which is a different question from "what text
+        # does the renderer place?".
         disposition, reason = (
             TextDisposition.SOURCE_KEPT,
             f"quarantined:{block.status.value}",

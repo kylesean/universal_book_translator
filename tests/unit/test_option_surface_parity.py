@@ -12,6 +12,7 @@ knobs a user can set, rather than asserting any single surface's contents.
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import inspect
 from pathlib import Path
@@ -208,27 +209,83 @@ def UBTConfig_from_env(*, env: dict[str, str]) -> object:
 
 
 def test_the_render_metadata_keys_have_a_writer() -> None:
-    """Every artifact metadata key must be written by something.
+    """Every artifact metadata key must be *written* by something.
 
     ``render_engine_effective`` and ``render_padding_pages`` were carried in
     ``ARTIFACT_METADATA_KEYS`` after their writers were deleted with the overlay
     engine — so the set advertised passthrough for keys the pipeline never
     produces. This guard is cheap and catches the next one.
-    """
-    import subprocess
 
+    The check is AST-based on purpose. The earlier version shelled out to
+    ``grep`` for the quoted key, so a *reader* — or even a comment — satisfied
+    it, which is how ``chapter_translations`` stayed listed while nothing has
+    ever written it.
+    """
     from ubt.core.ir.run_metadata import ARTIFACT_METADATA_KEYS
 
     root = Path(__file__).resolve().parents[2]
-    for key in ARTIFACT_METADATA_KEYS:
-        result = subprocess.run(
-            ["grep", "-rl", f'"{key}"', str(root / "ubt")],
-            capture_output=True,
-            text=True,
-        )
-        writers = [
-            line
-            for line in result.stdout.splitlines()
-            if "__pycache__" not in line and not line.endswith("run_metadata.py")
-        ]
-        assert writers, f"{key} is declared but nothing writes it"
+    written: dict[str, list[str]] = {key: [] for key in ARTIFACT_METADATA_KEYS}
+
+    for path in sorted((root / "ubt").rglob("*.py")):
+        if path.name == "run_metadata.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            for key in _metadata_keys_written(node):
+                if key in written:
+                    written[key].append(str(path.relative_to(root)))
+
+    # ``chapter_translations`` is the one deliberate exception: it is a
+    # *caller-supplied* contract (the bible stage reads it to seed chapter
+    # titles), never produced by this pipeline, so it has no writer here.
+    writer_optional = {"chapter_translations"}
+    missing = sorted(
+        key for key, paths in written.items() if not paths and key not in writer_optional
+    )
+    assert missing == [], f"declared artifact metadata key(s) with no writer: {missing}"
+
+
+def _metadata_keys_written(node: ast.AST) -> list[str]:
+    """The metadata keys a node writes.
+
+    Recognises the three shapes the pipeline uses: ``metadata["key"] = ...``,
+    a ``{"key": ...}`` literal assigned to a name containing ``metadata``, and a
+    ``metadata={...}`` keyword argument (which may declare several keys).
+    """
+    keys: list[str] = []
+    if isinstance(node, ast.Assign):
+        for target in node.targets:
+            if (
+                isinstance(target, ast.Subscript)
+                and isinstance(target.slice, ast.Constant)
+                and isinstance(target.slice.value, str)
+                and _is_metadata_reference(target.value)
+            ):
+                keys.append(target.slice.value)
+        if any(isinstance(t, ast.Name) and "metadata" in t.id for t in node.targets):
+            keys.extend(_str_keys(node.value))
+    if isinstance(node, ast.AnnAssign) and node.value is not None:
+        target = node.target
+        if isinstance(target, ast.Name) and "metadata" in target.id:
+            keys.extend(_str_keys(node.value))
+    if isinstance(node, ast.keyword) and node.arg == "metadata":
+        keys.extend(_str_keys(node.value))
+    return keys
+
+
+def _str_keys(node: ast.AST) -> list[str]:
+    """Every string key of a dict literal."""
+    if not isinstance(node, ast.Dict):
+        return []
+    return [
+        key.value
+        for key in node.keys
+        if isinstance(key, ast.Constant) and isinstance(key.value, str)
+    ]
+
+
+def _is_metadata_reference(node: ast.AST) -> bool:
+    """Whether an expression names a metadata mapping (``*.metadata``)."""
+    return (isinstance(node, ast.Attribute) and node.attr == "metadata") or (
+        isinstance(node, ast.Name) and "metadata" in node.id
+    )

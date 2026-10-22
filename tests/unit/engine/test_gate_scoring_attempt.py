@@ -26,6 +26,8 @@ from ubt.core.engine.stages.quality_gate import run_quality_gate_stage
 from ubt.core.ir.models import BlockStatus, BlockType, IRBlock, make_element
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.fast_pass import FastPassFilter
+from ubt.core.qe.heuristic import HeuristicQERunner, MockQERunner
+from ubt.core.qe.llm_judge import TieredQERunner
 
 pytestmark = pytest.mark.fast
 
@@ -57,6 +59,7 @@ class _SubprocessLikeRunner(BaseQERunner):
 class _Ledger:
     blocks: list[IRBlock]
     batches: list[list[dict[str, Any]]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def fetch_blocks_by_status(self, _job: str, status: Any, **_kw: Any) -> list[IRBlock]:
         return [b for b in self.blocks if b.status is status]
@@ -65,11 +68,11 @@ class _Ledger:
         self.batches.append(list(checkpoints))
         return len(checkpoints)
 
-    def get_job_metadata_value(self, *_a: Any, **_kw: Any) -> None:
-        return None
+    def get_job_metadata_value(self, _job: str, key: str, **_kw: Any) -> Any:
+        return self.metadata.get(key)
 
-    def set_job_metadata_value(self, *_a: Any, **_kw: Any) -> None:
-        return None
+    def set_job_metadata_value(self, _job: str, key: str, value: Any, **_kw: Any) -> None:
+        self.metadata[key] = value
 
 
 def _block(block_id: str) -> IRBlock:
@@ -128,7 +131,7 @@ class _Scoring:
     repair_loop: Any = None
 
 
-async def _run(runner: BaseQERunner) -> list[dict[str, Any]]:
+async def _run_with_ledger(runner: BaseQERunner) -> tuple[list[dict[str, Any]], _Ledger]:
     ledger = _Ledger([_block("b1")])
     ctx = _Ctx(ledger)
     services = _Services(
@@ -143,7 +146,12 @@ async def _run(runner: BaseQERunner) -> list[dict[str, Any]]:
     )
     async for _event in gen:
         pass
-    return ledger.batches[-1] if ledger.batches else []
+    return (ledger.batches[-1] if ledger.batches else []), ledger
+
+
+async def _run(runner: BaseQERunner) -> list[dict[str, Any]]:
+    updates, _ = await _run_with_ledger(runner)
+    return updates
 
 
 def test_a_neural_subprocess_runner_is_scored_on_the_first_batch() -> None:
@@ -163,3 +171,37 @@ def test_a_heuristic_fallback_subprocess_runner_yields_no_pseudo_scores() -> Non
 
     assert runner.score_calls == 1, "the gate must still make the attempt"
     assert updates[0]["mtqe_score"] is None
+
+
+def test_the_gate_records_which_engine_produced_the_scores() -> None:
+    """The audit artifact must name the scoring engine.
+
+    The probe used to read ``last_engine``, an attribute only the retired
+    CometKiwi subprocess set, so ``qe_score_source`` was never written and the
+    report field was permanently ``None`` while the console fell back to a
+    hard-coded label. Reading ``score_source()`` — part of the runner
+    interface — makes the write unconditional.
+    """
+    runner = _SubprocessLikeRunner(neural=True)
+    _, ledger = asyncio.run(_run_with_ledger(runner))
+
+    assert ledger.metadata["qe_score_source"] == runner.score_source()
+
+
+@pytest.mark.parametrize(
+    ("runner", "expected"),
+    [
+        (HeuristicQERunner(), "heuristic"),
+        (MockQERunner(), "mock"),
+    ],
+)
+def test_each_runner_names_its_own_engine(runner: BaseQERunner, expected: str) -> None:
+    """The label is per-runner, not a single hard-coded string."""
+    assert runner.score_source() == expected
+
+
+def test_a_tiered_runner_reports_the_leg_that_answered() -> None:
+    """A tier that never reached its judge must not claim a judge opinion."""
+    tier = TieredQERunner(heuristic=HeuristicQERunner(), judge=None, pass_sample=0.0)
+
+    assert tier.score_source() == "heuristic"

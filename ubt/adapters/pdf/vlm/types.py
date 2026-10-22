@@ -17,7 +17,6 @@ class VlmLine:
     """
 
     text: str
-    reading_index: int
     confidence: float = 1.0
     measured_box: tuple[float, float, float, float] | None = None
 

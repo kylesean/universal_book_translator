@@ -7,7 +7,9 @@ triage and the resume path. The load-bearing facts pinned here:
   residue) are all structural *and* critical — matching only one lets a
   never-translated paragraph fall through to "other structural rejection" and be
   auto-passed;
-* all four masked-token corrupt markers are structural and critical;
+* all five masked-token corrupt markers are structural and critical, and the
+  set is derived from ``PlaceholderEngine``'s own report list so a new masker
+  namespace cannot be added without also classifying it;
 * terminology violation and the provenance-only "Visual witness discrepancy" are
   structural but deliberately **not** critical (Major, not quarantine);
 * format-only classes (HTML delta, length) are structural but not critical and
@@ -23,6 +25,7 @@ from typing import Any
 
 import pytest
 
+from ubt.core.cleaners.mask_tokens import UnmaskReport
 from ubt.core.qe.defect_taxonomy import (
     CRITICAL_DEFECT_MARKERS,
     ECHO_MARKERS,
@@ -35,6 +38,7 @@ from ubt.core.qe.defect_taxonomy import (
     is_transient_failure,
     is_transient_lifecycle_only,
 )
+from ubt.segment.placeholders import RestoreOutcome
 
 pytestmark = pytest.mark.fast
 
@@ -57,6 +61,7 @@ def test_every_echo_phrasing_is_structural(marker: str) -> None:
         "soup_token_corrupt",
         "code_token_corrupt",
         "cite_token_corrupt",
+        "email_token_corrupt",
         "Omission suspected",
         "Numeric fidelity",
         "Visual witness discrepancy",
@@ -77,6 +82,32 @@ def test_structural_match_is_substring() -> None:
 def test_unrelated_flags_are_not_structural() -> None:
     assert has_structural_defect([]) is False
     assert has_structural_defect(["some unrelated note"]) is False
+
+
+def test_every_masker_namespace_is_classified() -> None:
+    """A new masker namespace must not silently escape the defect tables.
+
+    ``RestoreOutcome.reports`` is the producer of the ``*_token_corrupt``
+    labels. Deriving the expected set from it means adding a sixth masker
+    cannot leave the gate with a namespace that classifies as PASS — the
+    ``email`` namespace was exactly that gap: it was emitted, counted by the
+    reporter's retention metric, and auto-passed by ``classify_defect``.
+    """
+    clean = UnmaskReport(text="")
+    outcome = RestoreOutcome(
+        text="",
+        email=clean,
+        code=clean,
+        math=clean,
+        soup=clean,
+        citation=clean,
+    )
+
+    labels = [label for label, _ in outcome.reports]
+    assert len(labels) == 5, labels
+    for label in labels:
+        assert label in STRUCTURAL_DEFECT_MARKERS, f"{label} is not structural"
+        assert label in CRITICAL_DEFECT_MARKERS, f"{label} is not critical"
 
 
 # --------------------------------------------------------------------------- #

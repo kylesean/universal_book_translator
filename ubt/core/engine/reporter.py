@@ -285,10 +285,11 @@ class QualityReport(BaseModel):
     # Exact Typst compiler version that built the artifact
     # (None = unmeasured, e.g. compiler-absent Markdown-companion jobs).
     typst_version: str | None = None
-    # Engine the QE subprocess reported for this job's scores
-    # ("neural" | "heuristic_fallback"; None = heuristic/LLM runner or
-    # nothing scored). A fallback label means every mtqe_score in this report
-    # is a discrete defect band, not a calibrated CometKiwi measurement.
+    # Engine that produced this job's mtqe_score values, from the runner's
+    # ``score_source()`` ("heuristic" | "llm_judge" | "mock"; None when nothing
+    # was scored or the ledger predates the label). It matters because the same
+    # float means different things per engine: a discrete heuristic defect band
+    # is not a graded judge opinion.
     qe_score_source: str | None = None
     # Paid LLM-as-Judge ROI counters (zero when the explicit judge opt-in was
     # off or no suspicious blocks reached the tiered runner).
@@ -497,8 +498,8 @@ def build_quality_report(
     # Compiler pin for reproducibility (None = unmeasured).
     raw_tv = manifest.metadata.get("typst_version")
     typst_version = str(raw_tv) if isinstance(raw_tv, str) and raw_tv else None
-    # QE subprocess honesty label recorded by the quality gate (None when the
-    # run used a non-subprocess runner or scored nothing).
+    # QE engine label recorded by the quality gate (None when the run scored
+    # nothing or the ledger predates the label).
     raw_qe_src = ledger.get_job_metadata_value(job_id, "qe_score_source")
     qe_score_source = str(raw_qe_src) if isinstance(raw_qe_src, str) and raw_qe_src else None
 

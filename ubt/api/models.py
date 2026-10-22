@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ubt.api.provider_editor import ProviderEditModel
 from ubt.core.config import (
     DualMode,
     OcrMode,
@@ -872,66 +873,13 @@ class RuntimeConfigResponse(BaseModel):
     )
 
 
-class ProviderEditRequest(BaseModel):
+class ProviderEditRequest(ProviderEditModel):
     """One provider block edit from the console.
 
     ``extra="forbid"`` so a client that sends a credential gets a 422 naming the
     field instead of a silently ignored key. Every field is optional: an edit
     submits only what changed, and an omitted field is left untouched in the file.
     """
-
-    model_config = ConfigDict(extra="forbid")
-
-    make_default: bool | None = Field(
-        default=None,
-        description=(
-            "Also write [defaults] provider = name. The console sends this when "
-            "creating a block, because a declared block that nothing points at is "
-            "still a rehearsal — the state a fresh install was stuck in"
-        ),
-    )
-    api_key: str | None = Field(
-        default=None,
-        description=(
-            "Credential for this provider block. Accepted only on a loopback, "
-            "non-strict deployment; elsewhere the request is refused and the "
-            "message says to use the environment or the file."
-        ),
-    )
-    base_url: str | None = Field(default=None, description="Endpoint base URL (http/https)")
-    api_mode: str | None = Field(
-        default=None, description="Wire protocol (openai-chat, openai-responses, …)"
-    )
-    draft_model: str | None = Field(default=None, description="Model id used for drafting")
-    repair_model: str | None = Field(default=None, description="Model id used for repair")
-    draft_reasoning_effort: str | None = Field(default=None, description="Draft reasoning effort")
-    repair_reasoning_effort: str | None = Field(default=None, description="Repair reasoning effort")
-    reasoning_dialect: str | None = Field(
-        default=None, description="How the responses protocol spells a reasoning effort"
-    )
-    supports_temperature: bool | None = Field(
-        default=None, description="Whether the endpoint accepts a temperature"
-    )
-    supports_reasoning_effort: bool | None = Field(
-        default=None, description="Whether the endpoint accepts a reasoning effort"
-    )
-    supports_system_prompt: bool | None = Field(
-        default=None, description="Whether the endpoint accepts a system turn"
-    )
-    supports_vision: bool | None = Field(
-        default=None, description="Whether the endpoint accepts image input"
-    )
-    extraction_strategy: str | None = Field(
-        default=None, description="How to recover the translation (auto, xml_tag, raw, cp)"
-    )
-    deployment_backend: str | None = Field(
-        default=None, description="Self-hosted stack serving this model (ollama, vllm, …)"
-    )
-    is_free: bool | None = Field(default=None, description="Declared free (no billable spend)")
-    api_timeout: float | None = Field(default=None, gt=0, description="Per-request timeout (s)")
-    fallback_models: list[str] | None = Field(
-        default=None, description="Ordered model fallback chain"
-    )
 
 
 class ProviderDetailResponse(BaseModel):

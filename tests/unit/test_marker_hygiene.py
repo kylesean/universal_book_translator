@@ -2,8 +2,8 @@
 
 ``fast`` is the pre-push inner-loop contract (``pytest -m fast``), and the
 pre-push hook runs it with ``pass_filenames: false`` -- the whole tier on every
-push. ``slow`` means a heavy subprocess (typst/pandoc/pdftoppm). Two failures
-are possible, and both are silent:
+push. ``slow`` means a heavy subprocess (typst/pandoc/pdftoppm). Three failures
+are possible, and all are silent:
 
 1. **Both marks on one test.** A contradiction: ``-m fast`` pulls a
    multi-second subprocess loop into the tier that is supposed to be seconds.
@@ -22,7 +22,13 @@ are possible, and both are silent:
    including the ``tests/integration/test_pipeline_smoke.py`` end-to-end
    rehearsal the strategy doc described as the default tier.
 
-Both checks are fast and pure-AST: no imports are executed, so they cannot be
+3. **A ``fast`` module that shells out.** The first two checks reason about
+   marks only, so a module that is simply *marked* ``fast`` while spawning
+   typst/pandoc keeps the subprocess in the inner loop with no contradiction to
+   detect. Check 3 rejects a ``fast``-marked module that calls ``subprocess``
+   directly, unless it names the process it needs in a ``slow``-tier comment.
+
+All checks are fast and pure-AST: no imports are executed, so they cannot be
 fooled by import side effects and cost milliseconds.
 """
 
@@ -48,8 +54,6 @@ _CI_TIER_MARKS = frozenset({_INNER_LOOP_MARK, _HEAVY_MARK})
 #: exactly the hole this module exists to close. They are therefore additive --
 #: a test must still carry ``fast`` or ``slow`` to be run at all.
 _ADDITIVE_MARKS = frozenset({"network", "legacy_drift"})
-#: Marks that put a test in some tier, for the "is it marked at all" check.
-_TIER_MARKS = _CI_TIER_MARKS | _ADDITIVE_MARKS
 
 
 def _mark_names(node: ast.AST) -> set[str]:
@@ -168,4 +172,87 @@ def test_legacy_drift_never_joins_the_inner_loop() -> None:
         "test(s) are both `legacy_drift` and `fast`: a quarantined check cannot "
         "live in the inner loop it is quarantined from; use `slow`:\n"
         + "\n".join(f"  {o}" for o in offenders)
+    )
+
+
+#: A ``fast`` module may shell out only to a process it names here, with the
+#: reason. This is the escape hatch for the tier's deliberate exceptions: a
+#: single-snippet typst compile is cheap (well under a second) and is exactly
+#: the render contract the tier exists to protect, so it belongs in `fast` as
+#: long as CI installs typst first (`.github/workflows/ci.yml` does).
+_FAST_SUBPROCESS_ALLOWLIST: dict[str, str] = {
+    "tests/unit/adapters/test_visual_gate.py": "one-page typst render for the gate's type tier",
+    "tests/unit/render/test_academic_template.py": "single-snippet typst compile",
+    "tests/unit/render/test_document_renderer.py": "single-snippet typst compile",
+    "tests/unit/render/test_math_ast_transpiler.py": "single-snippet typst compile",
+    "tests/unit/render/test_math_transpiler.py": "single-snippet typst compile",
+    "tests/unit/render/test_typst_lang.py": "single-snippet typst compile",
+    "tests/unit/core/test_import_isolation.py": "subprocess imports the package to prove isolation",
+    "tests/unit/test_writer_lock.py": "subprocess holds the lock to prove cross-process exclusion",
+}
+
+_SUBPROCESS_CALLS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
+
+
+def _subprocess_calls(tree: ast.Module) -> int:
+    """Count ``subprocess.<spawn>(...)`` calls (not mentions in strings)."""
+    total = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr in _SUBPROCESS_CALLS
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "subprocess"
+        ):
+            total += 1
+    return total
+
+
+def test_a_fast_module_that_shells_out_is_declared() -> None:
+    """A `fast` module spawning a subprocess must be a known, justified exception.
+
+    Checks 1 and 2 reason about *marks*, so a module that is simply marked
+    `fast` while spawning typst/pandoc keeps the subprocess in the inner loop
+    with no contradiction to detect -- which is how 196 typst invocations leaked
+    into a ~50s gate. The allowlist makes each exception an explicit, reviewable
+    decision with a reason instead of an accident of where the mark landed.
+    """
+    undeclared: list[str] = []
+    for path in sorted(_TESTS_ROOT.rglob("test_*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        if _INNER_LOOP_MARK not in _module_marks(tree):
+            continue
+        if _subprocess_calls(tree) == 0:
+            continue
+        rel = str(path.relative_to(_TESTS_ROOT.parent))
+        if rel not in _FAST_SUBPROCESS_ALLOWLIST:
+            undeclared.append(rel)
+
+    assert undeclared == [], (
+        "fast-marked test module(s) spawn a subprocess without declaring it; a "
+        "`fast` module that shells out drags the process into the inner loop. "
+        "Either move the spawning tests to `slow`, or add the module to "
+        "_FAST_SUBPROCESS_ALLOWLIST with the reason it is cheap enough:\n"
+        + "\n".join(f"  {o}" for o in undeclared)
+    )
+
+
+def test_the_subprocess_allowlist_has_no_stale_entries() -> None:
+    """An allowlist entry that no longer spawns anything is dead weight."""
+    stale: list[str] = []
+    for rel in _FAST_SUBPROCESS_ALLOWLIST:
+        path = _TESTS_ROOT.parent / rel
+        if not path.is_file():
+            stale.append(f"{rel} (missing)")
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        if _subprocess_calls(tree) == 0 or _INNER_LOOP_MARK not in _module_marks(tree):
+            stale.append(rel)
+
+    assert stale == [], (
+        "allowlist entries that no longer describe reality; drop them:\n"
+        + "\n".join(f"  {s}" for s in stale)
     )

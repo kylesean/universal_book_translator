@@ -721,18 +721,22 @@ def is_verbatim_echo(source_text: str, target_text: str) -> bool:
 #: as an untranslated echo. Kept as one constant the dry-run provider imports.
 REHEARSAL_MARKER = "[模拟翻译]"
 
-#: A leading rehearsal prefix the PDF renderer strips before it places text, so
-#: an artifact audit must compare against the *rendered* text, not the marker a
-#: dry run prepends. One definition, shared by the renderer
-#: (``render``) and the artifact check (``pipeline.artifact``) --
-#: when only one of them knew about the strip, every rehearsal delivery reported a
-#: false "text realization missing" (worst on short headings, which cannot absorb
-#: the marker's four CJK tokens inside the overlap tolerance).
+#: A leading rehearsal prefix a *previous* PDF renderer stripped before placing
+#: text. That renderer was retired, and today's Typst renderer places the marker
+#: as ordinary text — so an artifact audit must tolerate its absence *and* its
+#: presence. Kept shared so the audit does not demand text the artifact may
+#: legitimately not carry (worst on short headings, which cannot absorb the
+#: marker's four CJK tokens inside the overlap tolerance).
 _REHEARSAL_PREFIX_RE = re.compile(r"^\[(?:模拟翻译|Mock\s*Translation)\]\s*", re.IGNORECASE)
 
 
 def strip_rehearsal_marker(text: str) -> str:
-    """Drop a leading rehearsal prefix; the renderer never places it."""
+    """Drop a leading rehearsal prefix from text being compared to an artifact.
+
+    Used by the artifact-presence check, not by the renderer: a rehearsal's
+    synthetic target may or may not reach the page with the marker attached,
+    and the audit must not fail on that difference.
+    """
     return _REHEARSAL_PREFIX_RE.sub("", text)
 
 

@@ -254,9 +254,17 @@ def test_readme_flags_exist_on_the_cli() -> None:
 
 
 def test_readme_env_vars_exist_on_the_config() -> None:
-    """A ``UBT_*`` variable the README names must map to a real config field.
+    """A ``UBT_*`` variable the README names must be real.
 
     Same failure mode as the flags: ``UBT_RENDER_MODE`` outlived the field it set.
+
+    There are two legitimate kinds of ``UBT_*`` variable, and the check has to
+    accept both: config-model fields (``ubt config`` lists these), and
+    process-level switches read directly from the environment at their point of
+    use (``UBT_LOG_LEVEL`` in ``core/log_config.py``, ``UBT_ALLOW_NO_AUTH`` in
+    ``api/security.py``, …) which deliberately never become model fields because
+    they configure the process, not a translation. A variable in neither group
+    is stale prose.
     """
     from ubt.core.config import UBTConfig, env_var_names
 
@@ -267,8 +275,21 @@ def test_readme_env_vars_exist_on_the_config() -> None:
     for field in UBTConfig.model_fields:
         declared |= set(env_var_names(field))
     mentioned = set(re.findall(r"\bUBT_[A-Z0-9_]+\b", readme.read_text(encoding="utf-8")))
-    unknown = sorted(mentioned - declared)
-    assert not unknown, f"README names UBT_* variable(s) with no backing config field: {unknown}"
+    unknown = sorted(mentioned - declared - _process_level_env_vars())
+    assert not unknown, f"README names UBT_* variable(s) that nothing reads: {unknown}"
+
+
+def _process_level_env_vars() -> set[str]:
+    """``UBT_*`` names the package reads straight from the environment.
+
+    Derived by scanning the source rather than hand-listed, so a deleted switch
+    cannot leave an allowance behind for the README to keep naming it.
+    """
+    found: set[str] = set()
+    pattern = re.compile(r"""["'](UBT_[A-Z0-9_]+)["']""")
+    for path in (_REPO_ROOT / "ubt").rglob("*.py"):
+        found |= set(pattern.findall(path.read_text(encoding="utf-8", errors="replace")))
+    return found
 
 
 def test_readme_mode_values_exist_in_the_code() -> None:

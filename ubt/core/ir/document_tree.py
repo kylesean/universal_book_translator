@@ -15,7 +15,7 @@ remove. So this module provides what was actually *missing*: a **grouping** of
 the existing blocks into sections, so translation can run at section scope
 (§2.3) instead of one block at a time.
 
-Nothing here is stored. A ``SectionTree`` is derived on demand from a block
+Nothing here is stored. The section list is derived on demand from a block
 sequence and holds no state of its own; the ledger keeps the block-level record
 that resume, billing and PE export depend on (RFC §7.2).
 """

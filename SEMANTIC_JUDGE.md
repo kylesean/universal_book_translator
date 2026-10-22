@@ -19,9 +19,8 @@ The judge needs a model and it needs to be *allowed* to run:
 ```toml
 # ubt.toml, or ~/.config/ubt/config.toml
 [defaults]
-qe_engine = "tiered"
-qe_judge_enabled = true
-qe_judge_pass_sample = 0.15      # see below — without this nothing is judged
+qe_judge_enabled = true          # the judge is enabled by this, not by qe_engine
+qe_judge_pass_sample = 0.15      # also audit ~15% of clean passes
 qe_judge_provider = "my-judge"   # the block declared below
 ```
 
@@ -134,9 +133,10 @@ api_key = "local-only"
 repair_model = "your-model-name"
 ```
 
-The key is not checked by a local server, but it **must not be empty**: an empty
-value produces the header `Bearer ` (with a trailing space), which is illegal and
-fails before the request reaches the server. Any placeholder works.
+The key is not checked by a local server, and it may be left out entirely: an
+empty or `mock-key` credential sends **no** `Authorization` header, so a local
+server that ignores auth works as-is. Any placeholder works too, for a gateway
+that insists on the header.
 
 A local judge large enough to be useful is slow — budget 35–85 seconds per judged
 block, and stop other GPU work first.

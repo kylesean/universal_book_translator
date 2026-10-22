@@ -115,7 +115,6 @@ class RapidOcrDriver:
             lines.append(
                 VlmLine(
                     text=str(text).strip(),
-                    reading_index=len(lines),
                     confidence=confidence,
                     measured_box=measured,
                 )

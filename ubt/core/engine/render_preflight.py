@@ -77,10 +77,10 @@ def select_preflight_sample(
 def _placeholder_text(block: IRBlock) -> str:
     """The rehearsal body for one sample block: its source, or a stand-in.
 
-    A formula's source is only typesettable when ``typeset_math`` can convert
+    A formula's source is only typesettable when ``typstify_math`` can convert
     it; the extractor represents a formula it could not read with a bare ``$$``
     (see ``docling_parser``), and ``typstify_math`` rejects that empty body, so
-    ``typeset_math`` returns ``None`` for reasons that have nothing to do with
+    it returns ``None`` for reasons that have nothing to do with
     the toolchain. The real render never draws those placeholders either (they
     are static skips), so substituting a synthetic math body keeps the gate on
     the math path instead of failing the whole book on markup nobody renders.
@@ -125,12 +125,12 @@ def _placeholder_blocks(sample: list[IRBlock]) -> list[IRBlock]:
 def _isolated_manifest(manifest: Any) -> Any:
     """Return a throwaway copy so a scratch render cannot mutate the run.
 
-    ``render_blocks`` records effective-mode facts (notably the rigid
-    monolingual downgrade) on the manifest it is handed. The pre-flight sample
-    can route differently from the full document — the 5-block sample prefers
-    structure blocks, so it reaches the ``struct_share`` cutoff sooner — and
-    rendering into the live manifest let a scratch compile permanently
-    downgrade a requested bilingual run to monolingual.
+    A scratch render writes ``metadata["typst_version"]`` on the manifest it is
+    handed. The pre-flight sample can route differently from the full document —
+    the 5-block sample prefers structure blocks, so it reaches the
+    ``struct_block_share`` cutoff sooner — and rendering into the live manifest
+    let a scratch compile permanently downgrade a requested bilingual run to
+    monolingual.
     """
     model_copy = getattr(manifest, "model_copy", None)
     if callable(model_copy):

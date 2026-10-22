@@ -39,6 +39,22 @@ def test_compute_pdf_page_chunks_fallback_on_zero() -> None:
     assert chunks == [[]]
 
 
+def test_the_env_knob_sets_the_default_chunk_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``UBT_PDF_STREAM_CHUNK_SIZE`` must reach the adapter's chunk loop.
+
+    The adapter binds ``get_pdf_page_chunk_size`` at import time, so a test that
+    patches the defining module proves nothing about the wiring. Driving the
+    real environment variable exercises the path production uses.
+    """
+    monkeypatch.setenv("UBT_PDF_STREAM_CHUNK_SIZE", "10")
+
+    assert get_pdf_page_chunk_size() == 10
+    chunks = compute_pdf_page_chunks(total_pages=25)
+
+    assert len(chunks) == 3
+    assert chunks[0] == list(range(1, 11))
+
+
 def test_get_pdf_page_chunk_size_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("UBT_PDF_STREAM_CHUNK_SIZE", "25")
     assert get_pdf_page_chunk_size() == 25
@@ -93,7 +109,10 @@ async def test_pdfium_adapter_out_of_core_streaming(tmp_path: Path) -> None:
     with (
         patch.object(adapter, "extract_manifest", return_value=manifest),
         patch.object(adapter, "_extract_blocks_sync", side_effect=fake_extract_blocks),
-        patch("ubt.adapters.pdf.page_chunking.get_pdf_page_chunk_size", return_value=50),
+        # Patch the name the adapter bound at import. Patching the defining
+        # module is a no-op, which let this test pass on the default value
+        # without ever exercising the wiring.
+        patch("ubt.adapters.pdf.docling_adapter.get_pdf_page_chunk_size", return_value=50),
         patch("gc.collect") as mock_gc,
     ):
         yielded_chapters = []
@@ -167,7 +186,10 @@ async def test_docling_adapter_out_of_core_streaming(tmp_path: Path) -> None:
             adapter, "_vlm_fallback_missing_pages", side_effect=lambda *args, **kw: args[1]
         ),
         patch.object(adapter, "_annotate_page_kinds", return_value={1: "body"}),
-        patch("ubt.adapters.pdf.page_chunking.get_pdf_page_chunk_size", return_value=50),
+        # Patch the name the adapter bound at import. Patching the defining
+        # module is a no-op, which let this test pass on the default value
+        # without ever exercising the wiring.
+        patch("ubt.adapters.pdf.docling_adapter.get_pdf_page_chunk_size", return_value=50),
         patch("gc.collect") as mock_gc,
     ):
         yielded_chapters = []

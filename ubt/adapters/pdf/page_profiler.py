@@ -28,7 +28,6 @@ from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
 from ubt.cache.store import DiskCacheStore, step_key
 from ubt.core.policy.layout_policy import (
     PDF_PATH_OPS,
-    PDF_TEXT_OPS,
     POSTER_MAX_CHARS,
     POSTER_MAX_FONTS,
     PROBE_COLUMN_EDGE_RATIO,
@@ -155,7 +154,6 @@ class PageFacts:
     n_rect_rows: int
     right_row_share: float
     formula_density: float
-    n_text_ops: int
     n_path_ops: int
     n_images: int
     n_fonts: int
@@ -167,11 +165,6 @@ class PageProfile:
 
     facts: PageFacts
     kind: PageKind
-
-    @property
-    def needs_vision(self) -> bool:
-        """True when the page must go through the VLM parser."""
-        return self.kind == PageKind.SCAN_IMAGE
 
 
 def classify_page(facts: PageFacts) -> PageKind:
@@ -342,19 +335,18 @@ def _struct_facts(pdf_path: Path, n_pages: int) -> list[dict[str, Any]]:
         for page in list(pdf.pages)[:n_pages]:
             try:
                 facts = {
-                    "n_text_ops": pdf_struct.count_ops(page, PDF_TEXT_OPS),
                     "n_path_ops": pdf_struct.count_ops(page, PDF_PATH_OPS),
                     "n_images": pdf_struct.resource_image_count(page),
                     "n_fonts": pdf_struct.resource_font_count(page),
                 }
             except Exception:  # one broken page must not lose the book
-                facts = {"n_text_ops": 0, "n_path_ops": 0, "n_images": 0, "n_fonts": 0}
+                facts = {"n_path_ops": 0, "n_images": 0, "n_fonts": 0}
             out.append(facts)
     finally:
         with contextlib.suppress(Exception):
             pdf.close()
     while len(out) < n_pages:
-        out.append({"n_text_ops": 0, "n_path_ops": 0, "n_images": 0, "n_fonts": 0})
+        out.append({"n_path_ops": 0, "n_images": 0, "n_fonts": 0})
     return out
 
 
@@ -375,7 +367,6 @@ def collect_page_facts(pdf_path: Path) -> list[PageFacts]:
                 n_rect_rows=int(trow["n_rect_rows"]),
                 right_row_share=float(trow["right_row_share"]),
                 formula_density=float(trow["formula_density"]),
-                n_text_ops=int(prow.get("n_text_ops", 0)),
                 n_path_ops=int(prow.get("n_path_ops", 0)),
                 n_images=int(prow.get("n_images", 0)),
                 n_fonts=int(prow.get("n_fonts", 0)),

@@ -341,12 +341,14 @@ async def run_quality_gate_stage(
             # Explicitly mark mtqe_score = None and route to REPAIR_PENDING based on structural defect flags.
             scores = [None] * len(suspicious_blocks)
 
-        engine = getattr(qe_runner, "last_engine", None)
-        if engine is not None:
-            # Honesty provenance: a COMET subprocess that fell back to its
-            # built-in heuristic must say so in the audit artifact, instead of
-            # shipping twelve discrete bands as if they were calibrated
-            # CometKiwi measurements.
+        engine = qe_runner.score_source()
+        if engine:
+            # Honesty provenance: the audit artifact must say which engine
+            # produced these numbers, because a discrete heuristic band and a
+            # graded judge opinion read identically once stored as a float.
+            # Every concrete runner implements ``score_source`` — the previous
+            # probe asked for ``last_engine``, an attribute only the retired
+            # CometKiwi subprocess ever set, so this label was always absent.
             recorded = await asyncio.to_thread(
                 ledger.get_job_metadata_value, actual_job_id, "qe_score_source"
             )

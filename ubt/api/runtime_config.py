@@ -24,29 +24,42 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from ubt.api.provider_editor import default_provider_name
 from ubt.core.config import UBTConfig, credential_required, has_real_credential
-from ubt.core.providers import credential_resolution, list_providers, load_provider_block
+from ubt.core.providers import (
+    credential_resolution,
+    list_providers,
+    load_provider_config,
+)
 from ubt.core.router.pricing import endpoint_is_local
 from ubt.core.router.registry import FALLBACK_PATTERN, registry_from_config
+
+
+class ExposedProviderFields(BaseModel):
+    """Safe displayable provider fields."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    base_url: str | None = None
+    api_mode: str | None = None
+    draft_model: str | None = None
+    repair_model: str | None = None
+    is_free: bool | None = False
+    supports_temperature: bool | None = None
+    supports_reasoning_effort: bool | None = None
+    supports_system_prompt: bool | None = None
+    supports_vision: bool | None = None
+    extraction_strategy: str | None = None
+    deployment_backend: str | None = None
+
 
 #: Provider-block fields the console may display. Everything else — most
 #: importantly ``api_key``, ``extra_headers`` and any credential — is dropped
 #: even when the block declares it. This is an allow-list on purpose: a deny-list
 #: would leak the next credential field somebody adds to ``providers.toml``.
-_EXPOSED_FIELDS: tuple[str, ...] = (
-    "base_url",
-    "api_mode",
-    "draft_model",
-    "repair_model",
-    "is_free",
-    "supports_temperature",
-    "supports_reasoning_effort",
-    "supports_system_prompt",
-    "supports_vision",
-    "extraction_strategy",
-    "deployment_backend",
-)
+_EXPOSED_FIELDS: tuple[str, ...] = tuple(ExposedProviderFields.model_fields.keys())
 
 
 def _safe_block(name: str) -> dict[str, Any]:
@@ -57,12 +70,16 @@ def _safe_block(name: str) -> dict[str, Any]:
     what is wrong.
     """
     try:
-        block = load_provider_block(name)
+        cfg = load_provider_config(name)
+        data = {k: v for k, v in cfg.model_dump(exclude_unset=True).items() if v is not None}
+        validated = ExposedProviderFields.model_validate(data)
+        exposed = {
+            key: getattr(validated, key)
+            for key in _EXPOSED_FIELDS
+            if getattr(validated, key) is not None
+        }
     except Exception:  # a broken block is reported as unavailable, not fatal
         return {"available": False}
-    exposed = {
-        key: block[key] for key in _EXPOSED_FIELDS if key in block and block[key] is not None
-    }
     # ``is_free`` is what tells the operator a run costs nothing; absent means
     # "not declared", which is not the same as "costs money".
     exposed.setdefault("is_free", False)
@@ -77,7 +94,7 @@ def _safe_block(name: str) -> dict[str, Any]:
         # runs that way. Reporting "missing" for it would send the operator to
         # fix a configuration that is already correct — the same false alarm the
         # old `bool(raw)` check produced, just in the other direction.
-        local_endpoint = endpoint_is_local(block.get("base_url"))
+        local_endpoint = endpoint_is_local(cfg.base_url)
         exposed["credential_issue"] = (
             "unresolved_variable"
             if state["unresolved_vars"]

@@ -107,14 +107,26 @@ def test_a_prices_file_set_in_config_is_used(tmp_path: Path) -> None:
         pricing._load_prices_cached.cache_clear()
 
 
-def test_a_missing_prices_file_falls_back_to_the_shipped_table() -> None:
-    """A bad path is ignored, not fatal — same as a bad ``UBT_PRICES_FILE``."""
+def test_a_missing_custom_prices_file_is_ignored() -> None:
+    """A bad custom path is ignored, not fatal — same as a bad ``UBT_PRICES_FILE``.
+
+    The name used to claim a fallback "to the shipped table", which is not what
+    happens: ``find_prices_file`` returns ``None`` (the shipped table is loaded
+    separately by ``resolve_model_prices``). Pinning the real contract keeps a
+    future refactor from making a typo'd path fatal at import time.
+    """
     from ubt.core.router.pricing import declare_custom_prices_file
 
     declare_custom_prices_file("/nonexistent/definitely-not-here.toml")
     try:
-        # Falls through to the search path rather than raising. There may be no
-        # user file at all, so only "does not raise" is asserted.
-        find_prices_file()
+        assert find_prices_file() is None
+        # The shipped table still answers, which is what the reader relies on.
+        assert resolve_model_prices("gpt-4o-mini") == (0.15, 0.6)
     finally:
         declare_custom_prices_file(None)
+
+
+def test_an_explicit_prices_path_that_is_missing_raises() -> None:
+    """An operator-supplied path must fail loudly; a config default may not."""
+    with pytest.raises(FileNotFoundError, match="Prices file not found"):
+        find_prices_file("/nonexistent/definitely-not-here.toml")

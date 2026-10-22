@@ -164,20 +164,20 @@ def world_readable_files(directory: Path, extra_dirs: Iterable[Path] = ()) -> li
     """Files under ``directory`` — plus any ``extra_dirs`` — that group or other users could still read.
 
     ``extra_dirs`` extends the scan to artifact trees the same caller owns but
-    the default check never walked: the pipeline's export report only scans
-    ``db_dir`` (see :func:`world_readable_files`'s caller in
-    ``ubt/core/engine/pipeline.py``), so rendered
-    PDFs, quality reports and the Docling conversion cache — all of which hold
-    the manuscript text — were invisible to it. Passing them here keeps one
+    the pre-existing check never walked: before it, the scan covered only
+    ``db_dir``, so rendered PDFs, quality reports and the Docling conversion
+    cache — all of which hold the manuscript text — were invisible to it.
+    The pipeline now passes the trees it wrote. Passing them here keeps one
     definition of "exposed"; the empty default preserves the original
     single-directory behaviour for existing callers.
     """
     found: dict[Path, None] = {}
 
     def _onerror(err: OSError) -> None:
-        # ``rglob`` silently skipped an unreadable directory, so a subtree of
-        # world-readable manuscript files could hide below the very report that
-        # exists to find them. Surface the gap instead of an all-clear.
+        # ``os.walk`` without ``onerror`` silently skipped an unreadable
+        # directory, so a subtree of world-readable manuscript files could hide
+        # below the very report that exists to find them. Surface the gap
+        # instead of an all-clear.
         logger.warning(
             "world-readable permission scan could not enter %s: %s",
             err.filename or "an unreadable path",
@@ -206,10 +206,11 @@ def world_readable_files(directory: Path, extra_dirs: Iterable[Path] = ()) -> li
 def warn_world_readable(directory: Path, extra_dirs: Iterable[Path] = ()) -> None:
     """Warn once about book-text files that group/other users can still read.
 
-    The scan is recursive (``rglob`` + ``stat``), so callers must run it off the
-    event loop. The warning names each exposed file's real parent — the exposed
-    files may live outside ``directory`` (deliverables, caches), and pointing the
-    operator at the already-owner-only ``directory`` changed nothing.
+    The scan is recursive (``os.walk`` + ``stat``), so callers must run it off
+    the event loop. The warning names each exposed file's real parent — the
+    exposed files may live outside ``directory`` (deliverables, caches), and
+    pointing the operator at the already-owner-only ``directory`` changed
+    nothing.
     """
     exposed = world_readable_files(directory, extra_dirs=extra_dirs)
     if not exposed:

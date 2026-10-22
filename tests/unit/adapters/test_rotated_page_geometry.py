@@ -120,7 +120,7 @@ class _RecordingDriver:
         rotation: int = 0,
     ) -> PageTranscript:
         self.calls.append((page_size_pt, scale, rotation))
-        return PageTranscript(lines=(VlmLine("ABCDEF", 0),), engine=self.name, measured_boxes=False)
+        return PageTranscript(lines=(VlmLine("ABCDEF"),), engine=self.name, measured_boxes=False)
 
 
 def test_transcription_tells_the_driver_the_page_is_rotated(tmp_path: Path) -> None:
@@ -168,7 +168,7 @@ class _DetectorDriver:
         )
         measured = rotate_rect_clockwise(box, undo_page_rotation(rotation), width, height)
         return PageTranscript(
-            lines=(VlmLine("ABCDEF", 0, measured_box=measured),),
+            lines=(VlmLine("ABCDEF", measured_box=measured),),
             engine=self.name,
             measured_boxes=True,
         )
@@ -207,7 +207,7 @@ def test_a_recognized_scan_page_gets_blocks_where_the_reader_sees_them(
 def _unplaceable_transcript() -> PageTranscript:
     """A measured driver whose one line carries no box of its own."""
     return PageTranscript(
-        lines=(VlmLine("unplaced", 0, measured_box=None),),
+        lines=(VlmLine("unplaced", measured_box=None),),
         engine="stub",
         measured_boxes=True,
     )

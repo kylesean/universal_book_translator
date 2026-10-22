@@ -281,25 +281,36 @@ class PipelineOrchestrator:
             )
             repair_provider = provider
             if self.config.repair_provider and self.config.repair_provider != self.config.provider:
-                from ubt.core.providers import load_layer
+                from pydantic import SecretStr
 
-                r_fields = load_layer(self.config.repair_provider)
-                r_key = str(r_fields.get("api_key", "")) or self.config.api_key.get_secret_value()
+                from ubt.core.providers import load_layer_config
+
+                r_cfg = load_layer_config(self.config.repair_provider)
+                raw_key = r_cfg.api_key
+                r_key = (
+                    raw_key.get_secret_value()
+                    if isinstance(raw_key, SecretStr)
+                    else str(raw_key or "")
+                ) or self.config.api_key.get_secret_value()
                 repair_provider = create_model_provider(
                     api_key=r_key,
-                    base_url=str(r_fields.get("base_url", self.config.base_url)),
-                    default_model=str(r_fields.get("repair_model", self.config.repair_model)),
-                    api_mode=str(r_fields.get("api_mode", self.config.api_mode)),
-                    timeout=float(r_fields.get("api_timeout", self.config.api_timeout)),
-                    extra_headers=dict(r_fields.get("extra_headers", self.config.extra_headers)),
+                    base_url=str(r_cfg.base_url or self.config.base_url),
+                    default_model=str(r_cfg.repair_model or self.config.repair_model),
+                    api_mode=str(r_cfg.api_mode or self.config.api_mode),
+                    timeout=float(
+                        r_cfg.api_timeout
+                        if r_cfg.api_timeout is not None
+                        else self.config.api_timeout
+                    ),
+                    extra_headers=dict(r_cfg.extra_headers or self.config.extra_headers),
                     chat_template_kwargs=dict(
-                        r_fields.get("chat_template_kwargs", self.config.chat_template_kwargs)
+                        r_cfg.chat_template_kwargs or self.config.chat_template_kwargs
                     ),
-                    reasoning_dialect=str(
-                        r_fields.get("reasoning_dialect", self.config.reasoning_dialect)
-                    ),
+                    reasoning_dialect=str(r_cfg.reasoning_dialect or self.config.reasoning_dialect),
                     prompt_caching=bool(
-                        r_fields.get("prompt_caching_enabled", self.config.prompt_caching_enabled)
+                        r_cfg.prompt_caching_enabled
+                        if r_cfg.prompt_caching_enabled is not None
+                        else self.config.prompt_caching_enabled
                     ),
                 )
             self.router = ModelRouter(
@@ -338,10 +349,11 @@ class PipelineOrchestrator:
         #: path never passes — is always wired.
         self._lease_lost_event: asyncio.Event | None = None
 
-        # The per-run protective collaborators (maskers, cleaner, neighbor
-        # builder, HTML validator) are owned by StageContext, which builds a
-        # fresh instance per run via ``field(default_factory=...)`` and hands
-        # it to each stage, so they are not reconstructed here. The billing
+        # The per-run protective collaborators are owned elsewhere and handed in
+        # per stage, so they are not reconstructed here: the HTML validator is a
+        # ``RunServices`` field built by ``field(default_factory=...)``, and the
+        # maskers belong to ``ubt.segment.PlaceholderEngine`` (the neighbor
+        # builder to ``HierarchicalMemory``). The billing
         # state below IS per-run instance state: every entry point (CLI, API
         # manager, job worker) builds one orchestrator per job, so it is not
         # shared — sharing a single instance across concurrent jobs would
@@ -519,25 +531,29 @@ class PipelineOrchestrator:
         be attributed; it is billed at zero like every other self-hosted call.
         """
         if self.config.qe_judge_provider:
-            from ubt.core.providers import load_layer
+            from pydantic import SecretStr
+
+            from ubt.core.providers import load_layer_config
             from ubt.core.router.provider import create_model_provider
 
-            fields = load_layer(self.config.qe_judge_provider)
-            if not fields:
-                raise ValueError(
-                    f"qe_judge_provider={self.config.qe_judge_provider!r} names no "
-                    "[providers.*] block. Declare one in ubt.toml or "
-                    f"~/.config/ubt/config.toml, or unset UBT_QE_JUDGE_PROVIDER."
-                )
+            judge_cfg = load_layer_config(self.config.qe_judge_provider)
+            raw_key = judge_cfg.api_key
+            j_key = (
+                raw_key.get_secret_value() if isinstance(raw_key, SecretStr) else str(raw_key or "")
+            ) or self.config.api_key.get_secret_value()
             judge_provider = create_model_provider(
-                api_key=str(fields.get("api_key") or self.config.api_key.get_secret_value()),
-                base_url=str(fields.get("base_url", self.config.base_url)),
-                default_model=str(fields.get("repair_model") or judge_model),
-                api_mode=str(fields.get("api_mode", self.config.api_mode)),
-                timeout=float(fields.get("api_timeout", self.config.api_timeout)),
-                extra_headers=dict(fields.get("extra_headers") or {}),
+                api_key=j_key,
+                base_url=str(judge_cfg.base_url or self.config.base_url),
+                default_model=str(judge_cfg.repair_model or judge_model),
+                api_mode=str(judge_cfg.api_mode or self.config.api_mode),
+                timeout=float(
+                    judge_cfg.api_timeout
+                    if judge_cfg.api_timeout is not None
+                    else self.config.api_timeout
+                ),
+                extra_headers=dict(judge_cfg.extra_headers or {}),
             )
-            judge_model = str(fields.get("repair_model") or judge_model)
+            judge_model = str(judge_cfg.repair_model or judge_model)
         elif self.config.qe_judge_base_url:
             from ubt.core.router.provider import create_model_provider
 
