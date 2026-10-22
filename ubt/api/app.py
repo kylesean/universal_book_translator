@@ -7,7 +7,7 @@ import logging
 import os
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -155,7 +155,7 @@ class UploadSizeLimitMiddleware:
     401, and a 10 GiB body would fill the disk the ledger lives on. This ASGI
     middleware checks the declared ``Content-Length`` up front and refuses with
     413 without reading a byte; a chunked body (no Content-Length) is counted as
-    it streams, and the connection is closed the moment the cap is crossed.
+    it streams and refused the moment the cap is crossed.
 
     Pure ASGI, not ``BaseHTTPMiddleware``: the latter buffers the body through an
     anyio stream, which is exactly the disk write this exists to prevent.
@@ -183,31 +183,47 @@ class UploadSizeLimitMiddleware:
             await _send_upload_too_large(send, self.max_bytes)
             return
 
-        # No (or a lying) Content-Length: count the streamed bytes and abort the
-        # moment the cap is crossed, so a chunked upload cannot outrun the limit.
+        # No (or a lying) Content-Length: count the streamed bytes and refuse the
+        # moment the cap is crossed.
+        #
+        # Refusing means *raising out of receive*, not flagging the read. The
+        # previous version set a flag and kept handing chunks to the app, so a
+        # chunked 200 MB body was read to the end and only then answered with a
+        # 413 — the guard cost nothing and prevented nothing. Raising propagates
+        # out of the app's body iteration (Starlette's form parser does not catch
+        # arbitrary exceptions), so reading actually stops.
         received = 0
-        aborted = False
+        forwarded_start = False
+
+        class _TooLarge(Exception):
+            """Internal: unwinds the app so the 413 can be sent."""
 
         async def _counting_receive() -> Any:
-            nonlocal received, aborted
+            nonlocal received
             message = await receive()
             if message["type"] == "http.request":
                 received += len(message.get("body", b""))
                 if received > self.max_bytes:
-                    aborted = True
+                    raise _TooLarge
             return message
 
         async def _guarded_send(message: Any) -> None:
-            # Suppress the handler's own response once the streamed cap is hit;
-            # the 413 below is the answer.
-            if not aborted:
-                await send(message)
+            # The 413 is the answer once the cap was crossed; the handler's own
+            # (now meaningless) response is suppressed. ``forwarded_start`` tracks
+            # what was actually sent, not what the handler tried to send: a
+            # handler that swallows the exception and then answers would
+            # otherwise leave the client with no response at all.
+            nonlocal forwarded_start
+            if received > self.max_bytes:
+                return
+            if message["type"] == "http.response.start":
+                forwarded_start = True
+            await send(message)
 
-        try:
+        with suppress(_TooLarge):
             await self.app(scope, _counting_receive, _guarded_send)
-        finally:
-            if aborted:
-                await _send_upload_too_large(send, self.max_bytes)
+        if received > self.max_bytes and not forwarded_start:
+            await _send_upload_too_large(send, self.max_bytes)
 
 
 async def _send_upload_too_large(send: Any, max_bytes: int) -> None:
@@ -217,7 +233,7 @@ async def _send_upload_too_large(send: Any, max_bytes: int) -> None:
     await send(
         {
             "type": "http.response.start",
-            "status": status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            "status": status.HTTP_413_CONTENT_TOO_LARGE,
             "headers": [
                 (b"content-type", b"application/json"),
                 (b"content-length", str(len(body)).encode()),
