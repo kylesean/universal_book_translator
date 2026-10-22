@@ -544,9 +544,7 @@ export const zh: TranslationDictionary = {
     defaultProviderLabel: '默认',
     createProvider: '创建',
     credentialField: '密钥',
-    credentialPlaceholder: '粘贴密钥原文，或 ${环境变量名}',
-    credentialPlaceholderHint:
-      '两种写法：① 直接粘贴密钥原文（以 sk- 等前缀开头）；② 写 ${环境变量名}，表示运行时从该环境变量读取，文件里不出现明文。',
+    credentialPlaceholder: '粘贴 API 密钥',
     credentialKeepHint: '留空则保留当前密钥。',
     credentialBlockedHint:
       '当前部署不允许在控制台写入密钥（可在回环之外访问，或已启用严格鉴权）。请在 ubt.toml 中设置，或导出 UBT_LLM_API_KEY。',
@@ -564,28 +562,27 @@ export const zh: TranslationDictionary = {
     save: '保存',
     saving: '保存中…',
     savedHint: '已写入 ubt.toml。下一个提交的作业即生效，无需重启。',
-    capabilityTitle: '这个端点能做到什么（需要你告诉引擎）',
+    capabilityTitle: '端点能力',
     capabilityHelp:
-      '引擎无法自动探测端点的这些能力，只能由你声明。留空表示「不知道」，引擎会按最保守的方式处理。',
-    capabilitySystem: '支持独立的系统提示词',
+      '引擎无法自动探测端点的这些能力，只能由你声明。没有声明时按最常见的默认值处理。',
+    capabilitySystem: '接受独立的系统消息',
     capabilitySystemNote:
-      '系统提示词是发给模型的一段指令，有的端点要求它跟在用户消息里一起发。选错不会损坏译文，只是多一层包裹。不确定就保持默认。',
-    capabilitySystemAccepted: '支持（作为单独一条系统消息发送）',
-    capabilitySystemMerged: '不支持（拼接到用户消息开头一起发送）',
+      '一般不用改：引擎默认认为端点接受单独的系统消息。只有当你提交作业时端点明确报错说 system 角色不被支持，才把它改成「不接受」，此时引擎会把指令并进用户消息一起发送——翻译内容本身不变，只是发送方式不同。注意：在「极速」「快速预览」等使用精简提示词的预设下本来就没有系统消息，这项设置不起作用。',
+    capabilitySystemAccepted: '接受（默认，单独发送）',
+    capabilitySystemMerged: '不接受（并进用户消息发送）',
     capabilityVision: '支持图像输入',
     capabilityVisionNote: '公式截图修复与视觉质检需要把页面图像发给该端点；不勾选则这两项跳过。',
-    capabilityUndeclared: '不确定（按最保守方式处理）',
+    capabilityUndeclared: '未声明（按默认处理）',
+    capabilityTroubleshootToggle: '端点报错说 system 角色不被支持？点此修改',
 
     baseUrl: '接口地址',
     apiMode: '通信协议',
     apiTimeout: '超时（秒）',
-    extractionStrategy: '回复提取方式',
+    extractionStrategy: '回复解析',
     extractionStrategyHelp:
-      '模型回复里会混入解释、思考过程或 markdown 代码块，这一步决定如何只取出译文。「自动」适合绝大多数端点。',
-    extractionAuto: '自动（先找 XML 标签，再清理代码块与开场白）',
-    extractionXmlTag: '只取 <translation> 标签内的内容',
-    extractionRaw: '原样使用（端点已保证只返回译文）',
-    extractionCp: '清理对话式包装（去掉 markdown 代码块与「译文如下：」这类开场白）',
+      '模型回复可能夹带解释、思考过程或 markdown 代码块，这一步决定如何只取出译文。',
+    extractionAutoNote:
+      '默认即可：先找 <translation> 标签，找不到就自动清理代码块和「译文如下：」这类开场白。只有端点确实属于特殊格式时，才需要在 ubt.toml 或环境变量 UBT_EXTRACTION_STRATEGY 中单独指定。',
     deploymentBackend: '自托管后端',
     deploymentBackendHelp:
       '仅当本地栈服务该模型时填写：网关返回「模型不存在」时会额外重试一次本地端点。',

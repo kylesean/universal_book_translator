@@ -484,15 +484,13 @@ export interface TranslationDictionary {
     capabilityVision: string
     capabilityVisionNote: string
     capabilityUndeclared: string
+    capabilityTroubleshootToggle: string
     baseUrl: string
     apiMode: string
     apiTimeout: string
     extractionStrategy: string
     extractionStrategyHelp: string
-    extractionAuto: string
-    extractionXmlTag: string
-    extractionRaw: string
-    extractionCp: string
+    extractionAutoNote: string
     deploymentBackend: string
     deploymentBackendHelp: string
     isFree: string
@@ -506,7 +504,6 @@ export interface TranslationDictionary {
     createProvider: string
     credentialField: string
     credentialPlaceholder: string
-    credentialPlaceholderHint: string
     credentialKeepHint: string
     credentialBlockedHint: string
     credentialUnknownHint: string

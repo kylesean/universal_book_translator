@@ -55,9 +55,15 @@ class TranslationOutputExtractor:
     )
 
     # Markdown code fences (when models wrap the answer in ```markdown ... ```)
+    #: An optional *language tag* is allowed on the opening fence. It used to be
+    #: limited to markdown/text/xml, so a reply fenced as ```python kept the word
+    #: "python" as the first line of the translation — and a book that translates
+    #: code snippets is exactly where that ends up in the delivered artifact.
     _CODE_FENCE_PATTERN = re.compile(
-        r"^```(?:markdown|text|xml)?\s*([\s\S]*?)\s*```$",
-        flags=re.IGNORECASE,
+        # The tag must be followed by a newline: without that requirement the
+        # reply "```code```" — a translation that is *about* a code fence —
+        # lost its content to the tag group.
+        r"^```(?:[A-Za-z0-9_+-]+[ \t]*\n)?([\s\S]*?)\s*```$",
     )
     _MACRO_BLOCK_PATTERN = re.compile(
         r'<\s*block\s+id=["\'](.*?)["\']\s*>([\s\S]*?)<\s*/\s*block\s*>',
@@ -129,14 +135,30 @@ class TranslationOutputExtractor:
 
     @classmethod
     def _clean_conversational_prefix(cls, text: str) -> str:
-        """Strip markdown fences and conversational lead-in phrases."""
-        cleaned = text.strip()
-        fence_match = cls._CODE_FENCE_PATTERN.match(cleaned)
-        if fence_match:
-            cleaned = fence_match.group(1).strip()
+        """Strip markdown fences and conversational lead-in phrases.
 
-        for pat in cls._CONVERSATIONAL_PREFIX_PATTERNS:
-            cleaned = pat.sub("", cleaned).strip()
+        The lead-in is removed *before* the fence is unwrapped. ``_CODE_FENCE_PATTERN``
+        is anchored with ``^```…```$``, so it only fires when the fence is the
+        entire reply. Models routinely open with a sentence first::
+
+            Here is the translation:
+            ```
+            你好，世界。
+            ```
+
+        In that order the old code matched neither the anchor nor the fence and
+        returned the backticks verbatim, which then rendered as literal ``` in
+        the delivered book. Repeating the pair handles a fence that the lead-in
+        was hiding, and is otherwise a no-op.
+        """
+        cleaned = text.strip()
+        for _ in range(2):
+            for pat in cls._CONVERSATIONAL_PREFIX_PATTERNS:
+                cleaned = pat.sub("", cleaned).strip()
+            fence_match = cls._CODE_FENCE_PATTERN.match(cleaned)
+            if fence_match is None:
+                break
+            cleaned = fence_match.group(1).strip()
 
         # Clean orphan translation tag remnants at the edges only. Mid-text
         # '<translation></translation>' is a mention in real prose (a book about

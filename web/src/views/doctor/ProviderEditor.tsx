@@ -4,7 +4,6 @@ import { getProvider, saveProvider, type ProviderDetail } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import { InfoTip } from '@/components/ui/InfoTip'
 import { useI18n } from '@/i18n/useI18n'
-import type { TranslationDictionary } from '@/i18n/types'
 
 interface ProviderEditorProps {
   /** The provider block being edited; ``null`` starts a new one. */
@@ -62,18 +61,6 @@ const TEXT_FIELDS = [
 type TextField = (typeof TEXT_FIELDS)[number]['field']
 
 const API_MODES = ['openai-chat', 'openai-responses', 'anthropic-messages', 'gemini-native']
-const EXTRACTION_STRATEGIES = ['auto', 'xml_tag', 'raw', 'cp'] as const
-
-/** The `doctor` dictionary key holding the human label for each stored value. */
-const EXTRACTION_LABEL_KEYS: Record<
-  (typeof EXTRACTION_STRATEGIES)[number],
-  Extract<keyof TranslationDictionary['doctor'], `extraction${string}`>
-> = {
-  auto: 'extractionAuto',
-  xml_tag: 'extractionXmlTag',
-  raw: 'extractionRaw',
-  cp: 'extractionCp',
-}
 
 /**
  * Edit one `[providers.<name>]` block: endpoint, protocol, models, capability.
@@ -110,7 +97,6 @@ export function ProviderEditor({
   const [text, setText] = useState<Partial<Record<TextField, string>>>({})
   const [flags, setFlags] = useState<Partial<Record<FlagField, boolean | undefined>>>({})
   const [apiMode, setApiMode] = useState('')
-  const [extraction, setExtraction] = useState('')
   const [isFree, setIsFree] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -140,7 +126,6 @@ export function ProviderEditor({
         }
         setFlags(seeded)
         setApiMode(loaded.api_mode ?? '')
-        setExtraction(loaded.extraction_strategy ?? '')
         setIsFree(loaded.is_free ?? false)
       })
       .catch((err: unknown) => {
@@ -190,9 +175,6 @@ export function ProviderEditor({
         }
       }
       if (apiMode && apiMode !== (detail?.api_mode ?? '')) changes.api_mode = apiMode
-      if (extraction && extraction !== (detail?.extraction_strategy ?? '')) {
-        changes.extraction_strategy = extraction
-      }
       if (isFree !== (detail?.is_free ?? false)) changes.is_free = isFree
       if (Object.keys(changes).length === 0 && !isCreate) {
         onSaved()
@@ -218,7 +200,7 @@ export function ProviderEditor({
     } finally {
       setIsSaving(false)
     }
-  }, [apiMode, credential, detail, extraction, flags, isCreate, isFree, name, nameIsValid, onSaved, t, text])
+  }, [apiMode, credential, detail, flags, isCreate, isFree, name, nameIsValid, onSaved, t, text])
 
   return (
     <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden">
@@ -326,13 +308,7 @@ export function ProviderEditor({
               <span className="block mt-0.5 type-help text-[var(--ink-muted)]">
                 {t.doctor.credentialKeepHint}
               </span>
-            ) : (
-              // "sk-… or ${VAR}" read as one opaque placeholder. Both halves are
-              // things the operator may legitimately type, so name them.
-              <span className="block mt-0.5 type-help text-[var(--ink-muted)] leading-relaxed">
-                {t.doctor.credentialPlaceholderHint}
-              </span>
-            )}
+            ) : null}
           </label>
         ) : (
           <p className="type-help text-[#b45309] leading-relaxed">
@@ -373,7 +349,19 @@ export function ProviderEditor({
               ))}
             </select>
           </label>
-          <label className="block">
+          {/* No extraction control. ``auto`` is not one strategy among four — it
+              IS "try the XML tag, then strip the conversational wrapper", so it
+              already contains ``xml_tag`` and ``cp``. The other two are actively
+              worse: ``raw`` skips cleaning (a chatty endpoint's "Here is the
+              translation:" and its ``` fence ship into the book) and
+              ``xml_tag`` returns *empty* for any reply without a tag, which is
+              every reply under the minimal and hybrid prompt strategies.
+
+              Presented as four unexplained choices, an operator had no way to
+              pick correctly. The default is what they want; the field stays
+              settable in ubt.toml / UBT_EXTRACTION_STRATEGY for the rare endpoint
+              that needs otherwise, and this row says so plainly. */}
+          <div className="block">
             <span className="flex items-center gap-1">
               <span className="type-label text-[var(--ink-secondary)]">
                 {t.doctor.extractionStrategy}
@@ -382,22 +370,10 @@ export function ProviderEditor({
                 {t.doctor.extractionStrategyHelp}
               </InfoTip>
             </span>
-            <select
-              value={extraction}
-              onChange={(event) => setExtraction(event.target.value)}
-              className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value"
-            >
-              <option value="">—</option>
-              {/* The stored values are `xml_tag`/`raw`/`cp`/`auto` — protocol
-                  vocabulary an operator cannot act on. The label says what each
-                  one *does*; the value sent to the server is unchanged. */}
-              {EXTRACTION_STRATEGIES.map((strategy) => (
-                <option key={strategy} value={strategy}>
-                  {t.doctor[EXTRACTION_LABEL_KEYS[strategy]]}
-                </option>
-              ))}
-            </select>
-          </label>
+            <p className="mt-1 type-help text-[var(--ink-secondary)] leading-relaxed">
+              {t.doctor.extractionAutoNote}
+            </p>
+          </div>
         </div>
 
         <div className="pt-1 border-t border-[var(--paper-border)]">
@@ -406,34 +382,50 @@ export function ProviderEditor({
             <InfoTip label={t.doctor.capabilityHelp}>{t.doctor.capabilityHelp}</InfoTip>
           </div>
 
-          {/* Required: the engine cannot discover this one. A rejected system role
-              is a 400 with no self-heal (the fix is a merge decision), so the job
-              fails rather than degrades. */}
-          {CAPABILITY_FIELDS.map(({ field, labelKey, noteKey }) => (
-            <div key={field} className="mt-1.5">
-              <div className="flex items-center justify-between gap-3">
-                <span className="type-value">{t.doctor[labelKey]}</span>
-                <select
-                  value={flags[field] === undefined ? '' : String(flags[field])}
-                  onChange={(event) => {
-                    const raw = event.target.value
-                    setFlags((prev) => {
-                      const next = { ...prev }
-                      if (raw === '') delete next[field]
-                      else next[field] = raw === 'true'
-                      return next
-                    })
-                  }}
-                  className="shrink-0 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-1.5 py-0.5 type-help font-mono"
-                >
-                  <option value="">{t.doctor.capabilityUndeclared}</option>
-                  <option value="true">{t.doctor.capabilitySystemAccepted}</option>
-                  <option value="false">{t.doctor.capabilitySystemMerged}</option>
-                </select>
+          {/* Collapsed, because it is a remedy rather than a choice: the engine
+              already assumes a separate system turn is accepted, and that is
+              right for essentially every endpoint. This switch exists for the
+              one failure mode where it is not — the provider answers the request
+              with a 400 complaining about the `system` role — and the operator
+              has to tell the engine to fold the instruction into the user turn
+              instead. Rendering it as an equal peer of "accepts images" invited
+              the reader to make a decision they had no basis for.
+
+              Note the engine cannot detect this: a rejected system role is a
+              merge decision, not a capability probe, so the job fails rather than
+              degrading — which is why the switch has to stay reachable. */}
+          <details className="mt-2">
+            <summary className="cursor-pointer type-help text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] select-none">
+              {t.doctor.capabilityTroubleshootToggle}
+            </summary>
+            {CAPABILITY_FIELDS.map(({ field, labelKey, noteKey }) => (
+              <div key={field} className="mt-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="type-value">{t.doctor[labelKey]}</span>
+                  <select
+                    value={flags[field] === undefined ? '' : String(flags[field])}
+                    onChange={(event) => {
+                      const raw = event.target.value
+                      setFlags((prev) => {
+                        const next = { ...prev }
+                        if (raw === '') delete next[field]
+                        else next[field] = raw === 'true'
+                        return next
+                      })
+                    }}
+                    className="shrink-0 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-1.5 py-0.5 type-help"
+                  >
+                    <option value="">{t.doctor.capabilityUndeclared}</option>
+                    <option value="true">{t.doctor.capabilitySystemAccepted}</option>
+                    <option value="false">{t.doctor.capabilitySystemMerged}</option>
+                  </select>
+                </div>
+                <p className="type-help text-[var(--ink-muted)] mt-0.5 leading-relaxed">
+                  {t.doctor[noteKey]}
+                </p>
               </div>
-              <p className="type-help text-[var(--ink-muted)] mt-0.5">{t.doctor[noteKey]}</p>
-            </div>
-          ))}
+            ))}
+          </details>
 
           {/* Vision: a plain checkbox. Off is the safe default and costs only a
               degraded repair, never a failed job. */}

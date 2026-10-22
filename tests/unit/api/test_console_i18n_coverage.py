@@ -321,3 +321,39 @@ def test_the_quality_gate_does_not_render_the_raw_skipped_reason() -> None:
     assert "skipCodes.map(skipLabel)" in source, (
         "the metric must render translated skip codes, not the raw sentence"
     )
+
+
+def test_the_provider_editor_does_not_offer_output_extraction_as_a_choice() -> None:
+    """Four unexplained enum values, one of which is the only safe answer.
+
+    ``auto`` is not a peer of the other three — it *is* "tag first, then clean
+    the wrapper", so it contains ``xml_tag`` and ``cp``. ``raw`` skips cleaning
+    (a chatty endpoint's lead-in and ``` ship into the book) and ``xml_tag``
+    returns empty for every reply without a tag, which is every reply from the
+    minimal and hybrid prompt strategies. Offered as equal options, an operator
+    had no basis to choose; the field stays settable in ubt.toml for the rare
+    endpoint that needs it, and the panel states the default instead.
+    """
+    source = _source(_VIEWS / "doctor" / "ProviderEditor.tsx")
+    assert "EXTRACTION_STRATEGIES" not in source, (
+        "the extraction dropdown is back; it offers values that are worse than "
+        "the default and cannot be reasoned about from the form"
+    )
+    assert "extractionAutoNote" in source, (
+        "the panel must still state which parsing behaviour applies"
+    )
+
+
+def test_the_system_prompt_switch_is_a_collapsed_remedy_not_a_peer_choice() -> None:
+    """It is a fix for a specific 400, not a capability decision to weigh.
+
+    The engine already assumes a separate system turn is accepted, which is
+    right for essentially every endpoint. Rendering the switch beside "accepts
+    images" implied the user had to judge it. It now lives behind a disclosure
+    that names the symptom.
+    """
+    source = _source(_VIEWS / "doctor" / "ProviderEditor.tsx")
+    assert "capabilityTroubleshootToggle" in source, (
+        "the system-prompt switch must sit behind a describing disclosure"
+    )
+    assert "<details" in source, "the remedy must be collapsed by default"

@@ -578,9 +578,7 @@ export const en: TranslationDictionary = {
     defaultProviderLabel: 'default',
     createProvider: 'Create',
     credentialField: 'Credential',
-    credentialPlaceholder: 'paste the key, or ${ENV_VAR_NAME}',
-    credentialPlaceholderHint:
-      'Two ways: ① paste the key itself (starting with sk- etc.); ② write ${ENV_VAR_NAME} to read it from that environment variable at runtime, so no plaintext secret is stored in the file.',
+    credentialPlaceholder: 'Paste the API key',
     credentialKeepHint: 'Leave blank to keep the current credential.',
     credentialBlockedHint:
       'A credential cannot be written from the console on this deployment (reachable beyond loopback, or strict auth is on). Set it in ubt.toml or export UBT_LLM_API_KEY.',
@@ -599,29 +597,28 @@ export const en: TranslationDictionary = {
     save: 'Save',
     saving: 'Saving…',
     savedHint: 'Saved to ubt.toml. The next submitted job picks it up; no restart needed.',
-    capabilityTitle: 'What this endpoint can do (tell the engine)',
+    capabilityTitle: 'Endpoint capability',
     capabilityHelp:
-      'The engine cannot detect these endpoint capabilities, so you state them. Blank means "unknown", and the engine then takes the most conservative path.',
-    capabilitySystem: 'Supports a separate system message',
+      'The engine cannot detect these endpoint capabilities, so you state them. Without a statement the most common default applies.',
+    capabilitySystem: 'Accepts a separate system message',
     capabilitySystemNote:
-      'A system message is an instruction block sent before the text. Some endpoints require it to be folded into the user message. Picking the wrong one does not corrupt the translation — it only adds a wrapper. Leave the default if unsure.',
-    capabilitySystemAccepted: 'Yes (send as its own system message)',
-    capabilitySystemMerged: 'No (prepend it to the user message)',
+      'Usually leave this alone: the engine assumes the endpoint accepts a separate system message. Only change it if a job fails with the endpoint rejecting the `system` role — then the engine folds the instruction into the user message instead. The translation itself is unchanged; only how it is sent differs. Note: presets that use minimal prompts (Fast, Preview) send no system message at all, so this setting has no effect there.',
+    capabilitySystemAccepted: 'Accepts (default, sent separately)',
+    capabilitySystemMerged: 'Rejects (fold into the user message)',
     capabilityVision: 'Supports image input',
     capabilityVisionNote:
       'Formula-image repair and the visual quality check send page images to this endpoint. Unchecked, both are skipped.',
-    capabilityUndeclared: 'Unknown (take the conservative path)',
+    capabilityUndeclared: 'Not declared (use the default)',
+    capabilityTroubleshootToggle: 'Endpoint rejects the system role? Change it here',
 
     baseUrl: 'Base URL',
     apiMode: 'Wire protocol',
     apiTimeout: 'Timeout (s)',
-    extractionStrategy: 'How to read the reply',
+    extractionStrategy: 'Reply parsing',
     extractionStrategyHelp:
-      'Model replies can carry explanations, reasoning, or markdown fences around the actual translation. This decides how the translation is cut out. "Auto" suits almost every endpoint.',
-    extractionAuto: 'Auto (look for an XML tag, then strip fences and lead-in)',
-    extractionXmlTag: 'Only the text inside <translation>',
-    extractionRaw: 'Use the reply verbatim (the endpoint already returns only the translation)',
-    extractionCp: 'Strip conversational wrapping (markdown fences, "Here is the translation:" lead-ins)',
+      'A model reply can carry explanations, reasoning, or markdown fences around the translation. This decides how only the translation is kept.',
+    extractionAutoNote:
+      'Leave it on the default: look for a <translation> tag, then automatically strip code fences and lead-ins like "Here is the translation:". Only an endpoint with a genuinely unusual reply format needs a different value, set in ubt.toml or UBT_EXTRACTION_STRATEGY.',
     deploymentBackend: 'Self-hosted backend',
     deploymentBackendHelp:
       'Set only when a local stack serves this model: it enables one retry against localhost when a gateway answers "model not supported".',
