@@ -278,3 +278,143 @@ def test_outline_rows_with_the_same_title_but_different_pages_both_survive(
     added = _extract_outline_only_blocks(Path("unused.pdf"), already, start_index=2)
 
     assert [b.provenance.toc_page for b in added] == ["79"]
+
+
+# --------------------------------------------------------------------------
+# Merging the rows must not move them out of the reading order.
+# --------------------------------------------------------------------------
+
+
+def test_the_contents_stays_where_the_source_printed_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Collecting the rows must not append them at the end of the book.
+
+    Deferring the outline merge to after the loop fixed a real duplicate-rows
+    bug (a two-page contents re-added the outline once per page), but the first
+    version also *placed* the rows there. The contents then read after the body
+    it describes, and the "Contents" heading was left orphaned above the first
+    paragraph — measured in both the Typst render and the HTML companion, which
+    order by ``spine_index``.
+
+    The source prints the contents on page 2: front matter, then the rows, then
+    the body.
+    """
+    items: list[tuple[object, int]] = [
+        (_FakeDocItem("text", "The Greatest Paper", 1), 0),
+        (_FakeDocItem("title", "Contents", 2), 0),
+        (_FakeItem(), 0),
+        (_FakeDocItem("text", "Body paragraph one.", 5), 0),
+        (_FakeDocItem("text", "Body paragraph two.", 5), 0),
+    ]
+
+    def fake_index(
+        item: object, pdf_path: object, cache: dict[int, list[object]], start_index: int
+    ) -> list[IRBlock]:
+        return [_row("1 Introduction", "5", start_index), _row("2 Methods", "7", start_index + 1)]
+
+    import ubt.adapters.pdf.docling_parser as dp
+
+    monkeypatch.setattr(dp, "_extract_document_index_blocks", fake_index)
+    monkeypatch.setattr(dp, "_extract_outline_only_blocks", lambda *a, **k: [])
+
+    blocks = map_iterated_items(items, type("_Doc", (), {})(), tmp_path / "a", pdf_path=None)
+
+    ordered = [b.source_text for b in sorted(blocks, key=lambda b: b.spine_index)]
+    assert ordered == [
+        "The Greatest Paper",
+        "Contents",
+        "1 Introduction",
+        "2 Methods",
+        "Body paragraph one.",
+        "Body paragraph two.",
+    ]
+    # Ids stay unique and encode the position they are read at.
+    assert [b.id for b in sorted(blocks, key=lambda b: b.spine_index)] == [
+        f"pdf_main#b{index:04d}" for index in range(1, 7)
+    ]
+
+
+def test_inserting_the_rows_keeps_asset_ids_and_leaves_no_collision() -> None:
+    """The shift renumbers positions, never asset ids, and never collides.
+
+    Two things must hold when rows are inserted before blocks that were already
+    emitted:
+
+    * the block that used to own ``#b{k+1}`` must move out of the way. A row
+      inserted at ``k + 1`` takes that id, and the ledger's
+      ``ON CONFLICT(job_id, block_id) DO UPDATE`` resolves the clash silently by
+      overwriting one block with the other — which is exactly how the TOC once
+      replaced the title page.
+    * an asset block keeps its ``img_``/``code_``/``formula_`` prefix. Those are
+      not positions; the quality gate and the renderer key on them, so a blanket
+      renumber to ``#bNNNN`` would erase the distinction.
+    """
+    from ubt.adapters.pdf.docling_parser import _place_toc_rows
+
+    front = [
+        IRBlock(
+            element=make_element(
+                id="pdf_main#b0001",
+                spine_index=1,
+                block_type=BlockType.NARRATIVE,
+                source_text="Title",
+            )
+        ),
+        IRBlock(
+            element=make_element(
+                id="pdf_main#b0002",
+                spine_index=2,
+                block_type=BlockType.NARRATIVE,
+                source_text="Abstract",
+            )
+        ),
+    ]
+    body = [
+        IRBlock(
+            element=make_element(
+                id="pdf_main#b0003",
+                spine_index=3,
+                block_type=BlockType.NARRATIVE,
+                source_text="Body",
+            )
+        ),
+        IRBlock(
+            element=make_element(
+                id="pdf_main#img_0004",
+                spine_index=4,
+                block_type=BlockType.IMAGE,
+                source_text="pic.png",
+                skip_translate=True,
+            )
+        ),
+        IRBlock(
+            element=make_element(
+                id="pdf_main#b0005",
+                spine_index=5,
+                block_type=BlockType.NARRATIVE,
+                source_text="Tail",
+            )
+        ),
+    ]
+    rows = [
+        _row("1 Introduction", "5", 0),
+        _row("2 Methods", "7", 0),
+    ]
+
+    blocks = front + body
+    _place_toc_rows(blocks, rows, insert_at=2)
+
+    ids = [b.id for b in blocks]
+    assert ids == [
+        "pdf_main#b0001",  # front matter untouched
+        "pdf_main#b0002",
+        "pdf_main#b0003",  # the two inserted rows
+        "pdf_main#b0004",
+        "pdf_main#b0005",  # "Body", shifted out of the way
+        "pdf_main#img_0004",  # asset id left exactly as emitted
+        "pdf_main#b0007",  # "Tail"
+    ], ids
+    assert len(ids) == len(set(ids))
+    assert [b.spine_index for b in blocks] == list(range(1, len(blocks) + 1))

@@ -95,6 +95,12 @@ logger = logging.getLogger(__name__)
 #: initialisation, then re-ran the whole conversion on CPU.
 _DOCLING_MIN_FREE_VRAM_GIB: float = 2.0
 
+#: A block id that encodes nothing but its reading position (``pdf_main#b0007``).
+#: Asset blocks use their own prefixes (``img_``, ``code_``, ``formula_``) and are
+#: deliberately excluded: those prefixes are what the quality gate and the
+#: renderer key on, so renumbering must not rewrite them.
+_POSITIONAL_ID_RE = re.compile(r"^pdf_main#b\d{4,}$")
+
 
 def _figure_asset_dpi_tag() -> str:
     """The delivered-crop DPI tag, read lazily.
@@ -1092,6 +1098,38 @@ def _doc_item_labels() -> Any:
         return SimpleNamespace(**_DOC_ITEM_LABEL_VALUES)
 
 
+def _place_toc_rows(blocks: list[IRBlock], rows: list[IRBlock], insert_at: int) -> None:
+    """Insert merged TOC ``rows`` at ``insert_at`` and renumber what follows.
+
+    The rows belong where the source printed the contents — after the front
+    matter, before the body — because every consumer orders by ``spine_index``
+    (``analyze.bridge``, the HTML/EPUB companions, ``render_preflight``).
+    Appending them at the end instead put the contents after the text it
+    describes and orphaned the "Contents" heading above the first paragraph.
+
+    Two invariants the insertion must not break:
+
+    * **Ids stay unique.** A row landing at position ``k + 1`` takes ``#b{k+1}``,
+      which the block that used to sit there already owns; the ledger's
+      ``ON CONFLICT(job_id, block_id) DO UPDATE`` then resolves the clash
+      silently by overwriting one block with the other. Everything from
+      ``insert_at`` on is therefore renumbered.
+    * **Asset prefixes survive.** ``pdf_main#img_…`` / ``code_…`` / ``formula_…``
+      are not positions — the quality gate and the renderer key on them — so
+      only positional ``#bNNNN`` ids are rewritten.
+
+    Blocks *before* ``insert_at`` keep the ids they were emitted with. That is
+    what stops the TOC from overwriting the title page, authors and abstract
+    (the ``cb2286a`` regression).
+    """
+    ordered = list(blocks[:insert_at]) + list(rows) + list(blocks[insert_at:])
+    for new_index, block in enumerate(ordered, start=1):
+        block.set_spine_index(new_index)
+        if _POSITIONAL_ID_RE.fullmatch(block.id):
+            block.set_id(f"pdf_main#b{new_index:04d}")
+    blocks[:] = ordered
+
+
 def map_iterated_items(
     items: list[Any],
     doc: Any,
@@ -1145,9 +1183,14 @@ def map_iterated_items(
     last_kept_label: Any = None
     last_kept_page: int | None = None
     page_lines_cache: dict[int, tuple[list[Any], float]] = {}
-    #: TOC rows gathered from every DOCUMENT_INDEX item, merged with the PDF
-    #: outline and placed once after the loop (see that branch).
+    #: TOC rows gathered from every DOCUMENT_INDEX item. The outline is merged
+    #: into them once, after the loop (see the branch below); they are *placed*
+    #: at the position of the first contents item, because the contents is read
+    #: where the source printed it — after the front matter and before the body.
     pending_toc: list[IRBlock] = []
+    #: ``len(blocks)`` at the first DOCUMENT_INDEX item, i.e. how many blocks
+    #: precede the contents in reading order. ``None`` until one is seen.
+    toc_insert_at: int | None = None
     #: Text of every page, loaded once when the first reference entry appears.
     #: Docling's ``prov.page_no`` for a reference entry is not reliable (measured
     #: on arXiv 2609.20519: entries stamped page 12 have their text on another
@@ -1184,6 +1227,14 @@ def map_iterated_items(
             # arXiv 2608.25512 (a two-page contents) delivered 128 rows for 64
             # entries, so every chapter printed twice. The merge happens once,
             # after the loop.
+            #
+            # Collection must not move the rows, though: they are placed back at
+            # the first contents item's position below, because that is where the
+            # source prints them. Appending them at the end of the book put every
+            # TOC row after the body it describes and left the "Contents" heading
+            # orphaned above the first paragraph.
+            if toc_insert_at is None:
+                toc_insert_at = len(blocks)
             toc_blocks = _extract_document_index_blocks(
                 item, pdf_path, page_lines_cache, start_index=1
             )
@@ -1540,26 +1591,22 @@ def map_iterated_items(
         # Introduction, 2 Switch Transformer" — the chapter that contains a
         # section printed below it (measured on the gold corpus,
         # switch-transformers: the TOC opened on "2.1").
-        #
-        # The renumbering is not cosmetic: every downstream consumer orders
-        # blocks by ``spine_index`` (``analyze.bridge``, ``render_preflight``,
-        # the ledger), so reordering the list alone is undone on the next sort
-        # and the delivered contents still opened on "2.1". Ids are rebuilt from
-        # the new position too, so they stay consistent with the index they
-        # encode.
-        #
-        # The renumber starts *after* the blocks already emitted (the title
-        # page, authors, abstract and footnotes), never at 1: those slots are
-        # taken, and the ledger's ``ON CONFLICT(job_id, block_id) DO UPDATE``
-        # made the clash silent — the TOC rows *overwrote* the front matter, so
-        # the delivered PDF opened on the contents page with no title, authors
-        # or abstract anywhere in it.
-        base = len(blocks)
         ordered_toc = sorted(pending_toc, key=_toc_sort_key)
-        for new_index, block in enumerate(ordered_toc, start=base + 1):
-            block.set_spine_index(new_index)
-            block.set_id(f"pdf_main#b{new_index:04d}")
-        blocks.extend(ordered_toc)
+        # The rows are inserted where the contents was read, not appended: the
+        # TOC is part of the reading order at its own position (page 2 of a
+        # paper, after the title/authors/abstract and before the body), and
+        # every consumer sorts by ``spine_index`` — ``analyze.bridge``, the
+        # HTML/EPUB companions, ``render_preflight``. Appending them put every
+        # row after the body it describes and left the "Contents" heading
+        # orphaned at the top of the first paragraph.
+        #
+        # ``insert_at`` is ``len(blocks)`` at the *first* contents item, so the
+        # front matter keeps the ids it was emitted with — renumbering it from 1
+        # made the ledger's ``ON CONFLICT(job_id, block_id) DO UPDATE`` overwrite
+        # the title page, authors and abstract block-for-block, and the delivered
+        # PDF opened on the contents with no front matter anywhere in it.
+        insert_at = len(blocks) if toc_insert_at is None else min(toc_insert_at, len(blocks))
+        _place_toc_rows(blocks, ordered_toc, insert_at)
 
     typed = type_docling_blocks(
         annotate_layout_metadata(drop_phantom_continuation_boxes(blocks), pdf_path)
