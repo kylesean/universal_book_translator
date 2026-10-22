@@ -4197,6 +4197,63 @@
             ],
             "title": "Pages",
             "description": "Page range filter (e.g. 1-10)"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "Provider block to quote against (must be declared in ubt.toml or be a built-in wire protocol). Endpoint and credentials still come from it."
+          },
+          "ocr_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "sidecar",
+                  "cloud",
+                  "vlm",
+                  "rapidocr",
+                  "off"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Mode",
+            "description": "OCR engine the job will use (affects the vision line)"
+          },
+          "visual_judge_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visual Judge Enabled",
+            "description": "Quote the VLM visual judge over rendered pages"
+          },
+          "max_concurrency": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Concurrency",
+            "description": "Concurrent LLM requests (drives the runtime estimate)"
           }
         },
         "additionalProperties": false,
@@ -4945,6 +5002,11 @@
           "rehearsal": {
             "type": "boolean",
             "title": "Rehearsal",
+            "default": false
+          },
+          "reused": {
+            "type": "boolean",
+            "title": "Reused",
             "default": false
           }
         },
@@ -5776,6 +5838,12 @@
             "type": "boolean",
             "title": "Can Translate",
             "description": "True when a submit would translate for real. False means the server would downgrade it to a zero-token rehearsal (no model, or no real credential) \u2014 the wizard says so before the button is pressed",
+            "default": false
+          },
+          "allow_page_upload": {
+            "type": "boolean",
+            "title": "Allow Page Upload",
+            "description": "True when rendered page images may leave this machine. The visual judge and cloud/vlm OCR both require it; with it false the pipeline skips them, so the console must say so instead of offering a switch that silently does nothing",
             "default": false
           }
         },

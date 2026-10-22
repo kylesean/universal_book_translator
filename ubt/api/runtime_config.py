@@ -165,6 +165,12 @@ def describe_runtime_config(
         # operator using a built-in protocol with UBT_LLM_API_KEY set has no
         # declared block and still runs for real.
         "can_translate": can_translate,
+        # Whether rendered page images may leave this machine. The wizard offers
+        # the visual judge as a switch, and that judge ships pages to a vision
+        # model — with egress closed the pipeline records an info finding and
+        # bills nothing, so a switch rendered without this fact would promise a
+        # quality gate the run cannot perform.
+        "allow_page_upload": bool(config.allow_page_upload),
     }
 
     # Split the menu into what the operator declared and what ships with the

@@ -250,6 +250,29 @@ class JobAssessRequest(BaseModel):
         description="Quality preset (publication, standard, publication_math, preview, fast)",
     )
     pages: str | None = Field(default=None, description="Page range filter (e.g. 1-10)")
+    # Every knob below must price the same work ``JobSubmitRequest`` will run.
+    # The quote used to be built from ``[defaults]`` alone, so the wizard showed
+    # a dollar figure for whichever provider the *file* named while the dropdown
+    # above it selected a different one — and an operator picking cloud OCR saw a
+    # quote with no vision line at all, because assess never learned the mode.
+    # The names — not their values — are what matters: a provider is a declared
+    # block, and the endpoint/credential still come from that block.
+    provider: str | None = Field(
+        default=None,
+        description=(
+            "Provider block to quote against (must be declared in ubt.toml or be a "
+            "built-in wire protocol). Endpoint and credentials still come from it."
+        ),
+    )
+    ocr_mode: OcrMode | None = Field(
+        default=None, description="OCR engine the job will use (affects the vision line)"
+    )
+    visual_judge_enabled: bool | None = Field(
+        default=None, description="Quote the VLM visual judge over rendered pages"
+    )
+    max_concurrency: int | None = Field(
+        default=None, gt=0, description="Concurrent LLM requests (drives the runtime estimate)"
+    )
 
     @field_validator("pages")
     @classmethod
@@ -527,6 +550,13 @@ class JobSubmitResponse(BaseModel):
     # auto-set at intake when no provider key is configured, so a keyless
     # server can never report a mock run as a real delivery.
     rehearsal: bool = False
+    # True when an idempotency key matched a job that already exists and
+    # nothing new was started. A retried submit (double-click, a flaky network
+    # retry, a page reload resending the form) must not bill a second run, and
+    # the console has to be able to tell "I started this" from "this already
+    # existed" — otherwise a reused id looks like a fresh start and the user
+    # wonders why the progress bar is already at 60%.
+    reused: bool = False
 
 
 class JobStatusResponse(ProgressSnapshot):
@@ -735,6 +765,15 @@ class RuntimeActiveModel(BaseModel):
             "True when a submit would translate for real. False means the server "
             "would downgrade it to a zero-token rehearsal (no model, or no real "
             "credential) — the wizard says so before the button is pressed"
+        ),
+    )
+    allow_page_upload: bool = Field(
+        default=False,
+        description=(
+            "True when rendered page images may leave this machine. The visual "
+            "judge and cloud/vlm OCR both require it; with it false the pipeline "
+            "skips them, so the console must say so instead of offering a switch "
+            "that silently does nothing"
         ),
     )
 

@@ -231,6 +231,36 @@ export const en: TranslationDictionary = {
     sliceTestingTag: 'Slice Test',
     estimateExact: 'exact',
     estimateApproximate: 'sampled estimate',
+    submitReusedNote:
+      'A job with this key already exists, so nothing new was started — open it to see its progress.',
+    quoteProviderNote: 'Priced against {provider}',
+    groupDelivery: 'What the reader gets',
+    visualJudge: 'Visual quality check',
+    visualJudgeHelp:
+      'Sends sampled rendered pages to a vision model to catch layout damage and broken formulas. Costs extra tokens and needs page egress enabled.',
+    visualJudgeBlocked:
+      'Page egress is off (UBT_ALLOW_PAGE_UPLOAD=false), so the judge would skip every page and bill nothing. Enable egress on the server to use it.',
+    emitBoth: 'Also produce the other edition',
+    emitBothHelp:
+      'Emits both the monolingual and the bilingual deliverables in one run. Roughly doubles render time and output size.',
+    groupBudget: 'Time & cost',
+    concurrency: 'Parallel requests',
+    concurrencyHelp:
+      'How many model requests may be in flight at once. Higher finishes sooner but hits rate limits more often.',
+    concurrencyAuto: 'Operator default',
+    domainHint: 'Subject hint',
+    domainHintPlaceholder: 'e.g. semiconductor device physics',
+    domainHintHelp:
+      'Free-text subject fed to the glossary and prompt hints. Leave empty to let the profile decide.',
+    chapterWindow: 'Chapter window',
+    chapterWindowHelp:
+      'Translate only a slice of chapters. Leave empty for the whole book. 1-based; the window is what gets billed.',
+    chapterStart: 'First chapter',
+    chapterCount: 'How many',
+    chapterWindowAuto: 'All chapters',
+    toggleAuto: 'Follow engine default',
+    toggleOn: 'On',
+    toggleOff: 'Off',
   },
   mission: {
     title: 'Mission Control',

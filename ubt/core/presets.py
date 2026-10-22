@@ -177,9 +177,3 @@ def resolve_engine_params(
         for key, value in PRESETS[preset].engine_overrides().items():
             resolved.setdefault(key, value)
     return resolved
-
-
-def apply_preset(config: UBTConfig, preset: Preset) -> UBTConfig:
-    """Apply preset engine overrides onto a UBTConfig instance."""
-    overrides = PRESETS[preset].engine_overrides()
-    return config.model_copy(update=overrides)

@@ -20,6 +20,7 @@ import {
   submitJob,
   uploadSourceDocument,
   type JobAssessResponse,
+  type JobSubmitRequest,
   type RuntimeConfig,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
@@ -130,6 +131,17 @@ export function NewJobWizard() {
   const [pageRange, setPageRange] = useState('')
   const [glossaryPath, setGlossaryPath] = useState('')
   const [dryRun, setDryRun] = useState(false)
+  // Delivery shape and spend knobs the REST model has always accepted but no
+  // control reached. Only the ones a user can actually reason about are here;
+  // ``draft_model``/``pdf_engine``/``batch_limit`` stay operator territory.
+  const [emitBoth, setEmitBoth] = useState<'auto' | 'on' | 'off'>('auto')
+  const [visualJudge, setVisualJudge] = useState<'auto' | 'on' | 'off'>('auto')
+  // Empty = follow the operator's UBTConfig.max_concurrency.
+  const [concurrency, setConcurrency] = useState('')
+  const [domainHint, setDomainHint] = useState('')
+  // Chapter window (1-based start + count). Empty = the whole book.
+  const [chapterStart, setChapterStart] = useState('')
+  const [chapterCount, setChapterCount] = useState('')
 
   const [isAssessing, setIsAssessing] = useState(false)
   const [isReassessing, setIsReassessing] = useState(false)
@@ -139,6 +151,9 @@ export function NewJobWizard() {
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  // Set when the submit matched an existing job instead of starting one, so the
+  // console can say so rather than presenting a run it did not start.
+  const [reusedJobId, setReusedJobId] = useState<string | null>(null)
   // Whether a real translation is possible at all. ``null`` = not loaded yet, so
   // the banner stays hidden rather than flashing a false warning on mount.
   const [runtime, setRuntime] = useState<RuntimeConfig | null>(null)
@@ -220,6 +235,14 @@ export function NewJobWizard() {
           source_lang: activeSource,
           preset: activePreset,
           pages: activePages.trim() ? activePages.trim() : null,
+          // The quote must price what this form will actually submit. Without
+          // these the server priced ``[defaults]``'s provider while the
+          // dropdown above selected another — and a cloud OCR choice added a
+          // vision line the quote never saw.
+          provider: provider || null,
+          ocr_mode: ocrMode === 'auto' ? null : ocrMode,
+          visual_judge_enabled: visualJudge === 'auto' ? null : visualJudge === 'on',
+          max_concurrency: concurrency.trim() ? Number(concurrency) : null,
           deep: !isSilent,
         })
         if (seq !== assessSeqRef.current) return // stale response
@@ -260,7 +283,7 @@ export function NewJobWizard() {
         }
       }
     },
-    [preset, pageRange, targetLang, sourceLang]
+    [preset, pageRange, targetLang, sourceLang, provider, ocrMode, visualJudge, concurrency]
   )
 
   // Reactive re-assessment on preset / page slice / lang tweaks
@@ -278,7 +301,18 @@ export function NewJobWizard() {
       }, 350)
       return () => clearTimeout(timer)
     }
-  }, [filePath, preset, pageRange, targetLang, sourceLang, runAssess])
+  }, [
+    filePath,
+    preset,
+    pageRange,
+    targetLang,
+    sourceLang,
+    provider,
+    ocrMode,
+    visualJudge,
+    concurrency,
+    runAssess,
+  ])
 
   // Browsers do not expose a real filesystem path (`File.path` exists only in
   // Electron), so the picked file is uploaded to the server and the staged
@@ -354,6 +388,73 @@ export function NewJobWizard() {
    * resort after local engines fail, and it warns in the log.
    */
   const ocrNeedsEgress = ocrMode === 'cloud' || ocrMode === 'vlm'
+  /**
+   * Page egress is closed on this deployment, so neither the visual judge nor a
+   * cloud/vlm OCR mode can ship a page anywhere. The judge would skip every page
+   * and bill nothing, which is worse than not offering it: the switch would
+   * promise a quality gate the run cannot perform.
+   */
+  const pageEgressClosed = runtime !== null && !runtime.active.allow_page_upload
+
+  /**
+   * The submit payload, built once so the idempotency fingerprint and the
+   * request cannot drift apart.
+   */
+  const buildPayload = (): JobSubmitRequest => ({
+    input_path: filePath.trim(),
+    target_lang: targetLang,
+    source_lang: sourceLang,
+    profile: domainProfile,
+    // A provider *name*, validated server-side against the declared blocks.
+    // Endpoint and credentials still come from that block.
+    provider: provider || null,
+    preset: preset,
+    dual_mode: dualMode === 'auto' ? null : dualMode,
+    // null = "align to the source layout"; the engine rejects anything but 1/2.
+    layout_columns: layoutColumns === 'auto' ? null : Number(layoutColumns),
+    // null = follow UBTConfig's operator default, not a hard-coded false.
+    translate_chrome: translateChrome === 'auto' ? null : translateChrome === 'on',
+    // null = follow UBT_OCR_MODE / config default.
+    ocr_mode: ocrMode === 'auto' ? null : ocrMode,
+    emit_both: emitBoth === 'auto' ? null : emitBoth === 'on',
+    // A judge with egress closed never runs, so do not claim it will.
+    visual_judge_enabled:
+      visualJudge === 'auto' || pageEgressClosed ? null : visualJudge === 'on',
+    // Empty = operator default; the engine rejects anything below 1.
+    max_concurrency: concurrency.trim() ? Number(concurrency) : null,
+    domain: domainHint.trim() ? domainHint.trim() : null,
+    start_chapter: chapterStart.trim() ? Number(chapterStart) : null,
+    max_chapters: chapterCount.trim() ? Number(chapterCount) : null,
+    pages: pageRange.trim() ? pageRange.trim() : null,
+    glossary: glossaryPath.trim() ? glossaryPath.trim() : null,
+    priority: 0,
+    dry_run: dryRun,
+    budget_usd: budgetUsd,
+  })
+
+  /**
+   * A job id derived from the payload, so a retried submit is idempotent.
+   *
+   * ``POST /jobs/submit`` already returns the existing job for a repeated
+   * ``job_id``; the console simply never sent one, so a double click or a
+   * network retry started — and billed — a second identical run. The key is
+   * keyed on the payload itself: *changing* a field mints a new id, because
+   * reusing the old one would hand back the previous job and silently ignore
+   * the edit.
+   */
+  const submitKeyRef = useRef<{ fingerprint: string; jobId: string } | null>(null)
+  const idempotencyKeyFor = (payload: JobSubmitRequest): string => {
+    const fingerprint = JSON.stringify(payload)
+    const memo = submitKeyRef.current
+    if (memo !== null && memo.fingerprint === fingerprint) return memo.jobId
+    const rand =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+        : Math.random().toString(36).slice(2, 14)
+    const jobId = `web_${Date.now().toString(36)}_${rand}`
+    submitKeyRef.current = { fingerprint, jobId }
+    return jobId
+  }
 
   const handleSubmit = async () => {
     if (!filePath.trim() || isSubmitting || glossaryError || budgetInvalid) return
@@ -365,29 +466,16 @@ export function NewJobWizard() {
     }
     setIsSubmitting(true)
     setSubmitError(null)
+    setReusedJobId(null)
     try {
-      const res = await submitJob({
-        input_path: filePath.trim(),
-        target_lang: targetLang,
-        source_lang: sourceLang,
-        profile: domainProfile,
-        // A provider *name*, validated server-side against the declared blocks.
-        // Endpoint and credentials still come from that block.
-        provider: provider || null,
-        preset: preset,
-        dual_mode: dualMode === 'auto' ? null : dualMode,
-        // null = "align to the source layout"; the engine rejects anything but 1/2.
-        layout_columns: layoutColumns === 'auto' ? null : Number(layoutColumns),
-        // null = follow UBTConfig's operator default, not a hard-coded false.
-        translate_chrome: translateChrome === 'auto' ? null : translateChrome === 'on',
-        // null = follow UBT_OCR_MODE / config default.
-        ocr_mode: ocrMode === 'auto' ? null : ocrMode,
-        pages: pageRange.trim() ? pageRange.trim() : null,
-        glossary: glossaryPath.trim() ? glossaryPath.trim() : null,
-        priority: 0,
-        dry_run: dryRun,
-        budget_usd: budgetUsd,
-      })
+      const payload = buildPayload()
+      const res = await submitJob({ ...payload, job_id: idempotencyKeyFor(payload) })
+      if (res.reused) {
+        // Nothing was started: this id already had a job. Jumping to a progress
+        // page would present it as a run this submit began.
+        setReusedJobId(res.job_id)
+        return
+      }
       navigate(`/jobs/${res.job_id}`)
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Submission failed')
@@ -994,6 +1082,123 @@ export function NewJobWizard() {
                     )}
                   </div>
 
+                  {/* What the reader receives. Both of these were REST-only:
+                      the engine emits them, the API accepts them, and no
+                      control ever reached them. */}
+                  <div className="type-group -mb-1 pt-1">{t.wizard.groupDelivery}</div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
+                    <div>
+                      <div className="flex items-center gap-1 mb-1">
+                        <label className="type-label">{t.wizard.emitBoth}</label>
+                        <InfoTip label={t.wizard.emitBoth}>{t.wizard.emitBothHelp}</InfoTip>
+                      </div>
+                      <select
+                        value={emitBoth}
+                        onChange={(e) => setEmitBoth(e.target.value as any)}
+                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
+                      >
+                        <option value="auto">{t.wizard.toggleAuto}</option>
+                        <option value="on">{t.wizard.toggleOn}</option>
+                        <option value="off">{t.wizard.toggleOff}</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center gap-1 mb-1">
+                        <label className="type-label">{t.wizard.visualJudge}</label>
+                        <InfoTip label={t.wizard.visualJudge}>
+                          {t.wizard.visualJudgeHelp}
+                        </InfoTip>
+                      </div>
+                      <select
+                        value={visualJudge}
+                        onChange={(e) => setVisualJudge(e.target.value as any)}
+                        disabled={pageEgressClosed}
+                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <option value="auto">{t.wizard.toggleAuto}</option>
+                        <option value="on">{t.wizard.toggleOn}</option>
+                        <option value="off">{t.wizard.toggleOff}</option>
+                      </select>
+                      {/* Stated, not guessed: with egress closed the judge
+                          skips every page and bills nothing, so offering the
+                          switch would promise a gate the run cannot perform. */}
+                      {pageEgressClosed && (
+                        <p className="type-help mt-1 text-[var(--ink-muted)]">
+                          {t.wizard.visualJudgeBlocked}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Subject hint: a free-text descriptor, distinct from the
+                      profile dropdown above (which picks a term directory). */}
+                  <div>
+                    <div className="flex items-center gap-1 mb-1">
+                      <label className="type-label">{t.wizard.domainHint}</label>
+                      <InfoTip label={t.wizard.domainHint}>{t.wizard.domainHintHelp}</InfoTip>
+                    </div>
+                    <input
+                      type="text"
+                      value={domainHint}
+                      onChange={(e) => setDomainHint(e.target.value)}
+                      placeholder={t.wizard.domainHintPlaceholder}
+                      className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
+                    />
+                  </div>
+
+                  {/* Time and cost. Both feed the quote directly: the runtime
+                      estimate scales with concurrency, and the chapter window
+                      decides how much of the book is billed. */}
+                  <div className="type-group -mb-1 pt-1">{t.wizard.groupBudget}</div>
+
+                  <div>
+                    <div className="flex items-center gap-1 mb-1">
+                      <label className="type-label">{t.wizard.concurrency}</label>
+                      <InfoTip label={t.wizard.concurrency}>
+                        {t.wizard.concurrencyHelp}
+                      </InfoTip>
+                    </div>
+                    <input
+                      type="number"
+                      min={1}
+                      value={concurrency}
+                      onChange={(e) => setConcurrency(e.target.value)}
+                      placeholder={t.wizard.concurrencyAuto}
+                      className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center gap-1 mb-1">
+                      <label className="type-label">{t.wizard.chapterWindow}</label>
+                      <InfoTip label={t.wizard.chapterWindow}>
+                        {t.wizard.chapterWindowHelp}
+                      </InfoTip>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3.5">
+                      <input
+                        type="number"
+                        min={1}
+                        value={chapterStart}
+                        onChange={(e) => setChapterStart(e.target.value)}
+                        placeholder={t.wizard.chapterStart}
+                        aria-label={t.wizard.chapterStart}
+                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
+                      />
+                      <input
+                        type="number"
+                        min={1}
+                        value={chapterCount}
+                        onChange={(e) => setChapterCount(e.target.value)}
+                        placeholder={t.wizard.chapterCount}
+                        aria-label={t.wizard.chapterCount}
+                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
+                      />
+                    </div>
+                  </div>
+
                   {/* Rehearsal: zero-token dry run through the same pipeline */}
                   <div className="pt-3 border-t border-[var(--paper-border)]">
                     <label className="flex items-start gap-2 cursor-pointer">
@@ -1068,6 +1273,19 @@ export function NewJobWizard() {
 
             {assessment ? (
               <div className="space-y-4">
+                {/* Which provider this quote was priced against. The dropdown
+                    selects one; the figure below used to come from whatever the
+                    operator's file named, so a user comparing blocks saw two
+                    identical totals and no way to tell which was priced. */}
+                {typeof assessment.meta?.provider === 'string' &&
+                  assessment.meta.provider !== '' && (
+                    <p className="type-help text-[var(--ink-muted)] font-mono">
+                      {t.wizard.quoteProviderNote.replace(
+                        '{provider}',
+                        assessment.meta.provider
+                      )}
+                    </p>
+                  )}
                 {/* Book File Header Card */}
                 {fileName && (
                   <div className="p-3 rounded-[5px] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] flex items-center justify-between">
@@ -1287,6 +1505,21 @@ export function NewJobWizard() {
             {submitError && (
               <div className="mb-3 p-2 rounded-[5px] bg-[#b91c1c]/10 border border-[#b91c1c]/25 text-[#b91c1c] text-xs">
                 {submitError}
+              </div>
+            )}
+            {/* The submit matched an existing job, so nothing new started. Say
+                that plainly and offer the way in — navigating straight to the
+                job page would present an old run as this click's result. */}
+            {reusedJobId && (
+              <div className="mb-3 p-2 rounded-[5px] bg-[#b45309]/10 border border-[#b45309]/25 text-[#b45309] text-xs flex items-start justify-between gap-2">
+                <span>{t.wizard.submitReusedNote}</span>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/jobs/${reusedJobId}`)}
+                  className="shrink-0 underline hover:no-underline font-semibold cursor-pointer"
+                >
+                  {reusedJobId}
+                </button>
               </div>
             )}
             <Button

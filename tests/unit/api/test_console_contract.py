@@ -629,20 +629,59 @@ def test_the_wizard_sends_only_fields_the_submit_endpoint_accepts() -> None:
     ``exec_mode`` after the field was removed from the model, so the console
     could not start a job at all, and nothing caught it because the frontend
     type-check (``tsc -b``) is a separate gate from the Python suite.
+
+    The payload is built by one ``buildPayload()`` function rather than inline at
+    the ``submitJob`` call. That is what makes the idempotency key trustworthy:
+    the key is a fingerprint of exactly this object, so a payload assembled in
+    two places could change without the key changing and resubmit the *old* job
+    (silently dropping the edit). This test therefore reads that function.
     """
     from ubt.api.models import JobSubmitRequest
 
     source = _WIZARD_TSX.read_text(encoding="utf-8")
-    match = re.search(r"submitJob\(\{(.*?)\n\s*\}\)", source, re.DOTALL)
-    assert match, "NewJobWizard.tsx has no submitJob({...}) payload"
+    match = re.search(
+        r"const buildPayload = \(\): JobSubmitRequest => \(\{(.*?)\n  \}\)", source, re.DOTALL
+    )
+    assert match, "NewJobWizard.tsx has no buildPayload(): JobSubmitRequest object"
 
-    sent = set(re.findall(r"^\s*([a-z_][a-z0-9_]*)\s*:", match.group(1), re.MULTILINE))
+    sent = set(re.findall(r"^\s{4}([a-z_][a-z0-9_]*)\s*:", match.group(1), re.MULTILINE))
     accepted = set(JobSubmitRequest.model_fields)
 
     assert sent, "parsed no payload keys from the wizard"
     assert not (sent - accepted), (
         f"the wizard sends fields the API rejects: {sorted(sent - accepted)}"
     )
+
+    # The idempotency key rides alongside the payload (it is a fingerprint *of*
+    # it, so it cannot live inside the object it hashes).
+    assert "job_id: idempotencyKeyFor(payload)" in source, (
+        "the submit must be sent with a job_id derived from the payload, or a "
+        "retried click starts and bills a second identical run"
+    )
+
+
+def test_the_wizard_quotes_the_provider_it_will_submit() -> None:
+    """The assess call must carry the provider/OCR/vision choices it prices.
+
+    The quote and the run used to disagree: assess applied only the preset, so
+    the dollar figure came from whatever ``[defaults] provider`` named while the
+    dropdown above it selected a different block. A user comparing two providers
+    saw the same total twice, and picking cloud OCR added a vision line to the
+    run that the quote never priced.
+
+    This is a source-level assertion because the mismatch spans two call sites
+    that no runtime test in this suite exercises.
+    """
+    source = _WIZARD_TSX.read_text(encoding="utf-8")
+    match = re.search(r"assessJob\(\{(.*?)\n        \}\)", source, re.DOTALL)
+    assert match, "NewJobWizard.tsx has no assessJob({...}) call"
+
+    body = match.group(1)
+    for key in ("provider", "ocr_mode", "visual_judge_enabled", "max_concurrency"):
+        assert f"{key}:" in body, (
+            f"assessJob() does not send {key}; the quote then prices a different "
+            "configuration than the submit will run"
+        )
 
 
 def test_the_wizard_does_not_reference_a_removed_internal_knob() -> None:

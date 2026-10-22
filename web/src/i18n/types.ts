@@ -168,6 +168,33 @@ export interface TranslationDictionary {
     sliceTestingTag: string
     estimateExact: string
     estimateApproximate: string
+    /** Shown when a submit matched an existing job id instead of starting one. */
+    submitReusedNote: string
+    /** Names the provider the quote was priced against. */
+    quoteProviderNote: string
+    groupDelivery: string
+    /** The page-egress gate: the visual judge cannot run while it is closed. */
+    visualJudge: string
+    visualJudgeHelp: string
+    visualJudgeBlocked: string
+    emitBoth: string
+    emitBothHelp: string
+    groupBudget: string
+    concurrency: string
+    concurrencyHelp: string
+    concurrencyAuto: string
+    domainHint: string
+    domainHintPlaceholder: string
+    domainHintHelp: string
+    chapterWindow: string
+    chapterWindowHelp: string
+    chapterStart: string
+    chapterCount: string
+    chapterWindowAuto: string
+    /** Generic tri-state labels shared by the new delivery switches. */
+    toggleAuto: string
+    toggleOn: string
+    toggleOff: string
   }
   mission: {
     title: string

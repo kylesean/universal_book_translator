@@ -158,10 +158,35 @@ def register_job_routes(
         # reported ``draft_model: ""`` and priced nothing, while the panel beside it
         # named the model that would actually run.
         cfg = scope.config
-        if req.preset is not None:
-            from ubt.core.presets import apply_preset
+        # Price the job the caller is about to submit, not the one the operator's
+        # file defaults to. ``apply_config_overrides`` is the same mapping the
+        # submit path uses (manager.execute_job / job_worker), so the quote and the
+        # run read one provider block, one OCR mode and one vision setting.
+        #
+        # Without the provider this quoted ``[defaults]``'s models against the
+        # dropdown's selection: a user who picked a cheap local block still saw the
+        # expensive cloud block's dollar figure. ``ocr_mode`` mattered for the same
+        # reason — cloud OCR adds a vision line, and the quote never learned the
+        # mode, so it silently priced 0 page calls.
+        #
+        # ``pages`` is deliberately NOT taken from the override chain: it rides in
+        # as an explicit argument (``assess_document_async(pages=...)``) and the
+        # quote scales itself by the selected slice. Applying it as a config
+        # override too would scale the block count a second time.
+        from ubt.core.job_options import apply_config_overrides, overrides_from_request
 
-            cfg = apply_preset(cfg, req.preset)
+        assess_request = req.model_dump(exclude={"pages"})
+        try:
+            cfg = apply_config_overrides(
+                cfg, overrides_from_request(assess_request, allow_provider_keys=False)
+            )
+        except UBTError as exc:
+            # An unknown provider name is a caller error naming the block, not a
+            # 500 — the submit path already answers this way for the same input.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
 
         resolved_in = resolve_secure_path(req.input_path, must_exist=True, config=cfg)
 
@@ -314,6 +339,7 @@ def register_job_routes(
                         stream_url=f"/jobs/{existing_queued.job_id}/stream",
                         status_url=f"/jobs/{existing_queued.job_id}/status",
                         rehearsal=bool(existing_queued.payload.get("dry_run", False)),
+                        reused=True,
                     )
         if requested_id is not None:
             existing = manager.get_job(requested_id)
@@ -330,6 +356,7 @@ def register_job_routes(
                     stream_url=f"/jobs/{existing.job_id}/stream",
                     status_url=f"/jobs/{existing.job_id}/status",
                     rehearsal=existing.request.dry_run,
+                    reused=True,
                 )
 
         if req.output_path:

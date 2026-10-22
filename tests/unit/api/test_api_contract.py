@@ -502,6 +502,39 @@ def test_resubmit_with_same_id_is_idempotent(authed: TestClient, tmp_path: Path)
     assert second.json()["job_id"] == first.json()["job_id"]
 
 
+def test_a_repeated_submit_reports_that_it_reused_the_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``reused`` is how a caller tells "I started this" from "it already existed".
+
+    The status code and the job id are identical either way, so without this flag
+    a double-clicked submit is indistinguishable from a fresh run — and the
+    console navigated to a progress page for a job whose bar was already at 60%.
+
+    The record is held non-terminal by stubbing ``execute_job``: a real
+    ``TestClient`` cancels the background task when the request scope ends, and a
+    ``cancelled`` id is deliberately *re-runnable* (resubmitting a dead id is a
+    request to run it again), so it would take the fresh-run branch and prove
+    nothing about reuse.
+    """
+
+    async def _stay_running(self: JobManager, record: JobRecord, config: Any) -> None:
+        record.status = JobStatus.RUNNING
+
+    monkeypatch.setattr(JobManager, "execute_job", _stay_running)
+    with TestClient(create_app(config=_config(tmp_path))) as client:
+        doc = _write_doc(tmp_path)
+        payload = {"input_path": str(doc), "job_id": "contract-reused-1"}
+
+        first = client.post("/jobs/submit", json=payload, headers=_AUTH)
+        second = client.post("/jobs/submit", json=payload, headers=_AUTH)
+
+    assert first.status_code == second.status_code == 202
+    assert first.json()["reused"] is False, "the first submit must start the run"
+    assert second.json()["reused"] is True, "the repeat must not claim to have started it"
+    assert second.json()["job_id"] == first.json()["job_id"]
+
+
 def test_submit_capacity_exceeded_is_429(
     authed: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

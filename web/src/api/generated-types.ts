@@ -1140,6 +1140,26 @@ export interface components {
              * @description Page range filter (e.g. 1-10)
              */
             pages?: string | null;
+            /**
+             * Provider
+             * @description Provider block to quote against (must be declared in ubt.toml or be a built-in wire protocol). Endpoint and credentials still come from it.
+             */
+            provider?: string | null;
+            /**
+             * Ocr Mode
+             * @description OCR engine the job will use (affects the vision line)
+             */
+            ocr_mode?: ("auto" | "sidecar" | "cloud" | "vlm" | "rapidocr" | "off") | null;
+            /**
+             * Visual Judge Enabled
+             * @description Quote the VLM visual judge over rendered pages
+             */
+            visual_judge_enabled?: boolean | null;
+            /**
+             * Max Concurrency
+             * @description Concurrent LLM requests (drives the runtime estimate)
+             */
+            max_concurrency?: number | null;
         };
         /**
          * JobAssessResponse
@@ -1487,6 +1507,11 @@ export interface components {
              * @default false
              */
             rehearsal: boolean;
+            /**
+             * Reused
+             * @default false
+             */
+            reused: boolean;
         };
         /**
          * JobSummary
@@ -1898,6 +1923,12 @@ export interface components {
              * @default false
              */
             can_translate: boolean;
+            /**
+             * Allow Page Upload
+             * @description True when rendered page images may leave this machine. The visual judge and cloud/vlm OCR both require it; with it false the pipeline skips them, so the console must say so instead of offering a switch that silently does nothing
+             * @default false
+             */
+            allow_page_upload: boolean;
         };
         /**
          * RuntimeConfigResponse
