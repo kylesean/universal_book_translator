@@ -11,6 +11,7 @@ manager) are overlaid with their in-memory progress, which is fresher than the
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -57,6 +58,11 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
     finally:
         ledger.close()
 
+    try:
+        quiet_seconds = max(0.0, time.time() - db_path.stat().st_mtime)
+    except OSError:
+        quiet_seconds = None
+
     total = int(snapshot.get("total", 0) or 0)
     completed = int(snapshot.get("completed", 0) or 0)
     failed = int(snapshot.get("failed", 0) or 0)
@@ -72,7 +78,12 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
         "job_id": str(snapshot["job_id"]),
         "file_name": Path(str(snapshot["source_path"])).name,
         "target_lang": str(snapshot["target_lang"]),
-        "status": str(snapshot["status"]),
+        "status": _reportable_status(
+            str(snapshot["status"]),
+            quiet_seconds=quiet_seconds,
+            total=total,
+            completed=completed,
+        ),
         "total_blocks": total,
         "completed_blocks": completed,
         "failed_blocks": failed,
@@ -89,6 +100,42 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
         "rehearsal": bool(isinstance(identity, dict) and identity.get("mock_run")),
         "page_scope": page_scope_label(selected_pages),
     }
+
+
+#: How long a per-job ledger may go unwritten before a non-terminal row is
+#: reported as interrupted. The same window MCP's ``ubt_status`` uses, and for
+#: the same reason: a live run in another process keeps writing checkpoints, so
+#: reporting that failed would make an operator restart a job still translating.
+LEDGER_STALENESS_SECONDS = 300.0
+
+#: ``job_meta.status`` values that end a job's life.
+_TERMINAL_LEDGER_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
+def _reportable_status(
+    stored: str, *, quiet_seconds: float | None, total: int, completed: int
+) -> str:
+    """The status a listing may show, normalizing a ledger row left mid-run.
+
+    ``job_meta.status`` has no ``running`` value: the row is written
+    ``initialized`` at ingest and stays that way for the whole run, so the column
+    alone cannot tell a live job from one whose process died. Reporting it
+    verbatim made ``/jobs`` show ``initialized`` (which the console renders as a
+    live run) for a job that had crashed hours earlier, while ``/status`` for the
+    same id — which does normalize — reported it failed.
+
+    A terminal row is passed through. A row whose blocks are all accounted for is
+    completed. Otherwise the row is only called interrupted once the ledger has
+    gone quiet for :data:`LEDGER_STALENESS_SECONDS`; until then it may be a live
+    run in another process, and ``initialized`` is the honest answer.
+    """
+    if stored in _TERMINAL_LEDGER_STATUSES:
+        return stored
+    if total > 0 and completed >= total:
+        return "completed"
+    if quiet_seconds is not None and quiet_seconds > LEDGER_STALENESS_SECONDS:
+        return "failed"
+    return stored
 
 
 def page_scope_label(pages: Any) -> str | None:
