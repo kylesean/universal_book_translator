@@ -375,6 +375,13 @@ class TieredQERunner(BaseQERunner):
         #: reads it to say "these numbers are graded judgements, keep them" —
         #: without it the quality gate discarded every judge verdict.
         self._judged_any = False
+        #: Indexes *within the last ``score_pairs`` batch* the judge actually
+        #: produced an opinion for. ``judged_this_run`` says a batch contained
+        #: at least one opinion; this says which entries carry one. Without it a
+        #: partly-failed batch read as fully judged: the gate stored the
+        #: heuristic bands of the entries the judge never answered as if they
+        #: were measurements.
+        self._judged_indices: frozenset[int] = frozenset()
         # Count every paid model call, not every block. Attached to the judge so
         # a sentence-level block contributes its real number of calls.
         if self.judge is not None:
@@ -448,6 +455,14 @@ class TieredQERunner(BaseQERunner):
         rank candidates against each other.
         """
         return self._judged_any
+
+    def judged_indices(self, count: int) -> frozenset[int]:
+        """Indexes of the last batch the judge actually scored (``count`` entries).
+
+        The gate reads this to keep a judgement for the blocks that got one and
+        ``None`` for the rest, instead of applying one batch-wide verdict.
+        """
+        return frozenset(i for i in self._judged_indices if i < count)
 
     def may_be_calibrated(self) -> bool:
         """A tier has a judge worth calling even though the heuristic does not.
@@ -526,6 +541,7 @@ class TieredQERunner(BaseQERunner):
         rebound.judge_calls = self.judge_calls
         rebound.judge_errors = self.judge_errors
         rebound._judged_any = self._judged_any
+        rebound._judged_indices = self._judged_indices
         return rebound
 
     async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
@@ -540,6 +556,7 @@ class TieredQERunner(BaseQERunner):
         # as if they were graded opinions, and ``score_source()`` labelled them
         # ``llm_judge``.
         self._judged_any = False
+        self._judged_indices = frozenset()
         if self.judge is None:
             return base
         ambiguous_idx = [
@@ -562,6 +579,9 @@ class TieredQERunner(BaseQERunner):
         # "judgements". Also mark which blocks were actually judged, so the gate
         # can keep only those.
         self._judged_any = any(score != _JUDGE_NO_OPINION for score in judged)
+        self._judged_indices = frozenset(
+            i for i, s in zip(ambiguous_idx, judged, strict=True) if s != _JUDGE_NO_OPINION
+        )
         merged = list(base)
         for i, s in zip(ambiguous_idx, judged, strict=True):
             if s == _JUDGE_NO_OPINION:
