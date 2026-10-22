@@ -196,6 +196,10 @@ _FAST_SUBPROCESS_ALLOWLIST: dict[str, str] = {
     # forever), so each case runs in a throwaway interpreter with a hard
     # timeout. Three short ``python -c`` starts, ~0.3s total.
     "tests/unit/test_config_construction.py": "fresh interpreter per case to observe a deadlock",
+    # Signal propagation can only be observed across processes: the whole point
+    # is that SIGTERM to the parent reaches a child the interpreter did not
+    # start. Two ``python -c`` starts, measured 0.08s.
+    "tests/unit/cli/test_console_dev.py": "throwaway parent+child to prove SIGTERM reaches the child",
 }
 
 _SUBPROCESS_CALLS = frozenset({"run", "Popen", "check_output", "check_call", "call"})

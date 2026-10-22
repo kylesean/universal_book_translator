@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
+import re
+import signal
 import subprocess
 import sys
 import threading
@@ -19,6 +22,120 @@ from rich.panel import Panel
 from ubt.cli.jstoolchain import JsToolchainError, detect_js_toolchain
 
 console = Console()
+
+#: The port ``web/vite.config.ts`` asks for. Vite silently moves to the next free
+#: port when it is taken, so this is the *requested* port, not necessarily the
+#: one it serves on — :func:`_dev_server_url` reads the real one back.
+VITE_REQUESTED_PORT = 3000
+#: How long to wait for Vite to print its listening address before giving up and
+#: reporting the requested port instead. Vite is ready in a few hundred ms warm
+#: and a few seconds cold; the wait only bounds the "is it up yet" question.
+VITE_START_TIMEOUT_S = 20.0
+
+
+#: What Vite prints when it has bound a port. Matching the *port* rather than
+#: parsing the whole banner keeps this working across Vite versions: the line
+#: has been ``➜  Local:   http://localhost:5173/`` and ``http://localhost:3001/``
+#: with different arrow glyphs and ANSI colouring.
+_VITE_READY_RE = re.compile(r"http://(?:localhost|127\.0\.0\.1|\[::1\]):(\d+)/")
+
+
+def _dev_server_url(proc: subprocess.Popen[str], requested_port: int) -> str:
+    """The URL the Vite dev server is actually serving on.
+
+    Vite moves to the next free port when the configured one is taken (measured
+    here: ``qoder-proxy`` holding 3000 pushed the console to 3001). Printing the
+    configured port regardless sent the operator — and ``webbrowser.open`` — to
+    whatever *else* owns 3000, which then answered as a working page. So read
+    the bound port back out of Vite's own startup line.
+
+    Falls back to ``requested_port`` when the line cannot be read in time (a
+    non-TTY stream, a wrapper that swallows stdout): a slightly wrong URL beats
+    hanging, and the caller prints the same line the operator can read.
+
+    Every line consumed here is echoed before being parsed. Vite's banner spans
+    several lines (``VITE v8.3.2 ready``, ``➜ Local:``, ``➜ Network:``) and this
+    function stops reading at the port, so echoing only what it *returns* would
+    drop the ``Local:`` line and the version line — the first run of this fix
+    lost Vite's whole startup banner that way.
+    """
+    if proc.stdout is None:
+        return f"http://localhost:{requested_port}/"
+    deadline = time.monotonic() + VITE_START_TIMEOUT_S
+    try:
+        while time.monotonic() < deadline:
+            line = proc.stdout.readline()
+            if not line:
+                break  # Vite exited; the caller reports that separately.
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            match = _VITE_READY_RE.search(line)
+            if match is not None:
+                return f"http://localhost:{match.group(1)}/"
+        return f"http://localhost:{requested_port}/"
+    finally:
+        # Whatever the outcome, the rest of Vite's output keeps flowing: an
+        # unread pipe fills up and blocks the child, and hiding the HMR log
+        # would take away the main reason to run ``--dev``.
+        _drain_stdout(proc)
+
+
+def _drain_stdout(proc: subprocess.Popen[str]) -> None:
+    """Keep echoing Vite's output so its HMR log is not swallowed by the pipe.
+
+    ``stdout=PIPE`` is what makes the bound port readable, but an unread pipe is
+    a deadlock waiting for a full buffer — and hiding Vite's own "page reload"
+    lines would take away the main reason to run ``--dev``. One daemon thread
+    forwards every line to the console for the process's lifetime.
+    """
+    if proc.stdout is None:
+        return
+
+    def _pump() -> None:
+        stream = proc.stdout
+        if stream is None:  # pragma: no cover - narrowed for the type checker
+            return
+        for line in stream:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+
+    threading.Thread(target=_pump, name="vite-stdout", daemon=True).start()
+
+
+def _forward_signals_to(proc: subprocess.Popen[str]) -> None:
+    """Make a terminating signal stop the dev server too.
+
+    ``Popen.terminate`` in a ``finally`` (and the ``atexit`` hook) only runs if
+    the interpreter unwinds. A bare ``kill -TERM <console>`` does not: Python's
+    default SIGTERM disposition kills the process outright, so the Vite child is
+    orphaned and keeps port 3001 (measured: it survived for the full 6s the
+    check waited, and again on every retry). Ctrl+C worked only because
+    ``KeyboardInterrupt`` *is* an exception.
+
+    Installing a handler turns SIGTERM/SIGHUP into that same unwind, so the
+    existing cleanup path runs. ``SIGINT`` is left alone: uvicorn installs its
+    own handler and raises ``KeyboardInterrupt``.
+    """
+    for signum in (signal.SIGTERM, signal.SIGHUP):
+
+        def _handler(received: int, frame: object) -> None:
+            # Raise as the exception the ``finally`` already handles. Raising
+            # from a handler unwinds the stack at the interrupted point, which
+            # for a blocking ``uvicorn.run`` is inside its serve loop.
+            raise SystemExit(128 + int(received))
+
+        with contextlib.suppress(ValueError, OSError):  # not the main thread
+            signal.signal(signum, _handler)
+
+
+def _repo_root() -> Path:
+    """The repository root: this file is ``<root>/ubt/cli/commands/console.py``.
+
+    A function rather than an inline expression so a test can point the command
+    at a temporary tree without rewriting ``__file__`` (which the module-level
+    imports have already resolved).
+    """
+    return Path(__file__).resolve().parent.parent.parent.parent
 
 
 def console_command(
@@ -37,7 +154,11 @@ def console_command(
     dev: Annotated[
         bool,
         typer.Option(
-            "--dev", help="Launch in Vite HMR development mode (starts pnpm dev on port 3000)"
+            "--dev",
+            help=(
+                "Launch in Vite HMR development mode (starts the Vite dev server, "
+                f"which asks for port {VITE_REQUESTED_PORT} and moves to the next free one)"
+            ),
         ),
     ] = False,
 ) -> None:
@@ -59,12 +180,12 @@ def console_command(
     ):
         os.environ["UBT_ALLOW_NO_AUTH"] = "1"
 
-    repo_root = Path(__file__).resolve().parent.parent.parent.parent
+    repo_root = _repo_root()
     web_dir = repo_root / "web"
     static_dir = Path(__file__).resolve().parent.parent.parent / "api" / "static"
     index_html = static_dir / "index.html"
 
-    vite_proc: subprocess.Popen[bytes] | None = None
+    vite_proc: subprocess.Popen[str] | None = None
 
     if dev:
         # Development mode: Launch Vite with Hot Module Replacement (HMR)
@@ -90,13 +211,24 @@ def console_command(
         )
         console.print(f"[bold cyan]🚀 Starting Vite frontend dev server via {runner}...[/]")
         try:
-            vite_proc = subprocess.Popen(dev_argv, cwd=web_dir)
+            # ``stdout=PIPE`` so the bound port can be read back: Vite moves to
+            # the next free port when the configured one is taken, and the
+            # console must report the port it actually serves on.
+            vite_proc = subprocess.Popen(
+                dev_argv,
+                cwd=web_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
         except OSError as exc:
             console.print(
                 f"[bold red]❌ Could not start the Vite dev server: {escape(str(exc))}[/]"
             )
             raise typer.Exit(1) from exc
-        target_url = "http://localhost:3000/"
+        _forward_signals_to(vite_proc)
+        target_url = _dev_server_url(vite_proc, VITE_REQUESTED_PORT)
 
         def _cleanup_vite(*_: object) -> None:
             if vite_proc and vite_proc.poll() is None:
@@ -139,7 +271,9 @@ def console_command(
         target_url = f"http://{host}:{port}/"
 
     mode_label = (
-        "[bold yellow]Vite HMR Dev Mode (port 3000)[/bold yellow]"
+        # The port comes from the URL Vite actually bound: the label said
+        # "port 3000" while the Web UI line beside it said 3001.
+        f"[bold yellow]Vite HMR Dev Mode ({target_url.rstrip('/')})[/bold yellow]"
         if dev
         else "[bold green]Production Embedded SPA[/bold green]"
     )
