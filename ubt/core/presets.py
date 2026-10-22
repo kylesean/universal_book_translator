@@ -33,7 +33,6 @@ from ubt.core.config import (
     PromptStrategyName,
     QeEngine,
     TableRenderMode,
-    UBTConfig,
 )
 
 
