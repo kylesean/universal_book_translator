@@ -278,10 +278,9 @@ def _page_pdf(
     tmp_path: Path, name: str, *, lines: Sequence[str], paint: Sequence[str] = ()
 ) -> Path:
     """A one-page PDF carrying ``lines`` of text and optionally raw ``paint`` ops."""
+    from pdf_builders import PAGE_HEIGHT, PAGE_WIDTH, _attach_font
     from pypdf import PdfWriter
     from pypdf.generic import DecodedStreamObject, NameObject
-
-    from tests.pdf_builders import PAGE_HEIGHT, PAGE_WIDTH, _attach_font
 
     writer = PdfWriter()
     page = writer.add_blank_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
