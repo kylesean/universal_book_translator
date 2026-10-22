@@ -205,6 +205,178 @@ def test_a_missing_target_language_fails_closed_even_when_disabled() -> None:
     assert blocking_gate_tripped([crashed], total_pages=999, enabled=False) == [crashed]
 
 
+def test_a_blank_page_fails_closed_even_when_disabled() -> None:
+    """An empty rendered page means dropped content, not a deliberate divider.
+
+    The renderer emits every block it is given, so a blank page is a delivery
+    defect whatever the opt-in switch or page window says. Before this, the gate
+    reported ``critical blank_page``, the affected blocks were quarantined as
+    ``NEEDS_HUMAN`` (which by contract still ships its translation), and the
+    verdict read ``warning`` — so the reader got a hole where a paragraph
+    belonged.
+    """
+    from ubt.adapters.pdf.visual_gate import blocking_gate_tripped
+    from ubt.core.policy.layout_policy import QA_FULL_GATE_MAX_PAGES
+
+    blank = _finding("critical", code="blank_page")
+    assert blocking_gate_tripped([blank], total_pages=3, enabled=False) == [blank]
+    assert blocking_gate_tripped([blank], total_pages=3, enabled=True) == [blank]
+    # The page window does not excuse it either.
+    long_book = QA_FULL_GATE_MAX_PAGES + 100
+    assert blocking_gate_tripped([blank], total_pages=long_book, enabled=False) == [blank]
+    # An unrelated critical still respects the switch: the set is not a blanket.
+    other = _finding("critical", code="some_defect")
+    assert blocking_gate_tripped([other], total_pages=3, enabled=False) == []
+
+
+# --------------------------------------------------------------------------- #
+# What counts as a blank page.
+#
+# ``blank_page`` now refuses export on its own, so the predicate behind it has
+# to be "the page carries nothing", not "the page is mostly white". The raster
+# tier alone cannot make that distinction: measured at 110 dpi on A4, a lone
+# 9pt caption (std 3.4), a light-grey figure (std 4.0) and a 15pt heading
+# (std 4.8) all sit inside the blank window (mean >= 250, std <= 6). Each of
+# those is a legitimate delivery, and refusing it would fail ordinary books.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_bare_page_number_is_page_furniture_not_content() -> None:
+    """The shape a forced break leaves: a blank page still prints its number."""
+    from ubt.adapters.pdf.visual_gate import _has_body_text
+
+    assert _has_body_text("2", 2) is False
+    assert _has_body_text("128", 128) is False
+    assert _has_body_text("- 7 -", 7) is False
+    assert _has_body_text("xiv", 14) is False
+
+
+def test_a_number_that_is_not_this_pages_number_is_content() -> None:
+    """Only *its own* number is furniture.
+
+    A page whose whole text is a year, a figure label or a stray digit is
+    carrying something; treating any bare number as furniture would declare
+    such a page empty and, now that the code fails closed, refuse the export.
+    """
+    from ubt.adapters.pdf.visual_gate import _has_body_text
+
+    assert _has_body_text("2019", 7) is True
+    assert _has_body_text("2", 3) is True
+    assert _has_body_text("iv", 14) is True
+
+
+def test_real_text_is_content_however_short(tmp_path: Path) -> None:
+    from ubt.adapters.pdf.visual_gate import _has_body_text
+
+    assert _has_body_text("Thanks to the reviewers.\n8", 8) is True
+    assert _has_body_text("Figure 1: results\n2", 2) is True
+    assert _has_body_text("Chapter One\n1", 1) is True
+    assert _has_body_text("", 5) is False
+
+
+def _page_pdf(
+    tmp_path: Path, name: str, *, lines: Sequence[str], paint: Sequence[str] = ()
+) -> Path:
+    """A one-page PDF carrying ``lines`` of text and optionally raw ``paint`` ops."""
+    from pdf_builders import PAGE_HEIGHT, PAGE_WIDTH, _attach_font
+    from pypdf import PdfWriter
+    from pypdf.generic import DecodedStreamObject, NameObject
+
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
+    ops = [f"BT /F1 12 Tf 54 {200 - 20 * i} Td ({line}) Tj ET" for i, line in enumerate(lines)]
+    ops.extend(paint)
+    stream = DecodedStreamObject()
+    stream.set_data("\n".join(ops).encode("latin-1"))
+    page[NameObject("/Contents")] = writer._add_object(stream)  # noqa: SLF001 - fixture
+    _attach_font(writer, page)
+    out = tmp_path / name
+    writer.write(out)
+    return out
+
+
+def test_a_page_with_nothing_at_all_is_contentless(tmp_path: Path) -> None:
+    from ubt.adapters.pdf.visual_gate import page_has_no_content
+
+    pdf = _page_pdf(tmp_path, "empty.pdf", lines=())
+    assert page_has_no_content(pdf, [1]) == {1}
+
+
+def test_a_page_whose_only_text_is_its_number_is_contentless(tmp_path: Path) -> None:
+    from ubt.adapters.pdf.visual_gate import page_has_no_content
+
+    pdf = _page_pdf(tmp_path, "numbered.pdf", lines=("1",))
+    assert page_has_no_content(pdf, [1]) == {1}
+
+
+def test_a_page_carrying_a_word_is_not_contentless(tmp_path: Path) -> None:
+    from ubt.adapters.pdf.visual_gate import page_has_no_content
+
+    pdf = _page_pdf(tmp_path, "word.pdf", lines=("End",))
+    assert page_has_no_content(pdf, [1]) == set()
+
+
+def test_a_page_carrying_only_a_drawing_is_not_contentless(tmp_path: Path) -> None:
+    """A vector figure is content the raster tier reads as "almost no ink"."""
+    from ubt.adapters.pdf.visual_gate import page_has_no_content
+
+    pdf = _page_pdf(
+        tmp_path, "drawing.pdf", lines=(), paint=("q 0 0 0 RG 2 w 20 20 m 180 180 l S Q",)
+    )
+    assert page_has_no_content(pdf, [1]) == set()
+
+
+def test_the_contentless_probe_never_reports_a_page_it_could_not_read(
+    tmp_path: Path,
+) -> None:
+    """An unreadable artifact is ``unreadable_pdf``'s finding, not a blank page.
+
+    Guessing "contentless" from a failed probe would refuse the export of any
+    file whose structure could not be read, under a code that names the wrong
+    defect. The artifact here is a real PDF truncated mid-file: its text layer
+    is still readable (oxide parses the page tree) while pikepdf refuses the
+    trailer, which is exactly the split that reaches this branch.
+    """
+    from ubt.adapters.pdf.visual_gate import page_has_no_content
+
+    source = Path(__file__).resolve().parents[3] / "corpus" / "documents" / "chapter-3.pdf"
+    if not source.exists():  # pragma: no cover - corpus is optional in a bare checkout
+        pytest.skip("corpus document not present")
+    truncated = tmp_path / "truncated.pdf"
+    truncated.write_bytes(source.read_bytes()[: source.stat().st_size // 2])
+    assert page_has_no_content(truncated, [1, 2]) == set()
+
+
+def test_a_file_that_is_not_a_pdf_at_all_reports_nothing(tmp_path: Path) -> None:
+    from ubt.adapters.pdf.visual_gate import page_has_no_content
+
+    broken = tmp_path / "broken.pdf"
+    broken.write_bytes(b"not a pdf at all")
+    assert page_has_no_content(broken, [1, 2]) == set()
+
+
+def test_a_sparse_but_legitimate_page_is_not_reported_blank(tmp_path: Path) -> None:
+    """The false positive that made the code unsafe to fail closed on.
+
+    A page holding one short caption renders nearly all white -- it is inside
+    the raster blank window -- but it carries text, so it is a delivery, not a
+    hole. Measured on a real Typst render of a figure page: mean 253.9, std 4.0.
+    """
+    from PIL import Image, ImageDraw
+
+    from ubt.adapters.pdf.visual_gate import page_has_no_content, pixel_findings
+
+    img = Image.new("L", (910, 1287), 255)
+    ImageDraw.Draw(img).text((80, 120), "Figure 1: results.", fill=0)
+    path = tmp_path / "caption.png"
+    img.save(path)
+    # The raster tier alone calls it blank...
+    assert [f.code for f in pixel_findings(path, 1)] == ["blank_page"]
+    # ...and the gate is what decides, from the artifact itself.
+    pdf = _page_pdf(tmp_path, "caption.pdf", lines=("Figure 1: results.",))
+    assert page_has_no_content(pdf, [1]) == set()
+
+
 def test_a_sparse_target_language_major_fails_closed() -> None:
     from ubt.adapters.pdf.visual_gate import blocking_gate_tripped
 

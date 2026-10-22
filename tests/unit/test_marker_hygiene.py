@@ -187,6 +187,9 @@ _FAST_SUBPROCESS_ALLOWLIST: dict[str, str] = {
     "tests/unit/render/test_math_ast_transpiler.py": "single-snippet typst compile",
     "tests/unit/render/test_math_transpiler.py": "single-snippet typst compile",
     "tests/unit/render/test_typst_lang.py": "single-snippet typst compile",
+    "tests/unit/render/test_typst_list_items.py": (
+        "single-snippet typst compile + pdftotext, skipped when typst is absent"
+    ),
     "tests/unit/core/test_import_isolation.py": "subprocess imports the package to prove isolation",
     "tests/unit/test_writer_lock.py": "subprocess holds the lock to prove cross-process exclusion",
     # A hang cannot be observed in-process (the wedged thread keeps the lock

@@ -74,12 +74,12 @@ class ArtifactReport:
         )
 
 
-def _read_all_text_pages(artifact: Path) -> str:
-    """All pages' text via pdfium textpages, serialized behind the C gate."""
+def _read_page_texts(artifact: Path) -> list[str]:
+    """Each page's text, in page order, via pdfium textpages behind the C gate."""
     from ubt.adapters.pdf.pdfium_gate import open_document, pdfium_serialized
 
     @pdfium_serialized
-    def _read(p: Path) -> str:
+    def _read(p: Path) -> list[str]:
         chunks: list[str] = []
         with open_document(p) as pdf:
             for idx in range(len(pdf)):
@@ -92,9 +92,41 @@ def _read_all_text_pages(artifact: Path) -> str:
                         tp.close()
                 finally:
                     page.close()
-        return " ".join(chunks)
+        return chunks
 
     return _read(artifact)
+
+
+def _read_all_text_pages(artifact: Path) -> str:
+    """All pages' text via pdfium textpages, serialized behind the C gate."""
+    return " ".join(_read_page_texts(artifact))
+
+
+def page_tokens(artifact: Path) -> list[frozenset[str]]:
+    """Per-page token sets (index 0 = page 1), for a page-scoped presence probe.
+
+    The whole-book token set is what made the audit blind in one direction and
+    noisy in the other. Blind: a paragraph lost from a 300-page book still had
+    every one of its common CJK glyphs somewhere in the remaining 299 pages, so
+    the probe reported it present. Noisy: a wrapper's tokens (``mark``,
+    ``class``, ``Repair``, ``500``) never appear on any page, so a block that
+    *was* placed failed.
+
+    Falls back to line extraction when the textpage read raises, matching
+    :func:`artifact_tokens`.
+    """
+    from ubt.adapters.pdf import pdf_struct, textgeom
+
+    try:
+        pages = _read_page_texts(artifact)
+    except Exception:
+        with pdf_struct.open_pdf(artifact) as pdf:
+            page_count = len(pdf.pages)
+        pages = []
+        for page_no in range(1, page_count + 1):
+            lines, _ = textgeom.extract_lines(artifact, page_no)
+            pages.append(" ".join(line.text for line in lines))
+    return [frozenset(_tokenize(text)) for text in pages]
 
 
 def artifact_tokens(artifact: Path) -> frozenset[str]:
@@ -139,14 +171,32 @@ def _present(expected: str, tokens: frozenset[str]) -> bool:
 def _expected(block: IRBlock, translations: Mapping[str, str]) -> str:
     """The text the artifact should carry for this block.
 
+    The map value is used as given — the export stage builds it with
+    :func:`ubt.render.delivered_text.delivered_text`, which already strips the
+    pipeline's ``<mark>`` wrappers. The *source* fallback goes through the same
+    rule for the same reason: a quarantined block's ``target_text`` is a
+    ``<mark class="ubt-blocked-human">`` wrapper around the source, and probing
+    its markup tokens (``mark``, ``class``, ``title``, …) asked the artifact for
+    text no renderer ever draws, reporting a placed block as missing.
+
     A leading rehearsal prefix is stripped before comparison: a rehearsal may
     render the marker or drop it, and the audit must not fail on that difference
     (see :func:`ubt.core.qe.fast_pass.strip_rehearsal_marker`).
     """
     target = (translations.get(block.id) or "").strip()
     if target:
+        # The map is normally plain text (the export stage builds it with
+        # ``delivered_text``), but a ledger row written before that fix, or a
+        # caller passing ``target_text`` directly, can still carry a wrapper.
+        # Probe the text the renderer draws, never the markup.
+        from ubt.render.delivered_text import is_any_mark, unwrap_mark
+
+        if is_any_mark(target):
+            target = unwrap_mark(target).strip()
         return strip_rehearsal_marker(target)
-    return strip_rehearsal_marker(block.source_text or "")
+    from ubt.render.delivered_text import delivered_text
+
+    return strip_rehearsal_marker(delivered_text(block))
 
 
 def check_artifact(
@@ -168,7 +218,16 @@ def check_artifact(
     """
     from ubt.render.delivered_text import dropped_page_furniture
 
-    text = artifact_tokens(Path(artifact_pdf))
+    pages = page_tokens(Path(artifact_pdf))
+    # A realization need not sit on the *same* page number as its source: a
+    # bilingual artifact interleaves source and target pages, and a reflowing
+    # layout moves text across page boundaries. Probing the whole book is the
+    # safe direction for that, but it makes the probe blind — every common glyph
+    # of a lost paragraph is somewhere in a long book. So probe the block's own
+    # page first, then its neighbours, and only then the whole book: a block
+    # that really was placed is found in one of the first two, and one that was
+    # lost is not found in any of them.
+    whole_book = frozenset().union(*pages) if pages else frozenset()
     checks: list[ElementCheck] = []
     for block in blocks:
         if block.block_type in (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE):
@@ -176,11 +235,36 @@ def check_artifact(
         if dropped_page_furniture(block):
             continue
         expected = _normalize(_expected(block, translations))
+        page_number = block.bbox.page if block.bbox is not None else 0
         checks.append(
             ElementCheck(
                 block.id,
-                block.bbox.page if block.bbox is not None else 0,
-                _present(expected, text),
+                page_number,
+                _present_on_pages(expected, pages, page_number, whole_book),
             )
         )
     return ArtifactReport(total=len(checks), checks=tuple(checks))
+
+
+def _present_on_pages(
+    expected: str,
+    pages: list[frozenset[str]],
+    page_number: int,
+    whole_book: frozenset[str],
+) -> bool:
+    """Whether ``expected`` is placed, looking near its source page first.
+
+    The page window is what closes the false-pass: a lost paragraph shares its
+    glyphs with the rest of the book, but not with the two pages around its own
+    position. The whole-book fallback is kept last so a block the layout moved
+    far from its source page is still reported present rather than as a false
+    failure.
+    """
+    if not pages:
+        return _present(expected, whole_book)
+    if 1 <= page_number <= len(pages):
+        for candidate in (page_number, page_number + 1, page_number - 1):
+            if 1 <= candidate <= len(pages) and _present(expected, pages[candidate - 1]):
+                return True
+        return False
+    return _present(expected, whole_book)

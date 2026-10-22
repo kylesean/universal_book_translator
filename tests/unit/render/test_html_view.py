@@ -381,15 +381,22 @@ def test_a_failed_draft_wrapper_never_reaches_the_companion_views(tmp_path: Path
     ``&lt;mark class="ubt-failed-draft" title="REPAIR ERROR RuntimeError: …"&gt;``
     — wrapper, exception text and all — as visible escaped markup, while the PDF
     renderer showed the clean translated sentence for the same block.
+
+    The map entry is left *in place* deliberately. An earlier version of this
+    test popped it, which exercised ``element_text``'s fallback while the export
+    stage's real map still carried the raw ``target_text`` — so the wrapper kept
+    reaching both companions and this test stayed green. The map is an override
+    that wins over the fallback, so it is the entry that must be clean.
     """
     blocks, translations = _blocks()
     wrapped = (
         '<mark class="ubt-failed-draft" title="REPAIR ERROR RuntimeError: boom">你好世界。</mark>'
     )
     blocks[1].target_text = wrapped
-    translations.pop(blocks[1].id, None)
+    translations[blocks[1].id] = wrapped
 
     assert element_text(blocks[1], {}) == "你好世界。"
+    assert element_text(blocks[1], translations) == "你好世界。"
 
     out = tmp_path / "view.html"
     compose_html(blocks, translations, out)

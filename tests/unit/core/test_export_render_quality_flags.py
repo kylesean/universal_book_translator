@@ -91,3 +91,75 @@ def test_the_new_render_quality_flags_land_and_never_read_as_kept() -> None:
     assert blocks[0].error_flags == ["formula_degraded"]
     assert blocks[1].error_flags == ["sentinel_leaked"]
     assert all(kept_in_source(b) is False for b in blocks)
+
+
+def _delivery_block(
+    block_id: str, target: str, *, status: BlockStatus = BlockStatus.FAILED
+) -> IRBlock:
+    from ubt.core.ir.models import make_element
+
+    block = IRBlock(
+        element=make_element(
+            id=block_id,
+            spine_index=1,
+            block_type=BlockType.NARRATIVE,
+            source_text="Hello world.",
+            bbox=BoundingBox(x0=54.0, y0=700.0, x1=81.6, y1=708.3, page=1),
+        )
+    )
+    block.target_text = target
+    block.status = status
+    return block
+
+
+def test_the_delivery_map_strips_a_failed_draft_wrapper() -> None:
+    """The map the HTML/EPUB companions receive must carry placed *text*.
+
+    ``_delivery_translations`` fed ``target_text`` through verbatim, and the
+    companion views treat a map entry as an override that beats their own
+    ``delivered_text`` fallback. So the PDF showed the clean sentence while both
+    companions shipped ``<mark class="ubt-failed-draft" title="Repair error: …">``
+    — wrapper class and provider exception text — escaped onto the page.
+    """
+    from ubt.core.engine.stages.export import _delivery_translations
+
+    wrapped = (
+        '<mark class="ubt-failed-draft" title="Repair error: Model API error (500)">'
+        "你好世界。</mark>"
+    )
+    placed = _delivery_translations([_delivery_block("b1", wrapped)])
+    assert placed == {"b1": "你好世界。"}
+
+
+def test_the_delivery_map_strips_a_structure_mismatch_wrapper() -> None:
+    """Export wraps the draft itself when the HTML delta check fails."""
+    from ubt.core.engine.stages.export import _delivery_translations
+
+    wrapped = (
+        '<mark class="ubt-failed-draft" title="html_structure_mismatch: expected &lt;p&gt;">'
+        "你好世界。</mark>"
+    )
+    placed = _delivery_translations([_delivery_block("b1", wrapped)])
+    assert placed["b1"] == "你好世界。"
+    assert "ubt-failed-draft" not in placed["b1"]
+
+
+def test_the_delivery_map_agrees_with_the_pdf_renderer() -> None:
+    """One rule for every deliverable: the map value equals ``delivered_text``."""
+    from ubt.core.engine.stages.export import _delivery_translations
+    from ubt.render.delivered_text import delivered_text
+
+    wrapped = (
+        '<mark class="ubt-failed-draft" title="Repair error: Model API error (500)">'
+        "你好世界。</mark>"
+    )
+    block = _delivery_block("b1", wrapped)
+    assert _delivery_translations([block])["b1"] == delivered_text(block)
+
+
+def test_the_delivery_map_omits_assets_and_source_kept_blocks() -> None:
+    from ubt.core.engine.stages.export import _delivery_translations
+
+    plain = _delivery_block("b1", "你好世界。", status=BlockStatus.MTQE_PASSED)
+    empty = _delivery_block("b2", "   ", status=BlockStatus.MTQE_PASSED)
+    assert _delivery_translations([plain, empty]) == {"b1": "你好世界。"}

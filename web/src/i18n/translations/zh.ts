@@ -30,6 +30,8 @@ export const zh: TranslationDictionary = {
     systemDoctor: '系统自检',
     workbenches: '出版审校工作台',
     reviewWorkbench: '逐块审校台',
+    toggleNavigation: '切换导航菜单',
+    closeNavigation: '关闭导航菜单',
   },
   wizard: {
     title: '新建书籍翻译任务',
@@ -302,6 +304,8 @@ export const zh: TranslationDictionary = {
     deleteJob: '删除任务记录',
     deleteConfirm: '确定删除该任务的历史记录与产物吗？此操作不可恢复。',
     deleteTypePrompt: '请输入 {phrase} 以确认删除',
+    collapseLogs: '折叠日志',
+    expandLogs: '展开日志',
     jobStatuses: {
       submitted: '已提交',
       queued: '排队中',

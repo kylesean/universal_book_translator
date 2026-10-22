@@ -1209,6 +1209,42 @@ def _block_text(block: IRBlock) -> str:
     return delivered_text(block)
 
 
+#: Ordered list markers: ``1.``, ``1)``, ``(1)``, ``１．`` and the compound
+#: forms (``2.1.``). Anything else the extractors emit is a bullet.
+_ORDERED_MARKER_RE = re.compile(r"^[（(]?[0-9０-９]{1,3}(?:[.．][0-9０-９]{1,3})*[.．、)）]$")
+
+
+def _list_is_ordered(block: IRBlock) -> bool:
+    """Whether a ``LIST_ITEM`` block came from an ordered (numbered) list.
+
+    The marker the extractors store is the source of truth: ``•``/``-``/``*``
+    for bullets, ``1.``/``(1)``/``2.1.`` for an enumeration. A block with no
+    marker falls back to a bullet, which is what the extractors default to.
+    """
+    marker = str(getattr(block.element, "marker", "") or "").strip()
+    return bool(marker) and _ORDERED_MARKER_RE.match(marker) is not None
+
+
+def _typst_list_markup(items: Sequence[str], *, ordered: bool) -> str:
+    """A Typst list call for one run of consecutive list items.
+
+    ``#list(..)`` / ``#enum(..)`` rather than the ``- `` / ``+ `` markup form:
+    the item bodies are already-escaped markup (``render_prose`` output), and
+    the markup form would require each body to be a single line with its
+    continuation indented, which a translated paragraph with a soft wrap is not.
+    A call takes each item as a content block, so line structure inside an item
+    is irrelevant.
+
+    Every body is wrapped in ``[...]``. A bare ``#list(...)`` argument is a code
+    expression, so an unescaped ``#`` or ``[`` in translated prose would be
+    parsed as code; the bracket makes it content again. ``render_prose`` already
+    escapes both, so the wrapper is defence for a caller that does not.
+    """
+    function = "enum" if ordered else "list"
+    rendered = ", ".join(f"[{item}]" for item in items)
+    return f"#{function}({rendered})"
+
+
 def _heading_level(block: IRBlock) -> int:
     """Heading depth, clamped to Typst's usable range (1..6)."""
     level = getattr(block.element, "level", 1)
@@ -1569,11 +1605,27 @@ class TypstDocumentRenderer:
             body.append(self._figure_markup(pending, build_dir))
             pending = None
 
+        #: Consecutive list items are emitted as ONE list, so the reader gets a
+        #: real list rather than a run of paragraphs that happen to start with a
+        #: bullet. Grouped up front by id, because the emit loop below has
+        #: already ``continue``d on TOC rows and the grouping must agree with
+        #: what actually gets rendered.
+        list_runs = self._group_list_runs(blocks, toc_consumed)
+
         for block in blocks:
             self.stats.blocks_seen += 1
             if block.id in toc_consumed:
                 continue
             block_type = str(getattr(block.block_type, "value", block.block_type) or "")
+
+            if block.id in list_runs:
+                run = list_runs[block.id]
+                if run is None:
+                    # Already emitted as part of its run's first item.
+                    continue
+                flush_figure()
+                body.append(run)
+                continue
 
             # A block whose delivered text still carries a pipeline sentinel
             # (``⟦SOUP_MASK…⟧``, ``⟦B⟧``, ``\\llbracket…``) had a restore pass that
@@ -1823,6 +1875,63 @@ class TypstDocumentRenderer:
         # of a per-branch increment a new branch could forget.
         self.stats.sentinels_leaked = len(find_sentinels(source))
         return source, self.stats
+
+    def _group_list_runs(
+        self, blocks: Sequence[IRBlock], consumed: set[str]
+    ) -> dict[str, str | None]:
+        """Map each list-item block id to its run's markup (``None`` = already emitted).
+
+        A run is a maximal stretch of consecutive, not-yet-consumed ``LIST_ITEM``
+        blocks of the same kind (ordered or bullet). Splitting on kind keeps a
+        numbered list from being renumbered as bullets (or the reverse) when two
+        lists are adjacent with no paragraph between them.
+
+        The renderer had no list branch at all: a ``LIST_ITEM`` fell through to
+        the prose path, so every bullet and every number was dropped and the
+        delivered PDF flattened a list into unmarked paragraphs. The marker was
+        already on the element (all three readers populate it) and the HTML
+        companion already emitted ``<ul><li>``; only the Typst backend lost it.
+        """
+        runs: dict[str, str | None] = {}
+        index = 0
+        total = len(blocks)
+        while index < total:
+            block = blocks[index]
+            if block.id in consumed or str(block.block_type) not in (
+                "list_item",
+                "BlockType.LIST_ITEM",
+            ):
+                index += 1
+                continue
+            ordered = _list_is_ordered(block)
+            items: list[str] = []
+            ids: list[str] = []
+            while index < total:
+                candidate = blocks[index]
+                if candidate.id in consumed:
+                    break
+                if str(candidate.block_type) not in ("list_item", "BlockType.LIST_ITEM"):
+                    break
+                if _list_is_ordered(candidate) != ordered:
+                    break
+                items.append(self._list_item_markup(candidate))
+                ids.append(candidate.id)
+                index += 1
+            if not items:
+                index += 1
+                continue
+            markup = _typst_list_markup(items, ordered=ordered)
+            runs[ids[0]] = markup
+            for block_id in ids[1:]:
+                runs[block_id] = None
+            self.stats.blocks_rendered += len(ids)
+        return runs
+
+    def _list_item_markup(self, block: IRBlock) -> str:
+        """One list item's body, as Typst content (no surrounding brackets)."""
+        if _keeps_source(block):
+            return self._prose((block.source_text or "").strip())
+        return self._maybe_pair(block, self._prose(_block_text(block), block_runs(block)))
 
     def _figure_markup(self, figure: _Figure, build_dir: Path) -> str:
         """The ``#figure(...)`` call for one image, with its caption if any."""

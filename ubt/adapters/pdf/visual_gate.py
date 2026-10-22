@@ -34,6 +34,13 @@ with CRITICAL findings refuse export when explicitly enabled, off by default,
 see ``UBTConfig.visual_blocking_gate_enabled`` — and an unreadable rendered
 PDF, which fails closed even when the blocking gate is off because the
 exported artifact itself cannot be read.
+
+A handful of codes bypass the opt-in switch *and* the page window, because
+each one means the artifact is not a delivery at all rather than a style
+worry: ``target_language_absent`` (nothing to read), ``target_language_sparse``
+(almost nothing), ``visual_gate_crashed`` (state unknown), ``type_illegible``
+(reader cannot read the page) and ``blank_page`` (content dropped). See
+``_ALWAYS_FAIL_CLOSED_CODES`` and its neighbours.
 """
 
 from __future__ import annotations
@@ -42,6 +49,7 @@ import asyncio
 import atexit
 import base64
 import logging
+import re
 import shutil
 import tempfile
 import unicodedata
@@ -53,6 +61,7 @@ from typing import Any, Literal, cast
 from ubt.adapters.pdf import oxide_render, pdf_struct
 from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
 from ubt.core.policy.layout_policy import (
+    PDF_PATH_OPS,
     QA_FULL_GATE_MAX_PAGES,
     QA_LONG_BOOK_SAMPLE,
     QA_TIERED_BAND_PAGES,
@@ -71,7 +80,19 @@ BANNED_NON_BREAKING_HYPHEN = "\u2011"
 # an artifact carrying none of the commissioned target language is unshippable.
 # ``visual_gate_crashed`` joins them: a gate that died mid-run leaves the
 # artifact's visual state unknown, and "unknown" must not read as a pass.
-_ALWAYS_FAIL_CLOSED_CODES = frozenset({"target_language_absent", "visual_gate_crashed"})
+#
+# ``blank_page`` joins them too. The renderer emits every block it is given, so
+# an empty page means content was dropped, not that the book wanted a divider —
+# the gate's own comment says so. It was a CRITICAL finding that still shipped:
+# ``VisualVerifyLoop`` quarantined the page's blocks as ``NEEDS_HUMAN`` (which
+# by contract still ships its translation) and the blocking gate is opt-in, so a
+# reader received a blank page where a paragraph belonged while the delivery
+# verdict read ``warning``. Measured on a three-page render with one blank page:
+# the gate reported ``critical blank_page``, the verdict stayed ``warning``, and
+# the affected block's draft was still placed.
+_ALWAYS_FAIL_CLOSED_CODES = frozenset(
+    {"target_language_absent", "visual_gate_crashed", "blank_page"}
+)
 # Delivery-breaking parity MAJOR. ``target_language_sparse`` (>=92% of the
 # artifact is not the commissioned language) is unshippable: there is nothing
 # for a reader to consume. A gate reporting passed=False on exactly these codes
@@ -142,6 +163,21 @@ TYPE_COLLAPSED_FRACTION = 0.5
 TYPE_AUDIT_MIN_GLYPHS = 20
 
 # Pillow pixel heuristics (white-paper academic PDFs only).
+#
+# The mean/stddev pair only says "almost no ink", which is NOT the same as
+# "nothing on the page": a page holding one caption, a figure, or a lone
+# heading is nearly all white too. Measured at 110 dpi on an A4 page:
+#
+#     page-number only          mean 255.0  std 0.9   no content stream
+#     one 9pt caption           mean 254.9  std 3.4   text ops
+#     light-grey figure         mean 253.9  std 4.0   image XObject
+#     one 15pt heading          mean 254.9  std 4.8   text ops
+#     one line of body text     mean 254.5  std 9.9   text ops
+#
+# Every one of those but the first is a legitimate delivery, so the raster
+# heuristic can only *nominate* a page; ``blank_page`` additionally requires
+# the page to carry nothing at all (see :func:`page_has_no_content`). That is
+# what makes the code safe to fail closed on.
 BLANK_MEAN_THRESHOLD = 250.0
 BLANK_STD_THRESHOLD = 6.0
 BLACK_PIXEL_VALUE = 12
@@ -494,6 +530,105 @@ def blank_page_candidates(pdf_path: Path, min_chars: int = BLANK_TEXT_THRESHOLD_
         logger.debug("Visual gate: text scan failed for %s", pdf_path)
         return []
     return [idx for idx, text in enumerate(texts, start=1) if len(text.strip()) < min_chars]
+
+
+#: What a footer page number looks like in the extracted text layer: the
+#: digits, optionally with the ``- N -`` decoration other styles emit.
+_PAGE_NUMBER_RE = re.compile(r"^(?:[-–—]\s*)?(\d{1,5}|[ivxlcdm]{1,7})\s*(?:[-–—])?$", re.I)
+
+#: Numeral letter to value, for the ``numbering: "i"`` front-matter style.
+_ROMAN = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
+
+
+def _roman_to_int(text: str) -> int | None:
+    """``"xiv"`` -> 14; ``None`` when ``text`` is not a well-formed numeral."""
+    values = [_ROMAN[char] for char in text.lower()]
+    total = 0
+    for index, value in enumerate(values):
+        following = values[index + 1] if index + 1 < len(values) else 0
+        total += -value if value < following else value
+    return total or None
+
+
+def _has_body_text(text: str, page_no: int) -> bool:
+    """Whether a page's text layer carries anything beyond *its own* page number.
+
+    A page number is page furniture: the renderer prints it on every page, so it
+    can never distinguish "this page's blocks were dropped" from "this page has
+    content". A page holding nothing else is therefore contentless -- exactly
+    the shape a forced break leaves (a blank page between two chapters still
+    carries its printed number).
+
+    The number must be *this page's* number, not merely a bare number. Without
+    that check any page whose whole text happened to be a year or a figure
+    label ("2019") would read as furniture and, with the code failing closed,
+    refuse the export.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return False
+    match = _PAGE_NUMBER_RE.fullmatch(stripped)
+    if match is not None:
+        token = match.group(1)
+        printed = int(token) if token.isdigit() else _roman_to_int(token)
+        if printed == page_no:
+            return False
+    return any(_is_content_char(char) for char in stripped)
+
+
+def page_has_no_content(pdf_path: Path, pages: Sequence[int]) -> set[int]:
+    """The pages among ``pages`` that carry nothing a reader could consume.
+
+    A page is *contentless* only when all three independent probes agree:
+
+    * its text layer holds no body text -- page furniture (a bare page number,
+      which the renderer prints in the footer) does not count as content;
+    * it paints no image XObject;
+    * it draws no vector path (a figure, a rule, a chart axis).
+
+    This is what makes ``blank_page`` safe to fail closed on. The raster
+    heuristic alone cannot tell a dropped paragraph from a deliberately
+    sparse page -- measured on real Typst renders, a lone 9pt caption, a
+    light-grey figure and a 15pt "Part II" title page all read as "almost no
+    ink". Requiring emptiness instead of sparseness keeps those pages
+    shippable while still catching a page whose blocks never made it.
+
+    A page the probes cannot read is *not* reported here: an unreadable
+    artifact is ``unreadable_pdf``'s job, and guessing "contentless" from a
+    failed probe would refuse every export of a file pikepdf cannot open.
+    """
+    wanted = {int(page) for page in pages}
+    if not wanted:
+        return set()
+    texts = oxide_render.extract_page_texts(pdf_path)
+    if not texts:
+        logger.debug("Visual gate: text scan failed for %s; blank check skipped", pdf_path)
+        return set()
+    try:
+        pike = pdf_struct.open_pdf(pdf_path)
+    except Exception as exc:  # unreadable artifact -> unreadable_pdf, not blank
+        logger.debug("Visual gate: cannot open %s for blank check: %s", pdf_path, exc)
+        return set()
+    contentless: set[int] = set()
+    try:
+        for page_no in sorted(wanted):
+            if not 1 <= page_no <= len(texts) or page_no > len(pike.pages):
+                continue
+            if _has_body_text(texts[page_no - 1], page_no):
+                continue
+            page = pike.pages[page_no - 1]
+            try:
+                if pdf_struct.resource_image_count(page) > 0:
+                    continue
+                if pdf_struct.count_ops(page, PDF_PATH_OPS) > 0:
+                    continue
+            except Exception as exc:  # a probe that fails cannot prove emptiness
+                logger.debug("Visual gate: content probe failed for page %d: %s", page_no, exc)
+                continue
+            contentless.add(page_no)
+    finally:
+        pike.close()
+    return contentless
 
 
 def block_overlap_findings(blocks: Sequence[object]) -> list[VisualFinding]:
@@ -1192,10 +1327,18 @@ async def run_visual_gate(
                     rotations,
                 )
             )
+            # ``blank_page`` is the one pixel finding that refuses export on its
+            # own, so it needs proof the page is empty rather than merely pale:
+            # a lone caption, a figure or a heading all read as "almost no ink".
+            # The probe runs only on the pages the raster tier nominated, so it
+            # costs a pikepdf page walk, not a second rasterisation.
+            nominated = {page for page in pngs if page in blank_cand_pages}
+            nominated -= exempt_blank_pages
+            contentless = await asyncio.to_thread(page_has_no_content, pdf_path, sorted(nominated))
             for page, png in sorted(pngs.items()):
                 # pixel_findings decodes the PNG with PIL (CPU-bound) — keep it off the loop too.
                 p_findings = await asyncio.to_thread(pixel_findings, png, page)
-                if page in exempt_blank_pages or page not in blank_cand_pages:
+                if page not in contentless:
                     p_findings = [f for f in p_findings if f.code != "blank_page"]
                 findings.extend(p_findings)
         if vlm_judge is not None and pngs and max_vlm_pages > 0:

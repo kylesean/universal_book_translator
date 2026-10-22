@@ -549,9 +549,9 @@ export function NewJobWizard() {
   ]
 
   return (
-    <div className="flex-1 overflow-y-auto px-8 py-7 space-y-7 max-w-6xl mx-auto w-full">
+    <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-7 space-y-5 sm:space-y-7 max-w-6xl mx-auto w-full pb-24 lg:pb-7">
       {/* View Title */}
-      <div className="flex items-end justify-between border-b border-[var(--paper-border)] pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 border-b border-[var(--paper-border)] pb-4">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-[var(--ink-primary)]">
             {t.wizard.title}
@@ -566,7 +566,7 @@ export function NewJobWizard() {
       </div>
 
       {/* Main 2-Column Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
         {/* Left Column: Input, Preset, Budget */}
         <div className="lg:col-span-7 space-y-6">
           {/* File Dropzone */}
@@ -601,7 +601,7 @@ export function NewJobWizard() {
                   fileInputRef.current?.click()
                 }
               }}
-              className={`rounded-lg border-2 border-dashed p-7 transition-all cursor-pointer text-center ${
+              className={`rounded-lg border-2 border-dashed p-5 sm:p-7 transition-all cursor-pointer text-center ${
                 isDragOver
                   ? 'border-[var(--ink-primary)] bg-[var(--paper-subsurface)]'
                   : 'border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] bg-[var(--paper-surface)] hover:bg-[var(--paper-subsurface)]'
@@ -625,7 +625,7 @@ export function NewJobWizard() {
                 {t.wizard.dropzoneSubtitle}
               </div>
               <div className="mt-3">
-                <span className="text-xs font-mono text-[var(--ink-primary)] underline decoration-[var(--paper-border-hover)] hover:text-black font-medium">
+                <span className="inline-block py-2 px-3 rounded text-xs font-mono text-[var(--ink-primary)] underline decoration-[var(--paper-border-hover)] hover:text-black font-medium">
                   {t.wizard.orBrowse}
                 </span>
               </div>
@@ -638,7 +638,7 @@ export function NewJobWizard() {
                 value={filePath}
                 onChange={(e) => setFilePath(e.target.value)}
                 placeholder={t.wizard.manualPathPlaceholder}
-                className="flex-1 h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-3 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none font-mono placeholder:text-[var(--ink-muted)] shadow-2xs"
+                className="flex-1 min-w-0 h-9 sm:h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-3 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none font-mono placeholder:text-[var(--ink-muted)] shadow-2xs"
               />
               <Button
                 onClick={() => {
@@ -651,7 +651,7 @@ export function NewJobWizard() {
                 disabled={!filePath.trim() || isAssessing}
                 variant="secondary"
                 size="sm"
-                className="shrink-0"
+                className="shrink-0 h-9 sm:h-8 px-3"
               >
                 {isAssessing ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
@@ -1543,6 +1543,56 @@ export function NewJobWizard() {
             </Button>
           </div>
         </div>
+      </div>
+
+      {/* Mobile Submit Error Alert (Phase 2) */}
+      {submitError && (
+        <div className="lg:hidden fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] left-0 md:left-64 right-0 mx-3 p-2.5 rounded-[5px] bg-[#b91c1c] text-white text-xs z-30 shadow-md flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-white" />
+          <span className="truncate flex-1">{submitError}</span>
+        </div>
+      )}
+
+      {/* Mobile Sticky Bottom Action Bar (Phase 2) */}
+      <div className="lg:hidden fixed bottom-0 left-0 md:left-64 right-0 p-3 bg-[var(--paper-surface)] border-t border-[var(--paper-border)] shadow-lg z-30 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-semibold text-[var(--ink-primary)] truncate font-mono">
+            {fileName || (filePath ? filePath.split('/').pop() : t.wizard.waitingFile)}
+          </div>
+          <div className="text-xs font-mono text-[var(--ink-secondary)] flex items-center gap-2">
+            {assessment?.cost.total_cost_usd !== null && assessment?.cost.total_cost_usd !== undefined ? (
+              <span className="text-[#b45309] font-bold">
+                ${assessment.cost.total_cost_usd.toFixed(2)}
+              </span>
+            ) : assessment ? (
+              <span className="text-[#15803d] font-semibold">{t.common.ready}</span>
+            ) : null}
+            {isAssessing && (
+              <span className="text-[var(--ink-muted)] flex items-center gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {t.wizard.compiling}
+              </span>
+            )}
+          </div>
+        </div>
+        <Button
+          onClick={handleSubmit}
+          disabled={!filePath.trim() || isSubmitting || glossaryError !== null || budgetInvalid}
+          variant="primary"
+          className="h-10 px-4 text-xs font-bold tracking-tight shadow-sm shrink-0"
+        >
+          {isSubmitting ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              {t.wizard.compiling}
+            </>
+          ) : (
+            <>
+              <span>{t.wizard.startCompile}</span>
+              <ArrowRight className="h-4 w-4 ml-1" />
+            </>
+          )}
+        </Button>
       </div>
     </div>
   )

@@ -439,6 +439,9 @@ def upsert_provider(
     if block is None:
         block = tomlkit.table()
         providers[name] = block
+
+    _reject_plaintext_credential_redirect(block, coerced)
+
     for field, value in coerced.items():
         # ``item()`` so tomlkit picks a representation that round-trips: a bare
         # string stays a string, a list stays a list.
@@ -459,6 +462,52 @@ def upsert_provider(
     atomic_write_text(path, tomlkit.dumps(document))
     _tighten_permissions(path)
     return read_provider(name)
+
+
+#: Hosts that stay on this machine, so a plaintext endpoint is not a wire exposure.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
+
+def _is_plaintext_nonlocal(base_url: str) -> bool:
+    """True for an ``http://`` endpoint that leaves this machine."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(base_url)
+    except ValueError:
+        return False
+    if parts.scheme.lower() != "http":
+        return False
+    return (parts.hostname or "").lower() not in _LOOPBACK_HOSTS
+
+
+def _reject_plaintext_credential_redirect(block: Any, coerced: dict[str, Any]) -> None:
+    """Refuse to point a block that holds a credential at a plaintext endpoint.
+
+    ``base_url`` is writable on its own, and the credential already in the file
+    is preserved verbatim unless ``changes`` names it — which is the documented
+    contract. The combination is the hazard: rewriting only ``base_url`` to
+    ``http://…`` sends the stored key to a remote host in cleartext, and the
+    operator's form said nothing about the credential at all.
+
+    This is not an authorisation check (an operator who can reach this route can
+    edit ``ubt.toml`` directly); it is a guard against a silent downgrade. A
+    loopback endpoint is exempt, because a local model server has no wire to
+    expose.
+    """
+    new_base = coerced.get("base_url")
+    if not isinstance(new_base, str) or not _is_plaintext_nonlocal(new_base):
+        return
+    stored_key = block.get("api_key")
+    # An explicit credential in this same request is the operator's own decision
+    # and is already gated by ``allow_credential``.
+    if stored_key and "api_key" not in coerced:
+        raise ProviderEditError(
+            f"base_url {new_base!r} is plain HTTP and not loopback: saving it would "
+            "send the provider's stored credential in cleartext. Use an https:// "
+            "endpoint, or edit ubt.toml directly if the endpoint really is "
+            "unauthenticated."
+        )
 
 
 def _write_default_provider(document: tomlkit.TOMLDocument, name: str) -> None:

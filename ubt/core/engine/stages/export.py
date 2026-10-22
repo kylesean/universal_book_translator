@@ -848,19 +848,29 @@ def _delivery_translations(blocks: Sequence[IRBlock]) -> dict[str, str]:
 
     Only a translation the renderer actually placed is in the map: a block kept
     in the source has none, so the views show its source text instead.
+
+    The value is :func:`ubt.render.delivered_text.delivered_text`'s, not
+    ``target_text`` verbatim. The companion views treat a map entry as an
+    override that wins over their own ``delivered_text`` fallback (an
+    interactive PE edit is plain text, so that ordering is right for *them*),
+    which made this map the one path where the pipeline's
+    ``<mark class="ubt-failed-draft" title="Repair error: …">`` wrapper still
+    reached the reader: the PDF showed the clean sentence while the HTML and
+    EPUB companions shipped the wrapper class and the provider's exception text
+    escaped onto the page. Stripping here keeps the PDF and the views agreeing.
     """
     from ubt.core.content.adapt import kept_in_source
+    from ubt.render.delivered_text import delivered_text
 
     placed: dict[str, str] = {}
     for block in blocks:
-        target = block.target_text or ""
-        if not target.strip():
+        if not (block.target_text or "").strip():
             continue
         if block.block_type in (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE):
             continue
         if kept_in_source(block):
             continue
-        placed[block.id] = target
+        placed[block.id] = delivered_text(block).strip()
     return placed
 
 

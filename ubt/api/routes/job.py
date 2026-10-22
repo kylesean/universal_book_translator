@@ -1068,15 +1068,38 @@ def register_job_routes(
                             # or pays the provider twice. Ask the lease instead:
                             # a live holder means running, an expired or missing
                             # one means the writer is gone.
-                            holder = LedgerWriterLock.lease_holder(db_path, valid_id)
-                            if holder is None:
-                                status_value = JobStatus.FAILED
-                                error_note = (
-                                    "Job was interrupted before it reached a terminal "
-                                    "state (the server restarted); re-run it to resume."
+                            #
+                            # Every block terminal is completion, not a crash.
+                            # ``finalize_job("completed")`` is guarded on exactly
+                            # that condition, and the export stage finalizes
+                            # *before* it records the rendered digest, so a
+                            # process lost in that window leaves a fully
+                            # translated book behind a row that still says
+                            # ``initialized``. ``/jobs`` reads that as completed;
+                            # reporting it failed here made the two endpoints
+                            # disagree about one ledger.
+                            _total = int(snap.get("total", 0) or 0)
+                            _done = sum(
+                                int(snap.get(key, 0) or 0)
+                                for key in (
+                                    "completed",
+                                    "failed",
+                                    "needs_human",
+                                    "blocked_human",
                                 )
+                            )
+                            if _total > 0 and _done >= _total:
+                                status_value = JobStatus.COMPLETED
                             else:
-                                status_value = JobStatus.RUNNING
+                                holder = LedgerWriterLock.lease_holder(db_path, valid_id)
+                                if holder is None:
+                                    status_value = JobStatus.FAILED
+                                    error_note = (
+                                        "Job was interrupted before it reached a terminal "
+                                        "state (the server restarted); re-run it to resume."
+                                    )
+                                else:
+                                    status_value = JobStatus.RUNNING
                         return JobStatusResponse(
                             **public_progress(progress.model_dump()),
                             job_id=str(snap["job_id"]),

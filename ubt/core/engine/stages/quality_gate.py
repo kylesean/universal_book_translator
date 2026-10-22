@@ -146,12 +146,41 @@ async def _audit_pass_sample(
         )
     scored: list[IRBlock] = []
     demoted: list[IRBlock] = []
-    for block, score in zip(scorable, scores, strict=True):
+    # A number is only a *measurement* for the entries the runner can vouch for:
+    # every entry when it is calibrated, and — for an uncalibrated tier — only
+    # the entries a judge actually returned an opinion for. A tier whose judge
+    # died still returns its heuristic leg's flat 0.92 for a clean pass, and
+    # recording that as ``mtqe_score`` made "the judge never answered"
+    # indistinguishable from "the judge measured this at 0.92", which is the
+    # audit's entire output. A partly-failed batch has the same shape one level
+    # down: one answered pair must not license the bands of the rest.
+    measured = _measured_indices(qe_runner, len(scorable))
+    for index, (block, score) in enumerate(zip(scorable, scores, strict=True)):
+        if index not in measured:
+            continue
         block.mtqe_score = float(score)
         scored.append(block)
         if score < threshold:
             demoted.append(block)
     return demoted, scored
+
+
+def _measured_indices(runner: Any, count: int) -> frozenset[int]:
+    """Indexes of the last batch whose scores are evidence, not fallback bands.
+
+    One definition, read by both the pass-sample audit and the suspicious-block
+    scoring path, so "is this number evidence" cannot drift between them.
+    """
+    is_calibrated = getattr(runner, "is_calibrated", None)
+    if is_calibrated is not None and is_calibrated():
+        return frozenset(range(count))
+    judged_indices = getattr(runner, "judged_indices", None)
+    if judged_indices is not None:
+        return frozenset(judged_indices(count))
+    # A runner that reports batch-level judgement only: keep its behaviour.
+    if getattr(runner, "judged_this_run", False):
+        return frozenset(range(count))
+    return frozenset()
 
 
 #: Block types whose text is not a translation the judge can read. Assets are
@@ -337,9 +366,17 @@ async def run_quality_gate_stage(
         # arXiv 2606.23344, a judge scored 0.78 for a block that had dropped a
         # word and the gate stored ``None``, so the block could not reach repair
         # on the judgement it had just been given.
-        judged = bool(getattr(runner, "judged_this_run", False))
-        if attempt and (runner.is_calibrated() or judged):
-            scores: list[float | None] = [float(s) for s in raw_scores]
+        #
+        # The predicate is shared with ``_audit_pass_sample`` so the two paths
+        # cannot disagree about whether the same batch's numbers are evidence.
+        # It is applied per entry: a batch where the judge answered some pairs
+        # keeps those opinions and stores ``None`` for the rest, rather than
+        # promoting every unanswered entry's heuristic band to a "judgement".
+        measured = _measured_indices(runner, len(suspicious_blocks)) if attempt else frozenset()
+        if measured:
+            scores: list[float | None] = [
+                float(s) if index in measured else None for index, s in enumerate(raw_scores)
+            ]
         else:
             # Bi-modal Gate Track 1: Structural Integrity.
             # When uncalibrated (HeuristicQERunner, or a COMET subprocess whose

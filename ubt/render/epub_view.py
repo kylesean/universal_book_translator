@@ -197,7 +197,9 @@ def compose_epub(
         packaged[href] = data
         return href
 
-    fragment, placements = render_fragment(blocks, translations, asset_resolver=_resolve_asset)
+    fragment, placements = render_fragment(
+        blocks, translations, asset_resolver=_resolve_asset, math_renderer="unicode"
+    )
 
     with atomic_write_path(output) as tmp_path, zipfile.ZipFile(tmp_path, "w") as archive:
         # The OCF spec requires ``mimetype`` first and uncompressed.

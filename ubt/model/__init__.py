@@ -40,7 +40,14 @@ from ubt.model.ast import (
     source_slice,
 )
 from ubt.model.segment import QA, Placeholder, Provenance, Segment, SegmentState
-from ubt.model.span import BBox, CanonicalSource, PageGeometry, Span
+from ubt.model.span import (
+    BBox,
+    CanonicalSource,
+    CompositeSpan,
+    PageGeometry,
+    PhysicalBox,
+    Span,
+)
 
 __all__ = [
     "ASSET_ELEMENTS",
@@ -49,6 +56,7 @@ __all__ = [
     "CanonicalSource",
     "Caption",
     "CodeBlock",
+    "CompositeSpan",
     "Confidence",
     "Dialogue",
     "Document",
@@ -62,6 +70,7 @@ __all__ = [
     "ListItem",
     "PageGeometry",
     "Paragraph",
+    "PhysicalBox",
     "Placeholder",
     "Provenance",
     "QA",

@@ -215,9 +215,9 @@ export function ProviderEditor({
           type="button"
           onClick={onCancel}
           aria-label={t.doctor.cancel}
-          className="p-1 rounded text-[var(--ink-muted)] hover:text-[var(--ink-primary)] hover:bg-[var(--paper-border)] shrink-0"
+          className="p-2 sm:p-1 rounded text-[var(--ink-muted)] hover:text-[var(--ink-primary)] hover:bg-[var(--paper-border)] shrink-0 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 flex items-center justify-center cursor-pointer"
         >
-          <X size={14} />
+          <X size={16} className="sm:w-3.5 sm:h-3.5" />
         </button>
       </div>
 
@@ -333,7 +333,7 @@ export function ProviderEditor({
           </label>
         ))}
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="block">
             <span className="type-label text-[var(--ink-secondary)]">{t.doctor.apiMode}</span>
             <select
@@ -483,6 +483,7 @@ export function ProviderEditor({
             size="sm"
             onClick={() => void handleSave()}
             disabled={isSaving || (!isCreate && !detail) || !nameIsValid}
+            className="min-h-[40px] sm:min-h-0 px-3"
           >
             {isSaving ? (
               <>
@@ -494,7 +495,13 @@ export function ProviderEditor({
               t.doctor.save
             )}
           </Button>
-          <Button size="sm" variant="ghost" onClick={onCancel} disabled={isSaving}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onCancel}
+            disabled={isSaving}
+            className="min-h-[40px] sm:min-h-0 px-3"
+          >
             {t.doctor.cancel}
           </Button>
         </div>

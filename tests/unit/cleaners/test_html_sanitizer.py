@@ -197,6 +197,104 @@ def test_scrub_is_idempotent() -> None:
     assert scrub_source_document(once) == once
 
 
+# --------------------------------------------------------------------------- #
+# RAWTEXT bodies are inert under BOTH parsers
+# --------------------------------------------------------------------------- #
+#
+# `<style>`, `<textarea>` and `<title>` bodies are RAWTEXT to an HTML5 parser, so
+# a `<` inside them is literal text there. An EPUB content document is XHTML —
+# XML, where those elements have no such special case and `<style><script>` is a
+# real `script` child that executes. The scrubber must be safe under the stricter
+# parser, because the same code path guards source EPUB members and source HTML.
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        "<style><script>alert(1)</script></style>",
+        '<textarea><img src="x" onerror="alert(1)"></textarea>',
+        "<svg><title><script>alert(1)</script></title></svg>",
+    ],
+)
+def test_a_rawtext_body_cannot_carry_a_live_element(markup: str) -> None:
+    """No child element may survive inside a RAWTEXT body."""
+    import xml.etree.ElementTree as ET
+
+    out = scrub_source_document(markup)
+    root = ET.fromstring(f'<root xmlns="http://www.w3.org/1999/xhtml">{out}</root>')
+    tags = [element.tag.split("}")[-1] for element in root.iter()]
+    assert "script" not in tags, out
+    assert "img" not in tags, out
+
+
+def test_a_clean_rawtext_body_is_byte_exact() -> None:
+    """Escaping must not rewrite CSS or titles that never had a tag-open char."""
+    for markup in (
+        "<style>p{color:red}</style>",
+        "<title>Chapter 1</title>",
+        '<textarea placeholder="notes"></textarea>',
+    ):
+        assert scrub_source_document(markup) == markup
+
+
+def test_a_style_body_still_gets_the_css_gate_after_neutralising() -> None:
+    """Neutralising `<` must not skip the remote-import policy."""
+    out = scrub_source_document("<style>@import url(https://evil/x.css);p{}</style>")
+    assert "@import" not in out
+
+
+# --------------------------------------------------------------------------- #
+# Remote resources: a loading attribute must not phone home
+# --------------------------------------------------------------------------- #
+#
+# The scrubber already dropped a remote `<link>` and a remote `@import`, on the
+# stated grounds that "remote targets go". Every other *loading* attribute
+# shipped its URL verbatim, so a source EPUB could carry a tracking pixel, a
+# video poster beacon, or a credential-harvesting `<form action>` into the
+# deliverable. A hyperlink is deliberately different: it fetches only on click.
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        '<img src="https://evil/t.png"/>',
+        '<video poster="https://evil/p.jpg"></video>',
+        '<form action="https://evil/steal"></form>',
+        '<object data="https://evil/x"></object>',
+        '<p style="background:url(https://evil/x.png)">t</p>',
+        '<img src="//evil/t.png"/>',
+    ],
+)
+def test_a_remote_loading_url_is_removed(markup: str) -> None:
+    out = scrub_source_document(markup)
+    assert "evil" not in out, out
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        '<img src="images/0001.png"/>',
+        '<video poster="images/p.jpg"></video>',
+        '<p style="background:url(images/bg.png)">t</p>',
+        '<img src="data:image/png;base64,AAAA"/>',
+    ],
+)
+def test_an_in_package_resource_is_kept(markup: str) -> None:
+    assert scrub_source_document(markup) == markup
+
+
+def test_an_external_hyperlink_is_kept() -> None:
+    """A link only fetches when the reader clicks it — that is their decision."""
+    markup = '<a href="https://example.com/ref">ref</a>'
+    assert scrub_source_document(markup) == markup
+
+
+def test_a_remote_css_url_is_neutralised() -> None:
+    """`@import` was gated; a plain `url()` was not, despite the docstring."""
+    assert "evil" not in scrub_css_text("p{background:url(https://evil/x.png)}")
+    assert "images/x.png" in scrub_css_text("p{background:url(images/x.png)}")
+
+
 def test_a_prose_lt_before_a_close_tag_does_not_eat_the_close() -> None:
     """``<b on the other hand</p>`` is prose, not a tag with attributes.
 

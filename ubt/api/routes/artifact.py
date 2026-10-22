@@ -41,6 +41,7 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
     _job_is_running = scope.job_is_running
     _read_job_blocks = scope.read_job_blocks
     _managed_dir = scope.managed_dir
+    _is_job_ledger = scope.is_job_ledger
 
     def _delivery_is_stale(job_id: str) -> bool:
         """Whether this job's delivered files predate its ledger text.
@@ -51,15 +52,38 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
         exactly as it did before this marker existed, which is the right
         degradation for a check whose only job is to catch a specific
         mistake.
+
+        The ledger is opened **read-only**, and only for a real job ledger.
+        ``validate_job_id`` constrains the charset, not the meaning: ``tm`` and
+        ``job_queue`` are legal ids naming the shared translation memory and the
+        live queue database. Opening one of those read-write through
+        ``SQLiteJobLedger`` runs the whole ledger DDL and stamps the service
+        database with UBT's tables — verified: an empty ``job_queue.sqlite``
+        gained ``job_meta``, ``blocks``, ``batch_jobs`` and ``job_locks``. The
+        review routes already refuse that; this probe was the remaining door.
         """
         db_path = _job_db_path(job_id)
         if not db_path.exists():
             return False
         try:
-            return is_delivery_stale(SQLiteJobLedger(db_path), job_id)
+            if not _is_job_ledger_sync(job_id):
+                return False
+            with SQLiteJobLedger(db_path, read_only=True) as ledger:
+                return is_delivery_stale(ledger, job_id)
         except Exception as exc:  # noqa: BLE001 - a probe must not break delivery
             logger.warning("delivery freshness probe failed for %s: %s", job_id, exc)
             return False
+
+    def _is_job_ledger_sync(job_id: str) -> bool:
+        """Synchronous twin of ``scope.is_job_ledger`` for the thread-run probe.
+
+        ``summarize_job`` opens the file read-only and returns ``None`` for a
+        database that is not a job ledger, so this is a pure predicate.
+        """
+        from ubt.api.job_catalog import summarize_job
+
+        summary = summarize_job(_job_db_path(job_id))
+        return summary is not None and str(summary.get("job_id")) == job_id
 
     @api_app.get(
         "/jobs/{job_id}/report",

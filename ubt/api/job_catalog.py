@@ -72,7 +72,12 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
         "job_id": str(snapshot["job_id"]),
         "file_name": Path(str(snapshot["source_path"])).name,
         "target_lang": str(snapshot["target_lang"]),
-        "status": str(snapshot["status"]),
+        "status": _reportable_status(
+            str(snapshot["status"]),
+            has_live_writer=_has_live_writer(db_path, job_id),
+            total=total,
+            completed=completed,
+        ),
         "total_blocks": total,
         "completed_blocks": completed,
         "failed_blocks": failed,
@@ -89,6 +94,54 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
         "rehearsal": bool(isinstance(identity, dict) and identity.get("mock_run")),
         "page_scope": page_scope_label(selected_pages),
     }
+
+
+#: ``job_meta.status`` values that end a job's life.
+_TERMINAL_LEDGER_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
+def _reportable_status(stored: str, *, has_live_writer: bool, total: int, completed: int) -> str:
+    """The status a listing may show, normalizing a ledger row left mid-run.
+
+    ``job_meta.status`` has no ``running`` value: the row is written
+    ``initialized`` at ingest and stays that way for the whole run, so the column
+    alone cannot tell a live job from one whose process died. Reporting it
+    verbatim made ``/jobs`` show ``initialized`` (which the console renders as a
+    live run) for a job that had crashed hours earlier, while ``/status`` for the
+    same id — which does normalize — reported it failed.
+
+    A terminal row is passed through. A row whose blocks are all accounted for is
+    completed — that is exactly the condition ``finalize_job("completed")`` is
+    guarded on, and the export stage finalizes *before* it records the rendered
+    digest, so a process lost in that window leaves a fully translated book
+    behind a row that still says ``initialized``. Any other row is ``running``
+    while a live writer holds the lease and ``failed`` once nothing does — the
+    same test ``/status`` applies
+    (:meth:`ubt.core.engine.writer_lock.LedgerWriterLock.lease_holder`).
+
+    The lease, not the file's mtime, is what makes this safe. A run spends
+    minutes inside one model call without writing a checkpoint, so a "quiet for
+    N minutes" rule calls a *working* job dead — measured: with a live lease held
+    and the ledger untouched for 1000s, an mtime rule reported ``failed`` where
+    ``/status`` correctly reported ``running``. Asking the lease covers the
+    reverse case for free: an expired lease is exactly what a crashed process
+    leaves behind.
+    """
+    if stored in _TERMINAL_LEDGER_STATUSES:
+        return stored
+    if total > 0 and completed >= total:
+        return "completed"
+    return "running" if has_live_writer else "failed"
+
+
+def _has_live_writer(db_path: Path, job_id: str) -> bool:
+    """Whether a live process holds this job's writer lease (never raises)."""
+    from ubt.core.engine.writer_lock import LedgerWriterLock
+
+    try:
+        return LedgerWriterLock.lease_holder(db_path, job_id) is not None
+    except Exception:  # noqa: BLE001 - a listing must not fail on a probe
+        return False
 
 
 def page_scope_label(pages: Any) -> str | None:
