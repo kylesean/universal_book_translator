@@ -1343,8 +1343,8 @@ export interface components {
             source_lang: string;
             /**
              * Profile
-             * @description Domain profile (general, textbook, paper)
-             * @default general
+             * @description Domain profile (auto, general, textbook, paper, etc.)
+             * @default auto
              */
             profile: string;
             /**

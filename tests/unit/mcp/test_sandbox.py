@@ -174,6 +174,27 @@ async def test_job_status_disk_fallback_reads_a_real_ledger(
     # A freshly initialized ledger reads as running/pending (never "completed"):
     # the fallback must not fabricate progress for a job that did none.
     assert status["status"] in {"initialized", "pending", "running"}
+    assert "delivery_verdict" in status
+    assert "needs_human" in status
+    assert "blocked_human" in status
+
+    # A live writer lock keeps a quiet ledger marked as RUNNING even if stale
+    import os
+    import time
+
+    from ubt.core.engine.writer_lock import LedgerWriterLock
+
+    old = time.time() - 1000.0
+    os.utime(db_path, (old, old))
+    lock = LedgerWriterLock(db_path, job_id)
+    lock.acquire()
+    try:
+        live_status = await mcp_server.ubt_job_status(
+            job_id=job_id, db_dir=str(sandbox / "ledgers")
+        )
+        assert live_status["status"] == "running"
+    finally:
+        lock.release()
 
     unknown = await mcp_server.ubt_job_status(
         job_id="never_seen_job", db_dir=str(sandbox / "ledgers")

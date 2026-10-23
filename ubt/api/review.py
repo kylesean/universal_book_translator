@@ -211,15 +211,16 @@ def apply_human_edit(
     if not text:
         raise ReviewEditError("target_text must be non-empty")
 
-    ledger = SQLiteJobLedger(db_path)
     lock = LedgerWriterLock(db_path, job_id)
+    try:
+        lock.acquire()
+    except LedgerWriterLockConflictError as exc:
+        raise ReviewEditConflict(f"job is being written by another process: {exc}") from exc
+
+    ledger: SQLiteJobLedger | None = None
     tm: TranslationMemory | None = None
     try:
-        try:
-            lock.acquire()
-        except LedgerWriterLockConflictError as exc:
-            raise ReviewEditConflict(f"job is being written by another process: {exc}") from exc
-
+        ledger = SQLiteJobLedger(db_path)
         block = ledger.get_block(block_id, job_id=job_id)
         if block is None:
             raise ReviewBlockNotFound(f"unknown block: {block_id}")
@@ -268,7 +269,8 @@ def apply_human_edit(
         if tm is not None:
             tm.close()
         lock.release()
-        ledger.close()
+        if ledger is not None:
+            ledger.close()
 
 
 # --------------------------------------------------------------------------- #
@@ -387,15 +389,16 @@ def apply_term_propagation(
     if scope not in ("block", "subsequent", "all"):
         raise ReviewEditError(f"unknown scope: {scope}")
 
-    ledger = SQLiteJobLedger(db_path)
     lock = LedgerWriterLock(db_path, job_id)
+    try:
+        lock.acquire()
+    except LedgerWriterLockConflictError as exc:
+        raise ReviewEditConflict(f"job is being written by another process: {exc}") from exc
+
+    ledger: SQLiteJobLedger | None = None
     tm: TranslationMemory | None = None
     try:
-        try:
-            lock.acquire()
-        except LedgerWriterLockConflictError as exc:
-            raise ReviewEditConflict(f"job is being written by another process: {exc}") from exc
-
+        ledger = SQLiteJobLedger(db_path)
         blocks = ledger.get_all_blocks(job_id)
         pivot = next((b for b in blocks if b.id == block_id), None)
         if pivot is None:
@@ -481,4 +484,5 @@ def apply_term_propagation(
         if tm is not None:
             tm.close()
         lock.release()
-        ledger.close()
+        if ledger is not None:
+            ledger.close()

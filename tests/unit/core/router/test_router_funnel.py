@@ -319,3 +319,26 @@ def test_sqlite_shared_bucket_climbs_like_the_in_process_one(tmp_path: Path) -> 
     assert row is not None
     # One success adds 1/60, not 1.0 — same law as AdaptiveTokenBucket.
     assert 60.0 < row[0] < 60.1
+
+
+async def test_content_refusal_fails_fast_and_does_not_trip_circuit_breaker() -> None:
+    """Content refusal fails the chain fast without retrying or tripping circuit breaker."""
+    refusal_err = ModelProviderError(
+        "Anthropic refused the request (stop_reason=refusal)",
+        details={"fail_fast": True, "reason": "content_refusal"},
+    )
+    provider = _ScriptedProvider([refusal_err, ("fallback draft", "stop")])
+    router = ModelRouter(
+        provider=cast(Any, provider),
+        draft_model="primary_model",
+        fallback_models=["fallback_model"],
+        rate_limiter=_NullLimiter(),
+    )
+
+    with pytest.raises(ModelProviderError, match="refused"):
+        await router.complete_raw("sys", "translate this text")
+
+    # Only 1 call was made to primary_model; fallback_model was never called!
+    assert len(provider.calls) == 1
+    # Circuit breaker for primary_model was NOT incremented or tripped
+    assert router._model_circuit.get("primary_model", (0, 0.0))[0] == 0

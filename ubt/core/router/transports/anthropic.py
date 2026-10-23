@@ -181,7 +181,10 @@ class AnthropicMessagesTransport(BaseTransport):
         # ship an empty draft and burn futile repair rounds.
         if not result:
             if stop_reason == "refusal":
-                raise ModelProviderError("Anthropic refused the request (stop_reason=refusal)")
+                raise ModelProviderError(
+                    "Anthropic refused the request (stop_reason=refusal)",
+                    details={"fail_fast": True, "reason": "content_refusal"},
+                )
             if not (data.get("content") or []):
                 raise ModelProviderError("Anthropic returned no content blocks")
         finish_reason = (
@@ -222,7 +225,16 @@ class AnthropicMessagesTransport(BaseTransport):
             "max_tokens": max_tokens or 4096,
         }
         if system_prompt:
-            payload["system"] = system_prompt
+            if self._prompt_caching:
+                payload["system"] = [
+                    {
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+            else:
+                payload["system"] = system_prompt
         if temperature is not None:
             payload["temperature"] = temperature
         client = self._get_client()
@@ -283,7 +295,7 @@ class AnthropicMessagesTransport(BaseTransport):
                 raise ModelProviderError("Batch request is missing custom_id")
             params = req.get("params")
             if not isinstance(params, dict):
-                params = _messages_params_from_request(req)
+                params = _messages_params_from_request(req, prompt_caching=self._prompt_caching)
             payload_requests.append({"custom_id": custom_id, "params": params})
 
         client = self._get_client()
@@ -428,7 +440,9 @@ def _anthropic_batch_status(processing_status: str) -> str:
     }.get(processing_status, processing_status or "unknown")
 
 
-def _messages_params_from_request(req: dict[str, Any]) -> dict[str, Any]:
+def _messages_params_from_request(
+    req: dict[str, Any], *, prompt_caching: bool = True
+) -> dict[str, Any]:
     """Build a ``/v1/messages`` body from a router batch request.
 
     The router builds OpenAI-shaped requests (``{custom_id, method, url, body}``
@@ -450,7 +464,23 @@ def _messages_params_from_request(req: dict[str, Any]) -> dict[str, Any]:
                 messages.append({"role": role, "content": str(content or "")})
         params["messages"] = messages or [{"role": "user", "content": ""}]
         if system_parts:
-            params["system"] = "\n\n".join(part for part in system_parts if part)
+            sys_text = "\n\n".join(part for part in system_parts if part)
+            cache_requested = body.get("prompt_caching", req.get("prompt_caching"))
+            # Anthropic prompt caching requires >= 1024 tokens for Sonnet/Opus and 2048 for Haiku.
+            # Short strings (such as "sys" in minimal unit tests) are sent as plain text unless explicitly requested.
+            should_cache = cache_requested is True or (
+                prompt_caching and cache_requested is not False and len(sys_text) >= 500
+            )
+            if should_cache:
+                params["system"] = [
+                    {
+                        "type": "text",
+                        "text": sys_text,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+            else:
+                params["system"] = sys_text
         # ``max_tokens`` is REQUIRED by the Messages API and has no server-side
         # default. Copying it only when truthy meant a reasoning-tier request --
         # which deliberately omits it and lets the thinking budget drive the
@@ -462,11 +492,26 @@ def _messages_params_from_request(req: dict[str, Any]) -> dict[str, Any]:
             params["temperature"] = body["temperature"]
         _apply_thinking(params, body.get("reasoning_effort"))
         return params
-    return _apply_thinking(
-        {
-            "model": req.get("model") or "",
-            "messages": [{"role": "user", "content": str(req.get("prompt") or "")}],
-            **_apply_max_tokens({}, req.get("max_tokens")),
-        },
-        req.get("reasoning_effort"),
-    )
+
+    sys_text = str(req.get("system_prompt") or "")
+    base_params: dict[str, Any] = {
+        "model": req.get("model") or "",
+        "messages": [{"role": "user", "content": str(req.get("prompt") or "")}],
+        **_apply_max_tokens({}, req.get("max_tokens")),
+    }
+    if sys_text:
+        cache_requested = req.get("prompt_caching")
+        should_cache = cache_requested is True or (
+            prompt_caching and cache_requested is not False and len(sys_text) >= 500
+        )
+        if should_cache:
+            base_params["system"] = [
+                {
+                    "type": "text",
+                    "text": sys_text,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        else:
+            base_params["system"] = sys_text
+    return _apply_thinking(base_params, req.get("reasoning_effort"))

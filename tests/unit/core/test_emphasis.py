@@ -7,8 +7,12 @@ import pytest
 from ubt.core.ir.emphasis import (
     BOLD_CLOSE,
     BOLD_OPEN,
+    ITALIC_CLOSE,
+    ITALIC_OPEN,
     mark_bold_spans,
+    mark_emphasis_spans,
     parse_bold,
+    parse_emphasis,
     strip_emphasis_markers,
 )
 
@@ -159,3 +163,30 @@ def test_ordinary_brackets_are_not_markers() -> None:
         clean, runs = parse_bold(text)
         assert clean == text, f"false positive on {text!r}"
         assert runs == ()
+
+
+def test_word_boundary_prevents_substring_matching_in_longer_words() -> None:
+    # "in" should NOT match inside "Looking" or "window", but should match stand-alone "in"
+    text = "Looking in the window."
+    marked = mark_bold_spans(text, ["in"])
+    assert marked == f"Looking {BOLD_OPEN}in{BOLD_CLOSE} the window."
+
+    # "in" inside "Looking" without standalone "in" should produce no match
+    text_no_standalone = "Looking out the window."
+    marked_none = mark_bold_spans(text_no_standalone, ["in"])
+    assert marked_none == text_no_standalone
+
+
+def test_mark_and_parse_emphasis_italic() -> None:
+    text = "This is important and novel."
+    marked = mark_emphasis_spans(text, bold_spans=["important"], italic_spans=["novel"])
+    assert (
+        marked == f"This is {BOLD_OPEN}important{BOLD_CLOSE} and {ITALIC_OPEN}novel{ITALIC_CLOSE}."
+    )
+
+    clean, runs = parse_emphasis(marked)
+    assert clean == text
+    assert len(runs) == 2
+    assert runs[0].text == "important" and runs[0].bold is True and runs[0].italic is False
+    assert runs[1].text == "novel" and runs[1].bold is False and runs[1].italic is True
+    assert strip_emphasis_markers(marked) == text

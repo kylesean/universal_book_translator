@@ -48,32 +48,39 @@ def _copy_fragment(soup: BeautifulSoup, markup: str, container: Tag) -> None:
         container.append(child)
 
 
-#: Inline tags a monolingual rewrite must carry over: clearing a leaf that held
-#: embedded math, losing every figure and breaking every footnote link. DOCX
-#: already preserves graphic runs and hyperlinks; these are the HTML/EPUB
-#: counterparts. Owned here (not in the EPUB adapter) because this module's
-#: injection functions are the only callers — the function used to live in
-#: ``ubt.adapters.epub.adapter`` and be imported back function-locally, a
-#: module cycle the 2026-10-14 review flagged (W3-8).
-_PRESERVED_INLINE_TAGS = frozenset(
-    {"img", "svg", "picture", "source", "video", "audio", "br", "hr", "math", "object", "a"}
+#: Inline tags a monolingual rewrite carries over: graphic media, embedded objects,
+#: breaks and linked figures. Text-bearing links and formulas are excluded because
+#: their translated prose is already placed within the paragraph body.
+_MEDIA_INLINE_TAGS = frozenset(
+    {"img", "svg", "picture", "source", "video", "audio", "br", "hr", "object"}
 )
+
+
+def _should_preserve_node(node: Tag) -> bool:
+    """Whether an inline element should be detached and carried over to monolingual output."""
+    if node.name in _MEDIA_INLINE_TAGS:
+        return True
+    if node.name == "a":
+        # Keep image links (e.g. <a href="..."><img .../></a>)
+        if node.find(list(_MEDIA_INLINE_TAGS)):
+            return True
+        # Keep empty target anchors (e.g. <a id="..."></a> or <a name="..."></a>)
+        if (node.get("id") or node.get("name")) and not node.get_text(strip=True):
+            return True
+    return False
 
 
 def take_preserved_inline_children(leaf: Tag) -> list[Tag]:
     """Detach and return inline descendants a monolingual rewrite must keep.
 
-    Collected from the whole subtree (a footnote reference is the standard
-    ``<sup><a href="#fn1">1</a></sup>`` shape — a direct-children scan drops it
-    with its href/id when the leaf is cleared). Only the outermost preserved
-    tags are taken: their subtrees ride along, so nothing is duplicated.
-    The nodes are detached (kept alive) so the caller can ``clear()`` the leaf
-    and re-append them after the translation.
+    Only outermost media tags and linked images/target anchors are taken; text-bearing
+    <a> tags and <math> formulas are not appended to the end of translated paragraphs
+    to avoid duplication against translated body text.
     """
     preserved = [
         c
-        for c in leaf.find_all(list(_PRESERVED_INLINE_TAGS))
-        if not any(p.name in _PRESERVED_INLINE_TAGS for p in c.parents)
+        for c in leaf.find_all(lambda tag: isinstance(tag, Tag) and _should_preserve_node(tag))
+        if not any(_should_preserve_node(p) for p in c.parents if isinstance(p, Tag) and p != leaf)
     ]
     for node in preserved:
         node.extract()

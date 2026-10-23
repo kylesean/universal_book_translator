@@ -306,8 +306,6 @@ def _terminology_and_structure_pass(
                         )
                         if flag not in fb.error_flags:
                             fb.error_flags.append(flag)
-                    if fb.status not in (BlockStatus.BLOCKED_HUMAN, BlockStatus.FAILED):
-                        fb.status = BlockStatus.NEEDS_HUMAN
                     modified_checkpoints.append(
                         {
                             "block_id": fb.id,

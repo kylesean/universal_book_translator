@@ -23,6 +23,8 @@ from ubt.core.ir.models import InlineRun
 #: Paired sentinels the draft prompt asks the model to preserve.
 BOLD_OPEN = "⟦B⟧"
 BOLD_CLOSE = "⟦/B⟧"
+ITALIC_OPEN = "⟦I⟧"
+ITALIC_CLOSE = "⟦/I⟧"
 
 #: Tolerant marker match. A model reading the sentinels as mathematical brackets
 #: routinely transcribes ``⟦B⟧`` into LaTeX (``\llbracket B \rrbracket``), and
@@ -31,7 +33,7 @@ BOLD_CLOSE = "⟦/B⟧"
 #: and a bare ``/`` inside a math span, and Typst failed with ``unknown variable:
 #: lbracket`` (mamba ``pdf_main#b0426``) — losing the document. Spacing and case
 #: inside the brackets are accepted too, so ``⟦ B ⟧`` and ``⟦/b⟧`` match.
-_MARKER_RE = re.compile(r"(?:\u27e6|\\llbracket)\s*(/)?\s*[Bb]\s*(?:\u27e7|\\rrbracket)")
+_MARKER_RE = re.compile(r"(?:\u27e6|\\llbracket)\s*(/)?\s*([BbIi])\s*(?:\u27e7|\\rrbracket)")
 
 #: A pdfium char probe and the docling text can disagree on a dash or quote
 #: (``agent–environment`` vs ``agent-environment``), so a source span located
@@ -44,6 +46,23 @@ _DASHES = frozenset("-") | {chr(code) for code in range(0x2010, 0x2016)} | {"\u2
 _APOSTROPHES = frozenset({"'"})
 _APOSTROPHES |= {"\u2018", "\u2019", "\u02bc", "`", "\u00b4"}
 _QUOTES = frozenset({'"', "\u201c", "\u201d"})
+
+
+def _is_ascii_word_char(ch: str) -> bool:
+    return ch.isascii() and (ch.isalnum() or ch == "_")
+
+
+def _has_valid_word_boundary(text: str, start: int, end: int) -> bool:
+    if start < end:
+        if _is_ascii_word_char(text[start]) and start > 0 and _is_ascii_word_char(text[start - 1]):
+            return False
+        if (
+            _is_ascii_word_char(text[end - 1])
+            and end < len(text)
+            and _is_ascii_word_char(text[end])
+        ):
+            return False
+    return True
 
 
 def _flexible_pattern(needle: str) -> str:
@@ -73,14 +92,75 @@ def _flexible_pattern(needle: str) -> str:
 
 
 def _locate_span(text: str, needle: str, cursor: int) -> tuple[int, int] | None:
-    """Locate ``needle`` in ``text`` from ``cursor``, tolerant of dash/quote."""
-    index = text.find(needle, cursor)
-    if index >= 0:
-        return index, index + len(needle)
-    match = re.search(_flexible_pattern(needle), text[cursor:])
-    if match is None:
-        return None
-    return cursor + match.start(), cursor + match.end()
+    """Locate ``needle`` in ``text`` from ``cursor``, tolerant of dash/quote and word boundaries."""
+    search_pos = cursor
+    needle_len = len(needle)
+    while search_pos < len(text):
+        index = text.find(needle, search_pos)
+        if index < 0:
+            break
+        end = index + needle_len
+        if _has_valid_word_boundary(text, index, end):
+            return index, end
+        search_pos = index + 1
+
+    pattern = re.compile(_flexible_pattern(needle))
+    for match in pattern.finditer(text, cursor):
+        start, end = match.start(), match.end()
+        if _has_valid_word_boundary(text, start, end):
+            return start, end
+    return None
+
+
+def mark_emphasis_spans(
+    text: str,
+    *,
+    bold_spans: Sequence[str] = (),
+    italic_spans: Sequence[str] = (),
+) -> str:
+    """Wrap each source span's occurrence in ``text`` with bold/italic sentinels."""
+    if not bold_spans and not italic_spans:
+        return text
+
+    items: list[tuple[int, int, str, str]] = []
+    cursor = 0
+    for span in bold_spans:
+        needle = span.strip()
+        if not needle:
+            continue
+        loc = _locate_span(text, needle, cursor)
+        if loc is not None:
+            items.append((loc[0], loc[1], BOLD_OPEN, BOLD_CLOSE))
+            cursor = loc[1]
+
+    cursor = 0
+    for span in italic_spans:
+        needle = span.strip()
+        if not needle:
+            continue
+        loc = _locate_span(text, needle, cursor)
+        if loc is not None and not any(
+            b_start <= loc[0] < b_end or b_start < loc[1] <= b_end for b_start, b_end, _, _ in items
+        ):
+            items.append((loc[0], loc[1], ITALIC_OPEN, ITALIC_CLOSE))
+            cursor = loc[1]
+
+    if not items:
+        return text
+
+    items.sort(key=lambda x: x[0])
+    marked: list[str] = []
+    idx = 0
+    for start, end, open_tag, close_tag in items:
+        if start < idx:
+            continue
+        marked.append(text[idx:start])
+        marked.append(open_tag)
+        marked.append(text[start:end])
+        marked.append(close_tag)
+        idx = end
+    marked.append(text[idx:])
+    return "".join(marked)
 
 
 def mark_bold_spans(text: str, spans: Sequence[str]) -> str:
@@ -92,69 +172,65 @@ def mark_bold_spans(text: str, spans: Sequence[str]) -> str:
     never overlap or nest. A dash/quote the extractor and the reader spell
     differently still matches.
     """
-    if not spans:
-        return text
-    marked: list[str] = []
-    cursor = 0
-    for span in spans:
-        needle = span.strip()
-        if not needle:
-            continue
-        located = _locate_span(text, needle, cursor)
-        if located is None:
-            continue
-        start, end = located
-        marked.append(text[cursor:start])
-        marked.append(BOLD_OPEN)
-        marked.append(text[start:end])
-        marked.append(BOLD_CLOSE)
-        cursor = end
-    marked.append(text[cursor:])
-    return "".join(marked)
+    return mark_emphasis_spans(text, bold_spans=spans)
 
 
-def parse_bold(text: str) -> tuple[str, tuple[InlineRun, ...]]:
-    """Split ``text`` into clean target text and its bold runs.
+def parse_emphasis(text: str) -> tuple[str, tuple[InlineRun, ...]]:
+    """Split ``text`` into clean target text and its bold/italic runs.
 
-    Returns the text with every marker stripped and one ``bold=True`` run per
-    contiguous emphasized region. Unbalanced markers are tolerated: a stray
-    close is dropped, an unterminated open emphasizes to the end, and a marker
-    is never left behind in the returned text.
+    Returns the text with every marker stripped and one ``InlineRun`` per
+    contiguous emphasized region. Unbalanced markers are tolerated.
     """
     clean_chars: list[str] = []
-    bold_flags: list[bool] = []
+    style_flags: list[tuple[bool, bool]] = []
     last = 0
-    depth = 0
+    bold_depth = 0
+    italic_depth = 0
     for match in _MARKER_RE.finditer(text):
         chunk = text[last : match.start()]
         clean_chars.append(chunk)
-        bold_flags.extend([depth > 0] * len(chunk))
-        if match.group(1):  # closing marker
-            if depth > 0:
-                depth -= 1
-        else:  # opening marker
-            depth += 1
+        style_flags.extend([(bold_depth > 0, italic_depth > 0)] * len(chunk))
+        is_close = bool(match.group(1))
+        tag_type = (match.group(2) or "b").lower()
+        if tag_type == "i":
+            if is_close:
+                if italic_depth > 0:
+                    italic_depth -= 1
+            else:
+                italic_depth += 1
+        else:
+            if is_close:
+                if bold_depth > 0:
+                    bold_depth -= 1
+            else:
+                bold_depth += 1
         last = match.end()
     tail = text[last:]
     clean_chars.append(tail)
-    bold_flags.extend([depth > 0] * len(tail))
-
+    style_flags.extend([(bold_depth > 0, italic_depth > 0)] * len(tail))
     clean_text = "".join(clean_chars)
+
     runs: list[InlineRun] = []
     index = 0
-    length = len(bold_flags)
+    length = len(style_flags)
     while index < length:
-        if not bold_flags[index]:
+        b, it = style_flags[index]
+        if not b and not it:
             index += 1
             continue
         stop = index
-        while stop < length and bold_flags[stop]:
+        while stop < length and style_flags[stop] == (b, it):
             stop += 1
         segment = clean_text[index:stop].strip()
         if segment:
-            runs.append(InlineRun(text=segment, bold=True))
+            runs.append(InlineRun(text=segment, bold=b, italic=it))
         index = stop
     return clean_text, tuple(runs)
+
+
+def parse_bold(text: str) -> tuple[str, tuple[InlineRun, ...]]:
+    """Split ``text`` into clean target text and its bold runs."""
+    return parse_emphasis(text)
 
 
 def strip_emphasis_markers(text: str) -> str:
@@ -191,8 +267,12 @@ def runs_from_json(text: str) -> tuple[InlineRun, ...]:
 __all__ = [
     "BOLD_CLOSE",
     "BOLD_OPEN",
+    "ITALIC_CLOSE",
+    "ITALIC_OPEN",
     "mark_bold_spans",
+    "mark_emphasis_spans",
     "parse_bold",
+    "parse_emphasis",
     "runs_from_json",
     "runs_to_json",
     "strip_emphasis_markers",

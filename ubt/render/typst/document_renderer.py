@@ -967,6 +967,41 @@ def render_table(
     full_page = page_columns > 1 and too_wide
     shrink = too_wide and not full_page
 
+    # When promoting to full-page float across dual columns, re-solve column widths
+    # against the full text width (493.2pt) rather than keeping the narrow 219.5pt column spec.
+    if full_page:
+        full_width_pt = _PAGE_TEXT_WIDTH_PT.get("academic_1col", _TABLE_DEFAULT_TEXT_WIDTH_PT)
+        share_available_fp = max(
+            full_width_pt - (columns - 1) * _TABLE_GUTTER_EM * TABLE_BASE_PT,
+            1.0,
+        )
+
+        def _alloc_fp(scale: float) -> list[float]:
+            run_mins = [run * TABLE_BASE_PT * scale + 2 * _TABLE_CELL_INSET_PT for run in runs]
+            total_run_min = sum(run_mins)
+            if total_run_min >= share_available_fp:
+                return [m * share_available_fp / total_run_min for m in run_mins]
+            floor = [w / _TABLE_HEADER_LINES * TABLE_BASE_PT * scale for w in weights]
+            base = [max(m, f) for m, f in zip(run_mins, floor, strict=True)]
+            base_total = sum(base)
+            if base_total >= share_available_fp:
+                return [b * share_available_fp / base_total for b in base]
+            slack = share_available_fp - base_total
+            return [b + slack * w / total_weight for b, w in zip(base, weights, strict=True)]
+
+        required_scale_fp = (
+            1.0
+            if total_run_em * TABLE_BASE_PT + inset_budget <= share_available_fp
+            else (share_available_fp - inset_budget) / (total_run_em * TABLE_BASE_PT)
+        )
+        required_scale_fp = max(required_scale_fp, 0.0)
+        table_scale_fp = (
+            max(required_scale_fp, _TABLE_MIN_TEXT_SCALE) if required_scale_fp < 1.0 else 1.0
+        )
+        widths = _alloc_fp(table_scale_fp)
+        column_spec = "(" + ", ".join(f"{w * slack_ratio:.1f}pt" for w in widths) + ")"
+        table_scale = table_scale_fp
+
     indent = "  " if full_page else "    "
     # The body scale the columns were actually sized for. ``_alloc(table_scale)``
     # computes every column's minimum as ``run * TABLE_BASE_PT * table_scale``,
@@ -983,6 +1018,8 @@ def render_table(
     emitted_scale = min(table_scale, float(_TABLE_TEXT_SCALE))
     if full_page:
         lines = ['#place(top + center, scope: "parent", float: true, rect(width: 98%)[']
+        if emitted_scale < 1.0:
+            lines.append(f"  #set text(size: {emitted_scale:.2f}em)")
         lines.append("  #table(")
     else:
         # ``#[`` opens a *content block*; a bare ``[`` is ordinary text in markup
@@ -1592,6 +1629,7 @@ class TypstDocumentRenderer:
                 title=self.paper_title,
                 abstract=getattr(self, "abstract", ""),
                 columns=getattr(self, "columns", 1),
+                lang=target_lang,
             )
             if banner:
                 # The banner *precedes* the TOC: a paper opens on its title.
@@ -1846,6 +1884,22 @@ class TypstDocumentRenderer:
                 kept = (block.source_text or "").strip()
                 if kept:
                     body.append(self._prose(kept))
+                    self.stats.blocks_rendered += 1
+                continue
+
+            if (
+                block_type in ("footnote", "BlockType.FOOTNOTE")
+                or str(getattr(block, "flow_id", None) or "") == "footnote"
+            ):
+                flush_figure()
+                text = _block_text(block)
+                if text:
+                    body.append(
+                        self._maybe_pair(
+                            block,
+                            f"#footnote[{self._prose(text, block_runs(block))}]",
+                        )
+                    )
                     self.stats.blocks_rendered += 1
                 continue
 

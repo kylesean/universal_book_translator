@@ -341,6 +341,9 @@ class DeterministicGlossaryEnforcer:
             for alias in entry.get("aliases") or []:
                 a_clean = str(alias).strip()
                 if a_clean and a_clean != target and a_clean not in self._approved_target_forms:
+                    if a_clean.isupper() and a_clean.isascii() and contains_cjk(target):
+                        # Guard uppercase Latin acronyms (LLM, GPU, etc.) from being mechanically expanded to CJK
+                        continue
                     check_left = _is_latin_word_char(a_clean[0])
                     check_right = _is_latin_word_char(a_clean[-1])
                     self._rules[a_clean] = (

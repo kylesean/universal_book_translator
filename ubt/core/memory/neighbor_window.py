@@ -65,6 +65,35 @@ class NeighborContextBuilder:
         # probe for exactly this reason). No information is added or removed.
         return "### Reference Context (read-only, NOT part of the task)\n\n" + "\n\n".join(parts)
 
+    @classmethod
+    def combine_chunk_neighbor_contexts(cls, first_ctx: str, last_ctx: str) -> str:
+        """Combine preceding context from first block and subsequent context from last block.
+
+        For macro-chunks, the first block's subsequent context is an internal chunk block
+        (e.g. chunk[1]), while the last block's subsequent context is what follows the entire
+        chunk. This helper joins the external preceding context of chunk[0] with the external
+        subsequent context of chunk[-1], preventing internal chunk blocks from being mislabeled
+        as read-only subsequent context.
+        """
+        pre_tag = "[READ-ONLY PRECEDING CONTEXT: DO NOT TRANSLATE OR ECHO]"
+        sub_tag = "[READ-ONLY SUBSEQUENT CONTEXT: DO NOT TRANSLATE OR ECHO]"
+        prev_part = ""
+        next_part = ""
+
+        if pre_tag in (first_ctx or ""):
+            start = first_ctx.index(pre_tag)
+            end = first_ctx.find(sub_tag, start) if sub_tag in first_ctx else len(first_ctx)
+            prev_part = first_ctx[start:end].strip()
+
+        if sub_tag in (last_ctx or ""):
+            start = last_ctx.index(sub_tag)
+            next_part = last_ctx[start:].strip()
+
+        parts = [p for p in (prev_part, next_part) if p]
+        if not parts:
+            return ""
+        return "### Reference Context (read-only, NOT part of the task)\n\n" + "\n\n".join(parts)
+
     def extract_from_blocks(
         self,
         target_block: IRBlock,

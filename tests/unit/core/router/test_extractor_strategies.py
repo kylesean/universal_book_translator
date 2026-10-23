@@ -91,3 +91,13 @@ def test_reasoning_traces_are_stripped_even_under_raw() -> None:
     raw = "<thought>let me consider</thought>你好"
     assert X.extract(raw, "raw") == "你好"
     assert X.extract(raw, "auto") == "你好"
+
+
+def test_sanitize_thought_output_strips_reasoning_preserving_xml_envelope() -> None:
+    from ubt.core.router.transports.base import sanitize_thought_output
+
+    raw = "<thought>thinking process</thought><translation>你好</translation>"
+    sanitized = sanitize_thought_output(raw)
+    assert sanitized == "<translation>你好</translation>"
+    # XML_TAG strategy can still extract cleanly from the sanitized transport output
+    assert X.extract(sanitized, "xml_tag") == "你好"

@@ -289,7 +289,7 @@ def overrides_from_request(
         # other, with a different filename. Resolving here makes the decision
         # depend on the document, not on which door the request came through.
         adaptive = adaptive_dual_mode(
-            None, resolve_profile_name(request.get("profile"), request.get("input_path"))
+            None, resolve_profile_name(request.get("profile", "auto"), request.get("input_path"))
         )
         if adaptive is not None:
             overrides["dual_mode"] = adaptive
@@ -365,7 +365,7 @@ def run_kwargs_from_request(request: Mapping[str, Any]) -> dict[str, Any]:
         "target_lang": request.get("target_lang", "zh"),
         "source_lang": request.get("source_lang", "en"),
         "profile_name": resolve_profile_name(
-            request.get("profile", "general"), request.get("input_path")
+            request.get("profile", "auto"), request.get("input_path")
         ),
         "job_id": request.get("job_id"),
     }

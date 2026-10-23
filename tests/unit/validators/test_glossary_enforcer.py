@@ -437,3 +437,22 @@ def test_a_latin_run_interior_space_is_never_optional() -> None:
     assert find_term_occurrences("New York city", "New York")
     assert not find_term_occurrences("NewYork city", "New York")
     assert find_term_occurrences("NewYork city", "NewYork")
+
+
+def test_uppercase_latin_acronym_alias_is_not_forced_to_cjk() -> None:
+    glossary = [
+        {
+            "source": "large language model",
+            "translation": "大语言模型",
+            "aliases": ["LLM", "llm_model"],
+        }
+    ]
+    # LLM is an acronym alias and shouldn't be mechanically rewritten into CJK full name,
+    # whether standalone or in parenthetical glosses like 大语言模型（LLM）.
+    out, records = _enforce(glossary, "这个 LLM 的表现很棒")
+    assert out == "这个 LLM 的表现很棒"
+    assert not any(r.original_span == "LLM" for r in records)
+
+    out2, records2 = _enforce(glossary, "本项目使用大语言模型（LLM）开发")
+    assert out2 == "本项目使用大语言模型（LLM）开发"
+    assert not any(r.original_span == "LLM" for r in records2)

@@ -22,7 +22,13 @@ import hashlib
 import html
 import re
 
-from ubt.core.ir.emphasis import BOLD_CLOSE, BOLD_OPEN, strip_emphasis_markers
+from ubt.core.ir.emphasis import (
+    BOLD_CLOSE,
+    BOLD_OPEN,
+    ITALIC_CLOSE,
+    ITALIC_OPEN,
+    strip_emphasis_markers,
+)
 from ubt.core.language_profile import PROFILES
 
 #: Wrapper tags the extractor treats as the answer envelope. A source span that
@@ -101,12 +107,12 @@ _SHORT_SOURCE_HINT = (
 #: locate. The rule is static so the prompt prefix stays cacheable.
 _EMPHASIS_RULE = (
     f"9. [Emphasis Preservation]: Source text bracketed by {BOLD_OPEN} ... "
-    f"{BOLD_CLOSE} is bold. Wrap the corresponding translated text with the SAME "
-    f"{BOLD_OPEN} ... {BOLD_CLOSE} markers, kept balanced and in place. Never "
+    f"{BOLD_CLOSE} is bold, and {ITALIC_OPEN} ... {ITALIC_CLOSE} is italic. Wrap the corresponding translated text with the SAME "
+    f"markers, kept balanced and in place. Never "
     "translate, drop, reorder, duplicate, or add emphasis markers of your own."
 )
 _EMPHASIS_HINT = (
-    f" Preserve any {BOLD_OPEN} ... {BOLD_CLOSE} emphasis markers around the "
+    f" Preserve any {BOLD_OPEN} ... {BOLD_CLOSE} or {ITALIC_OPEN} ... {ITALIC_CLOSE} emphasis markers around the "
     "corresponding translated text, balanced and in place."
 )
 
@@ -138,11 +144,6 @@ _PROMPT_LAYOUT_DIGEST = hashlib.sha256(
 #: a layout literal above changes, so a stored translation can never be reused
 #: across a prompt-layout change (see ``compute_tm_context``).
 PROMPT_VERSION = f"v1-{_PROMPT_LAYOUT_DIGEST}"
-
-
-def _has_emphasis(text: str) -> bool:
-    """True when the (masked) source carries the draft's bold sentinels."""
-    return strip_emphasis_markers(text) != text
 
 
 def _short_source_hint(source_text: str, block_type: str | None = None) -> str:
@@ -213,6 +214,53 @@ def draft_source_from_prompt(prompt: str) -> str:
     return prompt.strip()
 
 
+def _build_style_description(
+    genre_profile: str,
+    src_name: str,
+    tgt_name: str,
+    domain: str | None = None,
+) -> str:
+    genre = (genre_profile or "").strip().lower()
+    if genre == "fiction":
+        desc = (
+            f"You are an acclaimed literary translator translating from {src_name} into {tgt_name}.\n"
+            "Emphasize natural prose rhythm, character voice, subtext, and atmospheric immersion."
+        )
+    elif genre in ("academic", "paper"):
+        desc = (
+            f"You are a scholarly scientific translator translating from {src_name} into {tgt_name}.\n"
+            "Maintain strict scientific rigor, objective academic register, and precise domain terms."
+        )
+    elif genre == "textbook":
+        desc = (
+            f"You are an educational textbook translator translating from {src_name} into {tgt_name}.\n"
+            "Prioritize pedagogical clarity, conceptual fidelity, and retain all visual callouts."
+        )
+    elif genre == "technical":
+        desc = (
+            f"You are an expert technical translator translating from {src_name} into {tgt_name}.\n"
+            "Prioritize technical precision, unambiguous terminology, operational clarity, and structural consistency."
+        )
+    elif genre in ("nonfiction", "non-fiction"):
+        desc = (
+            f"You are an authoritative non-fiction book translator translating from {src_name} into {tgt_name}.\n"
+            "Balance intellectual rigor, factual accuracy, engaging narrative cadence, and clear exposition."
+        )
+    elif genre == "humanities":
+        desc = (
+            f"You are a scholarly humanities translator translating from {src_name} into {tgt_name}.\n"
+            "Preserve nuanced philosophical arguments, cultural context, intellectual register, and interpretive depth."
+        )
+    else:
+        desc = (
+            f"You are a professional book translator translating from {src_name} into {tgt_name}.\n"
+            "Translate accurately while maintaining natural prose and literary flow."
+        )
+    if domain:
+        desc += f"\nUse standard {domain} terminology."
+    return desc
+
+
 def build_minimal_draft_prompt(
     source_text: str,
     glossary_table: str = "",
@@ -245,7 +293,7 @@ def build_minimal_draft_prompt(
     parts = []
     if glossary_sections:
         parts.append("Glossary:\n" + "\n\n".join(glossary_sections))
-    if few_shot_reference.strip() and not _has_emphasis(source_text):
+    if few_shot_reference.strip():
         parts.append(few_shot_reference.strip())
     domain_hint = ""
     if domain:
@@ -291,28 +339,7 @@ def build_hybrid_draft_prompt(
         tgt_profile.name if tgt_profile else (target_lang.upper() if target_lang else "TARGET")
     )
 
-    if genre_profile == "fiction":
-        style_desc = (
-            f"You are an acclaimed literary translator translating from {src_name} into {tgt_name}.\n"
-            "Emphasize natural prose rhythm, character voice, subtext, and atmospheric immersion."
-        )
-    elif genre_profile in ("academic", "paper"):
-        style_desc = (
-            f"You are a scholarly scientific translator translating from {src_name} into {tgt_name}.\n"
-            "Maintain strict scientific rigor, objective academic register, and precise domain terms."
-        )
-    elif genre_profile == "textbook":
-        style_desc = (
-            f"You are an educational textbook translator translating from {src_name} into {tgt_name}.\n"
-            "Prioritize pedagogical clarity, conceptual fidelity, and retain all visual callouts."
-        )
-    else:
-        style_desc = (
-            f"You are a professional book translator translating from {src_name} into {tgt_name}.\n"
-            "Translate accurately while maintaining natural prose and literary flow."
-        )
-    if domain:
-        style_desc += f"\nUse standard {domain} terminology."
+    style_desc = _build_style_description(genre_profile, src_name, tgt_name, domain)
 
     if "zh" in tgt_name.lower() or (tgt_profile and "zh" in tgt_profile.code.lower()):
         system_prompt = (
@@ -345,7 +372,7 @@ def build_hybrid_draft_prompt(
     if neighbor_context.strip():
         user_parts.append(f"{neighbor_context.strip()}\n")
 
-    if few_shot_reference.strip() and not _has_emphasis(source_text):
+    if few_shot_reference.strip():
         user_parts.append(f"{few_shot_reference.strip()}\n")
 
     user_parts.append(
@@ -383,28 +410,7 @@ def build_rich_draft_prompt(
         tgt_profile.name if tgt_profile else (target_lang.upper() if target_lang else "TARGET")
     )
 
-    if genre_profile == "fiction":
-        style_desc = (
-            f"You are an acclaimed literary translator translating from {src_name} into {tgt_name}.\n"
-            "Emphasize natural prose rhythm, character voice, subtext, and atmospheric immersion."
-        )
-    elif genre_profile in ("academic", "paper"):
-        style_desc = (
-            f"You are a scholarly scientific translator translating from {src_name} into {tgt_name}.\n"
-            "Maintain strict scientific rigor, objective academic register, and precise domain terms."
-        )
-    elif genre_profile == "textbook":
-        style_desc = (
-            f"You are an educational textbook translator translating from {src_name} into {tgt_name}.\n"
-            "Prioritize pedagogical clarity, conceptual fidelity, and retain all visual callouts."
-        )
-    else:
-        style_desc = (
-            f"You are a professional book translator translating from {src_name} into {tgt_name}.\n"
-            "Translate accurately while maintaining natural prose and literary flow."
-        )
-    if domain:
-        style_desc += f"\nUse standard {domain} terminology."
+    style_desc = _build_style_description(genre_profile, src_name, tgt_name, domain)
 
     # Tier 1: Static Immutable Prefix
     system_parts = [
@@ -418,7 +424,7 @@ def build_rich_draft_prompt(
         f"   - Syntactic re-chunking: render long, multi-clause Western sentences as clean, logically balanced target prose (意合结构), maintaining natural narrative rhythm without omitting meaning.\n"
         f"4. [Faithful Reconstruction]: Render the source's genuine authorial/conceptual content as clean, fluent {tgt_name}. Where the source came from a scanned/OCR page, reconstruct the intended text rather than reproducing scanner noise, and keep any sidebar/callout text distinct from the main narrative.\n"
         f"5. [Scientific Math & Formula Fidelity]:\n"
-        f"   - Reconstruct all inline physical variables, mathematical symbols, Greek letters, and sub/superscript notations (such as Vtm, kBT/q, Vch(0)=Vs, psi(x,y), ni, eps_si) into standard LaTeX inline math syntax enclosed by single dollar signs ($...$, e.g. $V_{{tm}}$, $k_B T / q$, $V_{{ch}}(0) = V_s$, $\\psi(x, y)$). Never leave them as flattened plain ASCII strings.\n"
+        f"   - Reconstruct all inline physical variables, mathematical symbols, Greek letters, and sub/superscript notations (such as variables, constants, e.g. $x_i$, $k_B T$, $\\psi(x, y)$) into standard LaTeX inline math syntax enclosed by single dollar signs ($...$). Never leave them as flattened plain ASCII strings.\n"
         f"   - Only wrap notation that is ALREADY mathematical in the source. NEVER invent LaTeX control sequences (\\mathrm, \\text, \\mathbf, ...) or $...$ delimiters for plain alphanumeric labels that appear as plain text in the source (dimension tags like 2D/3D, figure/table callouts like Fig. 1.1, units like 10nm) — reproduce those verbatim.\n"
         f"   - Never omit or truncate explanatory clauses that follow formulas (such as clauses starting with 'where...', 'in which...', '式中...', '其中...'). Translate them fully and faithfully.\n"
         f"6. [Publishing Typography & CJK Spacing]:\n"
@@ -454,7 +460,7 @@ def build_rich_draft_prompt(
     if neighbor_context.strip():
         user_parts.append(f"{neighbor_context.strip()}\n")
 
-    if few_shot_reference.strip() and not _has_emphasis(source_text):
+    if few_shot_reference.strip():
         user_parts.append(f"{few_shot_reference.strip()}\n")
 
     user_parts.append(
@@ -492,28 +498,7 @@ def build_macro_chunk_draft_prompt(
         tgt_profile.name if tgt_profile else (target_lang.upper() if target_lang else "TARGET")
     )
 
-    if genre_profile == "fiction":
-        style_desc = (
-            f"You are an acclaimed literary translator translating from {src_name} into {tgt_name}.\n"
-            "Emphasize natural prose rhythm, character voice, subtext, and atmospheric immersion."
-        )
-    elif genre_profile in ("academic", "paper"):
-        style_desc = (
-            f"You are a scholarly scientific translator translating from {src_name} into {tgt_name}.\n"
-            "Maintain strict scientific rigor, objective academic register, and precise domain terms."
-        )
-    elif genre_profile == "textbook":
-        style_desc = (
-            f"You are an educational textbook translator translating from {src_name} into {tgt_name}.\n"
-            "Prioritize pedagogical clarity, conceptual fidelity, and retain all visual callouts."
-        )
-    else:
-        style_desc = (
-            f"You are a professional book translator translating from {src_name} into {tgt_name}.\n"
-            "Translate accurately while maintaining natural prose and literary flow."
-        )
-    if domain:
-        style_desc += f"\nUse standard {domain} terminology."
+    style_desc = _build_style_description(genre_profile, src_name, tgt_name, domain)
 
     system_parts = [
         style_desc,
@@ -526,7 +511,7 @@ def build_macro_chunk_draft_prompt(
         f"   - Syntactic re-chunking: render long, multi-clause Western sentences as clean, logically balanced target prose (意合结构), maintaining natural narrative rhythm without omitting meaning.\n"
         f"4. [Faithful Reconstruction]: Render the source's genuine authorial/conceptual content as clean, fluent {tgt_name}. Where the source came from a scanned/OCR page, reconstruct the intended text rather than reproducing scanner noise, and keep any sidebar/callout text distinct from the main narrative.\n"
         f"5. [Scientific Math & Formula Fidelity]:\n"
-        f"   - Reconstruct all inline physical variables, mathematical symbols, Greek letters, and sub/superscript notations (such as Vtm, kBT/q, Vch(0)=Vs, psi(x,y), ni, eps_si) into standard LaTeX inline math syntax enclosed by single dollar signs ($...$, e.g. $V_{{tm}}$, $k_B T / q$, $V_{{ch}}(0) = V_s$, $\\psi(x, y)$). Never leave them as flattened plain ASCII strings.\n"
+        f"   - Reconstruct all inline physical variables, mathematical symbols, Greek letters, and sub/superscript notations (such as variables, constants, e.g. $x_i$, $k_B T$, $\\psi(x, y)$) into standard LaTeX inline math syntax enclosed by single dollar signs ($...$). Never leave them as flattened plain ASCII strings.\n"
         f"   - Only wrap notation that is ALREADY mathematical in the source. NEVER invent LaTeX control sequences (\\mathrm, \\text, \\mathbf, ...) or $...$ delimiters for plain alphanumeric labels that appear as plain text in the source (dimension tags like 2D/3D, figure/table callouts like Fig. 1.1, units like 10nm) — reproduce those verbatim.\n"
         f"   - Never omit or truncate explanatory clauses that follow formulas (such as clauses starting with 'where...', 'in which...', '式中...', '其中...'). Translate them fully and faithfully.\n"
         f"6. [Publishing Typography & CJK Spacing]:\n"
@@ -553,20 +538,17 @@ def build_macro_chunk_draft_prompt(
         user_parts.append(
             f"### Document Continuation Context (Macro Snapshot)\n{rolling_summary.strip()}\n"
         )
+    if section_context.strip():
+        # Where these blocks sit in the document. Placed ahead of the per-chunk
+        # dynamic glossary to preserve prefix caching across chunks in the same section.
+        user_parts.append(f"### Section Context\n{section_context.strip()}\n")
     if glossary_table.strip():
         user_parts.append(f"### Translation Bible (Strict Mappings)\n{glossary_table.strip()}\n")
-
-    if section_context.strip():
-        # Where these blocks sit in the document. A chunk that does not itself
-        # contain the heading otherwise reaches the model with no idea which
-        # section it belongs to, and a back-reference ("this approach") loses
-        # its antecedent.
-        user_parts.append(f"### Section Context\n{section_context.strip()}\n")
 
     if neighbor_context.strip():
         user_parts.append(f"{neighbor_context.strip()}\n")
 
-    if few_shot_reference.strip() and not any(_has_emphasis(text) for _, text in blocks):
+    if few_shot_reference.strip():
         user_parts.append(f"{few_shot_reference.strip()}\n")
 
     # Escape source text and ids: a block containing </block> or </blocks>
@@ -809,7 +791,7 @@ def build_rich_repair_prompt(
             "1. [Terminology]: Verify all terms against the Translation Bible strictly.\n"
             "2. [Critique Resolution]: Address and fix every flagged quality defect.\n"
             "3. [Fluency & Denoising]: Polish target prose to eliminate stiff translationese and mechanical passive constructions (naturalize passive voice to active/topic-prominent phrasing in CJK, 意合重组). Suppress any raw OCR glyph noise, stray symbols, or broken boilerplate fragments that leaked into the draft.\n"
-            "4. [Scientific Math & Definition Integrity]: Reconstruct all inline physical variables, symbols, and subscripts/superscripts (e.g. Vtm, kBT/q, Vch) into LaTeX inline math ($...$). Only wrap notation already mathematical in the source — never invent LaTeX commands (\\mathrm, \\text, ...) or $...$ for plain labels verbatim in the source (2D, 3D, Fig. 1.1); reproduce those exactly. Never drop explanatory definition clauses that follow equations (e.g. 'where...', '其中...').\n"
+            "4. [Scientific Math & Definition Integrity]: Reconstruct all inline physical variables, symbols, and subscripts/superscripts (e.g. x_i, k_B T, \\psi) into LaTeX inline math ($...$). Only wrap notation already mathematical in the source — never invent LaTeX commands (\\mathrm, \\text, ...) or $...$ for plain labels verbatim in the source (2D, 3D, Fig. 1.1); reproduce those exactly. Never drop explanatory definition clauses that follow equations (e.g. 'where...', '其中...').\n"
             "5. [Publishing Typography & CJK Spacing]: In Chinese target text, leave a single half-width space between Chinese characters and English words, digits, or inline math ($...$), and eliminate stray spaces around full-width CJK punctuation.\n"
             f"{table_rule}"
             "Output Requirement:\n"

@@ -13,7 +13,6 @@ from pydantic import SecretStr
 
 from ubt.core.config import MOCK_API_KEY
 from ubt.core.exceptions import ModelProviderError
-from ubt.core.router.capabilities import ExtractionStrategy
 from ubt.core.router.extractor import TranslationOutputExtractor
 from ubt.core.router.pricing import endpoint_is_local
 
@@ -224,7 +223,7 @@ def sanitize_thought_output(raw_text: str, model: str | None = None) -> str:
     fallback. ``model`` is kept in the signature because callers pass it and a
     future profile-aware transport will want it.
     """
-    return TranslationOutputExtractor.extract(raw_text, strategy=ExtractionStrategy.AUTO)
+    return TranslationOutputExtractor.strip_reasoning(raw_text)
 
 
 _EFFORT_REJECTION_KEYS = (

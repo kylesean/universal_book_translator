@@ -196,6 +196,8 @@ def academic_preamble(
     cjk_first = ", ".join(f'"{face}"' for face in reversed(stack))
 
     escaped_title = escape_markup(paper_title) if paper_title else ""
+    is_zh = bool(lang and lang.strip().lower().startswith("zh"))
+    page_display = "第 #counter(page).display() 页" if is_zh else "Page #counter(page).display()"
 
     header_block = ""
     if escaped_title:
@@ -203,7 +205,7 @@ def academic_preamble(
             "  header: context {\n"
             "    if counter(page).get().first() > 1 [\n"
             "      #set text(size: 8pt, fill: luma(100))\n"
-            f"      #grid(columns: (1fr, 1fr), align(left)[{escaped_title}], align(right)[Page #counter(page).display()])\n"
+            f"      #grid(columns: (1fr, 1fr), align(left)[{escaped_title}], align(right)[{page_display}])\n"
             "      #v(-0.3em)\n"
             "      #line(length: 100%, stroke: 0.35pt + luma(180))\n"
             "    ]\n"
@@ -214,7 +216,7 @@ def academic_preamble(
             "  header: context {\n"
             "    if counter(page).get().first() > 1 [\n"
             "      #set text(size: 8pt, fill: luma(100))\n"
-            "      #align(right)[Page #counter(page).display()]\n"
+            f"      #align(right)[{page_display}]\n"
             "      #v(-0.3em)\n"
             "      #line(length: 100%, stroke: 0.35pt + luma(180))\n"
             "    ]\n"
@@ -261,6 +263,7 @@ def academic_title_banner(
     abstract: str = "",
     authors: Sequence[str] = (),
     columns: int = 1,
+    lang: str = "zh",
 ) -> str:
     """Emit a title, author, and abstract block for an academic paper."""
     if not title:
@@ -291,10 +294,12 @@ def academic_title_banner(
 
     if abstract:
         escaped_abstract = escape_markup(abstract)
+        is_zh = bool(lang and lang.strip().lower().startswith("zh"))
+        abstract_label = "摘要：" if is_zh else "Abstract: "
         parts.extend(
             [
                 "  #rect(width: 100%, stroke: none, fill: luma(248), inset: (x: 12pt, y: 10pt), radius: 3pt)[",
-                '    #text(weight: "bold")[摘要：]',
+                f'    #text(weight: "bold")[{abstract_label}]',
                 f'    #text(size: 9pt, style: "italic")[{escaped_abstract}]',
                 "  ]",
             ]

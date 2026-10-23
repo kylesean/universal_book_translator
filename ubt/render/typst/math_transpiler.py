@@ -149,9 +149,6 @@ _TYPST_MATH_WORDS = frozenset(_LATEX_CMD_MAP.values()) | {
 # never match (math-italic variables stay bare); a trailing dot never
 # joins (letter required after each dot), so "word." still splits.
 _WORD_RUN_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)+|[A-Za-z][A-Za-z0-9]+")
-_FONT_STYLE_CMD_RE = re.compile(
-    r"\\(mathbb|mathfrak|mathcal|mathbf|mathit|boldsymbol|bm)\{([^{}]*)\}"
-)
 _DOUBLE_BACKSLASH_CMD_RE = re.compile(r"\\\\([a-zA-Z]+)")
 
 
@@ -421,6 +418,51 @@ def _convert_sqrts(text: str) -> str:
     return "".join(out)
 
 
+_FONT_FN: dict[str, str] = {
+    "mathbb": "bb",
+    "mathfrak": "frak",
+    "mathcal": "cal",
+    "mathbf": "bold",
+    "boldsymbol": "bold",
+    "bm": "bold",
+    "mathit": "italic",
+}
+
+
+def _convert_font_styles(text: str) -> str:
+    """Convert LaTeX \\mathbf{arg}, \\mathcal{arg}, etc. to Typst bold(arg), cal(arg) with balanced braces."""
+    out: list[str] = []
+    i = 0
+    font_cmds = tuple(sorted(_FONT_FN.keys(), key=len, reverse=True))
+    while i < len(text):
+        matched = False
+        if text[i] == "\\":
+            for cmd in font_cmds:
+                cmd_len = len(cmd) + 1  # include backslash
+                if text.startswith("\\" + cmd, i) and (
+                    i + cmd_len == len(text) or not text[i + cmd_len].isalpha()
+                ):
+                    pos = i + cmd_len
+                    while pos < len(text) and text[pos].isspace():
+                        pos += 1
+                    if pos < len(text) and text[pos] == "{":
+                        braced = _extract_braced_chunk(text, pos)
+                        if braced is not None:
+                            content, after_chunk = braced
+                            inner = _convert_font_styles(content)
+                            call = f"{_FONT_FN[cmd]}({inner})"
+                            if out and (out[-1][-1].isalnum() or out[-1][-1] == "\\"):
+                                out.append(" ")
+                            out.append(call)
+                            i = after_chunk
+                            matched = True
+                            break
+        if not matched:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
 def typstify_math(body: str) -> str | None:
     """Translate a LaTeX inline-math body to compilable Typst math.
 
@@ -487,30 +529,7 @@ def typstify_math(body: str) -> str | None:
     # Unicode rather than emitting markup the compiler rejects.
     # ``boldsymbol``/``bm`` are LaTeX's bold-for-anything (including symbols),
     # which Typst's ``bold`` also accepts, so they share the mapping.
-    _font_fn = {
-        "mathbb": "bb",
-        "mathfrak": "frak",
-        "mathcal": "cal",
-        "mathbf": "bold",
-        "boldsymbol": "bold",
-        "bm": "bold",
-        "mathit": "italic",
-    }
-
-    def _font_style(match: re.Match[str]) -> str:
-        # ``\in\mathcal{T}`` (unspaced, and the common compact spelling) would
-        # otherwise fuse: the match starts right after ``\in``, so emitting
-        # ``cal(T)`` with no separator produced ``\incal`` — an unknown command
-        # that failed the whole formula closed. Keep a space when a command or
-        # a word character runs into the call. A separator before a bare
-        # letter subscript (``x^2``) or an opening delimiter is harmless.
-        call = f"{_font_fn[match.group(1)]}({match.group(2)})"
-        start = match.start()
-        if start > 0 and (body[start - 1] == "\\" or body[start - 1].isalnum()):
-            return " " + call
-        return call
-
-    body = _FONT_STYLE_CMD_RE.sub(_font_style, body)
+    body = _convert_font_styles(body)
 
     # Convert \frac{a}{b} -> frac(a, b) and \sqrt{a} -> sqrt(a) with balanced brace support
     body = _convert_fractions(body)

@@ -245,14 +245,17 @@ async def re_export_job(
     """
     if not db_path.exists():
         raise ReExportError(f"no ledger for job {job_id}")
-    ledger = SQLiteJobLedger(db_path)
     # Same invariant as apply_human_edit: an interactive re-render cannot race
     # a concurrent resume. Without this, a re-export forced another run's
     # in-flight blocks to FAILED (they are already terminal-block-checked now)
     # and rewrote the job status behind the running owner's back.
+    # Lock is acquired BEFORE creating SQLiteJobLedger to prevent connection leaks
+    # or concurrent DDL execution on locked databases.
     lock = LedgerWriterLock(db_path, job_id)
     lock.acquire()
+    ledger: SQLiteJobLedger | None = None
     try:
+        ledger = SQLiteJobLedger(db_path)
         # Resolve every precondition BEFORE building collaborators: building the
         # router needs a configured provider, and a job with no source or no
         # output path must fail with its own reason rather than a "no draft
@@ -333,4 +336,5 @@ async def re_export_job(
                 await renew_task
     finally:
         lock.release()
-        ledger.close()
+        if ledger is not None:
+            ledger.close()

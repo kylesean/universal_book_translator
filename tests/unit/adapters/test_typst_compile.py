@@ -64,6 +64,19 @@ def test_typst_compile_binary_not_found(monkeypatch: pytest.MonkeyPatch) -> None
     assert "not found on PATH" in err
 
 
+def test_typst_compile_py_binding_syntax_error_reported_when_no_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(typst_compile, "_HAS_TYPST_PY", True)
+    mock_typst = MagicMock()
+    mock_typst.compile.side_effect = RuntimeError("syntax error: unexpected token on line 42")
+    with patch.dict("sys.modules", {"typst": mock_typst}):
+        monkeypatch.setattr(typst_compile, "resolve_typst_binary", lambda b: None)
+        ok, err = typst_compile.typst_compile("input.typ", "output.pdf")
+        assert ok is False
+        assert "syntax error: unexpected token on line 42" in err
+
+
 def test_typst_compile_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(typst_compile, "_HAS_TYPST_PY", False)
     monkeypatch.setattr(typst_compile, "resolve_typst_binary", lambda b: "/bin/typst")

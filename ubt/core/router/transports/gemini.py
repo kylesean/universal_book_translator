@@ -171,14 +171,18 @@ class GeminiTransport(BaseTransport):
         # ship an empty draft and burn futile repair rounds.
         block_reason = str((data.get("promptFeedback") or {}).get("blockReason") or "")
         if block_reason:
-            raise ModelProviderError(f"Gemini blocked the prompt (blockReason={block_reason})")
+            raise ModelProviderError(
+                f"Gemini blocked the prompt (blockReason={block_reason})",
+                details={"fail_fast": True, "reason": "content_refusal"},
+            )
         candidates = data.get("candidates") or []
         if not candidates:
             raise ModelProviderError("Gemini returned no candidates")
         candidate_reason = str((candidates[0] or {}).get("finishReason") or "")
         if candidate_reason in _BLOCKED_FINISH_REASONS:
             raise ModelProviderError(
-                f"Gemini blocked the response (finishReason={candidate_reason})"
+                f"Gemini blocked the response (finishReason={candidate_reason})",
+                details={"fail_fast": True, "reason": "content_refusal"},
             )
 
     async def generate_with_finish_reason(
@@ -426,10 +430,27 @@ def _gemini_body_from_request(req: dict[str, Any]) -> dict[str, Any]:
             generation_config["temperature"] = body["temperature"]
         if body.get("max_tokens"):
             generation_config["maxOutputTokens"] = body["max_tokens"]
+        effort = body.get("reasoning_effort") or req.get("reasoning_effort")
+        if effort and isinstance(effort, str):
+            budget = _REASONING_EFFORT_BUDGETS.get(effort.strip().lower())
+            if budget is not None:
+                generation_config["thinkingConfig"] = {"thinkingBudget": budget}
         if generation_config:
             payload["generationConfig"] = generation_config
         return payload
     payload = {"contents": [{"role": "user", "parts": [{"text": str(req.get("prompt") or "")}]}]}
     if req.get("system_prompt"):
         payload["systemInstruction"] = {"parts": [{"text": str(req["system_prompt"])}]}
+    fallback_config: dict[str, Any] = {}
+    if req.get("temperature") is not None:
+        fallback_config["temperature"] = req["temperature"]
+    if req.get("max_tokens"):
+        fallback_config["maxOutputTokens"] = req["max_tokens"]
+    fallback_effort = req.get("reasoning_effort")
+    if fallback_effort and isinstance(fallback_effort, str):
+        fallback_budget = _REASONING_EFFORT_BUDGETS.get(fallback_effort.strip().lower())
+        if fallback_budget is not None:
+            fallback_config["thinkingConfig"] = {"thinkingBudget": fallback_budget}
+    if fallback_config:
+        payload["generationConfig"] = fallback_config
     return payload

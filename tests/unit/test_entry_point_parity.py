@@ -33,7 +33,7 @@ def paper_pdf(tmp_path: Path) -> Path:
     """A real one-page PDF, so the archetype probe has something to read."""
     from pdf_builders import write_text_pdf
 
-    path = tmp_path / "paper.pdf"
+    path = tmp_path / "2401.12345v1.pdf"
     write_text_pdf(
         path,
         [("Abstract", "We propose a compact model for FinFET devices.", "References")],
@@ -58,21 +58,18 @@ def test_auto_is_resolved_instead_of_matched_literally(paper_pdf: Path) -> None:
     assert auto == by_name
 
 
-def test_the_web_and_cli_forms_of_a_real_paper_agree() -> None:
+def test_the_web_and_cli_forms_of_a_real_paper_agree(paper_pdf: Path) -> None:
     """The concrete case: a paper submitted either way gets the same mode.
 
-    Uses the reference chapter, which the probe classifies as ``paper``, so the
+    Uses a paper PDF, which the probe classifies as ``paper``, so the
     profile-aware default is exercised rather than a synthetic ``general``.
     """
-    from pathlib import Path
-
-    chapter = Path("/home/kyle/Downloads/chapter-3.pdf")
-    if not chapter.exists():
-        pytest.skip("reference chapter not present")
-    base = {"input_path": str(chapter), "target_lang": "zh", "source_lang": "en"}
+    base = {"input_path": str(paper_pdf), "target_lang": "zh", "source_lang": "en"}
     auto = overrides_from_request({**base, "profile": "auto"})
     named = overrides_from_request({**base, "profile": "paper"})
+    default_req = overrides_from_request(base)
     assert auto == named
+    assert default_req == auto
     assert auto.get("dual_mode") == "mono"
 
 

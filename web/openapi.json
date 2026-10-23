@@ -4616,8 +4616,8 @@
             "type": "string",
             "pattern": "^[A-Za-z0-9_-]+$",
             "title": "Profile",
-            "description": "Domain profile (general, textbook, paper)",
-            "default": "general"
+            "description": "Domain profile (auto, general, textbook, paper, etc.)",
+            "default": "auto"
           },
           "provider": {
             "anyOf": [

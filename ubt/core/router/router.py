@@ -623,25 +623,29 @@ class ModelRouter:
                     return res, candidate
                 return res
             except ModelProviderError as exc:
-                # Re-read the clock: ``now`` was taken at entry, and the retries
-                # and fallback walk above can burn minutes. A cooldown computed
-                # from the entry timestamp would already be expired when
-                # written, leaving the breaker permanently closed under a
-                # slow-failing chain.
-                failure_now = time.monotonic()
-                failures, exp = self._model_circuit.get(candidate, (0, 0.0))
-                # Half-open: if cooldown expired, treat as single probe failure
-                if exp > 0 and exp <= failure_now:
-                    failures = 2
-                failures += 1
-                cooldown = (failure_now + 60.0) if failures >= 3 else 0.0
-                self._model_circuit[candidate] = (failures, cooldown)
-                if cooldown > 0:
-                    logger.warning(
-                        "Model %s tripped circuit breaker (%d consecutive failures); cooling down for 60s",
-                        candidate,
-                        failures,
-                    )
+                # Content refusal is a prompt/content policy violation, not an infrastructure
+                # failure or model outage: do not trip the model circuit breaker.
+                is_refusal = (exc.details or {}).get("reason") == "content_refusal"
+                if not is_refusal:
+                    # Re-read the clock: ``now`` was taken at entry, and the retries
+                    # and fallback walk above can burn minutes. A cooldown computed
+                    # from the entry timestamp would already be expired when
+                    # written, leaving the breaker permanently closed under a
+                    # slow-failing chain.
+                    failure_now = time.monotonic()
+                    failures, exp = self._model_circuit.get(candidate, (0, 0.0))
+                    # Half-open: if cooldown expired, treat as single probe failure
+                    if exp > 0 and exp <= failure_now:
+                        failures = 2
+                    failures += 1
+                    cooldown = (failure_now + 60.0) if failures >= 3 else 0.0
+                    self._model_circuit[candidate] = (failures, cooldown)
+                    if cooldown > 0:
+                        logger.warning(
+                            "Model %s tripped circuit breaker (%d consecutive failures); cooling down for 60s",
+                            candidate,
+                            failures,
+                        )
                 # Billing and credential-side failures cannot resolve by
                 # renaming the model: fail the chain fast instead of burning
                 # one call per entry on every block of the book.
@@ -807,6 +811,8 @@ class ModelRouter:
                         temperature=effective_temp,
                         partial=result,
                         is_repair=is_repair,
+                        reasoning_effort=effective_effort,
+                        max_tokens=max_tokens,
                     )
                 return result
             except ModelProviderError as exc:
@@ -886,6 +892,8 @@ class ModelRouter:
         temperature: float | None,
         partial: str,
         is_repair: bool = False,
+        reasoning_effort: str | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         """Continue a token-limit-truncated generation.
 
@@ -915,23 +923,41 @@ class ModelRouter:
                 prompt_tokens = _estimate_prompt_tokens(system_prompt, continuation_prompt)
                 await self.rate_limiter.acquire(estimated_tokens=prompt_tokens * 2)
                 active_provider = self._provider_for(model, is_repair=is_repair)
-                if self.request_timeout and self.request_timeout > 0:
-                    continuation, finish_reason = await asyncio.wait_for(
-                        active_provider.generate_with_finish_reason(
-                            prompt=continuation_prompt,
+
+                async def _invoke_continuation(
+                    prov: BaseModelProvider = active_provider,
+                    c_prompt: str = continuation_prompt,
+                ) -> tuple[str, str | None]:
+                    try:
+                        return await prov.generate_with_finish_reason(
+                            prompt=c_prompt,
                             system_prompt=system_prompt,
                             model=model,
                             temperature=temperature,
-                        ),
+                            max_tokens=max_tokens,
+                            reasoning_effort=reasoning_effort,
+                        )
+                    except TypeError as type_err:
+                        if (
+                            "reasoning_effort" in str(type_err)
+                            and "unexpected keyword argument" in str(type_err).lower()
+                        ):
+                            return await prov.generate_with_finish_reason(
+                                prompt=c_prompt,
+                                system_prompt=system_prompt,
+                                model=model,
+                                temperature=temperature,
+                                max_tokens=max_tokens,
+                            )
+                        raise
+
+                if self.request_timeout and self.request_timeout > 0:
+                    continuation, finish_reason = await asyncio.wait_for(
+                        _invoke_continuation(),
                         timeout=self.request_timeout,
                     )
                 else:
-                    continuation, finish_reason = await active_provider.generate_with_finish_reason(
-                        prompt=continuation_prompt,
-                        system_prompt=system_prompt,
-                        model=model,
-                        temperature=temperature,
-                    )
+                    continuation, finish_reason = await _invoke_continuation()
                 try:
                     if hasattr(self.rate_limiter, "report_success_async"):
                         await self.rate_limiter.report_success_async()

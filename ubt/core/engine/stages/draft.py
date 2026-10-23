@@ -22,7 +22,11 @@ from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import BudgetExceededError, JobInterruptedError, UBTError
 from ubt.core.ir.document_tree import section_context_for
-from ubt.core.ir.emphasis import mark_bold_spans, parse_bold, runs_from_json
+from ubt.core.ir.emphasis import (
+    mark_emphasis_spans,
+    parse_emphasis,
+    runs_from_json,
+)
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock, StyleMeta
 from ubt.core.memory.abbreviation_miner import format_abbreviations_markdown_table
 from ubt.core.memory.glossary_table import (
@@ -77,21 +81,34 @@ _SKIPPED_TYPES = frozenset({BlockType.IMAGE, BlockType.FORMULA})
 
 
 def _source_with_bold_markers(block: IRBlock) -> str:
-    """The source text with ``⟦B⟧…⟦/B⟧`` around each source-side bold span.
+    """The source text with ``⟦B⟧…⟦/B⟧`` and ``⟦I⟧…⟦/I⟧`` around emphasized spans.
 
-    Whole-block bold is already rendered from ``provenance["is_bold"]``; only a
-    *partial* bold block needs the model to carry the emphasis into the target,
+    Whole-block bold is already rendered from ``provenance["is_bold"]``; partial
+    bold and italic spans need the model to carry the emphasis into the target,
     because a source-derived inline run the translation rewrote has no target
     substring for the render to locate. The markers ride the masked source and
     are parsed back out in :meth:`_DraftProcessor.finalize_draft`.
     """
     style = block.style
-    if style is None or block.provenance.is_bold:
+    if style is None:
         return block.source_text
-    spans = [run.text for run in style.inline_runs if run.bold and run.text.strip()]
-    if not spans:
+    bold_spans = (
+        []
+        if block.provenance.is_bold
+        else [run.text for run in style.inline_runs if run.bold and run.text.strip()]
+    )
+    italic_spans = (
+        []
+        if getattr(block.provenance, "is_italic", False)
+        else [
+            run.text
+            for run in style.inline_runs
+            if run.italic and not run.bold and run.text.strip()
+        ]
+    )
+    if not bold_spans and not italic_spans:
         return block.source_text
-    return mark_bold_spans(block.source_text, spans)
+    return mark_emphasis_spans(block.source_text, bold_spans=bold_spans, italic_spans=italic_spans)
 
 
 @dataclass
@@ -343,10 +360,15 @@ class _DraftProcessor:
         )
         first_inp = chunk[0][1]
         last_inp = chunk[-1][1]
+        from ubt.core.memory.neighbor_window import NeighborContextBuilder
+
+        chunk_neighbor_ctx = NeighborContextBuilder.combine_chunk_neighbor_contexts(
+            first_inp.neighbor_ctx, last_inp.neighbor_ctx
+        )
         system, user = build_macro_chunk_draft_prompt(
             blocks=[(b.id, inp.masked_source) for b, inp in chunk],
             glossary_table=merged_glossary,
-            neighbor_context=first_inp.neighbor_ctx,
+            neighbor_context=chunk_neighbor_ctx,
             target_lang=self.policy.target_lang,
             source_lang=self.policy.source_lang,
             genre_profile=self.policy.profile_name,
@@ -627,11 +649,11 @@ class _DraftProcessor:
             email_map=inputs.email_map,
         )
         result = await asyncio.to_thread(self.runtime.engine.resolve, raw_text, masked)
-        # The model bracketed emphasized target text with ⟦B⟧ … ⟦/B⟧; parse the
+        # The model bracketed emphasized target text with ⟦B⟧/⟦I⟧; parse the
         # runs out (and strip every marker, balanced or not) so the target text
         # is always clean and the render can re-apply the weight the source-
         # derived inline run cannot locate.
-        final_draft, target_runs = parse_bold(result.text)
+        final_draft, target_runs = parse_emphasis(result.text)
         if block.block_type == BlockType.HEADING:
             trimmed = trim_heading_expansion(block.source_text, final_draft)
             if trimmed != final_draft:
@@ -1175,6 +1197,11 @@ class _DraftProcessor:
             )
             extracted_by_id = _decode_chunk(cached_raw)
 
+        from ubt.core.memory.neighbor_window import NeighborContextBuilder
+
+        chunk_neighbor_ctx = NeighborContextBuilder.combine_chunk_neighbor_contexts(
+            first_inp.neighbor_ctx, last_inp.neighbor_ctx
+        )
         if not extracted_by_id:
             async with self.runtime.concurrency_sem:
                 blocks_to_draft = [b.with_source_text(inp.masked_source) for b, inp in chunk]
@@ -1184,7 +1211,7 @@ class _DraftProcessor:
                             extracted_by_id = await self.runtime.router.draft_macro_chunk(
                                 blocks=blocks_to_draft,
                                 glossary_table=merged_glossary,
-                                neighbor_context=first_inp.neighbor_ctx,
+                                neighbor_context=chunk_neighbor_ctx,
                                 target_lang=self.policy.target_lang,
                                 source_lang=self.policy.source_lang,
                                 genre_profile=self.policy.profile_name,

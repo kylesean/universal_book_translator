@@ -234,6 +234,12 @@ def test_a_spaced_command_still_converts_identically() -> None:
     assert typstify_math(r"\frac{a}{b}") == "frac(a, b)"
 
 
+def test_font_style_nested_braces() -> None:
+    # Nested braces inside font commands like \mathbf{x_{i}} should not fail or return None
+    assert typstify_math(r"\mathbf{x_{i}}") == "bold(x_(i))"
+    assert typstify_math(r"\mathcal{O}(n^{2})") == "cal(O)(n^(2))"
+
+
 # --------------------------------------------------------------------------- #
 # Symbols that were absent from the table, so whole formulas failed closed
 # --------------------------------------------------------------------------- #

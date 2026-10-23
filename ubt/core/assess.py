@@ -485,23 +485,24 @@ def _build_cost(
     batch_requested = bool(
         getattr(config, "offline_batch_enabled", False) or getattr(config, "batch_enabled", False)
     )
+    api_mode = str(getattr(config, "api_mode", "openai-chat"))
     # The discount is only real if the run can actually be batched. The engine
-    # gates it on ``router.supports_batch_api`` — true only for the
-    # chat/completions wire — and falls back to *interactive full price* when a
-    # batch submission fails, so quoting it for a Responses-API profile cut the
-    # draft line in half against a spend that never got the discount.
+    # gates it on ``router.supports_batch_api`` — true for openai-chat,
+    # anthropic-messages, and gemini-native — and falls back to *interactive full price*
+    # when a batch submission fails, so quoting it for an unsupported api_mode
+    # cut the draft line in half against a spend that never got the discount.
+    _batch_supported_modes = frozenset({"openai-chat", "anthropic-messages", "gemini-native"})
     batch_discount = (
-        BATCH_API_DISCOUNT
-        if batch_requested and str(getattr(config, "api_mode", "openai-chat")) == "openai-chat"
-        else 1.0
+        BATCH_API_DISCOUNT if batch_requested and api_mode in _batch_supported_modes else 1.0
     )
     if batch_requested and batch_discount >= 1.0:
         warnings.append(
             AssessmentWarning(
                 "BATCH_DISCOUNT_UNAVAILABLE",
                 "warn",
-                "已请求批量 API，但当前 api_mode 不是 openai-chat（批处理仅支持 "
-                "chat/completions 线路）；草稿按交互全价估算。",
+                f"已请求批量 API，但当前 api_mode={api_mode} 不支持批处理（仅支持 "
+                "openai-chat, anthropic-messages, gemini-native）；草稿按交互全价估算。",
+                params={"api_mode": api_mode},
             )
         )
     if batch_discount < 1.0:

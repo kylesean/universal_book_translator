@@ -73,8 +73,8 @@ class JobSubmitRequest(BaseModel):
     # requiring a source profile here would make the API stricter than the CLI
     # and reject jobs the engine runs fine. Only the *target* needs a profile.
     profile: str = Field(
-        default="general",
-        description="Domain profile (general, textbook, paper)",
+        default="auto",
+        description="Domain profile (auto, general, textbook, paper, etc.)",
         pattern=PROFILE_NAME_PATTERN,
     )
     #: Which declared ``[providers.<name>]`` block this job runs against.

@@ -84,6 +84,7 @@ from ubt.core.job_options import (
     LANG_CODE_RE,
     apply_config_overrides,
     default_output_path,
+    delivery_verdict_from_blocks,
     job_id_is_valid,
     own_prior_deliverable,
     prior_output_of,
@@ -318,7 +319,7 @@ def _safe_output_path(raw: str) -> Path:
 async def ubt_translate_book(
     input_path: str,
     target_lang: str = "zh",
-    profile: str = "general",
+    profile: str = "auto",
     source_lang: str = "en",
     output_path: str | None = None,
     job_id: str | None = None,
@@ -528,6 +529,14 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
             "completed": rec.progress.completed_blocks,
             "repaired": rec.progress.repaired_blocks,
             "failed": rec.progress.failed_blocks,
+            "needs_human": rec.progress.needs_human_blocks,
+            "blocked_human": rec.progress.blocked_human_blocks,
+            "delivery_verdict": delivery_verdict_from_blocks(
+                failed_blocks=rec.progress.failed_blocks,
+                blocked_human_blocks=rec.progress.blocked_human_blocks,
+                needs_human_blocks=rec.progress.needs_human_blocks,
+                completed_blocks=rec.progress.completed_blocks,
+            ),
             "avg_qe_score": rec.progress.current_avg_qe,
             "output_file": sanitize_display_path(rec.progress.output_file),
             "report_file": sanitize_display_path(rec.progress.report_file),
@@ -563,25 +572,34 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
         # polling agent.
         persisted = await asyncio.to_thread(ledger.get_job_status, jid)
         interrupted = False
+        total_b = progress.total_blocks
+        done_b = (
+            progress.completed_blocks
+            + progress.failed_blocks
+            + progress.needs_human_blocks
+            + progress.blocked_human_blocks
+        )
         if persisted == "failed":
             status = JobStatus.FAILED
         elif persisted == "cancelled":
             # The pipeline records a cancel as terminal; reading it as "running"
             # would leave a polling agent waiting on a job that already stopped.
             status = JobStatus.CANCELLED
-        elif persisted == "completed" or (progress.completed_blocks >= progress.total_blocks > 0):
+        elif persisted == "completed" or (total_b > 0 and done_b >= total_b):
             status = JobStatus.COMPLETED
         else:
-            status = JobStatus.RUNNING
-            # The row keeps its creation status until finalize_job, so a
-            # process that died mid-run leaves it non-terminal forever; the
-            # REST disk fallback downgrades it. Here the downgrade waits for
-            # the ledger to go quiet first — a live run in another process
-            # keeps writing checkpoints, and reporting that failed would make
-            # a polling agent restart a job that is still translating.
-            if persisted not in TERMINAL_JOB_STATUSES and _ledger_is_stale(db_path):
+            # Check the writer lock lease first. In SQLite WAL mode with an open
+            # connection, the main .sqlite file's mtime is never touched, so an
+            # mtime-only check misclassifies active runs as FAILED after 5 minutes.
+            # A live lease holder confirms the process is actively translating.
+            holder = await asyncio.to_thread(LedgerWriterLock.lease_holder, db_path, jid)
+            if holder is not None:
+                status = JobStatus.RUNNING
+            elif _ledger_is_stale(db_path):
                 status = JobStatus.FAILED
                 interrupted = True
+            else:
+                status = JobStatus.RUNNING
         disk: dict[str, Any] = {
             "job_id": jid,
             "status": status,
@@ -589,6 +607,14 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
             "completed": progress.completed_blocks,
             "repaired": progress.repaired_blocks,
             "failed": progress.failed_blocks,
+            "needs_human": progress.needs_human_blocks,
+            "blocked_human": progress.blocked_human_blocks,
+            "delivery_verdict": delivery_verdict_from_blocks(
+                failed_blocks=progress.failed_blocks,
+                blocked_human_blocks=progress.blocked_human_blocks,
+                needs_human_blocks=progress.needs_human_blocks,
+                completed_blocks=progress.completed_blocks,
+            ),
             "avg_qe_score": progress.current_avg_qe,
             "output_file": sanitize_display_path(progress.output_file),
             "report_file": sanitize_display_path(progress.report_file),

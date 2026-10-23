@@ -250,7 +250,13 @@ class OpenAIResponsesTransport(BaseTransport):
             # empty translation: surface it so the fallback chain can try
             # instead of shipping "" as a finished block.
             detail = f": {refusal.strip()}" if refusal.strip() else ""
-            raise ModelProviderError(f"Responses API returned an empty message{detail}")
+            details_dict = (
+                {"fail_fast": True, "reason": "content_refusal"} if refusal.strip() else None
+            )
+            raise ModelProviderError(
+                f"Responses API returned an empty message{detail}",
+                details=details_dict,
+            )
         result = text.strip()
         finish_reason = "length" if truncated else ("stop" if status == "completed" else None)
         return self._finalize_output(result, target_model), finish_reason

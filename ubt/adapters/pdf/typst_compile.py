@@ -62,6 +62,7 @@ def typst_compile(
     The compile is pinned to :data:`REPRODUCIBLE_TIMESTAMP` so the produced PDF
     is a function of the Typst source alone. See the module docstring.
     """
+    last_err: str | None = None
     if _HAS_TYPST_PY:
         try:
             typst = importlib.import_module("typst")
@@ -72,11 +73,13 @@ def typst_compile(
             # CLI is deliberate: the binding would otherwise hand back a
             # wall-clock artifact while the CLI path is reproducible.
             pass
-        except Exception:
-            pass
+        except Exception as exc:
+            last_err = str(exc)
 
     resolved = resolve_typst_binary(binary)
     if resolved is None:
+        if last_err is not None:
+            return False, f"Typst compilation failed: {last_err}"
         return False, f"Typst compiler binary '{binary}' not found on PATH"
     try:
         proc = subprocess.run(

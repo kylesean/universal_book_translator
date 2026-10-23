@@ -62,10 +62,10 @@ def test_draft_source_from_prompt_strips_the_markers(build: _Builder) -> None:
 
 
 @pytest.mark.parametrize("build", _BUILDERS)
-def test_a_few_shot_reference_is_dropped_for_a_marked_source(build: _Builder) -> None:
-    reference = "REFERENCE_SHOULD_NOT_APPEAR"
+def test_a_few_shot_reference_is_retained_for_a_marked_source(build: _Builder) -> None:
+    reference = "REFERENCE_SHOULD_APPEAR"
     marked_system, marked_user = build(source_text=_MARKED, few_shot_reference=reference)
-    assert reference not in marked_system + marked_user
+    assert reference in marked_system + marked_user
     plain_system, plain_user = build(source_text=_CLEAN, few_shot_reference=reference)
     assert reference in plain_system + plain_user
 
@@ -75,9 +75,9 @@ def test_the_macro_builder_states_the_emphasis_rule() -> None:
     assert "⟦B⟧" in system + user
 
 
-def test_the_macro_builder_drops_a_few_shot_reference_for_a_marked_block() -> None:
-    reference = "REFERENCE_SHOULD_NOT_APPEAR"
+def test_the_macro_builder_retains_a_few_shot_reference_for_a_marked_block() -> None:
+    reference = "REFERENCE_SHOULD_APPEAR"
     system, user = build_macro_chunk_draft_prompt(
         [("b1", "plain"), ("b2", _MARKED)], few_shot_reference=reference
     )
-    assert reference not in system + user
+    assert reference in system + user
