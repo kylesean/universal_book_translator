@@ -18,7 +18,6 @@ from ubt.adapters.pdf.vlm.anchor import AnchoredLine, anchor_transcript
 from ubt.adapters.pdf.vlm.registry import default_driver_name, get_driver, list_drivers
 from ubt.adapters.pdf.vlm.transcribe import (
     FALLBACK_ENV_VAR,
-    fallback_enabled,
     transcribe_page_to_blocks,
 )
 from ubt.adapters.pdf.vlm.types import PageTranscript, VlmDriver, VlmLine
@@ -31,7 +30,6 @@ __all__ = [
     "VlmLine",
     "anchor_transcript",
     "default_driver_name",
-    "fallback_enabled",
     "get_driver",
     "list_drivers",
     "transcribe_page_to_blocks",

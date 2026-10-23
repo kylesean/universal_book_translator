@@ -11,9 +11,13 @@ Two entry points:
     A LaTeX *math body* (no delimiters) → a Typst math body, or ``None`` when
     the input cannot be emitted safely. ``None`` is a deliberate fail-closed
     answer, not an error: the caller falls back to keeping the source span.
+    **This is the one production uses**, always paired with
+    ``strip_math_delimiters`` (which also recognises the bare ``$$`` placeholder
+    a failed extraction writes).
 ``typstify_math_span(content)``
     A *delimited* span (``$...$``, ``$$...$$``, ``\(...\)``, ``\[...\]``) →
-    the body, or ``None``.
+    the body, or ``None``. A convenience wrapper for callers that already hold
+    a complete span; the tests exercise it, the pipeline does not.
 
 The module is pure: ``re``, ``unicodedata`` and the shared symbol table only.
 """
@@ -36,8 +40,15 @@ _BARE_NUMBER_RE = re.compile(r"^\d[\d,.]*$")
 def typstify_math_span(content: str) -> str | None:
     """Convert one delimited math span to a Typst math body, or ``None``.
 
-    The single entry point for "span in, body out", so the renderer and the
-    compile gate agree on exactly which bodies reach :func:`typstify_math`.
+    Convenience wrapper over :func:`_math_inner` + :func:`typstify_math` for a
+    span whose delimiters are still attached.
+
+    NOTE: this is *not* the path production uses. The renderer and the compile
+    gate call ``typstify_math(strip_math_delimiters(text))`` directly, because
+    they hold display-math text whose delimiter form is decided by
+    :func:`strip_math_delimiters` (which additionally recognises the bare
+    ``$$`` placeholder). This wrapper stays for callers that already have a
+    complete delimited span; it is exercised by the tests only.
     """
     body = _math_inner(content)
     return typstify_math(body) if body is not None else None

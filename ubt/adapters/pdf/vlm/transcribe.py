@@ -52,10 +52,6 @@ def get_fallback_mode() -> VlmFallbackMode:
     return VlmFallbackMode.OFF
 
 
-def fallback_enabled() -> bool:
-    return get_fallback_mode() != VlmFallbackMode.OFF
-
-
 def _median(values: list[float]) -> float:
     ordered = sorted(values)
     return ordered[len(ordered) // 2] if ordered else 10.0
