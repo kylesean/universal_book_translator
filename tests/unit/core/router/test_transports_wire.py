@@ -898,6 +898,36 @@ async def test_provider_shared_client_splits_connect_timeout() -> None:
     await client.aclose()
 
 
+async def test_local_transport_ignores_ambient_socks_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A localhost inference server must not inherit a shell's SOCKS proxy."""
+    monkeypatch.setenv("ALL_PROXY", "socks5h://127.0.0.1:10808")
+    transport = OpenAIChatTransport(api_key="k", base_url="http://127.0.0.1:9090/v1")
+    client = transport._get_client()
+    assert client._trust_env is False
+    await transport.aclose()
+
+
+async def test_remote_transport_still_honours_ambient_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ALL_PROXY", "socks5h://127.0.0.1:10808")
+    transport = OpenAIChatTransport(api_key="k", base_url="https://api.example.com/v1")
+    client = transport._get_client()
+    assert client._trust_env is True
+    await transport.aclose()
+
+
+async def test_local_provider_shared_client_ignores_ambient_socks_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ubt.core.router.provider import OpenAICompatibleProvider
+
+    monkeypatch.setenv("ALL_PROXY", "socks5h://127.0.0.1:10808")
+    provider = OpenAICompatibleProvider(api_key="k", base_url="http://localhost:9090/v1")
+    assert provider._shared_client._trust_env is False
+    await provider._shared_client.aclose()
+
+
 def test_retry_after_ms_is_converted_to_seconds() -> None:
     """A ``Retry-After-Ms`` header is milliseconds; the router sleeps seconds.
 

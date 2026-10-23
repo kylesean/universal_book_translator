@@ -15,6 +15,7 @@ from ubt.core.config import MOCK_API_KEY
 from ubt.core.exceptions import ModelProviderError
 from ubt.core.router.capabilities import ExtractionStrategy
 from ubt.core.router.extractor import TranslationOutputExtractor
+from ubt.core.router.pricing import endpoint_is_local
 
 logger = logging.getLogger(__name__)
 
@@ -445,6 +446,9 @@ class BaseTransport(ABC):
                 timeout=build_timeout(self._timeout),
                 transport=self._transport,
                 limits=self._limits,
+                # Local inference servers are reached directly; inherited
+                # SOCKS proxies are for remote providers only.
+                trust_env=not endpoint_is_local(self._base_url),
             )
             self._owned_client = True
         return self._client

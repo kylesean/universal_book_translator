@@ -13,6 +13,7 @@ from typing import Any, TypedDict
 import httpx
 from pydantic import SecretStr
 
+from ubt.core.router.pricing import endpoint_is_local
 from ubt.core.router.transports.anthropic import AnthropicMessagesTransport
 from ubt.core.router.transports.base import (
     BaseTransport,
@@ -325,6 +326,9 @@ class OpenAICompatibleProvider(BaseModelProvider):
             timeout=build_timeout(self._timeout),
             transport=self._transport,
             limits=self._limits,
+            # A loopback/self-hosted endpoint must never be sent through an
+            # ambient ALL_PROXY (e.g. a SOCKS proxy exported by the shell).
+            trust_env=not endpoint_is_local(self._base_url),
         )
 
         shared_kw: _SharedTransportKwargs = {
