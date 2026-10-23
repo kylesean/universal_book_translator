@@ -467,6 +467,7 @@ def test_resume_after_restart_restores_the_request_from_the_ledger(
     with SQLiteJobLedger(config.db_dir / f"{job_id}.sqlite") as ledger:
         ledger.finalize_job(job_id, status=JobStatus.FAILED)
         stored = ledger.get_job_metadata_value(job_id, "submitted_request")
+    assert isinstance(stored, dict)
     assert stored["job_id"] == job_id
     assert stored["draft_model"] == "draft-after-restart"
     assert stored["profile"] == "textbook"
