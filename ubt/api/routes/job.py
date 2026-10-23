@@ -57,6 +57,7 @@ from ubt.core.exceptions import (
 )
 from ubt.core.fs_perms import ensure_private_dir
 from ubt.core.job_options import clean_source_stem, resolve_target_output
+from ubt.core.presets import Preset
 from ubt.core.router.router import ModelRouter
 
 # Strong references to fire-and-forget tasks: the event loop holds only weak
@@ -65,6 +66,226 @@ from ubt.core.router.router import ModelRouter
 background_tasks: set[asyncio.Task[None]] = set()
 
 logger = logging.getLogger(__name__)
+
+
+def _reconstruct_resume_request(
+    metadata: dict[str, Any], *, default_output_dir: Path
+) -> JobSubmitRequest:
+    """Rebuild a resumable request from a pre-request-snapshot ledger.
+
+    Older ledgers (including the job that motivated this fallback) do not carry
+    the accepted REST request. They do carry the facts that determine the
+    ledger's identity and output: source/target language, profile, model
+    snapshot, page/chapter scope, and the run's rehearsal flag. Reconstructing
+    only those fields is deliberately conservative; provider credentials never
+    lived in the request and continue to come from the current operator config.
+
+    Raises ``HTTPException(409)`` when the minimum identity cannot be recovered,
+    rather than inventing a request that could mix incompatible translations.
+    """
+    run_identity = metadata.get("run_identity")
+    config_snapshot = metadata.get("config_snapshot")
+    identity = run_identity if isinstance(run_identity, dict) else {}
+    snapshot = config_snapshot if isinstance(config_snapshot, dict) else {}
+
+    profile = identity.get("profile_name") or metadata.get("genre_profile") or "general"
+    source_lang = str(metadata.get("source_lang") or "en")
+    target_lang = str(metadata.get("target_lang") or "")
+    source_path = str(metadata.get("source_path") or "")
+    if not source_path or not target_lang:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This job's ledger does not contain enough run metadata to resume it. "
+                "Resubmit the source document instead."
+            ),
+        )
+
+    chapter_window = metadata.get("chapter_window")
+    start_chapter: int | None = None
+    max_chapters: int | None = None
+    if isinstance(chapter_window, list) and chapter_window:
+        try:
+            start_chapter = int(chapter_window[0])
+            if len(chapter_window) > 1 and chapter_window[1] is not None:
+                max_chapters = int(chapter_window[1])
+        except (TypeError, ValueError):
+            start_chapter = None
+            max_chapters = None
+
+    selected_pages = metadata.get("selected_pages")
+    pages: str | None = None
+    if isinstance(selected_pages, list) and selected_pages:
+        pages = page_scope_label(selected_pages)
+
+    prompt_strategy = snapshot.get("prompt_strategy")
+    preset: Preset | None = None
+    if prompt_strategy == "rich":
+        # Publication and publication_math share rich prompts; without a
+        # recorded formula policy the conservative choice is publication.
+        preset = Preset.PUBLICATION
+
+    output_path = metadata.get("output_file") or default_output_dir
+    try:
+        # A whole-book run recorded `[]`; an empty result from page_scope_label
+        # must stay None so the ingest guard compares `[]` with `[]`.
+        return JobSubmitRequest(
+            input_path=source_path,
+            output_path=str(output_path),
+            target_lang=target_lang,
+            source_lang=source_lang,
+            profile=str(profile),
+            draft_model=snapshot.get("draft_model"),
+            repair_model=snapshot.get("repair_model"),
+            preset=preset,
+            pages=pages,
+            start_chapter=start_chapter,
+            max_chapters=max_chapters,
+            dry_run=bool(identity.get("mock_run", False)),
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This job's ledger has metadata that cannot be turned into a safe "
+                f"resume request ({exc}). Resubmit the source document instead."
+            ),
+        ) from exc
+
+
+async def _restore_resumable_record(
+    job_id: str,
+    *,
+    db_path: Path,
+    manager: Any,
+    config: Any,
+    default_output_dir: Path,
+) -> Any:
+    """Restore a failed/cancelled ledger job into the in-memory manager.
+
+    This is the restart path for embedded mode. The ledger is the durable source
+    of truth, while the manager only tracks jobs this process started. A live
+    writer lease is a hard conflict: another process (or a still-unwinding task)
+    owns the ledger, and restoring it here would create a second writer.
+    """
+    if not db_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job not found: {job_id}",
+        )
+
+    def _read() -> tuple[str, dict[str, Any], dict[str, Any] | None]:
+        with SQLiteJobLedger(db_path, read_only=True) as ledger:
+            snapshot = ledger.get_job_snapshot(job_id)
+            if snapshot is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Job not found: {job_id}",
+                )
+            stored_request = ledger.get_job_metadata_value(job_id, "submitted_request")
+            metadata = {
+                "source_path": snapshot.get("source_path"),
+                "target_lang": snapshot.get("target_lang"),
+                "source_lang": ledger.get_job_metadata_value(job_id, "source_lang"),
+                "genre_profile": ledger.get_job_metadata_value(job_id, "genre_profile"),
+                "run_identity": ledger.get_job_metadata_value(job_id, "run_identity"),
+                "config_snapshot": ledger.get_job_metadata_value(job_id, "config_snapshot"),
+                "chapter_window": ledger.get_job_metadata_value(job_id, "chapter_window"),
+                "selected_pages": ledger.get_job_metadata_value(job_id, "selected_pages"),
+                "output_file": ledger.get_job_metadata_value(job_id, "output_file"),
+            }
+            return (
+                str(snapshot["status"]),
+                metadata,
+                (stored_request if isinstance(stored_request, dict) else None),
+            )
+
+    try:
+        stored_status, metadata, stored_request = await asyncio.to_thread(_read)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Could not read ledger for resume of %s: %s", job_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job not found: {job_id}",
+        ) from exc
+
+    if stored_status == JobStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Job is {stored_status}; only a failed or cancelled job can resume.",
+        )
+    if stored_status not in (JobStatus.FAILED, JobStatus.CANCELLED, "initialized"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Job is {stored_status}; only a failed or cancelled job can resume.",
+        )
+
+    holder = await asyncio.to_thread(LedgerWriterLock.lease_holder, db_path, job_id)
+    if holder is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Job {job_id} is still held by a live writer (pid {holder}); "
+                "wait for it to finish before resuming."
+            ),
+        )
+
+    if stored_request is not None:
+        try:
+            request = JobSubmitRequest.model_validate(stored_request)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Job {job_id}'s saved request is invalid ({exc}); "
+                    "resubmit the source document instead."
+                ),
+            ) from exc
+        request = request.model_copy(update={"job_id": job_id, "fresh": False})
+    else:
+        request = _reconstruct_resume_request(metadata, default_output_dir=default_output_dir)
+        request = request.model_copy(update={"job_id": job_id, "fresh": False})
+
+    try:
+        resolve_secure_path(request.input_path, must_exist=True, config=config)
+    except HTTPException as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "The job's source document is no longer readable by this server "
+                f"({exc.detail}). Re-upload or resubmit the source document."
+            ),
+        ) from exc
+    if request.output_path:
+        try:
+            resolve_secure_path(request.output_path, must_exist=False, config=config)
+        except HTTPException as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "The job's recorded output path is no longer allowed by this "
+                    f"server's sandbox ({exc.detail}). Resubmit it with a valid output path."
+                ),
+            ) from exc
+    if request.glossary:
+        try:
+            resolve_secure_path(request.glossary, must_exist=True, config=config)
+        except HTTPException as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "The job's recorded glossary is no longer readable by this "
+                    f"server ({exc.detail}). Restore it or resubmit the job."
+                ),
+            ) from exc
+
+    record = await asyncio.to_thread(manager.create_job, request, job_id=job_id)
+    record.status = JobStatus.FAILED if stored_status == "initialized" else stored_status
+    record.error = None
+    record.progress = ProgressSnapshot()
+    return record
 
 
 def _ledger_is_rehearsal(ledger: Any, job_id: str) -> bool:
@@ -115,6 +336,31 @@ def _progress_from_ledger(db_dir: Path, job_id: str) -> dict[str, Any] | None:
             ).model_dump()
     except Exception:  # a broken ledger must not break /status
         return None
+
+
+def _persist_accepted_placeholder(
+    db_dir: Path,
+    job_id: str,
+    source_path: str,
+    target_lang: str,
+    title: str,
+    submitted_request: dict[str, Any] | None = None,
+) -> None:
+    """Create the accepted-job row under the same single-writer guard as a run."""
+    db_path = db_dir / f"{job_id}.sqlite"
+    lock = LedgerWriterLock(db_path, job_id)
+    lock.acquire()
+    try:
+        with SQLiteJobLedger(db_path) as ledger:
+            ledger.init_job_placeholder(
+                job_id,
+                source_path,
+                target_lang,
+                title=title,
+                submitted_request=submitted_request,
+            )
+    finally:
+        lock.release()
 
 
 #: The console's built index.html: the SPA shell the browser-navigation branch
@@ -526,6 +772,30 @@ def register_job_routes(
                 detail=str(exc),
             ) from exc
 
+        # Persist the accepted job before starting its task. Ingest writes the
+        # real manifest later; until then this row is what lets a restarted
+        # server answer /status with a terminal explanation instead of 404.
+        try:
+            await asyncio.to_thread(
+                _persist_accepted_placeholder,
+                app_config.db_dir,
+                record.job_id,
+                str(resolved_in),
+                safe_req.target_lang,
+                resolved_in.stem,
+                safe_req.model_copy(update={"job_id": record.job_id}).model_dump(mode="json"),
+            )
+        except Exception as exc:
+            manager.jobs.pop(record.job_id, None)
+            logger.exception("Could not persist accepted job %s: %s", record.job_id, exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "Could not persist the accepted job; the task was not started. "
+                    "Check the ledger directory and server logs."
+                ),
+            ) from exc
+
         # ``scope.config``, not the boot snapshot: the worker must translate with
         # the provider the operator just saved, not the one that existed when
         # the server started.
@@ -568,11 +838,13 @@ def register_job_routes(
                 overrides[job_id] = {
                     "status": record.status,
                     "total_blocks": progress.total_blocks,
+                    "drafted_blocks": progress.drafted_blocks,
                     "completed_blocks": progress.completed_blocks,
                     "failed_blocks": progress.failed_blocks,
                     "needs_human_blocks": progress.needs_human_blocks,
                     "progress_percent": progress.progress_percent,
                     "estimated_cost_usd": progress.estimated_cost_usd,
+                    "last_error": record.error,
                 }
             return overrides
 
@@ -687,12 +959,10 @@ def register_job_routes(
         """Re-run a failed/cancelled job from its ledger checkpoints (PRD §4.2.4).
 
         The pipeline resumes from the blocks still pending in the ledger, so no
-        finished segment is re-translated. Resume reuses the *original* request
-        (kept on the in-memory record), which keeps the run-identity guard happy
-        — a reconstructed request would silently drop knobs and could be refused
-        as a different profile/engine. That makes this a same-session recovery
-        (the network-drop case); a job whose record is gone after a restart must
-        be resubmitted instead.
+        finished segment is re-translated. The request is recovered from the
+        ledger when this process no longer has an in-memory record (the normal
+        case after a restart). New ledgers store the exact accepted request;
+        older ledgers are reconstructed from the run metadata they do carry.
         """
         valid_id = validate_job_id(job_id)
         if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):
@@ -707,12 +977,13 @@ def register_job_routes(
             )
         record = manager.get_job(valid_id)
         if record is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=(
-                    f"Job {valid_id} is not tracked by this server session; "
-                    "resubmit it to resume from its ledger."
-                ),
+            default_out_dir = ensure_private_dir(_managed_dir("outputs") / valid_id)
+            record = await _restore_resumable_record(
+                valid_id,
+                db_path=_job_db_path(valid_id),
+                manager=manager,
+                config=scope.config,
+                default_output_dir=default_out_dir,
             )
         if record.status not in (JobStatus.FAILED, JobStatus.CANCELLED):
             raise HTTPException(
@@ -738,20 +1009,14 @@ def register_job_routes(
         # before the flip, like the capacity check above.
         if record.request.output_path:
             claimed = Path(record.request.output_path).resolve()
-            for other in manager.jobs.values():
-                if other.job_id == valid_id or other.status in (
-                    JobStatus.FAILED,
-                    JobStatus.CANCELLED,
-                ):
-                    continue
-                if (
-                    other.request.output_path
-                    and Path(other.request.output_path).resolve() == claimed
-                ):
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail=f"output_path already claimed by live job {other.job_id}",
-                    )
+            claimant = await asyncio.to_thread(
+                output_path_claimant, manager, job_queue, valid_id, claimed
+            )
+            if claimant is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"output_path already claimed by live job {claimant}",
+                )
 
         # Never re-fresh (that would discard the checkpoints) and clear the
         # previous failure so the record restarts clean.
@@ -1051,6 +1316,13 @@ def register_job_routes(
                         )
                         status_value = str(snap["status"])
                         error_note: str | None = None
+                        stored_error = ledger.get_job_metadata_value(valid_id, "last_error")
+                        if (
+                            status_value in TERMINAL_JOB_STATUSES
+                            and isinstance(stored_error, str)
+                            and stored_error.strip()
+                        ):
+                            error_note = stored_error
                         if job_queue is None and status_value not in TERMINAL_JOB_STATUSES:
                             # Embedded mode has no durable worker and no startup
                             # reconcile, so a row a crash left mid-run will never
@@ -1094,10 +1366,11 @@ def register_job_routes(
                                 holder = LedgerWriterLock.lease_holder(db_path, valid_id)
                                 if holder is None:
                                     status_value = JobStatus.FAILED
-                                    error_note = (
-                                        "Job was interrupted before it reached a terminal "
-                                        "state (the server restarted); re-run it to resume."
-                                    )
+                                    if error_note is None:
+                                        error_note = (
+                                            "Job was interrupted before it reached a terminal "
+                                            "state (the server restarted); re-run it to resume."
+                                        )
                                 else:
                                     status_value = JobStatus.RUNNING
                         return JobStatusResponse(

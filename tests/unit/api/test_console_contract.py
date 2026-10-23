@@ -1993,6 +1993,7 @@ def test_the_terminal_stream_frame_carries_the_final_counters() -> None:
         None,
         counters={
             "total_blocks": 105,
+            "drafted_blocks": 0,
             "completed_blocks": 90,
             "skipped_blocks": 154,
             "needs_human_blocks": 15,
@@ -2003,6 +2004,7 @@ def test_the_terminal_stream_frame_carries_the_final_counters() -> None:
     payload = json.loads(frame.split("data: ", 1)[1].strip())
     assert payload["status"] == "completed"
     assert payload["total_blocks"] == 105
+    assert payload["drafted_blocks"] == 0
     assert payload["completed_blocks"] == 90
     assert payload["skipped_blocks"] == 154
     assert payload["needs_human_blocks"] == 15
@@ -2034,6 +2036,7 @@ def test_the_panel_renders_failures_and_the_human_queue() -> None:
 
     # And the zero-fallback that produced "0/0 blocks" is gone from the log line.
     assert "frame.completed_blocks ?? completedRef.current" in source
+    assert "frame.drafted_blocks ?? draftedRef.current" in source
     assert "${frame.completed_blocks ?? 0}/${frame.total_blocks ?? 0}" not in source
 
 

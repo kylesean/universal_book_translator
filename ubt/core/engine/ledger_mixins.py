@@ -13,6 +13,7 @@ import json
 import sqlite3
 from collections.abc import Iterable
 from contextlib import suppress
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from ubt.core.engine.ledger_base import (
@@ -122,14 +123,142 @@ def merge_usage_totals(
 class LedgerJobsMixin(_LedgerHost):
     """Job lifecycle, metadata, usage accounting and reporting reads."""
 
+    def init_job_placeholder(
+        self,
+        job_id: str,
+        source_path: str,
+        target_lang: str,
+        title: str | None = None,
+        submitted_request: dict[str, Any] | None = None,
+    ) -> None:
+        """Persist an accepted job before its manifest is available.
+
+        The API accepts a job and only then starts the pipeline. A restart in
+        that window used to erase the only record of the job (the in-memory
+        manager), so ``/status`` returned 404 even though the client held a
+        valid accepted id. This placeholder is replaced by
+        :meth:`init_job_from_manifest` once ingest knows the real document.
+
+        ``submitted_request`` is the resolved, non-sensitive request snapshot
+        the API accepted. It is what lets ``/resume`` recreate the in-memory
+        record after a process restart without guessing model, profile or
+        output choices. It deliberately excludes provider credentials and
+        endpoints; those remain operator configuration.
+        """
+        self._job_scope = job_id
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            row = conn.execute(
+                "SELECT metadata_json FROM job_meta WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            if row is not None:
+                try:
+                    meta = json.loads(row["metadata_json"] or "{}")
+                except (TypeError, ValueError):
+                    meta = {}
+                if isinstance(meta, dict) and meta.get("accepted_placeholder") is True:
+                    if submitted_request is not None:
+                        meta["submitted_request"] = submitted_request
+                    conn.execute(
+                        """
+                        UPDATE job_meta
+                           SET source_path = ?, target_lang = ?, metadata_json = ?,
+                               updated_at = CURRENT_TIMESTAMP
+                         WHERE job_id = ?
+                        """,
+                        (
+                            source_path,
+                            target_lang,
+                            json.dumps(meta, ensure_ascii=False),
+                            job_id,
+                        ),
+                    )
+                conn.execute("COMMIT;")
+                return
+
+            metadata: dict[str, Any] = {
+                "title": title or Path(source_path).name,
+                "accepted_placeholder": True,
+            }
+            if submitted_request is not None:
+                metadata["submitted_request"] = submitted_request
+            conn.execute(
+                """
+                INSERT INTO job_meta (
+                    job_id, doc_id, source_path, target_lang, total_blocks, status, metadata_json
+                ) VALUES (?, ?, ?, ?, 0, 'initialized', ?)
+                """,
+                (
+                    job_id,
+                    job_id,
+                    source_path,
+                    target_lang,
+                    json.dumps(metadata, ensure_ascii=False),
+                ),
+            )
+            conn.execute("COMMIT;")
+
     def init_job_from_manifest(self, job_id: str, manifest: BookManifest) -> None:
         """Atomically initialize job metadata from a lightweight BookManifest."""
         self._job_scope = job_id
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             cursor = conn.cursor()
-            cursor.execute("SELECT job_id FROM job_meta WHERE job_id = ?", (job_id,))
-            if cursor.fetchone() is not None:
+            cursor.execute("SELECT metadata_json FROM job_meta WHERE job_id = ?", (job_id,))
+            existing = cursor.fetchone()
+            if existing is not None:
+                try:
+                    existing_meta = json.loads(existing["metadata_json"] or "{}")
+                except (TypeError, ValueError):
+                    existing_meta = {}
+                if not (
+                    isinstance(existing_meta, dict)
+                    and existing_meta.get("accepted_placeholder") is True
+                ):
+                    conn.execute("COMMIT;")
+                    return
+                metadata = {
+                    "title": manifest.title,
+                    "source_lang": manifest.source_lang,
+                    "chapters": [c.model_dump() for c in manifest.chapters],
+                    **manifest.run.to_metadata_dict(),
+                    **manifest.metadata,
+                }
+                # The accepted request is intentionally not part of the
+                # manifest. Preserve it across the placeholder replacement so
+                # a restart after ingest can still resume with the exact
+                # operator choices instead of a reconstructed approximation.
+                submitted_request = existing_meta.get("submitted_request")
+                if isinstance(submitted_request, dict):
+                    metadata["submitted_request"] = submitted_request
+                # Keep block-derived counts and metadata written by a run that
+                # already progressed. Replacing the accepted placeholder is an
+                # idempotent ingest step, not a fresh run: zeroing these here
+                # would make a crash-rebuilt ingest report "0 blocks" while the
+                # translated rows (and their terminal states) are still present.
+                current_total = int(
+                    conn.execute(
+                        "SELECT total_blocks FROM job_meta WHERE job_id = ?", (job_id,)
+                    ).fetchone()["total_blocks"]
+                    or 0
+                )
+                cursor.execute(
+                    """
+                    UPDATE job_meta
+                       SET doc_id = ?, source_path = ?, target_lang = ?,
+                           total_blocks = ?, status = 'initialized', metadata_json = ?,
+                           updated_at = CURRENT_TIMESTAMP
+                     WHERE job_id = ?
+                    """,
+                    (
+                        manifest.doc_id,
+                        manifest.source_path,
+                        manifest.target_lang,
+                        current_total,
+                        json.dumps(metadata, ensure_ascii=False),
+                        job_id,
+                    ),
+                )
                 conn.execute("COMMIT;")
                 return
 

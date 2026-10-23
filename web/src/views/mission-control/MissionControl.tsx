@@ -43,6 +43,22 @@ interface LogEntry {
   level: LogLevel
 }
 
+/**
+ * Live progress from the shared counters.
+ *
+ * ``progress_percent`` only counts blocks with a final disposition, so the
+ * draft phase reads 0% for its whole duration. ``drafted_blocks`` is work that
+ * has started; use it until finalization overtakes it, and reserve 100% for a
+ * genuinely finalized run.
+ */
+const liveProgressPct = (finalized: number, drafted: number, total: number): number => {
+  if (total <= 0) return 0
+  const finalizedWork = Math.max(0, Math.min(total, finalized))
+  const draftedWork = Math.max(0, Math.min(total, drafted))
+  if (finalizedWork >= total) return 100
+  return Math.min(99.9, Math.round((Math.max(finalizedWork, draftedWork) / total) * 1000) / 10)
+}
+
 //: Job status as a label. Both the header badge and the queue rows rendered
 //: ``status.toUpperCase()``, so an operator on the Chinese console read
 //: "COMPLETED" over a fully Chinese page. An unknown status falls back to its
@@ -130,6 +146,10 @@ export function MissionControl() {
   const [stage, setStage] = useState<PipelineStage | null>(null)
   const [progressPct, setProgressPct] = useState<number>(0)
   const [completedBlocks, setCompletedBlocks] = useState<number>(0)
+  // Drafted blocks are live work, not finished work. They make the bar move
+  // during the long draft stage while ``completed_blocks`` correctly stays at
+  // zero until quality/repair reaches a terminal disposition.
+  const [draftedBlocks, setDraftedBlocks] = useState<number>(0)
   const [totalBlocks, setTotalBlocks] = useState<number>(0)
   const [costUsd, setCostUsd] = useState<number>(0)
   const [avgQe, setAvgQe] = useState<number>(0)
@@ -150,13 +170,28 @@ export function MissionControl() {
   // frame. Refs are the standard way out: the callback stays stable, the value
   // is always current.
   const completedRef = useRef(0)
+  const draftedRef = useRef(0)
   const totalRef = useRef(0)
   const skippedRef = useRef(0)
   const failedRef = useRef(0)
+  // Live progress must not step backwards when a drafted block becomes
+  // ``repair_pending`` (the finalized numerator can lag the drafted one).
+  // Reset on a job or stream-generation change, never on every frame.
+  const monotonicProgressRef = useRef(0)
   // The engine sends 0.0 as the "nothing scored" sentinel under the heuristic
   // QE engine; a measured average is never exactly 0 in practice (defect bands
   // floor at 0.30), so 0 renders as "not measured" instead of a failing score.
   const qeMeasured = avgQe > 0
+  // A translation job spends most of its wall clock drafting. Counting only
+  // finalized blocks left the progress bar at 0.0% for that entire phase and
+  // then jumped to the quality gate's completion percentage in one frame.
+  const finalizedBlocks = Math.max(
+    completedBlocks + failedBlocks + needsHumanBlocks,
+    totalBlocks > 0 && progressPct > 0 ? Math.round((progressPct / 100) * totalBlocks) : 0
+  )
+  const detailLivePct = liveProgressPct(finalizedBlocks, draftedBlocks, totalBlocks)
+  // oxlint-disable-next-line react/refs
+  const displayedProgressPct = Math.max(detailLivePct, monotonicProgressRef.current)
   // The run is over, so its live log can no longer be replayed.
   const isTerminal =
     statusStr === 'completed' || statusStr === 'failed' || statusStr === 'cancelled'
@@ -234,6 +269,8 @@ export function MissionControl() {
     // oxlint-disable-next-line react/set-state-in-effect
     setCompletedBlocks(0)
     // oxlint-disable-next-line react/set-state-in-effect
+    setDraftedBlocks(0)
+    // oxlint-disable-next-line react/set-state-in-effect
     setTotalBlocks(0)
     // oxlint-disable-next-line react/set-state-in-effect
     setSkippedBlocks(0)
@@ -254,11 +291,19 @@ export function MissionControl() {
     // The mirror refs feed the log line; they are not React state, so the
     // reset above cannot reach them.
     completedRef.current = 0
+    draftedRef.current = 0
     totalRef.current = 0
     skippedRef.current = 0
     failedRef.current = 0
+    monotonicProgressRef.current = 0
 
     let isMounted = true
+    // A 404 is terminal: the id does not exist in this server's queue, memory
+    // or ledgers. Stop both pollers instead of retrying until the operator
+    // leaves the page. The status request and the SSE error can race, so the
+    // flag is set before either cleanup runs; the interval and subscription
+    // are also cleared by the unmount cleanup below.
+    let missing = false
     const applyStatus = (res: Record<string, unknown>) => {
       if (res.status) setStatusStr(String(res.status))
       if (typeof res.stage === 'string') setStage(res.stage as PipelineStage)
@@ -266,6 +311,10 @@ export function MissionControl() {
       if (typeof res.completed_blocks === 'number') {
         setCompletedBlocks(res.completed_blocks)
         completedRef.current = res.completed_blocks
+      }
+      if (typeof res.drafted_blocks === 'number') {
+        setDraftedBlocks(res.drafted_blocks)
+        draftedRef.current = res.drafted_blocks
       }
       if (typeof res.total_blocks === 'number') {
         setTotalBlocks(res.total_blocks)
@@ -302,7 +351,17 @@ export function MissionControl() {
       }
     }
 
+    const stopForMissingJob = () => {
+      if (missing) return
+      missing = true
+      clearInterval(timer)
+      unsubscribe()
+      setIsLiveStreaming(false)
+      setStatusMissing(true)
+    }
+
     const fetchStatus = async () => {
+      if (missing) return
       try {
         const res = await getJobStatus(currentJobId)
         if (isMounted) {
@@ -313,12 +372,11 @@ export function MissionControl() {
         // retrying every 3 s forever is pointless and the "running" default is
         // a lie. Say so once and stop pretending.
         if (isMounted && err instanceof ApiError && err.status === 404) {
-          setStatusMissing(true)
+          stopForMissingJob()
         }
       }
     }
 
-    fetchStatus()
     const timer = setInterval(fetchStatus, 3000)
 
     const unsubscribe = subscribeJobProgress(
@@ -329,10 +387,12 @@ export function MissionControl() {
         if (frame.stage) setStage(frame.stage)
         if (typeof frame.progress_percent === 'number') setProgressPct(frame.progress_percent)
         if (typeof frame.completed_blocks === 'number') setCompletedBlocks(frame.completed_blocks)
+        if (typeof frame.drafted_blocks === 'number') setDraftedBlocks(frame.drafted_blocks)
         if (typeof frame.total_blocks === 'number') setTotalBlocks(frame.total_blocks)
         if (typeof frame.estimated_cost_usd === 'number') setCostUsd(frame.estimated_cost_usd)
         if (typeof frame.current_avg_qe === 'number') setAvgQe(frame.current_avg_qe)
         if (typeof frame.completed_blocks === 'number') completedRef.current = frame.completed_blocks
+        if (typeof frame.drafted_blocks === 'number') draftedRef.current = frame.drafted_blocks
         if (typeof frame.total_blocks === 'number') totalRef.current = frame.total_blocks
         if (typeof frame.skipped_blocks === 'number') {
           setSkippedBlocks(frame.skipped_blocks)
@@ -357,7 +417,10 @@ export function MissionControl() {
               'QE n/a (heuristic)'
         // A terminal frame now carries its own counters; when it does not, keep
         // the last known ones instead of printing 0/0.
-        const done = frame.completed_blocks ?? completedRef.current
+        const done = Math.max(
+          frame.completed_blocks ?? completedRef.current,
+          frame.drafted_blocks ?? draftedRef.current
+        )
         const total = frame.total_blocks ?? totalRef.current
         const skippedPart = skippedRef.current > 0 ? ` (+${skippedRef.current} skipped)` : ''
         const failPart = (frame.failed_blocks ?? failedRef.current) > 0
@@ -371,11 +434,22 @@ export function MissionControl() {
             : `${frame.status ?? 'running'} · ${counters}`
         appendLog([{ text, level }])
       },
-      undefined,
+      () => {
+        // EventSource does not expose the HTTP status. Only stop when the
+        // status poll has already proved the job absent; a transient stream
+        // failure on a live job must still use the API client's backoff.
+        if (missing) {
+          unsubscribe()
+          setIsLiveStreaming(false)
+        }
+      },
       (connected: boolean) => {
-        if (isMounted) setIsLiveStreaming(connected)
+        if (isMounted && !missing) setIsLiveStreaming(connected)
       }
     )
+
+    // After the subscription exists, so a 404 can tear it down immediately.
+    void fetchStatus()
 
     return () => {
       isMounted = false
@@ -389,6 +463,13 @@ export function MissionControl() {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
     }
   }, [logs, autoScroll])
+
+  useEffect(() => {
+    monotonicProgressRef.current = Math.max(
+      monotonicProgressRef.current,
+      detailLivePct
+    )
+  }, [detailLivePct])
 
   const handleCancel = async () => {
     setPendingCancel(false)
@@ -780,7 +861,19 @@ export function MissionControl() {
                           </div>
                         </td>
                         <td className="py-2 px-3 font-mono text-[var(--ink-primary)]">
-                          {job.progress_percent.toFixed(1)}%
+                          {liveProgressPct(
+                            Math.max(
+                              job.completed_blocks +
+                                job.failed_blocks +
+                                job.needs_human_blocks,
+                              job.progress_percent > 0
+                                ? Math.round((job.progress_percent / 100) * job.total_blocks)
+                                : 0
+                            ),
+                            job.drafted_blocks,
+                            job.total_blocks
+                          ).toFixed(1)}
+                          %
                         </td>
                         <td className="py-2 px-3 font-mono text-[#b45309]">
                           {job.estimated_cost_usd === null || job.estimated_cost_usd === undefined
@@ -859,7 +952,20 @@ export function MissionControl() {
                     </div>
                     <div className="flex items-center justify-between text-xs font-mono">
                       <span className="text-[var(--ink-primary)] font-medium">
-                        {t.mission.colProgress}: {job.progress_percent.toFixed(1)}%
+                        {t.mission.colProgress}:{' '}
+                        {liveProgressPct(
+                          Math.max(
+                            job.completed_blocks +
+                              job.failed_blocks +
+                              job.needs_human_blocks,
+                            job.progress_percent > 0
+                              ? Math.round((job.progress_percent / 100) * job.total_blocks)
+                              : 0
+                          ),
+                          job.drafted_blocks,
+                          job.total_blocks
+                        ).toFixed(1)}
+                        %
                       </span>
                       <span className="text-[#b45309]">
                         {job.estimated_cost_usd === null || job.estimated_cost_usd === undefined
@@ -972,12 +1078,12 @@ export function MissionControl() {
         <div className="p-3 sm:p-4 border-r border-b md:border-b-0 border-[var(--paper-border)]">
           <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.progress}</div>
           <div className="text-xl font-bold font-mono text-[var(--ink-primary)] mt-0.5">
-            {progressPct.toFixed(1)}%
+            {displayedProgressPct.toFixed(1)}%
           </div>
           <div className="w-full bg-[var(--paper-subsurface)] h-1.5 rounded-full mt-2 overflow-hidden border border-[var(--paper-border)]">
             <div
               className="bg-[var(--ink-primary)] h-full transition-all duration-200"
-              style={{ width: `${Math.min(100, Math.max(0, progressPct))}%` }}
+              style={{ width: `${Math.min(100, Math.max(0, displayedProgressPct))}%` }}
             />
           </div>
         </div>

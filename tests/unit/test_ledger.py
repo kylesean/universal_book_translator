@@ -177,6 +177,78 @@ def test_init_job_from_manifest_is_idempotent(ledger: SQLiteJobLedger) -> None:
     assert ledger.get_job_metadata_value("job", "marker") == "kept"
 
 
+def test_a_manifest_replaces_an_accepted_placeholder(ledger: SQLiteJobLedger) -> None:
+    ledger.init_job_placeholder(
+        "job",
+        "/uploads/book.pdf",
+        "zh",
+        title="Accepted",
+        submitted_request={"input_path": "/uploads/book.pdf", "job_id": "job"},
+    )
+    assert ledger.get_job_metadata_value("job", "accepted_placeholder") is True
+    assert ledger.get_job_metadata_value("job", "submitted_request") == {
+        "input_path": "/uploads/book.pdf",
+        "job_id": "job",
+    }
+    ledger.append_chapter(
+        "job",
+        _chapter("ch1", [_block("ch1#1", status=BlockStatus.MTQE_PASSED, target_text="译")]),
+    )
+
+    manifest = BookManifest(
+        doc_id="doc-real",
+        title="Real title",
+        source_path="/uploads/book.pdf",
+        target_lang="ja",
+    )
+    ledger.init_job_from_manifest("job", manifest)
+
+    snapshot = ledger.get_job_snapshot("job")
+    assert snapshot is not None
+    assert snapshot["doc_id"] == "doc-real"
+    assert snapshot["target_lang"] == "ja"
+    assert ledger.get_job_metadata_value("job", "title") == "Real title"
+    assert ledger.get_job_metadata_value("job", "accepted_placeholder") is None
+    assert ledger.get_job_metadata_value("job", "submitted_request") == {
+        "input_path": "/uploads/book.pdf",
+        "job_id": "job",
+    }
+    assert snapshot["total"] == 1
+    assert snapshot["completed"] == 1
+
+
+def test_a_manifest_does_not_replace_a_real_job_row(ledger: SQLiteJobLedger) -> None:
+    _init(ledger, doc_id="real-doc", target_lang="ja")
+    ledger.set_job_metadata_value("job", "marker", "kept")
+    _init(ledger, doc_id="other-doc", target_lang="fr")
+
+    snapshot = ledger.get_job_snapshot("job")
+    assert snapshot is not None
+    assert snapshot["doc_id"] == "real-doc"
+    assert snapshot["target_lang"] == "ja"
+    assert ledger.get_job_metadata_value("job", "marker") == "kept"
+
+
+def test_a_placeholder_round_trips_the_submitted_request(ledger: SQLiteJobLedger) -> None:
+    request = {
+        "input_path": "/uploads/book.pdf",
+        "output_path": "/outputs/book_zh.pdf",
+        "target_lang": "zh",
+        "profile": "textbook",
+        "job_id": "job",
+    }
+
+    ledger.init_job_placeholder(
+        "job", "/uploads/book.pdf", "zh", title="Accepted", submitted_request=request
+    )
+    ledger.init_job_placeholder(
+        "job", "/uploads/book.pdf", "zh", title="Accepted", submitted_request=request
+    )
+
+    assert ledger.get_job_metadata_value("job", "submitted_request") == request
+    assert ledger.get_job_metadata_value("job", "title") == "Accepted"
+
+
 def test_get_job_snapshot_is_none_for_an_unknown_job(ledger: SQLiteJobLedger) -> None:
     assert ledger.get_job_snapshot("ghost") is None
     assert ledger.get_job_status("ghost") is None

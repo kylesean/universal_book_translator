@@ -16,7 +16,7 @@ import time
 from collections.abc import Iterable
 from pathlib import Path
 
-from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobQueue
+from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobQueue, JobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,50 @@ def staged_uploads_in_use(job_queue: JobQueue | None) -> set[str]:
     return in_use
 
 
+def resumable_uploads(db_dir: Path) -> set[str]:
+    """Resolved source paths of failed/cancelled embedded ledgers.
+
+    The startup upload sweep only knew about live queue rows. In embedded mode
+    a failed job's staged source is exactly what ``/resume`` needs, but after
+    the retention window the sweep deleted it, turning a resumable ledger into
+    an unrestorable one. The ledger is the durable record of that dependency.
+    """
+    from ubt.api.job_catalog import is_job_ledger_stem, summarize_job
+
+    in_use: set[str] = set()
+    if not db_dir.is_dir():
+        return in_use
+    for db_path in db_dir.glob("*.sqlite"):
+        if not is_job_ledger_stem(db_path.stem):
+            continue
+        job_id = db_path.stem
+        # ``summarize_job`` verifies the file actually has a ``job_meta`` row
+        # for this id before opening it as a ledger, so service databases such
+        # as ``tm.sqlite``/``job_queue.sqlite`` are skipped safely.
+        summary = summarize_job(db_path)
+        if summary is None or summary.get("status") not in (
+            JobStatus.FAILED.value,
+            JobStatus.CANCELLED.value,
+        ):
+            continue
+        resolved = _resolved(_job_source_path(db_path, job_id))
+        if resolved:
+            in_use.add(resolved)
+    return in_use
+
+
+def _job_source_path(db_path: Path, job_id: str) -> str | None:
+    """Read a verified ledger's source path without re-stamping a service DB."""
+    from ubt.core.engine.ledger import SQLiteJobLedger
+
+    try:
+        with SQLiteJobLedger(db_path, read_only=True) as ledger:
+            return ledger.get_job_source_path(job_id)
+    except Exception as exc:
+        logger.debug("upload sweep: cannot read source from %s: %s", db_path, exc)
+        return None
+
+
 def prune_stale_uploads(
     uploads_dir: Path,
     *,
@@ -120,12 +164,16 @@ def reap_stale_uploads(
     *,
     max_age_days: float,
     job_queue: JobQueue | None = None,
+    db_dir: Path | None = None,
     now: float | None = None,
 ) -> int:
     """Prune the staging area, sparing every upload a live queue job still reads."""
+    keep = staged_uploads_in_use(job_queue)
+    if db_dir is not None:
+        keep |= resumable_uploads(db_dir)
     return prune_stale_uploads(
         uploads_dir,
         max_age_days=max_age_days,
-        keep=staged_uploads_in_use(job_queue),
+        keep=keep,
         now=now,
     )

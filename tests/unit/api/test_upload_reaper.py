@@ -21,9 +21,15 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from ubt.api.app import create_app
-from ubt.api.uploads import prune_stale_uploads, reap_stale_uploads, staged_uploads_in_use
+from ubt.api.uploads import (
+    prune_stale_uploads,
+    reap_stale_uploads,
+    resumable_uploads,
+    staged_uploads_in_use,
+)
 from ubt.core.config import UBTConfig
 from ubt.core.engine.job_queue import JobQueue, JobStatus
+from ubt.core.engine.ledger import SQLiteJobLedger
 
 pytestmark = pytest.mark.fast
 
@@ -187,6 +193,55 @@ def test_embedded_mode_protects_nothing(tmp_path: Path) -> None:
     # Without a queue there is no durable record of a pending run to consult,
     # and the sweep must not invent one.
     assert staged_uploads_in_use(None) == set()
+
+
+def test_a_failed_embedded_job_protects_its_source_for_resume(tmp_path: Path) -> None:
+    """The ledger, not the in-memory manager, names what a resume still needs."""
+    config = _config(tmp_path)
+    uploads = config.db_dir / "uploads"
+    resumable = _stage(uploads, "resumable.pdf", age_days=30)
+    orphan = _stage(uploads, "orphan.pdf", age_days=30)
+    job_id = "embedded-resume"
+    with SQLiteJobLedger(config.db_dir / f"{job_id}.sqlite") as ledger:
+        ledger.init_job_placeholder(job_id, str(resumable), "zh")
+        ledger.finalize_job(job_id, status=JobStatus.FAILED)
+
+    assert resumable_uploads(config.db_dir) == {str(resumable.resolve())}
+    assert reap_stale_uploads(uploads, max_age_days=_WINDOW_DAYS, db_dir=config.db_dir) == 1
+    assert resumable.exists()
+    assert not orphan.exists()
+
+
+def test_a_completed_embedded_job_does_not_pin_its_source(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    uploads = config.db_dir / "uploads"
+    done = _stage(uploads, "done.pdf", age_days=30)
+    job_id = "embedded-done"
+    with SQLiteJobLedger(config.db_dir / f"{job_id}.sqlite") as ledger:
+        ledger.init_job_placeholder(job_id, str(done), "zh")
+        ledger.finalize_job(job_id, status=JobStatus.COMPLETED)
+
+    assert resumable_uploads(config.db_dir) == set()
+    assert reap_stale_uploads(uploads, max_age_days=_WINDOW_DAYS, db_dir=config.db_dir) == 1
+    assert not done.exists()
+
+
+def test_a_service_database_is_not_mistaken_for_a_job_ledger(tmp_path: Path) -> None:
+    """``tm.sqlite``/``job_queue.sqlite`` live beside ledgers but have no job_meta."""
+    import sqlite3
+
+    config = _config(tmp_path)
+    config.db_dir.mkdir(parents=True)
+    service_db = config.db_dir / "tm.sqlite"
+    with sqlite3.connect(service_db) as conn:
+        conn.execute("CREATE TABLE translation_memory (id INTEGER PRIMARY KEY)")
+
+    assert resumable_uploads(config.db_dir) == set()
+    with sqlite3.connect(service_db) as conn:
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    assert tables == {"translation_memory"}
 
 
 def test_in_use_paths_are_resolved_not_spelled(tmp_path: Path) -> None:

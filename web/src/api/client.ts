@@ -96,6 +96,9 @@ export interface ProgressStreamFrame {
   message?: string | null
   progress_percent?: number
   total_blocks?: number
+  /** Blocks drafted but not yet finalized. Shown as live translation work,
+   * distinct from ``completed_blocks`` so a draft is never read as delivered. */
+  drafted_blocks?: number
   /** Blocks the skip rule finished without translating them (images, list
    * markers, short headings). Excluded from total/completed. */
   skipped_blocks?: number

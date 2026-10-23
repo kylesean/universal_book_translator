@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.engine.progress import live_progress_percent
 from ubt.core.job_options import JOB_ID_MAX_LEN, JOB_ID_RE
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,12 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
         output_file = ledger.get_job_metadata_value(job_id, "output_file")
         identity = ledger.get_job_metadata_value(job_id, "run_identity")
         selected_pages = ledger.get_job_metadata_value(job_id, "selected_pages")
+        stored_status = str(snapshot["status"])
+        last_error = (
+            ledger.get_job_metadata_value(job_id, "last_error")
+            if stored_status in _TERMINAL_LEDGER_STATUSES
+            else None
+        )
     except Exception as exc:  # no job_meta table -> not a job ledger
         logger.debug("job catalog: %s is not a job ledger: %s", db_path, exc)
         return None
@@ -58,6 +65,7 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
         ledger.close()
 
     total = int(snapshot.get("total", 0) or 0)
+    drafted = int(snapshot.get("drafted", 0) or 0)
     completed = int(snapshot.get("completed", 0) or 0)
     failed = int(snapshot.get("failed", 0) or 0)
     needs_human = int(snapshot.get("needs_human", 0) or 0)
@@ -79,10 +87,11 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
             completed=completed,
         ),
         "total_blocks": total,
+        "drafted_blocks": drafted,
         "completed_blocks": completed,
         "failed_blocks": failed,
         "needs_human_blocks": needs_human,
-        "progress_percent": round(processed / total * 100, 1) if total else 0.0,
+        "progress_percent": live_progress_percent(processed, drafted, total),
         "estimated_cost_usd": float(cost) if isinstance(cost, (int, float)) else None,
         "created_at": snapshot.get("created_at"),
         "updated_at": snapshot.get("updated_at"),
@@ -93,6 +102,7 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
         # full run in the console's list.
         "rehearsal": bool(isinstance(identity, dict) and identity.get("mock_run")),
         "page_scope": page_scope_label(selected_pages),
+        "last_error": last_error if isinstance(last_error, str) else None,
     }
 
 
@@ -183,17 +193,23 @@ def summarize_queued_job(job: Any) -> dict[str, Any]:
         "file_name": Path(input_path).name,
         "target_lang": str(payload.get("target_lang") or ""),
         "status": job.status.value,
-        "total_blocks": 0,
-        "completed_blocks": 0,
-        "failed_blocks": 0,
-        "needs_human_blocks": 0,
-        "progress_percent": 0.0,
+        "total_blocks": int(progress.get("total_blocks", 0) or 0),
+        "drafted_blocks": int(progress.get("drafted_blocks", 0) or 0),
+        "completed_blocks": int(progress.get("completed_blocks", 0) or 0),
+        "failed_blocks": int(progress.get("failed_blocks", 0) or 0),
+        "needs_human_blocks": int(progress.get("needs_human_blocks", 0) or 0),
+        "progress_percent": live_progress_percent(
+            int(progress.get("processed_blocks", 0) or 0),
+            int(progress.get("drafted_blocks", 0) or 0),
+            int(progress.get("total_blocks", 0) or 0),
+        ),
         "estimated_cost_usd": None,
         "created_at": _isoformat(getattr(job, "enqueued_at", None)),
         "updated_at": _isoformat(getattr(job, "enqueued_at", None)),
         "has_output": bool(progress.get("output_file")),
         "rehearsal": bool(payload.get("dry_run", False)),
         "page_scope": page_scope_label(payload.get("pages")),
+        "last_error": getattr(job, "error", None),
     }
 
 

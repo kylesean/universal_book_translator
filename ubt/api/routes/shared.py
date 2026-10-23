@@ -165,6 +165,7 @@ def terminal_frame(
                 key: counters[key]
                 for key in (
                     "total_blocks",
+                    "drafted_blocks",
                     "completed_blocks",
                     "skipped_blocks",
                     "failed_blocks",

@@ -1090,7 +1090,7 @@
           "Jobs"
         ],
         "summary": "Resume Job",
-        "description": "Re-run a failed/cancelled job from its ledger checkpoints (PRD \u00a74.2.4).\n\nThe pipeline resumes from the blocks still pending in the ledger, so no\nfinished segment is re-translated. Resume reuses the *original* request\n(kept on the in-memory record), which keeps the run-identity guard happy\n\u2014 a reconstructed request would silently drop knobs and could be refused\nas a different profile/engine. That makes this a same-session recovery\n(the network-drop case); a job whose record is gone after a restart must\nbe resubmitted instead.",
+        "description": "Re-run a failed/cancelled job from its ledger checkpoints (PRD \u00a74.2.4).\n\nThe pipeline resumes from the blocks still pending in the ledger, so no\nfinished segment is re-translated. The request is recovered from the\nledger when this process no longer has an in-memory record (the normal\ncase after a restart). New ledgers store the exact accepted request;\nolder ledgers are reconstructed from the run metadata they do carry.",
         "operationId": "resume_job_jobs__job_id__resume_post",
         "parameters": [
           {
@@ -4386,6 +4386,11 @@
             "title": "Total Blocks",
             "default": 0
           },
+          "drafted_blocks": {
+            "type": "integer",
+            "title": "Drafted Blocks",
+            "default": 0
+          },
           "skipped_blocks": {
             "type": "integer",
             "title": "Skipped Blocks",
@@ -5042,6 +5047,11 @@
             "type": "integer",
             "title": "Total Blocks"
           },
+          "drafted_blocks": {
+            "type": "integer",
+            "title": "Drafted Blocks",
+            "default": 0
+          },
           "completed_blocks": {
             "type": "integer",
             "title": "Completed Blocks"
@@ -5110,6 +5120,17 @@
               }
             ],
             "title": "Page Scope"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
           }
         },
         "type": "object",

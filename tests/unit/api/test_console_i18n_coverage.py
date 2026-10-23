@@ -261,6 +261,14 @@ def test_the_mission_control_view_recovers_from_a_missing_job() -> None:
     assert "statusMissing" in view
     assert "err.status === 404" in view
     assert "t.mission.jobMissingTitle" in view
+    # A 404 is terminal. The status poll and the SSE client's own reconnect
+    # timer must both stop, or the page keeps requesting a job that cannot
+    # reappear until the operator navigates away.
+    assert "let missing = false" in view
+    assert "if (missing) return" in view
+    assert "clearInterval(timer)" in view
+    assert "unsubscribe()" in view
+    assert "if (isMounted && !missing) setIsLiveStreaming(connected)" in view
 
 
 def test_a_restarted_run_resubscribes_its_stream() -> None:

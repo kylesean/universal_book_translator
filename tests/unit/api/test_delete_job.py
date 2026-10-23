@@ -253,3 +253,19 @@ def test_status_reports_running_while_a_live_writer_holds_the_lease(tmp_path: Pa
     assert dead.status_code == 200
     assert dead.json()["status"] == JobStatus.FAILED.value, dead.json()
     assert "server restarted" in (dead.json()["error"] or "")
+
+
+def test_status_prefers_the_persisted_terminal_error(tmp_path: Path) -> None:
+    config = _seed(tmp_path, status=JobStatus.FAILED)
+    db_path = config.db_dir / f"{_JOB}.sqlite"
+    with SQLiteJobLedger(db_path) as ledger:
+        ledger.set_job_metadata_value(
+            _JOB, "last_error", "RuntimeError (see server logs; job_id=deletejob00001)"
+        )
+
+    client = TestClient(create_app(config))
+    response = client.get(f"/jobs/{_JOB}/status", headers=_AUTH)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == JobStatus.FAILED.value
+    assert response.json()["error"] == ("RuntimeError (see server logs; job_id=deletejob00001)")

@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.engine.progress import live_progress_percent
 
 pytestmark = pytest.mark.fast
 
@@ -112,3 +113,12 @@ def test_the_real_job_shape_matches_the_reported_workload(
     assert stats["needs_human"] == 15
     processed = stats["completed"] + stats["failed"] + stats["needs_human"]
     assert processed == 105, "every translatable block reached a disposition"
+
+
+def test_live_progress_uses_drafts_but_reserves_100_for_finalization() -> None:
+    assert live_progress_percent(0, 50, 100) == 50.0
+    assert live_progress_percent(20, 80, 100) == 80.0
+    assert live_progress_percent(80, 0, 100) == 80.0
+    assert live_progress_percent(100, 0, 100) == 100.0
+    assert live_progress_percent(0, 100, 100) == 99.9
+    assert live_progress_percent(0, 0, 0) == 0.0

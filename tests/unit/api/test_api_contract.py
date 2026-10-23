@@ -424,6 +424,157 @@ def test_resume_unknown_job_is_404(authed: TestClient) -> None:
     assert authed.post("/jobs/nosuchjob00/resume", headers=_AUTH).status_code == 404
 
 
+def test_resume_after_restart_restores_the_request_from_the_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A restart must not turn a resumable ledger into a 404.
+
+    The manager is process memory; the ledger is the durable record. The
+    accepted request is persisted with the placeholder, so the restarted app can
+    reconstruct the exact model/profile/output choices and continue rather than
+    asking the operator to resubmit and potentially mix a different run into the
+    same checkpoints.
+    """
+    from ubt.core.engine.ledger import SQLiteJobLedger
+
+    resumed_requests: list[JobSubmitRequest] = []
+
+    async def _capture(self: JobManager, record: JobRecord, config: Any) -> None:
+        resumed_requests.append(record.request)
+        record.status = JobStatus.RUNNING
+
+    monkeypatch.setattr(JobManager, "execute_job", _capture)
+    doc = _write_doc(tmp_path)
+    out = tmp_path / "restart_output.md"
+    job_id = "restart-resume-1"
+    config = _config(tmp_path)
+    with TestClient(create_app(config=config)) as client:
+        submitted = client.post(
+            "/jobs/submit",
+            json={
+                "input_path": str(doc),
+                "output_path": str(out),
+                "job_id": job_id,
+                "profile": "textbook",
+                "draft_model": "draft-after-restart",
+                "repair_model": "repair-after-restart",
+                "pages": "1",
+            },
+            headers=_AUTH,
+        )
+        assert submitted.status_code == 202, submitted.text
+
+    with SQLiteJobLedger(config.db_dir / f"{job_id}.sqlite") as ledger:
+        ledger.finalize_job(job_id, status=JobStatus.FAILED)
+        stored = ledger.get_job_metadata_value(job_id, "submitted_request")
+    assert stored["job_id"] == job_id
+    assert stored["draft_model"] == "draft-after-restart"
+    assert stored["profile"] == "textbook"
+
+    with TestClient(create_app(config=_config(tmp_path))) as client:
+        resumed = client.post(f"/jobs/{job_id}/resume", headers=_AUTH)
+
+    assert resumed.status_code == 200, resumed.text
+    assert len(resumed_requests) == 2
+    assert resumed_requests[-1].job_id == job_id
+    assert resumed_requests[-1].fresh is False
+    assert resumed_requests[-1].output_path == str(out.resolve())
+    assert resumed_requests[-1].draft_model == "draft-after-restart"
+
+
+def test_resume_reconstructs_an_old_ledger_without_a_request_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pre-snapshot ledgers remain resumable when their run identity is complete."""
+    from ubt.core.engine.ledger import SQLiteJobLedger
+
+    started: list[JobSubmitRequest] = []
+
+    async def _capture(self: JobManager, record: JobRecord, config: Any) -> None:
+        started.append(record.request)
+        record.status = JobStatus.RUNNING
+
+    monkeypatch.setattr(JobManager, "execute_job", _capture)
+    doc = _write_doc(tmp_path)
+    job_id = "old-ledger-resume"
+    config = _config(tmp_path)
+    with SQLiteJobLedger(config.db_dir / f"{job_id}.sqlite") as ledger:
+        ledger.init_job_placeholder(job_id, str(doc), "zh", title="Old job")
+        ledger.set_job_metadata_value(job_id, "source_lang", "en")
+        ledger.set_job_metadata_value(job_id, "genre_profile", "textbook")
+        ledger.set_job_metadata_value(
+            job_id,
+            "config_snapshot",
+            {
+                "draft_model": "old-draft",
+                "repair_model": "old-repair",
+                "prompt_strategy": "rich",
+            },
+        )
+        ledger.set_job_metadata_value(
+            job_id,
+            "run_identity",
+            {
+                "profile_name": "textbook",
+                "engine_signature": "old-engine",
+                "mock_run": False,
+            },
+        )
+        ledger.set_job_metadata_value(job_id, "chapter_window", [1, None])
+        ledger.set_job_metadata_value(job_id, "selected_pages", [])
+        ledger.finalize_job(job_id, status=JobStatus.FAILED)
+
+    with TestClient(create_app(config=_config(tmp_path))) as client:
+        resumed = client.post(f"/jobs/{job_id}/resume", headers=_AUTH)
+
+    assert resumed.status_code == 200, resumed.text
+    assert len(started) == 1
+    request = started[0]
+    assert request.job_id == job_id
+    assert request.profile == "textbook"
+    assert request.draft_model == "old-draft"
+    assert request.repair_model == "old-repair"
+    assert request.preset == "publication"
+    assert request.fresh is False
+    assert request.output_path == str((tmp_path / "db" / "outputs" / job_id).resolve())
+
+
+def test_resume_refuses_a_live_ledger_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A restart must not become a second writer of a live job."""
+    from ubt.core.engine.ledger import SQLiteJobLedger
+    from ubt.core.engine.writer_lock import LedgerWriterLock
+
+    doc = _write_doc(tmp_path)
+    job_id = "busy-ledger-resume"
+    config = _config(tmp_path)
+    db_path = config.db_dir / f"{job_id}.sqlite"
+    with SQLiteJobLedger(db_path) as ledger:
+        ledger.init_job_placeholder(
+            job_id,
+            str(doc),
+            "zh",
+            submitted_request={
+                "input_path": str(doc),
+                "job_id": job_id,
+                "dry_run": True,
+            },
+        )
+        ledger.finalize_job(job_id, status=JobStatus.FAILED)
+
+    lock = LedgerWriterLock(db_path, job_id)
+    lock.acquire()
+    try:
+        with TestClient(create_app(config=_config(tmp_path))) as client:
+            resumed = client.post(f"/jobs/{job_id}/resume", headers=_AUTH)
+    finally:
+        lock.release()
+
+    assert resumed.status_code == 409
+    assert "live writer" in resumed.json()["detail"]
+
+
 def test_status_of_unknown_job_is_404(authed: TestClient) -> None:
     response = authed.get("/jobs/does-not-exist/status", headers=_AUTH)
     assert response.status_code == 404
@@ -533,6 +684,39 @@ def test_a_repeated_submit_reports_that_it_reused_the_job(
     assert first.json()["reused"] is False, "the first submit must start the run"
     assert second.json()["reused"] is True, "the repeat must not claim to have started it"
     assert second.json()["job_id"] == first.json()["job_id"]
+
+
+def test_an_accepted_job_survives_a_restart_before_ingest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Submit must leave a durable row before the background task can be lost.
+
+    The SOCKS-proxy failure happened after intake but before ingest created a
+    ledger. Restarting the console erased the only in-memory record, so the id
+    the client had just received answered 404 forever. The placeholder must
+    survive and report a terminal failure instead.
+    """
+
+    async def _stay_running(self: JobManager, record: JobRecord, config: Any) -> None:
+        record.status = JobStatus.RUNNING
+
+    monkeypatch.setattr(JobManager, "execute_job", _stay_running)
+    doc = _write_doc(tmp_path)
+    job_id = "accepted-restart-1"
+    with TestClient(create_app(config=_config(tmp_path))) as client:
+        response = client.post(
+            "/jobs/submit",
+            json={"input_path": str(doc), "job_id": job_id},
+            headers=_AUTH,
+        )
+        assert response.status_code == 202, response.text
+
+    with TestClient(create_app(config=_config(tmp_path))) as client:
+        status = client.get(f"/jobs/{job_id}/status", headers=_AUTH)
+
+    assert status.status_code == 200, status.text
+    assert status.json()["status"] == "failed"
+    assert "server restarted" in (status.json()["error"] or "")
 
 
 def test_submit_capacity_exceeded_is_429(

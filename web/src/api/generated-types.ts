@@ -310,12 +310,10 @@ export interface paths {
          * @description Re-run a failed/cancelled job from its ledger checkpoints (PRD §4.2.4).
          *
          *     The pipeline resumes from the blocks still pending in the ledger, so no
-         *     finished segment is re-translated. Resume reuses the *original* request
-         *     (kept on the in-memory record), which keeps the run-identity guard happy
-         *     — a reconstructed request would silently drop knobs and could be refused
-         *     as a different profile/engine. That makes this a same-session recovery
-         *     (the network-drop case); a job whose record is gone after a restart must
-         *     be resubmitted instead.
+         *     finished segment is re-translated. The request is recovered from the
+         *     ledger when this process no longer has an in-memory record (the normal
+         *     case after a restart). New ledgers store the exact accepted request;
+         *     older ledgers are reconstructed from the run metadata they do carry.
          */
         post: operations["resume_job_jobs__job_id__resume_post"];
         delete?: never;
@@ -1229,6 +1227,11 @@ export interface components {
              */
             total_blocks: number;
             /**
+             * Drafted Blocks
+             * @default 0
+             */
+            drafted_blocks: number;
+            /**
              * Skipped Blocks
              * @default 0
              */
@@ -1528,6 +1531,11 @@ export interface components {
             status: string;
             /** Total Blocks */
             total_blocks: number;
+            /**
+             * Drafted Blocks
+             * @default 0
+             */
+            drafted_blocks: number;
             /** Completed Blocks */
             completed_blocks: number;
             /** Failed Blocks */
@@ -1551,6 +1559,8 @@ export interface components {
             rehearsal: boolean;
             /** Page Scope */
             page_scope?: string | null;
+            /** Last Error */
+            last_error?: string | null;
         };
         /**
          * JobUploadResponse

@@ -1392,7 +1392,11 @@ class PipelineOrchestrator:
                 event_type=EventType.PIPELINE_FAILED,
                 job_id=actual_job_id,
                 total_blocks=int((failure_stats or {}).get("total", 0) or 0),
+                drafted_blocks=int((failure_stats or {}).get("drafted", 0) or 0),
                 completed_blocks=int((failure_stats or {}).get("completed", 0) or 0),
+                failed_blocks=int((failure_stats or {}).get("failed", 0) or 0),
+                needs_human_blocks=int((failure_stats or {}).get("needs_human", 0) or 0),
+                blocked_human_blocks=int((failure_stats or {}).get("blocked_human", 0) or 0),
                 message=f"Pipeline failed: {type(exc).__name__}: {exc}",
             )
             try:

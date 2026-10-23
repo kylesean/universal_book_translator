@@ -15,7 +15,9 @@ from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
 from ubt.core.engine.job_runner import build_job_orchestrator
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.progress import ProgressSnapshot, persist_progress_metadata
+from ubt.core.engine.writer_lock import LedgerWriterLock
 from ubt.core.exceptions import (
+    LedgerWriterLockConflictError,
     ServerCapacityError,
     public_job_error,
 )
@@ -216,6 +218,12 @@ class JobManager:
             # record at "running" — still counted against max_running_jobs.
             record.status = JobStatus.CANCELLED
             logger.warning("Job %s task cancelled", record.job_id)
+            await self._persist_terminal_failure(
+                record.job_id,
+                config,
+                status=JobStatus.CANCELLED,
+                error="Job cancelled",
+            )
             raise
         except Exception as exc:
             record.status = JobStatus.FAILED
@@ -225,10 +233,57 @@ class JobManager:
             # Same rule the queue worker applies (public_job_error is shared).
             logger.exception("Job %s failed: %s", record.job_id, exc)
             record.error = public_job_error(exc, record.job_id)
+            await self._persist_terminal_failure(
+                record.job_id,
+                config,
+                status=JobStatus.FAILED,
+                error=record.error,
+            )
         finally:
             # Broadcast termination sentinel (non-blocking)
             for sub_q in list(record.subscribers):
                 self._enqueue(sub_q, None)
+
+    @staticmethod
+    async def _persist_terminal_failure(
+        job_id: str,
+        config: UBTConfig,
+        *,
+        status: str,
+        error: str,
+    ) -> None:
+        """Best-effort terminal ledger write after an embedded task fails.
+
+        The pipeline normally finalizes in its own ``finally`` while still
+        holding the writer lock. This covers failures before that lock is taken
+        (bad config, provider construction, an accepted placeholder whose task
+        died) and cancellation. If the lock is still held, the pipeline owns the
+        terminal write; never wait for it here.
+        """
+        db_path = config.db_dir / f"{job_id}.sqlite"
+        if not db_path.exists():
+            return
+
+        def _write() -> None:
+            lock = LedgerWriterLock(db_path, job_id)
+            try:
+                lock.acquire()
+            except LedgerWriterLockConflictError:
+                return
+            try:
+                with SQLiteJobLedger(db_path) as ledger:
+                    current = ledger.get_job_status(job_id)
+                    if current in {status.value for status in TERMINAL_JOB_STATUSES}:
+                        return
+                    ledger.set_job_metadata_value(job_id, "last_error", error)
+                    ledger.finalize_job(job_id, status=status)
+            finally:
+                lock.release()
+
+        try:
+            await asyncio.shield(asyncio.to_thread(_write))
+        except Exception as exc:
+            logger.warning("Could not persist terminal ledger state for %s: %s", job_id, exc)
 
     @staticmethod
     def _persist_final_metadata(

@@ -346,6 +346,7 @@ def create_app(
             scope.uploads_dir(),
             max_age_days=app_config.upload_retention_days,
             job_queue=job_queue,
+            db_dir=app_config.db_dir,
         )
         if removed:
             logger.info(

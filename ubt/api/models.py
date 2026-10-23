@@ -414,6 +414,9 @@ class JobSummary(BaseModel):
     target_lang: str
     status: str
     total_blocks: int
+    #: Drafted but not yet finalized. A live-work counter, so the queue row can
+    #: show motion during a long draft stage without claiming the job is done.
+    drafted_blocks: int = 0
     completed_blocks: int
     failed_blocks: int
     needs_human_blocks: int
@@ -431,6 +434,9 @@ class JobSummary(BaseModel):
     #: sample run and a full delivery were otherwise indistinguishable in the
     #: queue.
     page_scope: str | None = None
+    #: Last safe terminal error persisted in the ledger. The list view uses it
+    #: for a failed job after the in-memory record is gone.
+    last_error: str | None = None
 
 
 class JobListResponse(BaseModel):

@@ -85,12 +85,37 @@ def _progress_percent(processed: int, total: int) -> float:
     return round(min(1.0, processed / total) * 100, 1)
 
 
+def live_progress_percent(finalized: int, drafted: int, total: int) -> float:
+    """Percent of work started, with 100 reserved for a finalized run.
+
+    ``progress_percent`` counts only terminal dispositions; during the long
+    draft phase that stays at zero. ``drafted`` is live work, so the console
+    uses the larger numerator. An unfinished run is capped at 99.9%; a fully
+    finalized one reports 100%. This is shared by the detail view and queue
+    rows so the two cannot disagree about the same job.
+    """
+    if total <= 0:
+        return 0.0
+    finalized_work = max(0, min(total, finalized))
+    drafted_work = max(0, min(total, drafted))
+    if finalized_work >= total:
+        return 100.0
+    return min(99.9, round(max(finalized_work, drafted_work) / total * 100, 1))
+
+
 class ProgressSnapshot(BaseModel):
     """Block counters, live QE metrics and the artifacts a finished job left."""
 
     model_config = ConfigDict(frozen=True)
 
     total_blocks: int = 0
+    #: Blocks the draft stage has produced but which have not yet reached a
+    #: terminal disposition. This is a *live work* counter, not a completion
+    #: counter: it makes the console advance during a long draft batch instead
+    #: of sitting at 0% until the first quality-gate event. It is deliberately
+    #: separate from ``completed_blocks`` and from ``progress_percent`` so a
+    #: draft is never misreported as a finished translation.
+    drafted_blocks: int = 0
     #: Blocks the skip rule marked done without translating them. Excluded from
     #: ``total_blocks`` and from ``processed_blocks``: they are not work, and
     #: counting them made two books with identical translation load report wildly
@@ -160,6 +185,7 @@ class ProgressSnapshot(BaseModel):
         )
         return cls(
             total_blocks=event.total_blocks,
+            drafted_blocks=event.drafted_blocks,
             skipped_blocks=event.skipped_blocks,
             completed_blocks=event.completed_blocks,
             repaired_blocks=event.repaired_blocks,
@@ -201,6 +227,7 @@ class ProgressSnapshot(BaseModel):
         stage = stage_raw if stage_raw in _PIPELINE_STAGES else None
         return cls(
             total_blocks=total,
+            drafted_blocks=int(stats.get("drafted", 0)),
             # Carried through: the query excludes skipped blocks from
             # ``total``/``completed``, and the panel needs the skipped count to
             # explain why the denominator is smaller than the source block count.
@@ -225,7 +252,7 @@ class ProgressSnapshot(BaseModel):
     def to_payload(self) -> dict[str, Any]:
         """Queue-row form: counters always present, artifact paths only when known.
 
-        The nine counters plus the ``processed_blocks``/``progress_percent``
+        The counters plus the ``processed_blocks``/``progress_percent``
         projection keep their keys even when a value is unknown
         (``estimated_cost_usd: null`` before the first usage report), because
         that is the shape rows have always had and the queue-mode SSE frame
@@ -273,4 +300,9 @@ def persist_progress_metadata(
             ledger.set_job_metadata_value(job_id, metadata_key, value)
 
 
-__all__ = ["ARTIFACT_KEYS", "ProgressSnapshot", "persist_progress_metadata"]
+__all__ = [
+    "ARTIFACT_KEYS",
+    "ProgressSnapshot",
+    "live_progress_percent",
+    "persist_progress_metadata",
+]
