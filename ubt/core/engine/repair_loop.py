@@ -171,10 +171,7 @@ class RepairLoop:
         so paying for one would replace a translation nobody objected to with
         one nobody checked.
         """
-        from ubt.core.qe.defect_taxonomy import (
-            REPAIR_ERROR_PREFIX,
-            STRUCTURAL_DEFECT_MARKERS,
-        )
+        from ubt.core.qe.defect_taxonomy import REPAIR_ERROR_PREFIX, has_structural_defect
 
         # A provider/lifecycle failure ("Repair error: 500", "repair failed")
         # also reads as structural in the taxonomy -- that is what keeps it out
@@ -182,9 +179,11 @@ class RepairLoop:
         # no candidate can be checked against it. Strip those first.
         _LIFECYCLE = (REPAIR_ERROR_PREFIX, "repair_unverifiable", "repair_structural_failure")
         quality_flags = [f for f in error_flags if not any(m in f for m in _LIFECYCLE)]
-        return any(
-            any(marker in flag for marker in STRUCTURAL_DEFECT_MARKERS) for flag in quality_flags
-        )
+        # ``has_structural_defect`` rather than a local table scan: it also
+        # honours a structured flag's declared severity, so a writer that
+        # adopts ``format_defect_flag`` is recheckable without being added to
+        # the marker table (whose entries are prose fragments it has none of).
+        return has_structural_defect(quality_flags)
 
     def _record_unrepairable_no_span(self, block: IRBlock, draft_text: str) -> None:
         """Close a repair attempt the span annotator could not localise.

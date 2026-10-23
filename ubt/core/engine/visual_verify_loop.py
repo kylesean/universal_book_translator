@@ -29,6 +29,7 @@ from ubt.core.ir.render_plan import RenderPlan
 from ubt.core.job_options import sidecar_path
 from ubt.core.log_aggregate import noise_report
 from ubt.core.ports import DocumentAdapter, get_visual_gate_runner
+from ubt.core.qe.defect_taxonomy import format_defect_flag
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +184,13 @@ class VisualVerifyLoop:
                             and getattr(f, "page", None) == page
                         )
                     ]
-                    flag = f"visual_gate_failed:{','.join(dict.fromkeys(codes))}"
+                    # Structured, and ``major`` by declaration: the block is
+                    # being quarantined as NEEDS_HUMAN right here, so a table
+                    # that guessed "minor" would contradict the status the
+                    # same loop just wrote.
+                    flag = format_defect_flag(
+                        "visual_gate_failed", "major", ",".join(dict.fromkeys(codes))
+                    )
                     if flag not in b.error_flags:
                         b.error_flags.append(flag)
                     quarantined.append(

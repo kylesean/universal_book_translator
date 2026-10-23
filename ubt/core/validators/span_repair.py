@@ -14,6 +14,7 @@ from typing import Any
 
 from ubt.core.cjk_ranges import is_cjk_char
 from ubt.core.cleaners.markup_cleanup import clean_model_repair_text
+from ubt.core.qe.defect_taxonomy import is_numeric_defect
 from ubt.core.validators.consistency import canonicalize_numeric_token
 
 
@@ -172,8 +173,14 @@ class MQMSpanAnnotator:
                     )
                     span_id_counter += 1
 
-        # 2. Number discrepancies (if flagged in error_flags or numeric distortion present)
-        has_numeric_flag = any("numeric" in f.lower() for f in error_flags)
+        # 2. Number discrepancies (if a *blocking* numeric defect was flagged, or
+        # numeric distortion is present). The predicate is the shared
+        # ``is_numeric_defect``, not a local ``"numeric" in flag``: that
+        # substring also matches the advisory classes (``numeric_advisory:``,
+        # ``numeric_order_differs:``, ``numeric_repeat_shortfall:``), so the
+        # annotator built MQM error spans for notes the pipeline explicitly
+        # reports without blocking.
+        has_numeric_flag = is_numeric_defect(error_flags)
         if has_numeric_flag:
             num_pattern = re.compile(r"(?<![0-9a-zA-Z])\d+(?:[\.,]\d+)*(?![0-9a-zA-Z])")
             src_nums = num_pattern.findall(source_text)

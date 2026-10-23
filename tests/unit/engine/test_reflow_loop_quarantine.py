@@ -143,7 +143,7 @@ def test_a_major_finding_quarantines_only_its_page(tmp_path: Path) -> None:
     _run(_loop(tmp_path, ledger, gate), tmp_path, [on_bad, on_good])
 
     assert on_bad.status is BlockStatus.NEEDS_HUMAN
-    assert on_bad.error_flags == ["visual_gate_failed:text_overflow"]
+    assert on_bad.error_flags == ["visual_gate_failed:major:text_overflow"]
     assert on_good.status is BlockStatus.MTQE_PASSED
     assert on_good.error_flags == []
     assert ledger.batches == [
@@ -151,7 +151,7 @@ def test_a_major_finding_quarantines_only_its_page(tmp_path: Path) -> None:
             {
                 "block_id": "bad",
                 "status": BlockStatus.NEEDS_HUMAN,
-                "error_flags": ["visual_gate_failed:text_overflow"],
+                "error_flags": ["visual_gate_failed:major:text_overflow"],
             }
         ]
     ]
@@ -171,7 +171,7 @@ def test_every_finding_code_on_a_page_lands_in_the_flag(tmp_path: Path) -> None:
     _run(_loop(tmp_path, ledger, gate), tmp_path, [block])
 
     # The info finding is not a quarantine trigger, so its code is not named.
-    assert block.error_flags == ["visual_gate_failed:blank_page,text_overflow"]
+    assert block.error_flags == ["visual_gate_failed:major:blank_page,text_overflow"]
 
 
 def test_a_finding_without_a_page_quarantines_nothing(tmp_path: Path) -> None:
@@ -252,7 +252,7 @@ def test_quarantine_is_idempotent_across_runs(tmp_path: Path) -> None:
     _run(loop, tmp_path, [block])
     _run(loop, tmp_path, [block])
 
-    assert block.error_flags == ["visual_gate_failed:text_overflow"]
+    assert block.error_flags == ["visual_gate_failed:major:text_overflow"]
 
 
 # --------------------------------------------------------------------------- #

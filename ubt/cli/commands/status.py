@@ -548,6 +548,114 @@ def rewrite_flag_text(
     console.print(f"[green]✓ Rewrote {changed} flag(s).[/]")
 
 
+def upgrade_flags(
+    db_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--db-dir",
+            help="SQLite ledger storage directory (default: from config / UBT_DB_DIR)",
+            show_default=False,
+        ),
+    ] = None,
+    apply: Annotated[
+        bool,
+        typer.Option(
+            "--apply",
+            help="Write the upgraded flags (default: dry run, print what would change)",
+        ),
+    ] = False,
+    limit: Annotated[
+        int,
+        typer.Option("--limit", help="Show at most N blocks in the detail table", min=0),
+    ] = 10,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Machine-readable mode: stdout carries the plan JSON")
+    ] = False,
+) -> None:
+    """Upgrade stored flags to the structured ``category:severity:detail`` form.
+
+    Legacy flags are classified by substring tables, so a rename in one stage
+    can silently change a verdict in another. The structured form carries its
+    own category and severity. This rewrites only the flags whose verdict is
+    provably unchanged — a flag the tables cannot place is left exactly as it
+    is, and a second run is a no-op.
+
+    Separate from ``rewrite-flags``, which fixes *wording* while keeping the
+    flag's encoding. Run this one first: an upgraded flag is still matched by
+    the old tables (its category is a structural category), so the two passes
+    are independent.
+    """
+    resolve_fn = resolve_db_dir()
+    resolved = resolve_fn(db_dir)
+    from ubt.core.engine.flag_upgrade import apply as apply_upgrades
+    from ubt.core.engine.flag_upgrade import plan as plan_upgrades
+
+    hits = plan_upgrades(resolved)
+    if json_output:
+        print(
+            json.dumps(
+                {
+                    "db_dir": str(resolved),
+                    "applied": apply,
+                    "blocks": len(hits),
+                    "flags": sum(hit.changed for hit in hits),
+                    "items": [
+                        {
+                            "db": hit.db.name,
+                            "block_id": hit.block_id,
+                            "old": list(hit.old_flags),
+                            "new": list(hit.new_flags),
+                        }
+                        for hit in hits
+                    ],
+                },
+                ensure_ascii=False,
+            )
+        )
+        if apply and hits:
+            apply_upgrades(hits)
+        return
+
+    if not hits:
+        console.print(
+            "[green]Nothing to upgrade:[/] every stored flag already uses the "
+            "structured form, or is one this tool will not guess at."
+        )
+        return
+    flags = sum(hit.changed for hit in hits)
+    table = Table(title="Stored QA flags to upgrade", show_header=True)
+    table.add_column("Ledger", overflow="fold")
+    table.add_column("Blocks", justify="right")
+    table.add_column("Flags", justify="right")
+    per_db: dict[str, tuple[int, int]] = {}
+    for hit in hits:
+        blocks, changed = per_db.get(hit.db.name, (0, 0))
+        per_db[hit.db.name] = (blocks + 1, changed + hit.changed)
+    for name, (blocks, changed) in sorted(per_db.items()):
+        table.add_row(name, str(blocks), str(changed))
+    console.print(table)
+    console.print(f"[bold]{flags}[/] flag(s) across [bold]{len(hits)}[/] block(s).")
+    if hits and limit:
+        detail = Table(title=f"Examples (showing {min(limit, len(hits))})")
+        detail.add_column("Block", overflow="fold")
+        detail.add_column("New flag", overflow="fold")
+        for hit in hits[:limit]:
+            changed_text = [
+                new for old, new in zip(hit.old_flags, hit.new_flags, strict=True) if old != new
+            ]
+            detail.add_row(hit.block_id, escape(changed_text[0])[:170])
+        console.print(detail)
+
+    if not apply:
+        console.print(
+            "\n[yellow]Dry run.[/] Nothing written. Back up the ledger directory "
+            "first, then re-run with [bold]--apply[/]."
+        )
+        return
+    changed = apply_upgrades(hits)
+    console.print(f"[green]✓ Upgraded {changed} flag(s).[/]")
+
+
 def pe_import(
     job_id: Annotated[str, typer.Argument(help="Job ID whose ledger receives the revisions")],
     file: Annotated[

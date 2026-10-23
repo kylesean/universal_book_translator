@@ -22,6 +22,7 @@ from ubt.cli.commands.status import (
     pe_import,
     recheck_gates_cmd,
     rewrite_flag_text,
+    upgrade_flags,
 )
 from ubt.cli.commands.translate import console as console
 from ubt.cli.commands.translate import translate
@@ -576,6 +577,7 @@ app.command(name="assess")(assess_cmd)
 app.command(name="status")(job_status)
 app.command(name="recheck-gates")(recheck_gates_cmd)
 app.command(name="rewrite-flags")(rewrite_flag_text)
+app.command(name="upgrade-flags")(upgrade_flags)
 app.command(name="pe-import")(pe_import)
 app.command(name="doctor")(doctor_command)
 app.command(name="worker")(worker_command)

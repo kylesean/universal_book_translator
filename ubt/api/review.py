@@ -29,6 +29,7 @@ from ubt.core.exceptions import LedgerWriterLockConflictError
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.tm import PROVENANCE_HUMAN_PE, TMPendingEntry, TranslationMemory
 from ubt.core.qe.defect_taxonomy import (
+    CONSTRAINT_PREFIX,
     ECHO_MARKERS,
     FLAG_MQM_CRITICAL_BLOCKED,
     FLAG_NEEDS_HUMAN_REVIEW,
@@ -50,8 +51,16 @@ FLAG_HUMAN_PE_IMPORTED = "human_pe_imported"
 
 #: Workbench issue kind -> the engine's own defect markers. Grouping is by
 #: marker *substring*, matching ``defect_taxonomy``'s helpers.
+#:
+#: This table is a *view*: every structural marker the engine can emit must
+#: land in a kind, or the reviewer sees a block the quality gate rejected with
+#: no issue type at all. Eight markers were missing (the five masker
+#: namespaces, ``script density``, ``Foreign-script text``, the consistency
+#: constraint prefix and ``Heading label dropped``) — the gate refused the
+#: draft and the workbench showed nothing to review. ``test_flag_provenance``
+#: now fails if a new marker has no kind here.
 _ISSUE_MARKERS: dict[str, tuple[str, ...]] = {
-    "terminology": ("Glossary term violation",),
+    "terminology": ("Glossary term violation", CONSTRAINT_PREFIX),
     "formula": (
         "Math span mismatch",
         "Undelimited math",
@@ -79,6 +88,14 @@ _ISSUE_MARKERS: dict[str, tuple[str, ...]] = {
         "HTML delta failure",
         "Table grid mismatch",
         "repair_structural_failure",
+        "Heading label dropped",
+        # Wrong-script contamination and a dropped section number are structural
+        # failures of the target text, not style notes.
+        "script density",
+        "Foreign-script text",
+        "email_token_corrupt",
+        "code_token_corrupt",
+        "cite_token_corrupt",
     ),
     "echo": ECHO_MARKERS,
     "review": (FLAG_NEEDS_HUMAN_REVIEW,),

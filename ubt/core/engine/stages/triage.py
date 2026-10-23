@@ -50,10 +50,8 @@ from ubt.core.qe.defect_taxonomy import (
     FLAG_NEEDS_HUMAN_REVIEW as _FLAG_NEEDS_HUMAN_REVIEW,
 )
 from ubt.core.qe.defect_taxonomy import (
-    has_critical_defect,
-    has_structural_defect,
+    declared_severity,
     is_transient_lifecycle_only,
-    structured_severity,
 )
 from ubt.core.qe.score_policy import shippable_threshold
 from ubt.core.validators.span_repair import max_severity, span_to_dict
@@ -104,19 +102,13 @@ def _flags_severity(flags: list[str]) -> str:
     else. This is the contract the module docstring states.
 
     A flag written in the structured ``<category>:<severity>:<detail>`` form
-    states its own severity, and that verdict wins over the substring tables:
-    the tables classify prose by matching English phrases, which is exactly the
-    coupling a structured flag removes. Legacy flags (the vast majority of what
-    a ledger holds) fall through to the tables unchanged.
+    states its own severity instead of leaving it to a substring table. It is a
+    *floor*, not an override: ``declared_severity`` takes the worse of the two
+    encodings, because returning the structured answer alone let one
+    ``advisory:minor:`` note downgrade a block that also carried a legacy
+    ``Numeric fidelity`` flag — triage then auto-passed a critical defect.
     """
-    declared = structured_severity(flags)
-    if declared is not None:
-        return declared
-    if has_critical_defect(flags):
-        return "critical"
-    if has_structural_defect(flags):
-        return "major"
-    return "minor"
+    return declared_severity(flags) or "minor"
 
 
 def _minor_may_auto_pass(score: float | None, qe_threshold: float) -> bool:

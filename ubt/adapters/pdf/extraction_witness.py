@@ -46,6 +46,7 @@ import pikepdf
 
 from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
 from ubt.core.ir.models import IRBlock
+from ubt.core.qe.defect_taxonomy import format_defect_flag
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +172,11 @@ def annotate_blocks(blocks: Sequence[IRBlock], verdicts: list[PageVerdict]) -> l
             continue
         page = block.bbox.page if block.bbox is not None else None
         if page in dirty:
-            flag = f"font_encoding_damage:page={page}"
+            # Structured: the severity is declared here rather than left to a
+            # substring table. ``minor`` is deliberate — the damage is to the
+            # *source* extraction, so it is reported on the block but must not
+            # force a repair the model cannot verify.
+            flag = format_defect_flag("font_encoding_damage", "minor", f"page={page}")
             if flag not in block.error_flags:
                 block.error_flags.append(flag)
                 flagged.append(block)

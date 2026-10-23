@@ -5,6 +5,34 @@ classify the same ``error_flags`` strings. Sharing one marker table — read by
 both the quality gate and triage — keeps a defect that is fatal in one stage
 from being auto-passable in another (e.g. a numeric fidelity failure must not
 clear the QE gate and never reach triage).
+
+**Why the substring tables are still here, and what would let them go.**
+The structured ``<category>:<severity>:<detail>`` form exists so a flag can
+carry its own classification instead of being guessed at. Three families
+cannot use it yet, and each is load-bearing:
+
+* **Lifecycle notes** (``Drafting error:``, ``Repair error:``,
+  ``repair_structural_failure:``). They are not quality defects, but the
+  structural table contains them *on purpose*: it is what keeps a block whose
+  provider call failed out of the auto-pass path. They have no severity to
+  declare — the defect is about the call, not the text — so converting them to
+  the structured form would mean inventing a severity for something that is
+  not a defect, and the resume path (``reset_transient_failures``) matches them
+  by prefix.
+* **Echo phrasings** (``Target identical to source`` and its two variants).
+  Their reason text doubles as the repair instruction, so changing the
+  encoding changes the prompt the model is sent.
+* **Flags written by an older build that the upgrade declines.** A stored
+  ``Repair error: …`` from a job that will never be re-run still has to
+  classify correctly today.
+
+Deleting a table is therefore gated on more than "the migration ran": it needs
+every legacy flag family to have a structured equivalent that preserves its
+routing verdict, *and* the stored corpus to be provably free of the families
+that do not. Until then the tables are the classifier of record for anything
+the structured form cannot express, and ``tests/unit/qe/test_flag_provenance``
+pins both directions (every marker is emitted, every emitted flag is
+classified or exempt).
 """
 
 import re
@@ -74,6 +102,13 @@ STRUCTURAL_DEFECT_MARKERS: tuple[str, ...] = (
     "Target text suspiciously truncated",
     "Target text suspiciously inflated",
     "script density",
+    # A target containing a character from a script the target language never
+    # uses ("遵循查询기반范式" — the model emitted Hangul for a Chinese target).
+    # FastPass rejects it outright, but no marker matched the reason, so it fell
+    # through to ``SEMANTIC_DOUBT``: repair skipped it as unverifiable and the
+    # block landed in the human queue even though the same check can verify a
+    # rewrite. Same family as ``script density``, which was already here.
+    "Foreign-script text",
     # Content the source never had. Fabrication is exactly the
     # case this table exists for — an echoed paragraph reads well and classifies
     # as "other structural rejection" (0.70), so any QE threshold at or below
@@ -162,22 +197,142 @@ CRITICAL_DEFECT_MARKERS: tuple[str, ...] = (
 )
 
 
+#: Numeric flags that are **advisory**: reported on the block, never blocking.
+#: ``consistency.py`` emits these for an order change (legal in translation) and
+#: for an elided restatement (legal too). They share the ``numeric`` stem with
+#: the real defect class, so any consumer that asks "was a number problem
+#: flagged?" by substring must exclude them — the span annotator did not, and
+#: built MQM error spans for notes the pipeline deliberately does not act on.
+NUMERIC_ADVISORY_PREFIXES: tuple[str, ...] = (
+    "numeric_advisory:",
+    "numeric_order_differs:",
+    "numeric_repeat_shortfall:",
+)
+
+
+def is_numeric_defect(flags: Iterable[str]) -> bool:
+    """Whether any flag reports a *blocking* numeric problem.
+
+    Case-insensitive on the ``numeric`` stem so a flag written in caps by an
+    older build still matches, but advisory classes are excluded by prefix.
+    """
+    return any(
+        "numeric" in flag.lower() and not flag.startswith(NUMERIC_ADVISORY_PREFIXES)
+        for flag in flags
+    )
+
+
+#: Structured categories that are structural **regardless of severity**.
+#:
+#: Severity alone cannot express "structural but minor": a dropped markup tag
+#: is cheap to fix (``FORMAT_ONLY_MARKERS``) *and* must never be auto-passed
+#: (``STRUCTURAL_DEFECT_MARKERS``) — the legacy tables say both. A structured
+#: flag carries no marker, so the category has to carry that half of the
+#: meaning. Without this, upgrading ``HTML delta failure`` to
+#: ``html_formatting_drift:minor:…`` flipped its routing from
+#: ``DETERMINISTIC_DEFECT`` to ``PASS``; ``flag_upgrade``'s safety check caught
+#: it and refused the rewrite, which is why the set exists rather than a bug.
+STRUCTURAL_CATEGORIES: tuple[str, ...] = (
+    "empty_target",
+    "numeric_fidelity",
+    "omission",
+    "table_dropped",
+    "table_grid",
+    "heading_label",
+    "added_reference",
+    "prompt_scaffold",
+    "prompt_leak",
+    "repetition",
+    "math_span",
+    "undelimited_math",
+    "hallucinated_latex",
+    "terminology_consistency",
+    "html_structure_mismatch",
+    "html_formatting_drift",
+    "email_token_corrupt",
+    "soup_token_corrupt",
+    "math_token_corrupt",
+    "cite_token_corrupt",
+    "code_token_corrupt",
+    "visual_witness",
+    "length_truncated",
+    "length_inflated",
+    "script_density",
+    "foreign_script",
+)
+
+
 def has_structural_defect(flags: Iterable[str]) -> bool:
-    """True when any flag contains a structural/factual defect marker."""
-    return any(marker in flag for flag in flags for marker in STRUCTURAL_DEFECT_MARKERS)
+    """True when any flag marks a structural/factual defect.
+
+    Three ways a flag can say so, and all three must agree with the legacy
+    tables for a migration to be safe:
+
+    * it contains a marker from ``STRUCTURAL_DEFECT_MARKERS`` (legacy prose);
+    * it declares ``major`` or ``critical`` (structured, severity carries it);
+    * its category is in ``STRUCTURAL_CATEGORIES`` (structured, severity does
+      not carry it — the format-only classes are structural but minor).
+
+    Making this predicate — rather than each caller — honour the declaration is
+    what keeps every consumer (the quality gate's pass check, triage,
+    ``RepairLoop._flags_are_recheckable``) in step: a writer that adopts the
+    format is classified correctly everywhere without touching any of them.
+    """
+    materialized = list(flags)
+    if any(marker in flag for flag in materialized for marker in STRUCTURAL_DEFECT_MARKERS):
+        return True
+    if structured_severity(materialized) in ("major", "critical"):
+        return True
+    return any(
+        parsed is not None and parsed[0] in STRUCTURAL_CATEGORIES
+        for parsed in (parse_defect_flag(flag) for flag in materialized)
+    )
 
 
 def has_critical_defect(flags: Iterable[str]) -> bool:
     """True when any flag marks an untrustworthy (MQM Critical) draft."""
-    return any(marker in flag for flag in flags for marker in CRITICAL_DEFECT_MARKERS)
+    materialized = list(flags)
+    if any(marker in flag for flag in materialized for marker in CRITICAL_DEFECT_MARKERS):
+        return True
+    return structured_severity(materialized) == "critical"
+
+
+#: Structured categories whose fix is mechanical (a re-emit), for the "all
+#: flags are format-only" question. Derived from ``FORMAT_ONLY_MARKERS``' own
+#: subject matter: HTML/markup drift and length over/under-shoot. Every entry
+#: here must also be in ``STRUCTURAL_CATEGORIES`` — the legacy tables say a
+#: format-only defect is *both* mechanical and structural, and a category that
+#: is one but not the other changes a verdict on migration.
+FORMAT_ONLY_CATEGORIES: tuple[str, ...] = (
+    "html_formatting_drift",
+    "html_structure_mismatch",
+    "length_truncated",
+    "length_inflated",
+)
 
 
 def is_format_only(flags: Iterable[str]) -> bool:
-    """True when every flag is a cheap-to-fix format defect."""
+    """True when every flag is a cheap-to-fix format defect.
+
+    The quantifier is "all", which has no structured equivalent: a structured
+    flag's severity says how bad it is, not whether the fix is mechanical. So
+    the structured half is expressed through the *category* instead, and only
+    the categories whose fix is a re-emit belong here. A flag that is neither
+    a known format marker nor a format category makes the answer False — the
+    conservative direction, since the caller uses this to skip expensive
+    reasoning.
+    """
     materialized = [f for f in flags if f]
-    return bool(materialized) and all(
-        any(marker in flag for marker in FORMAT_ONLY_MARKERS) for flag in materialized
-    )
+    if not materialized:
+        return False
+    return all(_is_format_flag(flag) for flag in materialized)
+
+
+def _is_format_flag(flag: str) -> bool:
+    if any(marker in flag for marker in FORMAT_ONLY_MARKERS):
+        return True
+    parsed = parse_defect_flag(flag)
+    return parsed is not None and parsed[0] in FORMAT_ONLY_CATEGORIES
 
 
 # --- Structured flags: a machine-readable alternative to prose matching -----
@@ -230,6 +385,36 @@ def structured_severity(flags: Iterable[str]) -> str | None:
         if best is None or DEFECT_SEVERITIES.index(severity) > DEFECT_SEVERITIES.index(best):
             best = severity
     return best
+
+
+def declared_severity(flags: Iterable[str]) -> str | None:
+    """The highest severity across *both* encodings, or ``None``.
+
+    The whole point of a structured flag is that its author states the verdict
+    instead of hoping a substring table guesses it. Two rules follow, and the
+    incremental landing got both wrong:
+
+    * A structured flag must never *weaken* a verdict. Returning the structured
+      severity whenever one is present let a single ``advisory:minor:`` note
+      downgrade a block that also carried a legacy ``Numeric fidelity`` flag —
+      triage then released it through the minor auto-pass branch. The answer is
+      the worse of the two encodings.
+    * A structured flag must never be *invisible* to the routing rule.
+      ``classify_defect`` read only the tables, so a writer that declared
+      ``critical`` produced a flag that classified as ``PASS``.
+
+    ``None`` means neither encoding expressed an opinion, which is different
+    from a declared ``minor``: the latter is a deliberate "this is advisory".
+    """
+    declared = structured_severity(flags)
+    if has_critical_defect(flags):
+        return "critical"
+    if has_structural_defect(flags):
+        # A structural marker floors at major; keep a declared critical.
+        if declared == "critical":
+            return "critical"
+        return "major"
+    return declared
 
 
 # --- Lifecycle failure markers (not quality defects) ------------------------
