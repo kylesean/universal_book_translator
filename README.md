@@ -89,6 +89,17 @@ ubt console                  # opens http://127.0.0.1:8000/ in a browser
 `127.0.0.1:8000` by default, and opens the browser for you; for a loopback bind
 it also opens the server without an auth gate.
 
+For a console that survives closing its terminal, run it as a user service:
+
+```bash
+systemctl --user enable ubt-console.service
+systemctl --user start ubt-console.service
+journalctl --user -u ubt-console.service -f
+```
+
+The service keeps the UI and API on `127.0.0.1:8000`; `--dev`/Vite is for frontend
+development only and is not needed to use the console.
+
 **Configuring a model in the browser.** You do not need a shell to get started.
 Engine Doctor (`/system`) lists every provider block in `ubt.toml`, lets you add
 one, pick which is in force, and edit its endpoint, wire protocol, model ids and
@@ -183,8 +194,9 @@ Measured against the current implementation, not aspirational:
 - **Tables**: table cells are translated in the IR (and scored by QE), then
   re-typeset with translated headers. EPUB/DOCX/HTML/Markdown outputs carry the
   translated cells too.
-- **Not supported**: vertical CJK, encrypted PDFs (rejected at assessment, not
-  translated), colour/watermarked backgrounds (no background-colour probe, so
+- **Not supported**: vertical CJK, encrypted PDFs (refused before extraction, at
+  both assessment and translate, rather than reported as a parse failure),
+  colour/watermarked backgrounds (no background-colour probe, so
   light text on dark pages is invisible), and text drawn inside figures.
 - **Text expansion**: there is no fixed box to overflow — the page reflows and
   pagination changes — so a translation is never shrunk to fit a source box.

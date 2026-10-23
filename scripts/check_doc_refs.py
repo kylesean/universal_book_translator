@@ -16,6 +16,11 @@ Off-by-a-few line numbers are *not* reported: the docs are prose with citations,
 not a compiler, and demanding byte-exact line anchors would make the check noise.
 Run it by hand after a refactor that moves code the docs cite.
 
+``docs/archive/`` and ``docs/reviews/`` are skipped entirely: those files are
+dated records of one audit round, pinned to the HEAD they examined. Rewriting
+their citations would falsify the record, so their drift is expected and is not
+a docs-refresh trigger. This check is for the *living* docs.
+
     python scripts/check_doc_refs.py [--docs docs]
 
 Exit code is 1 when anything is reported, so it can gate a docs refresh.

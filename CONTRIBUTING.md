@@ -63,7 +63,7 @@ uv run pytest -m slow -q
   check all run with `pass_filenames: false`, so a push cannot pass just because
   the files you happened to touch are clean.
 - **Coverage floor 70%.** A regression guard, not a quality target: it sits about
-  7 points under the fast-tier baseline (measured ~77%) so ordinary work never
+  8 points under the fast-tier baseline (measured ~78%) so ordinary work never
   trips it, but a large deletion-without-tests or a new untested module does.
   Paired with `tests/unit/test_no_orphaned_modules.py`, it catches the class of
   rot that lint, types and tests alone let through.
@@ -159,7 +159,9 @@ run; `docs/guides/CI_AND_QUALITY_GATES.md` is the authority on where the gates
 execute. After a refactor that moves code those docs cite, run
 `python scripts/check_doc_refs.py`: it reports only a referenced file that does
 not exist and a line number past the end of its file, and exits non-zero when it
-finds one.
+finds one. `docs/archive/` and `docs/reviews/` are excluded: those are dated
+records whose citations are pinned to the HEAD they audited, so drifting from
+the current tree is expected rather than drift.
 
 ## Extending the system
 
