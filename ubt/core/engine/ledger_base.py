@@ -356,6 +356,11 @@ class LedgerBase:
             ensure_private_dir(self.db_path.parent)
         self._lock = threading.RLock()
         self._conn: sqlite3.Connection | None = None
+        # Connection-per-thread for reads (see ``_get_read_conn``). WAL lets
+        # readers run concurrently with the single writer, so serialising them
+        # behind the writer's RLock was a policy choice, not a SQLite limit.
+        self._read_conns: dict[int, sqlite3.Connection] = {}
+        self._read_conns_lock = threading.Lock()
         # Set by close(). A stage generator that finalizes *after* the run's
         # finally closed the ledger used to silently reopen a fresh connection
         # (``_get_conn`` rebuilt one whenever ``_conn`` was None), which wrote
@@ -461,6 +466,60 @@ class LedgerBase:
                 self._safe_rollback()
                 raise
 
+    @contextmanager
+    def _get_read_conn(self) -> Iterator[sqlite3.Connection]:
+        """A read-only connection this thread can use without the writer's lock.
+
+        Every read used to share the writer's single connection and its
+        ``RLock``, so a full-table scan (346 ms on a 20k-block book, 88 % of it
+        ``IRBlock`` construction) stalled every other reader: a progress event's
+        ``get_job_stats`` went from 3 ms to 384 ms p95 while a scan ran, and the
+        chapter-streaming pipeline issues one of those per batch (666 per run at
+        the default ``batch_limit``).
+
+        SQLite's WAL mode already allows readers concurrent with the single
+        writer, so this opens a separate ``mode=ro`` connection per thread and
+        leaves the writer's connection and lock untouched. Cross-process
+        consistency is unaffected: the writer still serialises through its
+        lease, and a reader sees the last committed snapshot.
+
+        Thread-local because ``sqlite3`` connections are not safe to share
+        across threads even with ``check_same_thread=False``; a thread's
+        connection lives until ``close()``. ``read_only`` ledgers keep using
+        ``_get_conn`` (their only connection is already a reader).
+        """
+        if self.read_only or self._closed:
+            # The writer path already is a reader here, and a closed ledger must
+            # not silently reopen (see close()).
+            with self._get_conn() as conn:
+                yield conn
+            return
+
+        worker = threading.get_ident()
+        with self._read_conns_lock:
+            cached = self._read_conns.get(worker)
+            if cached is None:
+                try:
+                    opened = sqlite3.connect(
+                        f"file:{self.db_path.resolve()}?mode=ro",
+                        uri=True,
+                        timeout=self.timeout,
+                        isolation_level=None,
+                        check_same_thread=False,
+                    )
+                    opened.row_factory = sqlite3.Row
+                    opened.execute(f"PRAGMA busy_timeout={int(self.timeout * 1000)};")
+                except sqlite3.Error as err:
+                    raise LedgerError(
+                        f"Failed to open a read connection: {err}",
+                        details={"db_path": str(self.db_path), "error": str(err)},
+                    ) from err
+                self._read_conns[worker] = opened
+                cached = opened
+        # No ``with`` (transaction) around the yield: callers that need one open
+        # it themselves, exactly as they do on the writer connection.
+        yield cached
+
     def close(self) -> None:
         """Close the underlying persistent connection (idempotent).
 
@@ -470,6 +529,13 @@ class LedgerBase:
         """
         with self._lock:
             self._closed = True
+            with self._read_conns_lock:
+                conns, self._read_conns = self._read_conns, {}
+            for conn in conns.values():
+                try:
+                    conn.close()
+                except Exception:
+                    logger.warning("Error while closing ledger read connection %s", self.db_path)
             if self._conn is not None:
                 try:
                     self._conn.close()

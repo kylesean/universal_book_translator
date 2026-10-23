@@ -469,51 +469,68 @@ class LedgerJobsMixin(_LedgerHost):
             return removed
 
     def get_job_stats(self, job_id: str) -> dict[str, Any]:
-        """Calculate aggregated progress statistics strictly for a single job."""
-        with self._get_conn() as conn:
+        """Calculate aggregated progress statistics strictly for a single job.
+
+        Reads on its own connection (see ``_get_read_conn``): this is the query
+        behind every progress event — 666 of them on a 20k-block run at the
+        default ``batch_limit`` — and running it behind the writer's lock made
+        each one wait out an in-flight full scan (3 ms uncontended, 384 ms p95
+        under contention, measured).
+        """
+        with self._get_read_conn() as conn:
             actual_id = self._resolve_actual_job_id(conn, job_id)
             # One read snapshot across both queries: without it a concurrent
             # checkpoint write can make total/completed disagree with the scores.
             conn.execute("BEGIN;")
-            cursor = conn.execute(
-                f"""
-                SELECT
-                    COUNT(*) as total_all,
-                    SUM(CASE WHEN COALESCE(skip_translate, 0) = 1 THEN 1 ELSE 0 END) as skipped,
-                    SUM(CASE WHEN COALESCE(skip_translate, 0) = 0 THEN 1 ELSE 0 END) as total,
-                    SUM(CASE WHEN status IN ('mtqe_passed', 'repaired')
-                              AND COALESCE(skip_translate, 0) = 0 THEN 1 ELSE 0 END) as completed,
-                    SUM(CASE WHEN status = 'drafted' THEN 1 ELSE 0 END) as drafted,
-                    SUM(CASE WHEN status = 'repaired' THEN 1 ELSE 0 END) as repaired,
-                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-                    SUM(CASE WHEN status = 'needs_human' THEN 1 ELSE 0 END) as needs_human,
-                    SUM(CASE WHEN status = 'blocked_human' THEN 1 ELSE 0 END) as blocked_human,
-                    AVG(CASE WHEN {QE_SCORED_SQL} AND COALESCE(skip_translate, 0) = 0
-                             THEN mtqe_score ELSE NULL END) as avg_score
-                FROM blocks
-                WHERE job_id = ?
-                """,  # noqa: S608 — policy constant, not user input
-                (actual_id,),
-            )
-            row = cursor.fetchone()
-            b15_avg = 0.0
-            if row and row["avg_score"] is not None:
-                scores_cursor = conn.execute(
+            try:
+                cursor = conn.execute(
                     f"""
-                    SELECT mtqe_score FROM blocks
-                    WHERE job_id = ? AND {QE_SCORED_SQL}
-                    ORDER BY mtqe_score ASC
+                    SELECT
+                        COUNT(*) as total_all,
+                        SUM(CASE WHEN COALESCE(skip_translate, 0) = 1 THEN 1 ELSE 0 END) as skipped,
+                        SUM(CASE WHEN COALESCE(skip_translate, 0) = 0 THEN 1 ELSE 0 END) as total,
+                        SUM(CASE WHEN status IN ('mtqe_passed', 'repaired')
+                                  AND COALESCE(skip_translate, 0) = 0 THEN 1 ELSE 0 END) as completed,
+                        SUM(CASE WHEN status = 'drafted' THEN 1 ELSE 0 END) as drafted,
+                        SUM(CASE WHEN status = 'repaired' THEN 1 ELSE 0 END) as repaired,
+                        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+                        SUM(CASE WHEN status = 'needs_human' THEN 1 ELSE 0 END) as needs_human,
+                        SUM(CASE WHEN status = 'blocked_human' THEN 1 ELSE 0 END) as blocked_human,
+                        AVG(CASE WHEN {QE_SCORED_SQL} AND COALESCE(skip_translate, 0) = 0
+                                 THEN mtqe_score ELSE NULL END) as avg_score
+                    FROM blocks
+                    WHERE job_id = ?
                     """,  # noqa: S608 — policy constant, not user input
                     (actual_id,),
                 )
-                scores = [
-                    r["mtqe_score"] for r in scores_cursor.fetchall() if r["mtqe_score"] is not None
-                ]
-                if scores:
-                    cutoff = max(1, int(len(scores) * 0.15))
-                    b15_avg = round(sum(scores[:cutoff]) / cutoff, 4)
-
-            conn.execute("COMMIT;")
+                row = cursor.fetchone()
+                b15_avg = 0.0
+                if row and row["avg_score"] is not None:
+                    scores_cursor = conn.execute(
+                        f"""
+                        SELECT mtqe_score FROM blocks
+                        WHERE job_id = ? AND {QE_SCORED_SQL}
+                        ORDER BY mtqe_score ASC
+                        """,  # noqa: S608 — policy constant, not user input
+                        (actual_id,),
+                    )
+                    scores = [
+                        r["mtqe_score"]
+                        for r in scores_cursor.fetchall()
+                        if r["mtqe_score"] is not None
+                    ]
+                    if scores:
+                        cutoff = max(1, int(len(scores) * 0.15))
+                        b15_avg = round(sum(scores[:cutoff]) / cutoff, 4)
+            finally:
+                # Always end the read snapshot, including on a query error: a
+                # connection left "within a transaction" pins the WAL and poisons
+                # the next ``BEGIN`` on this thread. A read-only transaction is
+                # released by either statement; COMMIT is the success path, and
+                # ROLLBACK covers the failure one. Suppressed so a rollback
+                # failure cannot mask the error that caused it.
+                with suppress(sqlite3.Error):
+                    conn.execute("ROLLBACK;" if conn.in_transaction else "COMMIT;")
             return {
                 # ``total``/``completed`` count only blocks that could be
                 # translated. Skipped blocks (images, list markers, short
@@ -1344,15 +1361,22 @@ class LedgerBlocksMixin(_LedgerHost):
             return self._row_to_block(row)
 
     def get_all_blocks(self, job_id: str) -> list[IRBlock]:
-        """Fetch all blocks for a job in strict spine order with zero cross-job mixing."""
-        with self._get_conn() as conn:
+        """Fetch all blocks for a job in strict spine order with zero cross-job mixing.
+
+        Reads on a connection of their own (see ``_get_read_conn``) and
+        converts **after** releasing it: a full scan is 346 ms on a 20k-block
+        book and 88 % of that is :class:`IRBlock` construction, so holding the
+        writer's lock across the parse stalled every other ledger user (a
+        progress event went from 3 ms to 384 ms p95).
+        """
+        with self._get_read_conn() as conn:
             actual_id = self._resolve_actual_job_id(conn, job_id)
             cursor = conn.execute(
                 "SELECT * FROM blocks WHERE job_id = ? ORDER BY spine_index ASC",
                 (actual_id,),
             )
             rows = cursor.fetchall()
-            return [self._row_to_block(r) for r in rows]
+        return [self._row_to_block(r) for r in rows]
 
     def fetch_blocks_by_status(
         self, job_id: str, status: BlockStatus | str, chapter_id: str | None = None
@@ -1409,7 +1433,7 @@ class LedgerBlocksMixin(_LedgerHost):
 
     def fetch_source_texts(self, job_id: str) -> list[str]:
         """Fetch raw source texts for a job in spine order with zero Pydantic model overhead."""
-        with self._get_conn() as conn:
+        with self._get_read_conn() as conn:
             actual_id = self._resolve_actual_job_id(conn, job_id)
             cursor = conn.execute(
                 "SELECT source_text FROM blocks WHERE job_id = ? ORDER BY spine_index ASC",

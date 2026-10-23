@@ -31,6 +31,7 @@ from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.plan import RunGates, run_stages
 from ubt.core.engine.repair_loop import RepairLoop
 from ubt.core.engine.services import RunServices
+from ubt.core.engine.source_document import SourceDocumentIndex
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.engine.stages import (
     run_tm_writeback_stage,
@@ -1206,6 +1207,11 @@ class PipelineOrchestrator:
                 adaptive_policy=adaptive_policy,
                 concurrency_sem=concurrency_sem,
                 tm=tm,
+                # The book's source text is immutable after ingest, so it is read
+                # and indexed once per run and shared by the draft stage and the
+                # quality gate (see SourceDocumentIndex). Loaded lazily, after
+                # ingest has produced the blocks.
+                source_document=SourceDocumentIndex(),
                 qe_runner_explicit=self._qe_runner_explicit,
                 repair_loop_explicit=self._repair_loop_explicit,
             )

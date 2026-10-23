@@ -28,7 +28,12 @@ from ubt.core.qe.defect_taxonomy import (
     NEAR_ECHO_MARKER,
     UNTRANSLATED_RESIDUE_MARKER,
 )
-from ubt.core.qe.omission import OmissionGate, OmissionMetrics, singular_variant
+from ubt.core.qe.omission import (
+    DocumentVocabulary,
+    OmissionGate,
+    OmissionMetrics,
+    singular_variant,
+)
 from ubt.core.qe.term_shape import is_identifier_shaped, is_verbatim_carryover
 from ubt.core.validators.consistency import NumericConsistencyValidator
 from ubt.core.validators.html_delta import HTMLDeltaValidator
@@ -998,6 +1003,14 @@ class FastPassFilter:
         and the repair shipped the English source.
         """
         self.omission_gate.set_document_context(document_text)
+
+    def set_document_vocabulary(self, vocabulary: DocumentVocabulary | None) -> None:
+        """Bind an already-indexed document; see :meth:`set_document_context`.
+
+        The run indexes its source text once and shares the object, so a stage
+        that binds per chapter does not re-index the book each time.
+        """
+        self.omission_gate.bind_document_vocabulary(vocabulary)
 
     @property
     def policy(self) -> LanguageProfile | LanguagePairPolicy:

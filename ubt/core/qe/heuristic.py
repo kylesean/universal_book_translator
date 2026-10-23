@@ -19,6 +19,7 @@ from typing import Any
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.defect_taxonomy import ECHO_MARKERS
 from ubt.core.qe.fast_pass import FastPassFilter
+from ubt.core.qe.omission import DocumentVocabulary
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
 
 # The exact score values the heuristic emits, and what each band
@@ -180,6 +181,9 @@ class HeuristicQERunner(BaseQERunner):
         #: The run's source text, once the gate binds it (see
         #: :meth:`with_document_context`). Empty means "not bound yet".
         self._document_text: str = ""
+        #: The indexed form of that text, when the run shares one (see
+        #: :meth:`with_document_vocabulary`). Preferred over re-indexing.
+        self._document_vocabulary: DocumentVocabulary | None = None
         self._glossary_validator = (
             GlossaryConsistencyValidator(glossary=glossary) if glossary else None
         )
@@ -194,7 +198,9 @@ class HeuristicQERunner(BaseQERunner):
         )
         # Carry the bound context across a language rebind, like the glossary:
         # a runner that forgot it would reproduce the inner/outer gate split.
-        if self._document_text:
+        if self._document_vocabulary is not None:
+            rebound.with_document_vocabulary(self._document_vocabulary)
+        elif self._document_text:
             rebound.with_document_context(self._document_text)
         return rebound
 
@@ -226,7 +232,9 @@ class HeuristicQERunner(BaseQERunner):
         # Re-bind the document context this runner may already carry: rebinding
         # the glossary must not silently drop it (the quality gate calls this
         # before scoring, so the two would disagree again).
-        if self._document_text:
+        if self._document_vocabulary is not None:
+            bound.with_document_vocabulary(self._document_vocabulary)
+        elif self._document_text:
             bound.fast_pass.set_document_context(self._document_text)
             bound._document_text = self._document_text
         return bound
@@ -250,7 +258,23 @@ class HeuristicQERunner(BaseQERunner):
         if not document_text or document_text == self._document_text:
             return self
         self._document_text = document_text
+        self._document_vocabulary = None
         self.fast_pass.set_document_context(document_text)
+        return self
+
+    def with_document_vocabulary(
+        self, vocabulary: DocumentVocabulary | None
+    ) -> "HeuristicQERunner":
+        """Bind an already-indexed document (see ``DocumentVocabulary``).
+
+        The run indexes its source text once (``SourceDocumentIndex``) and hands
+        the same object to the draft filter and to this runner, so neither
+        re-indexes the book per chapter. Returns ``self``.
+        """
+        if vocabulary is None:
+            return self
+        self._document_vocabulary = vocabulary
+        self.fast_pass.set_document_vocabulary(vocabulary)
         return self
 
     def is_glossary_aware(self) -> bool:

@@ -1546,15 +1546,22 @@ async def _build_draft_runtime(
     # ``bert`` ``pdf_main#b0256``: without this the untranslated source passed
     # every check while the correct Chinese draft was rejected as an omission,
     # and the repair shipped the English source instead.
-    document_source = "\n".join(
-        block.source_text or ""
-        # Off-loop: chapter streaming calls this once per chapter, and a
-        # 20k-block book's ``get_all_blocks`` is a ~0.6s synchronous SQLite read
-        # that would otherwise stall the event loop (SSE, queue heartbeat) once
-        # per chapter — ~24s of blocking across a 40-chapter book.
-        for block in await asyncio.to_thread(ledger.get_all_blocks, actual_job_id)
-    )
-    active_fast_pass.set_document_context(document_source)
+    #
+    # Read once per RUN, not once per chapter: ``source_text`` is immutable
+    # after ingest, and the previous per-chapter ``get_all_blocks`` cost 346 ms
+    # on a 20k-block book (329 ms of it ``IRBlock`` construction nobody used)
+    # for a string that never changed. The index is also what the gate stage
+    # and the omission gate share, so the book is read and indexed exactly once.
+    source_index = getattr(services, "source_document", None)
+    if source_index is not None:
+        await asyncio.to_thread(source_index.load, ledger, actual_job_id)
+        active_fast_pass.set_document_vocabulary(source_index.vocabulary())
+    else:  # a caller built RunServices without the shared index
+        document_source = "\n".join(
+            block.source_text or ""
+            for block in await asyncio.to_thread(ledger.get_all_blocks, actual_job_id)
+        )
+        active_fast_pass.set_document_context(document_source)
     batch_active = bool(config.batch_enabled) and (router.supports_batch_api)
     batch_min_blocks = max(2, int(config.batch_min_blocks))
     batch_poll_interval = max(0.5, float(config.batch_poll_interval))

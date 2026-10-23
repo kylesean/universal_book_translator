@@ -11,6 +11,37 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Changed
 
+- **The book's source text is read and indexed once per run.** `source_text` is
+  immutable after ingest, yet `run_draft_stage` and `run_quality_gate_stage`
+  rebuilt the whole joined string from a full-table scan **per chapter** — and
+  the omission gate then re-derived its single document-wide answer ("is this
+  all-caps run an acronym, or a word capitalised for a table label?") from that
+  raw text **per block**. `SourceDocumentIndex`
+  (`ubt/core/engine/source_document.py`) loads it once through
+  `fetch_source_texts` (a bare column read: `IRBlock` construction was 88 % of
+  `get_all_blocks`' cost and neither caller used it) and exposes a
+  `DocumentVocabulary` built the same way. `identifier_terms`' boundary-aware
+  search over the whole document became a set membership test against that
+  vocabulary; the verdict is identical (pinned by a property test against the
+  retired implementation). Measured on a synthetic 20k-block / 3.9M-character
+  book: 139.7 ms → 0.21 ms per `evaluate()`, i.e. ~5581 s → ~8.5 s of gate CPU
+  across a full run.
+- **Reads no longer queue behind the writer's lock.** `SQLiteJobLedger` served
+  every read on the writer's single connection under one process-wide `RLock`,
+  so a full scan stalled everything else: the progress event's `get_job_stats`
+  went from 3 ms to 384 ms p95 while a scan loop ran (it is issued once per
+  batch — 666 times on a 20k-block run). Reads now use a per-thread `mode=ro`
+  connection (`_get_read_conn`) and convert results **after** releasing it; WAL
+  already allows readers concurrent with the single writer, and the writer keeps
+  its one connection and `BEGIN IMMEDIATE`. Measured: progress queries p50
+  375.9 → 3.8 ms, p95 408.5 → 62.7 ms, throughput 16 → 154 samples.
+- **`OmissionGate.evaluate(document_text=...)` honours its argument.** The
+  parameter was documented as "an explicit argument wins over the bound run
+  context" and then ignored: the body normalised a local and read
+  `self._document_text` anyway, so every keyword caller silently got the bound
+  context. It now uses the resolved value, and also accepts a prepared
+  `DocumentVocabulary` so a batch does not re-index the book per block.
+
 - The ledger schema is a **single flat baseline** (`SCHEMA_VERSION = 1000`). The
   historical 14-step incremental migration ladder was removed; a fresh database
   is created directly with the final shape (composite `(job_id, block_id)`

@@ -31,6 +31,7 @@ from ubt.core.qe.heuristic import (
     QE_SCORE_STRUCTURAL_OTHER,
     HeuristicQERunner,
 )
+from ubt.core.qe.omission import DocumentVocabulary
 
 #: Heuristic classes worth a paid second opinion. Each discrete score names its
 #: own defect class, so this set is the routing table; hard defects (omission,
@@ -556,6 +557,27 @@ class TieredQERunner(BaseQERunner):
         external filter knew the document, ``score_pairs`` did not.
         """
         heuristic = self.heuristic.with_document_context(document_text)
+        if heuristic is self.heuristic:
+            return self
+        rebound = TieredQERunner(
+            heuristic=heuristic,
+            judge=self.judge,
+            pass_sample=self.pass_sample,
+        )
+        return self._carry_run_state(rebound)
+
+    def with_document_vocabulary(self, vocabulary: DocumentVocabulary | None) -> TieredQERunner:
+        """Forward an already-indexed document to the heuristic leg.
+
+        Same delegation shape as :meth:`with_document_context`; the run indexes
+        its source text once and shares the object (see
+        ``SourceDocumentIndex``), so a per-chapter gate does not re-index the
+        book for every chapter.
+        """
+        bind = getattr(self.heuristic, "with_document_vocabulary", None)
+        if not callable(bind):
+            return self
+        heuristic = bind(vocabulary)
         if heuristic is self.heuristic:
             return self
         rebound = TieredQERunner(

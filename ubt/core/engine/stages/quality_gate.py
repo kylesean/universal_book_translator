@@ -273,15 +273,28 @@ async def run_quality_gate_stage(
     # context-free one, so an identifier the book states once (an uppercase
     # table header, an alias defined elsewhere) was reported "omitted" on a
     # block the gate had just accepted -- a correct block capped at 0.35.
+    #
+    # The run's shared index supplies both the text and the vocabulary, so this
+    # is a no-op load on every chapter after the first (see
+    # ``SourceDocumentIndex``). The fallback keeps a caller that built
+    # ``RunServices`` without the index working exactly as before.
+    source_index = getattr(services, "source_document", None)
+    bind_vocabulary = getattr(qe_runner, "with_document_vocabulary", None)
     bind_context = getattr(qe_runner, "with_document_context", None)
-    if not services.qe_runner_explicit and callable(bind_context):
-        document_source = "\n".join(
-            block.source_text or ""
-            for block in await asyncio.to_thread(ledger.get_all_blocks, actual_job_id)
-        )
-        if document_source.strip():
-            qe_runner = bind_context(document_source)
-            scoring.qe_runner = qe_runner
+    if not services.qe_runner_explicit:
+        if source_index is not None:
+            await asyncio.to_thread(source_index.load, ledger, actual_job_id)
+            if callable(bind_vocabulary) and source_index.bound:
+                qe_runner = bind_vocabulary(source_index.vocabulary())
+                scoring.qe_runner = qe_runner
+        elif callable(bind_context):
+            document_source = "\n".join(
+                block.source_text or ""
+                for block in await asyncio.to_thread(ledger.get_all_blocks, actual_job_id)
+            )
+            if document_source.strip():
+                qe_runner = bind_context(document_source)
+                scoring.qe_runner = qe_runner
     drafted_blocks = await asyncio.to_thread(
         ledger.fetch_blocks_by_status, actual_job_id, BlockStatus.DRAFTED, chapter_id=chapter_id
     )

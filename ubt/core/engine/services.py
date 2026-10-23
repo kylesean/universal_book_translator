@@ -30,6 +30,7 @@ from ubt.core.validators.html_delta import HTMLDeltaValidator
 if TYPE_CHECKING:
     from ubt.core.config import UBTConfig
     from ubt.core.engine.repair_loop import RepairLoop
+    from ubt.core.engine.source_document import SourceDocumentIndex
     from ubt.core.memory.tm import TranslationMemory
     from ubt.core.policy.adaptive_policy import AdaptivePolicy
     from ubt.core.qe.base import BaseQERunner
@@ -54,6 +55,17 @@ class RunServices:
     concurrency_sem: asyncio.Semaphore
     tm: TranslationMemory | None = None
     html_validator: HTMLDeltaValidator = field(default_factory=HTMLDeltaValidator)
+    #: The run's immutable source text, read once and indexed once.
+    #:
+    #: Both the draft stage and the quality gate teach their filters the shape
+    #: of the whole book so a table label in capitals is not demanded verbatim
+    #: in the target. They used to rebuild it from a full-table scan **per
+    #: chapter** (346 ms each on a 20k-block book, 329 ms of which was
+    #: ``IRBlock`` construction neither caller used), and the omission gate then
+    #: re-derived its one document-wide answer from that raw text **per block**.
+    #: One shared index makes both free: ``None`` means "not loaded yet", which
+    #: a stage resolves on first use (see ``SourceDocumentIndex``).
+    source_document: SourceDocumentIndex | None = None
     #: Whether the orchestrator built the runner/loop itself, or the caller
     #: injected one. Only a runner this pipeline built may be re-bound to the
     #: run's terminology; an injected loop must stay exactly as it was given.

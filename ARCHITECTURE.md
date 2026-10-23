@@ -119,10 +119,17 @@ of returning it:
   threads each to the stage that reads it.
 - `RunServices` (`ubt/core/engine/services.py`) carries the collaborators the run
   *builds for itself* — QE runner, repair loop, FastPass filter, adaptive
-  policy, in-flight semaphore, TM, HTML validator.
+  policy, in-flight semaphore, TM, HTML validator, and the run's
+  `SourceDocumentIndex`.
 - `BlockReader` (`ubt/core/engine/blocks.py`) owns the run's one piece of mutable
   state, the block snapshot, and re-reads it when the ledger's `blocks_seq`
   revision changes.
+- `SourceDocumentIndex` (`ubt/core/engine/source_document.py`) holds the book's
+  source text and its indexed vocabulary. `source_text` is immutable after
+  ingest (no write path touches the column), so it is read **once per run** and
+  shared by the draft stage and the quality gate instead of being rebuilt from a
+  full-table scan per chapter; the omission gate consumes the vocabulary rather
+  than re-scanning the book per block.
 
 Stage-specific tunables stay in the stage's own signature, so they remain
 greppable.

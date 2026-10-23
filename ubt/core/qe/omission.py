@@ -34,6 +34,7 @@ All floors use "must strictly exceed" semantics: ``ratio <= floor`` fails, so
 sentence merging (3-of-4) still passes.
 """
 
+import hashlib
 import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -127,6 +128,49 @@ def _is_hyphen_ghost(term: str, freq: "Counter[str]") -> bool:
     )
 
 
+#: Maximal runs of ASCII letters. A vocabulary entry is one such run, lower-cased.
+_LETTER_RUN_RE = re.compile(r"[A-Za-z]+")
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentVocabulary:
+    """The words a document spells in ordinary (non-all-caps) case.
+
+    The omission gate's only document-wide question is "is this all-caps run a
+    real acronym, or an ordinary word capitalised for a table label?", and the
+    evidence is whether the word also appears in ordinary case somewhere in the
+    book (see :func:`identifier_terms`). Answering that by re-scanning the whole
+    document once per candidate term cost 143 ms **per block** on a 20k-block
+    book — 5581 s across one run, measured — because the gate is asked about
+    every block twice. The same question against a set of the document's words
+    costs 0.08 ms and answers identically.
+
+    Build it once per run with :func:`document_vocabulary` (100 ms on a 3.9M
+    character book) and reuse it; :class:`OmissionGate` does exactly that when
+    the run's source text is bound.
+    """
+
+    words: frozenset[str]
+
+    def __bool__(self) -> bool:
+        return bool(self.words)
+
+
+def document_vocabulary(document_text: str) -> DocumentVocabulary:
+    """Index a document's ordinary-case words once, for many identifier checks.
+
+    Every all-caps run is stripped **before** the words are collected: an
+    acronym written in prose (``We use MHA and LSTM``) is still the acronym, so
+    it must not count as evidence that ``MHA`` is an ordinary word. What remains
+    is text in ordinary case, where a surviving ``mask`` (or ``Mask``) proves
+    the capitals were a formatting choice.
+    """
+    stripped = _ALL_CAPS_TOKEN_RE.sub(" ", document_text)
+    return DocumentVocabulary(
+        frozenset(match.group(0).lower() for match in _LETTER_RUN_RE.finditer(stripped))
+    )
+
+
 def identifier_terms(source_text: str, document_text: str = "") -> set[str]:
     """Source-verbatim identifier-shaped Latin runs the omission gate tracks.
 
@@ -149,10 +193,21 @@ def identifier_terms(source_text: str, document_text: str = "") -> set[str]:
     The discriminator is usage: a genuine acronym is *never* spelled out in
     lower case elsewhere in the document, while a capitalised word is. So an
     all-caps run is dropped from the tracked set when its lower-case form occurs
-    as a stand-alone word in ``document_text`` (the lower-case form may be the
-    run itself in prose, so the count must exceed the capitals' own
-    occurrences). Passing no ``document_text`` keeps the shape-only behaviour.
+    as a stand-alone word in ``document_text``. Passing no ``document_text``
+    keeps the shape-only behaviour.
+
+    This form indexes ``document_text`` on every call, which is right for a
+    one-off question. A caller that asks about many blocks of the same book must
+    build the index once with :func:`document_vocabulary` and call
+    :func:`identifier_terms_in` — that is the difference between 143 ms and
+    0.08 ms per block (see :class:`DocumentVocabulary`).
     """
+    vocabulary = document_vocabulary(document_text) if document_text else None
+    return identifier_terms_in(source_text, vocabulary)
+
+
+def identifier_terms_in(source_text: str, vocabulary: DocumentVocabulary | None = None) -> set[str]:
+    """The tracked identifier set of one block, against a prepared vocabulary."""
     runs = [
         match.group(0)
         for match in _LATIN_RUN_RE.finditer(source_text.strip())
@@ -160,36 +215,28 @@ def identifier_terms(source_text: str, document_text: str = "") -> set[str]:
     ]
     freq = Counter(runs)
     tracked = {t for t in set(runs) if _is_identifier_shaped(t) and not _is_hyphen_ghost(t, freq)}
-    if not document_text:
+    if not vocabulary:
         return tracked
-    # Strip the all-caps tokens from the document ONCE, not once per term: the
-    # per-term call was O(terms × document) — on a real book the omission gate
-    # re-scanned the whole document text for every tracked identifier.
-    lowered_document = _ALL_CAPS_TOKEN_RE.sub(" ", document_text)
-    return {t for t in tracked if not _reads_as_a_word_in_the_document(t, lowered_document)}
+    return {t for t in tracked if not _reads_as_a_word_in_the_document(t, vocabulary)}
 
 
-def _reads_as_a_word_in_the_document(term: str, stripped_document: str) -> bool:
+def _reads_as_a_word_in_the_document(term: str, vocabulary: DocumentVocabulary) -> bool:
     """Whether an all-caps run is ordinary prose capitalised for a table.
 
     Only all-caps runs are candidates: a camelCase or digit-bearing term
     (``PagedAttention``, ``GQA-8``) is never written in lower case, so the test
     cannot apply to it.
 
-    The evidence is a **non-all-caps** occurrence of the word in the document.
-    The caller strips every all-caps occurrence first (see
-    :func:`identifier_terms`), because an acronym written in prose is still the
-    acronym: ``We use MHA and LSTM`` must not count as evidence that ``MHA`` is
-    a word. What remains is text in ordinary case, so a surviving ``mask`` (or
-    ``Mask``) proves the capitals were a formatting choice, while an acronym
-    leaves nothing behind.
+    The evidence is a **non-all-caps** occurrence of the word in the document,
+    which :func:`document_vocabulary` collected after stripping every all-caps
+    run. A set membership test is equivalent to the boundary-aware search this
+    used to do, and it is the whole reason the vocabulary exists: the search was
+    O(document) per term, so the gate re-scanned the book for every identifier
+    of every block.
     """
     if not term.isupper() or len(term) < 3 or not term.isalpha():
         return False
-    return (
-        re.search(rf"(?<![A-Za-z]){re.escape(term)}(?![A-Za-z])", stripped_document, re.IGNORECASE)
-        is not None
-    )
+    return term.lower() in vocabulary.words
 
 
 def _math_term_variants(term: str) -> list[str]:
@@ -378,9 +425,27 @@ class OmissionGate:
         self.min_chrf_ngrams = min_chrf_ngrams
         self.ngram_sizes = ngram_sizes
         self._glossary_surfaces: list[tuple[str, str]] = []
-        #: Whole-document source text, for the capitalised-word discriminator.
-        self._document_text: str = ""
+        #: Indexed ordinary-case words of the whole source document, for the
+        #: capitalised-word discriminator. This replaces the per-block
+        #: ``re.search`` over the book; see :class:`DocumentVocabulary`.
+        self._document_vocabulary: DocumentVocabulary | None = None
+        #: Fingerprint of the text the current vocabulary was built from, so
+        #: re-binding the same book (the chapter-streaming draft stage binds per
+        #: chapter) is a no-op instead of a 130 ms re-index. A digest rather than
+        #: the text itself: holding the string would pin a multi-megabyte book in
+        #: memory for no reason.
+        self._document_digest: bytes | None = None
         self.set_glossary(glossary)
+
+    def bind_document_vocabulary(self, vocabulary: DocumentVocabulary | None) -> None:
+        """Bind an already-indexed document (see :class:`DocumentVocabulary`).
+
+        The run indexes its source text once (``SourceDocumentIndex``) and hands
+        the same object to every consumer. ``set_document_context`` still works
+        for a one-off caller that has only the text; this is the batch path that
+        must not re-index the book per stage.
+        """
+        self._document_vocabulary = vocabulary or None
 
     def set_document_context(self, document_text: str) -> None:
         """Bind the run's source text so a table-formatted word is not a term.
@@ -394,8 +459,26 @@ class OmissionGate:
         'RND', 'SAME']" and the repair adopted the untranslated source instead.
         Usage in the wider document is the discriminator — see
         :func:`identifier_terms`. Bound once per run, like the glossary.
+
+        The document is indexed here rather than stored: the gate asks its one
+        document-wide question about every block (twice per block, in the draft
+        and gate paths), and answering it from raw text meant re-scanning the
+        whole book per tracked term — 143 ms/block, 5581 s per run, measured.
+        The index keeps the answer identical and the per-block cost at 0.08 ms.
+
+        Re-binding the same text is a no-op, so a stage that binds per call (the
+        chapter-streaming draft stage does) does not re-index the book each
+        time.
         """
-        self._document_text = document_text or ""
+        if not document_text:
+            self._document_vocabulary = None
+            self._document_digest = None
+            return
+        digest = hashlib.blake2b(document_text.encode("utf-8"), digest_size=16).digest()
+        if self._document_vocabulary is not None and self._document_digest == digest:
+            return
+        self._document_digest = digest
+        self._document_vocabulary = document_vocabulary(document_text)
 
     def set_glossary(self, glossary: Sequence[Mapping[str, Any]] | None) -> None:
         """Bind the run's glossary so a term's canonical rendering counts as kept.
@@ -446,14 +529,24 @@ class OmissionGate:
         *,
         is_table: bool | None = None,
         block_type: object = None,
-        document_text: str = "",
+        document_text: str | DocumentVocabulary = "",
     ) -> OmissionDecision:
         src = source_text.strip()
         tgt = target_text.strip()
 
         # An explicit argument wins over the bound run context (a caller that
         # passes it is more specific), and the bound value may be unset.
-        document_text = document_text or self._document_text
+        #
+        # A prepared :class:`DocumentVocabulary` may be passed instead of raw
+        # text so a batch that reuses one book does not re-index it per block.
+        # The bound context is a vocabulary (see ``set_document_context``), so
+        # an explicit *string* has to be indexed here — once, for this call.
+        if isinstance(document_text, DocumentVocabulary):
+            vocabulary: DocumentVocabulary | None = document_text
+        elif document_text:
+            vocabulary = document_vocabulary(document_text)
+        else:
+            vocabulary = self._document_vocabulary
 
         if is_table is None:
             bt = getattr(block_type, "value", block_type or "")
@@ -467,8 +560,11 @@ class OmissionGate:
         sentence_ratio = tgt_sentences / max(1, src_sentences)
 
         # ``document_text`` lets the identifier set drop a word that is only
-        # capitalised for a table label; see :func:`identifier_terms`.
-        tracked_terms = identifier_terms(src, self._document_text)
+        # capitalised for a table label; see :func:`identifier_terms`. The
+        # resolved local is used, not ``self._document_vocabulary``: an explicit
+        # argument is documented to win over the bound context, and reading
+        # ``self`` here made that parameter inert.
+        tracked_terms = identifier_terms_in(src, vocabulary)
         surfaces: list[str] = []
         missing_terms = []
         for t in sorted(tracked_terms):
