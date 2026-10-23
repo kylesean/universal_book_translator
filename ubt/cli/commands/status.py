@@ -759,3 +759,61 @@ def pe_import(
         )
         console.print(f"[dim]Revised blocks:[/] {preview}{more}")
     console.print("[bold green]✓ Human PE revisions applied.[/]")
+
+
+def re_export_cmd(
+    job_id: Annotated[str, typer.Argument(help="Job ID whose deliverable to re-export")],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Custom output path (defaults to recorded output path from ledger)",
+        ),
+    ] = None,
+    db_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--db-dir",
+            help="SQLite ledger storage directory (default: from config / UBT_DB_DIR)",
+            show_default=False,
+        ),
+    ] = None,
+) -> None:
+    """Re-render a finished job's deliverable from its ledger (human-edit re-export)."""
+    resolve_fn = resolve_db_dir()
+    resolved_db_dir = resolve_fn(db_dir)
+    if not job_id_is_valid(job_id):
+        console.print(f"[bold red]Error:[/] Invalid job id: {job_id!r}")
+        raise typer.Exit(code=1)
+
+    db_path = resolved_db_dir / f"{job_id}.sqlite"
+    if not db_path.exists():
+        console.print(f"[bold red]Error:[/] Ledger database not found: {db_path}")
+        raise typer.Exit(code=1)
+
+    from ubt.core.config import UBTConfig
+    from ubt.core.engine.re_export import ReExportError, re_export_job
+    from ubt.core.exceptions import LedgerWriterLockConflictError
+
+    config = UBTConfig.from_env()
+    try:
+        event = asyncio.run(
+            re_export_job(
+                db_path=db_path,
+                job_id=job_id,
+                output_path=output,
+                config=config,
+            )
+        )
+    except LedgerWriterLockConflictError as exc:
+        console.print(
+            f"[bold red]Job {job_id} is being written by another process; "
+            f"refusing to re-export concurrently.[/] {escape(str(exc))}"
+        )
+        raise typer.Exit(code=1) from exc
+    except ReExportError as exc:
+        console.print(f"[bold red]Re-export failed:[/] {escape(str(exc))}")
+        raise typer.Exit(code=1) from exc
+
+    console.print(f"[bold green]✓ Deliverable re-exported to:[/] {event.artifact_path}")

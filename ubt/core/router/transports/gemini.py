@@ -73,6 +73,7 @@ class GeminiTransport(BaseTransport):
             provider_name=provider_name,
             **kwargs,
         )
+        self._thinking_rejected_models: set[str] = set()
 
     def _auth_headers(self) -> dict[str, str]:
         # The key travels in a header, not a ``?key=`` query string, so it
@@ -195,17 +196,23 @@ class GeminiTransport(BaseTransport):
         reasoning_effort: str | None = None,
     ) -> tuple[str, str | None]:
         target_model = self._resolve_model(model)
+        effective_effort = (
+            reasoning_effort if target_model not in self._thinking_rejected_models else None
+        )
         payload = self._build_payload(
-            prompt, None, system_prompt, temperature, max_tokens, reasoning_effort
+            prompt, None, system_prompt, temperature, max_tokens, effective_effort
         )
         client = self._get_client()
         url = self._generate_url(target_model)
         response = await self._request_json(client, url, payload)
 
         if response.status_code == 400:
-            response = await self._self_heal_400(
+            healed = await self._self_heal_400(
                 client, url, payload, response, (_heal_drop_thinking,)
             )
+            if healed.status_code == 200:
+                self._thinking_rejected_models.add(target_model)
+            response = healed
 
         raise_for_status(response)
 

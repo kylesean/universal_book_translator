@@ -299,6 +299,13 @@ def test_router_quota_exhausted_fail_fast() -> None:
     assert action.reason == "quota_exhausted"
 
 
+def test_programming_defects_fail_fast_and_do_not_retry() -> None:
+    for exc in (TypeError("unexpected arg"), AttributeError("no attr"), KeyError("missing")):
+        action = classify_provider_error(exc)
+        assert action.retryable is False
+        assert action.reason == "programming_defect"
+
+
 def test_sqlite_shared_bucket_climbs_like_the_in_process_one(tmp_path: Path) -> None:
     """The shared bucket must use the same additive-increase law (1/capacity).
 

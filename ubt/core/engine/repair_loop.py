@@ -73,6 +73,8 @@ class RepairLoop:
         self.terminal_pass_floor = shippable_threshold(qe_threshold)
         self.span_annotator = MQMSpanAnnotator()
         self.span_splicer = SpanRepairSplicer()
+        self._enforcer_cache: dict[tuple[int, str], Any] = {}
+        self._validator_cache: dict[int, Any] = {}
 
     async def _try_deterministic_glossary(
         self,
@@ -97,10 +99,24 @@ class RepairLoop:
         from ubt.core.validators.consistency import GlossaryConsistencyValidator
         from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
 
+        cache = getattr(self, "_enforcer_cache", None)
+        if cache is None:
+            cache = {}
+            self._enforcer_cache = cache
+
+        cache_key = (id(glossary_entries), target_lang)
+        enforcer = cache.get(cache_key)
+        if enforcer is None:
+            try:
+                enforcer = DeterministicGlossaryEnforcer(
+                    glossary=glossary_entries, target_lang=target_lang
+                )
+                cache[cache_key] = enforcer
+            except Exception as exc:
+                logger.debug("Deterministic glossary enforcer init failed: %s", exc)
+                return None
+
         try:
-            enforcer = DeterministicGlossaryEnforcer(
-                glossary=glossary_entries, target_lang=target_lang
-            )
             enforced, _records, _quarantined = enforcer.enforce_audited(draft_text)
         except Exception as exc:  # an enforcer bug must not block the repair path
             logger.debug("Deterministic glossary pre-repair skipped for %s: %s", block.id, exc)
@@ -108,7 +124,16 @@ class RepairLoop:
         if enforced == draft_text:
             return None
 
-        validator = GlossaryConsistencyValidator(glossary=glossary_entries)
+        val_cache = getattr(self, "_validator_cache", None)
+        if val_cache is None:
+            val_cache = {}
+            self._validator_cache = val_cache
+
+        val_key = id(glossary_entries)
+        validator = val_cache.get(val_key)
+        if validator is None:
+            validator = GlossaryConsistencyValidator(glossary=glossary_entries)
+            val_cache[val_key] = validator
         if not validator.validate(block.source_text or "", enforced).is_valid:
             return None
 

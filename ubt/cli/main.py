@@ -20,6 +20,7 @@ from ubt.cli.commands.status import (
     inspect_book,
     job_status,
     pe_import,
+    re_export_cmd,
     recheck_gates_cmd,
     rewrite_flag_text,
     upgrade_flags,
@@ -579,6 +580,7 @@ app.command(name="recheck-gates")(recheck_gates_cmd)
 app.command(name="rewrite-flags")(rewrite_flag_text)
 app.command(name="upgrade-flags")(upgrade_flags)
 app.command(name="pe-import")(pe_import)
+app.command(name="re-export")(re_export_cmd)
 app.command(name="doctor")(doctor_command)
 app.command(name="worker")(worker_command)
 app.command(name="config")(config_command)
@@ -594,6 +596,7 @@ __all__ = [
     "_assess_money",
     "job_status",
     "pe_import",
+    "re_export_cmd",
     "doctor_command",
     "worker_command",
     "config_command",

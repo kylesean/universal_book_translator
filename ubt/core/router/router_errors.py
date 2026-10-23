@@ -257,6 +257,19 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorAction:
         return ProviderErrorAction(True, reason="unknown_status")
     if isinstance(exc, (TimeoutError, asyncio.TimeoutError, ConnectionError)):
         return ProviderErrorAction(True, reason="transport")
+    if isinstance(
+        exc,
+        (
+            TypeError,
+            AttributeError,
+            NameError,
+            UnboundLocalError,
+            KeyError,
+            IndexError,
+            AssertionError,
+        ),
+    ):
+        return ProviderErrorAction(False, reason="programming_defect")
     return ProviderErrorAction(True, reason="unexpected")
 
 

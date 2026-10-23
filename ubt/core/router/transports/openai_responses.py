@@ -142,6 +142,7 @@ class OpenAIResponsesTransport(BaseTransport):
         responses_url = f"{self._base_url}/responses"
         response = await self._request_json(client, responses_url, payload)
 
+        current_payload = payload
         if response.status_code == 400 and (
             "reasoning_effort" in payload or "reasoning" in payload
         ):
@@ -171,10 +172,10 @@ class OpenAIResponsesTransport(BaseTransport):
                     if retry_resp.status_code == 200:
                         self._model_reasoning_mode[target_model] = "nested_minimal"
                         response = retry_resp
+                        current_payload = retry_payload
                     else:
-                        retry_resp = await self._request_json(
-                            client, responses_url, _without_reasoning()
-                        )
+                        retry_without = _without_reasoning()
+                        retry_resp = await self._request_json(client, responses_url, retry_without)
                         # Latch only on a proven outcome: an unrelated 400
                         # ("Unrecognized request argument supplied: seed")
                         # fails every retry identically, and latching "none"
@@ -183,22 +184,23 @@ class OpenAIResponsesTransport(BaseTransport):
                         if retry_resp.status_code == 200:
                             self._model_reasoning_mode[target_model] = "none"
                         response = retry_resp
+                        current_payload = retry_without
                 else:
-                    retry_resp = await self._request_json(
-                        client, responses_url, _without_reasoning()
-                    )
+                    retry_without = _without_reasoning()
+                    retry_resp = await self._request_json(client, responses_url, retry_without)
                     if retry_resp.status_code == 200:
                         self._model_reasoning_mode[target_model] = "none"
                     response = retry_resp
+                    current_payload = retry_without
 
         # Temperature is rejected by the reasoning families on this protocol too,
         # and this transport had no rule for it: a model whose chat-completions
         # sibling healed fine failed every call here with a permanent 400.
-        if response.status_code == 400 and "temperature" in payload:
+        if response.status_code == 400 and "temperature" in current_payload:
             response = await self._self_heal_400(
                 client,
                 responses_url,
-                payload,
+                current_payload,
                 response,
                 (_heal_drop_temperature(*_RESPONSES_TEMPERATURE_KEYS),),
             )
