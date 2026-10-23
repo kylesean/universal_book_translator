@@ -315,7 +315,7 @@ async def run_ingest_stage(
     # Identity a derived job id already namespaces; recorded so an explicit
     # ``--job-id`` resume cannot silently change it. Imported lazily because the
     # pipeline module imports this stage (a module-level import would cycle).
-    from ubt.core.engine.pipeline import engine_signature
+    from ubt.core.engine.pipeline import degraded_pdf_engine, engine_signature
 
     # Coerce to JSON-safe scalars: the identity is persisted, and a test (or a
     # duck-typed caller) may hand in a non-serializable stand-in.
@@ -328,7 +328,16 @@ async def run_ingest_stage(
     # explicit value on the manifest (e.g. from a caller or a resume) wins.
     if not manifest.metadata.get("genre_profile"):
         manifest.metadata["genre_profile"] = profile_name
-    engine_sig = engine_signature(ctx.config)
+    # The run identity must match what ``derive_job_id`` used, including the
+    # degraded-engine suffix: the manifest records the parser that produced
+    # these blocks, so a run that fell back from docling is identified by the
+    # engine that actually ran. Reading only the config made the identity guard
+    # disagree with the derived id and refuse a legitimate resume. The rule
+    # itself lives in the pipeline module so the two cannot drift apart.
+    engine_sig = engine_signature(
+        ctx.config,
+        pdf_engine_fallback=degraded_pdf_engine(ctx.config, manifest.metadata),
+    )
     mock_run = bool(ctx.is_mock_run)
     if selected_pages and not getattr(adapter, "supports_page_selection", True):
         # A page-ranged request against an adapter that declares no page

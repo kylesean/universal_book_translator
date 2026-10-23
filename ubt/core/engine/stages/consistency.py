@@ -114,10 +114,20 @@ async def run_consistency_stage(
         block = by_id.get(block_id)
         if block is None:
             return None
+        # A block that already spent the repair stage's rounds must still get
+        # ONE consistency attempt. ``repair_single_block`` opens with a circuit
+        # breaker on ``repair_rounds >= max_rounds``: passing the block through
+        # unchanged made every REPAIRED block from a full repair run skip the
+        # model and land FAILED — the stage silently doing the opposite of its
+        # job for exactly the blocks it most wants to fix. One round is
+        # reserved (``max_rounds - 1``) rather than zeroed so a block cannot
+        # exceed the documented ceiling across both stages.
+        budget = max(0, int(getattr(repair_loop, "max_rounds", 1)) - 1)
         flagged = block.model_copy(
             update={
                 "error_flags": [*block.error_flags, *[task.flag for task in block_tasks]],
                 "status": BlockStatus.REPAIR_PENDING,
+                "repair_rounds": min(block.repair_rounds, budget),
             }
         )
         glossary_table = build_chunk_glossary_table(

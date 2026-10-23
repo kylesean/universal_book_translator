@@ -152,7 +152,28 @@ _ENGINE_SIGNATURE_FIELDS: tuple[tuple[str, str], ...] = (
 )
 
 
-def engine_signature(config: Any) -> str:
+def degraded_pdf_engine(config: Any, manifest_metadata: dict[str, Any] | None) -> str | None:
+    """The engine that actually ran when the configured one could not.
+
+    ``auto`` (and an explicit ``docling`` that the factory let through) selects
+    docling; without the package the adapter silently falls back to the
+    geometric pdfium reader. The manifest records whichever parser produced the
+    blocks, so this reads it back. Returns ``None`` for a healthy run — a
+    deliberate ``--pdf-engine pdfium`` is not a degradation and must not
+    re-namespace existing ledgers.
+
+    Both the derived job id and the resume identity guard call this: two
+    copies of the rule would drift, and then the guard would refuse to resume
+    the very ledger the id was derived from.
+    """
+    requested = str(getattr(config, "pdf_engine", "") or "")
+    actual = str((manifest_metadata or {}).get("pdf_parser_engine", "") or "")
+    if requested in ("auto", "docling") and actual and actual != "docling":
+        return actual
+    return None
+
+
+def engine_signature(config: Any, *, pdf_engine_fallback: str | None = None) -> str:
     """Compact suffix for the engine knobs a config overrides from the default.
 
     The default config yields ``""`` (historical ledgers stay resumable); any
@@ -161,6 +182,14 @@ def engine_signature(config: Any) -> str:
     ledger. Compared against the declared field default, not ``UBTConfig()``:
     that constructor reads the environment itself and would hide an env-only
     override.
+
+    ``pdf_engine_fallback`` names the engine that actually ran when the
+    configured one could not (``auto`` → docling, docling missing → pdfium).
+    It is namespaced only in that case: the degraded ledger holds no tables,
+    figures or formulas, and a later run *with* docling installed must not
+    resume it as though it were a full ingest. A normal run — including an
+    explicit ``--pdf-engine pdfium`` — adds nothing, so existing ids stay
+    resumable.
     """
     fields = getattr(type(config), "model_fields", {})
     parts: list[str] = []
@@ -170,6 +199,8 @@ def engine_signature(config: Any) -> str:
         default = getattr(field_info, "default", None)
         if value is not None and value != default:
             parts.append(f"{tag}{re.sub(r'[^A-Za-z0-9]', '', str(value))}")
+    if pdf_engine_fallback:
+        parts.append(f"fb{re.sub(r'[^A-Za-z0-9]', '', pdf_engine_fallback)}")
     return "-".join(parts)
 
 
@@ -365,6 +396,13 @@ class PipelineOrchestrator:
         # the per-run filter (built in run() with source/target langs), and the
         # repair loop's fallback stays None rather than a wrong-language one.
 
+        # The judge's own provider, when ``qe_judge_provider``/``qe_judge_base_url``
+        # pointed it somewhere other than the translator. ``None`` means the main
+        # router answers and there is nothing extra to close or attribute.
+        self._judge_provider: Any = None
+        self._judge_model: str | None = None
+        self._judge_base_url: str | None = None
+
         if qe_runner is not None:
             self.qe_runner: BaseQERunner = qe_runner
         else:
@@ -381,9 +419,16 @@ class PipelineOrchestrator:
         if self.config.qe_judge_enabled and isinstance(self.qe_runner, HeuristicQERunner):
             from ubt.core.qe.llm_judge import LLMJudgeQERunner, TieredQERunner
 
-            judge_fn, judge_model = self._build_judge_fn(
+            judge_fn, judge_model, judge_base_url, judge_provider = self._build_judge_fn(
                 self.config.qe_judge_model or self.config.repair_model
             )
+            # Keep the provider and its endpoint on the orchestrator: the run's
+            # finally closes the pool, and billing attributes the judge's tokens
+            # to the endpoint they were actually spent at. Both were impossible
+            # while the provider lived only inside the closure.
+            self._judge_provider = judge_provider
+            self._judge_model = judge_model
+            self._judge_base_url = judge_base_url
             judge = LLMJudgeQERunner(
                 judge_fn=judge_fn,
                 model=judge_model,
@@ -400,7 +445,6 @@ class PipelineOrchestrator:
             max_rounds=self.config.max_repair_rounds,
             qe_threshold=self.config.qe_threshold,
             bottom_percentile=self.config.bottom_percentile,
-            rerank_k=self.config.rerank_k,
         )
         # Explicitly injected collaborators are kept verbatim; the default ones
         # are language-agnostic at construction time and get a per-run language
@@ -482,7 +526,19 @@ class PipelineOrchestrator:
         from ubt.core.qe.llm_judge import TieredQERunner
 
         if isinstance(self.qe_runner, TieredQERunner):
-            models.append(self.config.qe_judge_model or self.config.repair_model)
+            # The judge's own resolved model name, not the raw config value: a
+            # ``[providers.<qe_judge_provider>]`` block carries ``repair_model``,
+            # and checking only ``qe_judge_model or repair_model`` priced a
+            # different name than the one the run would actually bill. A local
+            # judge reached that way also stays exempt, which is correct — the
+            # endpoint, not the name, decides that.
+            models.append(
+                self._judge_model or self.config.qe_judge_model or self.config.repair_model
+            )
+        # The judge's endpoint joins the map so a self-hosted translator with a
+        # cloud judge is capped on the judge channel, and a cloud translator
+        # with a local judge is not refused for an unpriced local model.
+        endpoint_map = {**endpoint_map, **self._judge_endpoint_map()}
         unpriced = sorted(
             m
             for m in models
@@ -499,7 +555,17 @@ class PipelineOrchestrator:
                 "Models reached through a self-hosted endpoint are exempt (they cost $0)."
             )
 
-    def _build_judge_fn(self, judge_model: str) -> tuple[JudgeFn, str]:
+    def _judge_endpoint_map(self) -> dict[str, str]:
+        """The judge model's billing endpoint, when it differs from the primary.
+
+        Empty for the common single-endpoint setup (the judge answers through
+        the main router), so nothing is overridden there.
+        """
+        if self._judge_base_url and self._judge_model:
+            return {self._judge_model: self._judge_base_url}
+        return {}
+
+    def _build_judge_fn(self, judge_model: str) -> tuple[JudgeFn, str, str | None, Any]:
         """The judge's completion call, resolved in a standard way.
 
         Three sources, in this order — each one something a user already knows
@@ -519,16 +585,23 @@ class PipelineOrchestrator:
         large enough to notice a dropped noun is slow locally (measured 35-85 s
         per block on a 27B) and quick hosted (1.6-3.5 s for the same decisions).
 
-        Returns the callable **and the model name it resolves to**, because a
-        provider block carries its own model. Returning only the callable left
-        the caller passing the translation provider's ``repair_model`` as an
-        override — a name the judge's endpoint has never heard of. Measured: a
-        local name (``gemma4-e4b``) sent to a different gateway answered
-        ``404 no such model`` on every judge call, twelve times in a run, and
-        the report read "not machine-scored" with no indication why.
+        Returns the callable, **the model name it resolves to**, **the endpoint
+        it bills through** (``None`` when the main router answers), and **the
+        provider it owns** (also ``None`` for the router case). The model name
+        matters because a provider block carries its own: returning only the
+        callable left the caller passing the translation provider's
+        ``repair_model`` — a name the judge's endpoint has never heard of.
+        Measured: a local name (``gemma4-e4b``) sent to a different gateway
+        answered ``404 no such model`` on every judge call, twelve times in a
+        run, and the report read "not machine-scored" with no indication why.
 
-        A self-hosted judge has no price in ``prices.toml``, so its spend cannot
-        be attributed; it is billed at zero like every other self-hosted call.
+        The endpoint and the provider are returned for the two things the
+        caller must do with them and could not before: attribute the judge's
+        tokens to *its* endpoint (a local translator with a cloud judge was
+        billed $0.00, and a cloud translator with a local judge reported an
+        unknown cost that made ``--budget-usd`` inert) and close the HTTP pool
+        the closure owns (it was created per run and never released, so a
+        long-lived API/worker leaked one ``httpx.AsyncClient`` per judged run).
         """
         if self.config.qe_judge_provider:
             from pydantic import SecretStr
@@ -541,9 +614,10 @@ class PipelineOrchestrator:
             j_key = (
                 raw_key.get_secret_value() if isinstance(raw_key, SecretStr) else str(raw_key or "")
             ) or self.config.api_key.get_secret_value()
+            judge_base_url = str(judge_cfg.base_url or self.config.base_url)
             judge_provider = create_model_provider(
                 api_key=j_key,
-                base_url=str(judge_cfg.base_url or self.config.base_url),
+                base_url=judge_base_url,
                 default_model=str(judge_cfg.repair_model or judge_model),
                 api_mode=str(judge_cfg.api_mode or self.config.api_mode),
                 timeout=float(
@@ -557,9 +631,10 @@ class PipelineOrchestrator:
         elif self.config.qe_judge_base_url:
             from ubt.core.router.provider import create_model_provider
 
+            judge_base_url = self.config.qe_judge_base_url
             judge_provider = create_model_provider(
                 api_key=self.config.qe_judge_api_key or self.config.api_key,
-                base_url=self.config.qe_judge_base_url,
+                base_url=judge_base_url,
                 default_model=judge_model,
                 # ApiMode is a Literal of wire-protocol strings, not an enum.
                 api_mode=str(self.config.qe_judge_api_mode or self.config.api_mode),
@@ -573,7 +648,7 @@ class PipelineOrchestrator:
                 ),
             )
         else:
-            return self.router.complete_raw, judge_model
+            return self.router.complete_raw, judge_model, None, None
 
         async def _judge_complete(
             *,
@@ -589,7 +664,7 @@ class PipelineOrchestrator:
                 temperature=temperature,
             )
 
-        return _judge_complete, judge_model
+        return _judge_complete, judge_model, judge_base_url, judge_provider
 
     def _runtime_qe_runner(self, source_lang: str, target_lang: str) -> BaseQERunner:
         """Bind the run's language pair for the QE runner.
@@ -617,7 +692,6 @@ class PipelineOrchestrator:
             max_rounds=self.config.max_repair_rounds,
             qe_threshold=self.config.qe_threshold,
             bottom_percentile=self.config.bottom_percentile,
-            rerank_k=self.config.rerank_k,
         )
 
     @staticmethod
@@ -670,10 +744,16 @@ class PipelineOrchestrator:
                 base_url=self.config.base_url,
                 # Merge the OCR-channel map with the router's fallback attribution
                 # so a model served only by the local fallback is billed at the
-                # fallback endpoint, not the primary.
+                # fallback endpoint, not the primary — plus the judge's own
+                # endpoint when it was configured separately. Without the last
+                # one a mixed deployment priced the judge's tokens at the
+                # translator's URL: local translator + cloud judge reported
+                # $0.00, and cloud translator + local judge reported "unknown",
+                # which made --budget-usd inert.
                 endpoint_map={
                     **self.config.remote_billing_models(),
                     **self.router.billing_endpoint_map(),
+                    **self._judge_endpoint_map(),
                 },
             )
             session.billed_usage = run_usage
@@ -952,6 +1032,13 @@ class PipelineOrchestrator:
         runtime_qe_runner = self._runtime_qe_runner(source_lang, target_lang)
         runtime_repair_loop = self._runtime_repair_loop(runtime_qe_runner)
 
+        # What the run actually ingested with, when that is not what it asked
+        # for. The manifest records the parser that produced these blocks, so
+        # this reads the real answer instead of re-deriving the fallback.
+        # ``oxide_fallback`` is the docling adapter's own degraded path — the
+        # one that silently drops tables/figures/formulas.
+        degraded_engine = degraded_pdf_engine(self.config, manifest.metadata)
+
         if job_id:
             # A caller-chosen id is the caller's to name: ``ubt status <id>`` and
             # the API's job contract must find exactly what was asked for.
@@ -965,7 +1052,7 @@ class PipelineOrchestrator:
                 max_chapters=max_chapters,
                 mock_run=self._is_mock_run,
                 profile_name=profile_name,
-                engine_signature=engine_signature(self.config),
+                engine_signature=engine_signature(self.config, pdf_engine_fallback=degraded_engine),
                 source_lang=source_lang,
             )
         self._billing_sessions[actual_job_id] = run_session
@@ -1064,7 +1151,6 @@ class PipelineOrchestrator:
                 "qe_threshold": self.config.qe_threshold,
                 "max_repair_rounds": self.config.max_repair_rounds,
                 "prompt_strategy": self.config.prompt_strategy,
-                "rerank_k": self.config.rerank_k,
             }
             if short_chain:
                 logger.info(
@@ -1338,6 +1424,17 @@ class PipelineOrchestrator:
                     await self.qe_runner.aclose()
                 except Exception as qe_exc:
                     logger.debug("Error closing QE runner for job %s: %s", actual_job_id, qe_exc)
+            # The judge's own provider is created per orchestrator and owns an
+            # httpx.AsyncClient; nothing else ever closed it, so a long-lived
+            # API/worker leaked one connection pool per judged run. It is closed
+            # after the QE runner (which may still be unwinding a call).
+            if self._judge_provider is not None:
+                try:
+                    await self._judge_provider.aclose()
+                except Exception as judge_exc:
+                    logger.debug(
+                        "Error closing judge provider for job %s: %s", actual_job_id, judge_exc
+                    )
             if writer_lock is not None:
                 try:
                     writer_lock.release()

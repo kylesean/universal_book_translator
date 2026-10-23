@@ -1752,7 +1752,7 @@ async def run_draft_stage(
                             "Whole-book offline batch draft succeeded: %d block(s) drafted",
                             delivered,
                         )
-                        if memory_mgr.should_trigger_snapshot():
+                        if memory_mgr.should_trigger_snapshot(all_pending_blocks[0]):
                             try:
                                 await memory_mgr.generate_step_snapshot(
                                     router.complete_raw, target_lang=target_lang
@@ -1796,6 +1796,27 @@ async def run_draft_stage(
             cursor_spine = batch[-1].spine_index
             cursor_block_id = batch[-1].id
 
+            # Chapter transition, checked BEFORE the batch is drafted.
+            #
+            # ``should_trigger_snapshot`` has two triggers and the chapter one
+            # needs the *incoming* block; the production loop called it with no
+            # argument at every site, so that half was dead code and a chapter
+            # boundary shorter than ``step_chars`` produced no summary until the
+            # next threshold — or never. Summarizing here means the blocks about
+            # to be drafted see the finished chapter's macro context, which is
+            # the whole point of the transition trigger.
+            if memory_mgr.should_trigger_snapshot(batch[0]):
+                try:
+                    await memory_mgr.generate_step_snapshot(
+                        router.complete_raw, target_lang=target_lang
+                    )
+                except Exception as exc:
+                    logger.warning("Hierarchical step snapshot generation failed: %s", exc)
+                if rolling_enabled:
+                    await asyncio.to_thread(
+                        _persist_memory_state, ledger, actual_job_id, memory_mgr
+                    )
+
             # No summarizer runs here: the hierarchical L2 manager snapshots on
             # step threshold and chapter transition itself, so the batch is
             # drafted as one claim.
@@ -1813,6 +1834,8 @@ async def run_draft_stage(
                     f"Last error: {processor.runtime.last_fail_fast_reason}"
                 )
 
+            # Step-threshold trigger, checked after the batch: the buffer now
+            # holds this batch's drafts, and the next batch has not been fetched.
             if memory_mgr.should_trigger_snapshot():
                 try:
                     await memory_mgr.generate_step_snapshot(
@@ -1834,7 +1857,20 @@ async def run_draft_stage(
             # the block, so it would sit pending-unvisited until export
             # force-FAILED it — the cheapest place to catch that is here,
             # fail-loud, one COUNT per batch.
-            _assert_no_stranded_pending(ledger, actual_job_id, batch)
+            #
+            # A batch parked for retry is NOT stranded: ``flush_all`` retains it
+            # on a transient SQLite failure by design, and the background
+            # worker owns the retry budget. Asserting in that window aborted
+            # the stage on exactly the condition the flusher exists to survive.
+            if flusher.has_pending_retries:
+                logger.warning(
+                    "Draft batch for %s left %d checkpoint(s) queued for retry; "
+                    "skipping the stranded-block assertion this batch",
+                    actual_job_id,
+                    flusher.pending_retry_count,
+                )
+            else:
+                _assert_no_stranded_pending(ledger, actual_job_id, batch)
             event = await create_event_fn(
                 EventType.DRAFT_BATCH_COMPLETED,
                 actual_job_id,
@@ -1846,6 +1882,27 @@ async def run_draft_stage(
     finally:
         await flusher.close()
         if rolling_enabled:
+            # Chapter end: flush what the step threshold never reached.
+            #
+            # Under ``chapter_streaming`` each chapter gets its own
+            # ``run_draft_stage`` call and therefore its own
+            # ``HierarchicalMemoryManager``; the next chapter builds a fresh one
+            # and restores only what was persisted. A chapter (or a chapter's
+            # tail) shorter than ``step_chars`` never tripped
+            # ``should_trigger_snapshot``, so its whole buffer was dropped here
+            # and no summary for it ever existed — the L2 layer simply had
+            # holes at every short chapter boundary. Summarize first, then
+            # discard; a failure keeps the old behaviour rather than failing the
+            # stage (the summaries are context, not delivery).
+            if memory_mgr.pending_block_count:
+                try:
+                    await memory_mgr.generate_step_snapshot(
+                        router.complete_raw, target_lang=target_lang
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Chapter-end hierarchical snapshot failed for %s: %s", actual_job_id, exc
+                    )
             await asyncio.to_thread(_persist_memory_state, ledger, actual_job_id, memory_mgr)
         memory_mgr.discard_pending_blocks()
         if (

@@ -81,7 +81,6 @@ class RunServices:
             max_rounds=config.max_repair_rounds,
             qe_threshold=config.qe_threshold,
             bottom_percentile=config.bottom_percentile,
-            rerank_k=config.rerank_k,
         )
 
 

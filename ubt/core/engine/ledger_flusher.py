@@ -158,6 +158,23 @@ class CheckpointBatchFlusher:
         async with self._save_lock:
             return await self._save_locked(batch)
 
+    @property
+    def pending_retry_count(self) -> int:
+        """How many checkpoint updates are parked for the worker's next retry."""
+        return sum(len(batch) for batch in self._retry_batches)
+
+    @property
+    def has_pending_retries(self) -> bool:
+        """Whether a failed batch is parked for the worker's next retry window.
+
+        ``flush_all`` deliberately does not raise when SQLite is briefly busy:
+        the batch is retained and the background worker retries it. A caller
+        that asserts "every block I handed over has landed" has to know the
+        difference between "lost" and "queued", or the assertion turns the
+        retry design into an abort.
+        """
+        return bool(self._retry_batches) or self._failures > 0
+
     async def _save_locked(self, batch: list[dict[str, Any]]) -> bool:
         """Persist *batch*; on failure retain it for the next retry window.
 

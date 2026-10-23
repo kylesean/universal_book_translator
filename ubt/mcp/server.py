@@ -96,6 +96,7 @@ from ubt.core.job_options import (
 )
 from ubt.core.language_profile import is_supported_lang, supported_lang_codes
 from ubt.core.policy.layout_policy import MCP_MAX_RUNNING_JOBS as MCP_MAX_RUNNING_JOBS
+from ubt.core.router.rate_limiter import AdaptiveTokenBucket, build_rate_limiter
 
 mcp = MCPServer(name="ubt")
 
@@ -129,6 +130,29 @@ _MAX_RETAINED = 100
 #: One implementation serves the REST and agent surfaces, so the two cannot
 #: drift. ``ubt.api`` is a lazy package and ``JobManager`` imports no FastAPI,
 #: so the MCP extra stays light.
+#:
+#: The rate limiter is process-wide, like the REST server's: ``rate_limit_rpm``
+#: is a per-credential budget, so a per-job bucket multiplied it by the number
+#: of concurrent MCP translations against the same key. The bucket is built
+#: lazily from the environment on first use — the server is imported by every
+#: ``ubt`` CLI invocation, and constructing a limiter at import time would read
+#: the config before a caller has had a chance to override it.
+_rate_limiter: AdaptiveTokenBucket | None = None
+
+
+def _shared_rate_limiter() -> AdaptiveTokenBucket:
+    """The process-wide limiter, built once from the current environment.
+
+    Built on first use rather than at import: every ``ubt`` CLI invocation
+    imports this module, and a limiter constructed at import time would read the
+    config before a caller (or a test) could override it.
+    """
+    global _rate_limiter
+    if _rate_limiter is None:
+        _rate_limiter = build_rate_limiter(UBTConfig.from_env())
+    return _rate_limiter
+
+
 _MANAGER = JobManager(
     max_running_jobs=MCP_MAX_RUNNING_JOBS,
     max_retained_jobs=_MAX_RETAINED,
@@ -463,6 +487,12 @@ async def ubt_translate_book(
     # apply the value (REST 422s upfront, so this restores parity).
     validate_request_enums(payload)
     request = JobSubmitRequest.model_validate(payload)
+    # One bucket per process, not per job: ``rate_limit_rpm`` is a
+    # per-credential budget, so a per-job bucket multiplied it by the number of
+    # concurrent MCP translations against the same key. ``JobManager`` passes
+    # this through to every orchestrator it builds.
+    if _MANAGER.rate_limiter is None:
+        _MANAGER.rate_limiter = _shared_rate_limiter()
     record = _MANAGER.create_job(request, job_id=jid or None)
     record.task = asyncio.create_task(_MANAGER.execute_job(record, base_config))
     return {"job_id": record.job_id, "status": JobStatus.SUBMITTED, "rehearsal": rehearsal}

@@ -94,7 +94,16 @@ The asymmetry is intentional. Repairing a dropped number is **verifiable**: the
 same check that rejected the draft judges the fix, so the loop can tell whether
 it helped. Repairing "the judge found this awkward" is not — the judge carries
 its own noise, so a rewrite cannot be shown to be better, only different. Blocks
-in that class go to a human instead of spending tokens on an unmeasurable change.
+in that class are left for the human queue instead of spending tokens on an
+unmeasurable change.
+
+One consequence is worth stating plainly, because it is easy to read the table
+the wrong way: a sampled pass the judge lowers to 0.60 carries no deterministic
+flag, so repair skips it (`select_repair_candidates` excludes `SEMANTIC_DOUBT`)
+and triage sees a Minor block whose score is below the bar. It lands in
+`NEEDS_HUMAN`: the draft still reaches the deliverable, but labelled for human
+post-editing (see `ubt/adapters/unresolved.py`) rather than presented as
+finished. It is not rewritten and not released as approved.
 
 
 ### 3. Comparison is per sentence
@@ -150,12 +159,18 @@ local one.
 
 ## What it does not do
 
-* It cannot rank two translations against each other — `is_calibrated()` stays
-  `False` for the judge leg, so best-of-n reranking never uses it. Its verdict
-  can send a block to repair and can lower a score; it cannot promote one.
+* It cannot promote a block. Its verdict can lower a score, and a lowered score
+  is what routes a block to the human queue — but the routing rule
+  (`classify_defect`) treats a judge-only objection as `SEMANTIC_DOUBT`, so it
+  never triggers an automatic rewrite and never releases anything.
+  There is no best-of-n reranking in the pipeline to feed: that track was
+  deleted when every runner turned out to be uncalibrated, and
+  `is_calibrated()` stays `False` for the judge leg so nothing reintroduces it
+  by accident.
 * It sees only what the judge model can see. A loss it does not notice is not
-  caught, and nothing in the report distinguishes "judged clean" from "not
-  judged" unless you read `qe_judge_calls`.
+  caught. The report does say how far the judge actually got —
+  `qe_semantic_coverage` distinguishes "judged" from "the judge was asked and
+  failed" from "never requested", and `qe_judge_calls` gives the raw count.
 * It does not fix anything by itself. It routes a block to repair, where a
   capable **repair model** has to notice the same loss and write it back — a 4B
   translation model cannot, which is why `repair_model` is separate from

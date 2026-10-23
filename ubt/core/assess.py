@@ -545,25 +545,18 @@ def _build_cost(
         # priced repair passes that can never run.
         rounds = 1 if route_mode == "short" else config.max_repair_rounds
         repair_blocks = math.ceil(defect_fraction * billable_blocks) * rounds
-        # Best-of-n repair only multiplies calls when the QE runner can
-        # actually rank: the heuristic and tiered runners report
-        # ``is_calibrated() == False``, so ``RepairLoop._rerank_enabled`` is
-        # off for them and a ``rerank_k`` multiplier would over-quote the
-        # repair line. When rerank *is* on, each of the k candidates carries
-        # its own source span and emits its own completion, so both prompt and
-        # completion sides scale with k.
-        # With the neural QE scorer retired there is no engine that ranks
-        # candidates, so rerank is never on.
-        rerank_mult = 1
-        repair_calls = repair_blocks * rerank_mult
+        # One repair call per candidate block: best-of-n reranking was
+        # removed with the calibrated QE scorer it depended on, so there is no
+        # multiplier left to quote.
+        repair_calls = repair_blocks
         repair_tokens = (
             math.ceil((estimated_tokens * repair_blocks) / billable_blocks)
             if (estimated_tokens is not None and billable_blocks)
             else None
         )
         repair = estimate_draft_cost_from_totals(
-            billable_blocks=repair_blocks * rerank_mult,
-            source_chars=avg_block_chars * repair_blocks * rerank_mult,
+            billable_blocks=repair_blocks,
+            source_chars=avg_block_chars * repair_blocks,
             draft_model=config.repair_model,
             prefix_tokens=prefix,
             macro_chunk_size=1,

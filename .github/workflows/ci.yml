@@ -176,10 +176,36 @@ jobs:
           print("docling available; auto ->", inspect_pdf_route_plan.__name__)
           PY
 
+      - name: Install typst (checksum-pinned) and CJK fonts
+        # The two suites that actually exercise the docling engine end to end
+        # are `slow`-marked, and `test_crash_resume_e2e` skips outright without
+        # the typst compiler. Without this step the job below would select them
+        # and then skip them — a green that tested nothing, which is the failure
+        # this job exists to prevent. Same pin and checksum as the `gate` job.
+        env:
+          TYPST_VERSION: "0.15.1"
+          TYPST_SHA256: "a6d077d0a95eed5a2eba715b2dae06be954f624ccbf85758a03f389ded33118c"
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          archive="typst-x86_64-unknown-linux-musl.tar.xz"
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/${archive}" \
+            -o "/tmp/${archive}"
+          echo "${TYPST_SHA256}  /tmp/${archive}" | sha256sum -c -
+          tar -xJf "/tmp/${archive}" -C /tmp
+          sudo install "/tmp/typst-x86_64-unknown-linux-musl/typst" /usr/local/bin/typst
+          typst --version
+
       - name: Default-engine PDF tier (docling)
-        # The suite that previously could not run under the default engine.
+        # `-m fast` here selected the unit tests only: the two suites that run
+        # a real document through the docling engine are `slow`-marked, so the
+        # job passed without ever exercising the engine it is named for. The
+        # slow-marked PDF suites are named explicitly and `-m` is cleared.
         env:
           PYTHONIOENCODING: "utf-8"
-        run: >
-          uv run pytest -m fast -q -n auto --dist=loadscope
-          tests/unit/adapters/ tests/integration/
+        run: |
+          uv run pytest -m fast -q -n auto --dist=loadscope \
+            tests/unit/adapters/ tests/integration/
+          uv run pytest -q -o addopts="" \
+            tests/integration/test_crash_resume_e2e.py \
+            tests/integration/test_pdf_engine_differential.py

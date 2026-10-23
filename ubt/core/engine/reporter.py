@@ -490,7 +490,6 @@ def build_quality_report(
             "qe_threshold",
             "max_repair_rounds",
             "prompt_strategy",
-            "rerank_k",
         ):
             if k in manifest.metadata:
                 cfg_snapshot[k] = manifest.metadata[k]

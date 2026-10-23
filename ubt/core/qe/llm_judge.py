@@ -371,10 +371,17 @@ class TieredQERunner(BaseQERunner):
         # (call failure / unparsable). The heuristic score is kept for those
         # Pairs; this counter makes the silent fallback observable.
         self.judge_errors = 0
-        #: Whether the judge returned a usable opinion this run. ``is_calibrated``
-        #: reads it to say "these numbers are graded judgements, keep them" —
-        #: without it the quality gate discarded every judge verdict.
+        #: Whether the judge returned a usable opinion for the **last batch**.
+        #: The quality gate reads it (via ``judged_indices``) to decide which of
+        #: the numbers it just computed are judgements rather than heuristic
+        #: bands — so it must describe that batch and nothing else.
         self._judged_any = False
+        #: Whether the judge has produced a usable opinion at any point in this
+        #: task. ``score_source`` reads this: the label describes the run, not
+        #: the batch, and resetting it per batch made a run whose first batch
+        #: was judged report ``"heuristic"`` whenever the second batch happened
+        #: to contain no judge-eligible pair (e.g. only hard-defect flags).
+        self._judged_ever = False
         #: Indexes *within the last ``score_pairs`` batch* the judge actually
         #: produced an opinion for. ``judged_this_run`` says a batch contained
         #: at least one opinion; this says which entries carry one. Without it a
@@ -428,14 +435,13 @@ class TieredQERunner(BaseQERunner):
 
         The judge leg is an uncalibrated LLM opinion, and in the default
         configuration (``pass_sample`` below 1.0) clean-pass candidates score
-        the heuristic's flat 0.92 without ever reaching it — best-of-n rerank
-        would pick between heuristic bands and present the pick as measured.
-        Same delegation shape as :meth:`is_glossary_aware`.
+        the heuristic's flat 0.92 without ever reaching it. Nothing consumes
+        this any more — best-of-n reranking was deleted rather than left
+        depending on a flag no runner sets — but the answer stays conservative
+        so a future consumer does not inherit a false positive.
 
-        Kept conservative on purpose: ``RepairLoop`` reads this to decide which
-        repair lifecycle to run, and widening it would change repair behaviour
-        rather than the reporting of a score. A judge verdict is kept by the
-        quality gate through :attr:`judged_this_run` instead.
+        A judge verdict is kept by the quality gate through
+        :attr:`judged_this_run` instead.
         """
         return self.heuristic.is_calibrated()
 
@@ -476,11 +482,34 @@ class TieredQERunner(BaseQERunner):
         """Name the leg that actually produced this run's scores.
 
         A tiered run is two engines: when the judge answered at least one pair
-        the stored numbers include graded opinions, otherwise every number is a
-        heuristic band. Reporting a flat "tiered" would hide that distinction
-        from the audit artifact, which is the whole point of the label.
+        *anywhere in this task* the stored numbers include graded opinions,
+        otherwise every number is a heuristic band. Reporting a flat "tiered"
+        would hide that distinction from the audit artifact, which is the whole
+        point of the label.
+
+        Deliberately cumulative (``_judged_ever``), not per-batch
+        (``_judged_any``): the label describes the run, and a second batch with
+        no judge-eligible pair used to relabel a genuinely judged run
+        ``"heuristic"`` — the report then said no judge was consulted while its
+        token bill said otherwise.
         """
-        return "llm_judge" if self._judged_any else self.heuristic.score_source()
+        return "llm_judge" if self._judged_ever else self.heuristic.score_source()
+
+    def _carry_run_state(self, rebound: TieredQERunner) -> TieredQERunner:
+        """Copy per-run observability and judge state onto a rebound tier.
+
+        One helper because the three ``with_*`` rebinds each rebuilt the tier by
+        hand and drifted: ``with_languages`` and ``with_glossary`` copied the
+        call counters but not the judged flags, so a run rebound after its first
+        batch lost the very evidence ``score_source`` and ``judged_indices``
+        read.
+        """
+        rebound.judge_calls = self.judge_calls
+        rebound.judge_errors = self.judge_errors
+        rebound._judged_any = self._judged_any
+        rebound._judged_ever = self._judged_ever
+        rebound._judged_indices = self._judged_indices
+        return rebound
 
     def with_languages(self, source_lang: str, target_lang: str) -> TieredQERunner:
         heuristic = self.heuristic.with_languages(source_lang, target_lang)
@@ -495,9 +524,7 @@ class TieredQERunner(BaseQERunner):
         # Counters are per-run ROI observability, and the pipeline rebinds the
         # runner per run to set language labels: dropping them here made the
         # paid-judge call/error counts the report reads always zero.
-        rebound.judge_calls = self.judge_calls
-        rebound.judge_errors = self.judge_errors
-        return rebound
+        return self._carry_run_state(rebound)
 
     def with_glossary(self, glossary: list[dict[str, Any]]) -> TieredQERunner:
         """Bind the run's terminology to the heuristic leg.
@@ -517,9 +544,7 @@ class TieredQERunner(BaseQERunner):
             judge=self.judge,
             pass_sample=self.pass_sample,
         )
-        rebound.judge_calls = self.judge_calls
-        rebound.judge_errors = self.judge_errors
-        return rebound
+        return self._carry_run_state(rebound)
 
     def with_document_context(self, document_text: str) -> TieredQERunner:
         """Forward the run's source text to the heuristic leg's omission gate.
@@ -538,11 +563,7 @@ class TieredQERunner(BaseQERunner):
             judge=self.judge,
             pass_sample=self.pass_sample,
         )
-        rebound.judge_calls = self.judge_calls
-        rebound.judge_errors = self.judge_errors
-        rebound._judged_any = self._judged_any
-        rebound._judged_indices = self._judged_indices
-        return rebound
+        return self._carry_run_state(rebound)
 
     async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
         if not pairs:
@@ -554,7 +575,8 @@ class TieredQERunner(BaseQERunner):
         # previous batch's value in place made a batch nobody judged inherit the
         # earlier one's answer: the gate then kept twelve discrete defect bands
         # as if they were graded opinions, and ``score_source()`` labelled them
-        # ``llm_judge``.
+        # ``llm_judge``. ``_judged_ever`` is the run-level counterpart the label
+        # reads; it is never reset here.
         self._judged_any = False
         self._judged_indices = frozenset()
         if self.judge is None:
@@ -579,6 +601,7 @@ class TieredQERunner(BaseQERunner):
         # "judgements". Also mark which blocks were actually judged, so the gate
         # can keep only those.
         self._judged_any = any(score != _JUDGE_NO_OPINION for score in judged)
+        self._judged_ever = self._judged_ever or self._judged_any
         self._judged_indices = frozenset(
             i for i, s in zip(ambiguous_idx, judged, strict=True) if s != _JUDGE_NO_OPINION
         )

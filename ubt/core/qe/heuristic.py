@@ -116,6 +116,19 @@ class MockQERunner(BaseQERunner):
     def __init__(self, default_score: float = 0.85) -> None:
         self.default_score = default_score
 
+    def is_calibrated(self) -> bool:
+        """False: a rehearsal's length-ratio number is not a quality estimate.
+
+        Inheriting the base class's ``True`` made the dry-run path the only
+        caller of ``RepairLoop``'s calibrated track — a "dead" branch that
+        production never took but every ``--dry-run`` did, with score-comparison
+        adoption semantics no real engine could reproduce. The mock scores a
+        block by its length ratio; ranking repair candidates on that would be
+        the same "presented as measured" problem the base class docstring warns
+        about.
+        """
+        return False
+
     def score_source(self) -> str:
         """Label a rehearsal's synthetic scores so no report reads them as measured."""
         return "mock"

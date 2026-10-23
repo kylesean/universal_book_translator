@@ -672,17 +672,6 @@ class UBTConfig(BaseSettings):
     qe_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
     max_repair_rounds: int = Field(default=2, ge=0)
     bottom_percentile: float = Field(default=0.15, ge=0.0, le=1.0)
-    # Best-of-n repair candidates (MBR-lite). 1 = single candidate (default);
-    # >1 samples k repairs per repair candidate and keeps the best by a
-    # *calibrated* QE score.
-    #:
-    #: INERT with every shipped engine. Neither the heuristic nor the tiered
-    #: runner reports ``is_calibrated()`` — the first emits twelve discrete
-    #: defect classes with nothing to rank between, the second scores through the
-    #: same heuristic leg — so ``RepairLoop._rerank_enabled`` is always False and
-    #: setting this above 1 only logs a warning. It stays as the contract a
-    #: future calibrated runner would satisfy; do not treat it as a knob.
-    rerank_k: int = Field(default=1, ge=1, le=5)
     # Document-level terminology consistency enforcement, run after repair.
     # "off"    = detect + report only (default; no extra LLM spend)
     # "report" = plan the targeted re-translations and log them, still no spend
@@ -1200,18 +1189,6 @@ class UBTConfig(BaseSettings):
             raise ValueError(
                 "consistency_enforce='repair' requires consistency_max_repairs > 0; "
                 "use 'report' to detect drift without re-translating."
-            )
-        # Best-of-n rerank ranks candidates by a calibrated QE score. The
-        # heuristic runner emits discrete defect-class bands with nothing to
-        # rank, and the tiered runner scores through the same heuristic leg, so
-        # with the neural scorer retired there is no engine that can rank;
-        # RepairLoop disables reranking, so surface the no-op instead of
-        # silently spending a draft per extra candidate.
-        if self.rerank_k > 1:
-            logger.warning(
-                "rerank_k=%d has no effect (no calibrated QE score to rank "
-                "candidates after the neural scorer was retired); use rerank_k=1.",
-                self.rerank_k,
             )
         # If draft_model was explicitly configured (via env or constructor or copy)
         # and repair_model was NOT explicitly configured, sync repair_model to draft_model.

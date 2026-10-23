@@ -7,6 +7,7 @@ from being auto-passable in another (e.g. a numeric fidelity failure must not
 clear the QE gate and never reach triage).
 """
 
+import re
 from collections.abc import Iterable
 
 # --- The "not translated" (echo) class --------------------------------------
@@ -25,6 +26,12 @@ ECHO_MARKER = "Target identical to source"
 NEAR_ECHO_MARKER = "Target keeps nearly all source words"
 UNTRANSLATED_RESIDUE_MARKER = "Target reads as source-language residue"
 ECHO_MARKERS: tuple[str, ...] = (ECHO_MARKER, NEAR_ECHO_MARKER, UNTRANSLATED_RESIDUE_MARKER)
+
+#: The consistency stage's repair instruction prefix ("render X as Y").
+#: Single-sourced here rather than in :mod:`ubt.core.qe.consistency_enforce`
+#: because this module's marker tables must classify it, and that module
+#: imports the term scanner — a back-edge would cycle.
+CONSTRAINT_PREFIX = "terminology_consistency:"
 
 # Fragments that mark structural / factual corruption: the draft cannot be
 # trusted even when the score looks acceptable, and must never be auto-passed.
@@ -79,6 +86,14 @@ STRUCTURAL_DEFECT_MARKERS: tuple[str, ...] = (
     # not a style note, so it is fatal here like the classes above; the export
     # stage's advisory copy of the same check runs too late to change anything.
     "Glossary term violation",
+    # The consistency stage's repair *instruction* ("render X as Y") is the
+    # same defect class as the gate's violation marker, emitted by a different
+    # producer. It is listed here because ``RepairLoop._flags_are_recheckable``
+    # reads this table to decide whether a no-span defect is still verifiable:
+    # without the entry every terminology repair the consistency stage planned
+    # was refused as "unverifiable" and the block was written FAILED without a
+    # model call — the one defect class the stage exists to fix.
+    CONSTRAINT_PREFIX,
     # A heading that dropped its section number or appendix letter breaks every
     # cross-reference and is invisible to every other gate. The FastPass check
     # emitted this reason with no classifier branch, so it scored as "other
@@ -163,6 +178,58 @@ def is_format_only(flags: Iterable[str]) -> bool:
     return bool(materialized) and all(
         any(marker in flag for marker in FORMAT_ONLY_MARKERS) for flag in materialized
     )
+
+
+# --- Structured flags: a machine-readable alternative to prose matching -----
+# Every table above classifies a *free-text* flag by substring, which is why a
+# rename in one stage silently changes a verdict in another. The tables stay
+# (thousands of ledger rows carry the old spellings), but a flag written through
+# :func:`format_defect_flag` carries its own category and severity, so a new
+# writer never has to be added to four marker tuples to be classified.
+#
+# Format: ``<category>:<severity>:<detail>`` — e.g.
+# ``consistency:major:terminology_drift: render 'ALU' as '算术逻辑单元'``.
+# ``detail`` may itself contain colons; only the first two fields are fixed.
+DEFECT_SEVERITIES: tuple[str, ...] = ("minor", "major", "critical")
+STRUCTURED_FLAG_RE = re.compile(
+    r"^(?P<category>[a-z][a-z0-9_]*):(?P<severity>minor|major|critical):"
+)
+
+
+def format_defect_flag(category: str, severity: str, detail: str) -> str:
+    """Render a structured flag; ``severity`` must be one of the three tiers."""
+    if severity not in DEFECT_SEVERITIES:
+        raise ValueError(
+            f"unknown defect severity {severity!r}; expected one of {DEFECT_SEVERITIES}"
+        )
+    return f"{category}:{severity}:{detail}"
+
+
+def parse_defect_flag(flag: str) -> tuple[str, str] | None:
+    """``(category, severity)`` for a structured flag, ``None`` for a legacy one.
+
+    Deliberately narrow: a flag that merely *contains* a colon (``Drafting
+    error: 500``) is not structured, because its first field is not a lowercase
+    category token followed by a known severity. Callers fall back to the
+    substring tables for those.
+    """
+    match = STRUCTURED_FLAG_RE.match(flag)
+    if match is None:
+        return None
+    return match.group("category"), match.group("severity")
+
+
+def structured_severity(flags: Iterable[str]) -> str | None:
+    """The highest severity any structured flag declares, if any do."""
+    best: str | None = None
+    for flag in flags:
+        parsed = parse_defect_flag(flag)
+        if parsed is None:
+            continue
+        severity = parsed[1]
+        if best is None or DEFECT_SEVERITIES.index(severity) > DEFECT_SEVERITIES.index(best):
+            best = severity
+    return best
 
 
 # --- Lifecycle failure markers (not quality defects) ------------------------

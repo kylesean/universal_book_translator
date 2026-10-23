@@ -60,15 +60,18 @@ class BaseQERunner(ABC):
     def is_calibrated(self) -> bool:
         """Whether this runner's scores measure translation quality.
 
-        Best-of-n reranking picks the candidate with the highest score, which
-        is only sound when the score is a graded quality estimate. The
-        heuristic runner emits discrete defect classes (see
-        ``QE_DEFECT_CLASS_LEGEND``) — a tie among candidates that all cleared
-        the same gate would be broken at random and presented as a measured
-        preference. Runners that cannot prove their calibrated
-        model scored must flip this to ``False``.
+        A score is only a measurement when the engine behind it was validated
+        against human quality judgements. The heuristic runner emits discrete
+        defect classes (see ``QE_DEFECT_CLASS_LEGEND``) — a tie among candidates
+        that all cleared the same gate would be broken at random and presented
+        as a measured preference — and the judge is a probabilistic opinion.
+
+        The default is therefore **False**: a runner must prove calibration to
+        claim it. The old ``True`` default let any runner that forgot to
+        override (the rehearsal mock) silently enter score-comparison paths
+        that no shipped engine could honour.
         """
-        return True
+        return False
 
     def score_source(self) -> str:
         """The engine label the quality report records for this run's scores.

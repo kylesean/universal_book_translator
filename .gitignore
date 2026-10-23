@@ -19,6 +19,10 @@ htmlcov/
 .ubt_cache/
 *.sqlite*
 *.db*
+# A stray `:memory:.ses` (a timestamp + UUID, written by some tool's session
+# handling) was committed by accident from a repo-root shell and stayed tracked
+# for three commits. Nothing reads it; the pattern keeps the next one out.
+*.ses
 output/
 tmp/
 scratch/

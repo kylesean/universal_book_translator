@@ -310,6 +310,7 @@ async def run_quality_gate_stage(
     # passing prose blocks had no score at all, so the report could not show a
     # distribution and "how good is this delivery" was unanswerable. The scores
     # are now carried back for every sampled block.
+    audited_demotions: list[dict[str, Any]] = []
     if passed_updates:
         by_id = {b.id: b for b in drafted_blocks}
         pass_blocks = [by_id[u["block_id"]] for u in passed_updates if u["block_id"] in by_id]
@@ -323,7 +324,27 @@ async def run_quality_gate_stage(
         if demoted:
             demoted_ids = {b.id for b in demoted}
             passed_updates = [u for u in passed_updates if u["block_id"] not in demoted_ids]
-            suspicious_blocks.extend(demoted)
+            # A demoted block was *just* scored by the audit. Re-adding it to
+            # ``suspicious_blocks`` sent it through ``score_pairs`` a second
+            # time, and because the sampling is a stable ``crc32`` of the source
+            # the same pairs hit the judge again — the same opinion, billed
+            # twice. Persist what the audit measured instead.
+            #
+            # Status and score are exactly what the second pass would have
+            # produced (the audit keeps ``min(heuristic, judge)``); only the
+            # duplicate call disappears. No flag is added: a judge-only doubt is
+            # SEMANTIC_DOUBT and triage reads the score, not a new marker.
+            audited_demotions = [
+                {
+                    "block_id": b.id,
+                    "target_text": b.target_text or "",
+                    "status": BlockStatus.REPAIR_PENDING,
+                    "mtqe_score": b.mtqe_score,
+                    "error_flags": b.error_flags,
+                    "glossary_hits": b.glossary_hits,
+                }
+                for b in demoted
+            ]
         if scored:
             # Record what the audit measured for the blocks it let through, so a
             # passing block is not indistinguishable from an unmeasured one.
@@ -335,6 +356,8 @@ async def run_quality_gate_stage(
 
     if passed_updates:
         await asyncio.to_thread(ledger.save_checkpoints_batch, passed_updates)
+    if audited_demotions:
+        await asyncio.to_thread(ledger.save_checkpoints_batch, audited_demotions)
 
     if suspicious_blocks:
         # ``may_be_calibrated`` (not ``is_calibrated``): a dynamic or deferred

@@ -98,10 +98,12 @@ export const doctorCodesZh: DoctorCodeTables = {
     'batch_api.enabled': '已启用 — 端点须实现 /v1/files + /v1/batches（离线不探测）',
     'batch_api.disabled': '已禁用',
     'pdf_engine.docling_ok': 'docling 可导入',
-    'pdf_engine.docling_missing': '未安装 docling — PDF 作业将失败',
+    'pdf_engine.docling_missing':
+      '未安装 docling — UBT_PDF_ENGINE=docling 是显式请求，PDF 作业会以可操作的错误失败，而不会静默丢弃表格、图与公式',
     'pdf_engine.pdfium': 'pypdfium2 快速路径（内置依赖）；扫描版文档仍会自动转到 docling',
     'pdf_engine.auto_docling': 'auto = docling 版面解析（无条件）',
-    'pdf_engine.auto_missing': 'auto 选用 docling，但未安装 — PDF 作业将失败，不会回退到 pdfium',
+    'pdf_engine.auto_missing':
+      'auto 选用 docling，但未安装 — PDF 作业回退到几何 pdfium 解析器，重建的 PDF 会丢弃表格、图与公式',
     'pdf_engine.registered': '已注册的引擎：{engine}',
     'pdf_engine.unregistered': '「{engine}」不是已注册的引擎',
     'ocr_engine.sidecar': 'sidecar 服务在线（http://localhost:8765）',

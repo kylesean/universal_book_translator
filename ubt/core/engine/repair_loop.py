@@ -4,12 +4,10 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from ubt.core.exceptions import MTQEEvaluationError
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.qe.base import BaseQERunner
-from ubt.core.qe.defect_taxonomy import classify_defect, is_format_only
+from ubt.core.qe.defect_taxonomy import CONSTRAINT_PREFIX, classify_defect, is_format_only
 from ubt.core.qe.fast_pass import FastPassFilter
-from ubt.core.qe.heuristic import GLOSSARY_VIOLATION_MARKER
 from ubt.core.qe.score_policy import shippable_threshold
 from ubt.core.router.router import ModelRouter
 from ubt.core.validators.span_repair import MQMSpanAnnotator, SpanRepairSplicer
@@ -58,7 +56,6 @@ class RepairLoop:
         bottom_percentile: float = 0.15,
         fast_pass: FastPassFilter | None = None,
         escalation_extra_rounds: int = 1,
-        rerank_k: int = 1,
     ) -> None:
         self.router = router
         self.qe_runner = qe_runner
@@ -74,40 +71,8 @@ class RepairLoop:
         # (``score_policy.shippable_threshold``) so repair and triage cannot
         # disagree about what "shippable" means.
         self.terminal_pass_floor = shippable_threshold(qe_threshold)
-        # Best-of-n repair candidates (MBR-lite). 1 = single candidate;
-        # >1 samples and keeps the best structurally valid one, ranked by a
-        # neural QE score.
-        self.rerank_k = max(1, int(rerank_k))
         self.span_annotator = MQMSpanAnnotator()
         self.span_splicer = SpanRepairSplicer()
-
-    def _rerank_enabled(self) -> bool:
-        """Whether best-of-n reranking is active and meaningful.
-
-        Ranking needs a utility that measures quality; the heuristic runner
-        emits discrete defect classes, so it is excluded -- and so is a COMET
-        subprocess whose reply says it fell back to the heuristic this run
-        (``is_calibrated``), which an isinstance check could never see.
-        """
-        return self.rerank_k > 1 and self.qe_runner.is_calibrated()
-
-    def _adoptable(self, new_score: float, old_score: float) -> bool:
-        """Whether a repair candidate may replace the draft.
-
-        A calibrated runner ranks quality continuously, so ``>=`` is safe. A
-        non-calibrated one (heuristic) emits discrete bands, so the old
-        ``new_score >= threshold`` clause adopted a candidate that scored
-        *worse* than the draft whenever it still cleared the pass line — the
-        "repair made it worse" path. For it, require strict improvement,
-        or a genuine crossing of the pass line from below. Candidate soundness
-        is already enforced at collection (``_structural_check`` plus the
-        numeric/glossary validators), so this only tightens the comparison.
-        """
-        if self.qe_runner.is_calibrated():
-            return new_score >= old_score or new_score >= self.qe_threshold
-        return new_score > old_score or (
-            new_score >= self.qe_threshold and old_score < self.qe_threshold
-        )
 
     async def _try_deterministic_glossary(
         self,
@@ -149,10 +114,18 @@ class RepairLoop:
 
         # Only the drift flags are cleared; anything else (omission, numeric)
         # still needs the model, so its presence keeps the block in repair.
+        #
+        # ``CONSTRAINT_PREFIX`` is a drift flag too: the consistency stage
+        # phrases the same defect as "render X as Y" rather than the gate's
+        # "Glossary term violation: …". Matching only the gate's spelling left
+        # the constraint behind, so a mechanically-fixed block still looked
+        # defective and fell through to a paid model call it did not need.
         remaining = [
             flag
             for flag in block.error_flags
-            if "Glossary term violation" not in flag and not flag.startswith("glossary_")
+            if "Glossary term violation" not in flag
+            and not flag.startswith("glossary_")
+            and not flag.startswith(CONSTRAINT_PREFIX)
         ]
         if remaining:
             return None
@@ -166,8 +139,8 @@ class RepairLoop:
         # finished with 14 repaired blocks all still reading 0.25, which made
         # `min_qe` look like a quality failure. The heuristic is exactly the
         # same judge that produced the pass band, so this is the closed loop, not
-        # a second opinion. The caller's `_adoptable`/terminal checks then see
-        # the repaired score and route the block on it.
+        # a second opinion. The caller's terminal checks then see the repaired
+        # score and route the block on it.
         try:
             block.mtqe_score = await self.qe_runner.score(
                 block.source_text or "", enforced, block.block_type
@@ -427,18 +400,7 @@ class RepairLoop:
         # Best-of-n repair (MBR-lite): when enabled and the QE runner can rank,
         # sample k repairs concurrently and keep the best structurally-valid one.
         # k=1 evaluates a single repair candidate.
-        if self._rerank_enabled():
-            gathered = await asyncio.gather(
-                *[_repair_call() for _ in range(self.rerank_k)],
-                return_exceptions=True,
-            )
-            raw_candidates = [item for item in gathered if isinstance(item, str)]
-            if not raw_candidates:
-                failure = next((item for item in gathered if isinstance(item, BaseException)), None)
-                if failure is not None:
-                    raise failure
-        else:
-            raw_candidates = [await _repair_call()]
+        raw_candidates = [await _repair_call()]
 
         # (The round was already consumed above, before the call -- see there.)
         active_fast_pass = fast_pass or self.fast_pass
@@ -560,243 +522,63 @@ class RepairLoop:
 
         valid_tier1 = [entry for entry in tier1_candidates if entry[1]]
         valid_tier2 = [entry for entry in tier2_candidates if entry[1]]
-        old_score = block.mtqe_score or 0.0
 
-        chosen_text: str
-        _chosen_flags: list[str]
-        new_score: float | None = None
-
-        if not self.qe_runner.is_calibrated():
-            # Track 1 (Structural Integrity): Uncalibrated runner.
-            # Lifecycle is strictly determined by structural validity and absence of error flags.
-            if valid_tier1:
-                t1_chosen_text, _, t1_chosen_flags = valid_tier1[0]
-                block.target_text = t1_chosen_text
-                # Measure the repaired text instead of clearing the score. A
-                # ``None`` here is not "cleared" downstream: the checkpoint SQL
-                # uses ``COALESCE(?, mtqe_score)`` so that an omitted key
-                # preserves the stored value, and an explicit ``None`` binds the
-                # same way. Measured on a 6-page run: b0022 was scored 0.55,
-                # repaired into a correct translation that measures 0.92, and the
-                # ledger still said 0.55 — the repair looked like it changed
-                # nothing, and the next run's selection started from the score
-                # that had already been fixed.
-                block.mtqe_score = await self.qe_runner.score(
-                    block.source_text, t1_chosen_text, block_type=block.block_type
-                )
-                block.error_flags = list(t1_chosen_flags) + _residual_defect_flags(t1_chosen_text)
-            elif valid_tier2:
-                t2_chosen_text, _, t2_chosen_flags = valid_tier2[0]
-                block.target_text = t2_chosen_text
-                # Same reason as the tier1 branch above: measure, do not clear.
-                block.mtqe_score = await self.qe_runner.score(
-                    block.source_text, t2_chosen_text, block_type=block.block_type
-                )
-                block.error_flags = list(t2_chosen_flags) + _residual_defect_flags(t2_chosen_text)
-            else:
-                all_fallback = tier1_candidates + tier2_candidates
-                fallback_flags = (
-                    all_fallback[0][2]
-                    if all_fallback
-                    else ["repair_structural_failure: no repair candidate"]
-                )
-                block.target_text = draft_text
-                # No candidate survived, so the text is unchanged and the score
-                # that sent it here still describes it — leave it as it is.
-                # (Clearing it never worked anyway: the checkpoint binds NULL
-                # through ``COALESCE(?, mtqe_score)``, which keeps the stored
-                # value.)
-                merged = list(block.error_flags)
-                for flag in fallback_flags:
-                    if flag not in merged:
-                        merged.append(flag)
-                block.error_flags = merged
-
-            if not block.error_flags:
-                block.status = BlockStatus.REPAIRED
-            elif block.repair_rounds >= rounds_cap:
-                block.status = BlockStatus.FAILED
-            else:
-                block.status = BlockStatus.REPAIR_PENDING
-            return block
-
+        # Structural Integrity: the only track. Every runner in the tree is
+        # uncalibrated (the neural CometKiwi scorer was retired for licence
+        # reasons and the judge is deliberately uncalibrated), so the old
+        # best-of-n / score-comparison track could never be reached by
+        # production code — it survived only because MockQERunner inherited
+        # ``is_calibrated() == True`` from the base class and the rehearsal
+        # path drove it. MockQERunner now says False like every other runner,
+        # and the lifecycle below is decided by structural validity and the
+        # absence of error flags alone.
         if valid_tier1:
-            if self._rerank_enabled() and len(valid_tier1) >= 2:
-                scores = await self.qe_runner.score_pairs(
-                    [
-                        {
-                            "src": block.source_text,
-                            "mt": entry[0],
-                            "block_type": str(block.block_type),
-                        }
-                        for entry in valid_tier1
-                    ]
-                )
-                if len(scores) != len(valid_tier1):
-                    raise MTQEEvaluationError(
-                        f"QE runner returned {len(scores)} score(s) for "
-                        f"{len(valid_tier1)} repair candidate(s)",
-                        details={"expected": len(valid_tier1), "got": len(scores)},
-                    )
-                best_t1_idx = max(range(len(valid_tier1)), key=lambda i: scores[i])
-                t1_chosen_text, _, t1_chosen_flags = valid_tier1[best_t1_idx]
-                t1_score: float | None = scores[best_t1_idx]
-            else:
-                t1_chosen_text, _, t1_chosen_flags = valid_tier1[0]
-                t1_score = await self.qe_runner.score(
-                    block.source_text, t1_chosen_text, block_type=block.block_type
-                )
-
-            t1_passed = (t1_score is not None) and self._adoptable(t1_score, old_score)
-
-            if t1_passed or not valid_tier2:
-                chosen_text, _chosen_flags, new_score = t1_chosen_text, t1_chosen_flags, t1_score
-            else:
-                # Spliced repair degraded quality; evaluate wholesale fallback
-                if self._rerank_enabled() and len(valid_tier2) >= 2:
-                    scores_t2 = await self.qe_runner.score_pairs(
-                        [
-                            {
-                                "src": block.source_text,
-                                "mt": entry[0],
-                                "block_type": str(block.block_type),
-                            }
-                            for entry in valid_tier2
-                        ]
-                    )
-                    best_t2_idx = max(range(len(valid_tier2)), key=lambda i: scores_t2[i])
-                    t2_chosen_text, _, t2_chosen_flags = valid_tier2[best_t2_idx]
-                    t2_score: float | None = scores_t2[best_t2_idx]
-                else:
-                    t2_chosen_text, _, t2_chosen_flags = valid_tier2[0]
-                    t2_score = await self.qe_runner.score(
-                        block.source_text, t2_chosen_text, block_type=block.block_type
-                    )
-
-                if (
-                    t2_score is not None
-                    and (t2_score >= self.qe_threshold or t2_score > old_score)
-                    and (t1_score is None or t2_score > t1_score)
-                ):
-                    chosen_text, _chosen_flags, new_score = (
-                        t2_chosen_text,
-                        t2_chosen_flags,
-                        t2_score,
-                    )
-                else:
-                    chosen_text, _chosen_flags, new_score = (
-                        t1_chosen_text,
-                        t1_chosen_flags,
-                        t1_score,
-                    )
-
+            t1_chosen_text, _, t1_chosen_flags = valid_tier1[0]
+            block.target_text = t1_chosen_text
+            # Measure the repaired text instead of clearing the score. A
+            # ``None`` here is not "cleared" downstream: the checkpoint SQL
+            # uses ``COALESCE(?, mtqe_score)`` so that an omitted key
+            # preserves the stored value, and an explicit ``None`` binds the
+            # same way. Measured on a 6-page run: b0022 was scored 0.55,
+            # repaired into a correct translation that measures 0.92, and the
+            # ledger still said 0.55 — the repair looked like it changed
+            # nothing, and the next run's selection started from the score
+            # that had already been fixed.
+            block.mtqe_score = await self.qe_runner.score(
+                block.source_text, t1_chosen_text, block_type=block.block_type
+            )
+            block.error_flags = list(t1_chosen_flags) + _residual_defect_flags(t1_chosen_text)
         elif valid_tier2:
-            if self._rerank_enabled() and len(valid_tier2) >= 2:
-                scores_t2 = await self.qe_runner.score_pairs(
-                    [
-                        {
-                            "src": block.source_text,
-                            "mt": entry[0],
-                            "block_type": str(block.block_type),
-                        }
-                        for entry in valid_tier2
-                    ]
-                )
-                if len(scores_t2) != len(valid_tier2):
-                    raise MTQEEvaluationError(
-                        f"QE runner returned {len(scores_t2)} score(s) for "
-                        f"{len(valid_tier2)} repair candidate(s)",
-                        details={"expected": len(valid_tier2), "got": len(scores_t2)},
-                    )
-                best_t2_idx = max(range(len(valid_tier2)), key=lambda i: scores_t2[i])
-                t2_chosen_text, _, t2_chosen_flags = valid_tier2[best_t2_idx]
-                t2_score = scores_t2[best_t2_idx]
-            else:
-                t2_chosen_text, _, t2_chosen_flags = valid_tier2[0]
-                t2_score = await self.qe_runner.score(
-                    block.source_text, t2_chosen_text, block_type=block.block_type
-                )
-
-            if t2_score is not None and self._adoptable(t2_score, old_score):
-                chosen_text, _chosen_flags, new_score = t2_chosen_text, t2_chosen_flags, t2_score
-            else:
-                chosen_text = draft_text
-                _chosen_flags = ["repair_overreach: wholesale replacement failed quality threshold"]
-                new_score = None
+            t2_chosen_text, _, t2_chosen_flags = valid_tier2[0]
+            block.target_text = t2_chosen_text
+            # Same reason as the tier1 branch above: measure, do not clear.
+            block.mtqe_score = await self.qe_runner.score(
+                block.source_text, t2_chosen_text, block_type=block.block_type
+            )
+            block.error_flags = list(t2_chosen_flags) + _residual_defect_flags(t2_chosen_text)
         else:
             all_fallback = tier1_candidates + tier2_candidates
-            if all_fallback:
-                chosen_text, _, _chosen_flags = all_fallback[0]
-            else:
-                chosen_text, _chosen_flags = (
-                    draft_text,
-                    ["repair_structural_failure: no repair candidate"],
-                )
-            new_score = None
-
-        if new_score is not None:
-            # Clearing error_flags claims the defects are gone, so it needs
-            # evidence the scorer actually produced: either a better class than
-            # the draft, or a candidate at/above the pass line. Every structural
-            # flag caps its band at 0.70 (``score_from_flags``), so a candidate
-            # that ties the draft at 0.70 has neither. Adopting on ``>=`` would
-            # do both: adopt the text (right: the consistency stage fixes
-            # terminology drift no QE band measures) *and* wipe the evidence,
-            # leaving a block whose defect was never re-checked to read as clean
-            # and be re-accepted by the next resume's FastPass.
-            cleaned = new_score > old_score or new_score >= self.qe_threshold
-            if self._adoptable(new_score, old_score):
-                block.target_text = chosen_text
-                block.mtqe_score = new_score
-                if cleaned:
-                    # Cleared only upon passing both structural and semantic
-                    # criteria. A glossary-violation marker survives ONLY when
-                    # the scorer cannot see terminology: COMET / LLM judge score
-                    # fluency, so a high re-score is no evidence the dropped or
-                    # aliased term is back, and the flag must keep the block out
-                    # of REPAIRED. A glossary-aware runner re-checks the term
-                    # itself (a surviving violation caps the score below the
-                    # pass line, so ``cleaned`` is False), which means its clean
-                    # re-score *is* evidence — clearing the marker there is what
-                    # lets a genuinely fixed term reach REPAIRED.
-                    if self.qe_runner.is_glossary_aware() and new_score >= self.qe_threshold:
-                        # A glossary-aware re-score is evidence only when it
-                        # reaches the pass line. A surviving violation caps the
-                        # score at its own band (0.25), which can still exceed a
-                        # *lower* hard-defect band carried by the draft (leak
-                        # 0.10, fabricated 0.15, repetition 0.20) — so `cleaned`
-                        # alone is not evidence and must not erase the violation
-                        # before triage can classify it Major.
-                        block.error_flags = []
-                    else:
-                        block.error_flags = [
-                            f for f in block.error_flags if f.startswith(GLOSSARY_VIOLATION_MARKER)
-                        ]
-        else:
-            # The fallback keeps the draft, so every defect the draft already
-            # carried is still present: merge the rejection reason into the
-            # existing flags instead of replacing them. Replacing dropped a
-            # Critical marker (e.g. "Numeric fidelity failure") and left only
-            # the Minor ``repair_overreach`` note, so triage resolved the block
-            # to "minor" and the gate could ship a draft that lost a figure.
+            fallback_flags = (
+                all_fallback[0][2]
+                if all_fallback
+                else ["repair_structural_failure: no repair candidate"]
+            )
+            block.target_text = draft_text
+            # No candidate survived, so the text is unchanged and the score
+            # that sent it here still describes it — leave it as it is.
+            # (Clearing it never worked anyway: the checkpoint binds NULL
+            # through ``COALESCE(?, mtqe_score)``, which keeps the stored
+            # value.)
             merged = list(block.error_flags)
-            for flag in _chosen_flags or [
-                "repair_structural_failure: no structurally valid repair"
-            ]:
+            for flag in fallback_flags:
                 if flag not in merged:
                     merged.append(flag)
             block.error_flags = merged
 
-        # Update lifecycle status
-        if (block.mtqe_score or 0.0) >= self.qe_threshold and not block.error_flags:
+        if not block.error_flags:
             block.status = BlockStatus.REPAIRED
         elif block.repair_rounds >= rounds_cap:
-            block.status = (
-                BlockStatus.REPAIRED
-                if ((block.mtqe_score or 0.0) >= self.terminal_pass_floor and not block.error_flags)
-                else BlockStatus.FAILED
-            )
+            block.status = BlockStatus.FAILED
         else:
             block.status = BlockStatus.REPAIR_PENDING
-
         return block

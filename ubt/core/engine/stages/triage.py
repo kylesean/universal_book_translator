@@ -53,6 +53,7 @@ from ubt.core.qe.defect_taxonomy import (
     has_critical_defect,
     has_structural_defect,
     is_transient_lifecycle_only,
+    structured_severity,
 )
 from ubt.core.qe.score_policy import shippable_threshold
 from ubt.core.validators.span_repair import max_severity, span_to_dict
@@ -101,7 +102,16 @@ def _flags_severity(flags: list[str]) -> str:
     trusted and must be quarantined if escalation fails. Major: other
     structural defects (terminology, format, provenance). Minor: everything
     else. This is the contract the module docstring states.
+
+    A flag written in the structured ``<category>:<severity>:<detail>`` form
+    states its own severity, and that verdict wins over the substring tables:
+    the tables classify prose by matching English phrases, which is exactly the
+    coupling a structured flag removes. Legacy flags (the vast majority of what
+    a ledger holds) fall through to the tables unchanged.
     """
+    declared = structured_severity(flags)
+    if declared is not None:
+        return declared
     if has_critical_defect(flags):
         return "critical"
     if has_structural_defect(flags):

@@ -15,12 +15,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ubt.core.qe.defect_taxonomy import CONSTRAINT_PREFIX, format_defect_flag
 from ubt.core.qe.term_metrics import TermMetrics
 
 #: Prefix that makes the constraint greppable in ledgers/reports. The repair
 #: prompt surfaces ``error_flags`` verbatim under "Issues to Fix", so the flag
-#: doubles as the instruction.
-CONSTRAINT_PREFIX = "terminology_consistency:"
+#: doubles as the instruction. Defined in :mod:`ubt.core.qe.defect_taxonomy`
+#: because that module's marker tables classify this same string; re-exported
+#: here for the planner's callers.
+__all__ = ["CONSTRAINT_PREFIX", "ConsistencyTask", "plan_consistency_tasks"]
+
+#: Terminology drift is a Major defect by the triage contract (it damages
+#: consistency, not facts), which is why it is absent from the critical table.
+CONSTRAINT_SEVERITY = "major"
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,8 +40,19 @@ class ConsistencyTask:
 
     @property
     def flag(self) -> str:
-        """The repair instruction, carried as an error flag."""
-        return f"{CONSTRAINT_PREFIX} render '{self.source}' as '{self.expected}'"
+        """The repair instruction, carried as a structured error flag.
+
+        ``<prefix>:<severity>:<instruction>`` — the same shape every new flag
+        writer uses (see ``format_defect_flag``). It still starts with
+        ``CONSTRAINT_PREFIX``, so the structural table, the deterministic
+        glossary pass and ``_flags_are_recheckable`` keep matching it by prefix,
+        while triage reads the declared severity instead of guessing from prose.
+        """
+        return format_defect_flag(
+            CONSTRAINT_PREFIX.rstrip(":"),
+            CONSTRAINT_SEVERITY,
+            f"render '{self.source}' as '{self.expected}'",
+        )
 
 
 def plan_consistency_tasks(terms: TermMetrics, max_blocks: int = 50) -> tuple[ConsistencyTask, ...]:

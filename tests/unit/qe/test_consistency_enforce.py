@@ -22,6 +22,7 @@ from ubt.core.qe.consistency_enforce import (
     ConsistencyTask,
     plan_consistency_tasks,
 )
+from ubt.core.qe.defect_taxonomy import parse_defect_flag
 from ubt.core.qe.term_metrics import TermHit, TermMetrics
 
 pytestmark = pytest.mark.fast
@@ -39,8 +40,12 @@ def _metrics(*hits: TermHit) -> TermMetrics:
 
 
 def test_flag_is_the_repair_instruction() -> None:
-    assert ConsistencyTask("b", "X", "Y").flag == ("terminology_consistency: render 'X' as 'Y'")
-    assert CONSTRAINT_PREFIX in ConsistencyTask("b", "X", "Y").flag
+    flag = ConsistencyTask("b", "X", "Y").flag
+    # Structured form: the prefix the marker tables match, a declared severity
+    # triage can read without guessing, and the instruction the prompt shows.
+    assert flag == "terminology_consistency:major:render 'X' as 'Y'"
+    assert flag.startswith(CONSTRAINT_PREFIX)
+    assert parse_defect_flag(flag) == ("terminology_consistency", "major")
 
 
 def test_planning_is_disabled_for_non_positive_caps() -> None:

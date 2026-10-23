@@ -129,6 +129,17 @@ class HierarchicalMemoryManager:
         self._unsummarized_blocks.clear()
         self._current_buffer_chars = 0
 
+    @property
+    def pending_block_count(self) -> int:
+        """How many blocks are buffered but not yet summarized.
+
+        Read by the draft stage's chapter-end path: under chapter streaming the
+        manager is per-stage-call, so a chapter shorter than ``step_chars`` ends
+        with its whole buffer pending. Discarding it there lost the summary
+        permanently (nothing replays those blocks into a later manager).
+        """
+        return len(self._unsummarized_blocks)
+
     def should_trigger_snapshot(self, next_block: IRBlock | None = None) -> bool:
         """Check if buffer has accumulated enough content or crossed a chapter boundary."""
         if not self.enabled or not self._unsummarized_blocks:

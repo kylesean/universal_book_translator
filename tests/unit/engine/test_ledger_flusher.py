@@ -75,3 +75,54 @@ async def test_enqueue_does_not_hang_when_the_worker_dies_while_the_queue_is_ful
         # drain in ``close`` raises too — that is the point.
         with contextlib.suppress(Exception):
             await asyncio.wait_for(flusher.close(), timeout=5)
+
+
+class _TransientlyFailingLedger:
+    """A ledger that fails once, then succeeds."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def save_checkpoints_batch(self, updates: list[dict[str, Any]], **_: Any) -> int:
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("database is locked")
+        return len(updates)
+
+
+async def test_a_transient_failure_is_visible_as_a_pending_retry() -> None:
+    """``flush_all`` retains the batch instead of raising; callers must see that.
+
+    The draft stage's stranded-block assertion ran immediately after
+    ``flush_all`` and read a retained batch as a stranded block — aborting the
+    stage on exactly the condition the flusher exists to survive. The retry
+    state is what lets the assertion tell "lost" from "queued".
+    """
+    ledger = _TransientlyFailingLedger()
+    flusher = CheckpointBatchFlusher(ledger, flush_interval=0.01)  # type: ignore[arg-type]
+    try:
+        await flusher.enqueue({"block_id": "a"})
+        await flusher.flush_all()
+        assert flusher.has_pending_retries, "the failed batch was not retained"
+        assert flusher.pending_retry_count == 1
+
+        # The background worker retries and lands it.
+        await asyncio.sleep(0.1)
+        assert not flusher.has_pending_retries
+        assert flusher.pending_retry_count == 0
+    finally:
+        with contextlib.suppress(Exception):
+            await flusher.close()
+
+
+async def test_a_clean_flusher_reports_no_pending_retry() -> None:
+    ledger = _TransientlyFailingLedger()
+    ledger.calls = 1  # make the first save succeed
+    flusher = CheckpointBatchFlusher(ledger, flush_interval=0.01)  # type: ignore[arg-type]
+    try:
+        await flusher.enqueue({"block_id": "a"})
+        await flusher.flush_all()
+        assert not flusher.has_pending_retries
+        assert flusher.pending_retry_count == 0
+    finally:
+        await flusher.close()

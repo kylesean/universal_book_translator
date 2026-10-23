@@ -11,6 +11,7 @@ Exposes:
 from __future__ import annotations
 
 import asyncio
+import importlib
 import io
 import ipaddress
 import logging
@@ -108,16 +109,21 @@ def get_engine() -> tuple[str, Any]:
         except Exception as exc:
             logger.debug("PaddleOCR not available: %s", exc)
 
-        # 2. Try RapidOCR (ONNX)
-        try:
-            from rapidocr_onnxruntime import RapidOCR
-
-            _ocr_engine = RapidOCR()
-            _engine_name = "rapidocr"
-            logger.info("Initialized RapidOCR (ONNX) engine")
-            return _engine_name, _ocr_engine
-        except Exception as exc:
-            logger.debug("RapidOCR not available: %s", exc)
+        # 2. Try RapidOCR (ONNX). Both import paths are probed because the
+        #    package was renamed: ``rapidocr>=3`` ships as ``rapidocr``, while
+        #    the older ``rapidocr_onnxruntime`` still exists on PyPI. The
+        #    Dockerfile pins the modern name, so probing only the legacy one
+        #    made the container report "mock" (503, never adopted) even with
+        #    the engine installed.
+        for module_name in ("rapidocr", "rapidocr_onnxruntime"):
+            try:
+                module = importlib.import_module(module_name)
+                _ocr_engine = module.RapidOCR()
+                _engine_name = "rapidocr"
+                logger.info("Initialized RapidOCR engine (%s)", module_name)
+                return _engine_name, _ocr_engine
+            except Exception as exc:
+                logger.debug("RapidOCR via %s not available: %s", module_name, exc)
 
         _engine_name = "mock"
         _ocr_engine = None
@@ -133,6 +139,44 @@ def _is_loopback(host: str | None) -> bool:
         # "localhost" from a real socket; "testclient" is Starlette's TestClient
         # sentinel host (in-process, never a network caller).
         return host in ("localhost", "testclient")
+
+
+def _ocr_array(img: Any) -> Any:
+    """PIL RGB → the BGR ndarray both engines' ONNX models expect.
+
+    ``rapidocr``'s LoadImage passes an ndarray through unchanged (no channel
+    conversion) and its detector/recognizer models are trained on the OpenCV
+    BGR convention, so feeding RGB silently degrades recognition rather than
+    failing — the driver inside UBT does the same swap (see
+    ``ubt/adapters/pdf/vlm/drivers/rapidocr_driver.py``). PaddleOCR takes RGB
+    and does its own conversion, so the swap is applied per engine.
+    """
+    import numpy as np
+
+    arr = np.asarray(img)
+    if arr.ndim == 3 and arr.shape[2] == 3:
+        # ``ascontiguousarray`` keeps the negative-stride view safe for cv2.
+        return np.ascontiguousarray(arr[:, :, ::-1])
+    return arr
+
+
+def _iter_rapidocr_predictions(raw: Any) -> Any:
+    """Yield ``(box, text, conf)`` across rapidocr output shapes.
+
+    ``rapidocr`` 2.x returns ``([[box, text, conf], ...], elapse)``; 3.x returns
+    a typed result object with ``.boxes``/``.txts``/``.scores``. Accepting only
+    the first shape made the sidecar return zero lines on the version the
+    project's own dependency pins.
+    """
+    candidate = raw[0] if isinstance(raw, tuple) else raw
+    boxes = getattr(candidate, "boxes", None)
+    texts = getattr(candidate, "txts", getattr(candidate, "texts", None))
+    confs = getattr(candidate, "scores", getattr(candidate, "confs", None))
+    if boxes is not None and texts is not None:
+        if confs is None:
+            confs = [1.0] * len(texts)
+        return list(zip(boxes, texts, confs, strict=False))
+    return candidate or []
 
 
 def _run_ocr_inference(engine_name: str, engine: Any, img: Any) -> list[dict[str, Any]]:
@@ -156,20 +200,73 @@ def _run_ocr_inference(engine_name: str, engine: Any, img: Any) -> list[dict[str
                 box = [min(xs), min(ys), max(xs), max(ys)]
                 lines_out.append({"text": text, "box": box, "confidence": float(conf)})
     elif engine_name == "rapidocr" and engine is not None:
-        import numpy as np
-
-        img_np = np.asarray(img)
-        result, _ = engine(img_np)
-        if result:
-            for item in result:
+        result = engine(_ocr_array(img))
+        for item in _iter_rapidocr_predictions(result):
+            try:
                 box_pts, text, conf = item
-                xs = [p[0] for p in box_pts]
-                ys = [p[1] for p in box_pts]
-                box = [min(xs), min(ys), max(xs), max(ys)]
-                lines_out.append({"text": text, "box": box, "confidence": float(conf)})
+            except (TypeError, ValueError):
+                continue
+            if not (str(text or "")).strip():
+                continue
+            try:
+                xs = [float(p[0]) for p in box_pts]
+                ys = [float(p[1]) for p in box_pts]
+            except (TypeError, ValueError, IndexError):
+                continue
+            if not xs or not ys:
+                continue
+            box = [min(xs), min(ys), max(xs), max(ys)]
+            lines_out.append({"text": str(text), "box": box, "confidence": float(conf)})
     else:
         logger.warning("No OCR models found in sidecar environment; returning empty lines")
     return lines_out
+
+
+def _to_pdf_points(
+    lines_out: list[dict[str, Any]],
+    *,
+    width_pt: float,
+    height_pt: float,
+    scale: float,
+    image_width: int,
+    image_height: int,
+) -> str:
+    """Rewrite line boxes in place from pixel space to PDF points.
+
+    Returns the coordinate system the boxes are now in. The declared
+    page/scale pair is only usable when it agrees with the bitmap actually
+    decoded (within 1.5px, the rounding a renderer's ceil/floor can introduce);
+    otherwise the boxes are left in ``image_pixel`` and the caller is told so,
+    because silently mis-scaling every line is worse than making the caller
+    re-derive the scale.
+
+    Pixel space is top-left origin with y increasing downwards; PDF user space
+    is bottom-left origin with y increasing upwards, so the y pair flips.
+    """
+    if not (scale > 0 and width_pt > 0 and height_pt > 0):
+        return "image_pixel"
+    expected_w = width_pt * scale
+    expected_h = height_pt * scale
+    if abs(image_width - expected_w) > 1.5 or abs(image_height - expected_h) > 1.5:
+        logger.warning(
+            "sidecar: declared page %.1fx%.1fpt at scale %.2f implies a %.0fx%.0f "
+            "bitmap but the upload is %dx%d; reporting image_pixel instead",
+            width_pt,
+            height_pt,
+            scale,
+            expected_w,
+            expected_h,
+            image_width,
+            image_height,
+        )
+        return "image_pixel"
+    for line in lines_out:
+        box = line.get("box")
+        if not box:
+            continue
+        x0, y0, x1, y1 = (float(v) / scale for v in box)
+        line["box"] = [x0, height_pt - y1, x1, height_pt - y0]
+    return "pdf_points"
 
 
 @app.get("/health", dependencies=[Depends(require_token)])
@@ -200,7 +297,16 @@ async def ocr(
     height_pt: float = Form(default=842.0),
     scale: float = Form(default=2.0),
 ) -> dict[str, Any]:
-    """Perform OCR on uploaded image and return line text and coordinates."""
+    """Perform OCR on uploaded image and return line text and coordinates.
+
+    ``width_pt``/``height_pt``/``scale`` describe the page the caller rendered
+    this image from (page size in PDF points, and the pixels-per-point factor).
+    They are used to report boxes in **pdf_points** — the caller's own frame —
+    which is unambiguous, where ``image_pixel`` needs the caller to re-derive
+    the scale. When they are inconsistent with the uploaded bitmap (a caller
+    that rendered at a different scale than it declared), the response falls
+    back to ``image_pixel`` and says so, instead of silently mis-scaling.
+    """
     # Bounded read: reject before buffering the whole body into memory.
     chunks: list[bytes] = []
     total = 0
@@ -241,8 +347,17 @@ async def ocr(
             # inference may finish in the background still holding its frame.
             raise HTTPException(status_code=504, detail="OCR inference timed out") from exc
 
+    coord_system = _to_pdf_points(
+        lines_out,
+        width_pt=width_pt,
+        height_pt=height_pt,
+        scale=scale,
+        image_width=img.width,
+        image_height=img.height,
+    )
+
     return {
         "engine": engine_name,
         "lines": lines_out,
-        "coord_system": "image_pixel",
+        "coord_system": coord_system,
     }

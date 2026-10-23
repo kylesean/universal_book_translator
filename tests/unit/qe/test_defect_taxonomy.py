@@ -27,6 +27,7 @@ import pytest
 
 from ubt.core.cleaners.mask_tokens import UnmaskReport
 from ubt.core.qe.defect_taxonomy import (
+    CONSTRAINT_PREFIX,
     CRITICAL_DEFECT_MARKERS,
     ECHO_MARKERS,
     FORMAT_ONLY_MARKERS,
@@ -417,8 +418,10 @@ _KNOWN_UNEMITTED: frozenset[str] = frozenset()
 
 #: Markers the pipeline emits through a shared constant rather than a literal.
 #: The constant *is* the emit site, so searching for the literal string would
-#: wrongly call these dead.
-_EMITTED_VIA_CONSTANT: frozenset[str] = frozenset(ECHO_MARKERS)
+#: wrongly call these dead. ``CONSTRAINT_PREFIX`` is emitted by
+#: ``ConsistencyTask.flag`` (``ubt.core.qe.consistency_enforce``), which builds
+#: the string from the constant both modules share.
+_EMITTED_VIA_CONSTANT: frozenset[str] = frozenset((*ECHO_MARKERS, CONSTRAINT_PREFIX))
 
 
 def _sources() -> dict[Any, str]:
@@ -473,3 +476,84 @@ def test_a_structure_mismatch_is_a_deterministic_defect() -> None:
 
     flag = "html_structure_mismatch: expected <p> got <div>"
     assert classify_defect([flag], score=0.95, threshold=0.70) == "DETERMINISTIC_DEFECT"
+
+
+# --------------------------------------------------------------------------- #
+# Structured flags: the format that removes the substring coupling
+# --------------------------------------------------------------------------- #
+
+
+def test_a_structured_flag_round_trips() -> None:
+    from ubt.core.qe.defect_taxonomy import format_defect_flag, parse_defect_flag
+
+    flag = format_defect_flag("terminology_consistency", "major", "render 'ALU' as '算术逻辑单元'")
+    assert flag == "terminology_consistency:major:render 'ALU' as '算术逻辑单元'"
+    assert parse_defect_flag(flag) == ("terminology_consistency", "major")
+
+
+def test_an_unknown_severity_is_rejected_at_the_writer() -> None:
+    """A typo must fail where it is written, not silently classify as prose."""
+    from ubt.core.qe.defect_taxonomy import format_defect_flag
+
+    with pytest.raises(ValueError, match="unknown defect severity"):
+        format_defect_flag("terminology_consistency", "severe", "x")
+
+
+def test_legacy_flags_parse_as_none() -> None:
+    """The narrow regex is the point: prose with a colon is not structured."""
+    from ubt.core.qe.defect_taxonomy import parse_defect_flag
+
+    for legacy in (
+        "Drafting error: 500 from upstream",
+        "Glossary term violation: ALU",
+        "Numeric fidelity failure: dropped 42",
+        "terminology_consistency:render 'ALU' as 'X'",  # no severity tier
+        "Terminology_Consistency:major:x",  # category must be lowercase
+        "",
+    ):
+        assert parse_defect_flag(legacy) is None, legacy
+
+
+def test_the_highest_declared_severity_wins() -> None:
+    from ubt.core.qe.defect_taxonomy import (
+        format_defect_flag,
+        structured_severity,
+    )
+
+    flags = [
+        format_defect_flag("style", "minor", "a"),
+        format_defect_flag("terminology_consistency", "critical", "b"),
+        format_defect_flag("format", "major", "c"),
+        "Drafting error: 500",  # legacy, contributes nothing
+    ]
+    assert structured_severity(flags) == "critical"
+
+
+def test_no_structured_flag_reports_no_severity() -> None:
+    from ubt.core.qe.defect_taxonomy import structured_severity
+
+    assert structured_severity([]) is None
+    assert structured_severity(["Drafting error: 500"]) is None
+
+
+def test_triage_honours_a_declared_severity_over_the_substring_tables() -> None:
+    """The consumer: a structured flag's own verdict beats phrase matching.
+
+    The flag text contains no marker from any table, so the tables alone would
+    call it minor; the declaration says critical.
+    """
+    from ubt.core.engine.stages.triage import _flags_severity
+    from ubt.core.qe.defect_taxonomy import format_defect_flag
+
+    flag = format_defect_flag("terminology_consistency", "critical", "unresolved synonym")
+    assert _flags_severity([flag]) == "critical"
+
+
+def test_triage_still_reads_legacy_flags_from_the_tables() -> None:
+    from ubt.core.engine.stages.triage import _flags_severity
+
+    assert _flags_severity(["Numeric fidelity failure: dropped 42"]) == "critical"
+    # "Drafting error" is a structural marker, so it floors at major.
+    assert _flags_severity(["Drafting error: 500"]) == "major"
+    # A flag matching no table at all stays minor.
+    assert _flags_severity(["Low legibility font"]) == "minor"

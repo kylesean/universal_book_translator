@@ -486,3 +486,64 @@ def test_export_state_is_json_serializable_shape() -> None:
     manager._snapshots = [StepSnapshot(0, 1, 2, "c", "s", 3)]
     state: dict[str, Any] = manager.export_state()
     assert state["snapshots"][0]["chapter_id"] == "c"
+
+
+# --------------------------------------------------------------------------- #
+# Chapter-end flush: a short chapter must not lose its summary
+# --------------------------------------------------------------------------- #
+
+
+def test_pending_block_count_reports_the_buffer() -> None:
+    manager = HierarchicalMemoryManager(step_chars=10_000)
+    assert manager.pending_block_count == 0
+    manager.record_drafted_block(_block("ch1#b1", 1, target="第一章的正文内容。"))
+    assert manager.pending_block_count == 1
+    manager.discard_pending_blocks()
+    assert manager.pending_block_count == 0
+
+
+@pytest.mark.asyncio
+async def test_a_short_chapter_can_be_summarized_before_the_buffer_is_dropped() -> None:
+    """The draft stage's chapter-end path.
+
+    Under ``chapter_streaming`` each chapter gets a fresh manager, so a chapter
+    shorter than ``step_chars`` never tripped ``should_trigger_snapshot`` and its
+    whole buffer was discarded at teardown. Summarizing first (what the stage
+    now does when ``pending_block_count`` is non-zero) produces the L2 entry the
+    next chapter restores.
+    """
+    manager = HierarchicalMemoryManager(step_chars=10_000)
+    blocks = [_block("ch1#b1", 1, target="第一章的正文内容。" * 100)]
+    for block in blocks:
+        manager.record_drafted_block(block)
+
+    # The threshold alone does not fire for a short chapter.
+    assert manager.should_trigger_snapshot() is False
+    assert manager.pending_block_count == 1
+
+    summary = await manager.generate_step_snapshot(
+        await _fixed_complete("本章讨论了算术逻辑单元的用途以及它在流水线中的位置。")
+    )
+    assert summary, "a chapter-end flush produced no summary at all"
+    assert manager.pending_block_count == 0
+    assert len(manager.snapshots) == 1
+
+    # And it survives a resume round-trip, which is how the next chapter sees it.
+    state = manager.export_state()
+    restored = HierarchicalMemoryManager(step_chars=10_000)
+    restored.restore_state(state)
+    assert len(restored.snapshots) == 1
+    assert restored.snapshots[0].summary_text == summary
+
+
+def test_a_chapter_transition_triggers_once_the_buffer_has_content() -> None:
+    """The trigger production never used: it needs the *incoming* block."""
+    manager = HierarchicalMemoryManager(step_chars=10_000)
+    manager.record_drafted_block(_block("ch1#b1", 1, target="第一章的正文内容。" * 100))
+
+    # No next block: the transition cannot be seen.
+    assert manager.should_trigger_snapshot() is False
+    # With the incoming block the boundary is visible.
+    assert manager.should_trigger_snapshot(_block("ch2#b1", 2, target="第二章。")) is True
+    # A block from the same chapter is not a transition.
+    assert manager.should_trigger_snapshot(_block("ch1#b2", 2, target="同章。")) is False

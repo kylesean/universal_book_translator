@@ -1,5 +1,6 @@
 """Factory helpers to instantiate document adapters based on file extensions."""
 
+import importlib.util
 import logging
 from collections.abc import Callable
 from pathlib import Path
@@ -13,7 +14,7 @@ from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
 from ubt.adapters.pdf.encryption import reject_encrypted_pdf
 from ubt.adapters.pdf.engine_selector import inspect_pdf_route_plan
 from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
-from ubt.core.exceptions import UnsupportedDocumentFormatError
+from ubt.core.exceptions import OptionalDependencyError, UnsupportedDocumentFormatError
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,29 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
         raise UnsupportedDocumentFormatError(
             f"Unsupported or unregistered PDF engine: '{pdf_engine}'. Available: {available}."
         )
+    if engine_key == "docling" and importlib.util.find_spec("docling") is None:
+        # An explicit ``--pdf-engine docling`` names an engine that cannot run.
+        # Falling back would silently deliver a book with every table, figure
+        # and formula dropped, under a job id that later runs resume into, so
+        # this is refused before ingest rather than degraded. ``auto`` keeps its
+        # documented fallback (see ``DoclingPDFAdapter._extract_blocks_sync``),
+        # but never silently: the warning names what is lost, and the job id
+        # records the engine that actually ran.
+        if pdf_engine.lower() == "docling":
+            raise OptionalDependencyError(
+                "pdf_engine='docling' was requested but the 'docling' package is not "
+                "installed. Install it with `pip install 'universal-book-translator[pdf]'` "
+                "(or `uv sync --extra pdf`), or pass --pdf-engine pdfium to accept the "
+                "fast path, which cannot represent tables, figures or formulas."
+            )
+        if path is not None:
+            logger.warning(
+                "pdf_engine='auto' selected docling for '%s' but the 'docling' package "
+                "is not installed: falling back to the geometric pdfium reader, which "
+                "cannot represent tables, figures or formulas — those are omitted from "
+                "the rebuilt PDF. Install the [pdf] extra for lossless ingest.",
+                path.name,
+            )
     return factory_fn()
 
 

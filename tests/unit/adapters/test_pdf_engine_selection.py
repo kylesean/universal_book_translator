@@ -90,8 +90,58 @@ def test_pdfium_default_escapes_a_scanned_pdf_to_docling(tmp_path: Path) -> None
 
 
 def test_explicit_docling_beats_everything(tmp_path: Path) -> None:
+    import importlib.util
+
     from ubt.adapters import get_adapter_for_path
     from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+    from ubt.core.exceptions import OptionalDependencyError
 
     pdf = write_text_pdf(tmp_path / "prose.pdf", _prose_pages(6))
+    if importlib.util.find_spec("docling") is None:
+        # An explicit request for an engine that cannot run is refused before
+        # ingest: silently degrading would deliver a book with every table,
+        # figure and formula dropped, under a job id a later (fixed) run would
+        # resume into. ``auto`` keeps its documented fallback.
+        with pytest.raises(OptionalDependencyError, match="docling"):
+            get_adapter_for_path(pdf, pdf_engine="docling")
+        return
     assert isinstance(get_adapter_for_path(pdf, pdf_engine="docling"), DoclingPDFAdapter)
+
+
+def test_auto_without_docling_falls_back_to_pdfium(tmp_path: Path) -> None:
+    """``auto`` degrades to the geometric reader, and the caller is told why.
+
+    The fallback happens *inside* the docling adapter (``_extract_blocks_sync``
+    re-routes to the pdfium reader when the package is absent), so the factory
+    still returns ``DoclingPDFAdapter`` — the degraded engine is named in the
+    warning and, in a real run, in the job id. What this pins is the warning:
+    a silent fallback is what let a reader believe a structureless book was a
+    faithful one.
+    """
+    import importlib.util
+    import logging
+
+    from ubt.adapters import get_adapter_for_path
+
+    if importlib.util.find_spec("docling") is not None:
+        pytest.skip("docling is installed; the fallback path cannot be exercised")
+
+    pdf = write_text_pdf(tmp_path / "prose.pdf", _prose_pages(6))
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    factory_logger = logging.getLogger("ubt.adapters.factory")
+    factory_logger.addHandler(handler)
+    try:
+        get_adapter_for_path(pdf, pdf_engine="auto")
+    finally:
+        factory_logger.removeHandler(handler)
+
+    assert any(
+        record.levelno >= logging.WARNING and "cannot represent tables" in record.getMessage()
+        for record in records
+    ), "a degraded auto ingest must warn about the structure it drops"

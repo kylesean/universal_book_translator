@@ -949,7 +949,9 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
             record(
                 "PDF engine",
                 "WARN",
-                "docling not installed \u2014 PDF jobs will fail",
+                "docling not installed \u2014 UBT_PDF_ENGINE=docling is an explicit "
+                "request, so a PDF job fails with an actionable error instead of "
+                "silently dropping tables, figures and formulas",
                 fix="uv sync --extra pdf",
                 code="pdf_engine",
                 detail_code="pdf_engine.docling_missing",
@@ -974,16 +976,18 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
                 detail_code="pdf_engine.auto_docling",
             )
         else:
-            # ``auto`` is docling, full stop: it does not degrade to pdfium.
-            # The old text promised a silent fallback that no longer exists, so
-            # an operator without the extra was told ingest would merely be
-            # slower when in fact the job fails.
+            # ``auto`` is docling; without the package the adapter degrades to
+            # the geometric pdfium reader (warned at runtime, and namespaced in
+            # the job id). It does not fail the job \u2014 the old text claimed it
+            # would, which sent operators looking for a crash that never came
+            # while tables, figures and formulas were silently dropped.
             record(
                 "PDF engine",
-                "FAIL",
-                "auto selects docling, which is not installed \u2014 PDF jobs will "
-                "fail rather than fall back to pdfium",
-                fix="uv sync --extra pdf, or set UBT_PDF_ENGINE=pdfium to opt into the fast path",
+                "WARN",
+                "auto selects docling, which is not installed \u2014 PDF jobs fall "
+                "back to the geometric pdfium reader, dropping tables, figures and "
+                "formulas from the rebuilt PDF",
+                fix="uv sync --extra pdf, or set UBT_PDF_ENGINE=pdfium to accept the fast path",
                 code="pdf_engine",
                 detail_code="pdf_engine.auto_missing",
                 fix_code="pdf_engine.auto_missing",
