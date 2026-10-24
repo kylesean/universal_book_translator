@@ -35,7 +35,17 @@ _CASES: tuple[tuple[str, tuple[str, ...]], ...] = (("shadow_reader", ("--min-cov
 def _skip_without_corpus() -> None:
     documents = sorted((_REPO / "corpus" / "documents").glob("*.pdf"))
     if not documents:
-        pytest.skip("corpus documents are not present (gitignored); see corpus/README.md")
+        # ``corpus/documents`` is gitignored: the acceptance gate cannot run in
+        # CI by construction. The skip says so, because a silent skip here reads
+        # in the CI log as "the gate passed" and the harness has been dead on
+        # CI for as long as the corpus has been uncommitted.
+        pytest.skip(
+            "corpus/documents is not present (gitignored by design), so the "
+            "acceptance harness measured nothing. Fetch it with "
+            "`python scripts/fetch_semantic_gold.py` and run locally; CI cannot "
+            "cover this gate.",
+            allow_module_level=False,
+        )
 
 
 @pytest.mark.parametrize(("script", "extra"), _CASES, ids=[c[0] for c in _CASES])

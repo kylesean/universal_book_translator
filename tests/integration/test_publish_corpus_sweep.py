@@ -49,8 +49,30 @@ def _present(ids: tuple[str, ...]) -> list[str]:
     return [i for i in ids if (DOCS / f"{i}.pdf").exists()]
 
 
+_AVAILABLE = _present(SAMPLE)
+
+
 @pytest.mark.slow
-@pytest.mark.parametrize("case_id", _present(SAMPLE))
+def test_the_gold_corpus_is_present() -> None:
+    """Fail loudly when the corpus is missing instead of collecting zero cases.
+
+    ``parametrize("case_id", _present(SAMPLE))`` with an empty list collects
+    *zero* tests and pytest reports success — the sweep silently stopped
+    covering anything the moment the (gitignored) PDFs were absent, and CI
+    runs it in that state. An explicit failure turns "not measured" into a
+    visible red instead of a green that means nothing.
+    """
+    if not _AVAILABLE:
+        pytest.fail(
+            "the gold corpus is missing, so the publish sweep measured nothing. "
+            f"Expected PDFs under {DOCS}: {', '.join(SAMPLE)}. "
+            "Fetch them with `python scripts/fetch_semantic_gold.py`, or deselect "
+            "this test explicitly if you are building a corpus-free environment."
+        )
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("case_id", _AVAILABLE)
 def test_a_real_document_extracts_and_publishes(case_id: str, tmp_path: Path) -> None:
     """Extract with Docling, render with publish, and require a real PDF.
 

@@ -9,6 +9,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
+### Fixed
+
+- **A completed job can no longer exist without its render digest.** `finalize_job`
+  committed `completed` first and the export stage wrote `rendered_text_digest`
+  afterwards, so any failure in between left the one state the freshness check has
+  to read as "not stale". The download endpoint then served a file rendered from
+  text the ledger no longer held, and nothing self-heals it (`completed` is never
+  rewritten by the failure path). The digest is now an argument to
+  `finalize_job` and commits in the same transaction.
+- **A re-export no longer rewrites any block.** The docstring said it "doesn't own
+  any block's fate" while the stage still ran the deterministic glossary
+  substitution, the HTML structure checker (which can wrap a target in `<mark>` and
+  set `FAILED`), the math guard (which resets a drifted formula to its source) and
+  the length policy. A formatting-only re-render could therefore undo a human edit
+  or quarantine a block a later resume would not pick up.
+- **DIALOGUE was treated as a table by the zero-token gate.** It was missing from
+  `PROSE_BLOCK_TYPES`, and FastPass reads "not prose" as "table", which switched
+  off the sentence-drop gate and lowered the script-density floor to 0.02.
+- **A target consisting only of symbols passed every gate.** The residue strip left
+  an empty string, which the density check read as ratio 1.0, so `!!!@@@###%%%`
+  scored "Flawless". A target with no letters at all is now a critical defect when
+  the source had prose, and a legitimately letter-free table body still passes.
+- **`skip_translate` blocks failed their own language gate.** A verbatim formula or
+  code block is supposed to arrive in the source language; the density gate
+  rejected every correct "leave the LaTeX alone" repair candidate at ratio 0.00.
+- **Ragged and single-row tables skipped both table checks.** `markdown_grid_shape`
+  returned `[]` for any non-uniform grid, so a table whose translation dropped or
+  added a cell — and a header-only table — went unexamined.
+- **Hangul was budgeted as half-width in table layout.** Korean fell through to
+  `isalpha()` (0.557 em instead of 1.0), and the whole syllable block counted as
+  one unbreakable run, so Korean tables were ~44 % under-allocated and overflowed.
+- **An asset filename could break the whole compile.** A stem containing a quote
+  closed `image("…")` early; names are now restricted to what is safe inside a
+  Typst string literal (the content digest already makes them unique).
+- **The visual gate's Typst-source tier never ran.** It looked for `<pdf>.typ`,
+  while the renderer writes `.<stem>_typst/main.typ`. The tier is now listed in
+  `tiers_ran`/`tiers_skipped` so "never scanned" is distinguishable from "scanned
+  and clean".
+- **`⟦I⟧`/`⟦/I⟧` were not registered sentinels.** An italic marker a model rewrote
+  as `\llbracket I\rrbracket` was not recognised, reached the math transpiler, and
+  one such formula fails the whole document.
+- **The fallback chain had no total attempt budget.** `max_retries` is per model,
+  so N models meant `N * (max_retries + 1)` paid calls, each with its own backoff
+  (up to a clamped 375 s), for one block. The chain now shares one budget.
+- **Non-429 retry backoff was not cancellable**, and the truncation-continuation
+  loop never checked the cancel token, so a cancelled job kept buying completions.
+  The per-run cancel token is also unbound in `run()`'s `finally`: `JobWorker` runs
+  job after job on one task, and a set token leaked into the next job's backoff.
+- **`low_legibility_font` had no producer.** A table laid out at the 0.60
+  readability floor now emits it; the flag was declared, documented, and never
+  written.
+- **TOC `auto` invented a contents page from any five tagged lines.** A row now has
+  to carry a page number or name a heading that exists in the document (and a row
+  cannot vouch for itself).
+
+### Removed
+
+- `LENGTH_OVERFLOW_TO_HUMAN` / `LENGTH_POLICY_PAGE_KINDS` and
+  `apply_length_policy_flags`: unreachable. No renderer ever emitted an
+  `overflow*`/`spill*` skip reason, so the flip could not fire.
+- **The intentional-preserve skip whitelist**
+  (`render_skip:{policy,non_prose,chrome,footer}` and four `inplace_skip:` twins).
+  None of the eight had a producer, so `preserved_blocks` was a permanently-zero
+  KPI in real runs, and the one flag that looked like it belonged was wrong:
+  `triage` tagged a NEEDS_HUMAN non-prose block `render_skip:non_prose`, but the
+  renderer typesets that block's rejected *draft* (fail-open), so the delivery
+  contract recorded a translation the reader received as "text missing"
+  (`SOURCE_KEPT`, or `MISSING` for an asset). The advisory is now
+  `non_prose_degraded: …`, outside the skip vocabulary. A block ships its source
+  for exactly one reason — `skip_translate` — which yields
+  `TextDisposition.VERBATIM` on its own.
+- `RepairLoop.bottom_percentile`: stored and never read. The knob still drives
+  `ubt assess`'s quote; it never selected a repair candidate.
+- `quality_report.md` from `SidecarKind` / `RUN_REPORT_KINDS`: nothing wrote it, so
+  every export deleted a file that could not exist.
+
 ### Changed
 
 - **The book's source text is read and indexed once per run.** `source_text` is
