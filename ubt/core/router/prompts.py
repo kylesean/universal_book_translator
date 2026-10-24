@@ -666,7 +666,8 @@ def build_hybrid_repair_prompt(
 
     system_prompt = (
         f"You are an expert bilingual editor refining a translation from {src_name} into {tgt_name}.\n"
-        "Fix all identified issues and output the corrected translation."
+        "Fix all identified issues and output ONLY the corrected translation directly. "
+        "Do NOT include any commentary, analysis, explanations, notes, or conversational preambles."
         f"{table_guardrail}"
     )
 
@@ -693,14 +694,14 @@ def build_hybrid_repair_prompt(
             f"### Original Source\n{_neutralize_reserved_tags(source_text).strip()}\n\n"
             f"### Draft with Marked Errors\n{annotated_draft.strip()}\n\n"
             f"### Issues to Fix\n{issues_formatted}\n\n"
-            "Please provide the corrected full translation directly:"
+            "Please provide the corrected full translation directly without any commentary or explanations:"
         )
     else:
         user_parts.append(
             f"### Original Source\n{_neutralize_reserved_tags(source_text).strip()}\n\n"
             f"### Previous Draft\n{draft_text.strip()}\n\n"
             f"### Issues to Fix\n{issues_formatted}\n\n"
-            "Please provide the polished and corrected translation directly:"
+            "Please provide the polished and corrected translation directly without any commentary or explanations:"
         )
 
     return system_prompt, "\n".join(user_parts)
@@ -763,7 +764,10 @@ def build_rich_repair_prompt(
             "3. Output each correction using format:\n"
             '<correction id="1">replacement_text</correction>\n'
             'If multiple spans exist, output <correction id="X"> for each. '
-            "Or output the complete text with only the marked errors repaired in <final_translation>...</final_translation>."
+            "Or output the complete text with only the marked errors repaired in <final_translation>...</final_translation>.\n\n"
+            "Output Requirement:\n"
+            "Output ONLY the correction tags or <final_translation>...</final_translation>. "
+            "Do NOT output any reflections, reviews, commentary, analysis, markdown notes, or conversational text outside the tags."
             f"{table_infilling_note}"
         )
 
@@ -772,7 +776,7 @@ def build_rich_repair_prompt(
             f"### Translation Draft with Error Spans\n{annotated_draft.strip()}\n\n"
             f"### Quality Critique Issues\n{issues_formatted}\n\n"
             "### Instruction:\n"
-            'Correct the marked error spans with minimal in-place edits using <correction id="...">replacement</correction>:'
+            'Correct the marked error spans directly without commentary using <correction id="...">replacement</correction> or <final_translation>...</final_translation>:'
         )
     else:
         table_rule = ""
@@ -786,8 +790,8 @@ def build_rich_repair_prompt(
 
         system_prompt = (
             f"You are a master bilingual editor and precision repair agent refining a translation from {src_name} into {tgt_name}.\n"
-            "A draft translation failed quality checks. Conduct a focused, structured review before outputting the final translation.\n\n"
-            "Evaluation & Reflection Protocol:\n"
+            "A draft translation failed quality checks. Fix all identified defects and output the final polished translation.\n\n"
+            "Quality Guidelines:\n"
             "1. [Terminology]: Verify all terms against the Translation Bible strictly.\n"
             "2. [Critique Resolution]: Address and fix every flagged quality defect.\n"
             "3. [Fluency & Denoising]: Polish target prose to eliminate stiff translationese and mechanical passive constructions (naturalize passive voice to active/topic-prominent phrasing in CJK, 意合重组). Suppress any raw OCR glyph noise, stray symbols, or broken boilerplate fragments that leaked into the draft.\n"
@@ -795,7 +799,8 @@ def build_rich_repair_prompt(
             "5. [Publishing Typography & CJK Spacing]: In Chinese target text, leave a single half-width space between Chinese characters and English words, digits, or inline math ($...$), and eliminate stray spaces around full-width CJK punctuation.\n"
             f"{table_rule}"
             "Output Requirement:\n"
-            "Wrap the final polished translation strictly inside <final_translation>...</final_translation> without commentary or markdown code blocks."
+            "Output ONLY the final polished translation strictly wrapped inside <final_translation>...</final_translation>. "
+            "Do NOT output any reflections, reviews, commentary, analysis, markdown notes, or conversational text outside the tags."
         )
 
         user_parts.append(
@@ -803,7 +808,7 @@ def build_rich_repair_prompt(
             f"### Problematic Draft\n{draft_text.strip()}\n\n"
             f"### Quality Critique Issues\n{issues_formatted}\n\n"
             "### Instruction:\n"
-            "Reflect on the issues above and provide the corrected translation wrapped in <final_translation>...</final_translation>:"
+            "Fix the issues above and output ONLY the corrected translation wrapped in <final_translation>...</final_translation> directly (no reflections or commentary):"
         )
 
     return system_prompt, "\n".join(user_parts)

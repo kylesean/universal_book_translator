@@ -6,7 +6,7 @@ import os
 import re
 import sys
 import warnings
-from typing import Any, TextIO
+from typing import Any, Literal, TextIO
 
 from rich.logging import RichHandler
 from uvicorn.logging import ColourizedFormatter
@@ -30,7 +30,7 @@ class UBTColourizedFormatter(ColourizedFormatter):
         self,
         fmt: str | None = None,
         datefmt: str | None = None,
-        style: str = "%",
+        style: Literal["%", "{", "$"] = "%",
         use_colors: bool | None = None,
     ) -> None:
         super().__init__(

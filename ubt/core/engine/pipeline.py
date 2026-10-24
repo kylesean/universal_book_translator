@@ -445,7 +445,6 @@ class PipelineOrchestrator:
             qe_runner=self.qe_runner,
             max_rounds=self.config.max_repair_rounds,
             qe_threshold=self.config.qe_threshold,
-            bottom_percentile=self.config.bottom_percentile,
         )
         # Explicitly injected collaborators are kept verbatim; the default ones
         # are language-agnostic at construction time and get a per-run language
@@ -692,7 +691,6 @@ class PipelineOrchestrator:
             qe_runner=qe_runner,
             max_rounds=self.config.max_repair_rounds,
             qe_threshold=self.config.qe_threshold,
-            bottom_percentile=self.config.bottom_percentile,
         )
 
     @staticmethod
@@ -1407,6 +1405,12 @@ class PipelineOrchestrator:
                 )
             raise
         finally:
+            # Unbind this run's cooperative-cancel token. A ContextVar outlives
+            # the coroutine that set it whenever the task keeps running, and
+            # ``JobWorker`` runs job after job on the same task: leaving a set
+            # token bound made the next job's first backoff raise
+            # JobInterruptedError for a cancel that belonged to its predecessor.
+            set_run_cancel_token(None)
             # Release the WAL + connection per run, and close the
             # provider's HTTP pool (it is recreated lazily on the next call, so
             # reusing this orchestrator for another job stays correct).

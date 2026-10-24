@@ -339,7 +339,7 @@ async def test_content_refusal_fails_fast_and_does_not_trip_circuit_breaker() ->
         provider=cast(Any, provider),
         draft_model="primary_model",
         fallback_models=["fallback_model"],
-        rate_limiter=_NullLimiter(),
+        rate_limiter=cast(Any, _NullLimiter()),
     )
 
     with pytest.raises(ModelProviderError, match="refused"):

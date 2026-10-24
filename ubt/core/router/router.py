@@ -86,6 +86,17 @@ def set_run_cancel_token(token: asyncio.Event | None) -> None:
     _cancel_token_ctx.set(token)
 
 
+def _raise_if_cancelled(fallback: asyncio.Event | None = None) -> None:
+    """Raise :class:`JobInterruptedError` when this run's cancel token is set.
+
+    The ContextVar is the per-task token; ``fallback`` is the router's
+    constructor-time field, for library callers that never bind one.
+    """
+    token = _cancel_token_ctx.get() or fallback
+    if token is not None and token.is_set():
+        raise JobInterruptedError("Job cancelled before the next provider call")
+
+
 class ModelRouter:
     """Routes translation and repair tasks across LLM tiers with capability strategy dispatch."""
 
@@ -596,6 +607,14 @@ class ModelRouter:
         healthy = [c for c in chain if self._model_circuit.get(c, (0, 0.0))[1] <= now]
         effective_chain = healthy or chain
 
+        # Chain-level attempt budget. ``max_retries`` is per model, so a chain of
+        # N models could otherwise make ``N * (max_retries + 1)`` provider calls
+        # for ONE block, each with its own backoff (up to a clamped 375s). With
+        # the default 3 retries and a 3-model chain that is 12 paid calls and
+        # over an hour of sleeping for a block that is going to fail anyway.
+        # The per-model budget still does its job inside the primary model; this
+        # cap bounds the *total* so a bad chain fails in bounded time.
+        budget = [self.max_retries + 1]
         for index, candidate in enumerate(effective_chain):
             cand_profile = self._get_profile(candidate)
             cand_effort = reasoning_effort if cand_profile.supports_reasoning_effort else None
@@ -617,6 +636,7 @@ class ModelRouter:
                     reasoning_effort=cand_effort,
                     max_tokens=cand_max_tokens,
                     is_repair=is_repair,
+                    attempt_budget=budget,
                 )
                 self._model_circuit[candidate] = (0, 0.0)
                 if return_model:
@@ -700,6 +720,7 @@ class ModelRouter:
         max_tokens: int | None = None,
         *,
         is_repair: bool = False,
+        attempt_budget: list[int] | None = None,
     ) -> str:
         """Execute inference with rate limiter acquisition, parameter pre-cleaning, and backoff retry on 429."""
         profile = self._get_profile(model)
@@ -723,6 +744,13 @@ class ModelRouter:
         retries = 0
 
         while True:
+            if attempt_budget is not None:
+                if attempt_budget[0] <= 0:
+                    raise ModelProviderError(
+                        f"Attempt budget exhausted on {model}: the fallback chain used "
+                        "every call this block is allowed"
+                    )
+                attempt_budget[0] -= 1
             # The TPM bucket consumes the estimated request size. Count it with
             # the script-aware estimator, NOT ``chars/4``: the flat heuristic
             # under-reserves CJK ~3.4x (zh averages ~0.85 tok/char), so the
@@ -855,9 +883,11 @@ class ModelRouter:
                     await self._interruptible_sleep(wait)
                 else:
                     # Jittered linear backoff: without jitter concurrent workers
-                    # retry in lockstep and re-create the herd.
+                    # retry in lockstep and re-create the herd. Interruptible for
+                    # the same reason the 429 path is: a cancel that has to wait
+                    # out a 5xx backoff still bills the retry that follows it.
                     base = 0.2 * retries
-                    await asyncio.sleep(base + random.uniform(0, base))
+                    await self._interruptible_sleep(base + random.uniform(0, base))
             except ValueError as exc:
                 # A 200 whose body is not the declared JSON (a proxy error page,
                 # a truncated stream) is deterministic: retrying the same request
@@ -881,7 +911,7 @@ class ModelRouter:
                 if retries > self.max_retries:
                     raise ModelProviderError(f"Unexpected provider error: {exc}") from exc
                 base = 0.2 * retries
-                await asyncio.sleep(base + random.uniform(0, base))
+                await self._interruptible_sleep(base + random.uniform(0, base))
 
     async def _continue_truncated_output(
         self,
@@ -904,6 +934,10 @@ class ModelRouter:
         """
         text = partial
         for round_idx in range(_MAX_CONTINUATION_ROUNDS):
+            # Continuation is up to 3 more paid calls. Without a check here a
+            # cooperative cancel only took effect after the whole loop, so a
+            # cancelled job kept buying completions.
+            _raise_if_cancelled(self.cancel_token)
             tail = text[-_CONTINUATION_TAIL_CHARS:]
             logger.info(
                 "Model %s generation truncated (length limit hit, %d chars); auto-continuing (round %d/%d)...",

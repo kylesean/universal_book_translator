@@ -291,3 +291,39 @@ async def test_a_cancelled_job_stops_the_retry_loop() -> None:
             )
     finally:
         await canceller
+
+
+async def test_the_fallback_chain_has_a_total_attempt_budget() -> None:
+    """``max_retries`` is per model, so N models meant N*(max_retries+1) calls.
+
+    Each retry can sleep up to a clamped 375 s, so a 3-model chain with the
+    default 3 retries could spend 12 paid calls and over an hour on one block
+    that is going to fail. The chain now shares one attempt budget, so a bad
+    chain fails in bounded time instead of multiplying per-model retries.
+    """
+    from typing import Any, cast
+
+    from ubt.core.router.router import ModelRouter
+
+    class _AlwaysFails:
+        is_mock = False
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def generate_with_finish_reason(self, **kwargs: Any) -> tuple[str, str | None]:
+            self.calls += 1
+            raise ModelProviderError("boom", details={"status_code": 503})
+
+    provider = _AlwaysFails()
+    router = ModelRouter(
+        provider=cast(Any, provider),
+        draft_model="m1",
+        fallback_models=["m2", "m3"],
+        max_retries=2,
+    )
+    with pytest.raises(ModelProviderError):
+        await router.complete_raw("sys", "translate this text")
+
+    # 3 models x (2 retries + 1) would be 9; the chain budget is 3.
+    assert provider.calls == 3
