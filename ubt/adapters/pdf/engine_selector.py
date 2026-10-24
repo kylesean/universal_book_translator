@@ -1,6 +1,11 @@
-"""3 first-page heuristic engine selection for born-digital PDF routing.
+"""Born-digital PDF probe signals — assessment input, not a routing decision.
 
-Signals (cheap pypdfium2 probe of sampled pages):
+Routing is frozen: ``auto`` resolves to Docling unconditionally (measured on
+the mamba paper — 19 figures and 16 tables whose cheap probe signals all read
+zero — the probe could not separate the documents Docling was needed for), and
+``pdfium`` is an explicit operator opt-in with a loud warning. What this
+module still owns are the *signals* a sampled pypdfium2 probe produces for
+the assess report and the pdfium warning text:
 
 - extractable text volume — scanned / image-only PDFs must go to Docling
   (OCR / vision pipeline); pypdfium2 would extract nothing;
@@ -15,8 +20,8 @@ Signals (cheap pypdfium2 probe of sampled pages):
   blocks. The cover page alone must NOT decide: sampling covers the front,
   middle and back of the document.
 
-``UBT_PDF_ENGINE`` overrides the probe entirely: any explicit engine name
-(built-in or custom) is honored as-is; the probe only runs for ``auto``.
+``UBT_PDF_ENGINE`` still names the engine outright for callers that report
+the plan; the probe runs for every engine to fill the signal fields.
 """
 
 from __future__ import annotations

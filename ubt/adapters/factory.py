@@ -208,13 +208,14 @@ def supported_suffixes() -> list[str]:
 
 def get_adapter_for_path(
     path: Path | str,
-    pdf_engine: str = "docling",
+    pdf_engine: str = "auto",
 ) -> BaseDocumentAdapter:
     """Factory helper to resolve the appropriate document adapter by file extension.
 
-    Uses Docling + Typst + pdf_oxide for 100% permissive Zero-AGPL modern delivery.
-    ``pdf_engine='auto'`` routes PDFs through the first-page heuristic
-    ``auto`` is Docling, unconditionally; ``pdfium`` is an explicit opt-in.
+    The default matches the config's ``pdf_engine`` default so a direct call
+    resolves the same engine the pipeline would: ``auto`` is Docling,
+    unconditionally; ``pdfium`` is an explicit operator opt-in that carries a
+    loud multicolumn/scanned warning.
     """
     file_path = Path(path)
     suffix = file_path.suffix.lower()
