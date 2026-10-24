@@ -895,21 +895,56 @@ def _join_fragments_with_superscripts(kept: Sequence[LineBox], main_fsz: float) 
     return " ".join(tokens)
 
 
-def column_order(lines: Sequence[LineBox], page_width: float) -> list[LineBox]:
-    """Column-aware reading order: split at the gutter, then read left-to-right.
+#: Sub-split guards. The top-level split is governed by the thresholds below
+#: (0.7 span candidacy, 0.15 side span, 0.25 crossing ratio); a *sub*-split —
+#: recursive, inside what the top level already called one column — needs
+#: stricter evidence, because inside a single column a centred short title or a
+#: left-aligned short line produces a zero-crossing pseudo-gutter a real column
+#: never has. Differential testing (4000 random 1/2-column pages, prototype vs
+#: the previous single-cut implementation) pinned these: without the guards the
+#: recursive version cut single columns apart; with them, two-column behaviour
+#: is element-for-element identical to the single-cut version.
+#: A real sub-gutter has at least this many candidate lines on each side.
+_SUB_SPLIT_MIN_SIDE_LINES = 3
+#: A real sub-gutter is crossed by at most one non-furniture line (a display
+#: equation); a pseudo-cut is crossed by this column's own body lines.
+_SUB_SPLIT_NONFURNITURE_CROSS_CAP = 1
+#: Depth cap below the top split: 3 levels order up to 8 columns.
+_MAX_COLUMN_DEPTH = 3
 
-    A line only defines column membership when it does not span the gutter;
+
+def column_order(lines: Sequence[LineBox], page_width: float) -> list[LineBox]:
+    """Column-aware reading order: recursive gutter cuts, columns left-to-right.
+
+    Each level splits its region at the gutter crossed by the fewest candidate
+    lines, lifts banners above and footers below the columns, and recurses
+    into each side — so a three-column page reads column-major instead of
+    interleaving its second and third columns line by line (which is what a
+    single cut did: the third column merged into a neighbour cluster). A line
+    only defines column membership when it does not span the gutter;
     full-width lines (headings, captions) are routed to the nearer column by
-    x-center so they cannot bridge the two columns into one. Clusters go
+    x-center so they cannot bridge columns into one. Clusters go
     left-to-right, lines inside top-down. Single-column layouts strictly
-    preserve top-down reading.
+    preserve top-down reading; sub-splits must clear the guard constants
+    above, so a two-column page behaves exactly as the single-cut version did.
+
+    Returns the input objects themselves (never copies): the VLM transcription
+    path maps results back through ``id()``.
     """
     if len(lines) <= 1:
         return list(lines)
     work = list(lines)
-    span = max((ln.rect[2] for ln in work), default=page_width) - min(
+    page_span = max((ln.rect[2] for ln in work), default=page_width) - min(
         (ln.rect[0] for ln in work), default=0.0
     )
+    if page_span <= 0.0:
+        return sorted(work, key=lambda ln: (-ln.rect[3], ln.rect[0]))
+    return _order_region(work, depth=0, page_span=page_span)
+
+
+def _order_region(work: list[LineBox], *, depth: int, page_span: float) -> list[LineBox]:
+    """One XY-cut level of :func:`column_order`; recursion happens per side."""
+    span = max(ln.rect[2] for ln in work) - min(ln.rect[0] for ln in work)
     if span <= 0.0:
         return sorted(work, key=lambda ln: (-ln.rect[3], ln.rect[0]))
 
@@ -931,12 +966,12 @@ def column_order(lines: Sequence[LineBox], page_width: float) -> list[LineBox]:
         return max(work[i].rect[2] for i in idxs) - min(work[i].rect[0] for i in idxs)
 
     # The gutter is the x crossed by the fewest candidate lines. A single-column
-    # page has no low-crossing cut (any mid-column split severs many lines); a
-    # two-column page dips sharply at the real gutter. Naive connected-component
-    # clustering would merge every overlapping interval, so a single
-    # gutter-spanning line (a centered caption, a hanging-indented equation line)
-    # would chain the two columns into one component and collapse the page to
-    # top-down reading order.
+    # region has no low-crossing cut (any mid-column split severs many lines); a
+    # multi-column region dips sharply at the real gutter. Naive
+    # connected-component clustering would merge every overlapping interval, so
+    # a single gutter-spanning line (a centered caption, a hanging-indented
+    # equation line) would chain the columns into one component and collapse
+    # the region to top-down reading order.
     split_points = sorted(
         {work[idx].rect[0] for idx in candidates} | {work[idx].rect[2] for idx in candidates}
     )
@@ -954,12 +989,26 @@ def column_order(lines: Sequence[LineBox], page_width: float) -> list[LineBox]:
             best_crossings = crossed
             best_split = split
     # A real gutter is crossed by few lines; a mid-column cut is not. Without a
-    # low-crossing split this is a single-column page: keep top-down order.
+    # low-crossing split this is a single-column region: keep top-down order.
     if best_split is None or best_crossings > 0.25 * len(candidates):
         return sorted(work, key=lambda ln: (-ln.rect[3], ln.rect[0]))
 
     left_cands = [i for i in candidates if center(i) < best_split]
     right_cands = [i for i in candidates if center(i) >= best_split]
+
+    if depth > 0:
+        # Sub-split guards (see the module constants): a cut inside what the
+        # top level called one column must look like a real gutter, not like
+        # the seam between a centered short title and the column body.
+        nonfurniture = [ln for ln in work if (ln.rect[2] - ln.rect[0]) <= 0.7 * page_span]
+        nonfurn_crossed = sum(1 for ln in nonfurniture if ln.rect[0] < best_split < ln.rect[2])
+        if (
+            nonfurn_crossed > _SUB_SPLIT_NONFURNITURE_CROSS_CAP
+            or len(left_cands) < _SUB_SPLIT_MIN_SIDE_LINES
+            or len(right_cands) < _SUB_SPLIT_MIN_SIDE_LINES
+        ):
+            return sorted(work, key=lambda ln: (-ln.rect[3], ln.rect[0]))
+
     # A banner must clear the TOP of BOTH columns (y grows upward, so the
     # higher column's max top); a footer must sit below the BOTTOM of both (the
     # lower column's min bottom). Inverting these would misread the longer
@@ -972,19 +1021,36 @@ def column_order(lines: Sequence[LineBox], page_width: float) -> list[LineBox]:
         min(work[i].rect[1] for i in left_cands), min(work[i].rect[1] for i in right_cands)
     )
 
-    def sort_key(i: int) -> tuple[int, int, float, float]:
-        ln = work[i]
-        # Lines placed above both columns (banners/headings) read first.
-        if ln.rect[1] >= top_ceiling:
-            return (0, 0, -ln.rect[3], ln.rect[0])
-        # Lines placed below both columns (footers/notes) read last.
-        if ln.rect[3] <= bottom_floor:
-            return (2, 0, -ln.rect[3], ln.rect[0])
-        col = 0 if center(i) < best_split else 1
-        return (1, col, -ln.rect[3], ln.rect[0])
+    banner = sorted(
+        (ln for ln in work if ln.rect[1] >= top_ceiling),
+        key=lambda ln: (-ln.rect[3], ln.rect[0]),
+    )
+    footer = sorted(
+        (ln for ln in work if ln.rect[3] <= bottom_floor),
+        key=lambda ln: (-ln.rect[3], ln.rect[0]),
+    )
+    # A line at exactly the ceiling/floor boundary belongs to both buckets in
+    # the single-level sort key; keep the column routing exclusive by marking
+    # bucketed lines first.
+    bucketed = {id(ln) for ln in banner} | {id(ln) for ln in footer}
+    columns = [ln for ln in work if id(ln) not in bucketed]
+    left_lines = [ln for ln in columns if (ln.rect[0] + ln.rect[2]) / 2.0 < best_split]
+    right_lines = [ln for ln in columns if (ln.rect[0] + ln.rect[2]) / 2.0 >= best_split]
 
-    order = sorted(range(len(work)), key=sort_key)
-    return [work[i] for i in order]
+    if depth >= _MAX_COLUMN_DEPTH:
+        # Depth cap reached: order this level's columns the single-cut way.
+        return (
+            banner
+            + sorted(left_lines, key=lambda ln: (-ln.rect[3], ln.rect[0]))
+            + sorted(right_lines, key=lambda ln: (-ln.rect[3], ln.rect[0]))
+            + footer
+        )
+    return (
+        banner
+        + _order_region(left_lines, depth=depth + 1, page_span=page_span)
+        + _order_region(right_lines, depth=depth + 1, page_span=page_span)
+        + footer
+    )
 
 
 __all__ = [
