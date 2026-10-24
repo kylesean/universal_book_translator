@@ -50,22 +50,14 @@ export const en: TranslationDictionary = {
     providerDefault: 'Default',
     targetLang: 'Target Language',
     presets: 'Execution Profile',
-    // The copy describes the engine parameters each preset actually sets
-    // (ubt/core/presets.py): prompt depth, formula handling and exec mode.
-    // Presets never pick a model or a render route — the router and the single
-    // Typst renderer do — so the copy no longer claims either.
-    //
-    // Formula enrichment is NOT a quality gradient: only ``on`` runs the VLM, so
-    // ``publication`` and ``standard`` both crop the source region and render
-    // identical math. Only publication_math transcribes.
-    presetPublication: 'Publication Grade',
-    presetPublicationDesc:
-      'Forced rich prompts with full-context term bible; formulas kept as cropped source images with per-item visual witness.',
+    presetHighFidelity: 'High-Fidelity Reflow',
+    presetHighFidelityDesc:
+      'Forced rich prompts with full context; formulas kept as cropped source images with per-item visual witness (recommended for academic & technical reading).',
     presetStandard: 'Standard Balanced',
     presetStandardDesc:
-      'Model-adaptive prompts chosen by document probe; formulas cropped from source (same formula policy as Publication).',
-    presetPublicationMath: 'Publication Math',
-    presetPublicationMathDesc:
+      'Model-adaptive prompts chosen by document probe; formulas cropped from source (same formula policy as High-Fidelity).',
+    presetVectorMath: 'Vector Math Reflow',
+    presetVectorMathDesc:
       'Rich prompts plus the VLM transcribing each formula to scalable vector LaTeX (~15-60s per formula on CPU). Pick this only when the delivered math must scale.',
     presetFast: 'Fast Throughput',
     presetFastDesc:
@@ -110,8 +102,8 @@ export const en: TranslationDictionary = {
     sourceChars: 'Source characters',
     chapters: 'Chapters',
     mathDensity: 'Math density',
-    mathDensityTextOnly: 'text symbol density; no extractable formula objects found',
-    mathDensityWithObjects: 'text symbol density; formula objects found',
+    mathDensityTextOnly: 'dense math symbols; layout formula boxes unverified in fast probe (handled by high-fidelity engine)',
+    mathDensityWithObjects: 'dense math symbols; extractable formula layout boxes detected',
     estTime: 'Estimated compile time',
     confidence: 'Route confidence',
     probeWarnings: 'Assessment warnings',
@@ -383,17 +375,18 @@ export const en: TranslationDictionary = {
     reparseTypeMismatch: 'That does not match the job id.',
   },
   quality: {
-    title: 'Quality Gate & Attestation',
-    subtitle: 'Industrial-grade publication defense: mathematical integrity, lexical drift, collision gates, and cryptographic contract.',
+    title: 'Quality Gate & Verification Report',
+    subtitle:
+      'End-to-end quality defense: mathematical integrity, terminology consistency, layout overflow and structured proofs.',
     noJobTitle: 'No Job Selected for Audit',
     noJobDesc: 'Select a completed or running job from Mission Control to view formal verification results.',
     rehearsalBadge: 'Rehearsal — echo text, not a translation',
     rehearsalBody:
       'This run used the offline echo provider (--dry-run). The artifact repeats the source and every check below passes by construction, so treat the verdict as a pipeline check, not a quality verdict.',
-    decisionReady: 'PRODUCTION READY',
+    decisionReady: 'READY',
     decisionBlocked: 'GATE BLOCKED',
     allPassedDesc: 'All formal checks passed. Formula dropout is 0%, terminology drift within tolerances.',
-    blockedDesc: 'Gate blocked: manual post-editing review required before publication release.',
+    blockedDesc: 'Gate blocked: manual post-editing review required before exporting deliverables.',
     // The number shown is ``summary.pass_rate`` = completed / total blocks.
     // Calling it a "fidelity score" claimed a pixel/layout measurement the
     // value never made.
@@ -408,9 +401,9 @@ export const en: TranslationDictionary = {
     pillar4Desc: 'Paragraph length parity, table preservation, code fence verification.',
     pillar5Title: '5. Financial Ledger & Audit',
     pillar5Desc: 'Immutable WAL ledger reconciliation vs pre-flight quote.',
-    deliverablesTitle: 'Deliverables & Contract Export',
-    deliverablesSubtitle: 'Cryptographically certified compilation artifacts ready for press.',
-    targetPdf: 'Publication Target PDF',
+    deliverablesTitle: 'Deliverables & Quality Artifacts',
+    deliverablesSubtitle: 'Compilation artifacts and reports verified by quality gates.',
+    targetPdf: 'Reflowed Target PDF',
     epub: 'Standard Bilingual EPUB 3',
     contractJson: 'contract.json',
     secondaryDoc: 'Complementary mono/dual document',
@@ -430,6 +423,7 @@ export const en: TranslationDictionary = {
     visualSkipCodes: {
       vlm_judge_disabled: 'visual judge not enabled',
       page_render_failed: 'page render failed',
+      typst_source_absent: 'typst source not kept; source scan skipped',
       unknown: 'reason unknown',
     },
     visualTiersRan: 'Ran',

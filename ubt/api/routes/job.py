@@ -121,9 +121,9 @@ def _reconstruct_resume_request(
     prompt_strategy = snapshot.get("prompt_strategy")
     preset: Preset | None = None
     if prompt_strategy == "rich":
-        # Publication and publication_math share rich prompts; without a
-        # recorded formula policy the conservative choice is publication.
-        preset = Preset.PUBLICATION
+        # High fidelity and vector math share rich prompts; without a
+        # recorded formula policy the conservative choice is high fidelity.
+        preset = Preset.HIGH_FIDELITY
 
     output_path = metadata.get("output_file") or default_output_dir
     try:

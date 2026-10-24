@@ -1,6 +1,6 @@
 # Universal Book Translator (UBT) Console Design System & Taste Guidelines
 
-> **Mandate**: "UBT is a precision compiler and publication studio, not a consumer reader or a generic AI dashboard."
+> **Mandate**: "UBT is a precision compiler and document reflow studio, not a consumer reader or a generic AI dashboard."
 > **Inspiration**: Linear, Geist (Vercel), Typst App, Raycast, Overleaf.
 
 ---

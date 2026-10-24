@@ -9,16 +9,16 @@ translating" is a policy decision, while the model is the operator's.
 (pdfium is fast and geometry-only, docling is lossless and slow), and leaving it
 out made ``--preset fast`` still pay for a docling conversion. What stays out is
 the **render route**: every PDF is rebuilt from the semantic IR by the Typst
-publication renderer, and nothing selects otherwise.
+reflow renderer, and nothing selects otherwise.
 
 **Formula enrichment is not a quality gradient.** Only ``on`` runs the VLM math
 transcription; both ``auto`` and ``off`` end up cropping the source region
 (``resolve_formula_enrichment`` returns ``False`` for ``auto``, deliberately:
 a faithful crop is exact and instant, while the VLM's LaTeX is a model's
-transcription that can misread symbols). So ``publication`` and ``standard``
+transcription that can misread symbols). So ``high_fidelity`` and ``standard``
 render identical math — they differ only in prompt depth — and advertising
 "vector formula re-typesetting" for them was a promise no preset kept.
-:attr:`Preset.PUBLICATION_MATH` is the preset that actually pays for it.
+:attr:`Preset.VECTOR_MATH` is the preset that actually pays for it.
 
 Shared by the advisor and the CLI ``--preset`` layer: the CLI
 resolves explicit flags over the preset bundle over the engine defaults.
@@ -45,15 +45,15 @@ class Preset(StrEnum):
     #: Rich prompts on the lossless engine. ``formula_enrichment`` stays ``auto``,
     #: which resolves to the crop path — see the module docstring for why that is
     #: a property of ``auto`` and not a downgrade.
-    PUBLICATION = "publication"
-    #: Same ingest and formula policy as PUBLICATION; only the prompt depth
+    HIGH_FIDELITY = "high_fidelity"
+    #: Same ingest and formula policy as HIGH_FIDELITY; only the prompt depth
     #: differs (model-adaptive rather than forced rich).
     STANDARD = "standard"
     #: Rich prompts *and* ``formula_enrichment="on"``: the VLM transcribes each
     #: formula to vector LaTeX instead of the source being cropped. Much slower
     #: (roughly 15-60s per formula on CPU) and only worth it when the delivered
     #: PDF must scale its math.
-    PUBLICATION_MATH = "publication_math"
+    VECTOR_MATH = "vector_math"
     PREVIEW = "preview"
     FAST = "fast"
 
@@ -94,11 +94,11 @@ PRESET_ENGINE_FIELDS: tuple[str, ...] = tuple(
 
 
 PRESETS: dict[Preset, PresetPolicy] = {
-    Preset.PUBLICATION: PresetPolicy(
-        key=Preset.PUBLICATION,
-        label="出版级",
-        tagline="最佳质量：高保真术语 ＋ 全上下文提示，对标印刷交付",
-        description="智能路由（长/短链自适应） · 强制富提示词 · 公式裁切源图保真 · 双语/单语全覆盖",
+    Preset.HIGH_FIDELITY: PresetPolicy(
+        key=Preset.HIGH_FIDELITY,
+        label="高保真精排",
+        tagline="深度解析与重排：全上下文提示 ＋ 结构化版面抽取",
+        description="智能路由（长/短链自适应） · 强制富提示词 · 公式裁切源图保真 · 双语/单语排版重构",
         exec_mode="auto",
         prompt_strategy="rich",
         formula_enrichment="auto",
@@ -109,9 +109,9 @@ PRESETS: dict[Preset, PresetPolicy] = {
     ),
     Preset.STANDARD: PresetPolicy(
         key=Preset.STANDARD,
-        label="标准",
-        tagline="质量与成本平衡：路由交给文档探测",
-        description="自动短/长链 · 模型自适应提示 · 公式裁切源图保真（与出版级同一公式策略）",
+        label="标准平衡",
+        tagline="质量与速度平衡：路由交给文档探测",
+        description="自动短/长链 · 模型自适应提示 · 公式裁切源图保真（与高保真精排同一公式策略）",
         exec_mode="auto",
         prompt_strategy="auto",
         formula_enrichment="auto",
@@ -120,11 +120,11 @@ PRESETS: dict[Preset, PresetPolicy] = {
         emit_both=False,
         pdf_engine="auto",
     ),
-    Preset.PUBLICATION_MATH: PresetPolicy(
-        key=Preset.PUBLICATION_MATH,
-        label="出版级（公式矢量）",
+    Preset.VECTOR_MATH: PresetPolicy(
+        key=Preset.VECTOR_MATH,
+        label="高保真（公式矢量）",
         tagline="公式转为矢量 LaTeX，可无级缩放；以速度换保真",
-        description="富提示词 ＋ 视觉模型逐条转写公式（每条约 15-60 秒 CPU）· 其余同出版级",
+        description="富提示词 ＋ 视觉模型逐条转写公式为矢量 LaTeX（每条约 15-60 秒 CPU）· 其余同高保真精排",
         exec_mode="auto",
         prompt_strategy="rich",
         formula_enrichment="on",
@@ -136,8 +136,8 @@ PRESETS: dict[Preset, PresetPolicy] = {
     Preset.PREVIEW: PresetPolicy(
         key=Preset.PREVIEW,
         label="快速预览",
-        tagline="省时省费：跳过公式视觉识别，公式直接用源图",
-        description="快速路径（pdfium，扫描件自动转 Docling）· 精简提示 · 公式源图保真（不重排）· 完整质量报告",
+        tagline="省时省费：跳过公式视觉识别，快速走查排版",
+        description="快速路径（pdfium，扫描件自动转 Docling）· 精简提示 · 公式源图保真 · 完整质量报告",
         exec_mode="auto",
         prompt_strategy="minimal",
         formula_enrichment="off",
@@ -148,7 +148,7 @@ PRESETS: dict[Preset, PresetPolicy] = {
     ),
     Preset.FAST: PresetPolicy(
         key=Preset.FAST,
-        label="极速",
+        label="极速轻量",
         tagline="极速开箱即用：零重型依赖，轻量几何抽取，短链快速翻译",
         description="快速路径（pdfium；扫描件无文本层，自动转 Docling）· 最小提示词 · 公式源图保真 · 零重型环境门槛",
         exec_mode="short",

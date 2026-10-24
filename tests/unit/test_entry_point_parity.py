@@ -78,13 +78,13 @@ def test_the_preset_bundle_is_identical_on_both_paths(paper_pdf: Path) -> None:
     from ubt.core.job_options import resolve_profile_name
 
     resolved = resolve_profile_name("auto", paper_pdf)
-    for preset in ("publication", "standard", "preview"):
+    for preset in ("high_fidelity", "standard", "preview"):
         auto = overrides_from_request({**base, "profile": "auto", "preset": preset})
         named = overrides_from_request({**base, "profile": resolved, "preset": preset})
         assert auto == named, preset
     # A profile with a dual_mode default proves the shared default still fires.
     assert "dual_mode" in overrides_from_request(
-        {**base, "profile": "paper", "preset": "publication"}
+        {**base, "profile": "paper", "preset": "high_fidelity"}
     )
 
 

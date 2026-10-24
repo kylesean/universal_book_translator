@@ -109,7 +109,7 @@ export function NewJobWizard() {
 
   const [targetLang, setTargetLang] = useState('zh')
   const [sourceLang, setSourceLang] = useState('en')
-  const [preset, setPreset] = useState<'publication' | 'standard' | 'publication_math' | 'preview' | 'fast' | null>(null)
+  const [preset, setPreset] = useState<'high_fidelity' | 'standard' | 'vector_math' | 'preview' | 'fast' | null>(null)
   const [budgetUsd, setBudgetUsd] = useState<number | null>(null)
   // The raw field text is separate from ``budgetUsd``: while the user is
   // mid-typing ("" or "0.") the numeric value is not yet usable, but the input
@@ -205,7 +205,7 @@ export function NewJobWizard() {
     async (
       path: string,
       opts?: {
-        overridePreset?: 'publication' | 'standard' | 'publication_math' | 'preview' | 'fast'
+        overridePreset?: 'high_fidelity' | 'standard' | 'vector_math' | 'preview' | 'fast'
         overridePages?: string
         overrideTarget?: string
         overrideSource?: string
@@ -253,7 +253,7 @@ export function NewJobWizard() {
           lastAssessedFileRef.current = path.trim()
           if (!hasUserSelectedPresetRef.current && res.route?.recommended_preset) {
             const recP = res.route.recommended_preset.toLowerCase() as any
-            if (['publication', 'standard', 'publication_math', 'preview', 'fast'].includes(recP)) {
+            if (['high_fidelity', 'standard', 'vector_math', 'preview', 'fast'].includes(recP)) {
               setPreset(recP)
             }
           }
@@ -510,13 +510,13 @@ export function NewJobWizard() {
   // It deliberately does NOT name a model (a preset never picks one — the
   // router does) and does NOT claim a quality "gate" (a preset never changes
   // one; presets.py says so in its header). It also does not claim formula
-  // vectorisation outside publication_math: ``auto`` formula enrichment crops
-  // the source region, so publication and standard render identical math.
+  // vectorisation outside vector_math: ``auto`` formula enrichment crops
+  // the source region, so high_fidelity and standard render identical math.
   const presetOptions = [
     {
-      id: 'publication' as const,
-      name: t.wizard.presetPublication,
-      desc: t.wizard.presetPublicationDesc,
+      id: 'high_fidelity' as const,
+      name: t.wizard.presetHighFidelity,
+      desc: t.wizard.presetHighFidelityDesc,
       badge: t.wizard.presetBadgeRich,
     },
     {
@@ -526,9 +526,9 @@ export function NewJobWizard() {
       badge: t.wizard.presetBadgeAdaptive,
     },
     {
-      id: 'publication_math' as const,
-      name: t.wizard.presetPublicationMath,
-      desc: t.wizard.presetPublicationMathDesc,
+      id: 'vector_math' as const,
+      name: t.wizard.presetVectorMath,
+      desc: t.wizard.presetVectorMathDesc,
       badge: t.wizard.presetBadgeVectorMath,
       // The only preset that pays for VLM transcription; flagged so the cost
       // jump is visible before submission rather than after.
@@ -1340,7 +1340,11 @@ export function NewJobWizard() {
                     <span className="text-right">
                       <span
                         className={`font-mono font-bold ${
-                          assessment.document.has_formulas ? 'text-[#b45309]' : 'text-[#15803d]'
+                          assessment.document.math_density === 'high'
+                            ? 'text-[#b45309]'
+                            : assessment.document.math_density === 'low'
+                              ? 'text-[#15803d]'
+                              : 'text-[var(--ink-secondary)]'
                         }`}
                       >
                         {assessment.document.math_density}

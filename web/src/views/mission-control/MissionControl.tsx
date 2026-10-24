@@ -666,7 +666,7 @@ export function MissionControl() {
   })
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto md:overflow-hidden px-4 md:px-8 py-4 md:py-6 space-y-4 md:space-y-5">
+    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-4 md:px-8 py-4 md:py-6 space-y-4 md:space-y-5">
       <ConfirmDialog
         open={pendingCancel}
         title={t.mission.cancelTitle}
@@ -678,36 +678,40 @@ export function MissionControl() {
         onCancel={() => setPendingCancel(false)}
       />
       <ConfirmDialog
-        // Deleting a job destroys its ledger and every delivered file. That is
-        // at least as destructive as re-parsing, which already demands a typed
-        // phrase — a one-click delete here was the weakest guard on the most
-        // irreversible action in the console.
-        key={pendingDelete ?? 'none'}
         open={pendingDelete !== null}
         title={t.mission.deleteJob}
-        body={t.mission.deleteConfirm}
+        body={
+          <div className="space-y-2.5">
+            <p>{t.mission.deleteConfirm}</p>
+            {pendingDelete && (
+              <div className="rounded border border-[var(--paper-border)] bg-[var(--paper-subsurface)] p-2 font-mono text-xs text-[var(--ink-primary)] break-all select-all">
+                {pendingDelete}
+              </div>
+            )}
+          </div>
+        }
         confirmLabel={t.common.confirm}
         cancelLabel={t.common.cancel}
         danger
-        typeToConfirm={pendingDelete ?? ''}
-        typeToConfirmLabel={t.mission.deleteTypePrompt}
-        typeToConfirmMismatch={t.mission.reparseTypeMismatch}
         onConfirm={() => void confirmDeleteJob()}
         onCancel={() => setPendingDelete(null)}
       />
       <ConfirmDialog
-        // ``key`` remounts the dialog per job, so the typed phrase cannot
-        // survive into a second confirmation and let one click through.
-        key={pendingReparse ?? 'none'}
         open={pendingReparse !== null}
         title={t.mission.reparseTitle}
-        body={t.mission.reparseConfirm}
+        body={
+          <div className="space-y-2.5">
+            <p>{t.mission.reparseConfirm}</p>
+            {pendingReparse && (
+              <div className="rounded border border-[var(--paper-border)] bg-[var(--paper-subsurface)] p-2 font-mono text-xs text-[var(--ink-primary)] break-all select-all">
+                {pendingReparse}
+              </div>
+            )}
+          </div>
+        }
         confirmLabel={t.mission.reparseAction}
         cancelLabel={t.common.cancel}
         danger
-        typeToConfirm={pendingReparse ?? ''}
-        typeToConfirmLabel={t.mission.reparseTypePrompt}
-        typeToConfirmMismatch={t.mission.reparseTypeMismatch}
         onConfirm={() => void confirmReparse()}
         onCancel={() => setPendingReparse(null)}
       />
@@ -862,7 +866,7 @@ export function MissionControl() {
                             : 'hover:bg-[var(--paper-subsurface)]'
                         }`}
                       >
-                        <td className="py-2 px-3 font-mono text-[var(--ink-primary)] truncate max-w-[9rem]">
+                        <td className="py-2 px-3 font-mono text-[var(--ink-primary)] truncate max-w-[10rem] lg:max-w-[14rem]" title={job.job_id}>
                           {job.job_id}
                         </td>
                         <td className="py-2 px-3 text-[var(--ink-secondary)] truncate max-w-[12rem]">

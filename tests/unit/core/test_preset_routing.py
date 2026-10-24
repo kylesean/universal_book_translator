@@ -5,7 +5,7 @@ The routing model (docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md):
 * the default engine is ``auto`` — the probe picks the engine that can read
   the document, so an unconfigured user gets the best delivery rather than the
   fastest run (pdfium shatters a table/formula-heavy paper into fragments);
-* ``publication`` / ``standard`` select ``auto`` as well;
+* ``high_fidelity`` / ``standard`` select ``auto`` as well;
 * ``preview`` / ``fast`` select ``pdfium``;
 * an explicit ``--pdf-engine`` always beats the preset.
 """
@@ -39,7 +39,7 @@ def test_pdf_engine_is_a_preset_field() -> None:
     assert "pdf_engine" in PRESET_ENGINE_FIELDS
 
 
-@pytest.mark.parametrize("preset", [Preset.PUBLICATION, Preset.STANDARD])
+@pytest.mark.parametrize("preset", [Preset.HIGH_FIDELITY, Preset.STANDARD])
 def test_quality_presets_route_by_probe(preset: Preset) -> None:
     # auto = the probe may pick docling on a layout/scan signal.
     assert _resolve(preset)["pdf_engine"] == "auto"
@@ -53,7 +53,7 @@ def test_fast_presets_pin_the_fast_path(preset: Preset) -> None:
 def test_explicit_engine_beats_the_preset() -> None:
     # An explicit --pdf-engine docling must win over --preset fast.
     assert _resolve(Preset.FAST, pdf_engine="docling")["pdf_engine"] == "docling"
-    assert _resolve(Preset.PUBLICATION, pdf_engine="pdfium")["pdf_engine"] == "pdfium"
+    assert _resolve(Preset.HIGH_FIDELITY, pdf_engine="pdfium")["pdf_engine"] == "pdfium"
 
 
 def test_no_preset_leaves_the_engine_to_the_config_default() -> None:
@@ -75,22 +75,22 @@ def test_every_preset_key_matches_its_enum_member() -> None:
         assert policy.key == preset
 
 
-def test_publication_math_is_the_only_preset_that_transcribes_formulas() -> None:
+def test_vector_math_is_the_only_preset_that_transcribes_formulas() -> None:
     # ``formula_enrichment="auto"`` resolves to False (crop the source region),
-    # so any copy promising "vector formula re-typesetting" for publication or
+    # so any copy promising "vector formula re-typesetting" for high_fidelity or
     # standard describes behaviour no preset delivers. Only ``on`` runs the VLM.
     vector = {p for p, pol in PRESETS.items() if pol.formula_enrichment == "on"}
-    assert vector == {Preset.PUBLICATION_MATH}
+    assert vector == {Preset.VECTOR_MATH}
 
     # And the pair that the old UI copy conflated must stay identical on math.
-    assert PRESETS[Preset.PUBLICATION].formula_enrichment == (
+    assert PRESETS[Preset.HIGH_FIDELITY].formula_enrichment == (
         PRESETS[Preset.STANDARD].formula_enrichment
     )
 
 
 def test_auto_formula_enrichment_resolves_to_the_crop_path() -> None:
     # Pins the engine fact the preset copy depends on. If ``auto`` ever starts
-    # meaning "ask the VLM", the publication/standard copy above goes stale.
+    # meaning "ask the VLM", the high_fidelity/standard copy above goes stale.
     from ubt.adapters.pdf.docling_parser import resolve_formula_enrichment
 
     assert resolve_formula_enrichment("auto", lambda: True) is False
@@ -98,11 +98,11 @@ def test_auto_formula_enrichment_resolves_to_the_crop_path() -> None:
     assert resolve_formula_enrichment("on", lambda: False) is True
 
 
-def test_publication_math_only_changes_the_formula_policy() -> None:
-    # The preset must differ from publication in exactly one knob: otherwise its
-    # label ("publication, but vector math") would under-describe the change.
-    pub = PRESETS[Preset.PUBLICATION].engine_overrides()
-    math = PRESETS[Preset.PUBLICATION_MATH].engine_overrides()
+def test_vector_math_only_changes_the_formula_policy() -> None:
+    # The preset must differ from high_fidelity in exactly one knob: otherwise its
+    # label ("high_fidelity, but vector math") would under-describe the change.
+    pub = PRESETS[Preset.HIGH_FIDELITY].engine_overrides()
+    math = PRESETS[Preset.VECTOR_MATH].engine_overrides()
     differing = {k for k in pub if pub[k] != math[k]}
     assert differing == {"formula_enrichment"}
 

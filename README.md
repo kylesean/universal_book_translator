@@ -139,14 +139,14 @@ The reader-facing choice is `dual_mode` (`mono` / `dual` / `auto`, default
 delivers the target only, and `auto` starts bilingual and lets the advisor step
 it down to target-only when the layout cannot pair cleanly. This is the only
 mode knob; effort and engine details are chosen by a **preset**
-(`publication` / `standard` / `publication_math` / `preview` / `fast`), which
+(`high_fidelity` / `standard` / `vector_math` / `preview` / `fast`), which
 selects the prompt depth, formula handling and parser (a preset does pick
 `pdf_engine`, but never a model).
 
-Formula enrichment is not a quality gradient: only `publication_math` sets it
+Formula enrichment is not a quality gradient: only `vector_math` sets it
 to `on`, which runs the VLM math transcription to vector LaTeX (slow — roughly
 15–60 s per formula on CPU). Every other preset leaves it `auto`, which resolves
-to cropping the source region, so `publication` and `standard` render identical
+to cropping the source region, so `high_fidelity` and `standard` render identical
 math and differ only in prompt depth.
 
 Measured on the reference paper (arXiv 2101.03961): distinct font sizes drop

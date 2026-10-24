@@ -587,13 +587,15 @@ class UBTConfig(BaseSettings):
     # (0 tables, title shattered into 15 pieces) where docling yields 350
     # structured blocks (19 tables, title intact), and the fragment storm then
     # trips the numeric/structural validators into quarantining ~14% of the
-    # book. ``publication``/``standard`` presets also select ``auto``;
+    # book. ``high_fidelity``/``standard`` presets also select ``auto``;
     # ``preview``/``fast`` pin ``pdfium`` (a real opt-in for prose-only input),
     # and ``--pdf-engine`` always wins. A scanned (text-less) PDF is a capability
     # boundary, not a preference: pdfium extracts 0 blocks from one.
     #
-    # ``auto`` therefore requires the ``pdf`` extra; without docling it fails
-    # rather than silently degrading to pdfium. See
+    # ``auto`` therefore *tries* docling first and, when the ``pdf`` extra is
+    # absent, degrades to the geometric pdfium reader with a warning that names
+    # what is lost (``factory._resolve_pdf_adapter``); only an explicit
+    # ``--pdf-engine docling`` is refused. See
     # docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md.
     pdf_engine: PdfEngine = "auto"
 
@@ -671,6 +673,11 @@ class UBTConfig(BaseSettings):
     # -- Quality control ------------------------------------------------------
     qe_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
     max_repair_rounds: int = Field(default=2, ge=0)
+    # Quoting only: ``ubt assess`` extrapolates the repair fan-out from this
+    # fraction (UBT_BOTTOM_PERCENTILE). The repair loop itself does NOT read it —
+    # candidates are selected by ``defect_taxonomy.classify_defect``
+    # (DETERMINISTIC_DEFECT only). Changing it changes the estimate and the
+    # "Bottom N%" line in ``ubt status``, never which blocks get repaired.
     bottom_percentile: float = Field(default=0.15, ge=0.0, le=1.0)
     # Document-level terminology consistency enforcement, run after repair.
     # "off"    = detect + report only (default; no extra LLM spend)

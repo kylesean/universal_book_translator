@@ -4184,7 +4184,7 @@
                 "type": "null"
               }
             ],
-            "description": "Quality preset (publication, standard, publication_math, preview, fast)"
+            "description": "Quality preset (high_fidelity, standard, vector_math, preview, fast)"
           },
           "pages": {
             "anyOf": [
@@ -4664,7 +4664,7 @@
                 "type": "null"
               }
             ],
-            "description": "Quality preset (publication, standard, publication_math, preview, fast)"
+            "description": "Quality preset (high_fidelity, standard, vector_math, preview, fast)"
           },
           "pdf_engine": {
             "anyOf": [
@@ -5242,9 +5242,9 @@
       "Preset": {
         "type": "string",
         "enum": [
-          "publication",
+          "high_fidelity",
           "standard",
-          "publication_math",
+          "vector_math",
           "preview",
           "fast"
         ],

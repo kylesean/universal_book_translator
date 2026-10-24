@@ -64,7 +64,7 @@ def test_pdfium_default_keeps_fast_path_on_layout_signal(tmp_path: Path) -> None
 
 
 def test_auto_routing_sends_two_column_to_docling(tmp_path: Path) -> None:
-    # ``auto`` is the quality-routing mode the publication/standard presets use.
+    # ``auto`` is the quality-routing mode the high_fidelity/standard presets use.
     from ubt.adapters import get_adapter_for_path
     from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
 

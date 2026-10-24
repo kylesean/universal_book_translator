@@ -47,8 +47,8 @@ where each lives. Definitions are from the code, not a general dictionary.
 
 **route (short / long)** — The adaptive execution decision made once per run: short (whole-document rewrite plus reflow, for small born-digital documents) vs long (the staged block pipeline). Forced by `exec_mode`, otherwise probed. `ubt/core/router_mode.py`.
 
-**preset** — A user-facing quality bundle (`publication` / `standard` /
-`publication_math` / `preview` / `fast`) over prompt depth, formula handling,
+**preset** — A user-facing quality bundle (`high_fidelity` / `standard` /
+`vector_math` / `preview` / `fast`) over prompt depth, formula handling,
 parser and exec mode. It never picks a model, never disables a correctness
 gate, and never picks a render route. `ubt/core/presets.py`.
 

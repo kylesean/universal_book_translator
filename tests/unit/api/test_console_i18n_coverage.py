@@ -89,29 +89,28 @@ def test_every_deliverable_key_has_a_label() -> None:
     )
 
 
-def test_the_reparse_confirm_requires_the_job_id_to_be_typed() -> None:
-    """A destructive action must cost more than one click.
+def test_the_reparse_confirm_names_the_job_it_will_destroy() -> None:
+    """A destructive action must show what it targets.
 
-    Re-parsing discards a paid ledger and re-translates the whole book. A plain
-    "are you sure" button is one stray Enter away from that, so the dialog takes
-    a phrase only it names. Both halves are pinned here: the dialog must disable
-    its confirm until the text matches, and the call site must actually pass one.
+    Re-parsing discards a paid ledger and re-translates the whole book. The
+    dialog used to be a bare "are you sure"; it now renders the job id itself in
+    a selectable monospace block. The phrase gate still exists in
+    ``ConfirmDialog`` for callers that want it — the console no longer does,
+    because retyping a 40-character id made cancel and re-parse look the same.
     """
     repo = _REPO_ROOT
     dialog = _source(repo / "web" / "src" / "components" / "ui" / "ConfirmDialog.tsx")
     view = _source(_VIEWS / "mission-control" / "MissionControl.tsx")
 
-    assert "typeToConfirm" in dialog, "ConfirmDialog has no phrase gate"
+    # The capability is still there and still disables the button.
+    assert "typeToConfirm" in dialog, "ConfirmDialog lost its optional phrase gate"
     assert "disabled={!phraseOk}" in dialog, "the confirm button is never disabled"
     assert "typed.trim() === typeToConfirm" in dialog, "the typed text is not compared"
 
     marker = "onClick={() => setPendingReparse(currentJobId)}"
     assert marker in view, "the re-parse entry point disappeared"
-    assert "typeToConfirm={pendingReparse ?? ''}" in view, (
-        "the re-parse dialog does not require the job id"
-    )
-    # Remounted per job, so a phrase typed for one cannot confirm another.
-    assert "key={pendingReparse ?? 'none'}" in view
+    assert "pendingReparse &&" in view, "the dialog does not render the target job id"
+    assert "reparseConfirm" in view
 
 
 def test_the_console_says_re_parsing_is_expensive_and_destructive() -> None:
@@ -172,18 +171,22 @@ def test_uncommitted_review_drafts_survive_leaving_the_page() -> None:
     assert "t.review.unsavedDraft" in view
 
 
-def test_every_destructive_console_action_requires_a_typed_phrase() -> None:
-    """Deleting a job destroys more than re-parsing it, and was guarded more weakly.
+def test_every_destructive_console_action_shows_the_job_it_will_destroy() -> None:
+    """The most irreversible actions must name their target, not just warn.
 
-    Re-parse (discard the ledger, re-translate) demanded the job id typed out;
-    delete (ledger AND every delivered file, permanently) was one click.
+    Both dialogs used to be a one-click confirm whose body was a generic
+    sentence: the operator could not tell which job was about to lose its
+    ledger and every delivered file. The guard is now *showing* the id (in a
+    selectable monospace block) rather than demanding it be retyped — retyping
+    a 40-character job id protects nothing a visible id does not, and it made
+    the safe action (cancel) feel identical to the dangerous one.
     """
     view = _source(_VIEWS / "mission-control" / "MissionControl.tsx")
 
     for action in ("pendingReparse", "pendingDelete"):
-        marker = f"typeToConfirm={{{action} ?? ''}}"
-        assert marker in view, f"{action} does not require the job id"
-        assert f"key={{{action} ?? 'none'}}" in view, f"{action} is not remounted per job"
+        assert action in view, f"{action} is no longer wired"
+    # Both dialogs render the id itself, selectable and unbroken.
+    assert view.count("font-mono text-xs text-[var(--ink-primary)] break-all select-all") >= 2
 
 
 def test_the_gate_never_attests_a_report_it_did_not_load() -> None:

@@ -770,7 +770,7 @@ def test_the_wizard_offers_exactly_the_engine_presets() -> None:
     be unreachable. Both directions are checked.
 
     The wizard used to list four presets and hard-code their labels, while
-    ``ubt/core/presets.py`` owned the real table. Adding ``publication_math``
+    ``ubt/core/presets.py`` owned the real table. Adding ``vector_math``
     to the engine would have left it invisible in the console.
     """
     from ubt.core.presets import Preset
@@ -786,11 +786,11 @@ def test_the_wizard_offers_exactly_the_engine_presets() -> None:
     )
 
 
-def test_the_wizard_does_not_promise_vector_formulas_outside_publication_math() -> None:
+def test_the_wizard_does_not_promise_vector_formulas_outside_vector_math() -> None:
     """Only ``formula_enrichment="on"`` runs the VLM transcription.
 
     ``auto`` resolves to cropping the source region, so copy claiming "vector
-    formula re-render" or "公式矢量重排" for publication/standard described
+    formula re-render" or "公式矢量重排" for high_fidelity/standard described
     behaviour no run produced. This pins the claim to the one preset that
     actually pays for it.
     """
@@ -809,7 +809,7 @@ def test_the_wizard_does_not_promise_vector_formulas_outside_publication_math() 
 
     # The wizard must key the "slow / vector" badge off the preset that has it.
     wizard = _WIZARD_TSX.read_text(encoding="utf-8")
-    assert Preset.PUBLICATION_MATH.value in wizard
+    assert Preset.VECTOR_MATH.value in wizard
 
 
 def test_preset_badges_do_not_claim_a_quality_gate() -> None:

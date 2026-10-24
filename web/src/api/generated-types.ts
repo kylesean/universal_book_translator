@@ -1131,7 +1131,7 @@ export interface components {
              * @default en
              */
             source_lang: string;
-            /** @description Quality preset (publication, standard, publication_math, preview, fast) */
+            /** @description Quality preset (high_fidelity, standard, vector_math, preview, fast) */
             preset?: components["schemas"]["Preset"] | null;
             /**
              * Pages
@@ -1362,7 +1362,7 @@ export interface components {
              * @description Override repair model tier
              */
             repair_model?: string | null;
-            /** @description Quality preset (publication, standard, publication_math, preview, fast) */
+            /** @description Quality preset (high_fidelity, standard, vector_math, preview, fast) */
             preset?: components["schemas"]["Preset"] | null;
             /**
              * Pdf Engine
@@ -1649,7 +1649,7 @@ export interface components {
          * @description User-facing quality tiers.
          * @enum {string}
          */
-        Preset: "publication" | "standard" | "publication_math" | "preview" | "fast";
+        Preset: "high_fidelity" | "standard" | "vector_math" | "preview" | "fast";
         /**
          * PromptStrategy
          * @description Prompt assembly strategy.

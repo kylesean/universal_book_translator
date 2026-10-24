@@ -535,7 +535,7 @@ def test_resume_reconstructs_an_old_ledger_without_a_request_snapshot(
     assert request.profile == "textbook"
     assert request.draft_model == "old-draft"
     assert request.repair_model == "old-repair"
-    assert request.preset == "publication"
+    assert request.preset == "high_fidelity"
     assert request.fresh is False
     assert request.output_path == str((tmp_path / "db" / "outputs" / job_id).resolve())
 

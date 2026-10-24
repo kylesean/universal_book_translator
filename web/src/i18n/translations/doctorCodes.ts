@@ -116,7 +116,7 @@ export const doctorCodesZh: DoctorCodeTables = {
       '没有可用的本地 OCR 引擎（sidecar 离线，rapidocr/onnxruntime 未安装）— 扫描版 PDF 将失败',
     'ocr_engine.off': 'ocr_mode=off',
     'render.ok': 'dual_mode={dual_mode}，pdf=typst-reflow',
-    'typst.ok': 'PDF 出版渲染可用',
+    'typst.ok': 'PDF 高保真重排渲染可用',
     'typst.missing': 'PATH 中未找到 — PDF 渲染会在第 6 阶段失败',
     'typst_math.ok': 'Typst 原生公式微排版可用',
     'typst_math.unavailable': 'Typst 不可用；公式将保留为源图',

@@ -362,6 +362,7 @@ class PdfStructureFacts:
     formula_heavy: bool
     multicolumn_page_share: float
     structural_page_share: float
+    confirmed_font_damage_pages: int = 0
 
 
 def classify_pdf_structure(input_path: Path) -> PdfStructureFacts:
@@ -388,14 +389,24 @@ def classify_pdf_structure(input_path: Path) -> PdfStructureFacts:
     try:
         profiles = profile_pdf(input_path, cache_dir=PROFILE_CACHE_DIR)
         if not profiles:
-            return PdfStructureFacts(False, False, 0.0, 0.0)
+            return PdfStructureFacts(False, False, 0.0, 0.0, 0)
         has_scan, formula_heavy = majority_flags([p.kind for p in profiles])
         multicolumn_share, structural_share = structural_page_shares([p.facts for p in profiles])
+
+        damage_pages = 0
+        try:
+            from ubt.adapters.pdf.extraction_witness import inspect_pdf, summarize
+
+            damage_pages = summarize(inspect_pdf(input_path)).get("confirmed_pages", 0)
+        except Exception as exc:
+            logging.getLogger(__name__).debug("Font witness in structure classify: %s", exc)
+
         return PdfStructureFacts(
             has_scan=has_scan,
             formula_heavy=formula_heavy,
             multicolumn_page_share=multicolumn_share,
             structural_page_share=structural_share,
+            confirmed_font_damage_pages=damage_pages,
         )
     except Exception as exc:
         logging.getLogger(__name__).warning(
@@ -403,7 +414,7 @@ def classify_pdf_structure(input_path: Path) -> PdfStructureFacts:
             input_path,
             exc,
         )
-        return PdfStructureFacts(False, False, 0.0, 0.0)
+        return PdfStructureFacts(False, False, 0.0, 0.0, 0)
 
 
 # ---------------------------------------------------------------------------

@@ -215,3 +215,19 @@ def test_a_bold_target_run_renders_as_strong() -> None:
     text = "成本降低了 50.0% 随后"
     out = render_prose(text, _runs(("50.0%", True, False, False, None)))
     assert "#strong[50.0%]" in out
+
+
+def test_superscript_run_does_not_split_decimal_or_year() -> None:
+    """Superscript citation runs must not split decimals (e.g. 7 in 7.39) or years (20 in 2021)."""
+    # Case 1: "7" inside "7.39" should not be matched; the standalone "7" at the end should match.
+    text = "模型参数达到 7.39 亿，引用自 7。"
+    out = render_prose(text, _runs(("7", False, False, True, None)))
+    assert "7.39" in out
+    assert "[7].39" not in out
+    assert "[7]" in out
+
+    # Case 2: "20" inside "2021" must not be matched as superscript.
+    text_year = "如 Fedus 等（2021）所述"
+    out_year = render_prose(text_year, _runs(("20", False, False, True, None)))
+    assert "（2021）" in out_year
+    assert "[20]" not in out_year

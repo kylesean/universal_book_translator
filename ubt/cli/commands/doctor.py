@@ -1109,7 +1109,7 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
         record(
             "Typst",
             "OK",
-            "PDF publication rendering available",
+            "PDF reflow rendering available",
             code="typst",
             detail_code="typst.ok",
         )

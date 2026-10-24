@@ -49,12 +49,12 @@ export interface TranslationDictionary {
     providerDefault: string
     targetLang: string
     presets: string
-    presetPublication: string
-    presetPublicationDesc: string
+    presetHighFidelity: string
+    presetHighFidelityDesc: string
     presetStandard: string
     presetStandardDesc: string
-    presetPublicationMath: string
-    presetPublicationMathDesc: string
+    presetVectorMath: string
+    presetVectorMathDesc: string
     presetFast: string
     presetFastDesc: string
     presetPreview: string

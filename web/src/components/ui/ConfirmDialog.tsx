@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button'
 interface ConfirmDialogProps {
   open: boolean
   title: string
-  body: string
+  body: React.ReactNode
   confirmLabel: string
   cancelLabel: string
   danger?: boolean
@@ -68,14 +68,14 @@ export function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-4 sm:p-6"
       onClick={onCancel}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-full max-w-sm rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] p-5 shadow-[0_8px_32px_rgba(0,0,0,0.14)]"
+        className="w-full max-w-md sm:max-w-lg rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] p-5 shadow-[0_8px_32px_rgba(0,0,0,0.14)]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-3 flex items-start gap-2.5">
@@ -84,16 +84,42 @@ export function ConfirmDialog({
           />
           <h2 className="text-sm font-semibold text-[var(--ink-primary)]">{title}</h2>
         </div>
-        <p className="mb-5 text-xs leading-relaxed text-[var(--ink-secondary)]">{body}</p>
+        <div className="mb-5 text-xs leading-relaxed text-[var(--ink-secondary)] break-words">
+          {body}
+        </div>
         {needsPhrase && (
-          <div className="mb-4">
+          <div className="mb-4 space-y-2">
             <label
               htmlFor="confirm-phrase"
-              className="mb-1.5 block text-xs text-[var(--ink-secondary)]"
+              className="block text-xs leading-relaxed text-[var(--ink-secondary)]"
             >
-              {(typeToConfirmLabel ?? 'Type {phrase} to confirm').replace(
-                '{phrase}',
-                typeToConfirm ?? ''
+              {typeToConfirmLabel ? (
+                (() => {
+                  const parts = typeToConfirmLabel.split('{phrase}')
+                  if (parts.length === 2) {
+                    return (
+                      <span className="block space-y-1.5">
+                        <span>{parts[0].trim()}</span>
+                        <code className="block break-all rounded border border-[var(--paper-border)] bg-[var(--paper-subsurface)] px-2 py-1 font-mono text-xs font-semibold text-[var(--ink-primary)] select-all">
+                          {typeToConfirm}
+                        </code>
+                        {parts[1].trim() && <span>{parts[1].trim()}</span>}
+                      </span>
+                    )
+                  }
+                  return (
+                    <span className="break-all">
+                      {typeToConfirmLabel.replace('{phrase}', typeToConfirm ?? '')}
+                    </span>
+                  )
+                })()
+              ) : (
+                <span className="block space-y-1.5">
+                  <span>Type to confirm:</span>
+                  <code className="block break-all rounded border border-[var(--paper-border)] bg-[var(--paper-subsurface)] px-2 py-1 font-mono text-xs font-semibold text-[var(--ink-primary)] select-all">
+                    {typeToConfirm}
+                  </code>
+                </span>
               )}
             </label>
             <input
@@ -106,10 +132,10 @@ export function ConfirmDialog({
               }}
               spellCheck={false}
               autoComplete="off"
-              className="w-full rounded border border-[var(--paper-border)] bg-[var(--paper-subsurface)] px-2 py-1.5 font-mono text-xs text-[var(--ink-primary)]"
+              className="w-full rounded border border-[var(--paper-border)] bg-[var(--paper-subsurface)] px-2.5 py-1.5 font-mono text-xs text-[var(--ink-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--ink-primary)]"
             />
             {!phraseOk && typed.length > 0 && (
-              <p className="mt-1 text-xs text-[#b91c1c]">
+              <p className="mt-1 text-xs text-[#b91c1c] break-words">
                 {typeToConfirmMismatch ?? 'That does not match.'}
               </p>
             )}
