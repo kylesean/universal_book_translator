@@ -517,6 +517,7 @@ def render_fragment(
       requires a converter the package does not depend on, so the same
       degradation the PDF renderer uses is the honest delivery.
     """
+    from ubt.render.typst.document_renderer import _list_is_ordered
     from ubt.render.typst.math_transpiler import clean_math_fallback_text
 
     if math_renderer not in ("katex", "unicode"):
@@ -525,7 +526,8 @@ def render_fragment(
     resolve = asset_resolver or _default_asset_resolver
     parts: list[str] = []
     placements: list[Placement] = []
-    list_open = False
+    # "" when no list is open, else the open list's tag ("ul"/"ol").
+    list_open = ""
     toc_open = False
     for block in sorted(blocks, key=lambda b: b.spine_index):
         element = block.element
@@ -543,8 +545,8 @@ def render_fragment(
             # the PDF) and dropped the recovered page number. Lower it as a list
             # item so the reader keeps the contents listing.
             if list_open:
-                parts.append("</ul>")
-                list_open = False
+                parts.append(f"</{list_open}>")
+                list_open = ""
             if not toc_open:
                 parts.append('<ol class="ubt-toc">\n')
                 toc_open = True
@@ -604,14 +606,21 @@ def render_fragment(
                 for chunk, style in styled
             )
         if isinstance(element, ListItem):
-            if not list_open:
-                parts.append("<ul>")
-                list_open = True
+            # The marker decides ordered vs bullet — the same single owner the
+            # Typst renderer asks — instead of flattening every list to <ul>,
+            # which deleted the numbering from the companion HTML/EPUB views
+            # while the same job's PDF kept it.
+            tag = "ol" if _list_is_ordered(block) else "ul"
+            if list_open != tag:
+                if list_open:
+                    parts.append(f"</{list_open}>")
+                parts.append(f"<{tag}>")
+                list_open = tag
             parts.append(f"<li>{body}</li>")
         else:
             if list_open:
-                parts.append("</ul>")
-                list_open = False
+                parts.append(f"</{list_open}>")
+                list_open = ""
             asset_href = resolve(element.asset_id) if isinstance(element, Figure) else None
             rendered_el = _render_element(element, body, asset_href, raw_text=text)
             if (
@@ -644,7 +653,7 @@ def render_fragment(
     if toc_open:
         parts.append("</ol>")
     if list_open:
-        parts.append("</ul>")
+        parts.append(f"</{list_open}>")
     return "\n".join(parts), tuple(placements)
 
 

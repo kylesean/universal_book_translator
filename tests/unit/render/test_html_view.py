@@ -57,6 +57,32 @@ def test_the_html_view_carries_every_placed_text(tmp_path: Path) -> None:
         assert expected and expected in text, block.id
 
 
+def test_ordered_list_items_keep_their_numbering_in_the_companion_view(
+    tmp_path: Path,
+) -> None:
+    """The companion HTML/EPUB views must not flatten a numbered list to bullets:
+    the marker decides ``<ol>`` vs ``<ul>``, the same single owner the Typst
+    renderer asks, so the same job's PDF and companion views agree."""
+    from ubt.model.ast import ListItem
+
+    elements: tuple[ElementT, ...] = (
+        Paragraph(id="p0", spine_index=0, span=Span(page=1), text="Steps:"),
+        ListItem(id="li1", spine_index=1, span=Span(page=1), text="First step.", marker="1."),
+        ListItem(id="li2", spine_index=2, span=Span(page=1), text="Second step.", marker="2."),
+        ListItem(id="li3", spine_index=3, span=Span(page=1), text="A bullet aside.", marker="•"),
+    )
+    blocks = [IRBlock(element=el, target_text=el.text) for el in elements]
+    translations = {block.id: block.target_text or "" for block in blocks}
+    out = tmp_path / "view.html"
+    compose_html(blocks, translations, out)
+    text = out.read_text(encoding="utf-8")
+    assert "<ol>\n<li>First step.</li>" in text
+    assert "<li>Second step.</li>" in text
+    # A bullet item after the run closes the <ol> and opens a <ul>.
+    assert "</ol>\n<ul>" in text
+    assert "<ul>\n<li>A bullet aside.</li>" in text
+
+
 def test_the_epub_view_is_a_valid_ocf_container(tmp_path: Path) -> None:
     blocks, translations = _blocks()
     out = tmp_path / "view.epub"

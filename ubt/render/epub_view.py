@@ -132,9 +132,11 @@ def _opf(
 def _nav(title: str, lang: str, direction: str = "ltr") -> str:
     """The EPUB 3 navigation document.
 
-    A one-entry ``<ol>`` is valid, but useless for a 90-page book: the sidebar
-    showed a single link back to the top. Entries are emitted per heading when
-    heading anchors are available, so the reader can jump between chapters.
+    A single entry pointing at the one body document: the companion view
+    renders the whole book into one ``text.xhtml``, so there are no per-chapter
+    files to link. (A richer TOC would need heading anchors written into the
+    body and one entry per anchor — not implemented; the docstring that
+    claimed it described the plan, not the file.)
     """
     head = _XHTML_HEAD.format(
         lang=lang,

@@ -281,10 +281,16 @@ class DoclingRenderStrategy:
 
         # Non-PDF export: Markdown (.md / .markdown) or flat text (.txt)
         if out_path.suffix.lower() in (".md", ".markdown", ".txt"):
+            # The single owner of "what a block delivers": target_text can carry
+            # quarantine / failed-repair ``<mark>`` wrappers, and the PDF
+            # renderer and companion views unwrap them — without this the
+            # wrappers reach the .md deliverable as literal markup.
+            from ubt.render.delivered_text import delivered_text
+
             md_lines: list[str] = [f"# {manifest.title} ({target_lang})\n\n"]
             for block in blocks:
                 source = block.source_text
-                target = block.target_text or block.draft_text or source
+                target = delivered_text(block)
                 if block.block_type == BlockType.HEADING:
                     md_lines.append(f"## {target}\n\n")
                 elif block.block_type == BlockType.CODE:
