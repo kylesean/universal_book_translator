@@ -136,9 +136,15 @@ export function ReviewWorkbench() {
   const [inspectorOpen, setInspectorOpen] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
+  // Guards `load` against a stale response clobbering a newer filter's result:
+  // the ribbon switches filters quickly, and the slow request for the old
+  // filter can resolve after the new one. Same pattern as the wizard's assess
+  // guard.
+  const loadSeqRef = useRef(0)
 
   const load = useCallback(async () => {
     if (!jobId) return
+    const seq = ++loadSeqRef.current
     setLoading(true)
     setError(null)
     try {
@@ -153,6 +159,7 @@ export function ReviewWorkbench() {
         // endpoint; the review pane just never asked.
         listDeliverables(jobId).catch(() => null),
       ])
+      if (seq !== loadSeqRef.current) return // stale response
       setSegments(segmentData.segments)
       setSegmentTotal(segmentData.total)
       setIssues(issueData)
@@ -160,9 +167,10 @@ export function ReviewWorkbench() {
       setIssueCursor(0)
       if (listing) setReExportPending(listing.stale)
     } catch (err) {
+      if (seq !== loadSeqRef.current) return // stale failure
       setError(err instanceof Error ? err.message : t.review.loadFailed)
     } finally {
-      setLoading(false)
+      if (seq === loadSeqRef.current) setLoading(false)
     }
   }, [jobId, filter, t])
 
@@ -359,7 +367,26 @@ export function ReviewWorkbench() {
     if (page !== null && openPreviews[page]) {
       setPreviewBust(Date.now())
     }
-    void load()
+    // Refresh only the first page and splice it in front of the paged-in tail:
+    // a full `load()` here resets the segment list back to page one, throwing
+    // away every "load more" window the reviewer had paged through. There is
+    // no single-segment endpoint, so a replaced block deep in the tail keeps
+    // its pre-cascade text until the next explicit reload — the notice above
+    // still explains what happened.
+    if (!jobId) return
+    void listSegments(jobId, { status: filter, limit: PAGE_LIMIT, offset: 0 })
+      .then((data) => {
+        const firstPageIds = new Set(data.segments.map((segment) => segment.block_id))
+        setSegments((prev) => [
+          ...data.segments,
+          ...prev.filter((segment) => !firstPageIds.has(segment.block_id)),
+        ])
+        setSegmentTotal(data.total)
+      })
+      .catch(() => {
+        /* the notice above already explains the outcome; a silent refresh
+           failure must not surface as a load error */
+      })
   }
 
   if (!jobId) {
