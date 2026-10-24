@@ -178,6 +178,12 @@ def test_access_noise_filter_filters_polling_requests() -> None:
         is True
     )
 
+    # External probes for /v1/models (e.g. from OpenCode/VSCode) are noise and must be dropped
+    assert (
+        filt.filter(_make_record('127.0.0.1:48286 - "GET /v1/models HTTP/1.1" 404 Not Found'))
+        is False
+    )
+
     # When allow_all=True (debug/verbose mode), everything passes
     filt_verbose = AccessNoiseFilter(allow_all=True)
     assert (

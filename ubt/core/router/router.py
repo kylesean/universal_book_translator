@@ -1623,7 +1623,7 @@ class ModelRouter:
             if cand_profile.supports_reasoning_effort:
                 return None
             src_tokens = _estimate_prompt_tokens(block.source_text)
-            return max(1024, int(src_tokens * 3.0))
+            return max(4096, int(src_tokens * 4.0))
 
         raw_res, actual_model = await self._execute_with_retry(
             system_prompt="",

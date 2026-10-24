@@ -100,7 +100,7 @@ _NOISY_LOGGERS: dict[str, tuple[int, bool]] = {
 }
 
 _POLLING_ACCESS_RE = re.compile(
-    r'"GET\s+/(jobs/[^/\s]+/status|jobs\?limit=\d+|health|favicon\.ico|assets/[^\s]+)\s+HTTP/[0-9.]+"\s+(200|304)'
+    r'"GET\s+/(jobs/[^/\s]+/status|jobs\?limit=\d+|health|favicon\.ico|assets/[^\s]+)\s+HTTP/[0-9.]+"\s+(200|304)|"GET\s+/v1/models\s+HTTP/[0-9.]+"\s+(200|304|404)'
 )
 
 
