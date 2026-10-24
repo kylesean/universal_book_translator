@@ -11,6 +11,61 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Fixed
 
+- **Swapped checksum-less placeholder echoes fail closed instead of restoring
+  crossed spans.** A model that renumbered math/code tokens while dropping the
+  checksum suffix had each bare index restored verbatim wherever its digits
+  claimed to belong, so two swapped spans shipped crossed math with a clean
+  integrity report (verified on this code base: `x²`/`y³` interchanged,
+  `clean == True`). A bare echo that also participates in an order inversion is
+  now ambiguous-by-definition and lands in `mismatched`; a verified (checksummed)
+  reorder stays legitimate and clean.
+- **A losing writer-lock claimant no longer stalls the event loop.** The lock
+  take and the ledger's schema work ran inline in async paths — up to 10 s of
+  `busy_timeout` parking every slot's loop, the missed-heartbeat path that
+  reclaims a still-running job and bills the book twice. Both now run under
+  `asyncio.to_thread`, and a busy-timeout exhaustion surfaces as the typed
+  `LedgerWriterLockConflictError` (free retry) instead of a generic
+  `OperationalError` that burned a worker attempt.
+- **A re-export can no longer spend money nobody bills.** The export stage's
+  visual gate reads the config bound on the ctx, so an operator with
+  `visual_judge_enabled` made paid VLM calls through a path that binds no usage
+  sink — invisible to every budget surface. The module's zero-spend contract is
+  now enforced (judge closed on a config copy, like the rehearsal path); the
+  deterministic T0/T1 checks still run.
+- **A re-export refuses a contradicting output suffix** the way a first run
+  always did, before rendering — a PDF engine forced into `.md` also leaked
+  quarantine `<mark>` wrappers verbatim into the deliverable, because the
+  non-PDF branch read `target_text` raw instead of through `delivered_text`.
+- **Ordered lists keep their numbering in the companion HTML/EPUB views.** The
+  `ListItem` branch emitted `<ul>` unconditionally while the same job's Typst
+  PDF recovered `1.`/`2.` from the marker; the companion views now ask the same
+  `_list_is_ordered` the Typst renderer asks.
+- **A cancel that lands after the export finalized reports completed.** It used
+  to write the queue row CANCELLED against a ledger already finalized
+  `completed` with the artifact on disk — two terminal surfaces in permanent
+  disagreement. The worker now arbitrates with a read-only ledger probe.
+- **`"Appendix C …"` headings reach the label gate.** The regex alternative
+  carried a leading space under a `^` anchor and was unreachable; the survival
+  label is the letter alone, matching the bare-letter form ("附录 C" keeps it).
+- **Everyday words no longer trigger semiconductor detection.** `source`,
+  `gate`, `channel`, `drain` and `poisson` matched ordinary prose at the raw
+  4-hit threshold and injected semiconductor style instructions (plus 40 forced
+  seed terms and a job-id namespace change) into unrelated books.
+- **The repair prompt and the acceptance gate share one table-grid standard.**
+  The prompt counted any line with two pipes as a grid row while the gate
+  requires the row to open with a pipe, so prose with inline pipes was ordered
+  to "preserve the exact NxM grid" the gate never checked.
+- **`db_dir`/`cache_dir` defaults anchor to the discovered config file.** The
+  config search walks parents while the defaults stayed CWD-relative, so a run
+  from a subdirectory read the project's `ubt.toml` but wrote ledgers under
+  `<subdir>/.ubt` — resume from anywhere else found no healthy ledger.
+- **A refused submit leaves no ghost output directory**, the wire User-Agent
+  carries the installed version, and `DELETE /jobs/{id}` also drops the job's
+  SSE replay history.
+- **The review workbench is guarded against stale loads** (a slow response for
+  an old filter no longer clobbers the new one) and a term cascade no longer
+  resets the reviewer's paged-in segments.
+
 - **A completed job can no longer exist without its render digest.** `finalize_job`
   committed `completed` first and the export stage wrote `rendered_text_digest`
   afterwards, so any failure in between left the one state the freshness check has
