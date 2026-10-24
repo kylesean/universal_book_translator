@@ -37,17 +37,18 @@ class DocCategory(StrEnum):
     GENERAL = "general"
 
 
-# Keyword registries for automatic domain detection
+# Keyword registries for automatic domain detection. Single everyday words
+# ("source", "gate", "channel", "drain", "Poisson") are deliberately absent
+# from the semiconductor list: at a raw-count threshold of 4 hits they matched
+# ordinary prose (any book saying "source" four times) and injected
+# semiconductor style instructions into unrelated prompts. A real device
+# text trips the unambiguous terms (finfet/mosfet/doping/bandgap/…) far past
+# the threshold on its own.
 DOMAIN_PATTERNS: dict[str, list[str]] = {
     "semiconductor": [
         r"\bfinfet\b",
         r"\bmosfet\b",
         r"\bsubthreshold\b",
-        r"\bchannel\b",
-        r"\bgate\b",
-        r"\bdrain\b",
-        r"\bsource\b",
-        r"\bpoisson\b",
         r"\bt_?fin\b",
         r"\bt_?ox\b",
         r"\bv_?ch\b",
@@ -58,6 +59,8 @@ DOMAIN_PATTERNS: dict[str, list[str]] = {
         r"\bcapacitance\b",
         r"\bbandgap\b",
         r"\bquasifermi\b",
+        r"\bsource[- ]drain\b",
+        r"\bgate (?:oxide|dielectric|length|leakage|voltage|stack)\b",
     ],
     "biomedicine": [
         r"\bprotein\b",

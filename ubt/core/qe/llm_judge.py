@@ -436,13 +436,10 @@ class TieredQERunner(BaseQERunner):
 
         The judge leg is an uncalibrated LLM opinion, and in the default
         configuration (``pass_sample`` below 1.0) clean-pass candidates score
-        the heuristic's flat 0.92 without ever reaching it. Nothing consumes
-        this any more — best-of-n reranking was deleted rather than left
-        depending on a flag no runner sets — but the answer stays conservative
-        so a future consumer does not inherit a false positive.
-
-        A judge verdict is kept by the quality gate through
-        :attr:`judged_this_run` instead.
+        the heuristic's flat 0.92 without ever reaching it. The quality gate
+        consumes this (``_measured_indices``): an uncalibrated tier reports
+        judge verdicts as non-evidence rather than keeping them by index, so
+        the answer stays conservative by construction.
         """
         return self.heuristic.is_calibrated()
 

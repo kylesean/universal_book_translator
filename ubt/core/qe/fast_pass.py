@@ -403,7 +403,7 @@ def _is_prose_block(block_type: Any) -> bool:
 #: are English sentence-initial abbreviations ("A. Smith", "I. Introduction" is
 #: rare enough to lose), while "B." … "Z." stay appendix letters.
 _HEADING_LABEL_RE = re.compile(
-    r"^(?P<num>\d+(?:\.\d+)+| Appendix [A-Z]|\d+|[B-HJ-Z]\.)(?P<dot>\.?)\s+"
+    r"^(?P<num>\d+(?:\.\d+)+|Appendix [A-Z]|\d+|[B-HJ-Z]\.)(?P<dot>\.?)\s+"
 )
 
 #: A BARE capital letter used as an appendix label ("C Encouraging Exploration
@@ -469,6 +469,11 @@ def _missing_heading_label(source_text: str, target_text: str) -> str | None:
             return None
         m = bare
     label = m.group("num")
+    if label.startswith("Appendix "):
+        # An "Appendix C" label survives translation as its letter ("附录 C"):
+        # the word is translated, so only the letter is the survival label —
+        # matching the bare-letter form above.
+        label = label[-1]
     if "dot" in m.re.groupindex and m.group("dot") and not label.endswith("."):
         label += "."
     # Word-boundary search: a bare "4" must not match inside "4.1" or "14".

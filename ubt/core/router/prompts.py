@@ -572,16 +572,22 @@ def build_macro_chunk_draft_prompt(
 
 
 def _detect_table_grid(text: str) -> tuple[int, int] | None:
-    """Return (num_rows, num_cols) if text contains a markdown table, else None."""
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    table_lines = [ln for ln in lines if ln.count("|") >= 2]
-    if len(table_lines) >= 2:
-        col_counts = [len(ln.strip("|").split("|")) for ln in table_lines]
-        if col_counts:
-            from collections import Counter
+    """Return (num_rows, num_cols) if text contains a markdown table, else None.
 
-            common_cols = Counter(col_counts).most_common(1)[0][0]
-            return len(table_lines), common_cols
+    The acceptance gate's own row standard, not a private one: a repair prompt
+    must assert "preserve the exact NxM grid" exactly when the gate will check
+    for a grid, or the model is ordered to preserve a table the gate then
+    ignores (and prose with inline pipes was exactly that case: any line with
+    two ``|`` counted as a grid row here, while :func:`markdown_grid_shape`
+    requires the row to open with a pipe).
+    """
+    from collections import Counter
+
+    from ubt.core.qe.fast_pass import markdown_grid_shape
+
+    shape = markdown_grid_shape(text)
+    if shape:
+        return len(shape), Counter(shape).most_common(1)[0][0]
     return None
 
 
