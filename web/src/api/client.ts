@@ -390,6 +390,7 @@ export function subscribeJobProgress(
   let es: EventSource | null = null
   let lastEventId = ''
   let attempt = 0
+  let everOpened = false
   let timer: ReturnType<typeof setTimeout> | null = null
 
   const open = () => {
@@ -426,6 +427,7 @@ export function subscribeJobProgress(
 
     source.onopen = () => {
       attempt = 0
+      everOpened = true
       onConnectionChange?.(true)
     }
 
@@ -437,6 +439,18 @@ export function subscribeJobProgress(
       if (onError) onError(err)
       source.close()
       attempt += 1
+      // Give up on a stream that never connected: an EventSource does not
+      // expose the HTTP status, but a job whose stream answers 404 on every
+      // attempt (embedded mode drops terminal jobs from memory — anything a
+      // CLI run completed, or after a restart) never opens at all, while the
+      // status poll keeps the panel working. Retrying forever costs a request
+      // per backoff window per open tab and nothing else. A stream that
+      // connected once (a live job through an outage) keeps retrying as
+      // before.
+      if (!everOpened && attempt >= 6) {
+        done = true
+        return
+      }
       const delay = Math.min(_RECONNECT_MAX_MS, _RECONNECT_BASE_MS * 2 ** (attempt - 1))
       timer = setTimeout(open, delay)
     }
@@ -597,6 +611,13 @@ export interface Segment {
   status: string
   source_text: string
   target_text: string
+  /** The text a human reads and edits: the engine's mark wrappers already
+   * unwrapped server-side (one owner — the engine's own delivered-text rule).
+   * `target_text` stays raw for callers that want the storage truth. */
+  delivered_text: string
+  repair_failed: boolean
+  repair_error: string | null
+  quarantined: boolean
   mtqe_score: number | null
   error_flags: string[]
   issues: string[]

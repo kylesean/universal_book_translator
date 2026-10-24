@@ -33,7 +33,6 @@ import {
   type TermViolation,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
-import { parseFailedDraft } from '@/lib/failedDraft'
 
 type Filter = 'issues' | 'all' | 'needs_human' | string
 
@@ -176,8 +175,12 @@ export function ReviewWorkbench() {
 
   // Append the next window. The backend returns ``total`` with every page, so
   // the "load more" button can state how much is left instead of guessing.
+  // Same staleness guard as `load`: a slow page for the old filter/job that
+  // lands after a switch would splice foreign blocks into the new list (the
+  // block_id dedup cannot see that) and inflate the next offset.
   const loadMore = useCallback(async () => {
     if (!jobId || loadingMore) return
+    const seq = loadSeqRef.current
     setLoadingMore(true)
     setError(null)
     try {
@@ -186,15 +189,17 @@ export function ReviewWorkbench() {
         limit: PAGE_LIMIT,
         offset: segments.length,
       })
+      if (seq !== loadSeqRef.current) return // stale response
       setSegments((prev) => {
         const seen = new Set(prev.map((segment) => segment.block_id))
         return [...prev, ...data.segments.filter((segment) => !seen.has(segment.block_id))]
       })
       setSegmentTotal(data.total)
     } catch (err) {
+      if (seq !== loadSeqRef.current) return // stale failure
       setError(err instanceof Error ? err.message : t.review.loadMoreFailed)
     } finally {
-      setLoadingMore(false)
+      if (seq === loadSeqRef.current) setLoadingMore(false)
     }
   }, [jobId, filter, segments.length, loadingMore, t])
 
@@ -204,12 +209,19 @@ export function ReviewWorkbench() {
 
   // Mirror the drafts to sessionStorage on every change, and re-read them when
   // the job changes: switching from job A to job B inside this view does not
-  // remount it, so without the second line B would open holding A's drafts.
+  // remount it. The two effects run in declaration order on the same commit,
+  // so on a job switch the write must NOT fire with the OLD drafts under the
+  // NEW key — the ref marks which job the in-memory drafts belong to, and the
+  // write skips until the read effect has swapped them in. Without it, the
+  // "protection" persisted A's drafts into B's storage key and read them
+  // straight back.
+  const draftsJobRef = useRef<string | null>(jobId)
   useEffect(() => {
-    writeDrafts(jobId, drafts)
+    if (draftsJobRef.current === jobId) writeDrafts(jobId, drafts)
   }, [jobId, drafts])
 
   useEffect(() => {
+    draftsJobRef.current = jobId
     setDrafts(readDrafts(jobId))
   }, [jobId])
 
@@ -290,7 +302,7 @@ export function ReviewWorkbench() {
   const handleSave = async (segment: Segment) => {
     if (!jobId) return
     const draft = drafts[segment.block_id]
-    if (draft === undefined || draft === segment.target_text) return
+    if (draft === undefined || draft === segment.delivered_text) return
     setSaving((prev) => ({ ...prev, [segment.block_id]: true }))
     try {
       const res = await editSegment(jobId, segment.block_id, draft)
@@ -374,8 +386,10 @@ export function ReviewWorkbench() {
     // its pre-cascade text until the next explicit reload — the notice above
     // still explains what happened.
     if (!jobId) return
+    const seq = loadSeqRef.current
     void listSegments(jobId, { status: filter, limit: PAGE_LIMIT, offset: 0 })
       .then((data) => {
+        if (seq !== loadSeqRef.current) return // stale response
         const firstPageIds = new Set(data.segments.map((segment) => segment.block_id))
         setSegments((prev) => [
           ...data.segments,
@@ -625,11 +639,16 @@ export function ReviewWorkbench() {
             >
               {virtualizer.getVirtualItems().map((virtualRow) => {
                 const seg = segments[virtualRow.index]
-                const draft = drafts[seg.block_id] ?? seg.target_text
-                const dirty = draft !== seg.target_text
-                // The engine wraps a failed repair in <mark>; split the text
-                // from the reason so the pane shows a translation.
-                const failed = parseFailedDraft(seg.target_text)
+                const draft = drafts[seg.block_id] ?? seg.delivered_text
+                const dirty = draft !== seg.delivered_text
+                // The engine's wrapper semantics live server-side (one owner);
+                // the segment arrives with the delivered text, the repair
+                // failure flag and its decoded reason already split apart.
+                const failed = {
+                  text: seg.delivered_text,
+                  reason: seg.repair_error,
+                  failed: seg.repair_failed,
+                }
                 const previewOpen = seg.page !== null && openPreviews[seg.page]
                 return (
                   <div
@@ -727,7 +746,7 @@ export function ReviewWorkbench() {
                                     block they had left unfinished. */}
                                 {!saved[seg.block_id] &&
                                   drafts[seg.block_id] !== undefined &&
-                                  drafts[seg.block_id] !== seg.target_text && (
+                                  drafts[seg.block_id] !== seg.delivered_text && (
                                     <span className="text-[#b45309] font-sans font-medium">
                                       {t.review.unsavedDraft}
                                     </span>
@@ -819,6 +838,11 @@ export function ReviewWorkbench() {
                                   {failed.failed && (
                                     <div className="mt-1.5 rounded border border-[#b45309]/30 bg-[#b45309]/5 px-2 py-1 text-[10px] font-mono text-[#b45309] break-words max-h-24 overflow-y-auto">
                                       {t.review.failedDraftNotice}: {failed.reason}
+                                    </div>
+                                  )}
+                                  {seg.quarantined && (
+                                    <div className="mt-1.5 rounded border border-[var(--paper-border)] bg-[var(--paper-subsurface)] px-2 py-1 text-[10px] font-mono text-[var(--ink-secondary)] break-words">
+                                      {t.review.quarantinedNotice}
                                     </div>
                                   )}
                                 </>
@@ -937,7 +961,7 @@ export function ReviewWorkbench() {
                       <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs overflow-hidden">
                         <div className="h-8 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between text-xs font-mono text-[var(--ink-muted)]">
                           <span className="flex items-center gap-1.5">
-                            <Eye className="h-3.5 w-3.5" /> Page {page}
+                            <Eye className="h-3.5 w-3.5" /> {t.review.pageLabel.replace('{n}', String(page))}
                           </span>
                           <button
                             type="button"
@@ -1230,7 +1254,7 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
     return () => {
       alive = false
     }
-  }, [jobId, segment.block_id, segment.target_text])
+  }, [jobId, segment.block_id, segment.delivered_text])
 
   const getScope = (v: TermViolation): TermScope => {
     const key = `${v.surface}:${v.expected}`

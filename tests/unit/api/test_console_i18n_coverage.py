@@ -221,8 +221,10 @@ def test_pillar_three_reads_the_live_visual_verdict_not_a_deleted_field() -> Non
     assert "fidelity" not in reporter, "the report schema grew fidelity back — recheck the view"
     assert "report?.fidelity" not in view
     assert "visual?.passed" in view and "visual?.skipped_reason" in view
-    # A skipped gate must not read as a pass.
-    assert "visualSkipped\n        ? 'warn'" in view or "visualSkipped ? 'warn'" in view
+    # A skipped gate must not read as a pass — and neither may an absent
+    # report (gate disabled / non-PDF deliverable): no attestation either way.
+    assert "visualMissing || visualSkipped" in view
+    assert "visualMissing\n        ? 0" in view or "visualMissing ? 0" in view
 
 
 def test_an_unconfigured_glossary_is_not_reported_as_clean() -> None:
