@@ -421,10 +421,31 @@ def _recommend_route(
         scanned = arch.is_scanned
         confidence, basis = 0.5, "仅前5页采样启发式"
 
+    # Font encoding damage impact on confidence:
+    wit = pdf.get("witness")
+    total_pages = int(pdf.get("page_count") or (route.pages if route else 1))
+    if wit:
+        confirmed = int(wit.get("confirmed_pages", 0))
+        at_risk = int(wit.get("at_risk_pages", 0))
+        if confirmed > 0:
+            damage_ratio = confirmed / max(total_pages, 1)
+            penalty = min(0.45, round(damage_ratio * 0.5, 2))
+            confidence = max(0.4, round(confidence - penalty, 2))
+            basis += (
+                f"；检出 {confirmed} 页字体编码损伤（文本层含残字符），建议开启视觉增强或人工校对"
+            )
+        elif at_risk > 0:
+            confidence = max(0.6, round(confidence - 0.1, 2))
+            basis += f"；{at_risk} 页内嵌字体缺少 /ToUnicode 映射（存在潜在映射风险）"
+
+    # Math density vs formula layout object divergence:
+    if arch.math_density == MathDensity.HIGH and not pdf.get("has_formulas"):
+        basis += "；文本数学符号密集但快速预检未抽取出独立公式框，按高保真策略保守兜底"
+
     # There is no render-engine recommendation: every PDF renders through the
     # single renderer, so the engine is not a user choice.
     dual_mode = "mono" if academic or math_heavy else "dual"
-    preset = "publication" if (math_heavy or academic) else "standard"
+    preset = "high_fidelity" if (math_heavy or academic) else "standard"
     profile = (
         "paper"
         if arch.category == DocCategory.ACADEMIC_PAPER
@@ -740,18 +761,50 @@ def _build_cost(
     )
 
 
-def _runtime_estimate(total_calls: int, total_tokens: int, config: UBTConfig) -> RuntimeEstimate:
-    """Wall-clock from the rate-limiter knobs only — nothing timing is persisted."""
+def _runtime_estimate(
+    total_calls: int,
+    total_tokens: int,
+    config: UBTConfig,
+    *,
+    pages: int = 0,
+    format_ext: str = "",
+    pdf_engine: str = "docling",
+    preset: str = "standard",
+) -> RuntimeEstimate:
+    """Wall-clock estimate combining LLM call concurrency and local engine overhead."""
     rpm_floor = total_calls / max(config.rate_limit_rpm / 60.0, 1e-9)
     tpm_floor = total_tokens / max(config.rate_limit_tpm / 60.0, 1e-9)
-    low = max(rpm_floor, tpm_floor, total_calls / max(config.max_concurrency, 1) * 3.0)
+    llm_low = max(rpm_floor, tpm_floor, total_calls / max(config.max_concurrency, 1) * 3.0)
+
+    # Local parsing & compilation overhead:
+    local_overhead = 0.0
+    if format_ext == "pdf" and pages > 0:
+        if pdf_engine == "docling":
+            # Docling model load + OCR/DocLayNet per-page inference (~2.5s/page + 5s init)
+            local_overhead += 5.0 + pages * 2.5
+        else:
+            # pdfium fast reader (~0.05s/page + 1s init)
+            local_overhead += 1.0 + pages * 0.05
+
+        # Visual gate & formula image crop overhead in high_fidelity preset
+        if preset in ("high_fidelity", "vector_math"):
+            local_overhead += pages * 0.5
+
+        # PDF compilation baseline (Typst / WeasyPrint)
+        local_overhead += 4.0
+    elif format_ext in ("epub", "docx") and pages > 0:
+        local_overhead += 2.0 + pages * 0.02
+
+    low = llm_low + local_overhead
+    high = max(low + 10.0, low * 2.5)
     return RuntimeEstimate(
         heuristic=True,
         est_seconds_low=round(low, 1),
-        est_seconds_high=round(low * 3, 1),
+        est_seconds_high=round(high, 1),
         basis=(
-            "启发式：由 rate_limit_rpm/tpm 与 max_concurrency 推得（系统无历史耗时持久化）；"
-            "上界按局部延迟波动 ×3。"
+            "启发式：结合文档解析引擎开销（如 PDF/Docling 版面分析与排版编译）"
+            "与 LLM 速率限制（rate_limit_rpm/tpm、max_concurrency）推得；"
+            "上界按局部延迟波动与视觉重试 ×2.5。"
         ),
     )
 
@@ -1065,7 +1118,15 @@ async def assess_document_async(
         + cost.rollup_calls
     )
     total_tokens = cost.prompt_tokens + cost.completion_tokens
-    runtime = _runtime_estimate(total_calls, total_tokens, config)
+    runtime = _runtime_estimate(
+        total_calls,
+        total_tokens,
+        config,
+        pages=effective_pages,
+        format_ext=ext,
+        pdf_engine=pdf.get("primary_engine") or config.pdf_engine,
+        preset=rec.recommended_preset,
+    )
     warnings.extend(_synthesize_warnings(arch, pdf, config, rec, quality_signals))
 
     doc = DocumentFacts(

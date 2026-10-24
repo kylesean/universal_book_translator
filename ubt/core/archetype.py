@@ -237,7 +237,7 @@ def detect_math_density(text: str) -> MathDensity:
     # alone is not enough to call a book math-heavy: a long technical
     # document easily accumulates six incidental subscript-shaped tokens, so
     # the hits>=6 shortcut must still clear a minimum density. Otherwise the
-    # advisor would pre-select the heavy publication preset for a prose book.
+    # advisor would pre-select the heavy high_fidelity preset for a prose book.
     density = (hits / max(len(text), 1)) * 1000
     if density >= 2.0 or (hits >= 6 and density >= 0.5):
         return MathDensity.HIGH

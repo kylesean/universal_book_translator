@@ -80,7 +80,7 @@ def test_witness_warnings_contextual_remedy_on_confirmed_damage() -> None:
     route = RouteRecommendation(
         mode="long",
         reason="test",
-        recommended_preset="publication",
+        recommended_preset="high_fidelity",
         recommended_dual_mode="mono",
         recommended_profile="textbook",
         confidence=0.9,
@@ -281,3 +281,58 @@ def test_both_locales_carry_the_same_two_qualifiers() -> None:
         copy = block.group(1)
         for needle in needles:
             assert needle in copy, f"{name} lost {needle!r}"
+
+
+def test_recommend_route_penalizes_confidence_on_font_damage() -> None:
+    from ubt.core.assess import _recommend_route
+    from ubt.core.router_mode import RouteDecision
+
+    arch = Archetype(
+        format_ext="pdf",
+        page_or_ch_count=26,
+        is_scanned=False,
+        math_density=MathDensity.HIGH,
+        detected_domain="semiconductor",
+        domain_confidence=1.0,
+        category=DocCategory.ACADEMIC_PAPER,
+        sample_chars=10000,
+    )
+    route = RouteDecision(
+        mode="long",
+        pages=26,
+        chars=40000,
+        has_scan=False,
+        formula_heavy=False,
+        reason="test",
+    )
+    config = UBTConfig()
+
+    pdf_damaged = {
+        "page_count": 26,
+        "scan_page_share": 0.0,
+        "has_formulas": False,
+        "witness": {"confirmed_pages": 20, "residue_chars": 275, "at_risk_pages": 5},
+    }
+    rec = _recommend_route(arch, route, pdf_damaged, config)
+
+    # Confidence must NOT be 0.9 when 20/26 pages are damaged
+    assert rec.confidence < 0.7
+    assert "字体编码损伤" in rec.confidence_basis
+    assert "20 页" in rec.confidence_basis
+
+
+def test_runtime_estimate_incorporates_docling_overhead() -> None:
+    from ubt.core.assess import _runtime_estimate
+
+    config = UBTConfig()
+    # 0 calls, 0 tokens: pure local overhead test
+    runtime_fast = _runtime_estimate(
+        0, 0, config, pages=20, format_ext="pdf", pdf_engine="pdfium", preset="standard"
+    )
+    runtime_docling = _runtime_estimate(
+        0, 0, config, pages=20, format_ext="pdf", pdf_engine="docling", preset="high_fidelity"
+    )
+
+    # Docling + high_fidelity local overhead must be substantially higher than lightweight pdfium
+    assert runtime_docling.est_seconds_low > runtime_fast.est_seconds_low
+    assert runtime_docling.est_seconds_low >= 50.0  # 5 + 20*2.5 + 20*0.5 + 4 = 69s

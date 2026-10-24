@@ -45,3 +45,25 @@ def test_a_cjk_pdf_is_not_misrouted_to_the_short_chain() -> None:
     # would have wrongly kept it on the short single-shot chain.
     assert decision.estimated_tokens > 5 * 800
     assert decision.mode == "long"
+
+
+def test_font_encoding_damage_routes_to_staged_long_chain() -> None:
+    """PDF with confirmed font damage must NOT take the short chain."""
+    facts = PdfStructureFacts(
+        has_scan=False,
+        formula_heavy=False,
+        multicolumn_page_share=0.0,
+        structural_page_share=0.0,
+        confirmed_font_damage_pages=4,
+    )
+    with (
+        patch.object(router_mode, "probe_pdf_pages", return_value=(5, 1000)),
+        patch.object(router_mode, "sample_pdf_pages", return_value=(5, False, "hello world")),
+        patch.object(router_mode, "classify_pdf_structure", return_value=facts),
+    ):
+        decision = router_mode.decide(Path("damaged.pdf"), short_max_pages=10)
+
+    assert decision.mode == "long"
+    assert decision.confirmed_font_damage_pages == 4
+    assert "font-encoding damage confirmed" in decision.reason
+    assert "staged long chain" in decision.reason

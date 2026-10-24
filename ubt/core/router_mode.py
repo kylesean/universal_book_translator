@@ -64,6 +64,7 @@ class RouteDecision:
     #: share that drifts when the parser splits paragraphs differently.
     multicolumn_page_share: float = 0.0
     structural_page_share: float = 0.0
+    confirmed_font_damage_pages: int = 0
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -76,6 +77,7 @@ class RouteDecision:
             "estimated_tokens": self.estimated_tokens,
             "multicolumn_page_share": self.multicolumn_page_share,
             "structural_page_share": self.structural_page_share,
+            "confirmed_font_damage_pages": self.confirmed_font_damage_pages,
             "reason": self.reason,
         }
 
@@ -427,6 +429,24 @@ def decide(
             estimated_tokens=est_tokens,
             multicolumn_page_share=structure.multicolumn_page_share,
             structural_page_share=structure.structural_page_share,
+            confirmed_font_damage_pages=structure.confirmed_font_damage_pages,
+        )
+    if structure.confirmed_font_damage_pages > 0:
+        return RouteDecision(
+            mode="long",
+            pages=pages,
+            chars=chars,
+            has_scan=False,
+            formula_heavy=structure.formula_heavy,
+            reason=(
+                f"font-encoding damage confirmed ({structure.confirmed_font_damage_pages}pp), "
+                f"routed to staged long chain for defect triage and visual repair"
+            ),
+            chapters=pdf_chapters,
+            estimated_tokens=est_tokens,
+            multicolumn_page_share=structure.multicolumn_page_share,
+            structural_page_share=structure.structural_page_share,
+            confirmed_font_damage_pages=structure.confirmed_font_damage_pages,
         )
     # A PDF can have few pages but a huge text layer; the token budget must be
     # checked too or a 30-page 300k-char dump takes the short single-shot chain.
@@ -445,6 +465,7 @@ def decide(
             estimated_tokens=est_tokens,
             multicolumn_page_share=structure.multicolumn_page_share,
             structural_page_share=structure.structural_page_share,
+            confirmed_font_damage_pages=structure.confirmed_font_damage_pages,
         )
     return RouteDecision(
         mode="long",
@@ -457,4 +478,5 @@ def decide(
         estimated_tokens=est_tokens,
         multicolumn_page_share=structure.multicolumn_page_share,
         structural_page_share=structure.structural_page_share,
+        confirmed_font_damage_pages=structure.confirmed_font_damage_pages,
     )
