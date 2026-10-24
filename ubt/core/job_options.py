@@ -660,9 +660,14 @@ def own_prior_deliverable(
 
 
 #: The derived reports that hang off a deliverable.
+#:
+#: ``quality_report.md`` used to be listed here. Nothing ever wrote it: the
+#: only producer is ``save_quality_report``, and it writes JSON. It stayed in
+#: the sweep list, so every export deleted a file that could not exist while
+#: the console's report-kind union advertised it. Removed rather than
+#: implemented — a second report format is a feature, not a typo fix.
 SidecarKind = Literal[
     "quality_report.json",
-    "quality_report.md",
     "metrics.json",
     "visual_report.json",
     "contract.json",
@@ -712,7 +717,6 @@ def companion_path(artifact: str | Path, suffix: str) -> Path:
 #: current one's.
 RUN_REPORT_KINDS: tuple[SidecarKind, ...] = (
     "quality_report.json",
-    "quality_report.md",
     "metrics.json",
     "visual_report.json",
     "contract.json",

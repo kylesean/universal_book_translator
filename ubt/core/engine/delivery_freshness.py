@@ -78,15 +78,26 @@ def text_digest(blocks: Sequence[object]) -> str:
     return hasher.hexdigest()
 
 
-def record_rendered_digest(ledger: SQLiteJobLedger, job_id: str) -> str:
+def record_rendered_digest(ledger: SQLiteJobLedger, job_id: str, digest: str | None = None) -> str:
     """Record the current ledger text as rendered. Returns the digest written.
 
     Called by the export stage *after* the artifact is on disk, so a render that
     raises leaves the previous digest in place and the job still reads stale.
+
+    A normal run does **not** come through here: it passes the digest to
+    :meth:`SQLiteJobLedger.finalize_job` so the status flip and the digest share
+    one transaction. This function is the re-export path, which deliberately
+    leaves the job's terminal status alone.
     """
-    digest = text_digest(ledger.get_all_blocks(job_id))
+    if digest is None:
+        digest = text_digest(ledger.get_all_blocks(job_id))
     ledger.set_job_metadata_value(job_id, RENDERED_TEXT_DIGEST_KEY, digest)
     return digest
+
+
+def rendered_digest_for(ledger: SQLiteJobLedger, job_id: str) -> str:
+    """The digest of the text the ledger would render right now."""
+    return text_digest(ledger.get_all_blocks(job_id))
 
 
 def is_delivery_stale(ledger: SQLiteJobLedger, job_id: str) -> bool:

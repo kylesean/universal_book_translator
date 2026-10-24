@@ -16,6 +16,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from ubt.core.engine.delivery_freshness import RENDERED_TEXT_DIGEST_KEY
 from ubt.core.engine.ledger_base import (
     NON_TERMINAL_STATUSES,
     _upsert_blocks_batch,
@@ -718,7 +719,13 @@ class LedgerJobsMixin(_LedgerHost):
         snapshot.update(self.get_job_stats(job_id))
         return snapshot
 
-    def finalize_job(self, job_id: str, status: str = "completed") -> None:
+    def finalize_job(
+        self,
+        job_id: str,
+        status: str = "completed",
+        *,
+        rendered_digest: str | None = None,
+    ) -> None:
         """Mark job metadata as completed or terminated.
 
         Fail-closed on ``completed``: refuses when the job row is missing, when
@@ -726,6 +733,15 @@ class LedgerJobsMixin(_LedgerHost):
         concurrent cancel/lease-loss must not be rewritten to a false success).
         ``failed``/``cancelled`` stay permissive by design — the abort path must
         land a terminal write even mid-flight.
+
+        ``rendered_digest`` is written **in the same transaction** as the status
+        flip. It used to be a separate ``set_job_metadata_value`` call *after*
+        this one, which left a window where the job read ``completed`` with no
+        digest at all. Nothing self-heals that state: ``is_delivery_stale``
+        treats a missing digest as "not stale" (it has to, for jobs that
+        predate the marker), so the download endpoint would hand out a file
+        rendered from text the ledger no longer holds. Both writes now commit
+        together or not at all.
         """
         with self._get_conn() as conn:
             actual_id = self._resolve_actual_job_id(conn, job_id)
@@ -798,6 +814,21 @@ class LedgerJobsMixin(_LedgerHost):
             )
             if cursor.rowcount == 0:
                 raise LedgerError(f"finalize_job: unknown job '{job_id}'")
+            if rendered_digest is not None:
+                # Same transaction as the status flip: json_set keeps the rest
+                # of metadata_json untouched, and a failed digest write rolls
+                # the completion back rather than leaving it undeliverable.
+                conn.execute(
+                    "UPDATE job_meta "
+                    "   SET metadata_json = json_set("
+                    "       COALESCE(NULLIF(metadata_json, ''), '{}'), ?, json(?)) "
+                    " WHERE job_id = ?",
+                    (
+                        "$." + json.dumps(RENDERED_TEXT_DIGEST_KEY),
+                        json.dumps(rendered_digest, ensure_ascii=False),
+                        actual_id,
+                    ),
+                )
             conn.execute("COMMIT;")
 
     def record_visual_report(self, job_id: str, report: dict[str, Any]) -> None:

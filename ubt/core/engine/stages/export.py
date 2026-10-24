@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 from ubt.core.atomic import atomic_write_text
 from ubt.core.cleaners.cjk_spacing import normalize_publishing_cjk
 from ubt.core.config import DualMode
-from ubt.core.engine.delivery_freshness import record_rendered_digest
+from ubt.core.engine.delivery_freshness import record_rendered_digest, rendered_digest_for
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import NON_TERMINAL_STATUSES, SQLiteJobLedger
 from ubt.core.engine.reporter import (
@@ -34,7 +34,6 @@ from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock
 from ubt.core.job_options import RUN_REPORT_KINDS, resolve_target_output, sidecar_path
 from ubt.core.metrics.collect import collect_kpis, save_metrics_report
 from ubt.core.policy.bilingual_advisor import SECONDARY_SUFFIX
-from ubt.core.policy.layout_policy import LENGTH_OVERFLOW_TO_HUMAN, LENGTH_POLICY_PAGE_KINDS
 from ubt.core.ports import (
     DocumentAdapter,
     blocking_gate_tripped,
@@ -51,9 +50,6 @@ if TYPE_CHECKING:
     from ubt.pipeline.artifact import DeliveredArtifact
 from ubt.core.engine.facts import RenderPlan, Terminology
 from ubt.core.engine.services import RunServices
-from ubt.core.qe.defect_taxonomy import (
-    INTENTIONAL_PRESERVED_SKIP_PREFIXES as _INTENTIONAL_PRESERVED_SKIP_PREFIXES,
-)
 from ubt.core.qe.defect_taxonomy import UNTRANSLATED_PREFIX
 from ubt.core.qe.term_metrics import evaluate_terms, summarize_drift
 from ubt.core.router.pricing import cache_hit_rate_from_usage, estimate_cost_usd
@@ -130,10 +126,8 @@ def apply_render_skip_flags(
     previous render of the same job are dropped first: a render-only rerun
     (same ledger, different engine result) can render a block that an older
     artifact skipped, and a kept flag would make the quality report describe an
-    artifact that does not exist. A ledger may carry the ``inplace_skip:``
-    spelling, so both prefixes are dropped. The
-    quality report picks the flags up via ``defect_flags`` with no further
-    wiring.
+    artifact that does not exist. The quality report picks the flags up via
+    ``defect_flags`` with no further wiring.
     """
     by_id = {b.id: b for b in blocks}
     wanted_by_block: dict[str, set[str]] = {}
@@ -144,7 +138,7 @@ def apply_render_skip_flags(
         block.error_flags = [
             flag
             for flag in block.error_flags
-            if not flag.startswith(("inplace_skip:", "render_skip:")) or flag in keep
+            if not flag.startswith("render_skip:") or flag in keep
         ]
     checkpoints: list[dict[str, Any]] = []
     for block_id, reason in skips:
@@ -215,43 +209,6 @@ def apply_render_quality_flags(
         if block_id not in by_id:
             logger.debug("render quality flag for unknown block %s ignored", block_id)
     return changed
-
-
-def apply_length_policy_flags(
-    blocks: list[IRBlock],
-    skipped_ids: set[str],
-) -> int:
-    """Flip overflow skips on length-policy pages to NEEDS_HUMAN.
-
-    Pure helper (unit-testable): only blocks whose provenance ``page_kind``
-    is in ``LENGTH_POLICY_PAGE_KINDS`` move; everything else keeps the
-    flag-only behaviour. Returns the flipped count.
-    """
-    by_id = {b.id: b for b in blocks}
-    flipped = 0
-    for block_id in skipped_ids:
-        fb = by_id.get(block_id)
-        if fb is None or fb.skip_translate:
-            continue
-        if str(fb.provenance.page_kind or "") not in LENGTH_POLICY_PAGE_KINDS:
-            continue
-        reason = next(
-            (
-                f.split(":", 1)[1]
-                for f in fb.error_flags
-                if f.startswith(("inplace_skip:", "render_skip:"))
-            ),
-            "overflow",
-        )
-        if not reason.startswith(("overflow", "spill")):
-            continue
-        flag = f"length_overflow:{reason}"
-        if flag not in fb.error_flags:
-            fb.error_flags.append(flag)
-        if fb.status != BlockStatus.NEEDS_HUMAN:
-            fb.status = BlockStatus.NEEDS_HUMAN
-        flipped += 1
-    return flipped
 
 
 def _terminology_and_structure_pass(
@@ -487,12 +444,7 @@ def _check_completion_ratio(
         for fb in translatable
         if not (fb.target_text or "")
         or fb.status in (BlockStatus.BLOCKED_HUMAN, BlockStatus.FAILED)
-        or any(
-            isinstance(f, str)
-            and f.startswith(("render_skip:", "inplace_skip:"))
-            and not f.startswith(_INTENTIONAL_PRESERVED_SKIP_PREFIXES)
-            for f in fb.error_flags
-        )
+        or any(isinstance(f, str) and f.startswith("render_skip:") for f in fb.error_flags)
     ]
     completed_ratio = 1.0 - len(untranslated) / len(translatable)
     if completed_ratio < min_completion_ratio:
@@ -510,28 +462,28 @@ def _partition_render_skip_counts(
     skip_checkpoints: list[dict[str, Any]],
 ) -> tuple[int, int]:
     """Separate true fail-closed skips (spill, no_zone, math_unrenderable) from intentional preserved elements."""
-    fail_closed = 0
-    preserved = 0
-    for cp in skip_checkpoints:
-        flags = cp.get("error_flags") or []
-        skip_flags = [
-            f
-            for f in flags
-            if isinstance(f, str) and f.startswith(("render_skip:", "inplace_skip:"))
-        ]
-        if skip_flags and all(
-            f.startswith(_INTENTIONAL_PRESERVED_SKIP_PREFIXES) for f in skip_flags
-        ):
-            preserved += 1
-        else:
-            fail_closed += 1
-    return fail_closed, preserved
+    # Every ``render_skip:`` is fail-closed by definition now: the intentional
+    # families (``policy``/``non_prose``/``chrome``/``footer``) never had a
+    # producer and were removed. ``_partition_render_skip_counts`` stays as the
+    # named seam so the call site keeps reading as a partition rather than a
+    # count with a zero bolted on.
+    fail_closed = sum(
+        1
+        for cp in skip_checkpoints
+        if any(
+            isinstance(f, str) and f.startswith("render_skip:")
+            for f in (cp.get("error_flags") or [])
+        )
+    )
+    return fail_closed, 0
 
 
 async def _apply_render_skip_ledger_pass(
     ctx: StageContext,
     adapter: DocumentAdapter,
     final_blocks: list[IRBlock],
+    *,
+    persist: bool = True,
 ) -> None:
     """Land fail-closed render skips (and length-policy flips) on the ledger.
 
@@ -543,37 +495,21 @@ async def _apply_render_skip_ledger_pass(
     blocks from it, and a render-only rerun can render what an older
     artifact skipped — a kept stale flag would make the report describe a
     file that does not exist.
+
+    ``persist=False`` (a re-export) still applies the skip flags **in memory**
+    so this artifact's contract and report describe what was actually drawn,
+    but writes nothing back and leaves the length-policy status flip alone: a
+    re-render must not move a block into or out of NEEDS_HUMAN.
     """
     actual_job_id = ctx.job_id
     ledger = ctx.ledger
     stale_skips = {
-        b.id: [f for f in b.error_flags if f.startswith(("inplace_skip:", "render_skip:"))]
-        for b in final_blocks
+        b.id: [f for f in b.error_flags if f.startswith("render_skip:")] for b in final_blocks
     }
     render_skip_checkpoints = apply_render_skip_flags(final_blocks, get_last_render_skips(adapter))
     # A drawn-but-below-floor fragment is a defect, not a skip: the translation
     # ships, so the block must stay deliverable while the shrink is recorded.
     quality_changed_ids = apply_render_quality_flags(final_blocks, get_last_render_flags(adapter))
-    # Length conservation: overflow skips on length-policy pages
-    # (resume_dense/poster_fixed — fit-to-page, never repaginate) flip to
-    # NEEDS_HUMAN so they reach the PE queue instead of shipping
-    # source-visible with only an error flag. Statuses stay terminal either way.
-    length_human = 0
-    if LENGTH_OVERFLOW_TO_HUMAN and render_skip_checkpoints:
-        skipped_ids = {c["block_id"] for c in render_skip_checkpoints}
-        length_human = apply_length_policy_flags(final_blocks, skipped_ids)
-        by_id = {b.id: b for b in final_blocks}
-        for checkpoint in render_skip_checkpoints:
-            flipped = by_id.get(checkpoint["block_id"])
-            if flipped is not None:
-                checkpoint["status"] = flipped.status
-                checkpoint["error_flags"] = flipped.error_flags
-    if length_human:
-        logger.warning(
-            "Job %s routed %d length-policy overflow block(s) to NEEDS_HUMAN",
-            actual_job_id,
-            length_human,
-        )
 
     # Persist a block whose skip set *changed*, partial removals included: the
     # old filter only wrote when every skip flag was gone, so a block that kept
@@ -586,7 +522,7 @@ async def _apply_render_skip_ledger_pass(
         if any(f not in b.error_flags for f in stale_skips[b.id])
     ]
 
-    if render_skip_checkpoints or cleared_skips or quality_changed_ids:
+    if persist and (render_skip_checkpoints or cleared_skips or quality_changed_ids):
         if render_skip_checkpoints:
             fail_closed_count, preserved_count = _partition_render_skip_counts(
                 render_skip_checkpoints
@@ -607,9 +543,8 @@ async def _apply_render_skip_ledger_pass(
                 )
         by_block_id = {b.id: b for b in final_blocks}
         # One entry per block, constructed directly from authoritative final_blocks:
-        # a block can be in a skip checkpoint (whose status the length-policy pass
-        # may have flipped), cleared_skips, and the quality set. Building directly
-        # from final_blocks ensures no order-dependent overwriting occurs.
+        # a block can be in a skip checkpoint, cleared_skips, and the quality set.
+        # Building directly from final_blocks ensures no order-dependent overwriting.
         affected_block_ids = {
             c["block_id"] for c in (*render_skip_checkpoints, *cleared_skips)
         } | set(quality_changed_ids)
@@ -1420,24 +1355,37 @@ async def run_export_stage(
     )
     _check_completion_ratio(actual_job_id, final_blocks, min_completion_ratio)
 
+    # A re-export's whole contract is "re-typeset what the ledger already holds".
+    # Every pass below can rewrite a block's delivered text or its status:
+    # deterministic glossary substitution, CJK normalization, the HTML structure
+    # checker (FAILED + <mark> wrap), the math guard (target reset to source),
+    # and the length policy (NEEDS_HUMAN). Those belong to the run that *owns*
+    # the blocks. Applying them here made a formatting-only re-render change
+    # what the ledger says, silently rewriting a human edit or quarantining a
+    # block that a later resume would no longer pick up. Skip the lot.
+    owning_run = claims_finality
+
     glossary_enforcer = (
         DeterministicGlossaryEnforcer(
             glossary=glossary_dicts,
             target_lang=target_lang,
             source_lang=source_lang,
         )
-        if deterministic_glossary_enforce
+        if deterministic_glossary_enforce and owning_run
         else None
     )
     glossary_validator = GlossaryConsistencyValidator(glossary=glossary_dicts)
-    modified_checkpoints, enforced_spans = await asyncio.to_thread(
-        _terminology_and_structure_pass,
-        final_blocks,
-        glossary_enforcer=glossary_enforcer,
-        glossary_validator=glossary_validator,
-        html_validator=html_validator,
-        target_lang=target_lang,
-    )
+    modified_checkpoints: list[dict[str, Any]] = []
+    enforced_spans = 0
+    if owning_run:
+        modified_checkpoints, enforced_spans = await asyncio.to_thread(
+            _terminology_and_structure_pass,
+            final_blocks,
+            glossary_enforcer=glossary_enforcer,
+            glossary_validator=glossary_validator,
+            html_validator=html_validator,
+            target_lang=target_lang,
+        )
 
     if modified_checkpoints:
         await asyncio.to_thread(ledger.save_checkpoints_batch, modified_checkpoints)
@@ -1445,7 +1393,17 @@ async def run_export_stage(
     # Gate 3 (math closed loop, CAT translate="no" + QA): formula targets must
     # be source LaTeX verbatim; FAILED math-debris blocks render source instead
     # of hallucinated drafts. Counted + flagged, statuses untouched.
-    math_checkpoints, math_counts = await asyncio.to_thread(apply_math_guards, final_blocks)
+    if owning_run:
+        math_checkpoints, math_counts = await asyncio.to_thread(apply_math_guards, final_blocks)
+    else:
+        math_checkpoints, math_counts = (
+            [],
+            {
+                "formula_invariant_repairs": 0,
+                "math_debris_fallbacks": 0,
+                "c_text_accepted": 0,
+            },
+        )
     if math_checkpoints:
         await asyncio.to_thread(ledger.save_checkpoints_batch, math_checkpoints)
     if (
@@ -1517,8 +1475,9 @@ async def run_export_stage(
     )
 
     # Render skip pass-through + length conservation, before the report is
-    # built (see _apply_render_skip_ledger_pass).
-    await _apply_render_skip_ledger_pass(ctx, adapter, final_blocks)
+    # built (see _apply_render_skip_ledger_pass). A re-export applies them in
+    # memory only.
+    await _apply_render_skip_ledger_pass(ctx, adapter, final_blocks, persist=owning_run)
     _check_completion_ratio(actual_job_id, final_blocks, min_completion_ratio)
 
     # Clean up any stale quality/metrics reports from prior runs so that
@@ -1610,16 +1569,30 @@ async def run_export_stage(
         rehearsal=ctx.is_mock_run,
     )
 
-    if claims_finality:
-        await asyncio.to_thread(ledger.finalize_job, actual_job_id, status="completed")
-
     # Mark the delivered files as current. Recorded here — after the primary
     # artifact, every companion, the visual gate's possible rewrite and the
     # table appendix are all on disk — so a render that raised above leaves the
     # previous digest in place and the job still reads stale. The download
     # endpoint refuses a stale delivery, and a human edit is precisely what
     # makes one stale.
-    await asyncio.to_thread(record_rendered_digest, ledger, actual_job_id)
+    #
+    # The digest is computed *before* the terminal write and handed to
+    # ``finalize_job`` so both land in one transaction: the previous order
+    # (finalize, then digest) left a window where the job read ``completed``
+    # with no digest, and a missing digest is the one state the freshness check
+    # has to treat as "not stale".
+    deliverable_digest = await asyncio.to_thread(rendered_digest_for, ledger, actual_job_id)
+    if claims_finality:
+        await asyncio.to_thread(
+            ledger.finalize_job,
+            actual_job_id,
+            status="completed",
+            rendered_digest=deliverable_digest,
+        )
+    else:
+        # A re-export does not own the job's terminal status, but this artifact
+        # is now the current one, so the freshness marker must move with it.
+        await asyncio.to_thread(record_rendered_digest, ledger, actual_job_id, deliverable_digest)
 
     dual_suffix = f" | Complementary artifact: {secondary_path}" if secondary_path else ""
     # What the artifact actually is: the renderer's outcome when it rendered,

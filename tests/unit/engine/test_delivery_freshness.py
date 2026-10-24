@@ -157,3 +157,66 @@ def test_the_digest_survives_a_process_restart(tmp_path: Path) -> None:
     # A brand-new ledger object, as a restarted server or another surface sees it.
     reopened = SQLiteJobLedger(tmp_path / f"{_JOB}.sqlite")
     assert is_delivery_stale(reopened, _JOB) is True
+
+
+def test_finalize_and_digest_land_in_one_transaction(tmp_path: Path) -> None:
+    """A completed job must never exist without its digest.
+
+    ``finalize_job`` used to commit ``completed`` and only then did the export
+    stage write the digest. Any failure in between left the one state the
+    freshness check has to read as "not stale" (a missing marker), so the
+    download endpoint served a file rendered from text the ledger no longer
+    held — and nothing self-heals it, because ``completed`` is never rewritten
+    by the failure path. Both writes now commit together.
+    """
+    from ubt.core.engine.delivery_freshness import rendered_digest_for
+
+    ledger = _ledger(tmp_path, [_block(1, "译文")])
+    digest = rendered_digest_for(ledger, _JOB)
+
+    ledger.finalize_job(_JOB, status="completed", rendered_digest=digest)
+
+    snapshot = ledger.get_job_snapshot(_JOB)
+    assert snapshot is not None
+    assert snapshot["status"] == "completed"
+    assert ledger.get_job_metadata_value(_JOB, RENDERED_TEXT_DIGEST_KEY) == digest
+    assert is_delivery_stale(ledger, _JOB) is False
+
+
+def test_a_rejected_finalize_writes_no_digest(tmp_path: Path) -> None:
+    """The digest rides the terminal write: a refused completion leaves neither.
+
+    A refusal happens when non-terminal blocks remain. Writing the digest
+    anyway would make the ledger claim "this text was rendered" for a run that
+    never produced an artifact.
+    """
+    from ubt.core.engine.delivery_freshness import rendered_digest_for
+    from ubt.core.exceptions import LedgerError
+
+    ledger = _ledger(tmp_path, [_block(1, "译文", status=BlockStatus.PENDING)])
+    digest = rendered_digest_for(ledger, _JOB)
+
+    with pytest.raises(LedgerError):
+        ledger.finalize_job(_JOB, status="completed", rendered_digest=digest)
+
+    assert ledger.get_job_metadata_value(_JOB, RENDERED_TEXT_DIGEST_KEY) is None
+
+
+def test_a_refused_digest_write_rolls_the_completion_back(tmp_path: Path) -> None:
+    """One transaction means all-or-nothing, in both directions."""
+    ledger = _ledger(tmp_path, [_block(1, "译文")])
+    # Corrupt metadata_json underneath the transaction: json_set would fail.
+    with ledger._get_conn() as conn:
+        conn.execute("UPDATE job_meta SET metadata_json = ? WHERE job_id = ?", ("not json", _JOB))
+        conn.commit()
+
+    # sqlite3 raises OperationalError ("malformed JSON") from json_set, and the
+    # ledger wraps it as LedgerError while rolling the open transaction back.
+    from ubt.core.exceptions import LedgerError
+
+    with pytest.raises(LedgerError, match="malformed JSON"):
+        ledger.finalize_job(_JOB, status="completed", rendered_digest="deadbeef")
+
+    snapshot = ledger.get_job_snapshot(_JOB)
+    assert snapshot is not None
+    assert snapshot["status"] != "completed"

@@ -127,3 +127,44 @@ async def test_a_re_export_writes_the_original_output_path_by_default(tmp_path: 
 
 def _flat(text: str) -> str:
     return " ".join(text.split())
+
+
+async def test_a_re_export_never_rewrites_a_block(tmp_path: Path) -> None:
+    """Re-export re-typesets; it does not own any block's delivered text or status.
+
+    The docstring said so all along, but the stage ran the deterministic glossary
+    substitution, the HTML structure checker (which can wrap a target in
+    ``<mark>`` and set FAILED), the math guard (which resets a drifted formula to
+    its source) and the length policy (which can move a block to NEEDS_HUMAN).
+    A formatting-only re-render therefore silently rewrote the ledger — undoing a
+    human edit was the worst case, but any of these could quarantine a block that
+    a later resume would no longer pick up.
+    """
+    output, job_id, block_id, orchestrator = await _run_then_edit(tmp_path)
+    config = _config(tmp_path)
+    db_path = config.db_dir / f"{job_id}.sqlite"
+
+    with SQLiteJobLedger(db_path, read_only=True) as ledger:
+        before = {
+            b.id: (b.target_text, b.status, tuple(b.error_flags))
+            for b in ledger.get_all_blocks(job_id)
+        }
+
+    await re_export_job(
+        db_path=db_path,
+        job_id=job_id,
+        config=config,
+        router=orchestrator.router,
+        qe_runner=orchestrator.qe_runner,
+    )
+
+    with SQLiteJobLedger(db_path, read_only=True) as ledger:
+        after = {
+            b.id: (b.target_text, b.status, tuple(b.error_flags))
+            for b in ledger.get_all_blocks(job_id)
+        }
+
+    changed = {bid for bid in before if before[bid] != after.get(bid)}
+    assert not changed, f"re-export rewrote block(s) {sorted(changed)}"
+    # And the artifact still reflects the human edit.
+    assert _EDITED in _flat("\n".join(oxide_render.extract_page_texts(output)))
