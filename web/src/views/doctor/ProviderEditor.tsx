@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Loader2, X } from 'lucide-react'
 import { getProvider, saveProvider, type ProviderDetail } from '@/api/client'
 import { Button } from '@/components/ui/Button'
@@ -93,6 +93,9 @@ export function ProviderEditor({
   // reads that state, and reading it before the declaration throws a temporal
   // dead-zone ReferenceError that the error boundary surfaces as a blank screen.
   const isCreate = initialName === null && detail === null
+  // Edit mode before the first load lands: the fields stay readable (they are
+  // empty) but must not accept typing the landing seed would silently revert.
+  const loadingDetail = !isCreate && detail === null
   const [credential, setCredential] = useState('')
   const [text, setText] = useState<Partial<Record<TextField, string>>>({})
   const [flags, setFlags] = useState<Partial<Record<FlagField, boolean | undefined>>>({})
@@ -102,15 +105,24 @@ export function ProviderEditor({
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
 
+  // The name whose block the current form state was seeded from. Seeding once
+  // per name: after a successful create the stored block is already the
+  // baseline (``setDetail(stored)`` in the save handler), and refetching on
+  // the ``isCreate`` flip would overwrite whatever was typed during the round
+  // trip; a name change is the only thing that legitimately reloads.
+  const loadedNameRef = useRef<string | null>(null)
+
   useEffect(() => {
     // A new block starts from the state's initial values (empty), so there is
     // nothing to load and nothing to set — returning here rather than calling
     // setState keeps the effect free of a synchronous state write.
     if (isCreate) return
+    if (loadedNameRef.current === name && detail !== null) return
     let cancelled = false
     void getProvider(name)
       .then((loaded) => {
         if (cancelled) return
+        loadedNameRef.current = name
         setDetail(loaded)
         setText({
           base_url: loaded.base_url ?? '',
@@ -134,7 +146,9 @@ export function ProviderEditor({
     return () => {
       cancelled = true
     }
-  }, [name, isCreate])
+  // ``detail`` re-runs the effect after the seed lands; the guard above
+  // turns that into a no-op.
+  }, [name, isCreate, detail])
 
   const nameIsValid = /^[A-Za-z0-9_-]{1,64}$/.test(name)
 
@@ -301,6 +315,7 @@ export function ProviderEditor({
               value={credential}
               placeholder={detail?.has_credential ? '********' : t.doctor.credentialPlaceholder}
               autoComplete="off"
+              disabled={loadingDetail}
               onChange={(event) => setCredential(event.target.value)}
               className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value font-mono"
             />
@@ -325,6 +340,7 @@ export function ProviderEditor({
               type="text"
               value={text[field] ?? ''}
               placeholder={placeholder}
+              disabled={loadingDetail}
               onChange={(event) =>
                 setText((prev) => ({ ...prev, [field]: event.target.value }))
               }
@@ -338,6 +354,7 @@ export function ProviderEditor({
             <span className="type-label text-[var(--ink-secondary)]">{t.doctor.apiMode}</span>
             <select
               value={apiMode}
+              disabled={loadingDetail}
               onChange={(event) => setApiMode(event.target.value)}
               className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value font-mono"
             >

@@ -695,6 +695,9 @@ export function MissionControl() {
         danger
         onConfirm={() => void confirmDeleteJob()}
         onCancel={() => setPendingDelete(null)}
+        typeToConfirm={pendingDelete ?? undefined}
+        typeToConfirmLabel={t.mission.deleteTypePrompt.replace('{phrase}', pendingDelete ?? '')}
+        typeToConfirmMismatch={t.mission.deleteTypeMismatch}
       />
       <ConfirmDialog
         open={pendingReparse !== null}
@@ -714,6 +717,12 @@ export function MissionControl() {
         danger
         onConfirm={() => void confirmReparse()}
         onCancel={() => setPendingReparse(null)}
+        // Reparse discards the ledger and re-bills a first run: the typed
+        // phrase is the job id itself, so the click cannot happen without
+        // reading what is about to be destroyed.
+        typeToConfirm={pendingReparse ?? undefined}
+        typeToConfirmLabel={t.mission.reparseTypePrompt.replace('{phrase}', pendingReparse ?? '')}
+        typeToConfirmMismatch={t.mission.reparseTypeMismatch}
       />
       {/* Header bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 border-b border-[var(--paper-border)] pb-4">
@@ -735,7 +744,7 @@ export function MissionControl() {
             )}
           </div>
           <div className="text-xs text-[var(--ink-secondary)] font-mono mt-0.5 truncate">
-            JOB:{' '}
+            {t.mission.jobIdLabel}{' '}
             <span className="text-[var(--ink-primary)] font-semibold">
               {currentJobId ?? t.mission.noActiveJobTitle}
             </span>

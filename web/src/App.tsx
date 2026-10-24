@@ -1,4 +1,3 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { I18nProvider } from '@/i18n/I18nContext'
@@ -36,15 +35,6 @@ const ReviewWorkbench = lazy(() =>
   import('@/views/review/ReviewWorkbench').then((m) => ({ default: m.ReviewWorkbench }))
 )
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      refetchOnWindowFocus: false,
-      retry: 1,
-    },
-  },
-})
-
 /**
  * Route-scoped error boundary.
  *
@@ -79,39 +69,37 @@ function RouteFallback() {
 
 export function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-        <ToastProvider>
-          <BrowserRouter>
-            <AuthGate>
-              <ConsoleLayout>
-                {/* One boundary per route: a render error in one screen is
-                    contained there instead of unmounting the whole console
-                    (which would also blank a still-running job's dashboard). */}
-                <RouteBoundary>
-                  {/* Suspense sits inside the boundary so a failed chunk load
-                      surfaces through the error boundary rather than leaving a
-                      permanent spinner. */}
-                  <Suspense fallback={<RouteFallback />}>
-                    <Routes>
-                      <Route path="/" element={<Navigate to="/wizard" replace />} />
-                      <Route path="/wizard" element={<NewJobWizard />} />
-                      <Route path="/jobs" element={<MissionControl />} />
-                      <Route path="/jobs/:jobId" element={<MissionControl />} />
-                      <Route path="/jobs/:jobId/quality" element={<QualityGateView />} />
-                      <Route path="/jobs/:jobId/review" element={<ReviewWorkbench />} />
-                      <Route path="/assets" element={<LanguageAssetsView />} />
-                      <Route path="/system" element={<SystemDoctorView />} />
-                      <Route path="*" element={<Navigate to="/wizard" replace />} />
-                    </Routes>
-                  </Suspense>
-                </RouteBoundary>
-              </ConsoleLayout>
-            </AuthGate>
-          </BrowserRouter>
-        </ToastProvider>
-      </I18nProvider>
-    </QueryClientProvider>
+    <I18nProvider>
+      <ToastProvider>
+        <BrowserRouter>
+          <AuthGate>
+            <ConsoleLayout>
+              {/* One boundary per route: a render error in one screen is
+                  contained there instead of unmounting the whole console
+                  (which would also blank a still-running job's dashboard). */}
+              <RouteBoundary>
+                {/* Suspense sits inside the boundary so a failed chunk load
+                    surfaces through the error boundary rather than leaving a
+                    permanent spinner. */}
+                <Suspense fallback={<RouteFallback />}>
+                  <Routes>
+                    <Route path="/" element={<Navigate to="/wizard" replace />} />
+                    <Route path="/wizard" element={<NewJobWizard />} />
+                    <Route path="/jobs" element={<MissionControl />} />
+                    <Route path="/jobs/:jobId" element={<MissionControl />} />
+                    <Route path="/jobs/:jobId/quality" element={<QualityGateView />} />
+                    <Route path="/jobs/:jobId/review" element={<ReviewWorkbench />} />
+                    <Route path="/assets" element={<LanguageAssetsView />} />
+                    <Route path="/system" element={<SystemDoctorView />} />
+                    <Route path="*" element={<Navigate to="/wizard" replace />} />
+                  </Routes>
+                </Suspense>
+              </RouteBoundary>
+            </ConsoleLayout>
+          </AuthGate>
+        </BrowserRouter>
+      </ToastProvider>
+    </I18nProvider>
   )
 }
 

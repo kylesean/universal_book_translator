@@ -83,6 +83,9 @@ export const en: TranslationDictionary = {
     budgetPlaceholder: 'e.g. 25.00',
     budgetHelp: 'The run stops once cost passes this amount; translated blocks stay in the ledger, so raising the cap and rerunning the same job resumes.',
     budgetInvalid: 'Enter an amount greater than 0.',
+    fieldMinOne: 'Must be a number of at least 1.',
+    reassessing: 'UPDATING...',
+    assessStale: 'Quote may be outdated — auto re-assessment failed; it retries on the next change',
     budgetExceedsQuote: 'Cap is below the estimated quote — the run may be refused before its first request',
     preflightTitle: 'Pre-flight Assessment Radar',
     preflightSubtitle: 'Zero-token structural analysis by engine assess module.',
@@ -332,6 +335,8 @@ export const en: TranslationDictionary = {
     deleteJob: 'Delete job history',
     deleteConfirm: "Delete this job's history and deliverables? This cannot be undone.",
     deleteTypePrompt: 'Type {phrase} to confirm deletion',
+    deleteTypeMismatch: 'That does not match the job id.',
+    jobIdLabel: 'JOB:',
     collapseLogs: 'Collapse logs',
     expandLogs: 'Expand logs',
     jobStatuses: {
@@ -385,8 +390,10 @@ export const en: TranslationDictionary = {
       'This run used the offline echo provider (--dry-run). The artifact repeats the source and every check below passes by construction, so treat the verdict as a pipeline check, not a quality verdict.',
     decisionReady: 'READY',
     decisionBlocked: 'GATE BLOCKED',
+    decisionWarning: 'DELIVERABLE — HUMAN REVIEW PENDING',
     allPassedDesc: 'All formal checks passed. Formula dropout is 0%, terminology drift within tolerances.',
     blockedDesc: 'Gate blocked: manual post-editing review required before exporting deliverables.',
+    warningDesc: 'Deliverable, with blocks routed to human review — check the review workbench.',
     // The number shown is ``summary.pass_rate`` = completed / total blocks.
     // Calling it a "fidelity score" claimed a pixel/layout measurement the
     // value never made.
@@ -414,6 +421,8 @@ export const en: TranslationDictionary = {
     deliveryStaleNote: 'These files predate your latest edits. Downloading re-renders them first.',
     noVerdictTitle: 'No verdict yet',
     visualGateSkipped: 'Pixel gate skipped',
+    visualNoReport: 'No visual report',
+    visualNoReportDesc: 'No visual report exists for this job: the visual gate was disabled or the deliverable is not a PDF. That is not a passing gate — only a gate that never ran.',
     visualTierNames: {
       geometry: 'geometry overlap',
       type: 'type size',
@@ -483,6 +492,10 @@ export const en: TranslationDictionary = {
     metricFormulaBlocks: 'formula blocks',
   },
   assets: {
+    colSource: 'Source',
+    colTarget: 'Target',
+    colProvenance: 'Provenance',
+    colAction: 'Action',
     title: 'Language Assets Center',
     subtitle: 'Manage canonical domain glossaries, durable translation memories, and ground-truth project bibles.',
     tabGlossary: 'Glossary Terms',
@@ -494,6 +507,8 @@ export const en: TranslationDictionary = {
     activeTerms: 'active terms',
     tmTitle: 'Translation Memory Ledger',
     tmDesc: 'Durable SQLite TM automatically caches high-confidence translation units for fuzzy reuse.',
+    tmLoadMore: 'Load {n} more entries',
+    tmLoadingMore: 'Loading…',
     conflictsTitle: 'Glossary conflicts',
     conflictTargets: 'Conflicting targets',
     noConflicts: 'No glossary conflicts detected.',
@@ -658,6 +673,7 @@ export const en: TranslationDictionary = {
     targetSegment: 'Target Translation (Editable)',
     saveFeedback: 'Save & Commit to TM',
     failedDraftNotice: 'Repair failed; the previous translation was kept',
+    quarantinedNotice: 'Quarantined for human review — the text shown is the kept draft/source, not a machine delivery',
     sourceCanvas: 'Original Manuscript Canvas (PDFium)',
     targetCanvas: 'Typst Re-typeset Canvas (0.12)',
     sourceCanvasAlt: 'Source page {n} of the manuscript',
@@ -752,5 +768,9 @@ export const en: TranslationDictionary = {
     saveFailed: 'Failed to save the revision',
     propagateFailed: 'Failed to apply the glossary term',
     saveConflict: 'The job is locked by another process (a running resume or another reviewer). Your edit is kept; retry once it clears.',
+  },
+  errorBoundary: {
+    title: 'This screen failed to render',
+    retry: 'Retry',
   },
 }

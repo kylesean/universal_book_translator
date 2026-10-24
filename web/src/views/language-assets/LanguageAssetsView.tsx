@@ -100,6 +100,30 @@ export function LanguageAssetsView() {
     }
   }, [])
 
+  // The TM grows with every human revision; the endpoint serves at most 1000
+  // rows per call, so the window past the first page loads on demand. Without
+  // this the panel's client-side search only ever saw the first 200 rows, and
+  // older pairs were invisible (and unmanageable) forever.
+  const loadMoreTm = useCallback(async () => {
+    if (tmLoading || tmEntries.length >= tmTotal) return
+    setTmLoading(true)
+    try {
+      const data = await listTm({ limit: 200, offset: tmEntries.length })
+      setTmEntries((prev) => {
+        const seen = new Set(prev.map((entry) => `${entry.source_text}::${entry.target_text}`))
+        return [
+          ...prev,
+          ...data.entries.filter((entry) => !seen.has(`${entry.source_text}::${entry.target_text}`)),
+        ]
+      })
+      setTmTotal(data.total)
+    } catch {
+      /* keep the loaded window usable; the next click retries */
+    } finally {
+      setTmLoading(false)
+    }
+  }, [tmLoading, tmEntries.length, tmTotal])
+
   useEffect(() => {
     // Tab-switch load; both loaders' setStates run after their awaited fetches.
     // oxlint-disable-next-line react/set-state-in-effect
@@ -329,13 +353,13 @@ export function LanguageAssetsView() {
               <thead className="bg-[var(--paper-subsurface)] text-[var(--ink-muted)] font-mono border-b border-[var(--paper-border)]">
                 <tr>
                   <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider">
-                    SOURCE
+                    {t.assets.colSource}
                   </th>
                   <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider">
-                    TARGET
+                    {t.assets.colTarget}
                   </th>
                   <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider text-right">
-                    ACTION
+                    {t.assets.colAction}
                   </th>
                 </tr>
               </thead>
@@ -504,16 +528,16 @@ export function LanguageAssetsView() {
               <thead className="bg-[var(--paper-subsurface)] text-[var(--ink-muted)] font-mono border-b border-[var(--paper-border)]">
                 <tr>
                   <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider">
-                    SOURCE
+                    {t.assets.colSource}
                   </th>
                   <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider">
-                    TARGET
+                    {t.assets.colTarget}
                   </th>
                   <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider">
-                    PROVENANCE
+                    {t.assets.colProvenance}
                   </th>
                   <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider text-right">
-                    ACTION
+                    {t.assets.colAction}
                   </th>
                 </tr>
               </thead>
@@ -558,6 +582,19 @@ export function LanguageAssetsView() {
                 )}
               </tbody>
             </table>
+            {tmEntries.length < tmTotal && (
+              <div className="py-2.5 text-center border-t border-[var(--paper-border)]">
+                <button
+                  onClick={() => void loadMoreTm()}
+                  disabled={tmLoading}
+                  className="type-help text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] disabled:opacity-50 transition-colors"
+                >
+                  {tmLoading
+                    ? t.assets.tmLoadingMore
+                    : t.assets.tmLoadMore.replace('{n}', String(tmTotal - tmEntries.length))}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

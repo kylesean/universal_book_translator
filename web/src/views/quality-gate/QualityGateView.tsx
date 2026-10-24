@@ -157,6 +157,11 @@ export function QualityGateView() {
   const [downloadBusy, setDownloadBusy] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [visual, setVisual] = useState<Record<string, any> | null>(null)
+  // Whether the visual report itself is absent (gate disabled, or the
+  // deliverable is not a PDF — the endpoint then answers 404/400). Distinct
+  // from a loaded report: an absent report is no attestation either way, and
+  // must not read as a clean gate.
+  const [visualMissing, setVisualMissing] = useState(false)
   const [expanded, setExpanded] = useState<number | null>(null)
 
   useEffect(() => {
@@ -187,10 +192,16 @@ export function QualityGateView() {
 
     getVisualReport(jobId)
       .then((rep) => {
-        if (isMounted) setVisual(rep)
+        if (isMounted) {
+          setVisual(rep)
+          setVisualMissing(false)
+        }
       })
       .catch(() => {
-        if (isMounted) setVisual(null)
+        if (isMounted) {
+          setVisual(null)
+          setVisualMissing(true)
+        }
       })
 
     return () => {
@@ -373,22 +384,40 @@ export function QualityGateView() {
       // A short, translated summary. The full tier breakdown and the reason live
       // in the expanded detail — the row header must stay one line so the badge
       // beside it is not squeezed.
-      metric: visualSkipped
-        ? skipCodes.length > 0
-          ? `${t.quality.visualGateSkipped} · ${skipCodes.map(skipLabel).join('、')}`
-          : t.quality.visualGateSkipped
-        : `${flaggedPages.length} ${t.quality.flaggedPages}`,
-      // A skipped gate is not a passing gate. `visual_gate` reports
-      // `skipped_reason` when the tooling or the artifact type prevents the
-      // check (e.g. "not a rendered pdf"), and this view used to render that as
-      // a green PASS because it only ever looked at `findings` — which are
-      // empty when the gate never ran.
-      status: visualSkipped
-        ? 'warn'
-        : pillarStatus(flaggedPages.length > 0 || visualPassed === false, false),
-      score: visualSkipped ? 0 : visualPassed === false ? 55 : flaggedPages.length > 0 ? 60 : 100,
+      metric: visualMissing
+        ? t.quality.visualNoReport
+        : visualSkipped
+          ? skipCodes.length > 0
+            ? `${t.quality.visualGateSkipped} · ${skipCodes.map(skipLabel).join('、')}`
+            : t.quality.visualGateSkipped
+          : `${flaggedPages.length} ${t.quality.flaggedPages}`,
+      // A skipped gate is not a passing gate, and neither is an absent one:
+      // `visual_gate` reports `skipped_reason` when the tooling or the artifact
+      // type prevents the check (e.g. "not a rendered pdf"), and the visual
+      // *report itself* is missing entirely when the gate was disabled or the
+      // deliverable is not a PDF — this view used to render both as a green
+      // PASS because it only ever looked at `findings`, which are empty when
+      // the gate never ran.
+      status:
+        visualMissing || visualSkipped
+          ? 'warn'
+          : pillarStatus(flaggedPages.length > 0 || visualPassed === false, false),
+      score: visualMissing
+        ? 0
+        : visualSkipped
+          ? 0
+          : visualPassed === false
+            ? 55
+            : flaggedPages.length > 0
+              ? 60
+              : 100,
       detail: (
         <div className="space-y-2">
+          {visualMissing && (
+            <div className="text-xs text-[var(--ink-secondary)]">
+              {t.quality.visualNoReportDesc}
+            </div>
+          )}
           {/* Which inspection tiers ran. This is the full statement the row
               header summarizes; it wraps freely here, so it can afford the
               names instead of a comma-separated code list. */}
@@ -523,6 +552,12 @@ export function QualityGateView() {
   const handleDownload = async (key: string) => {
     if (downloadBusy) return
     setDownloadBusy(true)
+    // The tab is opened inside the click gesture, before any await: a stale
+    // delivery re-renders first (whole-book, easily past the browser's ~5 s
+    // transient-activation window), and a `window.open` after that wait is
+    // silently swallowed by the popup blocker — the click "did nothing".
+    // Mission Control fixed the same bug the same way.
+    const tab = window.open('', '_blank')
     try {
       if (deliveryStale) {
         await reExportJob(jobId)
@@ -530,8 +565,10 @@ export function QualityGateView() {
         setDeliverables(refreshed.items)
         setDeliveryStale(refreshed.stale)
       }
-      window.open(deliverableDownloadUrl(jobId, key), '_blank')
+      if (tab) tab.location.href = deliverableDownloadUrl(jobId, key)
+      else window.open(deliverableDownloadUrl(jobId, key), '_blank')
     } catch (err) {
+      tab?.close()
       setDownloadError(err instanceof Error ? err.message : t.quality.downloadFailed)
     } finally {
       setDownloadBusy(false)
@@ -604,7 +641,7 @@ export function QualityGateView() {
         <div className="flex items-start sm:items-center gap-3.5">
           <div
             className={`h-10 w-10 rounded-[6px] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] flex items-center justify-center shrink-0 ${
-              isPassed ? 'text-[#15803d]' : 'text-[#b91c1c]'
+              isPassed ? 'text-[#15803d]' : isWarning ? 'text-[#b45309]' : 'text-[#b91c1c]'
             }`}
           >
             {isPassed ? <CheckCircle2 className="h-6 w-6" /> : <AlertTriangle className="h-6 w-6" />}
@@ -612,7 +649,11 @@ export function QualityGateView() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-bold text-[var(--ink-primary)]">
-                {isPassed ? t.quality.decisionReady : t.quality.decisionBlocked}
+                {isPassed
+                  ? t.quality.decisionReady
+                  : isWarning
+                    ? t.quality.decisionWarning
+                    : t.quality.decisionBlocked}
               </span>
               <Badge
                 variant={isPassed ? 'success' : isWarning ? 'warning' : 'destructive'}
@@ -626,7 +667,11 @@ export function QualityGateView() {
               </Badge>
             </div>
             <p className="text-xs text-[var(--ink-secondary)] mt-0.5">
-              {isPassed ? t.quality.allPassedDesc : t.quality.blockedDesc}
+              {isPassed
+                ? t.quality.allPassedDesc
+                : isWarning
+                  ? t.quality.warningDesc
+                  : t.quality.blockedDesc}
             </p>
             <div className="text-xs font-mono text-[var(--ink-muted)] mt-1.5">
               {t.quality.passRate.replace('{value}', pct(summary.pass_rate))} ·{' '}

@@ -76,6 +76,9 @@ export interface TranslationDictionary {
     budgetPlaceholder: string
     budgetHelp: string
     budgetInvalid: string
+    fieldMinOne: string
+    reassessing: string
+    assessStale: string
     budgetExceedsQuote: string
     preflightTitle: string
     preflightSubtitle: string
@@ -273,6 +276,8 @@ export interface TranslationDictionary {
     deleteJob: string
     deleteConfirm: string
     deleteTypePrompt: string
+    deleteTypeMismatch: string
+    jobIdLabel: string
     collapseLogs: string
     expandLogs: string
     //: Job statuses shown as a badge on the header and in the queue rows.
@@ -310,8 +315,10 @@ export interface TranslationDictionary {
     rehearsalBody: string
     decisionReady: string
     decisionBlocked: string
+    decisionWarning: string
     allPassedDesc: string
     blockedDesc: string
+    warningDesc: string
     fidelityScore: string
     pillar1Title: string
     pillar1Desc: string
@@ -340,6 +347,8 @@ export interface TranslationDictionary {
     deliveryStaleNote: string
     //: Rendered instead of a verdict when the report could not be loaded.
     visualGateSkipped: string
+    visualNoReport: string
+    visualNoReportDesc: string
     /** Tier names the visual gate reports in ``tiers_ran`` / ``tiers_skipped``. */
     visualTierNames: Record<string, string>
     /** Stable ``skip_codes`` from the visual report, rendered in this language. */
@@ -397,6 +406,10 @@ export interface TranslationDictionary {
     metricFormulaBlocks: string
   }
   assets: {
+    colSource: string
+    colTarget: string
+    colProvenance: string
+    colAction: string
     title: string
     subtitle: string
     tabGlossary: string
@@ -408,6 +421,8 @@ export interface TranslationDictionary {
     activeTerms: string
     tmTitle: string
     tmDesc: string
+    tmLoadMore: string
+    tmLoadingMore: string
     conflictsTitle: string
     conflictTargets: string
     noConflicts: string
@@ -556,6 +571,7 @@ export interface TranslationDictionary {
     targetSegment: string
     saveFeedback: string
     failedDraftNotice: string
+    quarantinedNotice: string
     sourceCanvas: string
     targetCanvas: string
     sourceCanvasAlt: string
@@ -632,5 +648,9 @@ export interface TranslationDictionary {
     //: Shown when the ledger is held by another writer (HTTP 409), so the
     //: operator knows to stop the run or retry rather than assume the save lost.
     saveConflict: string
+  }
+  errorBoundary: {
+    title: string
+    retry: string
   }
 }

@@ -48,6 +48,7 @@ export function ConfirmDialog({
   typeToConfirmMismatch,
 }: ConfirmDialogProps) {
   const confirmRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
   const [typed, setTyped] = useState('')
   const needsPhrase = Boolean(typeToConfirm)
   const phraseOk = !needsPhrase || typed.trim() === typeToConfirm
@@ -58,7 +59,36 @@ export function ConfirmDialog({
     // rather than the button, which would make Enter confirm immediately.
     if (!needsPhrase) confirmRef.current?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCancel()
+      if (event.key === 'Escape') {
+        onCancel()
+        return
+      }
+      // Focus trap: Tab cycles inside the dialog. The module comment has
+      // always claimed this; without it, Tab walks into the console behind
+      // the overlay and a keyboard user can trigger background actions while
+      // a danger confirmation is open.
+      if (event.key === 'Tab') {
+        const root = dialogRef.current
+        if (!root) return
+        const focusables = Array.from(
+          root.querySelectorAll<HTMLElement>(
+            'button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])'
+          )
+        ).filter((el) => !(el as HTMLButtonElement).disabled && el.offsetParent !== null)
+        if (focusables.length === 0) return
+        const first = focusables[0]
+        const last = focusables[focusables.length - 1]
+        const active = document.activeElement as HTMLElement | null
+        if (event.shiftKey) {
+          if (active === first || !root.contains(active)) {
+            event.preventDefault()
+            last.focus()
+          }
+        } else if (active === last || !root.contains(active)) {
+          event.preventDefault()
+          first.focus()
+        }
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -72,6 +102,7 @@ export function ConfirmDialog({
       onClick={onCancel}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
