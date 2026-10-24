@@ -1,5 +1,6 @@
 """Logging configuration and setup for UBT applications and services."""
 
+import copy
 import logging
 import os
 import re
@@ -7,11 +8,53 @@ import sys
 from typing import Any, TextIO
 
 from rich.logging import RichHandler
+from uvicorn.logging import ColourizedFormatter
 
 from ubt.core.log_aggregate import install_noise_aggregators
 
-DEFAULT_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+DEFAULT_LOG_FORMAT = "%(levelprefix)s%(name_prefix)s%(message)s"
 DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+class UBTColourizedFormatter(ColourizedFormatter):
+    """Unified terminal formatter matching Uvicorn's colorized level prefix style.
+
+    Renders records with ANSI colored level prefixes (INFO in green, WARNING in yellow,
+    ERROR in red) aligned to 8 characters with no redundant leading timestamps.
+    For uvicorn loggers, renders ``%(levelprefix)s %(message)s``.
+    For UBT loggers, renders ``%(levelprefix)s %(name)s: %(message)s``.
+    """
+
+    def __init__(
+        self,
+        fmt: str | None = None,
+        datefmt: str | None = None,
+        style: str = "%",
+        use_colors: bool | None = None,
+    ) -> None:
+        super().__init__(
+            fmt=fmt or DEFAULT_LOG_FORMAT,
+            datefmt=datefmt,
+            style=style,
+            use_colors=use_colors,
+        )
+
+    def formatMessage(self, record: logging.LogRecord) -> str:
+        recordcopy = copy.copy(record)
+        levelname = recordcopy.levelname
+        separator = " " * (8 - len(recordcopy.levelname))
+        if self.use_colors:
+            levelname = self.color_level_name(levelname, recordcopy.levelno)
+            if "color_message" in recordcopy.__dict__:
+                recordcopy.msg = recordcopy.__dict__["color_message"]
+                recordcopy.__dict__["message"] = recordcopy.getMessage()
+        recordcopy.__dict__["levelprefix"] = levelname + ":" + separator
+        if recordcopy.name.startswith("uvicorn"):
+            recordcopy.__dict__["name_prefix"] = " "
+        else:
+            recordcopy.__dict__["name_prefix"] = f" {recordcopy.name}: "
+        return super(ColourizedFormatter, self).formatMessage(recordcopy)
+
 
 #: Marks a handler this module installed. A later call may replace *its own*
 #: handler when the routing request changes, while leaving handlers a foreign
@@ -78,6 +121,7 @@ def setup_logging(
     verbose: bool = False,
     stream: TextIO = sys.stderr,
     console: Any = None,
+    use_colors: bool | None = None,
 ) -> None:
     """Configure root logging for CLI and server processes.
 
@@ -127,7 +171,10 @@ def setup_logging(
             handler.setFormatter(logging.Formatter("%(message)s", datefmt=DEFAULT_DATE_FORMAT))
         else:
             handler = logging.StreamHandler(stream)
-            handler.setFormatter(logging.Formatter(DEFAULT_LOG_FORMAT, datefmt=DEFAULT_DATE_FORMAT))
+            colors = (
+                getattr(stream, "isatty", lambda: False)() if use_colors is None else use_colors
+            )
+            handler.setFormatter(UBTColourizedFormatter(use_colors=colors))
         setattr(handler, _MANAGED_HANDLER_ATTR, True)
         for stale in managed:
             root.removeHandler(stale)

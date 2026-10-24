@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import logging
-import re
 
 import pytest
 
@@ -20,16 +19,15 @@ pytestmark = pytest.mark.fast
 
 
 def test_default_log_format_structure() -> None:
-    """Standard UBT log format must include timestamp, bracketed level, logger name, and message."""
-    assert "%(asctime)s" in DEFAULT_LOG_FORMAT
-    assert "[%(levelname)s]" in DEFAULT_LOG_FORMAT
-    assert "%(name)s:" in DEFAULT_LOG_FORMAT
+    """Standard UBT log format must include levelprefix, name_prefix, and message."""
+    assert "%(levelprefix)s" in DEFAULT_LOG_FORMAT
+    assert "%(name_prefix)s" in DEFAULT_LOG_FORMAT
     assert "%(message)s" in DEFAULT_LOG_FORMAT
     assert DEFAULT_DATE_FORMAT == "%Y-%m-%d %H:%M:%S"
 
 
 def test_setup_logging_formats_records() -> None:
-    """A log record handled by setup_logging must render with the unified format."""
+    """A log record handled by setup_logging must render with the unified modern format."""
     stream = io.StringIO()
     setup_logging(level=logging.INFO, stream=stream)
 
@@ -37,11 +35,19 @@ def test_setup_logging_formats_records() -> None:
     test_logger.info("unified telemetry message test")
 
     output = stream.getvalue()
-    # E.g.: "2026-10-24 17:00:00 [INFO] ubt.test.telemetry: unified telemetry message test\n"
-    pattern = re.compile(
-        r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[INFO\] ubt\.test\.telemetry: unified telemetry message test\n$"
-    )
-    assert pattern.match(output), f"Output did not match expected format: {output!r}"
+    assert output == "INFO:     ubt.test.telemetry: unified telemetry message test\n"
+
+
+def test_setup_logging_with_colors() -> None:
+    """When colors are enabled, level prefix includes ANSI escape sequences."""
+    stream = io.StringIO()
+    setup_logging(level=logging.INFO, stream=stream, use_colors=True)
+
+    test_logger = logging.getLogger("ubt.test.telemetry")
+    test_logger.info("color test")
+
+    output = stream.getvalue()
+    assert output == "\x1b[32mINFO\x1b[0m:     ubt.test.telemetry: color test\n"
 
 
 def test_httpx_and_httpcore_are_floored_at_warning() -> None:
@@ -65,7 +71,7 @@ def test_httpx_and_httpcore_are_floored_at_warning() -> None:
 
     # WARNING must still pass
     httpx_logger.warning("HTTP connection timeout to provider")
-    assert "[WARNING] httpx: HTTP connection timeout to provider" in stream.getvalue()
+    assert "WARNING:  httpx: HTTP connection timeout to provider" in stream.getvalue()
 
 
 def test_debug_lifts_floor_on_noisy_loggers(monkeypatch: pytest.MonkeyPatch) -> None:

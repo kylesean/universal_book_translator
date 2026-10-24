@@ -1619,6 +1619,12 @@ class ModelRouter:
                 model=cand_model,
             )
 
+        def _calc_repair_max_tokens(cand_model: str, cand_profile: ModelProfile) -> int | None:
+            if cand_profile.supports_reasoning_effort:
+                return None
+            src_tokens = _estimate_prompt_tokens(block.source_text)
+            return max(1024, int(src_tokens * 3.0))
+
         raw_res, actual_model = await self._execute_with_retry(
             system_prompt="",
             user_prompt="",
@@ -1626,6 +1632,7 @@ class ModelRouter:
             temperature=temperature,
             reasoning_effort=effort,
             prompt_builder=_build_repair_prompts,
+            max_tokens_fn=_calc_repair_max_tokens,
             return_model=True,
             is_repair=True,
         )
