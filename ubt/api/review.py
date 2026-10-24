@@ -17,7 +17,9 @@ consistent with the rest of the engine:
 
 from __future__ import annotations
 
+import html
 import logging
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -131,14 +133,35 @@ def segment_issue_kinds(block: IRBlock) -> list[str]:
     return kinds
 
 
+#: Title attribute of a leading pipeline ``<mark>`` wrapper — the reason the
+#: stage recorded (repair failure summary, quarantine justification). The
+#: writers escape it for an HTML attribute, so it is unescaped on the way out.
+_MARK_TITLE_RE = re.compile(r"^\s*<mark\b[^>]*\btitle=\"([^\"]*)\"", re.IGNORECASE)
+
+
+def _mark_title(text: str) -> str | None:
+    match = _MARK_TITLE_RE.match(text or "")
+    return html.unescape(match.group(1)) if match else None
+
+
 def serialize_segment(block: IRBlock) -> dict[str, Any]:
     """Project a block into the workbench's segment shape.
 
     Includes the execution detail the Inspector panel shows (repair rounds,
     glossary hits, MQM severity/spans, provenance) so the workbench does not
     need a second per-block request.
+
+    The delivered surface is owned here, once: ``delivered_text`` is the text
+    a human reads and edits — the pipeline's own wrapper semantics
+    (:mod:`ubt.render.delivered_text`) already applied, so a quarantined or
+    repair-failed block cannot re-publish its markup through the workbench,
+    and an edit seeded from it cannot write the wrapper back into the ledger.
+    ``target_text`` stays raw for callers that want the storage truth.
     """
+    from ubt.render.delivered_text import delivered_text, is_failed_draft, is_placeholder
+
     bbox = block.bbox
+    target = block.target_text or ""
     return {
         "block_id": block.id,
         "spine_index": block.spine_index,
@@ -146,7 +169,11 @@ def serialize_segment(block: IRBlock) -> dict[str, Any]:
         "block_type": block.block_type.value,
         "status": block.status.value,
         "source_text": block.source_text or "",
-        "target_text": block.target_text or "",
+        "target_text": target,
+        "delivered_text": delivered_text(block),
+        "repair_failed": is_failed_draft(target),
+        "repair_error": _mark_title(target) if is_failed_draft(target) else None,
+        "quarantined": is_placeholder(target),
         "mtqe_score": block.mtqe_score,
         "error_flags": list(block.error_flags or ()),
         "issues": segment_issue_kinds(block),
