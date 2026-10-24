@@ -236,6 +236,31 @@ class JobWorker:
 
         await asyncio.to_thread(_write)
 
+    async def _ledger_job_status(self, job: QueuedJob, job_config: UBTConfig | None) -> str | None:
+        """The ledger's job status, read-only and off-loop; ``None`` if unreadable.
+
+        The one place the worker asks the ledger a question directly: terminal
+        arbitration when a cancel races the export stage's own finalize. A
+        missing or locked ledger reads as ``None`` so the caller keeps its
+        original behaviour (treat it as not-completed) rather than guessing.
+        """
+        cfg = job_config or self.config
+        db_path = Path(cfg.db_dir) / f"{job.job_id}.sqlite"
+
+        def _read() -> str | None:
+            from ubt.core.engine.ledger import SQLiteJobLedger
+
+            if not db_path.exists():
+                return None
+            try:
+                with SQLiteJobLedger(db_path, read_only=True) as ledger:
+                    return ledger.get_job_status(job.job_id)
+            except Exception as exc:  # read-only arbitration probe
+                logger.debug("Job %s: ledger status probe failed: %s", job.job_id, exc)
+                return None
+
+        return await asyncio.to_thread(_read)
+
     async def _heartbeat_loop(
         self,
         job_id: str,
@@ -347,7 +372,21 @@ class JobWorker:
             if cancel_token.is_set() or await self._q(
                 self.queue.is_cancel_requested, job.job_id, owner
             ):
-                raise JobInterruptedError(f"job {job.job_id} cancelled by request")
+                # A cancel landing between the export stage's finalize_job
+                # (which runs before the terminal event is yielded) and this
+                # point has nothing left to cancel: the artifact is on disk and
+                # the ledger says completed. Raising here wrote the queue row
+                # CANCELLED against that completed ledger — two terminal
+                # surfaces in permanent disagreement — so a finished job
+                # completes instead of "cancelling".
+                if await self._ledger_job_status(job, job_config) == "completed":
+                    logger.info(
+                        "Job %s: cancel requested after the deliverable was "
+                        "finalized; reporting completed",
+                        job.job_id,
+                    )
+                else:
+                    raise JobInterruptedError(f"job {job.job_id} cancelled by request")
 
             completed = False
             try:

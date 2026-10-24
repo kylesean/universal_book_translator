@@ -459,19 +459,14 @@ class PipelineOrchestrator:
         self._owns_router = router is None
         # Per-run billing sessions keyed by job_id for concurrent multi-job safety.
         self._billing_sessions: dict[str, _RunBillingSession] = {}
-        self._completed_sessions: dict[str, _RunBillingSession] = {}
-        self._default_session = _RunBillingSession()
 
-    def _get_billing_session(self, job_id: str | None = None) -> _RunBillingSession:
-        if job_id:
-            if job_id in self._billing_sessions:
-                return self._billing_sessions[job_id]
-            if job_id in self._completed_sessions:
-                return self._completed_sessions[job_id]
-            raise KeyError(f"No active or recent billing session for job '{job_id}'")
-        if self._billing_sessions:
-            return next(reversed(self._billing_sessions.values()))
-        return self._default_session
+    def _get_billing_session(self, job_id: str) -> _RunBillingSession:
+        """The run's billing session. Every entry point builds one orchestrator
+        per job, so a job_id always has at most one live session here."""
+        try:
+            return self._billing_sessions[job_id]
+        except KeyError:
+            raise KeyError(f"No active billing session for job '{job_id}'") from None
 
     @property
     def _is_mock_run(self) -> bool:
@@ -932,7 +927,6 @@ class PipelineOrchestrator:
         sink = self.router.begin_usage_sink()
         baseline = {} if sink is not None else self.router.usage_totals_by_model()
         run_session = _RunBillingSession(sink=sink, baseline=baseline, billed_usage={})
-        self._default_session = run_session
         if self.config.qe_engine == "tiered" and not self.config.qe_judge_enabled:
             logger.warning(
                 "qe_engine='tiered' selected without UBT_QE_JUDGE_ENABLED=true: "
@@ -1166,10 +1160,17 @@ class PipelineOrchestrator:
             # ledger (the engine claims no per-block leases; this lock is the only
             # cross-process job mutual exclusion).
             writer_lock = LedgerWriterLock(db_path, actual_job_id)
-            writer_lock.acquire()
+            # Off-loop, like every other sqlite call: a losing claimant parks on
+            # the lock's busy_timeout (10 s) and a fresh ledger runs its
+            # migrations, so taking either inline stalls every slot's loop —
+            # the missed-heartbeat path that reclaims a still-running job and
+            # bills the book twice (see job_worker's ``_q``).
+            await asyncio.to_thread(writer_lock.acquire)
 
             # Staged execution lifecycle with guaranteed resource cleanup and failure handling.
-            ledger = SQLiteJobLedger(db_path, fresh=bool(self.config.fresh))
+            ledger = await asyncio.to_thread(
+                SQLiteJobLedger, db_path, fresh=bool(self.config.fresh)
+            )
             if self.config.tm_enabled:
                 self.config.db_dir.mkdir(parents=True, exist_ok=True)
                 tm = TranslationMemory(self.config.db_dir / "tm.sqlite")
@@ -1456,8 +1457,6 @@ class PipelineOrchestrator:
                     logger.debug(
                         "Error releasing writer lock for job %s: %s", actual_job_id, lock_exc
                     )
-            session = self._billing_sessions.pop(actual_job_id, None)
-            if session is not None:
-                self._completed_sessions[actual_job_id] = session
-                if len(self._completed_sessions) > 100:
-                    self._completed_sessions.pop(next(iter(self._completed_sessions)))
+            # Nothing reads the session after the run ends (one orchestrator per
+            # job), so the pop is pure teardown.
+            self._billing_sessions.pop(actual_job_id, None)

@@ -10,8 +10,14 @@ the artifact the caller downloads.
 
 Only the export stage runs. Every block is already terminal (a human edit stamps
 ``REPAIRED``), so no drafting, QE or repair is invoked and no token is spent —
-the re-export is a pure re-render. The render mode is read back from the ledger
-where the first export persisted it, so a bilingual book stays bilingual.
+the re-export is a pure re-render. That zero-spend contract is enforced, not
+assumed: the export stage's visual gate reads the config bound on the ctx, and
+an operator with ``visual_judge_enabled`` would otherwise make paid VLM calls a
+path that binds no usage sink never bills — so the re-export runs on a config
+copy with the judge closed, the same closure the rehearsal path applies. The
+deterministic T0/T1 visual checks still run. The render mode is read back from
+the ledger where the first export persisted it, so a bilingual book stays
+bilingual.
 
 This is deliberately *not* a second pipeline: the block set, the glossary, and
 the render mode all come from the ledger, so a re-export cannot diverge from what
@@ -33,6 +39,7 @@ from ubt.core.engine.stage_context import StageContext
 from ubt.core.engine.stages.bible import _BIBLE_CACHE_KEY
 from ubt.core.engine.stages.export import run_export_stage
 from ubt.core.engine.writer_lock import LedgerWriterLock, keep_lease_fresh
+from ubt.core.exceptions import LedgerWriterLeaseLostError, UnsupportedDocumentFormatError
 from ubt.core.ir.models import BookManifest, ChapterMeta
 from ubt.core.ir.render_plan import RenderPlan
 from ubt.core.ports import resolve_adapter
@@ -208,6 +215,12 @@ def _default_collaborators(
     a re-export's collaborators cannot drift from a real run's. Only the missing
     half is built: a caller holding a process-wide router (the API server) passes
     it and keeps the shared rate-limit bucket.
+
+    Ownership: everything this builds travels out through the returned router /
+    QE runner (the discarded orchestrator keeps nothing they need), so the
+    *caller* owns their lifecycle — a long-lived caller that is done
+    re-exporting closes the router. Today's only build-both caller is a
+    one-shot CLI process, which is why nothing has leaked yet.
     """
     from ubt.core.engine.pipeline import PipelineOrchestrator
 
@@ -252,10 +265,13 @@ async def re_export_job(
     # Lock is acquired BEFORE creating SQLiteJobLedger to prevent connection leaks
     # or concurrent DDL execution on locked databases.
     lock = LedgerWriterLock(db_path, job_id)
-    lock.acquire()
+    # Off-loop like every other sqlite call: a losing claimant parks on the
+    # lock's busy_timeout, and this coroutine runs on the API server's loop
+    # where a stall misses queue heartbeats.
+    await asyncio.to_thread(lock.acquire)
     ledger: SQLiteJobLedger | None = None
     try:
-        ledger = SQLiteJobLedger(db_path)
+        ledger = await asyncio.to_thread(SQLiteJobLedger, db_path)
         # Resolve every precondition BEFORE building collaborators: building the
         # router needs a configured provider, and a job with no source or no
         # output path must fail with its own reason rather than a "no draft
@@ -282,10 +298,34 @@ async def re_export_job(
             qe_runner = qe_runner or built_qe
 
         adapter = resolve_adapter(source_path, pdf_engine=config.pdf_engine)
+        # The adapter decides the artifact format, the same rule a first run
+        # enforces before spending anything: a contradicting output suffix must
+        # be refused before the render, not after a broken file is written (a
+        # PDF engine into ``.md`` would also leak quarantine ``<mark>`` wrappers
+        # verbatim into the deliverable).
+        allowed_suffixes: frozenset[str] = getattr(type(adapter), "output_suffixes", frozenset())
+        out_suffix = target.suffix.lower()
+        if allowed_suffixes and out_suffix and out_suffix not in allowed_suffixes:
+            wanted = "/".join(sorted(allowed_suffixes))
+            raise UnsupportedDocumentFormatError(
+                f"{type(adapter).__name__} writes {wanted}, so re-exporting to "
+                f"{target.name} would not be a readable {out_suffix.lstrip('.')}. "
+                f"Drop --output (the ledger's own path is kept) or choose one of {wanted}."
+            )
+        # The zero-spend contract, enforced: the visual gate is driven by the
+        # config bound on the ctx, and this path bills nothing (it binds no
+        # usage sink), so a paid judge here would spend invisibly to every
+        # budget surface.
+        export_config = config.model_copy(update={"visual_judge_enabled": False})
         render_plan = _render_plan_from_ledger(ledger, job_id)
-        services = _build_services(config, router, qe_runner, manifest)
+        services = _build_services(export_config, router, qe_runner, manifest)
+        # Created before the ctx so the export stage's own boundary checks can
+        # observe a reclaimed lease mid-render, not only at the two event
+        # boundaries (a whole-book render plus the visual gate routinely
+        # outlives the 300 s default lease).
+        lease_lost = asyncio.Event()
         ctx = StageContext(
-            config=config,
+            config=export_config,
             router=router,
             ledger=ledger,
             manifest=manifest,
@@ -297,6 +337,7 @@ async def re_export_job(
             target_lang=manifest.target_lang,
             profile_name="general",
             create_event=_make_event_factory(ledger, job_id),
+            lease_lost=lease_lost,
         )
         # Renew the lease for the life of the re-export. A whole-book Typst render
         # plus the visual gate routinely outlives the 300 s default lease, and
@@ -304,7 +345,6 @@ async def re_export_job(
         # both then write the same ledger and the same output file, the later
         # writer silently winning. The live run has always renewed; a re-export
         # is the same kind of long holder and must renew on the same rule.
-        lease_lost = asyncio.Event()
         renew_task = asyncio.create_task(
             keep_lease_fresh(lock, on_lost=lambda _reason: lease_lost.set()),
             name=f"renew-lock:{job_id}",
@@ -330,6 +370,11 @@ async def re_export_job(
             if terminal is None:
                 raise ReExportError(f"re-export of {job_id} produced no artifact")
             return terminal
+        except LedgerWriterLeaseLostError as exc:
+            # The export stage's own boundary check saw the reclaim mid-render
+            # (the ctx is wired to ``lease_lost`` now). Same stop, expressed in
+            # this module's documented error so callers need no new handler.
+            raise ReExportError(f"re-export of {job_id} stopped: {exc}") from exc
         finally:
             renew_task.cancel()
             with suppress(asyncio.CancelledError):

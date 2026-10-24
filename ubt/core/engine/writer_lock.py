@@ -140,6 +140,19 @@ class LedgerWriterLock:
                     details={"job_id": self.job_id, "holder_pid": holder_pid},
                 )
             self._held = True
+        except sqlite3.OperationalError as exc:
+            # A holder whose transaction outlives busy_timeout surfaces as
+            # ``database is locked`` rather than as rowcount 0. Without this
+            # mapping the losing claimant reports a generic failure, the worker
+            # burns one of its attempts on it, and the typed conflict path
+            # (free retry — the other writer owns the job) is skipped.
+            if "locked" in str(exc).lower():
+                raise LedgerWriterLockConflictError(
+                    f"Job {self.job_id}: the ledger stayed locked by another "
+                    f"writer past the busy timeout — refusing to contend: {exc}",
+                    details={"job_id": self.job_id},
+                ) from exc
+            raise
         finally:
             conn.close()
 

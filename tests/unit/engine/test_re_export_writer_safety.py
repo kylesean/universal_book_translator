@@ -25,7 +25,11 @@ from ubt.core.config import UBTConfig
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.re_export import ReExportError, re_export_job
 from ubt.core.engine.writer_lock import LedgerWriterLock
-from ubt.core.exceptions import IntegrityViolationError, LedgerWriterLockConflictError
+from ubt.core.exceptions import (
+    IntegrityViolationError,
+    LedgerWriterLockConflictError,
+    UnsupportedDocumentFormatError,
+)
 from ubt.core.ir.models import (
     BlockStatus,
     BlockType,
@@ -97,7 +101,9 @@ async def test_re_export_refuses_non_terminal_blocks_instead_of_failing_them(
     # and stub the collaborators so no provider is constructed (a re-export
     # never calls the router — every block here is non-terminal on purpose).
     with SQLiteJobLedger(db_path) as ledger:
-        ledger.set_job_metadata_value(_JOB, "output_file", str(tmp_path / "out.pdf"))
+        # .md: the re-export now enforces the first run's suffix rule, so the
+        # planted output must be one the Markdown adapter may write.
+        ledger.set_job_metadata_value(_JOB, "output_file", str(tmp_path / "out.md"))
     import ubt.core.engine.re_export as re_export_module
 
     dummy_router, dummy_qe = object(), object()
@@ -117,6 +123,58 @@ async def test_re_export_refuses_non_terminal_blocks_instead_of_failing_them(
         # And the job's terminal status must be untouched (the seed wrote
         # 'failed'; the old path would have superseded it to 'completed').
         assert ledger.get_job_status(_JOB) == "failed"
+
+
+async def test_re_export_refuses_contradicting_output_suffix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A first run refuses ``--output out.pdf`` on a Markdown source before
+    spending anything; the re-export path enforces the same rule — a PDF engine
+    forced into ``.md`` also leaks quarantine ``<mark>`` wrappers verbatim."""
+    import ubt.core.engine.re_export as re_export_module
+
+    blocks = [_block(1, "Done sentence.", "已完成。", BlockStatus.MTQE_PASSED)]
+    config, db_path = _seed(tmp_path, blocks, job_status="failed")
+    with SQLiteJobLedger(db_path) as ledger:
+        ledger.set_job_metadata_value(_JOB, "output_file", str(tmp_path / "out.pdf"))
+    monkeypatch.setattr(
+        re_export_module,
+        "_default_collaborators",
+        lambda config, router, qe: (object(), object()),
+    )
+    with pytest.raises(UnsupportedDocumentFormatError, match="would not be a readable pdf"):
+        await re_export_job(db_path=db_path, job_id=_JOB, config=config)
+
+
+async def test_re_export_closes_the_paid_visual_judge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The module's zero-spend contract is enforced on the config: an operator
+    with ``visual_judge_enabled`` must not make unbilled VLM calls here."""
+    import ubt.core.engine.re_export as re_export_module
+
+    blocks = [_block(1, "Done sentence.", "已完成。", BlockStatus.MTQE_PASSED)]
+    config, db_path = _seed(tmp_path, blocks, job_status="failed")
+    config.visual_judge_enabled = True
+    with SQLiteJobLedger(db_path) as ledger:
+        ledger.set_job_metadata_value(_JOB, "output_file", str(tmp_path / "out.md"))
+    monkeypatch.setattr(
+        re_export_module,
+        "_default_collaborators",
+        lambda config, router, qe: (object(), object()),
+    )
+
+    seen: dict[str, object] = {}
+
+    async def _capture_ctx(ctx: object, *args: object, **kwargs: object) -> object:
+        seen["visual_judge_enabled"] = ctx.config.visual_judge_enabled  # type: ignore[attr-defined]
+        return
+        yield  # pragma: no cover - never iterated
+
+    monkeypatch.setattr(re_export_module, "run_export_stage", _capture_ctx)
+    with pytest.raises(ReExportError, match="produced no artifact"):
+        await re_export_job(db_path=db_path, job_id=_JOB, config=config)
+    assert seen["visual_judge_enabled"] is False
 
 
 async def test_re_export_holds_the_writer_lock_against_a_live_run(

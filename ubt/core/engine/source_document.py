@@ -61,8 +61,13 @@ class SourceDocumentIndex:
             if self._text is not None:
                 return
             texts = ledger.fetch_source_texts(job_id)
-            self._text = "\n".join(texts)
-            self._vocabulary = document_vocabulary(self._text)
+            joined = "\n".join(texts)
+            self._vocabulary = document_vocabulary(joined)
+            # Published last: the lock-free fast path above admits a reader as
+            # soon as ``_text`` is set, and a reader that wins the race between
+            # the two assignments must not observe a text whose vocabulary is
+            # still None (vocabulary() folds None to an empty set).
+            self._text = joined
 
     def text(self) -> str:
         """The joined source text of every block, in spine order."""
