@@ -52,7 +52,7 @@ def test_the_flag_lands_on_the_block_without_keeping_the_source() -> None:
 
 def test_every_quality_flag_is_a_plain_flag_not_a_skip() -> None:
     for flag in RENDER_QUALITY_FLAGS:
-        assert not flag.startswith(("render_skip:", "inplace_skip:"))
+        assert not flag.startswith("render_skip:")
 
 
 def test_a_stale_flag_from_an_earlier_render_is_cleared() -> None:

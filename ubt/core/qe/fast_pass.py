@@ -149,6 +149,9 @@ _CITATION_SPAN_RE = re.compile(r"\[[^\[\]]*\]")
 _TABLE_SEP_RE = re.compile(r"-{2,}")
 _ISOLATED_LETTER_RE = re.compile(r"(?<![A-Za-z])[A-Za-z](?![A-Za-z])")
 _DIGIT_RE = re.compile(r"\d")
+#: Any letter, in any script. Used by the "no letters at all" density check:
+#: a target of pure punctuation is not a translation when the source had prose.
+_LETTER_RE = re.compile(r"[^\W\d_]")
 #: English-word-equivalent weight of one CJK glyph in the length-ratio gate.
 #: EN→ZH prose compresses to roughly 0.35–0.6 raw characters per source
 #: character; counting a Han glyph as ~2.2 source characters (one word ≈ 4.4
@@ -854,29 +857,45 @@ def grid_columns(line: str) -> int | None:
 def markdown_grid_shape(text: str) -> list[int]:
     """Per-row column counts of a markdown grid, or [] when it is not one.
 
-    A real grid is uniform: the extractor pads every row to the same column
-    count (``docling_blocks.table_to_markdown``), so a pipe-bearing prose block
-    or a ragged run of pipe lines is not a table and returns ``[]``. Otherwise
-    prose that merely contains pipes reads as a grid and a faithful translation
-    without pipes is rejected as a dropped table.
+    A grid is one or more runs of pipe-delimited rows. Rows that disagree on
+    column count still count as a grid: Docling pads every row, but a model's
+    translation routinely drops or keeps one cell ("| 甲 | 乙 |\n| 1 | 2 | 3 |"),
+    and returning ``[]`` for that made the *table-shape* checks skip exactly the
+    tables that were malformed. Raggedness is reported, not hidden — the caller
+    compares the source shape against the target shape, so a 2-column source
+    and a 3-column target is a mismatch.
+
+    A single pipe row with no separator is still not a grid (see
+    :func:`_is_pipe_prose`): ``A | B | C`` in prose must not be read as a table.
+    One row **plus** a GFM delimiter row (``|---|---|``) is.
     """
-    shape = [cols for cols in (grid_columns(ln) for ln in text.splitlines()) if cols]
-    if len(shape) < 2 or len(set(shape)) != 1:
+    lines = text.splitlines()
+    shape = [cols for cols in (grid_columns(ln) for ln in lines) if cols]
+    if not shape:
         return []
-    return shape
+    if len(shape) >= 2:
+        return shape
+    # One pipe row: only a table when a delimiter row sits beside it.
+    row_index = next(i for i, ln in enumerate(lines) if grid_columns(ln))
+    neighbours = [lines[i] for i in (row_index - 1, row_index + 1) if 0 <= i < len(lines)]
+    if any(_TABLE_SEP_RE.fullmatch(ln.strip().strip("|").strip()) for ln in neighbours):
+        return shape
+    return []
 
 
 def _grid_label(shape: list[int]) -> str:
-    """Describe a uniform grid shape the way a reviewer reads it: rows x columns.
+    """Describe a grid shape the way a reviewer reads it.
 
-    ``markdown_grid_shape`` returns one ``column count`` per row and guarantees
-    every entry is equal (a ragged run is not a table). Printing that list
-    verbatim, as the mismatch message used to, reads as "the column count keeps
-    changing" when the real difference is how many rows there are.
+    ``markdown_grid_shape`` returns one column count per row. A uniform grid
+    reads as "3-row x 2-column"; a ragged one has to show the counts, because
+    "3-row x 2-column" would be a lie about a row that kept a third cell.
     """
+    if not shape:
+        return "an empty grid"
     rows = len(shape)
-    columns = shape[0] if shape else 0
-    return f"a {rows}-row x {columns}-column grid"
+    if len(set(shape)) == 1:
+        return f"a {rows}-row x {shape[0]}-column grid"
+    return f"a ragged {rows}-row grid ({', '.join(str(c) for c in shape)} columns per row)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1197,12 +1216,6 @@ class FastPassFilter:
                     length_ratio=0.0,
                 )
             if src_grid != tgt_grid:
-                # Both shapes are uniform by construction (``markdown_grid_shape``
-                # returns [] for a ragged grid), so a difference is always the ROW
-                # count: the column count is identical on both sides. The message
-                # used to print the raw per-row list and call it "columns", which
-                # told a reviewer the column count was oscillating when a row had
-                # actually been dropped.
                 return FastPassDecision(
                     passed=False,
                     reason=(
@@ -1364,6 +1377,14 @@ class FastPassFilter:
         src_clean = source_text.strip()
         tgt_clean = target_text.strip()
         _is_prose = _is_prose_block(block_type)
+        # A block the run decided to ship verbatim (formula, code, table chrome)
+        # is *supposed* to arrive in the source language. Every language gate
+        # below would reject it — and did: ``repair_loop`` re-runs the full gate
+        # over each repair candidate, so a correct "keep the LaTeX as it is"
+        # answer scored 0.00 on script density. Structural invariants still ran
+        # (that is the whole point of running them first); only the language
+        # identity checks are meaningless here.
+        language_identity_applies = not skip_translate
 
         # 4. Standalone number preservation check
         num_res = self.numeric_validator.validate(src_clean, tgt_clean)
@@ -1424,7 +1445,7 @@ class FastPassFilter:
             is_table=True if ((not _is_prose) or bool(markdown_grid_shape(src_clean))) else None,
             block_type=block_type,
         )
-        if not omission.passed:
+        if not omission.passed and language_identity_applies:
             return FastPassDecision(
                 passed=False,
                 reason=omission.reason,
@@ -1434,7 +1455,7 @@ class FastPassFilter:
             )
 
         # 6. Target-language identity check on stripped prose text (profile-driven).
-        # Measure density over the *translatable residue* — citation
+        # measure density over the *translatable residue* — citation
         # markers, table pipes/separators, numerals and isolated letters are
         # required to survive verbatim and must not dilute the ratio.
         prose_only = re.sub(r"<[^>]+>", "", tgt_clean)
@@ -1484,7 +1505,14 @@ class FastPassFilter:
         # signal and only dilutes the ratio (decimal points, parens, slashes
         # dominate tables and formulas).
         residue = re.sub(r"[\W\d_]+", "", residue)
-        if residue:
+        if not language_identity_applies:
+            # Verbatim block (formula / code / table chrome): it is *supposed*
+            # to arrive in the source language, so script density is not a
+            # signal. ``repair_loop`` re-runs this gate over each candidate, and
+            # the old unconditional check rejected every correct "leave the
+            # LaTeX alone" answer at ratio 0.00.
+            target_ratio = 1.0
+        elif residue:
             target_ratio = self.profile.target_script_ratio(residue)
             # A benchmark table's body is numerals and model names by
             # construction (| T5-Base | 84.3 | 85.5 | …). After stripping the
@@ -1511,6 +1539,26 @@ class FastPassFilter:
                     length_ratio=length_ratio,
                 )
         else:
+            # Nothing survived the residue strip. Two very different situations
+            # land here, and the old code treated both as "ratio 1.0, pass":
+            #
+            #  * the target legitimately carries no letters — a numeric table
+            #    body (| 84.3 | 85.5 |) or a formula-only fragment; and
+            #  * the model emitted punctuation/symbols instead of a translation
+            #    ("!!!@@@###%%%"), which every other gate then accepted.
+            #
+            # The source is the discriminator: if the source had letters to
+            # translate, a target with none is not a translation.
+            if _LETTER_RE.search(src_clean) and not _LETTER_RE.search(tgt_clean):
+                return FastPassDecision(
+                    passed=False,
+                    reason=(
+                        "Target carries no letters at all while the source does — "
+                        "the model emitted symbols instead of a translation"
+                    ),
+                    target_ratio=0.0,
+                    length_ratio=length_ratio,
+                )
             target_ratio = 1.0
 
         # 6a-bis. Foreign-script cross-talk. The density gate above proves enough
@@ -1519,7 +1567,11 @@ class FastPassFilter:
         # — the model emitted 기반 for "query-based") measured CJK density 0.82,
         # sailing through every ratio gate. Chinese never uses Hangul or Kana
         # and Korean never uses Kana, so a single character is already an error.
-        foreign = foreign_script_chars(tgt_clean, target_code=self.profile.code)
+        foreign = (
+            foreign_script_chars(tgt_clean, target_code=self.profile.code)
+            if language_identity_applies
+            else []
+        )
         if foreign:
             sample = "".join(dict.fromkeys(foreign))[:8]
             return FastPassDecision(
@@ -1537,7 +1589,11 @@ class FastPassFilter:
         # separate a Latin->Latin pair, so the pair policy's function-word gate
         # is the only identity signal. ``None`` means the pair is cross-script
         # (or a language without a fingerprint), so this check is inert.
-        if self.same_script_gate is not None and not self.same_script_gate(prose_only):
+        if (
+            language_identity_applies
+            and self.same_script_gate is not None
+            and not self.same_script_gate(prose_only)
+        ):
             source_name = getattr(self.profile, "source_name", "the source language")
             target_name = getattr(self.profile, "target_name", "the target language")
             return FastPassDecision(

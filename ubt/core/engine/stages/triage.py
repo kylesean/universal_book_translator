@@ -355,10 +355,17 @@ async def run_triage_stage(
             if not is_fatal_leak(cand.error_flags):
                 counters["needs_human"] += 1
                 flags = _needs_human_flags(cand)
-                if is_non_prose_degradable(cand.block_type, cand.error_flags) and not any(
-                    "render_skip:non_prose" in f for f in flags
-                ):
-                    flags.append("render_skip:non_prose")
+                # A non-prose block that is only degraded (not fatal) still ships
+                # its translation — the renderer typesets the rejected draft
+                # (fail-open). It must NOT be tagged with a ``render_skip:``
+                # flag: that vocabulary means "the renderer could not place a
+                # translation that exists", and the delivery contract reads it as
+                # text missing from the artifact. This used to write
+                # ``render_skip:non_prose``, which made the contract report a
+                # source-kept block (or a missing asset) for a translation the
+                # reader actually received.
+                if is_non_prose_degradable(cand.block_type, cand.error_flags):
+                    flags.append("non_prose_degraded: structural block kept in the draft")
                 if cand.id in escalation_errors:
                     flags.append(f"escalation error: {escalation_errors[cand.id]}")
                 if _FLAG_MQM_CRITICAL_BLOCKED not in flags:

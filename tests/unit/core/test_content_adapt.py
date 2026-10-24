@@ -16,6 +16,7 @@ from ubt.core.content.nodes import (
     AssetNode,
     ReconstructionRecord,
     TextDisposition,
+    TextNode,
 )
 from ubt.core.ir.models import BlockStatus, BlockType, BoundingBox, IRBlock, make_element
 
@@ -205,3 +206,62 @@ def test_a_skip_translate_block_carries_its_policy_reason_into_the_contract() ->
     (node,) = graph.text_nodes
     assert node.disposition is TextDisposition.VERBATIM
     assert node.reason == "skip:bibliography entry (kept verbatim for retrievability)"
+
+
+# --------------------------------------------------------------------------- #
+# The delivery contract must describe what the reader actually received.
+# --------------------------------------------------------------------------- #
+
+
+def _text_node(block: IRBlock) -> TextNode:
+    """The graph's node for a prose block, narrowed past the asset union."""
+    node = graph_from_blocks([block], doc_id="d").nodes[0]
+    assert isinstance(node, TextNode)
+    return node
+
+
+def _prose(block_id: str, *, status: BlockStatus, flags: list[str], skip: bool = False) -> IRBlock:
+    element = make_element(
+        id=block_id,
+        spine_index=0,
+        block_type=BlockType.NARRATIVE,
+        source_text="Some source prose here.",
+    )
+    block = IRBlock(element=element)
+    block.target_text = "某段译文。"
+    block.status = status
+    block.error_flags = list(flags)
+    block.skip_translate = skip
+    return block
+
+
+def test_a_needs_human_block_is_delivered_not_missing() -> None:
+    """Fail-open delivery: the renderer typesets the rejected draft.
+
+    ``triage`` used to tag such a block ``render_skip:non_prose``, which the
+    contract read as "the renderer could not place a translation" —
+    ``SOURCE_KEPT`` (or ``MISSING`` for an asset) for text the reader actually
+    received. The advisory is now a plain note outside the skip vocabulary.
+    """
+    block = _prose("b1", status=BlockStatus.NEEDS_HUMAN, flags=[])
+    assert kept_in_source(block) is False
+    assert _text_node(block).disposition is (TextDisposition.TRANSLATED)
+
+    noted = _prose("b2", status=BlockStatus.NEEDS_HUMAN, flags=["non_prose_degraded: note"])
+    assert kept_in_source(noted) is False
+    assert _text_node(noted).disposition is (TextDisposition.TRANSLATED)
+
+
+def test_a_real_render_skip_is_still_source_kept() -> None:
+    """The fail-closed channel keeps working — that is what it is for."""
+    block = _prose("b1", status=BlockStatus.REPAIRED, flags=["render_skip:table_unparseable"])
+    assert kept_in_source(block) is True
+    node = _text_node(block)
+    assert node.disposition is TextDisposition.SOURCE_KEPT
+    assert node.reason and node.reason.startswith("render:")
+
+
+def test_a_verbatim_block_is_the_only_preserved_disposition() -> None:
+    """``VERBATIM`` means "the source *is* the delivery", not "we gave up"."""
+    block = _prose("b1", status=BlockStatus.MTQE_PASSED, flags=[], skip=True)
+    assert _text_node(block).disposition is (TextDisposition.VERBATIM)

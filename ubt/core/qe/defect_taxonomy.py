@@ -102,6 +102,11 @@ STRUCTURAL_DEFECT_MARKERS: tuple[str, ...] = (
     "Target text suspiciously truncated",
     "Target text suspiciously inflated",
     "script density",
+    # A target with no letters at all while the source had prose: the model
+    # emitted punctuation/symbols. Same class as an empty target — nothing the
+    # reader can use came back — and it slipped through every gate while the
+    # density check read the empty residue as ratio 1.0.
+    "carries no letters at all",
     # A target containing a character from a script the target language never
     # uses ("遵循查询기반范式" — the model emitted Hangul for a Chinese target).
     # FastPass rejects it outright, but no marker matched the reason, so it fell
@@ -185,6 +190,8 @@ CRITICAL_DEFECT_MARKERS: tuple[str, ...] = (
     "Omission suspected",
     # A dropped table is wholesale content loss, the same class as omission.
     "Table dropped",
+    # No letters at all is wholesale loss too.
+    "carries no letters at all",
     "Added reference",
     "Prompt scaffold",
     "Prompt template XML artifacts",
@@ -455,19 +462,6 @@ TRIAGE_VERDICT_FLAGS: tuple[str, ...] = (FLAG_NEEDS_HUMAN_REVIEW, FLAG_MQM_CRITI
 #: (chrome, non-prose, policy, footer), as opposed to a fail-closed skip
 #: (spill/no_zone/math_unrenderable) that lost a translation. Shared by the
 #: reporter's coverage split and the export ledger pass so the two cannot drift.
-INTENTIONAL_PRESERVED_SKIP_PREFIXES: tuple[str, ...] = (
-    "render_skip:policy",
-    "render_skip:non_prose",
-    "render_skip:chrome",
-    "render_skip:footer",
-    # NOTE: ``render_skip:table_unparseable`` is deliberately absent — it is a
-    # *fail-closed* skip (a translated table the render could not place), not a
-    # deliberate source-keep, so it must count against coverage.
-    "inplace_skip:policy",
-    "inplace_skip:non_prose",
-    "inplace_skip:chrome",
-    "inplace_skip:footer",
-)
 
 
 def is_transient_failure(flags: Iterable[str]) -> bool:

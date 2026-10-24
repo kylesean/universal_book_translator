@@ -74,7 +74,7 @@ def _seed(tmp_path: Path) -> UBTConfig:
         _block(
             3, "A formula here", "公式在此", ["render_skip:overflow(base=1)"], BlockStatus.REPAIRED
         ),
-        _block(4, "Kept chrome", "保留页眉", ["inplace_skip:chrome"], BlockStatus.MTQE_PASSED),
+        _block(4, "Kept chrome", "保留页眉", [], BlockStatus.MTQE_PASSED),
     ]
     with SQLiteJobLedger(config.db_dir / f"{_JOB}.sqlite") as ledger:
         ledger.init_job_from_manifest(
@@ -88,11 +88,18 @@ def _seed(tmp_path: Path) -> UBTConfig:
     return config
 
 
-def test_issue_classifier_ignores_intentional_skips() -> None:
-    intentional = _block(9, "s", "t", ["inplace_skip:chrome"], BlockStatus.MTQE_PASSED)
-    assert segment_issue_kinds(intentional) == []
-    overflow = _block(9, "s", "t", ["render_skip:overflow(base=1)"], BlockStatus.REPAIRED)
-    assert segment_issue_kinds(overflow) == ["render"]
+def test_issue_classifier_flags_every_render_skip() -> None:
+    """Every ``render_skip:`` is a fault now, not a preserve.
+
+    The intentional-preserve whitelist (``inplace_skip:chrome`` and its
+    siblings) is gone: nothing ever emitted those reasons, and the one flag that
+    looked like one was mislabelled. A block that was skipped because its
+    translation could not be placed belongs in the ribbon.
+    """
+    clean = _block(9, "s", "t", [], BlockStatus.MTQE_PASSED)
+    assert segment_issue_kinds(clean) == []
+    skipped = _block(9, "s", "t", ["render_skip:overflow(base=1)"], BlockStatus.REPAIRED)
+    assert segment_issue_kinds(skipped) == ["render"]
     term = _block(9, "s", "t", ["Glossary term violation: x"], BlockStatus.NEEDS_HUMAN)
     assert segment_issue_kinds(term) == ["terminology"]
 

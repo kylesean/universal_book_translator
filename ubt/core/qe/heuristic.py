@@ -328,7 +328,7 @@ class HeuristicQERunner(BaseQERunner):
             return QE_SCORE_HTML_DELTA
         if "omission" in r:
             return QE_SCORE_OMISSION
-        if "script density" in r:
+        if "script density" in r or "carries no letters at all" in r:
             return QE_SCORE_SCRIPT_DENSITY
         if "numeric" in r:
             return QE_SCORE_NUMERIC

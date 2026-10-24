@@ -30,7 +30,6 @@ from ubt.core.content.nodes import (
     TextNode,
 )
 from ubt.core.ir.models import TERMINAL_STATUSES, BlockStatus, BlockType, IRBlock
-from ubt.core.qe.defect_taxonomy import INTENTIONAL_PRESERVED_SKIP_PREFIXES
 
 _ASSET_KIND: dict[BlockType, AssetKind] = {
     BlockType.FORMULA: AssetKind.FORMULA,
@@ -38,7 +37,7 @@ _ASSET_KIND: dict[BlockType, AssetKind] = {
     BlockType.IMAGE: AssetKind.FIGURE,
 }
 
-_SKIP_PREFIXES = ("render_skip:", "inplace_skip:")
+_SKIP_PREFIXES = ("render_skip:",)
 #: Skip reasons naming decorative chrome, not a meaning-bearing asset. Reused
 #: from the artifact-parity vocabulary so the two gates cannot drift.
 _DECORATIVE_SKIP_REASONS = frozenset({"decorative_banner", "cover_asset_missing"})
@@ -61,10 +60,6 @@ def _skip_reason(flag: str) -> str:
         if flag.startswith(prefix):
             return flag[len(prefix) :].split("(", 1)[0].strip()
     return flag
-
-
-def _all_intentional(flags: Sequence[str]) -> bool:
-    return bool(flags) and all(f.startswith(INTENTIONAL_PRESERVED_SKIP_PREFIXES) for f in flags)
 
 
 def kept_in_source(block: IRBlock) -> bool:
@@ -93,12 +88,11 @@ def kept_in_source(block: IRBlock) -> bool:
 
 def _text_node(block: IRBlock, order: int, region: SourceRegion | None) -> TextNode:
     flags = _skip_flags(block)
-    if flags and not _all_intentional(flags):
+    if flags:
         # A translation existed but the renderer left source visible: not silent
-        # (it is recorded), so a warning.
+        # (it is recorded), so a warning. Every ``render_skip:`` is fail-closed
+        # now — the intentional-keep families had no producer and were removed.
         disposition, reason = TextDisposition.SOURCE_KEPT, f"render:{_skip_reason(flags[0])}"
-    elif flags:  # intentional preserved element (chrome/non-prose/policy/footer)
-        disposition, reason = TextDisposition.VERBATIM, f"preserved:{_skip_reason(flags[0])}"
     elif block.skip_translate:
         # Carry the specific policy reason (``skip:bibliography entry …``) into
         # the contract instead of the opaque ``skip_translate``: the audit then
@@ -183,7 +177,7 @@ def _asset_node(
     if reasons & _DECORATIVE_SKIP_REASONS:
         integrity = AssetIntegrity.DROPPED
         detail = "intentional:" + ",".join(sorted(reasons & _DECORATIVE_SKIP_REASONS))
-    elif flags and not _all_intentional(flags):
+    elif flags:
         integrity = AssetIntegrity.MISSING
         detail = f"render:{_skip_reason(flags[0])}"
     elif reconstruction is not None:

@@ -208,8 +208,15 @@ def test_a_line_without_a_leading_pipe_is_not_a_grid_row() -> None:
 
 def test_markdown_grid_shape_needs_at_least_two_rows() -> None:
     assert markdown_grid_shape("| a | b |\n| c | d |") == [2, 2]
+    # A lone pipe row is prose unless a GFM delimiter row marks it as a table.
     assert markdown_grid_shape("| a | b |") == []
     assert markdown_grid_shape("plain text") == []
+
+
+def test_a_single_row_table_is_a_grid_when_it_has_a_delimiter_row() -> None:
+    # Header-only tables occur (a one-row comparison) and used to read as prose,
+    # which skipped both the dropped-table and the shape checks.
+    assert markdown_grid_shape("| Model | Acc |\n|---|---|") == [2, 2]
 
 
 def test_prose_with_inline_pipes_is_not_a_grid() -> None:
@@ -218,9 +225,23 @@ def test_prose_with_inline_pipes_is_not_a_grid() -> None:
     assert markdown_grid_shape("The options are A | B | C\nand D | E | F are also valid") == []
 
 
-def test_a_ragged_run_of_pipe_lines_is_not_a_grid() -> None:
-    # A real grid pads every row to the same column count; a ragged run does not.
-    assert markdown_grid_shape("| a | b |\n| c |") == []
+def test_a_ragged_run_of_pipe_lines_is_a_grid_with_reported_raggedness() -> None:
+    # A ragged run has to *count* as a table: returning [] made the shape checks
+    # skip exactly the grids a model mangled. The per-row counts expose the
+    # inconsistency to the caller's source/target comparison.
+    assert markdown_grid_shape("| a | b |\n| c |") == [2, 1]
+
+
+def test_a_ragged_target_is_a_grid_mismatch_not_a_dropped_table() -> None:
+    fp = FastPassFilter(source_lang="en", target_lang="zh")
+    decision = fp.evaluate(
+        "| a | b |\n| 1 | 2 |",
+        "| 甲 | 乙 |\n| 1 | 2 | 3 |",
+        block_type="table",
+    )
+    assert not decision.passed
+    assert "Table grid mismatch" in decision.reason
+    assert "ragged" in decision.reason
 
 
 def test_a_grid_without_a_trailing_pipe_is_still_a_grid() -> None:
@@ -642,7 +663,9 @@ def test_the_grid_label_counts_rows_and_columns_separately() -> None:
 
     assert _grid_label([5, 5, 5]) == "a 3-row x 5-column grid"
     assert _grid_label([2]) == "a 1-row x 2-column grid"
-    assert _grid_label([]) == "a 0-row x 0-column grid"
+    assert _grid_label([]) == "an empty grid"
+    # Ragged shapes must not pretend to a single column count.
+    assert _grid_label([3, 4]) == "a ragged 2-row grid (3, 4 columns per row)"
 
 
 @pytest.mark.asyncio
@@ -718,3 +741,55 @@ def test_a_dropped_heading_label_is_classified_as_a_deterministic_defect() -> No
     )
     assert has_structural_defect([flag])
     assert classify_defect([flag], score=None, threshold=0.75) == "DETERMINISTIC_DEFECT"
+
+
+# --------------------------------------------------------------------------- #
+# Language-identity gates: dialogue, symbol-only targets, verbatim blocks.
+# --------------------------------------------------------------------------- #
+
+
+def test_dialogue_is_prose_not_a_table() -> None:
+    """DIALOGUE is outside ``PROSE_BLOCK_TYPES``, and FastPass reads "not prose"
+    as "table": the sentence-drop gate switched off and the density floor fell to
+    0.02, so a line of dialogue with one translated word passed every check."""
+    fp = FastPassFilter(source_lang="en", target_lang="zh")
+    source = "Transformers rely on attention mechanisms to model long range dependencies."
+    half = "Transformers rely on 注意力 mechanisms to model long range dependencies."
+    for block_type in ("narrative", "dialogue"):
+        decision = fp.evaluate(source, half, block_type=block_type)
+        assert not decision.passed, block_type
+        assert "script density" in decision.reason
+
+
+def test_a_target_with_no_letters_is_not_a_translation() -> None:
+    """The residue strip removed every symbol, leaving an empty string that the
+    density check read as ratio 1.0. ``!!!@@@###%%%`` then passed every gate."""
+    fp = FastPassFilter(source_lang="en", target_lang="zh")
+    decision = fp.evaluate(
+        "Attention is all you need in this paper about transformers", "!!!@@@###%%%"
+    )
+    assert not decision.passed
+    assert "no letters" in decision.reason
+
+
+def test_a_numeric_only_table_body_still_passes() -> None:
+    """The no-letters rejection must not fire on a legitimately letter-free target."""
+    fp = FastPassFilter(source_lang="en", target_lang="zh")
+    decision = fp.evaluate(
+        "| Model | Acc |\n|---|---|\n| T5 | 84.3 |",
+        "| 模型 | 准确率 |\n|---|---|\n| T5 | 84.3 |",
+        block_type="table",
+    )
+    assert decision.passed
+
+
+@pytest.mark.parametrize("block_type", ["formula", "code"])
+def test_a_verbatim_block_is_exempt_from_language_identity(block_type: str) -> None:
+    """``skip_translate`` means "ship the source", so script density is not a
+    signal. ``repair_loop`` re-runs this gate over each candidate, and the old
+    unconditional check rejected every correct "leave the LaTeX alone" answer at
+    ratio 0.00."""
+    fp = FastPassFilter(source_lang="en", target_lang="zh")
+    decision = fp.evaluate("E = mc^2", "E = mc^2", block_type=block_type, skip_translate=True)
+    assert decision.passed
+    assert decision.target_ratio == 1.0

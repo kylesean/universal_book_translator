@@ -32,3 +32,25 @@ def test_parse_corrupt_count_reads_soup_corruption() -> None:
 
 def test_parse_corrupt_count_ignores_unrelated_flags() -> None:
     assert _parse_corrupt_count("html_attr_mismatch missing=[1] mismatched=[2]") == 0
+
+
+def test_every_render_skip_is_fail_closed() -> None:
+    """The report splits skips into fail-closed vs preserved; only the first exists.
+
+    ``preserved`` used to be read from an "intentional skip" whitelist that no
+    producer ever wrote. Its real meaning is ``skip_translate`` (a block shipped
+    in the source by design), which is counted from the blocks themselves — see
+    ``build_quality_report``. A ``render_skip:`` is always a translation the
+    renderer could not place.
+    """
+    from ubt.core.engine.reporter import summarize_render_skips
+
+    assert summarize_render_skips({}) == (0, 0, "No source-visible skips recorded")
+
+    fail_closed, preserved, verdict = summarize_render_skips(
+        {"render_skip:table_unparseable": 2, "render_skip:asset_not_found": 1}
+    )
+    assert (fail_closed, preserved) == (3, 0)
+    assert "review required" in verdict
+    # Families strip fit parameters so per-size variants do not fragment the audit.
+    assert "asset_not_found×1" in verdict

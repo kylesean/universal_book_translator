@@ -72,7 +72,9 @@ UNICODE_WORD_RE = re.compile(r"\w+", re.UNICODE)
 # ---------------------------------------------------------------------------
 # Block vocabulary (semantic categories — stable by design, not tuned)
 # ---------------------------------------------------------------------------
-PROSE_BLOCK_TYPES = frozenset({BlockType.HEADING, BlockType.NARRATIVE, BlockType.LIST_ITEM})
+PROSE_BLOCK_TYPES = frozenset(
+    {BlockType.HEADING, BlockType.NARRATIVE, BlockType.LIST_ITEM, BlockType.DIALOGUE}
+)
 # Blocks whose text must ship byte-identical. TABLE is deliberately NOT here:
 # a table's cells are the book's content, and both the parser
 # (``docling_parser`` marks tables ``skip=False``) and the QE layer (which
@@ -326,16 +328,6 @@ SHORT_CHAIN_MAX_PAGES = 30
 FAST_LANE_MIN_TEXT_CHARS = 200
 
 # ---------------------------------------------------------------------------
-# Length conservation (export.py — short-doc parity)
-# ---------------------------------------------------------------------------
-# Overflow skips on length-policy pages (resume_dense/poster_fixed) flip to
-# NEEDS_HUMAN so they reach the PE queue instead of shipping source-visible
-# with only an error flag. Kill-switch: False restores flag-only behaviour.
-LENGTH_OVERFLOW_TO_HUMAN = True
-# Page kinds under the length-conservation policy (fit-to-page, no repaginate).
-LENGTH_POLICY_PAGE_KINDS = frozenset({"resume_dense", "poster_fixed"})
-
-# ---------------------------------------------------------------------------
 # Verdict pre-filter (verdict.py — zero-LLM-cost keep rules)
 # ---------------------------------------------------------------------------
 HEXDUMP_MIN_TOKENS = 32
@@ -520,12 +512,6 @@ CALIBRATION: dict[str, KnobMeta] = {
         "UBT_SHORT_MAX_PAGES env var).",
     ),
     "FAST_LANE_MIN_TEXT_CHARS": KnobMeta(H, "200-char scan gate for the fast lane, unvalidated"),
-    "LENGTH_OVERFLOW_TO_HUMAN": KnobMeta(
-        H, "Overflow skips on length-policy pages go NEEDS_HUMAN, unvalidated"
-    ),
-    "LENGTH_POLICY_PAGE_KINDS": KnobMeta(
-        H, "Resume_dense/poster_fixed under fit-to-page, unvalidated"
-    ),
     # Verdict: single-doc keep rules.
     "HEXDUMP_MIN_TOKENS": KnobMeta(S, "32 byte-words observed in hex tables"),
     "HEXDUMP_MIN_SHARE": KnobMeta(S, "0.55 share observed in hex tables"),
@@ -671,8 +657,6 @@ __all__ = [
     "JOIN_HYPHEN_TAIL",
     "JOIN_LOWER_START",
     "JOIN_THRESHOLD",
-    "LENGTH_OVERFLOW_TO_HUMAN",
-    "LENGTH_POLICY_PAGE_KINDS",
     "MCP_MAX_RUNNING_JOBS",
     "NON_PROSE_FLOWS",
     "NON_TEXT_BLOCK_TYPES",

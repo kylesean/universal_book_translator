@@ -55,7 +55,9 @@ def test_every_calibration_key_resolves_to_a_module_attribute() -> None:
 
 def test_calibration_summary_matches_registry() -> None:
     summary = calibration_summary()
-    assert summary == {"proven": 28, "single_doc": 31, "hypothesis": 16}
+    # hypothesis count dropped by 2 when the unreachable LENGTH_* length-policy
+    # knobs were removed alongside the branch that could never fire.
+    assert summary == {"proven": 28, "single_doc": 31, "hypothesis": 14}
     assert sum(summary.values()) == len(CALIBRATION)
 
 
@@ -144,7 +146,12 @@ def test_block_type_accepts_bare_strings() -> None:
 
 
 def test_block_type_vocabularies_are_pinned() -> None:
-    assert {BlockType.HEADING, BlockType.NARRATIVE, BlockType.LIST_ITEM} == PROSE_BLOCK_TYPES
+    # DIALOGUE is prose. It was excluded, and FastPass reads "not prose" as
+    # "table", which switched off the sentence-drop gate and dropped the script
+    # density floor to 0.02 for every line of dialogue.
+    assert {BlockType.HEADING, BlockType.NARRATIVE, BlockType.LIST_ITEM, BlockType.DIALOGUE} == (
+        PROSE_BLOCK_TYPES
+    )
     assert {BlockType.FORMULA, BlockType.CODE, BlockType.IMAGE} == NON_TEXT_BLOCK_TYPES
     assert {FlowID.FOOTNOTE, FlowID.CAPTION, FlowID.TABLE_GRID} == NON_PROSE_FLOWS
 

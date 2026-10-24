@@ -33,7 +33,6 @@ from ubt.core.qe.defect_taxonomy import (
     ECHO_MARKERS,
     FLAG_MQM_CRITICAL_BLOCKED,
     FLAG_NEEDS_HUMAN_REVIEW,
-    INTENTIONAL_PRESERVED_SKIP_PREFIXES,
 )
 from ubt.core.qe.term_drift import detect_target_term_violations, replace_term_surface
 
@@ -75,6 +74,9 @@ _ISSUE_MARKERS: dict[str, tuple[str, ...]] = {
         "Table dropped",
         "Empty target text",
         "Target text suspiciously truncated",
+        # A target with no letters at all is wholesale loss, not a style
+        # problem: the reader got punctuation where prose belongs.
+        "carries no letters at all",
     ),
     "fabrication": (
         "Added reference",
@@ -105,7 +107,7 @@ _ISSUE_MARKERS: dict[str, tuple[str, ...]] = {
 #: Prefixes that mark a fail-closed render skip (a translation that could not be
 #: placed). The intentional-preserve prefixes are excluded — those are chrome /
 #: non-prose kept on purpose, not faults.
-_RENDER_SKIP_PREFIXES = ("render_skip:", "inplace_skip:")
+_RENDER_SKIP_PREFIXES = ("render_skip:",)
 
 #: Every issue kind, in ribbon display order.
 ISSUE_KINDS: tuple[str, ...] = (*_ISSUE_MARKERS, "render")
@@ -116,8 +118,6 @@ def segment_issue_kinds(block: IRBlock) -> list[str]:
     kinds: list[str] = []
     for flag in block.error_flags or ():
         if not flag:
-            continue
-        if any(flag.startswith(prefix) for prefix in INTENTIONAL_PRESERVED_SKIP_PREFIXES):
             continue
         matched = False
         for kind, markers in _ISSUE_MARKERS.items():

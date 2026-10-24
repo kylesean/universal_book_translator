@@ -92,7 +92,6 @@ class RunServices:
             qe_runner=qe_runner,
             max_rounds=config.max_repair_rounds,
             qe_threshold=config.qe_threshold,
-            bottom_percentile=config.bottom_percentile,
         )
 
 

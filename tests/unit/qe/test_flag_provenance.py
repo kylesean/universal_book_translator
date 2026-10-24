@@ -11,11 +11,10 @@ table recognises and nothing failed. That is not hypothetical:
   lost its markup classified as "other structural rejection" (0.70) and any
   threshold at or below it released the block.
 * Nine flags the pipeline really emits (``numeric_advisory``,
-  ``length_overflow``, ``render_skip:non_prose``, …) classify as ``PASS`` today.
-  Most of that is *correct* — they are advisories, render skips or lifecycle
-  notes, not quality defects — but it is correct by accident: nothing records
-  the intent, so the next reader cannot tell a deliberate exemption from an
-  oversight.
+  ``render_skip:non_prose``, …) classify as ``PASS`` today. Most of that is
+  *correct* — they are advisories, render skips or lifecycle notes, not quality
+  defects — but it is correct by accident: nothing records the intent, so the
+  next reader cannot tell a deliberate exemption from an oversight.
 
 This module turns the accident into a contract. ``EXEMPT`` names every emitted
 flag family that is deliberately not a quality defect, with the reason. The
@@ -65,14 +64,15 @@ EXEMPT: dict[str, str] = {
     "mqm_critical_blocked": "triage verdict; permanent, never auto-reset",
     # --- render / layout: the deliverable was adjusted, the text was not ------
     "render_skip:": "the renderer kept the source element; not a text defect",
-    "inplace_skip:": "the renderer kept the source element; not a text defect",
-    "length_overflow:": "the layout policy moved the block; the translation is intact",
+    "non_prose_degraded:": (
+        "an advisory on a block that is already NEEDS_HUMAN; the renderer still "
+        "typesets its draft, so nothing was skipped and nothing was lost"
+    ),
     "column_count_mismatch": "table reconstruction refused; reported, never blocked",
     "row_count_mismatch": "table reconstruction refused; reported, never blocked",
     "target_not_a_pipe_table": "table reconstruction refused; reported, never blocked",
     "source_not_a_pipe_table": "table reconstruction refused; reported, never blocked",
-    "html_formatting_drift:": "the HTML delta validator's advisory tier",
-    # --- advisory: reported, never blocked -----------------------------------
+    "html_formatting_drift:": "the HTML delta validator's advisory tier",  # --- advisory: reported, never blocked -----------------------------------
     "numeric_advisory:": "numeric order/repeat notes are advisory by design",
     "numeric_order_differs:": "advisory: order may legitimately change in translation",
     "numeric_repeat_shortfall:": "advisory: an elided restatement is legal",
@@ -620,3 +620,63 @@ def test_classify_defect_reads_a_structured_flag_end_to_end() -> None:
 
     advisory = format_defect_flag("word_order", "minor", "x")
     assert classify_defect([advisory], score=0.99, threshold=0.75) == "PASS"
+
+
+def test_the_intentional_preserve_whitelist_is_gone() -> None:
+    """Eight prefixes were declared "intentional keeps" and none had a producer.
+
+    ``render_skip:{policy,non_prose,chrome,footer}`` and their four
+    ``inplace_skip:`` twins made ``preserved_blocks`` a permanently-zero KPI in
+    real runs, and the one flag that looked like it belonged — triage's
+    ``render_skip:non_prose`` — was actively wrong: the renderer typesets the
+    rejected *draft* for a NEEDS_HUMAN block, so the contract recorded a
+    translation the reader received as "text missing". A block ships its source
+    for exactly one reason (``skip_translate``), which produces
+    ``TextDisposition.VERBATIM`` on its own.
+    """
+    import ubt.core.qe.defect_taxonomy as taxonomy
+
+    assert not hasattr(taxonomy, "INTENTIONAL_PRESERVED_SKIP_PREFIXES")
+
+
+def test_no_emitter_uses_the_inplace_skip_spelling() -> None:
+    """``inplace_skip:`` was read-compatibility for a spelling nothing wrote.
+
+    Matched against *string literals and identifiers*, not raw file text: the
+    removal notes in the docstrings name the spelling they retired, and a plain
+    substring scan flags its own explanation.
+    """
+    import ast
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[3] / "ubt"
+    offenders: list[str] = []
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            literal = ""
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                literal = node.value
+            elif isinstance(node, ast.Name):
+                literal = node.id
+            if "inplace_skip" in literal:
+                line = getattr(node, "lineno", 0)
+                offenders.append(f"{path.relative_to(root)}:{line}")
+    assert offenders == []
+
+
+def test_a_needs_human_non_prose_block_is_not_marked_as_a_render_skip() -> None:
+    """Triage must not write a skip flag for a block it did not skip."""
+    import pathlib
+
+    source = (
+        pathlib.Path(__file__).resolve().parents[3]
+        / "ubt"
+        / "core"
+        / "engine"
+        / "stages"
+        / "triage.py"
+    ).read_text(encoding="utf-8")
+    # The comment explains the retired flag; the *string literal* must be gone.
+    assert '"render_skip:non_prose"' not in source
+    assert '"non_prose_degraded: structural block kept in the draft"' in source

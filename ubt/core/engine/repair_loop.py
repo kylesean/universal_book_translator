@@ -53,7 +53,6 @@ class RepairLoop:
         qe_runner: BaseQERunner,
         max_rounds: int = 2,
         qe_threshold: float = 0.75,
-        bottom_percentile: float = 0.15,
         fast_pass: FastPassFilter | None = None,
         escalation_extra_rounds: int = 1,
     ) -> None:
@@ -61,7 +60,6 @@ class RepairLoop:
         self.qe_runner = qe_runner
         self.max_rounds = max_rounds
         self.qe_threshold = qe_threshold
-        self.bottom_percentile = bottom_percentile
         self.fast_pass = fast_pass or getattr(qe_runner, "fast_pass", None)
         # MQM Critical escalation: flagship repair tier gets
         # extra rounds beyond the standard circuit breaker before a block is

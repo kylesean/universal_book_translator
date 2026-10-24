@@ -50,6 +50,7 @@ from ubt.core.qe.defect_taxonomy import (
 #: purpose — see :func:`upgrade_flag`.
 _CATEGORY_BY_MARKER: dict[str, str] = {
     "Empty target text": "empty_target",
+    "carries no letters at all": "empty_target",
     "Numeric fidelity": "numeric_fidelity",
     "Omission suspected": "omission",
     "Table dropped": "table_dropped",
