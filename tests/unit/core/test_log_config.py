@@ -71,23 +71,30 @@ def test_httpx_and_httpcore_are_floored_at_warning() -> None:
 def test_debug_lifts_floor_on_noisy_loggers(monkeypatch: pytest.MonkeyPatch) -> None:
     """UBT_LOG_LEVEL=DEBUG or explicit debug level lifts the floor to NOTSET (inherits root DEBUG)."""
     monkeypatch.setenv("UBT_LOG_LEVEL", "DEBUG")
-    setup_logging()
-
-    httpx_logger = logging.getLogger("httpx")
-    # In lift_all mode, floor is removed (set to NOTSET so it inherits root DEBUG)
-    assert httpx_logger.level == logging.NOTSET
-    assert httpx_logger.isEnabledFor(logging.DEBUG)
+    root = logging.getLogger()
+    old_level = root.level
+    try:
+        setup_logging()
+        httpx_logger = logging.getLogger("httpx")
+        # In lift_all mode, floor is removed (set to NOTSET so it inherits root DEBUG)
+        assert httpx_logger.level == logging.NOTSET
+        assert httpx_logger.isEnabledFor(logging.DEBUG)
+    finally:
+        root.setLevel(old_level)
 
 
 def test_setup_logging_preserves_debug_when_already_debug() -> None:
     """If an outer CLI callback (e.g. -v) already put root into DEBUG, re-calling setup_logging keeps it."""
     root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
-
-    # A bare setup_logging() without args should detect already_debug and stay in DEBUG
-    setup_logging()
-    assert root.level == logging.DEBUG
-    assert logging.getLogger("httpx").isEnabledFor(logging.DEBUG)
+    old_level = root.level
+    try:
+        root.setLevel(logging.DEBUG)
+        # A bare setup_logging() without args should detect already_debug and stay in DEBUG
+        setup_logging()
+        assert root.level == logging.DEBUG
+        assert logging.getLogger("httpx").isEnabledFor(logging.DEBUG)
+    finally:
+        root.setLevel(old_level)
 
 
 def test_access_noise_filter_filters_polling_requests() -> None:
@@ -175,8 +182,10 @@ def test_access_noise_filter_filters_polling_requests() -> None:
     )
 
 
-def test_run_server_passes_log_config_none_to_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:
-    """run_server must pass log_config=None so uvicorn inherits UBT's standard logging."""
+def test_run_server_boots_uvicorn_with_noisy_loggers_floored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """run_server boots uvicorn with colorized terminal logging while keeping httpx wire traces floored."""
     from ubt.api.app import run_server
 
     captured_kwargs: dict[str, object] = {}
@@ -191,4 +200,4 @@ def test_run_server_passes_log_config_none_to_uvicorn(monkeypatch: pytest.Monkey
     run_server(host="127.0.0.1", port=8999)
 
     assert captured_kwargs["app_target"] == "ubt.api.app:app"
-    assert captured_kwargs["log_config"] is None
+    assert logging.getLogger("httpx").level == logging.WARNING

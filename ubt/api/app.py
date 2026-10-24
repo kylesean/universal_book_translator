@@ -565,4 +565,4 @@ def run_server(host: str | None = None, port: int | None = None) -> None:
     _require_api_key_gate(server_config)
     import uvicorn
 
-    uvicorn.run("ubt.api.app:app", host=host, port=port, reload=False, log_config=None)
+    uvicorn.run("ubt.api.app:app", host=host, port=port, reload=False)
