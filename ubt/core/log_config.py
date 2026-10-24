@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import sys
+import warnings
 from typing import Any, TextIO
 
 from rich.logging import RichHandler
@@ -199,3 +200,10 @@ def setup_logging(
     # Count-and-summarize, never mute: a third party that warns once per
     # recoverable object still has to be countable for visual_report.json.
     install_noise_aggregators()
+
+    # Filter known noisy third-party deprecations (e.g. jieba's legacy pkg_resources import)
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*pkg_resources is deprecated as an API.*",
+        category=UserWarning,
+    )

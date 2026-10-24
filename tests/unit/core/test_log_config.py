@@ -207,3 +207,17 @@ def test_run_server_boots_uvicorn_with_noisy_loggers_floored(
 
     assert captured_kwargs["app_target"] == "ubt.api.app:app"
     assert logging.getLogger("httpx").level == logging.WARNING
+
+
+def test_pkg_resources_userwarning_is_filtered() -> None:
+    """The deprecated pkg_resources warning from third parties like jieba is filtered."""
+    import warnings
+
+    setup_logging()
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.warn(
+            "pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html.",
+            UserWarning,
+            stacklevel=1,
+        )
+    assert len(captured) == 0
