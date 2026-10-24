@@ -42,6 +42,34 @@ _ENUM_REQUEST_FIELDS: dict[str, tuple[str, ...]] = {
 }
 
 
+#: Preset names that were renamed, and what they became. Kept as a one-way map
+#: (not an enum alias) so the failure is loud but *actionable*: a stored job's
+#: ``submitted_request.preset`` from before the rename reaches
+#: ``validate_request_enums`` on resume, and "'publication' is not valid" alone
+#: leaves the operator guessing. The value is never silently accepted — the two
+#: presets are not the same run identity, and a job id must not resume under a
+#: name it was not created with.
+_RENAMED_PRESETS: dict[str, str] = {
+    "publication": "high_fidelity",
+    "publication_math": "vector_math",
+    "full_reflow": "high_fidelity",
+}
+
+
+def _preset_migration_hint(value: object) -> str:
+    """The actionable half of an unknown-preset error, or ``""``."""
+    if not isinstance(value, str):
+        return ""
+    replacement = _RENAMED_PRESETS.get(value.strip().lower())
+    if replacement is None:
+        return ""
+    return (
+        f" '{value}' was renamed to '{replacement}' and is no longer accepted; "
+        "re-run with the new name (the ledger namespace changes with the preset, "
+        "so an old job cannot resume under it)."
+    )
+
+
 def validate_request_enums(request: Mapping[str, Any]) -> None:
     """Reject an out-of-vocabulary enum option at the entry point, uniformly.
 
@@ -55,7 +83,8 @@ def validate_request_enums(request: Mapping[str, Any]) -> None:
         if value is None:
             continue
         if value not in allowed:
-            raise UBTError(f"Invalid {key} {value!r}; expected one of: {', '.join(allowed)}")
+            hint = _preset_migration_hint(value) if key == "preset" else ""
+            raise UBTError(f"Invalid {key} {value!r}; expected one of: {', '.join(allowed)}.{hint}")
 
 
 # Job ids become SQLite file names (`<job_id>.sqlite`), so this regex acts as a

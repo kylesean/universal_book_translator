@@ -115,3 +115,59 @@ def test_each_preset_has_a_distinct_parameter_bundle() -> None:
         signature = tuple(sorted(policy.engine_overrides().items()))
         assert signature not in bundles, f"{preset} duplicates {bundles[signature]}"
         bundles[signature] = preset
+
+
+# --------------------------------------------------------------------------- #
+# The rename must fail loudly *and* actionably.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("publication", "high_fidelity"),
+        ("publication_math", "vector_math"),
+        ("full_reflow", "high_fidelity"),
+    ],
+)
+def test_a_retired_preset_name_names_its_replacement(old: str, new: str) -> None:
+    """A stored job from before the rename reaches this on resume.
+
+    "'publication' is not valid" leaves the operator guessing which name to use;
+    the error now names it. The value is still rejected — a preset is part of the
+    ledger's run identity, so accepting the old spelling would resume a job under
+    settings it was not created with.
+    """
+    from ubt.core.exceptions import UBTError
+    from ubt.core.job_options import validate_request_enums
+
+    with pytest.raises(UBTError) as excinfo:
+        validate_request_enums({"preset": old})
+
+    message = str(excinfo.value)
+    assert f"was renamed to '{new}'" in message
+    assert "no longer accepted" in message
+
+
+def test_an_unknown_preset_gets_no_migration_hint() -> None:
+    """Only a *retired* name earns the hint; a typo must not be pointed at a preset."""
+    from ubt.core.exceptions import UBTError
+    from ubt.core.job_options import validate_request_enums
+
+    with pytest.raises(UBTError) as excinfo:
+        validate_request_enums({"preset": "publikation"})
+    assert "was renamed" not in str(excinfo.value)
+
+
+def test_the_old_names_are_not_enum_members() -> None:
+    """No alias: ``Preset("publication")`` raising is the intended behaviour."""
+    for retired in ("publication", "publication_math", "full_reflow"):
+        with pytest.raises(ValueError):
+            Preset(retired)
+    assert {p.value for p in Preset} == {
+        "high_fidelity",
+        "standard",
+        "vector_math",
+        "preview",
+        "fast",
+    }
