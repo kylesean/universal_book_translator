@@ -11,6 +11,49 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Changed
 
+- **The segments API owns mark unwrapping; the workbench's parallel parser is
+  deleted.** The engine writes two `<mark>` wrappers with different meanings
+  (`ubt-failed-draft` = a real draft whose repair call failed;
+  `ubt-blocked-human` = quarantined source), and the console re-implemented
+  half of that grammar client-side — so quarantined blocks rendered their raw
+  markup in the review pane and an edit seeded from them would have written
+  the wrapper back into the ledger. `serialize_segment` now delivers the
+  unwrapped text (`delivered_text`) plus the facts (`repair_failed`,
+  `repair_error`, `quarantined`) through the engine's own delivered-text rule:
+  one owner, and a frontend that cannot drift again.
+- **An absent visual report is no longer a passing gate.** The quality view
+  treated a missing visual report (gate disabled, or a non-PDF deliverable) as
+  a clean pixel gate — a full-score pillar and radar axis for a check that
+  never ran, the exact false attestation the view's own comments promise
+  cannot happen. Missing now reads as "no report", warn-scored, with the
+  reason; and a `warning` verdict (deliverable, human review pending) no
+  longer renders under the red "GATE BLOCKED" banner.
+- **Wizard quotes stay honest.** A silent re-assessment failure kept the last
+  quote but blanked the panel with no explanation (now: the quote stays,
+  flagged as possibly outdated); and a preset/language/provider change made
+  while a deep assessment was in flight was never re-priced — the operator
+  submitted a differently-priced payload than the dollars shown (now: a
+  fingerprint comparison re-prices on settle). Numeric fields
+  (concurrency/chapter window) gained the budget field's client-side guard
+  against hand-typed zeros the server 422s.
+- **The SSE client gives up on a stream that never opens.** An embedded-mode
+  terminal job (anything a CLI run completed, or after a restart) has a
+  `/status` fallback but no `/stream` fallback, so the console retried a 404
+  forever at one request per backoff window per open tab; six consecutive
+  failures without a single successful open now stop the retry. A stream that
+  connected once keeps the old retry-forever behaviour.
+- **The console's long tail**: downloads from a stale delivery open the tab
+  inside the click gesture (the re-render outlasts the browser's activation
+  window and the popup blocker ate the old click); `loadMore`/term-refresh
+  carry the same staleness guard as `load`; switching jobs inside the review
+  view can no longer persist job A's drafts under job B's key; the TM panel
+  pages past its first 200 rows; reparse and delete demand the typed job id
+  their own comments always claimed; the confirm dialog actually traps focus;
+  AuthGate cannot wedge on a network-layer reject; provider-editor loads no
+  longer overwrite typing; every rendered string (the crash screen included)
+  goes through i18n; and the never-used react-query provider and Card family
+  are gone from the bundle.
+
 - **One FastPassFilter per run, owned by the run.** The QE runner used to
   build a private filter that had to be taught the glossary, the document
   context and the vocabulary by hand while the draft stage bound a second
