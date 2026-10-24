@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
+### Changed
+
+- **One FastPassFilter per run, owned by the run.** The QE runner used to
+  build a private filter that had to be taught the glossary, the document
+  context and the vocabulary by hand while the draft stage bound a second
+  filter — three measured gate-versus-score contradictions came from that
+  split, each patched with cross-carry rebind code. The pipeline now hands the
+  run's filter to the runner (`with_fast_pass`), so whatever the draft stage
+  binds is, by identity, what `score_pairs` scores with; the quality gate's
+  re-synchronisation block and the glossary rebind's hand-carry are deleted.
+- **Recursive gutter cuts: three-column pages read column-major.** A single
+  cut merged the third column into a neighbour cluster, interleaving columns
+  2 and 3 line by line (and cutting a 24-line three-column scan into 17
+  paragraph groups in the VLM fallback). Each region now recurses into its
+  two sides under strict sub-split guards; differential testing against the
+  previous implementation: 4000/4000 random one- and two-column pages
+  element-for-element identical, 300/300 three-column pages column-major.
+- **The pdf-oxide binding surface is contract-pinned.** UBT touches exactly
+  four symbols; a drift in a young 0.3.x dependency used to surface as a
+  silent runtime `None` in the visual gate. The contract test exercises
+  construction, page count, DPI parity (the crop math depends on it), PNG
+  output and text shape against a real document — raising the pin is now a
+  review-time decision gated by a red/green test, and the stale size/API
+  notes in `pyproject.toml` are corrected.
+
 ### Fixed
 
 - **Swapped checksum-less placeholder echoes fail closed instead of restoring
