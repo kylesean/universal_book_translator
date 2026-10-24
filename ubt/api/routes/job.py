@@ -474,7 +474,7 @@ def register_job_routes(
         if req.deep and assess_semaphore.locked():
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Server at capacity: too many deep assessments in flight",
+                detail="Server at capacity: assessment slots are saturated",
             )
         async with assess_semaphore:
             return await _assess()
@@ -605,6 +605,7 @@ def register_job_routes(
                     reused=True,
                 )
 
+        default_out_dir: Path | None = None
         if req.output_path:
             resolved_out = resolve_secure_path(req.output_path, must_exist=False, config=app_config)
             target_candidate = (
@@ -634,8 +635,10 @@ def register_job_routes(
             # the directory allows the export stage to derive the honest
             # deliverable name (_mono or _bilingual) dynamically based on the
             # resolved profile and bilingual_mode, rather than pre-allocating
-            # a hardcoded filename.
-            default_out_dir = ensure_private_dir(_managed_dir("outputs") / submit_id)
+            # a hardcoded filename. The directory itself is created only once
+            # the submit is accepted — earlier rejections (409/429/parse)
+            # must not leave a ghost directory per refused job id.
+            default_out_dir = _managed_dir("outputs") / submit_id
             resolved_out = resolve_secure_path(default_out_dir, must_exist=False, config=app_config)
             stem = clean_source_stem(resolved_in)
             for candidate in (
@@ -737,6 +740,8 @@ def register_job_routes(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=str(exc),
                 ) from exc
+            if default_out_dir is not None:
+                ensure_private_dir(default_out_dir)
             return JobSubmitResponse(
                 job_id=job.job_id,
                 status=job.status.value,
@@ -771,6 +776,8 @@ def register_job_routes(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(exc),
             ) from exc
+        if default_out_dir is not None:
+            ensure_private_dir(default_out_dir)
 
         # Persist the accepted job before starting its task. Ingest writes the
         # real manifest later; until then this row is what lets a restarted
@@ -1197,11 +1204,16 @@ def register_job_routes(
         ledger_gone, outputs_gone = await asyncio.to_thread(_remove)
         # Drop the queue row too. Leaving it makes the job reappear in /jobs as
         # COMPLETED with a download that no longer resolves, and makes re-submitting
-        # the same id a no-op ("already completed") that never runs again.
+        # the id a no-op ("already completed") that never runs again.
         queued_gone = False
         if job_queue is not None:
             queued_gone = bool(await asyncio.to_thread(job_queue.delete, valid_id))
         manager.forget_job(valid_id)
+        # And the job's replay history: the buffer is LRU-bounded, but the id
+        # is right here and the frames are dead the moment the job is gone.
+        replay = getattr(api_app.state, "sse_replay", None)
+        if replay is not None:
+            replay.forget(valid_id)
         if not ledger_gone and not outputs_gone and not queued_gone and record is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

@@ -799,9 +799,11 @@ def test_default_output_lands_in_per_job_outputs_dir(
     assert isinstance(job_id, str) and job_id.startswith("job_")
     out = Path(captured["request"].output_path)
     assert out == (tmp_path / "db" / "outputs" / job_id).resolve()
-    # The directory exists before the worker starts, and the source staging
-    # area stays free of deliverables.
-    assert out.is_dir()
+    # A rejected submit (400 here) must not leave the per-job directory behind:
+    # the directory is created only once the submit is accepted, so a refused
+    # job id leaves no ghost in the outputs tree. The source staging area stays
+    # free of deliverables either way.
+    assert not out.is_dir()
     assert "uploads" not in out.parts
 
 
