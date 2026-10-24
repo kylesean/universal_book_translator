@@ -65,8 +65,18 @@ export function AuthGate({ children }: AuthGateProps) {
     if (!key.trim() || busy) return
     setBusy(true)
     setFailed(false)
-    const ok = await signIn(key.trim())
-    setBusy(false)
+    let ok = false
+    try {
+      ok = await signIn(key.trim())
+    } catch {
+      // A network-layer reject (server unreachable between the probe and this
+      // submit) used to skip the reset below: `busy` stayed true forever and
+      // the only way out was a full reload. `signIn` has already handled the
+      // HTTP-level rejections; this is purely the fetch throwing.
+      ok = false
+    } finally {
+      setBusy(false)
+    }
     if (ok) {
       setState('signed-in')
     } else {

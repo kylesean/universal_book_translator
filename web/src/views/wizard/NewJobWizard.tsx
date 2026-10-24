@@ -98,6 +98,18 @@ const LANGUAGES: ReadonlyArray<{ code: string; label: string }> = [
   { code: 'he', label: 'עברית (he)' },
 ]
 
+/**
+ * Whether a numeric field holds a value the server would 422 on. Pure and
+ * module-scoped: ``min={1}`` only constrains the stepper, a hand-typed 0 (or a
+ * half-finished edit) still enters state, and both the assess payload and the
+ * submit guard must agree on the verdict.
+ */
+function numericFieldInvalid(raw: string, min: number): boolean {
+  if (!raw.trim()) return false // empty = follow the operator's default
+  const value = Number(raw)
+  return !Number.isFinite(value) || value < min
+}
+
 export function NewJobWizard() {
   const { t } = useI18n()
   const navigate = useNavigate()
@@ -196,10 +208,24 @@ export function NewJobWizard() {
   const selectedProviderDetail = declaredProviders.find((p) => p.name === provider)
 
   const lastAssessedFileRef = useRef<string>('')
+  // Fingerprint of the params the LAST COMPLETED assessment priced. The
+  // reactive re-assess compares the form's live fingerprint against it, so a
+  // change made while a (slow, deep) assessment was in flight is re-priced
+  // when things settle — the old filePath-only gate skipped those forever and
+  // the operator could submit a differently-priced payload than the quote
+  // shown.
+  const assessedFingerprintRef = useRef<string>('')
+  // The live fingerprint, kept current for completion-time rechecks (the
+  // callback closing over the render that started it would see stale params).
+  const formFingerprintRef = useRef<string>('')
+  // True while an explicit (deep) assess owns the next fingerprint: the
+  // reactive effect must not schedule a shallow re-price that would race it.
+  const deepInFlightRef = useRef(false)
   const hasUserSelectedPresetRef = useRef<boolean>(false)
   const hasUserSelectedDomainRef = useRef<boolean>(false)
   const hasUserSelectedDualModeRef = useRef<boolean>(false)
   const assessSeqRef = useRef(0)
+  const [assessStale, setAssessStale] = useState(false)
 
   const runAssess = useCallback(
     async (
@@ -214,6 +240,8 @@ export function NewJobWizard() {
     ) => {
       if (!path.trim()) return
       const isSilent = opts?.silent ?? false
+      const wasDeep = !isSilent
+      if (wasDeep) deepInFlightRef.current = true
       if (!isSilent) {
         setIsAssessing(true)
         setAssessment(null)
@@ -242,11 +270,30 @@ export function NewJobWizard() {
           provider: provider || null,
           ocr_mode: ocrMode === 'auto' ? null : ocrMode,
           visual_judge_enabled: visualJudge === 'auto' ? null : visualJudge === 'on',
-          max_concurrency: concurrency.trim() ? Number(concurrency) : null,
+          // An invalid value prices as unset — the field-level guard stops the
+          // submit; the quote must not 422 on the way.
+          max_concurrency:
+            concurrency.trim() && !numericFieldInvalid(concurrency, 1)
+              ? Number(concurrency)
+              : null,
           deep: !isSilent,
         })
         if (seq !== assessSeqRef.current) return // stale response
         setAssessment(res)
+        setAssessStale(false)
+        // What this response actually priced — the reactive effect and the
+        // completion-time recheck both compare against it.
+        assessedFingerprintRef.current = [
+          path.trim(),
+          activePreset ?? '',
+          activePages.trim(),
+          activeTarget,
+          activeSource,
+          provider,
+          ocrMode,
+          visualJudge,
+          concurrency.trim(),
+        ].join('\u0000')
 
         // Auto-feed recommendations when a new document is assessed
         if (lastAssessedFileRef.current !== path.trim()) {
@@ -274,45 +321,75 @@ export function NewJobWizard() {
         if (seq !== assessSeqRef.current) return // stale response
         if (!isSilent) {
           setAssessError(err instanceof Error ? err.message : 'Assessment failed')
+          setAssessment(null) // don't leave a stale quote on error
+        } else {
+          // A silent re-price failure must not blank the panel: the last quote
+          // stays, visibly flagged as possibly outdated. Record the attempted
+          // fingerprint so the drift check does not loop on the same failure.
+          setAssessStale(true)
+          assessedFingerprintRef.current = [
+            path.trim(),
+            activePreset ?? '',
+            activePages.trim(),
+            activeTarget,
+            activeSource,
+            provider,
+            ocrMode,
+            visualJudge,
+            concurrency.trim(),
+          ].join('\u0000')
         }
-        setAssessment(null) // don't leave a stale quote on error
       } finally {
         if (seq === assessSeqRef.current) {
           setIsAssessing(false)
           setIsReassessing(false)
+          if (wasDeep) deepInFlightRef.current = false
+          // Params moved while this assessment was in flight: the quote that
+          // just landed prices the old ones, so re-price with the current form.
+          if (
+            formFingerprintRef.current &&
+            assessedFingerprintRef.current !== formFingerprintRef.current
+          ) {
+            setTimeout(() => void runAssessRef.current(path.trim(), { silent: true }), 350)
+          }
         }
       }
     },
     [preset, pageRange, targetLang, sourceLang, provider, ocrMode, visualJudge, concurrency]
   )
 
-  // Reactive re-assessment on preset / page slice / lang tweaks
-  useEffect(() => {
-    if (!filePath.trim()) return
-    if (lastAssessedFileRef.current === filePath.trim()) {
-      const timer = setTimeout(() => {
-        void runAssess(filePath, {
-          overridePreset: preset ?? undefined,
-          overridePages: pageRange,
-          overrideTarget: targetLang,
-          overrideSource: sourceLang,
-          silent: true,
-        })
-      }, 350)
-      return () => clearTimeout(timer)
-    }
-  }, [
-    filePath,
-    preset,
-    pageRange,
+  // The live fingerprint and the latest callback, read at completion time.
+  const assessFingerprint = [
+    filePath.trim(),
+    preset ?? '',
+    pageRange.trim(),
     targetLang,
     sourceLang,
     provider,
     ocrMode,
     visualJudge,
-    concurrency,
-    runAssess,
-  ])
+    concurrency.trim(),
+  ].join('\u0000')
+  const runAssessRef = useRef(runAssess)
+  useEffect(() => {
+    formFingerprintRef.current = assessFingerprint
+    runAssessRef.current = runAssess
+  })
+
+  // Reactive re-assessment: whenever the form's pricing fingerprint drifts
+  // from what the last completed assessment priced, re-price (debounced). A
+  // deep assessment in flight owns the fingerprint — racing it with a shallow
+  // call would discard the deep result — so drift during a deep flight is
+  // handled by the completion-time recheck above instead.
+  useEffect(() => {
+    if (!filePath.trim()) return
+    if (deepInFlightRef.current) return
+    if (assessedFingerprintRef.current === assessFingerprint) return
+    const timer = setTimeout(() => {
+      void runAssessRef.current(filePath, { silent: true })
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [assessFingerprint, filePath])
 
   // Browsers do not expose a real filesystem path (`File.path` exists only in
   // Electron), so the picked file is uploaded to the server and the staged
@@ -324,6 +401,7 @@ export function NewJobWizard() {
     setIsUploading(true)
     setAssessError(null)
     setAssessment(null)
+    setAssessStale(false)
     lastAssessedFileRef.current = ''
     hasUserSelectedPresetRef.current = false
     hasUserSelectedDomainRef.current = false
@@ -349,6 +427,12 @@ export function NewJobWizard() {
   }
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Same guard as the drop path: a second pick while an upload is in flight
+    // would race the first (last-picked name, last-finished path).
+    if (isUploading) {
+      e.target.value = ''
+      return
+    }
     if (e.target.files && e.target.files.length > 0) {
       void handleFile(e.target.files[0])
       e.target.value = '' // allow re-picking the same file after an edit
@@ -379,6 +463,18 @@ export function NewJobWizard() {
    * keeps the failure visible at the field instead of at the API boundary.
    */
   const budgetInvalid = budgetUsd === null && budgetInput.trim() !== ''
+  /**
+   * Same trap as the budget field, for the other numeric fields: ``min={1}``
+   * only constrains the stepper, a hand-typed 0 (or a half-finished edit)
+   * still enters state, and the server answers 422 for
+   * ``max_concurrency<=0`` and ``start_chapter``/``max_chapters`` below 1 —
+   * after the submit was already allowed.
+   */
+  const concurrencyInvalid = numericFieldInvalid(concurrency, 1)
+  const chapterStartInvalid = numericFieldInvalid(chapterStart, 1)
+  const chapterCountInvalid = numericFieldInvalid(chapterCount, 1)
+  const advancedNumericInvalid =
+    concurrencyInvalid || chapterStartInvalid || chapterCountInvalid
   /**
    * OCR modes that ship rendered page images off this machine.
    *
@@ -457,7 +553,14 @@ export function NewJobWizard() {
   }
 
   const handleSubmit = async () => {
-    if (!filePath.trim() || isSubmitting || glossaryError || budgetInvalid) return
+    if (
+      !filePath.trim() ||
+      isSubmitting ||
+      glossaryError ||
+      budgetInvalid ||
+      advancedNumericInvalid
+    )
+      return
     if (rehearsalOnly && !rehearsalAcknowledged) {
       // The banner is the only path to a mock delivery: pressing compile without
       // acknowledging it must not silently produce one.
@@ -594,11 +697,16 @@ export function NewJobWizard() {
               }}
               onDragLeave={() => setIsDragOver(false)}
               onDrop={handleFileDrop}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => {
+                // Guarded like the drop path: re-opening the picker mid-upload
+                // races two staged files (name from the last pick, path from
+                // the last upload to finish).
+                if (!isUploading) fileInputRef.current?.click()
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault()
-                  fileInputRef.current?.click()
+                  if (!isUploading) fileInputRef.current?.click()
                 }
               }}
               className={`rounded-lg border-2 border-dashed p-5 sm:p-7 transition-all cursor-pointer text-center ${
@@ -642,7 +750,6 @@ export function NewJobWizard() {
               />
               <Button
                 onClick={() => {
-                  lastAssessedFileRef.current = ''
                   hasUserSelectedPresetRef.current = false
                   hasUserSelectedDomainRef.current = false
                   hasUserSelectedDualModeRef.current = false
@@ -1168,6 +1275,9 @@ export function NewJobWizard() {
                       placeholder={t.wizard.concurrencyAuto}
                       className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
                     />
+                    {concurrencyInvalid && (
+                      <p className="type-help mt-1 text-[#b91c1c]">{t.wizard.fieldMinOne}</p>
+                    )}
                   </div>
 
                   <div>
@@ -1178,24 +1288,34 @@ export function NewJobWizard() {
                       </InfoTip>
                     </div>
                     <div className="grid grid-cols-2 gap-3.5">
-                      <input
-                        type="number"
-                        min={1}
-                        value={chapterStart}
-                        onChange={(e) => setChapterStart(e.target.value)}
-                        placeholder={t.wizard.chapterStart}
-                        aria-label={t.wizard.chapterStart}
-                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
-                      />
-                      <input
-                        type="number"
-                        min={1}
-                        value={chapterCount}
-                        onChange={(e) => setChapterCount(e.target.value)}
-                        placeholder={t.wizard.chapterCount}
-                        aria-label={t.wizard.chapterCount}
-                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
-                      />
+                      <div>
+                        <input
+                          type="number"
+                          min={1}
+                          value={chapterStart}
+                          onChange={(e) => setChapterStart(e.target.value)}
+                          placeholder={t.wizard.chapterStart}
+                          aria-label={t.wizard.chapterStart}
+                          className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
+                        />
+                        {chapterStartInvalid && (
+                          <p className="type-help mt-1 text-[#b91c1c]">{t.wizard.fieldMinOne}</p>
+                        )}
+                      </div>
+                      <div>
+                        <input
+                          type="number"
+                          min={1}
+                          value={chapterCount}
+                          onChange={(e) => setChapterCount(e.target.value)}
+                          placeholder={t.wizard.chapterCount}
+                          aria-label={t.wizard.chapterCount}
+                          className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
+                        />
+                        {chapterCountInvalid && (
+                          <p className="type-help mt-1 text-[#b91c1c]">{t.wizard.fieldMinOne}</p>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -1238,7 +1358,11 @@ export function NewJobWizard() {
               {isReassessing ? (
                 <Badge variant="outline" className="animate-pulse text-xs font-mono">
                   <Loader2 className="h-3 w-3 animate-spin mr-1 inline" />
-                  UPDATING...
+                  {t.wizard.reassessing}
+                </Badge>
+              ) : assessStale && assessment ? (
+                <Badge variant="warning" className="text-xs">
+                  {t.wizard.assessStale}
                 </Badge>
               ) : assessment ? (
                 <div className="flex items-center gap-2 shrink-0">
@@ -1528,7 +1652,13 @@ export function NewJobWizard() {
             )}
             <Button
               onClick={handleSubmit}
-              disabled={!filePath.trim() || isSubmitting || glossaryError !== null || budgetInvalid}
+              disabled={
+                !filePath.trim() ||
+                isSubmitting ||
+                glossaryError !== null ||
+                budgetInvalid ||
+                advancedNumericInvalid
+              }
               variant="primary"
               className="w-full h-10 text-xs font-bold tracking-tight shadow-sm"
               shortcut="⌘⏎"
@@ -1581,7 +1711,13 @@ export function NewJobWizard() {
         </div>
         <Button
           onClick={handleSubmit}
-          disabled={!filePath.trim() || isSubmitting || glossaryError !== null || budgetInvalid}
+          disabled={
+            !filePath.trim() ||
+            isSubmitting ||
+            glossaryError !== null ||
+            budgetInvalid ||
+            advancedNumericInvalid
+          }
           variant="primary"
           className="h-10 px-4 text-xs font-bold tracking-tight shadow-sm shrink-0"
         >

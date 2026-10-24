@@ -6,7 +6,16 @@ import { I18nContext } from './useI18n'
 
 function detectDefaultLanguage(): Language {
   if (typeof window === 'undefined') return 'en'
-  const saved = localStorage.getItem('ubt_lang') as Language | null
+  // The write side already tolerates refused storage (private mode); the read
+  // side must too — a SecurityError here throws during render, above every
+  // error boundary, and blanks the whole console for users with site data
+  // disabled.
+  let saved: string | null = null
+  try {
+    saved = localStorage.getItem('ubt_lang')
+  } catch {
+    saved = null
+  }
   if (saved === 'en' || saved === 'zh') return saved
 
   // Check browser / OS language

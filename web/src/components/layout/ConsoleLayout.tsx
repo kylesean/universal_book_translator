@@ -41,7 +41,13 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [info, setInfo] = useState<SystemInfo | null>(null)
   const [paperTone, setPaperTone] = useState<'cotton' | 'dowling'>(() => {
-    return (localStorage.getItem('ubt_paper_tone') as 'cotton' | 'dowling') || 'cotton'
+    // Storage can be refused (private mode, site-data policy); a SecurityError
+    // in the initializer throws during render, above every error boundary.
+    try {
+      return (localStorage.getItem('ubt_paper_tone') as 'cotton' | 'dowling') || 'cotton'
+    } catch {
+      return 'cotton'
+    }
   })
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const location = useLocation()
@@ -76,7 +82,11 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
     } else {
       document.documentElement.removeAttribute('data-paper-tone')
     }
-    localStorage.setItem('ubt_paper_tone', paperTone)
+    try {
+      localStorage.setItem('ubt_paper_tone', paperTone)
+    } catch {
+      // Refused storage: the tone applies for this session only.
+    }
   }, [paperTone])
 
   useEffect(() => {
