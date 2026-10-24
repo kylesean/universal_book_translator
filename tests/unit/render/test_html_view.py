@@ -65,7 +65,8 @@ def test_ordered_list_items_keep_their_numbering_in_the_companion_view(
     renderer asks, so the same job's PDF and companion views agree."""
     from ubt.model.ast import ListItem
 
-    elements: tuple[ElementT, ...] = (
+    # TextElement variants only: every one of these carries ``.text``.
+    elements: tuple[Paragraph | ListItem, ...] = (
         Paragraph(id="p0", spine_index=0, span=Span(page=1), text="Steps:"),
         ListItem(id="li1", spine_index=1, span=Span(page=1), text="First step.", marker="1."),
         ListItem(id="li2", spine_index=2, span=Span(page=1), text="Second step.", marker="2."),
