@@ -235,6 +235,16 @@ export interface TranslationDictionary {
     blocksRemaining: string
     stateCertified: string
     stateDrafting: string
+    stageStateExtract: string
+    stageStateSegment: string
+    stageStateTm: string
+    stageStateTranslate: string
+    stageStateQe: string
+    stageStateRepair: string
+    stageStateRender: string
+    stageStateVerify: string
+    stageStatePackage: string
+    engineActiveHeartbeat: string
     logAborted: string
     logResumed: string
     logDeleted: string

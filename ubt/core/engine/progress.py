@@ -53,7 +53,10 @@ _STAGE_BY_EVENT: dict[EventType, PipelineStage] = {
     EventType.CTEXT_COMPLETED: "translate",
     EventType.CHAPTER_COMPLETED: "translate",
     EventType.MTQE_EVALUATED: "qe",
+    EventType.REPAIR_STARTED: "repair",
+    EventType.REPAIR_PROGRESS: "repair",
     EventType.REPAIR_BATCH_COMPLETED: "repair",
+    EventType.RENDER_STARTED: "render",
     EventType.TRIAGE_COMPLETED: "verify",
     EventType.EXPORT_COMPLETED: "package",
 }

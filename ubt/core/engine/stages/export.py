@@ -1499,6 +1499,13 @@ async def run_export_stage(
         },
     )
     translations = await asyncio.to_thread(_delivery_translations, final_blocks)
+    event = await create_event_fn(
+        EventType.RENDER_STARTED,
+        actual_job_id,
+        ledger,
+        message=f"Rendering document with {adapter.engine_name or 'typst'} for {len(final_blocks)} blocks",
+    )
+    yield event
     rendered_path = await _render_adapter_output(
         adapter=adapter,
         manifest=manifest,

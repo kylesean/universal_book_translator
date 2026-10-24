@@ -903,8 +903,15 @@ class ModelRouter:
         output (half a block beats no block — downstream gates still run).
         """
         text = partial
-        for _ in range(_MAX_CONTINUATION_ROUNDS):
+        for round_idx in range(_MAX_CONTINUATION_ROUNDS):
             tail = text[-_CONTINUATION_TAIL_CHARS:]
+            logger.info(
+                "Model %s generation truncated (length limit hit, %d chars); auto-continuing (round %d/%d)...",
+                model,
+                len(text),
+                round_idx + 1,
+                _MAX_CONTINUATION_ROUNDS,
+            )
             continuation_prompt = (
                 f"{user_prompt}\n\n"
                 "---\n"

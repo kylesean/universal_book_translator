@@ -602,6 +602,34 @@ export function MissionControl() {
 
   const isCompleted = statusStr === 'completed'
   const isFailed = statusStr === 'failed' || statusStr === 'cancelled'
+
+  const getExecutionSubtext = (): string => {
+    if (isCompleted) return t.mission.stateCertified
+    if (isFailed) return t.mission.jobStatuses[statusStr] ?? statusStr
+    switch (derivedStage) {
+      case 'extract':
+        return t.mission.stageStateExtract
+      case 'segment':
+        return t.mission.stageStateSegment
+      case 'tm':
+        return t.mission.stageStateTm
+      case 'translate':
+        return t.mission.stageStateTranslate
+      case 'qe':
+        return t.mission.stageStateQe
+      case 'repair':
+        return t.mission.stageStateRepair
+      case 'render':
+        return t.mission.stageStateRender
+      case 'verify':
+        return t.mission.stageStateVerify
+      case 'package':
+        return t.mission.stageStatePackage
+      default:
+        return t.mission.stateDrafting
+    }
+  }
+
   // The engine reports its own pipeline step on every event (``stage``), so the
   // stepper highlights where the run actually is. Falling back to a
   // ``progress_percent`` threshold — the old approach — mislabelled a job in
@@ -1060,13 +1088,18 @@ export function MissionControl() {
                 ref={isCurrent ? activeStageRef : undefined}
                 className={`flex-1 shrink-0 min-w-[80px] md:min-w-0 py-2 md:py-1.5 px-1.5 md:px-1 text-center text-xs font-mono font-medium rounded-[4px] border transition-colors ${
                   isCurrent
-                    ? 'border-[var(--ink-primary)] bg-[var(--paper-subsurface)] text-[var(--ink-primary)] font-bold shadow-2xs'
+                    ? 'border-[var(--ink-primary)] bg-[var(--paper-subsurface)] text-[var(--ink-primary)] font-bold shadow-2xs ring-1 ring-current'
                     : isDone
                       ? 'border-[#15803d]/30 bg-[#15803d]/5 text-[#15803d]'
                       : 'border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-muted)]'
                 }`}
               >
-                {stage.label}
+                <div className="flex items-center justify-center gap-1">
+                  {isCurrent && !isCompleted && !isFailed && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--ink-primary)] animate-ping" />
+                  )}
+                  <span>{stage.label}</span>
+                </div>
               </div>
             )
           })}
@@ -1150,8 +1183,8 @@ export function MissionControl() {
           <div className="text-sm font-bold font-mono text-[var(--ink-primary)] mt-1">
             {jobStatusLabel(t, statusStr)}
           </div>
-          <div className="text-xs text-[var(--ink-secondary)] mt-1.5 truncate">
-            {isCompleted ? t.mission.stateCertified : t.mission.stateDrafting}
+          <div className="text-xs text-[var(--ink-secondary)] mt-1.5 truncate" title={getExecutionSubtext()}>
+            {getExecutionSubtext()}
           </div>
         </div>
       </div>
@@ -1174,6 +1207,12 @@ export function MissionControl() {
                 <ChevronUp className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
               )}
             </button>
+            {isLiveStreaming && !isCompleted && !isFailed && (
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-[#15803d] font-mono px-2 py-0.5 rounded bg-[#15803d]/10 ml-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#15803d] animate-pulse" />
+                {t.mission.engineActiveHeartbeat}
+              </span>
+            )}
           </div>
           {!isLogCollapsed && (
             <div className="flex flex-wrap items-center gap-2">
@@ -1252,6 +1291,14 @@ export function MissionControl() {
                   </div>
                 )
               })
+            )}
+            {filteredLogs.length > 0 && !isCompleted && !isFailed && (
+              <div className="flex items-center gap-2.5 px-1 py-1.5 text-[var(--ink-secondary)] border-t border-[var(--paper-border)] mt-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#15803d] animate-ping shrink-0" />
+                <span className="italic text-[11px] font-mono truncate">
+                  {t.mission.stageLine.replace('{stage}', stageLabel(t, derivedStage || statusStr))} · {getExecutionSubtext()}
+                </span>
+              </div>
             )}
           </div>
         )}

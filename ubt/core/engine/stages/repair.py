@@ -117,6 +117,14 @@ async def run_repair_stage(
         if not repair_candidates:
             break
 
+        event = await create_event_fn(
+            EventType.REPAIR_STARTED,
+            actual_job_id,
+            ledger,
+            message=f"Starting targeted repair round {round_idx + 1} for {len(repair_candidates)} candidate blocks",
+        )
+        yield event
+
         async def _repair_single_candidate(cand: IRBlock) -> dict[str, Any]:
             glossary_table = build_chunk_glossary_table(
                 glossary_dicts, abbreviation_entries, cand.source_text
@@ -170,24 +178,39 @@ async def run_repair_stage(
                 update = _record_failure(cand, res)
             await flusher.enqueue(update)
 
+        batch_size = max(5, int(getattr(ctx.config, "repair_batch_size", 10)))
+        processed_candidates = 0
         try:
-            results = await asyncio.gather(
-                *[_repair_and_record(cand) for cand in repair_candidates],
-                return_exceptions=True,
-            )
+            for chunk_start in range(0, len(repair_candidates), batch_size):
+                chunk = repair_candidates[chunk_start : chunk_start + batch_size]
+                ctx.check_cancelled()
+                results = await asyncio.gather(
+                    *[_repair_and_record(cand) for cand in chunk],
+                    return_exceptions=True,
+                )
+                for outcome in results:
+                    if isinstance(
+                        outcome, (BudgetExceededError, JobInterruptedError, asyncio.CancelledError)
+                    ):
+                        raise outcome
+                    if isinstance(outcome, BaseException):
+                        # Without return_exceptions=True the first ledger-write failure
+                        # propagated while sibling repairs kept calling the paid model
+                        # and writing after the stage unwound.
+                        logger.warning("repair task failed: %s", outcome)
+
+                processed_candidates += len(chunk)
+                if processed_candidates < len(repair_candidates):
+                    progress_event = await create_event_fn(
+                        EventType.REPAIR_PROGRESS,
+                        actual_job_id,
+                        ledger,
+                        message=f"Targeted repair round {round_idx + 1}: {processed_candidates}/{len(repair_candidates)} candidate blocks processed",
+                        active_block_id=chunk[-1].id,
+                    )
+                    yield progress_event
         finally:
             await flusher.close()
-
-        for outcome in results:
-            if isinstance(
-                outcome, (BudgetExceededError, JobInterruptedError, asyncio.CancelledError)
-            ):
-                raise outcome
-            if isinstance(outcome, BaseException):
-                # Without return_exceptions=True the first ledger-write failure
-                # propagated while sibling repairs kept calling the paid model
-                # and writing after the stage unwound.
-                logger.warning("repair task failed: %s", outcome)
 
         event = await create_event_fn(
             EventType.REPAIR_BATCH_COMPLETED,
