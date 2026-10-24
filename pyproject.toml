@@ -58,10 +58,14 @@ dependencies = [
     "uvicorn>=0.30.0",
     # Replaces the runtime pypdf leg and the poppler pdftoppm subprocess:
     # page raster + text extraction (ubt/adapters/pdf/oxide_render.py).
-    # Zero transitive deps, single 26MB abi3 wheel, MIT/Apache dual — the same
-    # license profile as pypdfium2. The <0.4 ceiling is deliberate: the 0.3.x
-    # bindings drift against their own README (PyPI's `page.text` does not
-    # exist in 0.3.78) — re-probe with dir() introspection before any bump.
+    # Zero transitive deps, ~11MB abi3 wheel, MIT/Apache dual — the same
+    # license profile as pypdfium2. The <0.4 ceiling is deliberate: 0.3.x
+    # bindings have drifted against their own README before. UBT touches
+    # exactly four symbols (PdfDocument / page_count / render_page(dpi=) /
+    # extract_text), and tests/unit/adapters/test_pdf_oxide_contract.py pins
+    # them against a real document — a bump that drifts anything is a red
+    # test, not a runtime None in the visual gate. Raise the pin only with
+    # that contract green.
     "pdf-oxide>=0.3.78,<0.4",
     "pypdfium2>=4.30.0",
     "pyahocorasick>=2.1.0",

@@ -20,7 +20,10 @@ under ``asyncio.to_thread`` and each renders one page per document open.
 
 DPI parity: ``render_page(dpi=N)`` is assumed to mean the same scale as
 ``pdftoppm -r N`` (both N dots per 72pt inch). ``svg_diagram``'s
-``bbox * dpi/72`` crop math silently depends on it.
+``bbox * dpi/72`` crop math silently depends on it. The four-symbol binding
+surface and that parity are pinned by
+``tests/unit/adapters/test_pdf_oxide_contract.py`` — a dependency bump that
+drifts either fails there, not silently here.
 """
 
 from __future__ import annotations
