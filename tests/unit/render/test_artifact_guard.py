@@ -81,9 +81,22 @@ def test_the_registry_covers_every_masker_family() -> None:
 
 
 def test_the_emphasis_sentinels_come_from_the_emphasis_module() -> None:
-    from ubt.core.ir.emphasis import BOLD_CLOSE, BOLD_OPEN
+    from ubt.core.ir.emphasis import BOLD_CLOSE, BOLD_OPEN, ITALIC_CLOSE, ITALIC_OPEN
 
-    assert has_sentinel(BOLD_OPEN) and has_sentinel(BOLD_CLOSE)
+    for token in (BOLD_OPEN, BOLD_CLOSE, ITALIC_OPEN, ITALIC_CLOSE):
+        assert has_sentinel(token), token
+    assert "emphasis" in sentinel_kinds(ITALIC_OPEN)
+
+
+def test_a_latex_transcribed_italic_marker_is_a_sentinel() -> None:
+    """A model may rewrite either marker as ``\\llbracket … \\rrbracket``.
+
+    ``I`` was missing, so an italic marker escaping into a formula reached the
+    math transpiler and failed the whole document compile.
+    """
+    assert has_sentinel(r"\llbracket I \rrbracket")
+    assert has_sentinel(r"\llbracket /I \rrbracket")
+    assert has_sentinel(r"\\llbracket i \\rrbracket")
 
 
 def test_the_semantic_break_token_is_covered() -> None:

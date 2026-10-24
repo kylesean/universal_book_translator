@@ -87,6 +87,31 @@ def folded_find(text: str, needle: str, from_index: int = 0) -> tuple[int, int] 
     return starts[at], ends[at + len(folded_needle) - 1]
 
 
+def _is_valid_run_position(text: str, start: int, end: int, run: InlineRun) -> bool:
+    if run.superscript:
+        # Avoid splitting numbers or decimals (e.g. "7" in "7.39", "20" in "2021", "1" in "100")
+        if run.text and run.text[0].isdigit() and start > 0:
+            prev = text[start - 1]
+            if prev.isdigit() or prev == ".":
+                return False
+        if run.text and run.text[-1].isdigit() and end < len(text):
+            next_ch = text[end]
+            if next_ch.isdigit() or next_ch == ".":
+                return False
+    return True
+
+
+def _find_run(text: str, needle: str, from_index: int, run: InlineRun) -> int:
+    pos = from_index
+    while True:
+        idx = text.find(needle, pos)
+        if idx < 0:
+            return -1
+        if _is_valid_run_position(text, idx, idx + len(needle), run):
+            return idx
+        pos = idx + 1
+
+
 def locate_runs(text: str, runs: Sequence[InlineRun]) -> list[SpanStyle]:
     """Locate each run's literal span in ``text``, in order.
 
@@ -100,9 +125,9 @@ def locate_runs(text: str, runs: Sequence[InlineRun]) -> list[SpanStyle]:
     for run in runs:
         if not run.text:
             continue
-        index = text.find(run.text, cursor)
+        index = _find_run(text, run.text, cursor, run)
         if index < 0:
-            index = text.find(run.text)
+            index = _find_run(text, run.text, 0, run)
         if index >= 0:
             spans.append(
                 (
@@ -117,8 +142,14 @@ def locate_runs(text: str, runs: Sequence[InlineRun]) -> list[SpanStyle]:
             cursor = index + len(run.text)
             continue
         located = folded_find(text, run.text, cursor)
+        if located is not None and not _is_valid_run_position(text, located[0], located[1], run):
+            located = None
         if located is None:
             located = folded_find(text, run.text, 0)
+            if located is not None and not _is_valid_run_position(
+                text, located[0], located[1], run
+            ):
+                located = None
         if located is None:
             continue
         start, end = located

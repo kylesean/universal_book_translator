@@ -48,6 +48,8 @@ from dataclasses import dataclass
 _SENTINEL_PREFIXES: tuple[tuple[str, str], ...] = (
     ("\u27e6B\u27e7", "emphasis"),
     ("\u27e6/B\u27e7", "emphasis"),
+    ("\u27e6I\u27e7", "emphasis"),
+    ("\u27e6/I\u27e7", "emphasis"),
     ("\u27e6SEMANTIC_BREAK\u27e7", "semantic_break"),
     ("\u27e6MATH_MASK_", "math"),
     ("\u27e6SOUP_MASK_", "soup"),
@@ -68,7 +70,13 @@ _SENTINEL_RE = re.compile(r"\u27e6[^\u27e7\n]*\u27e7")
 #: tolerates the extra backslash Typst escaping adds (``\llbracket`` →
 #: ``\\llbracket`` in the emitted source), so the same pattern recognises the
 #: marker in raw text *and* counts it in the rendered source.
-_LATEX_EMPHASIS_RE = re.compile(r"\\+llbracket\s*(?:/\s*)?[Bb]\s*\\+rrbracket")
+#:
+#: ``[BI]`` covers bold *and* italic: ``⟦I⟧`` was missing from the registry and
+#: from this pattern, so a target whose italic marker the model rewrote as
+#: ``\llbracket I \rrbracket`` was not recognised as a sentinel at all. It then
+#: reached the math transpiler as a stray command, and one such formula fails
+#: the whole document compile.
+_LATEX_EMPHASIS_RE = re.compile(r"\\+llbracket\s*(?:/\s*)?[BbIi]\s*\\+rrbracket")
 
 
 @dataclass(frozen=True, slots=True)

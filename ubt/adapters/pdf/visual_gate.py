@@ -1131,6 +1131,7 @@ def _tier_coverage(
     *,
     rendered_pages: int,
     sampled_pages: int,
+    source_available: bool = True,
 ) -> str:
     """State which gate tiers actually ran, and which were skipped.
 
@@ -1152,7 +1153,7 @@ def _tier_coverage(
     - ``pixel`` inspects the raster;
     - ``vlm`` only when pages were actually sent to the judge.
     """
-    ran, skipped = _tier_lists(vlm_pages, rendered_pages)
+    ran, skipped = _tier_lists(vlm_pages, rendered_pages, source_available)
     coverage = f"tiers run: {', '.join(ran)}"
     if skipped:
         coverage += f" (not run: {', '.join(skipped)})"
@@ -1167,6 +1168,7 @@ def _tier_coverage(
 _SKIP_CODES: dict[str, str] = {
     "page render failed (pdf_oxide); pixel checks skipped": "page_render_failed",
     "vlm judge disabled": "vlm_judge_disabled",
+    "no typst source beside the artifact; source scan skipped": "typst_source_absent",
 }
 
 
@@ -1183,18 +1185,32 @@ def _skip_code(note: str) -> str:
 def _tier_lists(
     vlm_pages: Sequence[int],
     rendered_pages: int,
+    source_available: bool = True,
 ) -> tuple[list[str], list[str]]:
     """Which tiers ran and which did not — the structured form of ``coverage``.
 
     Split out of :func:`_tier_coverage` so the report can carry the facts
     separately from the English sentence built on them.
+
+    ``source`` is its own tier. It used to be invisible: the guard only scanned
+    the Typst source ``if typ_text is not None``, and nothing recorded the
+    ``None`` case, so a run whose source scan never happened reported the same
+    ``tiers_ran`` as one where it ran and found nothing.
     """
     ran: list[str] = ["geometry"]
+    skipped: list[str] = []
+    if source_available:
+        ran.append("source")
+    else:
+        skipped.append("source")
     if rendered_pages > 0:
         ran.extend(["type", "pixel"])
+    else:
+        skipped.extend(["type", "pixel"])
     if vlm_pages:
         ran.append("vlm")
-    skipped = [tier for tier in ("type", "pixel", "vlm") if tier not in ran]
+    else:
+        skipped.append("vlm")
     return ran, skipped
 
 
@@ -1366,12 +1382,19 @@ async def run_visual_gate(
         elif vlm_judge is None:
             skip_notes.append("vlm judge disabled")
     passed = not any(f.severity in ("major", "critical") for f in findings)
-    ran_tiers, skipped_tiers = _tier_lists(vlm_pages, len(pngs))
+    if typ_text is None:
+        # Make the gap explicit in the report. The source scan is a real tier:
+        # it catches a non-breaking hyphen that renders as a missing glyph, and
+        # it used to be skipped silently whenever the sidecar was missing (which
+        # was always — see VisualVerifyLoop._evaluate_gate).
+        skip_notes.append("no typst source beside the artifact; source scan skipped")
+    ran_tiers, skipped_tiers = _tier_lists(vlm_pages, len(pngs), typ_text is not None)
     coverage = _tier_coverage(
         vlm_pages,
         skip_notes,
         rendered_pages=len(pngs),
         sampled_pages=len(sampled),
+        source_available=typ_text is not None,
     )
     stats: dict[str, str | int | float] = {
         "total_pages": total,

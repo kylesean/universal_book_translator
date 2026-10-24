@@ -200,6 +200,14 @@ def escape_markup(text: str) -> str:
 #: languages the deliverable may spell it in.
 _TOC_TITLE_TEXTS = frozenset({"contents", "table of contents", "目录", "目錄", "目次"})
 
+#: A leading section label on a heading or TOC row: "1.2.", "3", "A.", "Appendix B".
+#: Stripped before matching a TOC row against the headings it names, because the
+#: row and the heading can disagree on the trailing dot or the spacing.
+_HEADING_LABEL_PREFIX_RE = re.compile(
+    r"^\s*(?:appendix\s+)?(?:[0-9]+(?:[.．][0-9]+)*[.．、)）]?|[A-Z][.．])?\s*",
+    re.IGNORECASE,
+)
+
 
 def typst_lang_arguments(lang: str | None) -> str:
     """``lang: "zh", region: "CN"`` — the form Typst actually accepts.
@@ -268,15 +276,35 @@ def _group_toc_runs(blocks: Sequence[IRBlock]) -> list[tuple[int, list[IRBlock]]
     return runs
 
 
-def resolve_toc_mode(mode: str, *, layout_template: str, has_toc: bool) -> bool:
+def _toc_title_key(text: str) -> str:
+    """A heading's identity for matching a TOC row against the real headings.
+
+    Case-folded, label-stripped and whitespace-collapsed: a TOC row is the
+    heading's title with a page number beside it ("1.2. Attention 12"), while
+    the heading itself carries no page. Matching the *text* is what separates a
+    genuine contents page from five lines the reader happened to tag.
+    """
+    key = _HEADING_LABEL_PREFIX_RE.sub("", text.strip())
+    key = re.sub(r"[\s\u3000]+", " ", key)
+    return key.strip(" .:：·—-–").casefold()
+
+
+def resolve_toc_mode(
+    mode: str,
+    *,
+    layout_template: str,
+    has_toc: bool,
+    has_explicit_heading: bool = False,
+    entry_count: int = 0,
+) -> bool:
     """Whether to place the recovered table of contents.
 
-    ``auto`` follows the document kind: a paper carries no TOC by convention,
-    and the run a PDF reader picks up is the source's section list with the
-    *source* page numbers — which the reflowed deliverable does not reproduce,
-    so placing it is worse than omitting it. ``on`` forces it (the reader may
-    have recovered a real TOC and the caller wants it), ``off`` suppresses it.
-    A document with no recovered TOC rows never gets an invented one.
+    ``auto`` follows the document kind: short papers without an explicit TOC heading
+    or with only a couple isolated entries omit the TOC (preventing spurious fragments).
+    However, monographs, long academic reports, or papers with a genuine table of contents
+    (possessing an explicit "Contents"/"目录" heading or >= 5 entries) preserve the TOC.
+    ``on`` forces it, ``off`` suppresses it. A document with no recovered TOC rows never
+    gets an invented one.
     """
     if not has_toc:
         return False
@@ -285,7 +313,9 @@ def resolve_toc_mode(mode: str, *, layout_template: str, has_toc: bool) -> bool:
         return False
     if normalized in ("on", "true", "1"):
         return True
-    return layout_template != "academic"
+    if layout_template != "academic":
+        return True
+    return bool(has_explicit_heading or entry_count >= 5)
 
 
 def render_toc(entries: Sequence[tuple[str, str]]) -> str:
@@ -648,6 +678,7 @@ def render_table(
     is_math_ok: Callable[[str], bool] | None = None,
     page_columns: int = 1,
     content_width_pt: float | None = None,
+    scale_out: list[float] | None = None,
 ) -> str:
     """Render a Markdown table as a Typst ``#table`` with a three-line frame.
 
@@ -658,6 +689,11 @@ def render_table(
 
     ``is_math_ok`` is the same compile gate :func:`render_prose` takes; a cell's
     ``$\\frac{a}{}$`` reaches the compiler exactly as a paragraph's does.
+
+    ``scale_out``, when given, receives the body scale actually emitted (one
+    element). The caller needs it to tell a table set at a comfortable size from
+    one squashed onto the 0.60 floor, which is the only thing that can emit the
+    ``low_legibility_font`` render-quality flag.
     """
     parsed = parse_markdown_table(markup, escape=False)
     if parsed is None:
@@ -736,11 +772,23 @@ def render_table(
         (0xF900, 0xFAFF),  # CJK compatibility ideographs
         (0xFF00, 0xFFEF),  # half/full-width forms (full-width punctuation)
         (0x3000, 0x303F),  # CJK symbols and punctuation
+        (0x1100, 0x11FF),  # Hangul Jamo
+        (0xA960, 0xA97F),  # Hangul Jamo Extended-A
+        (0xAC00, 0xD7FF),  # Hangul syllables + Jamo Extended-B
     )
 
     def _is_cjk(char: str) -> bool:
         code = ord(char)
         return any(low <= code <= high for low, high in _BREAKABLE_RANGES)
+
+    def _is_hangul(char: str) -> bool:
+        """Korean syllables and Jamo: full-width, and a break opportunity each."""
+        code = ord(char)
+        return (
+            0x1100 <= code <= 0x11FF  # Jamo
+            or 0xA960 <= code <= 0xA97F  # Jamo Extended-A
+            or 0xAC00 <= code <= 0xD7FF  # syllables + Jamo Extended-B
+        )
 
     def _is_cjk_punct(char: str) -> bool:
         """Full-width punctuation, which is its own break opportunity.
@@ -757,6 +805,12 @@ def render_table(
         """Measured advance of one character, as a fraction of the em."""
         if char.isspace():
             return _SPACE_EM
+        if _is_hangul(char):
+            # Hangul is full-width: syllables and Jamo advance a whole em, the
+            # same as Han. It used to fall through to ``isalpha()`` -> 0.557em,
+            # so a Korean target's columns were budgeted 44 % too narrow and
+            # the table overflowed on every render.
+            return _CJK_EM
         if _is_cjk(char):
             # Full-width ideographs and the full-width punctuation forms share a
             # 1em advance; the narrower CJK punctuation block does not.
@@ -1016,6 +1070,8 @@ def render_table(
     # that fits at full size; a table that had to shrink uses the computed
     # factor, and never a value above it.
     emitted_scale = min(table_scale, float(_TABLE_TEXT_SCALE))
+    if scale_out is not None:
+        scale_out.append(emitted_scale)
     if full_page:
         lines = ['#place(top + center, scope: "parent", float: true, rect(width: 98%)[']
         if emitted_scale < 1.0:
@@ -1588,7 +1644,25 @@ class TypstDocumentRenderer:
         # it put it on the opening page, above the title banner, when the source
         # spelled the section list before the title block.
         toc_consumed: set[str] = set()
-        toc_chunks: list[str] = []
+        toc_by_insertion_point: dict[int, list[str]] = {}
+        has_toc_heading = False
+        # Only entries that *behave* like a TOC row count toward the "this paper
+        # really has a contents page" decision. A run of five bare lines that the
+        # reader mislabelled ``toc_entry`` (a reference list, a term glossary) is
+        # not a table of contents, and counting it invented a 20-page TOC on a
+        # short paper — exactly what the old "papers get no TOC" rule prevented.
+        # A row qualifies when it carries a page number, or when it names a
+        # heading that actually appears in the document.
+        heading_keys = {
+            _toc_title_key(_block_text(b))
+            for b in blocks
+            if str(getattr(b.block_type, "value", b.block_type) or "") == "heading"
+            # A row mislabelled ``toc_entry`` is still a HEADING block, so it
+            # must not vouch for itself: that self-match made every tagged run
+            # "name a heading that exists" and defeated this check entirely.
+            and not b.provenance.toc_entry
+        }
+        total_toc_entries = 0
         for run_start, entry_blocks in _group_toc_runs(blocks):
             title_page: list[tuple[str, str]] = []
             for blk in entry_blocks:
@@ -1596,10 +1670,10 @@ class TypstDocumentRenderer:
                 page = str(blk.provenance.toc_page or "").strip()
                 if title:
                     title_page.append((title, page))
+                    if page or _toc_title_key(title) in heading_keys:
+                        total_toc_entries += 1
                 toc_consumed.add(blk.id)
                 self.stats.blocks_rendered += 1
-            if title_page:
-                toc_chunks.append(render_toc(title_page))
             # The TOC's own heading ("Contents") is page furniture, not a
             # section: its entries were consumed above, so emitting it leaves an
             # orphan heading with no body. Consume the heading that introduces
@@ -1612,13 +1686,18 @@ class TypstDocumentRenderer:
                     break
                 if _is_toc_heading_text(_block_text(earlier)):
                     toc_consumed.add(earlier.id)
+                    has_toc_heading = True
                 break
-        if resolve_toc_mode(
+            if title_page:
+                toc_by_insertion_point.setdefault(run_start, []).append(render_toc(title_page))
+
+        should_render_toc = resolve_toc_mode(
             getattr(self, "toc_mode", "auto"),
             layout_template=getattr(self, "layout_template", "book"),
-            has_toc=bool(toc_chunks),
-        ):
-            body.extend(toc_chunks)
+            has_toc=bool(toc_by_insertion_point),
+            has_explicit_heading=has_toc_heading,
+            entry_count=total_toc_entries,
+        )
 
         if getattr(self, "layout_template", "book") == "academic" and getattr(
             self, "paper_title", ""
@@ -1650,7 +1729,16 @@ class TypstDocumentRenderer:
         #: what actually gets rendered.
         list_runs = self._group_list_runs(blocks, toc_consumed)
 
-        for block in blocks:
+        for i, block in enumerate(blocks):
+            if should_render_toc and i in toc_by_insertion_point:
+                flush_figure()
+                for chunk in toc_by_insertion_point[i]:
+                    if body:
+                        body.append("#pagebreak()")
+                    body.append(chunk)
+                    body.append("#pagebreak()")
+                del toc_by_insertion_point[i]
+
             self.stats.blocks_seen += 1
             if block.id in toc_consumed:
                 continue
@@ -1732,11 +1820,13 @@ class TypstDocumentRenderer:
                     or None
                 )
                 target_text = _block_text(block)
+                table_scale: list[float] = []
                 markup = render_table(
                     target_text,
                     is_math_ok=self._math_gate,
                     page_columns=self.columns,
                     content_width_pt=table_width,
+                    scale_out=table_scale,
                 )
                 fell_back = False
                 if not markup:
@@ -1776,6 +1866,11 @@ class TypstDocumentRenderer:
                             reason=verdict.reason,
                         )
                     )
+                # A table laid out at the readability floor was drawn, but at a
+                # body size a reader has to squint at. That is a render-quality
+                # flag, never a skip: the translated cells shipped.
+                if table_scale and table_scale[0] <= _TABLE_MIN_TEXT_SCALE + 1e-6:
+                    self.last_render_flags.append((block.id, "low_legibility_font"))
                 # A bilingual pair whose target fell back to the source grid
                 # would show the same grid twice; pair only a genuine
                 # translation against the source.
@@ -1894,10 +1989,12 @@ class TypstDocumentRenderer:
                 flush_figure()
                 text = _block_text(block)
                 if text:
+                    prose_text = self._prose(text, block_runs(block))
+                    markup = f"#block(width: 100%, inset: (top: 0.2em, bottom: 0.2em))[#text(size: 8.5pt, fill: luma(80))[{prose_text}]]"
                     body.append(
                         self._maybe_pair(
                             block,
-                            f"#footnote[{self._prose(text, block_runs(block))}]",
+                            markup,
                         )
                     )
                     self.stats.blocks_rendered += 1
@@ -2047,7 +2144,13 @@ class TypstDocumentRenderer:
         failed build; the digest is what disambiguates.
         """
         digest = hashlib.sha256(resolved.read_bytes()).hexdigest()[:16]
-        target = build_dir / f"{resolved.stem}-{digest}{resolved.suffix.lower()}"
+        # A Typst string literal is the boundary here: a stem containing a quote
+        # or a backslash closes ``image("…")`` early and the whole document
+        # fails to compile. The digest already makes the name unique, so drop
+        # everything that is not safe inside a double-quoted literal.
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "-", resolved.stem).strip("-") or "asset"
+        suffix = re.sub(r"[^A-Za-z0-9.]+", "", resolved.suffix)[:10].lower()
+        target = build_dir / f"{stem}-{digest}{suffix}"
         if not target.exists():
             shutil.copy2(resolved, target)
             self.stats.assets_copied += 1

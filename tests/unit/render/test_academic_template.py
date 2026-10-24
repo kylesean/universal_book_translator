@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from ubt.adapters.pdf.typst_compile import resolve_typst_binary
-from ubt.core.ir.models import BlockType, BookManifest, IRBlock
+from ubt.core.ir.models import BlockType, BookManifest, FlowID, IRBlock
 from ubt.render.typst.academic import (
     academic_preamble,
     academic_title_banner,
@@ -380,6 +380,16 @@ def _toc_block(bid: str, title: str, page: str) -> IRBlock:
     )
 
 
+def _toc_block_run(
+    ids: list[str], titles: list[str], *, pages: list[str] | None = None
+) -> list[IRBlock]:
+    """A contiguous run of ``toc_entry`` rows (optionally without page numbers)."""
+    return [
+        _toc_block(bid, title, pages[i] if pages else "")
+        for i, (bid, title) in enumerate(zip(ids, titles, strict=True))
+    ]
+
+
 def _heading_block(bid: str, text: str) -> IRBlock:
     from ubt.core.ir.models import make_element
 
@@ -448,6 +458,41 @@ def test_a_paper_places_no_recovered_toc_by_default(tmp_path: Path) -> None:
     # The TOC rows are still consumed (never promoted to headings); the one
     # genuine section heading is the only heading emitted.
     assert source.count("#heading(level: 1)") == 1
+
+
+def test_a_mislabelled_run_of_lines_does_not_invent_a_toc(tmp_path: Path) -> None:
+    """Five ``toc_entry``-tagged lines are not a contents page on their own.
+
+    ``auto`` used to grant a paper a TOC whenever ``entry_count >= 5``, without
+    asking whether those rows behaved like one. A reference list or a term
+    glossary the reader mislabelled produced a 20-page contents section in a
+    6-page paper. A row only counts when it carries a page number or names a
+    heading that exists.
+    """
+    renderer = TypstDocumentRenderer(layout_template="academic", columns=1, paper_title="Paper")
+    blocks = [
+        # Tagged ``toc_entry`` by the reader, but: no page numbers, and not one
+        # of them names a heading in the document.
+        *_toc_block_run(
+            [f"ref-{i}" for i in range(5)], [f"[{i}] Some cited work" for i in range(5)]
+        ),
+        _heading_block("h1", "1 Introduction"),
+        _heading_block("h2", "2 Method"),
+    ]
+    source, _ = renderer.build_source(blocks, tmp_path / "b", target_lang="zh")
+    assert "目录" not in source
+
+
+def test_a_real_contents_page_still_earns_its_place(tmp_path: Path) -> None:
+    """The same five rows, with page numbers and matching headings, do render."""
+    renderer = TypstDocumentRenderer(layout_template="academic", columns=1, paper_title="Paper")
+    titles = ["1 Introduction", "2 Method", "3 Results", "4 Discussion", "5 Conclusion"]
+    blocks = [
+        *_toc_block_run([f"t{i}" for i in range(5)], titles, pages=[str(i + 1) for i in range(5)]),
+        *[_heading_block(f"h{i}", t) for i, t in enumerate(titles)],
+    ]
+    source, _ = renderer.build_source(blocks, tmp_path / "b", target_lang="zh")
+    assert "目录" in source
 
 
 def test_a_book_places_its_recovered_toc_after_the_front_matter(tmp_path: Path) -> None:
@@ -529,3 +574,146 @@ def test_toc_renders_and_compiles(tmp_path: Path) -> None:
     source, _ = renderer.build_source(blocks, tmp_path / "b", target_lang="zh")
     ok, stderr = _compile_typst(source)
     assert ok, f"Typst compile failed for a TOC document: {stderr}"
+
+
+def test_a_paper_with_explicit_toc_heading_places_toc_in_auto_mode(tmp_path: Path) -> None:
+    """When a paper has an explicit TOC heading ('Contents'), auto mode places the TOC."""
+    renderer = TypstDocumentRenderer(layout_template="academic", columns=1, paper_title="Paper")
+    blocks = [
+        _heading_block("h_toc", "Contents"),
+        _toc_block("t1", "1 引言", "3"),
+        _toc_block("t2", "2 切换 Transformer", "4"),
+        _heading_block("h1", "1 引言"),
+        _para_block("p1", "这是正文。"),
+    ]
+    source, _ = renderer.build_source(blocks, tmp_path / "b", target_lang="zh")
+    assert "目录" in source
+    assert "1 引言" in source and "3" in source
+
+
+def test_a_paper_with_substantial_toc_places_toc_in_auto_mode(tmp_path: Path) -> None:
+    """When a paper has 5+ TOC entries, auto mode preserves the genuine TOC."""
+    renderer = TypstDocumentRenderer(layout_template="academic", columns=1, paper_title="Paper")
+    blocks = [_toc_block(f"t{i}", f"第{i}章 概念", str(i + 2)) for i in range(1, 6)] + [
+        _heading_block("h1", "第1章 概念"),
+        _para_block("p1", "这是正文。"),
+    ]
+    source, _ = renderer.build_source(blocks, tmp_path / "b", target_lang="zh")
+    assert "目录" in source
+    assert "第1章 概念" in source
+
+
+def test_footnote_block_does_not_emit_inline_footnote_callout(tmp_path: Path) -> None:
+    """Footnote blocks extracted from PDF must not emit #footnote[...], which would inject
+    stray footnote reference markers (1, 2, 3...) in the middle of prose body.
+    """
+    from ubt.core.ir.models import BlockType, make_element
+
+    renderer = TypstDocumentRenderer(layout_template="academic", columns=1, paper_title="Paper")
+    blocks = [
+        _para_block("p1", "这是关键词：机器学习。"),
+        IRBlock(
+            element=make_element(
+                id="fn1",
+                spine_index=2,
+                block_type=BlockType.NARRATIVE,
+                flow_id=FlowID.FOOTNOTE,
+                source_text="1. Equal contribution.",
+            ),
+            target_text="1. 贡献均等。",
+        ),
+        _para_block("p2", "这是后续正文。"),
+    ]
+    source, _ = renderer.build_source(blocks, tmp_path / "b", target_lang="zh")
+    # Must NOT contain standalone #footnote[...] callout which causes detached 1 2 3 in body
+    assert "#footnote[" not in source
+    assert "贡献均等。" in source
+    # Footnote block is rendered with styling block
+    assert "fill: luma(80)" in source
+
+
+def test_hangul_is_measured_as_full_width() -> None:
+    """Hangul fell through to ``isalpha()`` and was budgeted 0.557 em.
+
+    A Korean target's columns were therefore ~44 % too narrow, and since the
+    whole syllable block was also treated as one unbreakable run, every Korean
+    table overflowed. Hangul is full-width and breaks between syllables, exactly
+    like Han. Measured through ``render_table`` (the weights live in its closure):
+    a narrow table has to shrink, and the emitted scale records by how much.
+    """
+    from ubt.render.typst.document_renderer import render_table
+
+    def emitted_scale(text: str, width: float) -> float:
+        markup = f"| A | B |\n|---|---|\n| {text} | {text} |"
+        rendered = render_table(markup, content_width_pt=width)
+        for line in rendered.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#set text(size:"):
+                return float(stripped.split(":")[1].strip().removesuffix("em)"))
+        return 1.0
+
+    # Identical character counts, so any difference is the width model.
+    korean = "한국어문장입니다만"
+    han = "中文句子内容测试吗"
+    latin = "a" * len(korean)
+
+    # Every character is 1 em, so the same 15 characters need the same budget.
+    assert emitted_scale(korean, 150) == emitted_scale(han, 150)
+    # And it is genuinely wider than the Latin model (0.557 em per letter).
+    assert emitted_scale(korean, 150) < emitted_scale(latin, 150)
+
+
+def test_a_korean_word_is_a_break_opportunity() -> None:
+    """A whole Korean sentence must not count as one unbreakable run."""
+    from ubt.render.typst.document_renderer import render_table
+
+    def required_scale(text: str) -> float:
+        markup = f"| A | B |\n|---|---|\n| {text} | {text} |"
+        rendered = render_table(markup, content_width_pt=90)
+        for line in rendered.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#set text(size:"):
+                return float(stripped.split(":")[1].strip().removesuffix("em)"))
+        return 1.0
+
+    long_korean = "한국어로작성된아주긴문장입니다정말로깁니다"
+    long_latin = "abcdefghijklmnopqrstuvwxyzabcdefghij"
+    # Korean breaks between syllables, so it needs a *larger* scale than an
+    # equally long unbreakable Latin token squeezed into the same column.
+    assert required_scale(long_korean) >= required_scale(long_latin)
+
+
+def test_an_asset_name_cannot_escape_its_typst_string(tmp_path: Path) -> None:
+    """A stem containing a quote closed ``image("…")`` early and failed the whole
+    document compile. The content digest already makes the name unique, so
+    everything outside ``[A-Za-z0-9._-]`` is dropped."""
+    from ubt.render.typst.document_renderer import TypstDocumentRenderer
+
+    renderer = TypstDocumentRenderer()
+    build = tmp_path / "build"
+    build.mkdir()
+    source = tmp_path / 'weird"name\\x.png'
+    source.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    copied = renderer._copy_asset(source, build)
+    assert '"' not in copied.name
+    assert "\\" not in copied.name
+    assert copied.exists()
+
+
+def test_a_table_at_the_readability_floor_is_flagged(tmp_path: Path) -> None:
+    """``low_legibility_font`` had no producer, so the render-quality channel
+    only ever carried formula/sentinel flags."""
+    from ubt.render.typst.document_renderer import render_table
+
+    md = (
+        "| Header A | Header B | Header C | Header D |\n|---|---|---|---|\n"
+        "| 很长的中文单元格 | 另一个很长的内容 | 第三个很长的 | 第四个很长的 |"
+    )
+    scales: list[float] = []
+    render_table(md, content_width_pt=120, scale_out=scales)
+    assert scales and scales[0] <= 0.60 + 1e-6
+
+    comfortable: list[float] = []
+    render_table(md, content_width_pt=520, scale_out=comfortable)
+    assert comfortable and comfortable[0] > 0.60

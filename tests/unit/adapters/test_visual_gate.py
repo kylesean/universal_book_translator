@@ -676,17 +676,24 @@ def test_tier_lists_distinguish_a_render_failure_from_a_judge_miss() -> None:
 
     # Pages rendered, no judge: only the semantic tier is missing.
     ran, skipped = _tier_lists((), rendered_pages=6)
-    assert ran == ["geometry", "type", "pixel"]
+    assert ran == ["geometry", "source", "type", "pixel"]
     assert skipped == ["vlm"]
 
     # Nothing rendered: the raster tiers could not run either.
     ran, skipped = _tier_lists((), rendered_pages=0)
-    assert ran == ["geometry"]
+    assert ran == ["geometry", "source"]
     assert skipped == ["type", "pixel", "vlm"]
+
+    # No Typst source beside the artifact: the source tier has to *say* it did
+    # not run. It used to be invisible, so "scanned and clean" and "never
+    # scanned" produced the same tiers_ran list.
+    ran, skipped = _tier_lists((), rendered_pages=6, source_available=False)
+    assert ran == ["geometry", "type", "pixel"]
+    assert skipped == ["source", "vlm"]
 
     # Everything ran, including the judge.
     ran, skipped = _tier_lists((2,), rendered_pages=6)
-    assert ran == ["geometry", "type", "pixel", "vlm"]
+    assert ran == ["geometry", "source", "type", "pixel", "vlm"]
     assert skipped == []
 
 
@@ -739,3 +746,31 @@ def test_every_skip_note_the_gate_emits_has_a_code_and_a_translation() -> None:
         assert block, f"{lang}.ts has no visualSkipCodes block"
         for code in sorted(codes | {"unknown"}):
             assert f"{code}:" in block.group(1), f"{lang}.ts is missing visualSkipCodes.{code}"
+
+
+def test_the_source_tier_reads_the_typst_file_the_renderer_actually_writes(
+    tmp_path: Path,
+) -> None:
+    """The renderer writes ``.<stem>_typst/main.typ``, not ``<pdf>.typ``.
+
+    The gate looked for ``pdf.with_suffix(".typ")``, which never exists, so the
+    U+2011 source scan silently never ran — and ``tiers_ran`` had no slot to say
+    so, which made "scanned and clean" indistinguishable from "never scanned".
+    """
+    from ubt.core.engine.visual_verify_loop import _typst_source_path
+
+    out = Path(tmp_path) / "book_mono.pdf"
+    out.write_bytes(b"%PDF-1.4\n")
+    build = Path(tmp_path) / ".book_mono_typst"
+    build.mkdir()
+    (build / "main.typ").write_text("#set text()", encoding="utf-8")
+
+    assert _typst_source_path(out) == build / "main.typ"
+
+
+def test_a_missing_typst_source_is_reported_as_a_skipped_tier(tmp_path: Path) -> None:
+    from ubt.core.engine.visual_verify_loop import _typst_source_path
+
+    out = Path(tmp_path) / "book_mono.pdf"
+    out.write_bytes(b"%PDF-1.4\n")
+    assert _typst_source_path(out) is None

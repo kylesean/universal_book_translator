@@ -34,6 +34,26 @@ from ubt.core.qe.defect_taxonomy import format_defect_flag
 logger = logging.getLogger(__name__)
 
 
+def _typst_source_path(pdf_path: Path) -> Path | None:
+    """The Typst source the renderer wrote for ``pdf_path``, or ``None``.
+
+    The publication renderer writes ``<output dir>/.<stem>_typst/main.typ``
+    (``docling_render._render_publish_sync``), not a ``.typ`` sibling of the
+    PDF. Looking for ``pdf.with_suffix(".typ")`` therefore never found
+    anything: the source tier silently never ran, and nothing in the report
+    said so. Both spellings are accepted so a caller holding a PDF from some
+    other build dir still gets scanned.
+    """
+    candidates = (
+        pdf_path.parent / f".{pdf_path.stem}_typst" / "main.typ",
+        pdf_path.with_suffix(".typ"),
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 class VisualVerifyLoop:
     """Visual-verification control loop: verify the render, quarantine on defect.
 
@@ -89,8 +109,8 @@ class VisualVerifyLoop:
     ) -> Any:
         runner = get_visual_gate_runner()
         typ_text: str | None = None
-        typ_sidecar = pdf_path.with_suffix(".typ")
-        if typ_sidecar.exists():
+        typ_sidecar = _typst_source_path(pdf_path)
+        if typ_sidecar is not None:
             with suppress(Exception):
                 typ_text = (
                     await asyncio.to_thread(
