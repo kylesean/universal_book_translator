@@ -35,10 +35,13 @@ web/node_modules/
 node_modules/
 web/dist/
 
-# Docs are intentionally unversioned: they change too often to track. The
-# `docs/` tree stays in the working copy; it is just never committed. Code and
-# tests must therefore treat a missing `docs/` directory as normal.
-/docs/
+# Docs: the working notes (benchmarks, reviews) change too often to track and
+# stay unversioned, but `docs/guides/` is referenced as the authority by
+# CONTRIBUTING.md, pyproject.toml, the pre-commit config and code comments —
+# those links must resolve in a fresh clone, so the guides are versioned.
+/docs/*
+!/docs/README.md
+!/docs/guides/
 
 # Generated corpus & deliverables
 tests/fixtures/*.pdf

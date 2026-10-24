@@ -15,10 +15,14 @@ short-document by default; the long route opts in with
 
 ## Install
 
+No PyPI release yet — install from a checkout:
+
 ```bash
-uv sync --extra dev                            # development (Python 3.12+)
-pip install universal-book-translator          # users
-pip install 'universal-book-translator[mcp]'   # users who want the MCP server
+git clone https://github.com/kylesean/universal_book_translator.git
+cd universal_book_translator
+pip install .                                  # users (Python 3.12+)
+pip install '.[mcp]'                           # users who want the MCP server
+uv sync --extra dev                            # development
 ```
 
 Extras: `pdf` (Docling), `ocr` / `academic` (RapidOCR + ONNX runtime), `mcp`
@@ -47,6 +51,12 @@ export UBT_REPAIR_MODEL=gpt-4o             # tier-2 repair model
 `UBT_BASE_URL` is used directly. To run the whole pipeline without spending
 anything, add `--dry-run`: it uses a deterministic echo provider, so no key is
 needed and no tokens are billed.
+
+One entry-point difference worth knowing: with no credential configured for a
+remote endpoint, the CLI refuses the run (set `UBT_LLM_API_KEY` or pass
+`--dry-run`), while the REST API and MCP server auto-run the same rehearsal
+and label it — the submit response carries `"rehearsal": true`, and the
+console badges the job. Nothing is silently translated by a mock.
 
 ```bash
 ubt translate book.pdf -l zh
