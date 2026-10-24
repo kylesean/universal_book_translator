@@ -45,7 +45,10 @@ def subprocess_env() -> dict[str, str]:
     ``XDG_*``, fontconfig, ``HF_HOME`` and ``TORCH_*`` must survive or the
     child stops working, and minimizing the environment wholesale breaks real
     functionality (typst fonts, node startup, COMET weight caching). Pass the
-    result as ``env=`` to every spawn.
+    result as ``env=`` to every spawn of a third-party binary. The one
+    sanctioned exception is a child that *is* this project (the corpus
+    verifier's ``python -m ubt`` run): it legitimately needs the credential
+    variables to do the work the parent already authorized.
     """
     return {name: value for name, value in os.environ.items() if not _is_secret_env_name(name)}
 

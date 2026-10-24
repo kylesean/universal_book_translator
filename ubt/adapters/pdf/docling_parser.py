@@ -739,6 +739,8 @@ def _vram_hint() -> str:
     ``nvidia-smi`` already knows.
     """
     try:
+        from ubt.core.env import subprocess_env
+
         result = subprocess.run(
             [
                 "nvidia-smi",
@@ -749,6 +751,7 @@ def _vram_hint() -> str:
             text=True,
             timeout=5,
             check=False,
+            env=subprocess_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return ""

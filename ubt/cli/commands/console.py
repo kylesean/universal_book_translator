@@ -213,7 +213,11 @@ def console_command(
         try:
             # ``stdout=PIPE`` so the bound port can be read back: Vite moves to
             # the next free port when the configured one is taken, and the
-            # console must report the port it actually serves on.
+            # console must report the port it actually serves on. The dev
+            # server is a third-party node toolchain: it gets the sanitized
+            # environment, not the operator's credentials.
+            from ubt.core.env import subprocess_env
+
             vite_proc = subprocess.Popen(
                 dev_argv,
                 cwd=web_dir,
@@ -221,6 +225,7 @@ def console_command(
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                env=subprocess_env(),
             )
         except OSError as exc:
             console.print(
@@ -248,7 +253,13 @@ def console_command(
             try:
                 script = repo_root / "scripts" / "build_console_assets.py"
                 if script.exists():
-                    subprocess.run([sys.executable, str(script)], check=True)
+                    from ubt.core.env import subprocess_env
+
+                    subprocess.run(
+                        [sys.executable, str(script)],
+                        check=True,
+                        env=subprocess_env(),
+                    )
                 else:
                     console.print(
                         "[bold red]❌ Cannot auto-build: scripts/build_console_assets.py not found.[/]"

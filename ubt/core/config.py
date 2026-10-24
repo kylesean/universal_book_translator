@@ -1525,9 +1525,41 @@ class UBTConfig(BaseSettings):
         # assignment here — one owner for the key, not two that can disagree.
         clean = merge_provider_under(clean, layer_cfg, env_supplied=_env_supplied_field_names())
         cfg = cls(**clean)
+        cfg._anchor_state_dir_to_config_file(custom_path)
         if bootstrap:
             cfg.bootstrap_runtime_environment()
         return cfg
+
+    def _anchor_state_dir_to_config_file(self, custom_path: Path | str | None) -> None:
+        """Anchor untouched state-dir defaults to the discovered config file.
+
+        ``find_config_file`` walks parent directories, so a run from a
+        subdirectory reads the project's ``ubt.toml`` while the CWD-relative
+        ``db_dir``/``cache_dir`` defaults put the ledgers under
+        ``<subdir>/.ubt`` — resume from any other directory then cannot find a
+        healthy ledger. When no layer set them, the project the config came
+        from owns its own state. Explicit values (env, file, overrides) are
+        respected verbatim; no config file found keeps the CWD default.
+        """
+        from ubt.core.providers import find_config_file
+
+        try:
+            discovered = find_config_file(custom_path)
+        except FileNotFoundError:
+            return
+        if discovered is None:
+            return
+        anchor = discovered.parent.resolve()
+        try:
+            cwd = Path.cwd()
+        except OSError:
+            return
+        if anchor == cwd:
+            return
+        if self.db_dir == Path(".ubt/ledgers"):
+            self.db_dir = anchor / ".ubt" / "ledgers"
+        if self.cache_dir == Path(".ubt/cache"):
+            self.cache_dir = anchor / ".ubt" / "cache"
 
 
 def _env_supplied_field_names() -> set[str]:

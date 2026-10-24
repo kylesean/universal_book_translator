@@ -18,6 +18,19 @@ from ubt.core.router.pricing import endpoint_is_local
 
 logger = logging.getLogger(__name__)
 
+
+def _version() -> str:
+    """The installed distribution's version, for the wire User-Agent.
+
+    Resolved lazily: the root package's ``__version__`` reads packaging
+    metadata at import time, and a transport module must stay importable
+    without paying (or depending on the order of) that initialisation.
+    """
+    import ubt
+
+    return str(ubt.__version__)
+
+
 #: Per-phase HTTP timeouts. Connect/write/pool fail fast (a dead endpoint or a
 #: stalled upload should not pin a pool slot), while ``read`` carries the long
 #: window a large LLM completion needs. These are the values the pipeline
@@ -427,7 +440,9 @@ class BaseTransport(ABC):
         # transport that only tested truthiness would put it on the wire.
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "universal-book-translator/1.0",
+            # The installed distribution's version (the same source /health
+            # reports), not a restated literal that drifts on every bump.
+            "User-Agent": f"universal-book-translator/{_version()}",
         }
         if self._api_key and self._api_key != MOCK_API_KEY:
             auth_val = self._api_key
