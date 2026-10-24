@@ -173,10 +173,21 @@ class HeuristicQERunner(BaseQERunner):
         target_lang: str = "zh",
         source_lang: str = "en",
         glossary: list[dict[str, Any]] | None = None,
+        *,
+        fast_pass: FastPassFilter | None = None,
     ) -> None:
         self.target_lang = target_lang
         self.source_lang = source_lang
-        self.fast_pass = FastPassFilter(source_lang=source_lang, target_lang=target_lang)
+        # One filter per run, not one per collaborator: when the pipeline hands
+        # the run's filter in (see :meth:`with_fast_pass`), every later binding
+        # the draft stage makes on it — glossary, document context, vocabulary —
+        # is what ``score_pairs`` scores with, by construction. A filter built
+        # here is the standalone/test configuration and behaves as before.
+        self.fast_pass = (
+            fast_pass
+            if fast_pass is not None
+            else FastPassFilter(source_lang=source_lang, target_lang=target_lang)
+        )
         self._glossary = glossary or None
         #: The run's source text, once the gate binds it (see
         #: :meth:`with_document_context`). Empty means "not bound yet".
@@ -186,6 +197,31 @@ class HeuristicQERunner(BaseQERunner):
         self._document_vocabulary: DocumentVocabulary | None = None
         self._glossary_validator = (
             GlossaryConsistencyValidator(glossary=glossary) if glossary else None
+        )
+
+    def with_fast_pass(self, fast_pass: FastPassFilter) -> "HeuristicQERunner":
+        """Score through the run's own filter — the one the draft stage binds.
+
+        This is the single-owner wiring that retired the inner/outer filter
+        split: the draft stage, the repair loop, triage and consistency all
+        read ``services.fast_pass``, while ``score_pairs`` used to run through
+        a *second* filter this runner built privately — one that had to be
+        taught the glossary, the document context and the vocabulary by hand,
+        and whose desynchronisation produced three measured gate-versus-score
+        contradictions (each now a comment in git history rather than code).
+
+        Always returns a distinct instance (the API shares one runner across
+        concurrent jobs; mutating the shared one's filter would leak this
+        job's bindings into the next). Bind after :meth:`with_languages`: the
+        handed filter already carries the run's language pair.
+        """
+        if fast_pass is self.fast_pass:
+            return self
+        return HeuristicQERunner(
+            target_lang=self.target_lang,
+            source_lang=self.source_lang,
+            glossary=self._glossary,
+            fast_pass=fast_pass,
         )
 
     def with_languages(self, source_lang: str, target_lang: str) -> "HeuristicQERunner":
@@ -223,20 +259,17 @@ class HeuristicQERunner(BaseQERunner):
         """
         if not glossary or glossary is self._glossary:
             return self
+        # The clone keeps this runner's filter object (identity, not a copy):
+        # the filter already carries whatever document context was bound on it,
+        # so the glossary rebind cannot desynchronise the two — the hand-carry
+        # that used to live here was the split's last patch.
         bound = HeuristicQERunner(
             target_lang=self.target_lang,
             source_lang=self.source_lang,
             glossary=glossary,
+            fast_pass=self.fast_pass,
         )
         bound.fast_pass.set_glossary(glossary)
-        # Re-bind the document context this runner may already carry: rebinding
-        # the glossary must not silently drop it (the quality gate calls this
-        # before scoring, so the two would disagree again).
-        if self._document_vocabulary is not None:
-            bound.with_document_vocabulary(self._document_vocabulary)
-        elif self._document_text:
-            bound.fast_pass.set_document_context(self._document_text)
-            bound._document_text = self._document_text
         return bound
 
     def with_document_context(self, document_text: str) -> "HeuristicQERunner":

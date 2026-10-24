@@ -262,6 +262,9 @@ class _RunPreparation:
     repair_loop: RepairLoop
     actual_job_id: str
     run_session: _RunBillingSession
+    #: The run's single FastPassFilter — the object the qe_runner was bound to
+    #: and every stage reads, so the gate and the scorer cannot diverge.
+    fast_pass: FastPassFilter
 
 
 class PipelineOrchestrator:
@@ -661,8 +664,10 @@ class PipelineOrchestrator:
 
         return _judge_complete, judge_model, judge_base_url, judge_provider
 
-    def _runtime_qe_runner(self, source_lang: str, target_lang: str) -> BaseQERunner:
-        """Bind the run's language pair for the QE runner.
+    def _runtime_qe_runner(
+        self, source_lang: str, target_lang: str, *, fast_pass: FastPassFilter | None = None
+    ) -> BaseQERunner:
+        """Bind the run's language pair — and its single filter — for the QE runner.
 
         Injected runners pass through ``with_languages`` too: every runner's
         implementation returns the same instance when the pair already
@@ -671,11 +676,21 @@ class PipelineOrchestrator:
         with this job's language-pair-dependent thresholds, and an injected
         runner no longer keeps its construction-time en→zh
         state for every pair.
+
+        ``fast_pass`` is the run's filter (created by the caller with the same
+        pair): the runner scores through the very object the draft stage binds
+        the glossary and document context onto, so the inner/outer gate split
+        cannot come back. Bind-after-languages is the required order — the
+        handed filter already carries the pair.
         """
         # Fresh run, fresh residency attempt (the API shares one runner).
         if self._qe_runner_explicit:
             self.qe_runner.reset_residency()
-        return self.qe_runner.with_languages(source_lang=source_lang, target_lang=target_lang)
+        runner = self.qe_runner.with_languages(source_lang=source_lang, target_lang=target_lang)
+        bind = getattr(runner, "with_fast_pass", None)
+        if fast_pass is not None and callable(bind):
+            runner = bind(fast_pass)
+        return runner
 
     def _runtime_repair_loop(self, qe_runner: BaseQERunner) -> RepairLoop:
         """Build the per-run repair loop so no language-bound state is shared."""
@@ -1022,7 +1037,16 @@ class PipelineOrchestrator:
         # ledger records it (resume language guard in the ingest stage).
         manifest.target_lang = target_lang
 
-        runtime_qe_runner = self._runtime_qe_runner(source_lang, target_lang)
+        # The run's single FastPassFilter, created with the run's pair and
+        # handed to every consumer: the draft stage binds the glossary and the
+        # document context onto it, the repair/triage/consistency re-checks
+        # evaluate through it, and the QE runner scores through the same
+        # object (``_runtime_qe_runner``). One filter, one owner — the
+        # inner/outer gate split that required hand-carried rebinds is gone.
+        runtime_fast_pass = FastPassFilter(source_lang=source_lang, target_lang=target_lang)
+        runtime_qe_runner = self._runtime_qe_runner(
+            source_lang, target_lang, fast_pass=runtime_fast_pass
+        )
         runtime_repair_loop = self._runtime_repair_loop(runtime_qe_runner)
 
         # What the run actually ingested with, when that is not what it asked
@@ -1057,6 +1081,7 @@ class PipelineOrchestrator:
             repair_loop=runtime_repair_loop,
             actual_job_id=actual_job_id,
             run_session=run_session,
+            fast_pass=runtime_fast_pass,
         )
 
     async def run(
@@ -1089,6 +1114,7 @@ class PipelineOrchestrator:
         source_lang = prep.source_lang
         runtime_qe_runner = prep.qe_runner
         runtime_repair_loop = prep.repair_loop
+        runtime_fast_pass = prep.fast_pass
         actual_job_id = prep.actual_job_id
         run_session = prep.run_session
         # Make a provider Retry-After backoff cancellable: the router sleeps the
@@ -1194,11 +1220,11 @@ class PipelineOrchestrator:
             # language-bound collaborators are built here rather than at the
             # stage that uses them so the whole set is visible in one place.
             concurrency_sem = asyncio.Semaphore(self.config.max_concurrency)
-            # A dedicated per-run FastPassFilter instance avoids shared mutable state.
-            runtime_fast_pass = FastPassFilter(source_lang=source_lang, target_lang=target_lang)
             # The per-run services the stages read (document compiler architecture): built here, where
             # the whole set is visible in one place, and handed to the plan
-            # instead of being fields on the shared context.
+            # instead of being fields on the shared context. ``fast_pass`` is
+            # the run's single filter, created above next to the runner it is
+            # bound to.
             services = RunServices(
                 fast_pass=runtime_fast_pass,
                 qe_runner=runtime_qe_runner,

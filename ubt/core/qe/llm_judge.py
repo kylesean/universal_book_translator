@@ -544,6 +544,24 @@ class TieredQERunner(BaseQERunner):
         )
         return self._carry_run_state(rebound)
 
+    def with_fast_pass(self, fast_pass: Any) -> TieredQERunner:
+        """Forward the run's single filter to the heuristic leg (see the
+        heuristic's :meth:`~ubt.core.qe.heuristic.HeuristicQERunner.with_fast_pass`).
+
+        The judge leg scores semantics and has no FastPass; only the heuristic
+        leg's ``score_pairs`` runs through the filter, so that is the only leg
+        that needs the run's object.
+        """
+        heuristic = self.heuristic.with_fast_pass(fast_pass)
+        if heuristic is self.heuristic:
+            return self
+        rebound = TieredQERunner(
+            heuristic=heuristic,
+            judge=self.judge,
+            pass_sample=self.pass_sample,
+        )
+        return self._carry_run_state(rebound)
+
     def with_document_context(self, document_text: str) -> TieredQERunner:
         """Forward the run's source text to the heuristic leg's omission gate.
 

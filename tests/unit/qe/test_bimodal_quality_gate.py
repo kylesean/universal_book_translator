@@ -243,11 +243,17 @@ async def test_the_runner_scores_a_table_label_with_the_document_context() -> No
     assert kept is bound, "the gate holds this reference and rebinds it in place"
     assert await bound.score_pairs(pair) == [0.92]
 
-    # Rebinding the glossary must not drop the context.
+    # Rebinding the glossary must not drop the context: the rebound runner
+    # keeps the *same* filter object, so whatever was bound onto it — the
+    # document context here — is what the rebound runner scores with. (The
+    # runner-level mirror used to be re-applied onto a fresh filter; the
+    # single-owner filter made that carry unnecessary.)
     rebound = bound.with_glossary([{"source": "MASK", "target": "掩码"}])
-    assert rebound._document_text == book
+    assert rebound.fast_pass is bound.fast_pass
+    assert await rebound.score_pairs(pair) == [0.92]
 
-    # Neither must a language rebind.
+    # Neither must a language rebind (that path still builds a fresh filter
+    # for the new pair, so it carries the context the explicit way).
     relang = bound.with_languages("en", "ja")
     assert relang._document_text == book
 
