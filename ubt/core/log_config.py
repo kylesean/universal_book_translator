@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import sys
 from typing import Any, TextIO
 
@@ -42,14 +43,34 @@ _NOISY_LOGGERS: dict[str, tuple[int, bool]] = {
     "pikepdf": (logging.ERROR, True),
     "pikepdf._core": (logging.ERROR, True),
     "docling": (logging.INFO, False),
+    "docling_core": (logging.INFO, False),
     # httpcore/httpx emit 6-8 DEBUG lines per HTTP call (send_request_headers,
-    # receive_response_body, ...). With 727 draft calls at concurrency 8 those
-    # wire traces buried every line of UBT's own output. The floor is a
+    # receive_response_body, ...), and httpx emits one INFO line per completed
+    # request ("HTTP Request: POST ..."). With hundreds of chunk calls that
+    # wire trace buried every line of UBT's own output. The floor is a
     # transport-level detail, not UBT behaviour, so --verbose stays silent;
     # UBT_LOG_LEVEL=DEBUG is the explicit way to ask for it.
-    "httpcore": (logging.INFO, False),
-    "httpx": (logging.INFO, False),
+    "httpcore": (logging.WARNING, False),
+    "httpx": (logging.WARNING, False),
+    "urllib3": (logging.WARNING, False),
 }
+
+_POLLING_ACCESS_RE = re.compile(
+    r'"GET\s+/(jobs/[^/\s]+/status|jobs\?limit=\d+|health|favicon\.ico|assets/[^\s]+)\s+HTTP/[0-9.]+"\s+(200|304)'
+)
+
+
+class AccessNoiseFilter(logging.Filter):
+    """Filter out high-frequency polling and static asset 200/304 logs from uvicorn.access."""
+
+    def __init__(self, allow_all: bool = False) -> None:
+        super().__init__()
+        self.allow_all = allow_all
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if self.allow_all:
+            return True
+        return not bool(_POLLING_ACCESS_RE.search(record.getMessage()))
 
 
 def setup_logging(
@@ -74,8 +95,9 @@ def setup_logging(
             # An explicit level is the deliberate ask; DEBUG lifts every floor.
             lift_all = resolved_level <= logging.DEBUG
         else:
-            resolved_level = logging.DEBUG if verbose else logging.INFO
-            lift_all = False
+            already_debug = logging.getLogger().isEnabledFor(logging.DEBUG)
+            resolved_level = logging.DEBUG if (verbose or already_debug) else logging.INFO
+            lift_all = resolved_level <= logging.DEBUG
     elif isinstance(level, str):
         resolved_level = int(getattr(logging, level.upper(), logging.INFO))
         lift_all = resolved_level <= logging.DEBUG
@@ -92,7 +114,7 @@ def setup_logging(
     # already own one; skip only when a foreign owner has the root to itself
     # (pytest, an embedding app) and no console was passed — then we adjust
     # levels and leave their routing intact.
-    if console is not None or managed or not foreign:
+    if console is not None or stream is not sys.stderr or managed or not foreign:
         if console is not None:
             # RichHandler defers to whatever Live is currently displaying, so
             # records print above the live region instead of tearing it.
@@ -120,6 +142,12 @@ def setup_logging(
     for name, (floor, restore_on_verbose) in _NOISY_LOGGERS.items():
         restore = lift_all or (verbose and restore_on_verbose)
         logging.getLogger(name).setLevel(logging.NOTSET if restore else floor)
+
+    # Attach access noise filter to uvicorn.access so polling status requests do not drown the console.
+    access_logger = logging.getLogger("uvicorn.access")
+    for stale_f in [f for f in access_logger.filters if isinstance(f, AccessNoiseFilter)]:
+        access_logger.removeFilter(stale_f)
+    access_logger.addFilter(AccessNoiseFilter(allow_all=lift_all or verbose))
 
     # Count-and-summarize, never mute: a third party that warns once per
     # recoverable object still has to be countable for visual_report.json.

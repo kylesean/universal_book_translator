@@ -71,7 +71,8 @@ from ubt.core.job_options import (
     overrides_from_request,
     run_kwargs_from_request,
 )
-from ubt.core.log_config import setup_logging
+from ubt.core.log_aggregate import install_noise_aggregators
+from ubt.core.log_config import _NOISY_LOGGERS, setup_logging
 from ubt.core.qe import BaseQERunner
 from ubt.core.router.rate_limiter import build_rate_limiter
 from ubt.core.router.router import ModelRouter
@@ -492,6 +493,10 @@ def _bootstrap_asgi_app() -> FastAPI:
     """
     if not logging.getLogger().handlers:
         setup_logging()
+    else:
+        for name, (floor, _) in _NOISY_LOGGERS.items():
+            logging.getLogger(name).setLevel(floor)
+        install_noise_aggregators()
     return create_app()
 
 
@@ -560,4 +565,4 @@ def run_server(host: str | None = None, port: int | None = None) -> None:
     _require_api_key_gate(server_config)
     import uvicorn
 
-    uvicorn.run("ubt.api.app:app", host=host, port=port, reload=False)
+    uvicorn.run("ubt.api.app:app", host=host, port=port, reload=False, log_config=None)

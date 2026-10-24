@@ -84,6 +84,7 @@ dependencies = [
     # transitive deps, PSF/BSD.
     "defusedxml>=0.7.1",
     "tomlkit>=0.13.0",
+    "python-multipart>=0.0.32",
 ]
 
 [project.scripts]
