@@ -128,6 +128,21 @@ def test_swapped_tokens_are_reordered() -> None:
     assert report.text == "A $y$ B $x$ C"
 
 
+def test_swapped_checksumless_tokens_fail_closed() -> None:
+    # The same swap with the checksums dropped is indistinguishable from a
+    # rewritten index (a renumbered echo), and the rewrite variant restores the
+    # wrong span silently. Those indices must land in ``mismatched`` so the
+    # block repairs instead of shipping crossed math on trusted digits.
+    masker = MathMasker()
+    masked, mapping = masker.mask("A $x^2$ B $y^3$ C")
+    first, second = list(mapping)
+    bare = [re.sub(r"-[0-9a-z]{3}⟧$", "⟧", token) for token in (first, second)]
+    swapped = masked.replace(first, "@@").replace(second, bare[0]).replace("@@", bare[1])
+    report = masker.unmask_checked(swapped, mapping)
+    assert report.mismatched == [1, 2]
+    assert not report.clean
+
+
 def test_checksumless_echo_restores_for_math_but_not_for_citation() -> None:
     # A faithful model may drop the optional checksum suffix. Math restores it
     # (reported as unverified, which does not fail ``clean``); a citation refuses

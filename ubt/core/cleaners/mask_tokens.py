@@ -383,6 +383,18 @@ def restore_masked(text: str, mapping: dict[str, str], style: RestoreStyle) -> U
     # A swap of two intact tokens leaves every other bucket empty; only the
     # order check can see a protected span move within the block.
     reordered = find_reordered(list(table), [idx for idx, _ in draft_refs if idx in table])
+    # An echo that arrived checksum-less and participates in an inversion is
+    # ambiguous between a legitimate reorder and a rewritten index: without the
+    # checksum the two are indistinguishable, and the rewrite variant restores
+    # the wrong span silently — a swap every other bucket misses, because each
+    # bare index is restored verbatim wherever its digits claim to belong. The
+    # checksum is what makes a reorder verifiable (a verified swap stays clean
+    # above), so the moved bare indices fail closed into ``mismatched`` and the
+    # block repairs rather than shipping on trusted digits.
+    bare_moved = set(reordered) & set(unverified)
+    if bare_moved:
+        unverified = [idx for idx in unverified if idx not in bare_moved]
+        mismatched = sorted(set(mismatched) | bare_moved)
     # Post-restore residue: anything still token-shaped is unaccounted for.
     residue = [
         f"{int(idx)}-{ck}" if ck else str(int(idx))
