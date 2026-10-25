@@ -478,25 +478,40 @@ export interface DeliverableListing {
   /** True when the files on disk predate the job's ledger text. The download
    *  endpoint refuses such a job with 409, so callers must re-render first. */
   stale: boolean
+  /** The shared three-state delivery verdict, or null when the job has no
+   *  quality report yet. `blocked` means the download endpoint refuses the
+   *  reader-facing files unless `force` is set — callers should warn before
+   *  opening the download rather than surface the 409 afterwards. */
+  deliveryVerdict: 'passed' | 'warning' | 'blocked' | null
 }
 
 export async function listDeliverables(jobId: string): Promise<DeliverableListing> {
   const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/deliverables`)
   if (!res.ok) throw await apiError(res, "Failed to list deliverables")
   const data = await res.json()
-  return { items: data.deliverables ?? [], stale: Boolean(data.stale) }
+  return {
+    items: data.deliverables ?? [],
+    stale: Boolean(data.stale),
+    deliveryVerdict: data.delivery_verdict ?? null,
+  }
 }
 
 export function deliverableDownloadUrl(
   jobId: string,
   key: string,
-  opts: { inline?: boolean } = {}
+  opts: { inline?: boolean; force?: boolean } = {}
 ): string {
   const base = `${BASE_URL}/jobs/${encodeURIComponent(jobId)}/download/${encodeURIComponent(key)}`
   // `inline` asks the server to drop Content-Disposition: attachment and serve
   // a renderable media type, so the console's preview pane can embed the file
   // instead of triggering a download. The server CSP-sandboxes the response.
-  return opts.inline ? `${base}?inline=1` : base
+  //
+  // `force` takes a delivery the quality gate blocked. The server refuses those
+  // by default; the console only sets it after the operator confirms, having
+  // read that some blocks ship the source text instead of a translation.
+  if (opts.inline) return `${base}?inline=1`
+  if (opts.force) return `${base}?force=1`
+  return base
 }
 
 /**

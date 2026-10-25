@@ -394,6 +394,11 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
                 # Lets the console offer "re-render first" instead of opening a
                 # download that the guard below will refuse.
                 "stale": await asyncio.to_thread(_delivery_is_stale, valid_id),
+                # The same three-state verdict the report carries, surfaced here
+                # so the download button can warn *before* the click rather than
+                # 409-ing after it. ``None`` = no report yet, which is not a
+                # refusal.
+                "delivery_verdict": await asyncio.to_thread(_delivery_verdict_sync, valid_id),
             }
         )
 
@@ -405,6 +410,7 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
         job_id: str,
         key: str,
         inline: bool = False,
+        force: bool = False,
         x_ubt_tenant: str | None = Header(default=None),
     ) -> FileResponse:
         """Serve one deliverable by key (see :data:`DELIVERABLE_LABELS`).
@@ -416,6 +422,11 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
         generated from *book* content, which is untrusted input, so even a
         fetched-directly preview runs scriptless in an opaque origin rather
         than in the console's origin.
+
+        ``?force=1`` takes a delivery the quality gate blocked. It exists for
+        the operator who has read the report and decided the partial book is
+        still worth shipping; without it a ``blocked`` verdict refuses the
+        reader-facing deliverables (see the check below).
         """
         valid_id = validate_job_id(job_id)
         if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):
@@ -475,6 +486,38 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
                     "before downloading it."
                 ),
             )
+
+        # Refuse a reader-facing deliverable whose quality gate said BLOCKED.
+        #
+        # ``blocked`` means blocks were quarantined (MQM Critical unresolved) or
+        # failed: they ship as a source-only placeholder, not a translation, so
+        # the reader meets English in a Chinese book. Every other surface
+        # already says so — the CLI banner, the console's gate screen, Mission
+        # Control's status line — and this endpoint served the file anyway,
+        # which made the whole verdict advisory at the one moment it matters.
+        #
+        # Three deliberate narrowings:
+        #   * only reader-facing keys (``_READER_FACING_DELIVERABLES``); the
+        #     audit sidecars stay open, or an operator could not read the report
+        #     explaining the refusal;
+        #   * ``?inline=1`` is exempt — that is the console's own preview pane,
+        #     not a delivery, and the operator needs to look at the artifact to
+        #     decide what to do about it;
+        #   * ``?force=1`` overrides, mirroring ``strict_contract`` and
+        #     ``allow_unpriced_budget``: the safe behaviour is the default and
+        #     loosening it must be asked for explicitly.
+        if key in _READER_FACING_DELIVERABLES and not inline and not force:
+            verdict = await asyncio.to_thread(_delivery_verdict_sync, valid_id)
+            if verdict == "blocked":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "The quality gate blocked this delivery: some blocks were "
+                        "quarantined or failed and ship the source text instead of a "
+                        "translation. Inspect the quality report, or re-download with "
+                        "?force=1 to take it knowingly."
+                    ),
+                )
 
         _, media_type = DELIVERABLE_LABELS[key]
         if inline:

@@ -35,6 +35,7 @@ from ubt.core.ir.models import (
     IRBlock,
     make_element,
 )
+from ubt.core.job_options import sidecar_path
 
 pytestmark = pytest.mark.fast
 
@@ -53,29 +54,37 @@ def _config(tmp_path: Path) -> UBTConfig:
     return config
 
 
-def _seed_job(config: UBTConfig, tmp_path: Path) -> None:
-    """A completed job with one block and its artifact paths on disk."""
+def _seed_job(config: UBTConfig, tmp_path: Path, *, blocked_human_blocks: int = 2) -> None:
+    """A completed job with one block and its artifact paths on disk.
+
+    ``blocked_human_blocks`` defaults to 2, so the seeded report's verdict is
+    ``blocked`` — the state most of these tests care about, because it is the
+    one the console used to misreport. Tests that are about *readiness* or
+    *staleness* rather than the gate pass 0, so the download guard stays out of
+    their way.
+    """
     out = tmp_path / "out.pdf"
     out.write_bytes(b"%PDF-1.4\nfake")
-    report = tmp_path / "out_quality_report.json"
-    report.write_text(
-        json.dumps(
-            {
-                "summary": {
-                    "completed_blocks": 10,
-                    "failed_blocks": 0,
-                    "blocked_human_blocks": 2,
-                    "needs_human_blocks": 0,
-                    "pass_rate": 0.83,
-                },
-                "score_metrics": {"avg_qe": 0.9, "qe_measured": True},
-                "source_path": str(tmp_path / "secret-host-path.pdf"),
-            }
-        ),
-        encoding="utf-8",
+    report_data = json.dumps(
+        {
+            "summary": {
+                "completed_blocks": 10,
+                "failed_blocks": 0,
+                "blocked_human_blocks": blocked_human_blocks,
+                "needs_human_blocks": 0,
+                "pass_rate": 0.83,
+            },
+            "score_metrics": {"avg_qe": 0.9, "qe_measured": True},
+            "source_path": str(tmp_path / "secret-host-path.pdf"),
+        }
     )
+    report = tmp_path / "out_quality_report.json"
+    report.write_text(report_data, encoding="utf-8")
+    sidecar_path(out, "quality_report.json").write_text(report_data, encoding="utf-8")
     visual = tmp_path / "out_visual_report.json"
-    visual.write_text(json.dumps({"findings": [], "total_pages": 3}), encoding="utf-8")
+    visual_data = json.dumps({"findings": [], "total_pages": 3})
+    visual.write_text(visual_data, encoding="utf-8")
+    sidecar_path(out, "visual_report.json").write_text(visual_data, encoding="utf-8")
 
     with SQLiteJobLedger(config.db_dir / f"{_JOB}.sqlite") as ledger:
         ledger.init_job_from_manifest(
@@ -193,7 +202,7 @@ def test_deliverables_list_what_exists_on_disk(tmp_path: Path) -> None:
 
 def test_download_serves_the_primary_artifact(tmp_path: Path) -> None:
     config = _config(tmp_path)
-    _seed_job(config, tmp_path)
+    _seed_job(config, tmp_path, blocked_human_blocks=0)
     client = TestClient(create_app(config))
 
     res = client.get(f"/jobs/{_JOB}/download/primary", headers=_AUTH)
@@ -260,7 +269,7 @@ def test_download_refuses_a_delivery_that_predates_the_ledger(tmp_path: Path) ->
     from ubt.core.engine.delivery_freshness import record_rendered_digest
 
     config = _config(tmp_path)
-    _seed_job(config, tmp_path)
+    _seed_job(config, tmp_path, blocked_human_blocks=0)
     client = TestClient(create_app(config))
 
     # A render happened, so the artifact is current.
@@ -294,8 +303,117 @@ def test_a_job_that_never_recorded_a_render_is_still_downloadable(tmp_path: Path
     render has recorded one.
     """
     config = _config(tmp_path)
-    _seed_job(config, tmp_path)
+    _seed_job(config, tmp_path, blocked_human_blocks=0)
     client = TestClient(create_app(config))
     res = client.get(f"/jobs/{_JOB}/download/primary", headers=_AUTH)
     assert res.status_code == 200
     assert client.get(f"/jobs/{_JOB}/deliverables", headers=_AUTH).json()["stale"] is False
+
+
+def test_a_blocked_delivery_is_not_served_by_default(tmp_path: Path) -> None:
+    """The verdict is no longer advisory at the one moment it matters.
+
+    ``blocked`` means quarantined or failed blocks ship the *source* in place of
+    a translation, so the reader meets English in a Chinese book. Every other
+    surface said so (CLI banner, gate screen, Mission Control) while this
+    endpoint handed the file over regardless.
+    """
+    config = _config(tmp_path)
+    _seed_job(config, tmp_path, blocked_human_blocks=2)
+    client = TestClient(create_app(config))
+
+    res = client.get(f"/jobs/{_JOB}/download/primary", headers=_AUTH)
+    assert res.status_code == 409, res.text
+    assert "blocked" in res.json()["detail"]
+    assert "force=1" in res.json()["detail"]
+
+
+def test_force_takes_a_blocked_delivery_knowingly(tmp_path: Path) -> None:
+    """The escape hatch mirrors ``strict_contract``: safe by default, loosen on ask."""
+    config = _config(tmp_path)
+    _seed_job(config, tmp_path, blocked_human_blocks=2)
+    client = TestClient(create_app(config))
+
+    res = client.get(f"/jobs/{_JOB}/download/primary?force=1", headers=_AUTH)
+    assert res.status_code == 200
+    assert res.content.startswith(b"%PDF")
+
+
+def test_the_audit_sidecars_stay_downloadable_from_a_blocked_job(tmp_path: Path) -> None:
+    """Refusing these would make the refusal unexplainable.
+
+    The quality report is the only place an operator can read *why* the gate
+    blocked the delivery; the contract is the other half of that audit. Neither
+    is reader-facing, so neither is gated.
+    """
+    config = _config(tmp_path)
+    _seed_job(config, tmp_path, blocked_human_blocks=2)
+    client = TestClient(create_app(config))
+
+    # The deliverable path for ``quality_report`` is derived from the primary
+    # artifact's stem (``out_pdf_quality_report.json``), not from the ledger's
+    # ``report_file`` key, so write one there for this test.
+    sidecar = tmp_path / "out_pdf_quality_report.json"
+    sidecar.write_text(json.dumps({"summary": {"blocked_human_blocks": 2}}), encoding="utf-8")
+
+    report = client.get(f"/jobs/{_JOB}/download/quality_report", headers=_AUTH)
+    assert report.status_code == 200, report.text
+    assert report.json()["summary"]["blocked_human_blocks"] == 2
+
+
+def test_the_console_preview_of_a_blocked_delivery_still_renders(tmp_path: Path) -> None:
+    """``?inline=1`` is the preview pane, not a delivery.
+
+    The operator needs to look at the artifact to decide whether to fix it or
+    take it with ``?force=1``; refusing the preview would leave them deciding
+    blind.
+    """
+    config = _config(tmp_path)
+    _seed_job(config, tmp_path, blocked_human_blocks=2)
+    client = TestClient(create_app(config))
+
+    res = client.get(f"/jobs/{_JOB}/download/primary?inline=1", headers=_AUTH)
+    assert res.status_code == 200, res.text
+    assert "attachment" not in res.headers.get("content-disposition", "")
+
+
+def test_a_warning_delivery_downloads_without_force(tmp_path: Path) -> None:
+    """``warning`` is deliverable-by-design: blocks await human review, they are
+    not quarantined, so nothing ships source in place of a translation."""
+    config = _config(tmp_path)
+    _seed_job(config, tmp_path, blocked_human_blocks=0)
+    report = tmp_path / "out_quality_report.json"
+    data = json.loads(report.read_text(encoding="utf-8"))
+    data["summary"]["needs_human_blocks"] = 3
+    report.write_text(json.dumps(data), encoding="utf-8")
+    client = TestClient(create_app(config))
+
+    listing = client.get(f"/jobs/{_JOB}/deliverables", headers=_AUTH)
+    assert listing.json()["delivery_verdict"] == "warning"
+    assert client.get(f"/jobs/{_JOB}/download/primary", headers=_AUTH).status_code == 200
+
+
+def test_the_listing_reports_the_verdict_before_the_click(tmp_path: Path) -> None:
+    """So the console can warn instead of opening a download that would 409."""
+    config = _config(tmp_path)
+    _seed_job(config, tmp_path, blocked_human_blocks=2)
+    client = TestClient(create_app(config))
+
+    body = client.get(f"/jobs/{_JOB}/deliverables", headers=_AUTH).json()
+    assert body["delivery_verdict"] == "blocked"
+
+
+def test_a_job_with_no_report_is_not_treated_as_blocked(tmp_path: Path) -> None:
+    """``None`` means "nothing to judge", not "refused".
+
+    An in-flight job polls this endpoint; a missing report must not turn every
+    poll into a 409.
+    """
+    config = _config(tmp_path)
+    _seed_job(config, tmp_path, blocked_human_blocks=0)
+    (tmp_path / "out_quality_report.json").unlink()
+    client = TestClient(create_app(config))
+
+    body = client.get(f"/jobs/{_JOB}/deliverables", headers=_AUTH).json()
+    assert body["delivery_verdict"] is None
+    assert client.get(f"/jobs/{_JOB}/download/primary", headers=_AUTH).status_code == 200

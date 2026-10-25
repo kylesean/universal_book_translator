@@ -303,6 +303,10 @@ export const en: TranslationDictionary = {
     blocksRemaining: 'blocks remaining',
     stateBlocked: 'Gate did not release — quarantined or failed blocks',
     stateNeedsReview: 'Deliverable — blocks awaiting human review',
+    blockedDownloadTitle: 'The quality gate blocked this delivery',
+    blockedDownloadBody:
+      "Some blocks were quarantined or failed, so the artifact shows the source text where a translation should be — the reader meets English in the delivered book. The quality report names them. Downloading anyway takes the file without the gate's release.",
+    blockedDownloadConfirm: 'Download anyway',
     stateCertified: 'Compiler output certified',
     stateDrafting: 'Drafting and typesetting blocks',
     stageStateExtract: 'Extracting source document layout…',

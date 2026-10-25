@@ -676,6 +676,12 @@ class DeliverableListResponse(BaseModel):
     #: refuses such a job (409); this flag is how the console knows *before* it
     #: opens a download the user would only see fail.
     stale: bool = False
+    #: The shared three-state delivery verdict (``passed`` / ``warning`` /
+    #: ``blocked``), or ``None`` when the job has no quality report yet. A
+    #: ``blocked`` delivery's reader-facing files are refused by the download
+    #: endpoint unless ``?force=1``; surfacing it here lets the console warn
+    #: before the click instead of after the 409.
+    delivery_verdict: str | None = None
 
 
 class GlossaryResponse(BaseModel):

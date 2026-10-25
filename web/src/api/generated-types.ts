@@ -566,6 +566,11 @@ export interface paths {
          *     generated from *book* content, which is untrusted input, so even a
          *     fetched-directly preview runs scriptless in an opaque origin rather
          *     than in the console's origin.
+         *
+         *     ``?force=1`` takes a delivery the quality gate blocked. It exists for
+         *     the operator who has read the report and decided the partial book is
+         *     still worth shipping; without it a ``blocked`` verdict refuses the
+         *     reader-facing deliverables (see the check below).
          */
         get: operations["download_deliverable_jobs__job_id__download__key__get"];
         put?: never;
@@ -1066,6 +1071,8 @@ export interface components {
              * @default false
              */
             stale: boolean;
+            /** Delivery Verdict */
+            delivery_verdict?: string | null;
         };
         /**
          * ExtractionStrategy
@@ -3355,6 +3362,7 @@ export interface operations {
         parameters: {
             query?: {
                 inline?: boolean;
+                force?: boolean;
             };
             header?: {
                 "x-ubt-tenant"?: string | null;

@@ -2028,7 +2028,7 @@
           "Jobs"
         ],
         "summary": "Download Deliverable",
-        "description": "Serve one deliverable by key (see :data:`DELIVERABLE_LABELS`).\n\n``?inline=1`` renders the file in place (the console's preview pane)\ninstead of attaching it: no ``Content-Disposition: attachment``, and a\nmedia type the browser can actually display. The response is served\nunder a CSP ``sandbox`` directive either way \u2014 the HTML deliverable is\ngenerated from *book* content, which is untrusted input, so even a\nfetched-directly preview runs scriptless in an opaque origin rather\nthan in the console's origin.",
+        "description": "Serve one deliverable by key (see :data:`DELIVERABLE_LABELS`).\n\n``?inline=1`` renders the file in place (the console's preview pane)\ninstead of attaching it: no ``Content-Disposition: attachment``, and a\nmedia type the browser can actually display. The response is served\nunder a CSP ``sandbox`` directive either way \u2014 the HTML deliverable is\ngenerated from *book* content, which is untrusted input, so even a\nfetched-directly preview runs scriptless in an opaque origin rather\nthan in the console's origin.\n\n``?force=1`` takes a delivery the quality gate blocked. It exists for\nthe operator who has read the report and decided the partial book is\nstill worth shipping; without it a ``blocked`` verdict refuses the\nreader-facing deliverables (see the check below).",
         "operationId": "download_deliverable_jobs__job_id__download__key__get",
         "parameters": [
           {
@@ -2057,6 +2057,16 @@
               "type": "boolean",
               "default": false,
               "title": "Inline"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Force"
             }
           },
           {
@@ -4125,6 +4135,17 @@
             "type": "boolean",
             "title": "Stale",
             "default": false
+          },
+          "delivery_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery Verdict"
           }
         },
         "type": "object",

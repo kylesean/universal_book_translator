@@ -242,6 +242,9 @@ export interface TranslationDictionary {
     executionState: string
     blocksRemaining: string
     stateCertified: string
+    blockedDownloadTitle: string
+    blockedDownloadBody: string
+    blockedDownloadConfirm: string
     stateBlocked: string
     stateNeedsReview: string
     stateDrafting: string

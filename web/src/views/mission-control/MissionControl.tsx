@@ -29,6 +29,7 @@ import {
   reExportJob,
   reparseJob,
   subscribeJobProgress,
+  type DeliverableListing,
   type JobSummary,
   type PipelineStage,
   type ProgressStreamFrame,
@@ -240,6 +241,10 @@ export function MissionControl() {
   // irreversible action in the console, and the only one that used to fire
   // on a single click while delete and re-parse demanded a typed id.
   const [pendingCancel, setPendingCancel] = useState(false)
+  // Set when the operator asked to download a delivery the quality gate
+  // blocked. The server refuses those by default, so the click opens this
+  // dialog instead of a download; confirming re-issues it with `force`.
+  const [pendingBlockedDownload, setPendingBlockedDownload] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
   // The job's terminal error, as the engine phrased it for an operator. The
   // status payload always carried it and the console never read it, so a
@@ -538,8 +543,8 @@ export function MissionControl() {
   // is the worst outcome available. The user asked for their current text, so
   // the console re-renders first and then downloads, turning a correctness
   // guard into a slower click rather than an error they must decode.
-  const handleDownload = async () => {
-    if (!currentJobId || downloading) return
+  /** Issue the download for `key`, optionally overriding a blocked verdict. */
+  const issueDownload = async (jobId: string, key: string, force = false) => {
     setDownloading(true)
     // Open the tab SYNCHRONOUSLY, while still inside the click gesture. The
     // previous version called window.open after up to three awaits (the stale
@@ -548,15 +553,15 @@ export function MissionControl() {
     // un-rendered edits appeared to do nothing at all.
     const tab = window.open('', '_blank')
     try {
-      let listing = await listDeliverables(currentJobId)
+      let listing = await listDeliverables(jobId)
       if (listing.stale) {
         toast.push(t.mission.reRenderingBeforeDownload, 'info')
-        await reExportJob(currentJobId)
-        listing = await listDeliverables(currentJobId)
+        await reExportJob(jobId)
+        listing = await listDeliverables(jobId)
       }
-      const primary = listing.items.find((d) => d.key === 'primary') ?? listing.items[0]
+      const primary = listing.items.find((d) => d.key === key) ?? listing.items[0]
       if (primary) {
-        const url = deliverableDownloadUrl(currentJobId, primary.key)
+        const url = deliverableDownloadUrl(jobId, primary.key, { force })
         if (tab) tab.location.href = url
         else window.open(url, '_blank')
       } else {
@@ -571,6 +576,29 @@ export function MissionControl() {
     } finally {
       setDownloading(false)
     }
+  }
+
+  /**
+   * The download button. A `blocked` verdict means the reader meets source text
+   * in place of a translation, and the server refuses those files — so ask
+   * first, and only then issue the request with `force`. Checking here (rather
+   * than letting the 409 arrive) keeps the decision in front of the operator
+   * instead of in a blank tab.
+   */
+  const handleDownload = async () => {
+    if (!currentJobId || downloading) return
+    let verdict: DeliverableListing['deliveryVerdict'] = null
+    try {
+      verdict = (await listDeliverables(currentJobId)).deliveryVerdict
+    } catch {
+      // A listing failure is not a refusal: fall through to the download, whose
+      // own error path reports the real problem.
+    }
+    if (verdict === 'blocked') {
+      setPendingBlockedDownload(currentJobId)
+      return
+    }
+    await issueDownload(currentJobId, 'primary')
   }
 
   // History management: removes the ledger + deliverables of a finished job.
@@ -718,6 +746,20 @@ export function MissionControl() {
         danger
         onConfirm={() => void handleCancel()}
         onCancel={() => setPendingCancel(false)}
+      />
+      <ConfirmDialog
+        open={pendingBlockedDownload !== null}
+        title={t.mission.blockedDownloadTitle}
+        body={t.mission.blockedDownloadBody}
+        confirmLabel={t.mission.blockedDownloadConfirm}
+        cancelLabel={t.common.cancel}
+        danger
+        onConfirm={() => {
+          const jobId = pendingBlockedDownload
+          setPendingBlockedDownload(null)
+          if (jobId) void issueDownload(jobId, 'primary', true)
+        }}
+        onCancel={() => setPendingBlockedDownload(null)}
       />
       <ConfirmDialog
         open={pendingDelete !== null}

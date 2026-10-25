@@ -284,6 +284,12 @@ export const zh: TranslationDictionary = {
     blocksRemaining: '块待处理',
     // ``completed`` 只代表流水线跑完，不代表门禁放行（隔离块也是终态）。
     stateCertified: '编译器产物已认证',
+    // 质量门禁判 blocked 时，面向读者的产物会被服务端拒绝；这里让操作员先
+    // 知道后果再决定，而不是让下载在空白标签页里失败。
+    blockedDownloadTitle: '这份交付被质量门禁拦下了',
+    blockedDownloadBody:
+      '部分块被隔离或失败，它们在产物里显示的是原文而不是译文——读者会在中文书里读到英文。质量报告里写着是哪几块。仍要下载的话，文件会被标记为未经门禁放行。',
+    blockedDownloadConfirm: '我已知情，仍然下载',
     stateBlocked: '门禁未放行——存在隔离或失败块',
     stateNeedsReview: '产物可交付——有块待人工复核',
     stateDrafting: '正在翻译与排版分块',
