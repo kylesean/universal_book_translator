@@ -33,7 +33,7 @@ from pathlib import Path
 import pytest
 
 from ubt.core.config import UBTConfig
-from ubt.core.engine.dry_run import create_dry_run_orchestrator
+from ubt.core.engine.dry_run import create_dry_run_orchestrator, rehearsal_db_dir
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.ir.models import TERMINAL_STATUSES
@@ -113,7 +113,15 @@ async def test_the_rehearsal_reaches_a_delivered_artifact(tmp_path: Path) -> Non
     assert terminal.artifact_path == str(output)
     assert not any(e.event_type is EventType.PIPELINE_FAILED for e in events)
 
-    db_path = tmp_path / "ledgers" / f"{job_id}.sqlite"
+    # A rehearsal writes to its own store (`rehearsal_db_dir`), a sibling of the
+    # real one — so the ledger is under `ledgers-mock`, not `ledgers`. Asserting
+    # the derived path rather than hard-coding it keeps this test honest about
+    # the isolation the orchestrator actually chose.
+    db_path = rehearsal_db_dir(tmp_path / "ledgers") / f"{job_id}.sqlite"
+    assert db_path.is_file(), f"the rehearsal wrote no ledger at its own store: {db_path}"
+    assert not (tmp_path / "ledgers" / f"{job_id}.sqlite").exists(), (
+        "the rehearsal leaked into the real ledger directory"
+    )
     ledger = SQLiteJobLedger(db_path)
     try:
         assert ledger.get_job_status(job_id) == "completed"
