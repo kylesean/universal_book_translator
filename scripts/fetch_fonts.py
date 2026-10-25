@@ -102,39 +102,53 @@ NOTO_SERIF_DEVANAGARI_URL = (
 #: are deliberately unreachable.
 NOTO_VARIANT = "full"
 
-#: Coverage for the subset: every CJK unified ideograph plus the punctuation a
-#: book actually uses. Cutting to GB2312 (7,445 chars) is smaller but ships
-#: tofu the moment a book uses a name or technical term outside it — an
-#: unacceptable failure mode for a translation engine, so the full block stays.
-#: Coverage for the CJK subsets. The upstream pan-CJK faces carry every CJK
-#: script in one file — measured on Noto Serif CJK SC: kana 96.9%, hangul
-#: syllables 100%, ideographs 100% — so a single file serves Chinese, Japanese
-#: and Korean. Cutting only the ideograph block (the first version of this
-#: script) produced a set that rendered Japanese and Korean as tofu; including
-#: the kana and hangul ranges costs 2.7 MB and removes that class of failure.
+#: Coverage for the CJK subsets. Every CJK unified ideograph plus the
+#: punctuation a book actually uses.
 #:
-#: GB2312 (7,445 chars) would be smaller still, but a book using a name or
-#: technical term outside it would ship tofu — unacceptable for a translation
-#: engine, so the full ideograph block stays.
+#: **The SC cut deliberately excludes kana and hangul.** Upstream ships one
+#: pan-CJK face carrying every script, so the first version of this script cut
+#: a single file serving Chinese, Japanese and Korean. That file is what broke:
+#: measured with Typst 0.15.1 under ``--ignore-system-fonts``, a subset holding
+#: the ideographs *plus* both kana and hangul (33,624 glyphs) typesets ``：``,
+#: ``；`` and ``？`` as CID 0 — the glyphs exist in the font and the page looks
+#: right, but the PDF's CIDSet declares only CID 0, so the characters are gone
+#: from the text layer. Copy, search and the artifact check all fail on text a
+#: reader can see. Neither block alone triggers it (ideographs+hangul = 32,597
+#: glyphs is clean; ideographs+kana = 21,799 is clean), and the un-subsetted
+#: face at 65,535 glyphs is clean, so this is a defect in the subsetting path,
+#: not in the font.
+#:
+#: Since the JP and KR cuts already exist as their own files, the SC cut has no
+#: reason to carry kana or hangul: dropping both removes the trigger *and* the
+#: 2.7 MB they cost. Chinese coverage is unchanged (ideographs 100%, CJK
+#: punctuation 100%, fullwidth forms 93.8%, ASCII 100%).
 CJK_SUBSET_UNICODES = ",".join(
     [
         "U+0020-007E",  # ASCII
         "U+00A0-00FF",  # Latin-1 supplement (accents, currency)
-        "U+1100-11FF",  # Hangul Jamo
         "U+2000-206F",  # general punctuation (quotes, dashes, ellipsis)
         "U+20A0-20CF",  # currency symbols
         "U+2100-214F",  # letterlike symbols (№, ™)
         "U+2190-21FF",  # arrows (common in technical prose)
         "U+2200-22FF",  # mathematical operators
         "U+3000-303F",  # CJK punctuation
+        "U+4E00-9FFF",  # CJK unified ideographs
+        "U+FE30-FE4F",  # CJK compatibility forms
+        "U+FF00-FFEF",  # fullwidth forms
+    ]
+)
+
+#: Kana and hangul, cut for the regional faces that own them. Kept as a
+#: separate spec so the SC cut above stays free of the combination that breaks
+#: Typst's subsetting; see the note there.
+KANA_HANGUL_UNICODES = ",".join(
+    [
+        "U+1100-11FF",  # Hangul Jamo
         "U+3040-30FF",  # Hiragana + Katakana
         "U+3130-318F",  # Hangul compatibility Jamo
-        "U+4E00-9FFF",  # CJK unified ideographs
         "U+A960-A97F",  # Hangul Jamo Extended-A
         "U+AC00-D7A3",  # Hangul syllables
         "U+D7B0-D7FF",  # Hangul Jamo Extended-B
-        "U+FE30-FE4F",  # CJK compatibility forms
-        "U+FF00-FFEF",  # fullwidth forms
     ]
 )
 
@@ -153,8 +167,14 @@ def _download(url: str, dest: Path, *, timeout: int = 180) -> None:
         raise SystemExit(f"download failed: {url}\n  {exc}") from exc
 
 
-def _subset(source: Path, dest: Path, *, font_number: int = 0) -> None:
-    """Cut ``source`` down to the delivery charset."""
+def _subset(source: Path, dest: Path, *, font_number: int = 0, unicodes: str | None = None) -> None:
+    """Cut ``source`` down to the delivery charset.
+
+    ``unicodes`` defaults to :data:`CJK_SUBSET_UNICODES`, the Chinese cut. A
+    face that owns kana or hangul passes the spec that includes them; keeping
+    the two specs apart is what stops the SC cut from carrying the combination
+    that breaks Typst's subsetting (see :data:`CJK_SUBSET_UNICODES`).
+    """
     if shutil.which("pyftsubset") is None:
         raise SystemExit(
             "pyftsubset is required to build the font subset.\n"
@@ -163,7 +183,7 @@ def _subset(source: Path, dest: Path, *, font_number: int = 0) -> None:
     cmd = [
         "pyftsubset",
         str(source),
-        f"--unicodes={CJK_SUBSET_UNICODES}",
+        f"--unicodes={unicodes or CJK_SUBSET_UNICODES}",
         f"--output-file={dest}",
         f"--font-number={font_number}",
         f"--layout-features={SUBSET_LAYOUT}",
@@ -185,6 +205,8 @@ def _obtain(filename: str, dest: Path) -> None:
             # JP/KR glyph forms differ from SC for many shared ideographs
             # (直, 骨, 角 ...). Rendering Japanese with the SC face is legible
             # but reads as Chinese typesetting, so each region gets its own cut.
+            # These faces own kana/hangul, so they take the wider spec: it is
+            # the SC cut that must stay free of that combination.
             face = "jp" if "CJKjp" in filename else "kr"
             archive = work / "noto-otc.zip"
             _download(NOTO_CJK_OTC_URL, archive)
@@ -200,7 +222,13 @@ def _obtain(filename: str, dest: Path) -> None:
             ]
             if not candidates:
                 raise SystemExit("no *-Regular collection in the OTC archive")
-            _subset(candidates[0], dest, font_number=NOTO_CJK_FACE_INDEX[face])
+            regional = ",".join([CJK_SUBSET_UNICODES, KANA_HANGUL_UNICODES])
+            _subset(
+                candidates[0],
+                dest,
+                font_number=NOTO_CJK_FACE_INDEX[face],
+                unicodes=regional,
+            )
         elif filename.startswith("NotoSerifCJK"):
             archive = work / "noto-serif.zip"
             _download(NOTO_CJK_URL, archive)

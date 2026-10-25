@@ -83,7 +83,7 @@ BUNDLED_FONTS: tuple[BundledFont, ...] = (
     BundledFont(
         filename="NotoSerifCJKsc-Regular-subset.otf",
         family="Noto Serif CJK SC",
-        sha256="6edad0c599e75f2f873b1f2d298067054ba5d2f5243a7e73d9e97d379e657313",
+        sha256="887cc02eced4fe97f62ef9e0e4bcc201736761f56c9cae6802b4a9767c2b70a9",
         license="OFL-1.1",
         # `hant` too: the traditional ideographs live in the same unified block
         # the subset covers (measured against a traditional-only sample).
@@ -96,7 +96,7 @@ BUNDLED_FONTS: tuple[BundledFont, ...] = (
     BundledFont(
         filename="NotoSansCJKsc-Regular-subset.otf",
         family="Noto Sans CJK SC",
-        sha256="c88350d62d52e8676896f9e2487a1eba10ca3875e12e04d0271ac18f9c2c3552",
+        sha256="e1b256cfecfd8633146f0569045b43bcedf5a607f5dd07310d987df6633faeab",
         license="OFL-1.1",
         scripts=("hans", "hant", "cjk"),
     ),

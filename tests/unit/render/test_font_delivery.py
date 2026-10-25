@@ -341,24 +341,48 @@ def test_a_script_alias_is_never_used_for_a_different_script() -> None:
         assert lang in _SCRIPT_OF_LANGUAGE, f"{lang} has no script mapping at all"
 
 
-def test_the_cjk_subset_spec_includes_kana_and_hangul() -> None:
-    """The subset spec is what decides whether Japanese/Korean ship as tofu.
+def test_the_sc_subset_keeps_kana_and_hangul_out() -> None:
+    """The Chinese cut must not carry kana *and* hangul together.
 
-    The first version cut only the ideograph block, so the set rendered Japanese
-    and Korean as blank squares even though the upstream pan-CJK face carries
-    both scripts. The ranges are data, so a future edit could silently drop them
-    again; this pins the intent, not the encoding.
+    Measured with Typst 0.15.1 under ``--ignore-system-fonts``: a subset holding
+    ideographs plus both kana and hangul (33,624 glyphs) typesets ``：``, ``；``
+    and ``？`` as CID 0. The page still looks correct — the glyphs are drawn —
+    but the PDF's CIDSet declares only CID 0, so those characters are absent
+    from the text layer and copy/search/artifact checks all fail on text a
+    reader can plainly see. Neither block alone triggers it (ideographs+hangul,
+    32,597 glyphs, is clean), and the un-subsetted 65,535-glyph face is clean,
+    so the defect is in the subsetting path rather than the font.
+
+    Since JP and KR have their own faces, the SC cut has nothing to gain from
+    either block; excluding both removes the trigger and 2.7 MB. Chinese
+    coverage is unaffected: ideographs 100%, CJK punctuation 100%, fullwidth
+    forms 93.8%, ASCII 100% (measured on the fetched file).
     """
     from scripts.fetch_fonts import CJK_SUBSET_UNICODES as spec
 
-    # Hiragana/Katakana
-    assert "U+3040-30FF" in spec
-    # Hangul syllables and Jamo
-    assert "U+AC00-D7A3" in spec
-    assert "U+1100-11FF" in spec
-    # The ideograph block and CJK punctuation stay.
+    # Kana and hangul belong to the regional cuts only.
+    assert "U+3040-30FF" not in spec, "kana in the SC cut re-creates the CID-0 defect"
+    assert "U+AC00-D7A3" not in spec
+    assert "U+1100-11FF" not in spec
+    # Chinese coverage stays complete.
     assert "U+4E00-9FFF" in spec
     assert "U+3000-303F" in spec
+    assert "U+FF00-FFEF" in spec
+
+
+def test_the_regional_cuts_do_keep_kana_and_hangul() -> None:
+    """JP and KR own those scripts, so their spec must include them.
+
+    The complement of the test above: removing kana/hangul from the SC cut is
+    only safe because a Japanese book resolves to the JP face, which still
+    carries kana. A future edit that "simplifies" both specs to one would leave
+    Japanese rendering as tofu under isolation.
+    """
+    from scripts.fetch_fonts import KANA_HANGUL_UNICODES as extra
+
+    assert "U+3040-30FF" in extra
+    assert "U+AC00-D7A3" in extra
+    assert "U+1100-11FF" in extra
 
 
 def test_each_cjk_region_has_its_own_face() -> None:
