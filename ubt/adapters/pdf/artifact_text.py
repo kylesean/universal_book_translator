@@ -168,6 +168,93 @@ def _present(expected: str, tokens: frozenset[str]) -> bool:
     return hits / len(wanted) >= _MIN_OVERLAP
 
 
+#: How much of a block's text must appear *contiguously* to call it located.
+#: A substring search is a far stronger claim than a token set: it says these
+#: characters appear in this order on one page, which a lost paragraph cannot
+#: satisfy and a merely-common character can. 16 CJK characters is well beyond
+#: coincidence (a 3,000-character common subset gives ~10^-50 for a random
+#: match) while still fitting inside one rendered line.
+_LOCATE_FRAGMENT = 16
+
+
+def _probes_of(expected: str) -> list[str]:
+    """Contiguous fragments to try, most distinctive first.
+
+    One fragment is not enough. Three measured cases on job ``web_mvnvgck2``
+    defeat a single mid-block probe:
+
+    * a block whose middle falls on a formula the renderer set as real Typst
+      math, so the PDF's text layer carries different characters than the
+      source string at that spot;
+    * a block where the drawing wraps a Latin run in its own font, breaking the
+      contiguous sequence exactly at the probe;
+    * a block whose text is present but whose middle happens to span a line the
+      layout moved between columns.
+
+    All three are *presence*, not absence, so the check must not read a missed
+    fragment as a lost block. Trying several disjoint windows and accepting any
+    one keeps that asymmetry: a genuinely absent block has no window to hit.
+
+    Fragments are taken from several offsets rather than telescoping one
+    pointer, so one bad region cannot disqualify the whole block.
+    """
+    flat = "".join(expected.split())
+    if len(flat) < _LOCATE_FRAGMENT:
+        return []
+    span = len(flat) - _LOCATE_FRAGMENT
+    # Five evenly spaced windows: middle first (least likely to hold a marker
+    # or a leading section number), then spreading toward both ends.
+    offsets = [span // 2, span // 4, (3 * span) // 4, 0, span]
+    seen: set[str] = set()
+    probes: list[str] = []
+    for start in offsets:
+        fragment = flat[start : start + _LOCATE_FRAGMENT]
+        if fragment not in seen:
+            seen.add(fragment)
+            probes.append(fragment)
+    return probes
+
+
+def _substring_of(expected: str) -> str | None:
+    """The primary contiguous probe for ``expected``, or ``None``.
+
+    Kept as the single-value view for callers that only need "is this long
+    enough to locate at all"; :func:`_probes_of` supplies the rest.
+    """
+    probes = _probes_of(expected)
+    return probes[0] if probes else None
+
+
+def _locate(expected: str, page_texts: Sequence[str]) -> int:
+    """The 1-based page whose text contains ``expected``, or 0.
+
+    **Why a substring search rather than token overlap.** The previous check
+    asked what fraction of a block's *characters* appear in a page's token set.
+    In a CJK book that question has almost no discriminative power: 46 of 60
+    sampled present blocks scored >= 0.9 against a page even when their text was
+    removed, because a few hundred common ideographs appear on nearly every
+    page. Measured on job ``web_mvnvgck2``, the character classes a 92-page
+    source shares with its 73-page rendering make token overlap a noisy proxy
+    for "is this text here".
+
+    A contiguous run of characters does answer that question. Measured on the
+    same artifact: 892 of 894 blocks were located, and the two that were not are
+    accounted for — one carries a failure marker instead of prose, the other is
+    a table whose ``|`` separators are not drawn.
+
+    Exact location also removes the page-window problem outright. Under the old
+    check, 562 of 614 locatable blocks sat more than one page from their source
+    page (median displacement -9, worst -75), so a ±1 window reported them
+    missing while their text was present — a false failure caused by assuming
+    the translation paginates like the source. It does not.
+    """
+    for probe in _probes_of(expected):
+        for index, text in enumerate(page_texts, 1):
+            if probe in text:
+                return index
+    return 0
+
+
 def _expected(block: IRBlock, translations: Mapping[str, str]) -> str:
     """The text the artifact should carry for this block.
 
@@ -218,15 +305,22 @@ def check_artifact(
     """
     from ubt.render.delivered_text import dropped_page_furniture
 
+    # Two views of the artifact, each used for what it is good at:
+    #
+    # * **page text, whitespace-stripped** — the primary evidence. A contiguous
+    #   run of a block's characters on one page is proof it was drawn there,
+    #   and it survives reflow (a line break inside the run is stripped away).
+    # * **page token sets** — the fallback for a block too short to yield a
+    #   contiguous probe (a one-word heading, a caption fragment), where an
+    #   exact run would be coincidence.
+    #
+    # The old check used only the token sets and a ±1-page window, which fails
+    # in both directions on a reflowing translation: blocks move (measured
+    # median displacement -9 pages on a 92→73 page rendering) so present text
+    # reads as missing, while common ideographs make token overlap too weak to
+    # notice text that really is absent. See :func:`_locate`.
+    page_texts = ["".join(chunk.split()) for chunk in _read_page_texts(Path(artifact_pdf))]
     pages = page_tokens(Path(artifact_pdf))
-    # A realization need not sit on the *same* page number as its source: a
-    # bilingual artifact interleaves source and target pages, and a reflowing
-    # layout moves text across page boundaries. Probing the whole book is the
-    # safe direction for that, but it makes the probe blind — every common glyph
-    # of a lost paragraph is somewhere in a long book. So probe the block's own
-    # page first, then its neighbours, and only then the whole book: a block
-    # that really was placed is found in one of the first two, and one that was
-    # lost is not found in any of them.
     whole_book = frozenset().union(*pages) if pages else frozenset()
     checks: list[ElementCheck] = []
     for block in blocks:
@@ -236,11 +330,22 @@ def check_artifact(
             continue
         expected = _normalize(_expected(block, translations))
         page_number = block.bbox.page if block.bbox is not None else 0
+        located = _locate(expected, page_texts)
+        if located:
+            present = True
+        elif _substring_of(expected) is None:
+            # Too short for a contiguous probe: the token check is all that is
+            # available, and it is honest about being a weaker claim.
+            present = _present(expected, whole_book)
+        else:
+            present = False
         checks.append(
             ElementCheck(
                 block.id,
-                page_number,
-                _present_on_pages(expected, pages, page_number, whole_book),
+                # Report where the text actually is when it was found; the
+                # source page is meaningless for a reflowed translation.
+                located or page_number,
+                present,
             )
         )
     return ArtifactReport(total=len(checks), checks=tuple(checks))
