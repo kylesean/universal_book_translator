@@ -236,6 +236,27 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Fixed
 
+- **Rehearsals write to their own store, not the operator's ledger.** A
+  `--dry-run` used to write into the same `.ubt/ledgers/` as real work,
+  distinguished only by a `_mock` segment in the job id. Nothing prunes a
+  ledger, so every rehearsal left a permanent job in the console — seven of
+  them after one afternoon of validating the render path — and telling them
+  from real work meant reading the job id. The isolation was also only
+  *mostly* true: the job-id suffix, the `mock_run` flag and the skip-TM guard
+  all work, but they are three mechanisms that must each remember the
+  distinction, while the ledger directory never did — so every tool that
+  enumerated the store had to re-apply the rule. A rehearsal now runs against
+  `<parent>/ledgers-mock`, a **sibling** of the real store (a child would still
+  be walked by anything scanning `ledgers/` for `*.sqlite`, which is most of
+  the code this protects). Since `uploads`/`outputs`/`tm` all derive from
+  `db_dir`, one override moves the rehearsal's ledger, staged uploads, TM and
+  deliverables together. Verified end to end: a CLI rehearsal left the real
+  directory byte-identical (same file list, 37,504 TM entries untouched) and
+  wrote its own ledger and an empty TM under `ledgers-mock`. Four fast-tier
+  tests pin the sibling rule, that the caller's config is not mutated, that a
+  relative `db_dir` stays relative, and that the three egress closures survive
+  the same config copy.
+
 - **Every language the engine accepts now either isolates or says why not.**
   The bundled font set could typeset Chinese, Japanese, Korean, Arabic and
   Hebrew with system fonts sealed; Russian, Greek, Thai and Hindi could not, so

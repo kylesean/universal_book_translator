@@ -9,6 +9,7 @@ between the CLI, the API and the MCP server.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from ubt.core.config import UBTConfig
@@ -72,6 +73,37 @@ class DryRunModelProvider(MockModelProvider):
         return f"{_DRY_RUN_PREFIX} {src}"
 
 
+def rehearsal_db_dir(db_dir: Path | str) -> Path:
+    """The ledger directory a rehearsal must use: a sibling of the real one.
+
+    **Why rehearsals get their own directory rather than a suffixed job id.** A
+    dry run used to write into the same ``.ubt/ledgers/`` as real work, told
+    apart only by a ``_mock`` segment in the job id. Two things went wrong with
+    that.
+
+    The obvious one is accumulation: nothing prunes a ledger, so every rehearsal
+    left a permanent job in the operator's console — seven of them after one
+    afternoon of validating the render path — with no way to tell them from real
+    work except by reading the job id.
+
+    The subtler one is that "rehearsal" was only *mostly* isolated. The job-id
+    suffix, the ``mock_run`` flag and the skip-TM guard all work, but they are
+    three separate mechanisms that must each remember the distinction, and the
+    ledger directory itself never did: a rehearsal's outputs, uploads and every
+    row it wrote lived beside a real run's, so every tool that enumerated the
+    store (the console, the artifact audit, ``ubt status``) had to re-apply the
+    rule. Putting rehearsals in their own store removes the question instead of
+    answering it repeatedly.
+
+    The directory is a **sibling**, not a child: ``<parent>/ledgers-mock``
+    beside ``<parent>/ledgers``. A child of ``ledgers`` would still be walked by
+    anything that scans that tree for ``*.sqlite``, which is most of the code
+    this is meant to protect.
+    """
+    real = Path(db_dir)
+    return real.parent / f"{real.name}-mock"
+
+
 def create_dry_run_orchestrator(
     config: UBTConfig, **orchestrator_kwargs: Any
 ) -> PipelineOrchestrator:
@@ -91,12 +123,21 @@ def create_dry_run_orchestrator(
     page upload allowed would still make real cloud calls with their key and
     upload manuscript pages during a "zero-spend" rehearsal. The rehearsal runs
     on a copy with every page-image egress path closed.
+
+    The ledger directory is isolated too, for the reasons
+    :func:`rehearsal_db_dir` gives: a rehearsal must not be able to look like a
+    job, and must not accumulate in the store the operator reads.
     """
     rehearsal_config = config.model_copy(
         update={
             "ocr_mode": "off",
             "allow_page_upload": False,
             "visual_judge_enabled": False,
+            # One store per run kind. ``managed_dir``/``uploads_dir``/
+            # ``outputs_dir`` all derive from ``db_dir``, so this one change
+            # moves the rehearsal's ledger, its staged uploads and its
+            # deliverables away from real work in a single place.
+            "db_dir": rehearsal_db_dir(config.db_dir),
         }
     )
     router = ModelRouter(
@@ -132,4 +173,4 @@ def create_dry_run_orchestrator(
     )
 
 
-__all__ = ["DryRunModelProvider", "create_dry_run_orchestrator"]
+__all__ = ["DryRunModelProvider", "create_dry_run_orchestrator", "rehearsal_db_dir"]
