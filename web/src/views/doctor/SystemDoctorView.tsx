@@ -8,10 +8,13 @@ import {
   Loader2,
   Pencil,
   Plus,
+  Copy,
+  Check,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { InfoTip } from '@/components/ui/InfoTip'
+import { Donut } from '@/views/quality-gate/charts'
 import {
   getDoctor,
   getRuntimeConfig,
@@ -117,6 +120,44 @@ export function SystemDoctorView() {
     void load(true)
   }
 
+  // Long details (a 200-char ledger path) clamp to two lines; a verdict chip
+  // both jumps to its row and expands it, because a chip that scrolls to a
+  // clamped blob would only move the reader to the thing they still cannot read.
+  const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set())
+  const [highlightedRow, setHighlightedRow] = useState<string | null>(null)
+  const [copiedFix, setCopiedFix] = useState<string | null>(null)
+
+  const toggleDetail = (rowId: string) => {
+    setExpandedDetails((prev) => {
+      const next = new Set(prev)
+      if (next.has(rowId)) next.delete(rowId)
+      else next.add(rowId)
+      return next
+    })
+  }
+
+  const jumpToCheck = (rowId: string) => {
+    setExpandedDetails((prev) => new Set(prev).add(rowId))
+    document.getElementById(rowId)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setHighlightedRow(rowId)
+    window.setTimeout(() => {
+      setHighlightedRow((cur) => (cur === rowId ? null : cur))
+    }, 2000)
+  }
+
+  const copyFix = async (rowId: string, fix: string) => {
+    try {
+      await navigator.clipboard.writeText(fix)
+      setCopiedFix(rowId)
+      window.setTimeout(() => {
+        setCopiedFix((cur) => (cur === rowId ? null : cur))
+      }, 1500)
+    } catch {
+      // Clipboard can refuse (permissions, non-secure context); the command is
+      // still fully visible for a manual copy, so silence is fine here.
+    }
+  }
+
   // The engine prints English; this panel is the same checklist. Each check
   // carries a stable code plus the values interpolated into its English sentence,
   // so the console renders its own copy. A code the catalogue does not know falls
@@ -129,6 +170,15 @@ export function SystemDoctorView() {
   // Ordered by the engine's group codes, so the sections keep the CLI's order
   // rather than the order they happen to arrive in.
   const groups = Array.from(new Set(localized.map(({ check }) => check.group_code)))
+  // Global row index per check: the verdict chips jump by row id, and group
+  // filtering must not renumber them.
+  const indexed = localized.map((item, index) => ({ item, index }))
+  // The verdict the page's first question deserves: how many probes pass and
+  // where the exceptions live. Anything unknown counts as not-passing rather
+  // than silently flattering the ratio.
+  const okCount = localized.filter(({ check }) => check.status === 'OK').length
+  const problems = indexed.filter(({ item }) => item.check.status !== 'OK')
+  const hasFail = localized.some(({ check }) => check.status === 'FAIL')
 
   return (
     <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-7 space-y-5 sm:space-y-7 max-w-5xl mx-auto w-full">
@@ -160,6 +210,45 @@ export function SystemDoctorView() {
         </div>
       )}
 
+      {/* Verdict first. Fifteen same-sized 正常 badges made the page's only
+          question — is anything wrong? — answerable only by scanning to the
+          bottom. The ring answers it at a glance; each chip jumps to (and
+          expands) its row. */}
+      {checks.length > 0 && (
+        <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs px-4 py-3.5 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <Donut
+            value={okCount / checks.length}
+            tone={hasFail ? 'fail' : problems.length > 0 ? 'warn' : 'pass'}
+            center={`${okCount}/${checks.length}`}
+            caption={t.doctor.verdictCaption}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="type-value font-bold text-[var(--ink-primary)]">
+              {problems.length === 0
+                ? t.doctor.verdictAllOk
+                : t.doctor.verdictNeedsAttention.replace('{n}', String(problems.length))}
+            </div>
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
+              {problems.map(({ item, index }) => (
+                <button
+                  key={`chip-${index}`}
+                  type="button"
+                  onClick={() => jumpToCheck(`dr-${index}`)}
+                  className={`type-help inline-flex items-center gap-1 px-1.5 py-0.5 rounded border cursor-pointer ${
+                    item.check.status === 'FAIL'
+                      ? 'border-[#b91c1c]/30 bg-[#b91c1c]/5 text-[#b91c1c]'
+                      : 'border-[#b45309]/30 bg-[#b45309]/5 text-[#b45309]'
+                  }`}
+                >
+                  <span>{t.doctor.checkStatuses[item.check.status] ?? item.check.status}</span>
+                  <span className="font-semibold">{item.text.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Diagnostics & Providers 2-Col Split */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Left: Diagnostics */}
@@ -179,38 +268,80 @@ export function SystemDoctorView() {
                     {localized.find(({ check }) => check.group_code === groupCode)?.text.group ??
                       groupCode}
                   </div>
-                  {localized
-                    .filter(({ check }) => check.group_code === groupCode)
-                    .map(({ check, text }, idx) => (
+                  {indexed
+                    .filter(({ item }) => item.check.group_code === groupCode)
+                    .map(({ item, index }) => {
+                      const rowId = `dr-${index}`
+                      // A 200-character ledger path wrapped across four lines
+                      // turned one probe into a log entry; clamp and let the
+                      // reader (or a verdict chip) ask for the whole thing.
+                      const detailLong = item.text.detail.length > 88
+                      const expanded = expandedDetails.has(rowId)
+                      return (
                       <div
-                        key={`${groupCode}-${idx}`}
-                        className="px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs"
+                        key={rowId}
+                        id={rowId}
+                        className={`px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs transition-colors ${
+                          highlightedRow === rowId ? 'bg-[#b45309]/10' : ''
+                        }`}
                       >
                         <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                          <CheckIcon status={check.status} />
+                          <CheckIcon status={item.check.status} />
                           <div className="min-w-0 flex-1">
                             <div className="font-semibold text-[var(--ink-primary)] break-words">
-                              {text.name}
+                              {item.text.name}
                             </div>
-                            <div className="text-xs text-[var(--ink-secondary)] font-mono mt-0.5 break-words">
-                              {text.detail}
+                            <div
+                              className={`text-xs text-[var(--ink-secondary)] font-mono mt-0.5 break-words ${
+                                detailLong && !expanded ? 'line-clamp-2' : ''
+                              }`}
+                            >
+                              {item.text.detail}
                             </div>
-                            {text.fix && (
-                              <div className="text-xs text-[#b45309] mt-0.5 break-words">
-                                {t.doctor.fixLabel}: {text.fix}
+                            {detailLong && (
+                              <button
+                                type="button"
+                                onClick={() => toggleDetail(rowId)}
+                                className="type-help underline underline-offset-2 text-[var(--ink-muted)] hover:text-[var(--ink-primary)] cursor-pointer"
+                              >
+                                {expanded ? t.doctor.collapseDetail : t.doctor.expandDetail}
+                              </button>
+                            )}
+                            {item.text.fix && (
+                              <div className="mt-1.5 flex items-start gap-1.5">
+                                <span className="type-help text-[#b45309] shrink-0 pt-[3px]">
+                                  {t.doctor.fixLabel}
+                                </span>
+                                <code className="type-help font-mono text-[#b45309] bg-[#b45309]/5 border border-[#b45309]/20 rounded px-1.5 py-0.5 break-all min-w-0 flex-1">
+                                  {item.text.fix}
+                                </code>
+                                <button
+                                  type="button"
+                                  onClick={() => void copyFix(rowId, item.text.fix ?? '')}
+                                  title={copiedFix === rowId ? t.doctor.fixCopied : t.doctor.fixLabel}
+                                  aria-label={copiedFix === rowId ? t.doctor.fixCopied : t.doctor.fixLabel}
+                                  className="shrink-0 p-1 rounded text-[var(--ink-muted)] hover:text-[var(--ink-primary)] hover:bg-[var(--paper-subsurface)] cursor-pointer"
+                                >
+                                  {copiedFix === rowId ? (
+                                    <Check size={12} className="text-[#15803d]" />
+                                  ) : (
+                                    <Copy size={12} />
+                                  )}
+                                </button>
                               </div>
                             )}
                           </div>
                         </div>
                         <Badge
-                          variant={statusBadgeVariant(check.status)}
+                          variant={statusBadgeVariant(item.check.status)}
                           dot
                           className="text-xs shrink-0"
                         >
-                          {t.doctor.checkStatuses[check.status] ?? check.status}
+                          {t.doctor.checkStatuses[item.check.status] ?? item.check.status}
                         </Badge>
                       </div>
-                    ))}
+                      )
+                    })}
                 </div>
               ))
             )}
@@ -240,7 +371,7 @@ export function SystemDoctorView() {
             column, showing "local-gemma4 is active" while the operator edited
             index-translate. Same data, twice on screen, one copy in the wrong
             place. */}
-        <div ref={editorRef} className="md:col-start-2 md:row-start-1">
+        <div ref={editorRef} className="md:col-start-2 md:row-start-1 md:sticky md:top-6 md:self-start">
           {editingProvider !== undefined ? (
             <ProviderEditor
               name={editingProvider}
@@ -592,44 +723,99 @@ export function SystemDoctorView() {
       {/* Page egress, full width: the privacy gate every egress-dependent
           control names. Sits beside the security boundary panel below, because
           it *is* one — but unlike that panel it is operator-settable here. */}
-      <EgressSettingsCard />
+      {/* The two boundaries, paired: the egress gate (operator-settable) and
+          the deployment boundary (read-only). The probe list above already
+          carries the storage facts — ledger dir, disk, WAL — so this panel
+          keeps only what is a security decision, in the same row language. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
+        <EgressSettingsCard />
 
-      {/* Security Boundary Panel */}
-      <div className="p-4 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] space-y-1.5 text-xs font-mono text-[var(--ink-secondary)] shadow-2xs break-words">
-        <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] mb-2 font-semibold">
-          {t.doctor.securityBoundary}
+        <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
+          <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] type-group">
+            {t.doctor.securityBoundary}
+          </div>
+          {info ? (
+            <div className="divide-y divide-[var(--paper-border)]">
+              <div className="px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs">
+                <span className="type-value text-[var(--ink-secondary)] shrink-0">
+                  {t.doctor.listenInterface}
+                </span>
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <span className="type-value font-mono truncate" title={info.host}>
+                    {info.host}
+                  </span>
+                  <Badge variant={info.is_loopback ? 'success' : 'warning'} className="text-xs shrink-0">
+                    {info.is_loopback ? t.doctor.loopbackOnly : t.doctor.exposed}
+                  </Badge>
+                </span>
+              </div>
+
+              <div className="px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs">
+                <span className="type-value text-[var(--ink-secondary)] shrink-0">
+                  {t.doctor.authGate}
+                </span>
+                <Badge
+                  variant={info.auth_enabled ? 'success' : 'warning'}
+                  className="text-xs shrink-0"
+                >
+                  {info.auth_enabled ? t.doctor.enabled : t.doctor.disabled}
+                </Badge>
+              </div>
+
+              <div className="px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs">
+                <span className="flex items-center gap-1 shrink-0">
+                  <span className="type-value text-[var(--ink-secondary)]">{t.doctor.jobMode}</span>
+                  <InfoTip label={t.doctor.jobMode}>{t.doctor.jobModeHelp}</InfoTip>
+                </span>
+                <span className="type-value font-mono text-[var(--ink-primary)]">
+                  {info.job_mode}
+                </span>
+              </div>
+
+              <div className="px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-start justify-between gap-1.5 sm:gap-3 text-xs">
+                <span className="type-value text-[var(--ink-secondary)] shrink-0">
+                  {t.doctor.allowedRoots}
+                </span>
+                <span className="flex flex-wrap gap-1 justify-start sm:justify-end min-w-0">
+                  {info.allowed_bases.length === 0 ? (
+                    <span className="type-help text-[var(--ink-muted)]">—</span>
+                  ) : (
+                    info.allowed_bases.map((base) => (
+                      <span
+                        key={base}
+                        title={base}
+                        className="type-help font-mono px-1.5 py-0.5 rounded border border-[var(--paper-border)] bg-[var(--paper-subsurface)] max-w-[15rem] truncate"
+                      >
+                        {base}
+                      </span>
+                    ))
+                  )}
+                </span>
+              </div>
+
+              <div className="px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs">
+                <span className="type-value text-[var(--ink-secondary)] shrink-0">
+                  {t.doctor.forbiddenPaths}
+                </span>
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <span className="type-help font-mono truncate" title="/etc, /root, /var/run, ~/.ssh">
+                    /etc, /root, /var/run, ~/.ssh
+                  </span>
+                  <Badge variant="outline" className="text-xs shrink-0">
+                    {t.doctor.securityForbiddenBadge}
+                  </Badge>
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="p-4 type-help text-[var(--ink-muted)]">—</div>
+          )}
+          {info && !info.is_loopback && (
+            <div className="px-3.5 py-2 border-t border-[var(--paper-border)] bg-[#b45309]/10 type-help text-[#b45309]">
+              {t.doctor.exposedWarning}
+            </div>
+          )}
         </div>
-        {info ? (
-          <>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={info.is_loopback ? 'text-[#15803d]' : 'text-[#b45309]'}>
-                • {t.doctor.listenInterface}: {info.host}
-              </span>
-              <Badge variant={info.is_loopback ? 'success' : 'warning'} className="text-xs">
-                {info.is_loopback ? t.doctor.loopbackOnly : t.doctor.exposed}
-              </Badge>
-            </div>
-            <div className="break-words">• {t.doctor.authGate}: {info.auth_enabled ? t.doctor.enabled : t.doctor.disabled}</div>
-            <div className="break-words">• {t.doctor.jobMode}: {info.job_mode}</div>
-            <div className="break-words">• {t.doctor.dbDir}: {info.db_dir}</div>
-            {info.disk_free_gb != null && (
-              <div>• {t.doctor.diskFree}: {info.disk_free_gb} GB</div>
-            )}
-            {info.wal_status && (
-              <div className="break-words">• {t.doctor.walStatus}: {info.wal_status}</div>
-            )}
-            <div className="break-words">
-              • {t.doctor.allowedRoots}:{' '}
-              {info.allowed_bases.length === 0 ? '—' : info.allowed_bases.join(', ')}
-            </div>
-            <div className="break-words">• {t.doctor.forbiddenPaths}: /etc, /root, /var/run, ~/.ssh (Hard refusal)</div>
-            {!info.is_loopback && (
-              <div className="text-[#b45309] pt-1">⚠ {t.doctor.exposedWarning}</div>
-            )}
-          </>
-        ) : (
-          <div className="text-[var(--ink-muted)]">—</div>
-        )}
       </div>
     </div>
   )

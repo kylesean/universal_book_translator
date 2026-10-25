@@ -726,10 +726,7 @@ export interface TranslationDictionary {
     allowedRoots: string
     forbiddenPaths: string
     authGate: string
-    dbDir: string
     jobMode: string
-    diskFree: string
-    walStatus: string
     enabled: string
     disabled: string
     exposedWarning: string
@@ -738,6 +735,14 @@ export interface TranslationDictionary {
     //: Diagnostic verdict shown as a badge on every check row. The engine's
     //: status codes ("OK" | "WARN" | "FAIL" | "SKIP") are stable, so they are
     //: the translation key.
+    verdictCaption: string
+    verdictAllOk: string
+    verdictNeedsAttention: string
+    expandDetail: string
+    collapseDetail: string
+    fixCopied: string
+    securityForbiddenBadge: string
+    jobModeHelp: string
     checkStatuses: Record<string, string>
   }
   review: {

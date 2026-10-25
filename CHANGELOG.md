@@ -11,6 +11,22 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Changed
 
+- **The system doctor leads with a verdict.** The page's only real question —
+  is anything wrong? — was answerable by scanning fifteen same-sized 正常
+  badges to the bottom. Now a verdict band opens the page: a health donut
+  （20/22）with a plain headline, and one chip per non-passing check that
+  jumps to, expands, and flashes its row. The details follow the same
+  discipline the wizard drawer got: a 200-character ledger path clamps to two
+  lines behind an 展开 link, and every 修复建议 renders as a copyable command
+  chip instead of wrapped amber prose. The right rail goes sticky (the
+  wizard's quote panel pattern) because the diagnostics column runs several
+  screens tall and the runtime panel left dead paper beside it the whole way;
+  the storage facts the security panel used to repeat in terminal mono
+  （WAL Mode Active, Hard refusal）are deduped into the probe list, and what
+  remains — bind address, auth gate, run mode, allowed roots, forbidden
+  paths — speaks in rows and badges beside the egress card it belongs next
+  to.
+
 - **The page-egress gate gets a console toggle.** Every egress-dependent
   control (render QC, cloud/VLM OCR) named a fix the reader could not perform:
   `UBT_ALLOW_PAGE_UPLOAD=true` lives in the server's environment, not on any
