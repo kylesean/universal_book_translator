@@ -1460,8 +1460,16 @@ class TypstDocumentRenderer:
             # No stack supplied: resolve the profile against this machine, so an
             # absent spare face is pruned instead of warning on every compile.
             stack = resolve_for_render(lang).families
-        body = ", ".join(f'"{face}"' for face in stack)
-        cjk_first = ", ".join(f'"{face}"' for face in reversed(stack))
+        # `covers` routing: in a CJK document the Latin face is scoped to
+        # `latin-in-cjk` so shared punctuation (curly quotes, dashes, ellipsis)
+        # belongs to the CJK face — the typographic convention, and something a
+        # bare priority list gets wrong for every page of every Chinese book.
+        from ubt.render.typst.font_routing import typst_font_list
+
+        body = typst_font_list(stack, lang)
+        # Headings reverse the order (CJK face first). Routing is applied to the
+        # reversed list so a Latin heading face is still scoped inside CJK text.
+        cjk_first = typst_font_list(tuple(reversed(stack)), lang)
         return "\n".join(
             [
                 TypstDocumentRenderer._PAGE_SETUP,

@@ -54,6 +54,22 @@ def typst_available(binary: str = "typst") -> bool:
     return resolve_typst_binary(binary) is not None
 
 
+def _bundled_font_dir() -> Path | None:
+    """The bundled font directory, or ``None`` when the set is not installed.
+
+    Imported lazily: this module sits on the compile hot path and must not pull
+    the render package's import graph at load time. A font lookup that fails
+    must never stop a compile — the caller falls back to system fonts, which is
+    the previous behaviour.
+    """
+    try:
+        from ubt.render.typst.fonts import bundled_font_dir
+
+        return bundled_font_dir()
+    except Exception:  # noqa: BLE001 - a probe failure degrades, never blocks
+        return None
+
+
 def typst_compile(
     typ_path: str, pdf_path: str, binary: str = "typst", timeout: float = 120.0
 ) -> tuple[bool, str]:
@@ -81,6 +97,11 @@ def typst_compile(
         if last_err is not None:
             return False, f"Typst compilation failed: {last_err}"
         return False, f"Typst compiler binary '{binary}' not found on PATH"
+    # A bundled font set makes the PDF a function of the source alone: the same
+    # book renders identically on a workstation and in an Alpine container.
+    # Without it the output depends on whatever the host happened to install.
+    bundled = _bundled_font_dir()
+    font_args = ["--font-path", str(bundled)] if bundled else []
     try:
         proc = subprocess.run(
             [
@@ -88,6 +109,7 @@ def typst_compile(
                 "compile",
                 "--creation-timestamp",
                 str(REPRODUCIBLE_TIMESTAMP),
+                *font_args,
                 typ_path,
                 pdf_path,
             ],

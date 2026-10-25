@@ -40,12 +40,23 @@ def test_default_stack_is_unchanged_for_zh() -> None:
 
 
 def test_a_supplied_font_stack_leads_the_body() -> None:
+    """Order is preserved; the Latin tail is scoped rather than emitted bare.
+
+    A bare Latin entry in a CJK document claims the shared punctuation
+    (curly quotes, dashes, ellipsis), so it carries ``covers: "latin-in-cjk"``.
+    The *preference order* the caller supplied is unchanged.
+    """
     renderer = TypstDocumentRenderer(font_stack=("Noto Serif CJK JP", "Liberation Serif"))
     source = renderer.preamble("ja")
-    assert '#set text(font: ("Noto Serif CJK JP", "Liberation Serif"),' in source
+    assert (
+        '#set text(font: ("Noto Serif CJK JP", '
+        '(name: "Liberation Serif", covers: "latin-in-cjk")),' in source
+    )
 
 
 def test_headings_reverse_the_stack_so_the_cjk_face_leads() -> None:
     renderer = TypstDocumentRenderer(font_stack=("Libertinus Serif", "Noto Serif CJK SC"))
     source = renderer.preamble("zh")
-    assert 'font: ("Noto Serif CJK SC", "Libertinus Serif")' in source
+    assert (
+        'font: ("Noto Serif CJK SC", (name: "Libertinus Serif", covers: "latin-in-cjk"))' in source
+    )

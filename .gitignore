@@ -43,6 +43,11 @@ web/dist/
 !/docs/README.md
 !/docs/guides/
 
+# Fetched font set (scripts/fetch_fonts.py). Not committed: a CJK subset is
+# 6.5-15 MB per language, and most checkouts never render a PDF. Absent, the
+# renderer falls back to system fonts and the quality report says so.
+/fonts/
+
 # Generated corpus & deliverables
 tests/fixtures/*.pdf
 /out*

@@ -194,8 +194,12 @@ def academic_preamble(
         # absent spare face is pruned instead of warning on every compile.
         stack = resolve_for_render(lang).families
 
-    body_fonts = ", ".join(f'"{face}"' for face in stack)
-    cjk_first = ", ".join(f'"{face}"' for face in reversed(stack))
+    # Same `covers` routing as the book template: Latin faces inside a CJK
+    # document are scoped so CJK punctuation is not claimed by them.
+    from ubt.render.typst.font_routing import typst_font_list
+
+    body_fonts = typst_font_list(stack, lang)
+    cjk_first = typst_font_list(tuple(reversed(stack)), lang)
 
     escaped_title = escape_markup(paper_title) if paper_title else ""
     is_zh = bool(lang and lang.strip().lower().startswith("zh"))
