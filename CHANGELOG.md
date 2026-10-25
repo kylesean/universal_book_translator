@@ -117,6 +117,22 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Fixed
 
+- **A blocked delivery is no longer downloadable by accident.** `blocked` means
+  blocks were quarantined (MQM Critical unresolved) or failed, so they ship a
+  source-only placeholder instead of a translation — the reader meets English
+  in a Chinese book. The CLI banner, the console's gate screen and Mission
+  Control all said so, while `GET /jobs/{id}/download/{key}` served the file
+  anyway, which made the verdict advisory at the one moment it matters. The
+  endpoint now refuses `primary`/`secondary`/`epub` from a blocked job with 409
+  and points at the quality report. Three deliberate narrowings keep it from
+  becoming a dead end: the audit sidecars (quality report, contract, XLIFF,
+  metrics, visual report) stay open, because they are how an operator finds out
+  *why* the gate refused; `?inline=1` is exempt, since that is the console's
+  preview pane and the operator needs to look before deciding; and `?force=1`
+  overrides, mirroring `strict_contract` — safe by default, loosening must be
+  asked for. The console asks first (a confirm dialog naming the consequence)
+  instead of letting the 409 arrive in a blank tab, and `/deliverables` now
+  carries `delivery_verdict` so the warning lands before the click.
 - **The wizard's unnamed controls have names.** The hidden file input, the
   manual path field and four `<select>`s (provider, source/target language)
   carried no accessible name and no label association — reachable only by
