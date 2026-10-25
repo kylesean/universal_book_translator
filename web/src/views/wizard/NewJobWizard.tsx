@@ -709,8 +709,11 @@ export function NewJobWizard() {
     },
   ]
 
+  // 工作台页（双栏：表单 + 报告）限宽 1500px，比全站阅读页（max-w-5xl/6xl）
+  // 宽：宽屏上的多余空间应该喂给表单列与报告列，而不是留成两侧空白；字段的
+  // 行宽仍由列宽（约 840px）自然约束。
   return (
-    <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-7 space-y-5 sm:space-y-7 max-w-6xl mx-auto w-full pb-24 lg:pb-7">
+    <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-7 space-y-5 sm:space-y-7 max-w-[1500px] mx-auto w-full pb-24 lg:pb-7">
       {/* View Title */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 border-b border-[var(--paper-border)] pb-4">
         <div>
