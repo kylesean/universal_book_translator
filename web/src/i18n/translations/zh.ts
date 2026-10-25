@@ -18,6 +18,7 @@ export const zh: TranslationDictionary = {
     dismiss: '关闭',
     paperToneCotton: '棉白',
     paperToneDowling: '道林',
+    paperToneObsidian: '墨黑',
     paperToneSwitchTo: '切换至{tone}纸色',
     switchLanguage: '切换语言',
   },
@@ -835,6 +836,7 @@ export const zh: TranslationDictionary = {
   review: {
     title: '逐块审校台',
     modeSegments: '分块对齐网格 (Segments)',
+    modeFlow: '连续双语通读 (Flow)',
     modeVisual: 'Pixel Witness 像素叠差 (PDF)',
     sourceSegment: '原文段落分块 (Source)',
     targetSegment: '译文审校与后编排 (可原地编辑)',

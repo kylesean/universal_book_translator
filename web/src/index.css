@@ -52,6 +52,29 @@
   --btn-hover: #292524;
 }
 
+[data-paper-tone="obsidian"] {
+  /* Obsidian Dark Paper / 曜石墨黑纸感 (#131316) */
+  --paper-bg: #131316;
+  --paper-surface: #1a1a1f;
+  --paper-subsurface: #22222a;
+  --paper-border: #2e2e38;
+  --paper-border-hover: #424250;
+
+  --ink-primary: #f4f4f5;
+  --ink-secondary: #a1a1aa;
+  --ink-muted: #8b8b98;
+  --ink-highlight: #22c55e;
+  --ink-amber: #f59e0b;
+  --ink-rose: #f87171;
+  --ink-info: #38bdf8;
+
+  --btn-bg: #f4f4f5;
+  --btn-fg: #18181b;
+  --btn-hover: #e4e4e7;
+
+  color-scheme: dark;
+}
+
 body {
   margin: 0;
   padding: 0;

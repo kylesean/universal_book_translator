@@ -339,6 +339,13 @@ export function NewJobWizard() {
         // Auto-feed recommendations when a new document is assessed
         if (lastAssessedFileRef.current !== path.trim()) {
           lastAssessedFileRef.current = path.trim()
+          if (res.document?.file_name && !fileName) {
+            setFileName(res.document.file_name)
+          }
+          if (res.document?.file_size_bytes && !fileSize) {
+            const sz = res.document.file_size_bytes
+            setFileSize(sz > 1024 * 1024 ? `${(sz / (1024 * 1024)).toFixed(1)} MB` : `${(sz / 1024).toFixed(0)} KB`)
+          }
           if (!hasUserSelectedPresetRef.current && res.route?.recommended_preset) {
             const recP = res.route.recommended_preset.toLowerCase() as any
             if (['high_fidelity', 'standard', 'vector_math', 'preview', 'fast'].includes(recP)) {
@@ -430,8 +437,9 @@ export function NewJobWizard() {
     if (deepInFlightRef.current) return
     if (assessedFingerprintRef.current === assessFingerprint) return
     const timer = setTimeout(() => {
-      void runAssessRef.current(filePath, { silent: true })
-    }, 350)
+      const isFirstAssess = !lastAssessedFileRef.current || lastAssessedFileRef.current !== filePath.trim()
+      void runAssessRef.current(filePath, { silent: !isFirstAssess })
+    }, 450)
     return () => clearTimeout(timer)
   }, [assessFingerprint, filePath])
 
@@ -1636,15 +1644,22 @@ export function NewJobWizard() {
                     </p>
                   )}
                 {/* Book File Header Card */}
-                {fileName && (
+                {(fileName || assessment.document?.file_name) && (
                   <div className="p-3 rounded-[5px] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] flex items-center justify-between">
                     <div className="flex items-center gap-2.5 truncate">
                       <FileText className="h-4 w-4 text-[var(--ink-secondary)] shrink-0" />
                       <div className="truncate">
                         <div className="text-xs font-semibold text-[var(--ink-primary)] truncate font-mono">
-                          {fileName}
+                          {fileName || assessment.document.file_name}
                         </div>
-                        <div className="text-xs text-[var(--ink-secondary)] font-mono">{fileSize}</div>
+                        <div className="text-xs text-[var(--ink-secondary)] font-mono">
+                          {fileSize ||
+                            (assessment.document.file_size_bytes
+                              ? assessment.document.file_size_bytes > 1024 * 1024
+                                ? `${(assessment.document.file_size_bytes / (1024 * 1024)).toFixed(1)} MB`
+                                : `${(assessment.document.file_size_bytes / 1024).toFixed(0)} KB`
+                              : '')}
+                        </div>
                       </div>
                     </div>
                     <Badge variant="outline" className="uppercase shrink-0 text-xs font-mono">

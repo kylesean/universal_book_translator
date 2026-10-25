@@ -18,6 +18,7 @@ export interface TranslationDictionary {
     dismiss: string
     paperToneCotton: string
     paperToneDowling: string
+    paperToneObsidian: string
     paperToneSwitchTo: string
     switchLanguage: string
   }
@@ -748,6 +749,7 @@ export interface TranslationDictionary {
   review: {
     title: string
     modeSegments: string
+    modeFlow: string
     modeVisual: string
     sourceSegment: string
     targetSegment: string

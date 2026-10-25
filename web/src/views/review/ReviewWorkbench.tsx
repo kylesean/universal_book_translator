@@ -110,7 +110,8 @@ export function ReviewWorkbench() {
   const { t } = useI18n()
   const { jobId: routeJobId } = useParams<{ jobId: string }>()
   const jobId = routeJobId ?? null
-  const [viewMode, setViewMode] = useState<'segments' | 'visual_witness'>('segments')
+  const [viewMode, setViewMode] = useState<'segments' | 'reading_flow' | 'visual_witness'>('segments')
+  const [mobileInspectorExpanded, setMobileInspectorExpanded] = useState(false)
   const [filter, setFilter] = useState<Filter>('issues')
 
   const [segments, setSegments] = useState<Segment[]>([])
@@ -234,6 +235,15 @@ export function ReviewWorkbench() {
     count: segments.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 210,
+    overscan: 6,
+  })
+
+  const flowScrollRef = useRef<HTMLDivElement>(null)
+  // oxlint-disable-next-line react/incompatible-library
+  const flowVirtualizer = useVirtualizer({
+    count: segments.length,
+    getScrollElement: () => flowScrollRef.current,
+    estimateSize: () => 130,
     overscan: 6,
   })
 
@@ -575,6 +585,16 @@ export function ReviewWorkbench() {
               }`}
             >
               {t.review.modeSegments}
+            </button>
+            <button
+              onClick={() => setViewMode('reading_flow')}
+              className={`min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-[3px] transition-colors font-medium cursor-pointer ${
+                viewMode === 'reading_flow'
+                  ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-2xs'
+                  : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
+              }`}
+            >
+              {t.review.modeFlow}
             </button>
             <button
               onClick={() => setViewMode('visual_witness')}
@@ -934,6 +954,136 @@ export function ReviewWorkbench() {
             )}
           </div>
         )
+      ) : viewMode === 'reading_flow' ? (
+        /* Reading Flow View: continuous natural layout with dual-column typography */
+        <div ref={flowScrollRef} className="flex-1 overflow-y-auto px-4 md:px-10 py-6 bg-[var(--paper-bg)]">
+          <div
+            className="relative w-full max-w-5xl mx-auto"
+            style={{ height: flowVirtualizer.getTotalSize() }}
+          >
+            {flowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const seg = segments[virtualRow.index]
+              const draft = drafts[seg.block_id] ?? seg.delivered_text
+              const hasIssues = seg.issues.length > 0 || seg.quarantined || seg.repair_failed
+              const isSelected = selectedBlockId === seg.block_id
+              const isEditingThis = editing[seg.block_id]
+              return (
+                <div
+                  key={seg.block_id}
+                  data-index={virtualRow.index}
+                  ref={flowVirtualizer.measureElement}
+                  className="absolute top-0 left-0 w-full pb-4"
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  <div
+                    onClick={() => {
+                      setSelectedBlockId(seg.block_id)
+                      setInspectorOpen(true)
+                    }}
+                    className={`grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 p-4 rounded-lg transition-all cursor-pointer border ${
+                      isSelected
+                        ? 'bg-[var(--paper-surface)] shadow-md border-[var(--ink-primary)]'
+                        : hasIssues
+                          ? 'bg-[#b45309]/5 hover:bg-[#b45309]/10 border-l-2 border-[#b45309]'
+                          : 'border-transparent hover:border-[var(--paper-border)] hover:bg-[var(--paper-subsurface)]'
+                    }`}
+                  >
+                    {/* Left: Source text */}
+                    <div className="text-xs md:text-sm font-mono leading-relaxed text-[var(--ink-secondary)] select-text">
+                      <div className="text-[10px] font-mono uppercase text-[var(--ink-muted)] mb-1">
+                        {seg.block_id} · P{seg.page ?? '—'}
+                      </div>
+                      {seg.source_text}
+                    </div>
+
+                    {/* Right: Target translation */}
+                    <div className="text-xs md:text-sm font-sans leading-relaxed text-[var(--ink-primary)]">
+                      {isEditingThis ? (
+                        <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
+                          <AutoGrowTextarea
+                            autoFocus
+                            value={draft}
+                            onChange={(e) =>
+                              setDrafts((prev) => ({
+                                ...prev,
+                                [seg.block_id]: e.target.value,
+                              }))
+                            }
+                            onKeyDown={(e) => {
+                              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                e.preventDefault()
+                                void handleSave(seg)
+                                setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault()
+                                setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
+                              }
+                            }}
+                            className="w-full text-xs md:text-sm font-sans bg-[var(--paper-surface)] border border-[var(--paper-border)] p-2.5 rounded focus:border-[var(--ink-primary)] focus:outline-none resize-none leading-relaxed text-[var(--ink-primary)] shadow-2xs"
+                          />
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-[var(--ink-muted)] font-mono text-[10px]">Ctrl+Enter 保存 · Esc 取消</span>
+                            <Button
+                              size="sm"
+                              className="text-xs h-7 px-2.5"
+                              onClick={() => {
+                                void handleSave(seg)
+                                setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
+                              }}
+                              disabled={saving[seg.block_id]}
+                            >
+                              {saving[seg.block_id] ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}
+                              {t.common.confirm}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          onDoubleClick={(e) => {
+                            e.stopPropagation()
+                            setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
+                          }}
+                          className="group relative"
+                        >
+                          <p className="select-text whitespace-pre-wrap">{draft}</p>
+                          {hasIssues && (
+                            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                              {seg.issues.map((kind) => (
+                                <span
+                                  key={kind}
+                                  className="text-[10px] px-1 py-0.2 rounded bg-[#b45309]/15 text-[#b45309] font-mono font-medium"
+                                >
+                                  {issueLabel(t, kind)}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          {hasMore && (
+            <div className="flex justify-center pb-6">
+              <Button
+                onClick={() => void loadMore()}
+                variant="secondary"
+                size="sm"
+                disabled={loadingMore}
+              >
+                {loadingMore ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                {t.review.loadMore} ({segmentTotal - segments.length})
+              </Button>
+            </div>
+          )}
+        </div>
       ) : (
         /* Visual witness: source page vs the composed translation (PRD §5.1 mode B). */
         <div ref={witnessScrollRef} className="flex-1 overflow-y-auto">
@@ -1059,10 +1209,14 @@ export function ReviewWorkbench() {
           />
 
           {/* Inspector Panel: Fixed Bottom Sheet on Mobile (< md), Side-by-Side Column on Desktop (md+) */}
-          <aside className="fixed inset-x-0 bottom-0 z-50 max-h-[85vh] rounded-t-xl border-t border-[var(--paper-border)] shadow-2xl bg-[var(--paper-surface)] flex flex-col overflow-hidden overscroll-contain shrink-0 select-text pb-[env(safe-area-inset-bottom,0px)] md:static md:z-auto md:max-h-none md:h-full md:rounded-none md:border-t-0 md:w-80 md:border-l md:shadow-none md:pb-0">
+          <aside className={`fixed inset-x-0 bottom-0 z-50 transition-all duration-200 ${mobileInspectorExpanded ? 'max-h-[85vh]' : 'max-h-[42vh]'} rounded-t-xl border-t border-[var(--paper-border)] shadow-2xl bg-[var(--paper-surface)] flex flex-col overflow-hidden overscroll-contain shrink-0 select-text pb-[env(safe-area-inset-bottom,0px)] md:static md:z-auto md:max-h-none md:h-full md:rounded-none md:border-t-0 md:w-80 md:border-l md:shadow-none md:pb-0`}>
             {/* Grab Handle Indicator (Mobile Only) */}
-            <div className="md:hidden flex justify-center pt-2 pb-1 shrink-0">
-              <div className="w-10 h-1 rounded-full bg-[var(--paper-border)]" />
+            <div
+              className="md:hidden flex justify-center pt-2 pb-1 shrink-0 cursor-pointer"
+              onClick={() => setMobileInspectorExpanded(!mobileInspectorExpanded)}
+              title={mobileInspectorExpanded ? '收起检查器' : '展开检查器'}
+            >
+              <div className="w-10 h-1.5 rounded-full bg-[var(--paper-border)] hover:bg-[var(--ink-muted)] transition-colors" />
             </div>
 
             <div className="h-11 px-4 border-b border-[var(--paper-border)] flex items-center justify-between shrink-0">

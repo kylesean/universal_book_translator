@@ -36,15 +36,30 @@ interface NavItem {
   disabled?: boolean
 }
 
+type PaperTone = 'cotton' | 'dowling' | 'obsidian'
+
+function cyclePaperTone(current: PaperTone): PaperTone {
+  if (current === 'cotton') return 'dowling'
+  if (current === 'dowling') return 'obsidian'
+  return 'cotton'
+}
+
+function toneLabel(t: ReturnType<typeof useI18n>['t'], tone: PaperTone): string {
+  if (tone === 'cotton') return t.common.paperToneCotton
+  if (tone === 'dowling') return t.common.paperToneDowling
+  return t.common.paperToneObsidian
+}
+
 export function ConsoleLayout({ children }: ConsoleLayoutProps) {
   const { t, language, setLanguage } = useI18n()
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [info, setInfo] = useState<SystemInfo | null>(null)
-  const [paperTone, setPaperTone] = useState<'cotton' | 'dowling'>(() => {
+  const [paperTone, setPaperTone] = useState<PaperTone>(() => {
     // Storage can be refused (private mode, site-data policy); a SecurityError
     // in the initializer throws during render, above every error boundary.
     try {
-      return (localStorage.getItem('ubt_paper_tone') as 'cotton' | 'dowling') || 'cotton'
+      const stored = localStorage.getItem('ubt_paper_tone') as PaperTone | null
+      return stored && ['cotton', 'dowling', 'obsidian'].includes(stored) ? stored : 'cotton'
     } catch {
       return 'cotton'
     }
@@ -77,10 +92,10 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
   const currentJobId = jobMatch?.params.jobId ?? null
 
   useEffect(() => {
-    if (paperTone === 'dowling') {
-      document.documentElement.setAttribute('data-paper-tone', 'dowling')
-    } else {
+    if (paperTone === 'cotton') {
       document.documentElement.removeAttribute('data-paper-tone')
+    } else {
+      document.documentElement.setAttribute('data-paper-tone', paperTone)
     }
     try {
       localStorage.setItem('ubt_paper_tone', paperTone)
@@ -247,19 +262,19 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
           <button
             id="btn-paper-toggle-mobile"
             type="button"
-            onClick={() => setPaperTone(paperTone === 'cotton' ? 'dowling' : 'cotton')}
+            onClick={() => setPaperTone((prev) => cyclePaperTone(prev))}
             className="flex items-center gap-1.5 min-h-[40px] h-10 px-2.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors cursor-pointer"
             aria-label={t.common.paperToneSwitchTo.replace(
               '{tone}',
-              paperTone === 'cotton' ? t.common.paperToneDowling : t.common.paperToneCotton,
+              toneLabel(t, cyclePaperTone(paperTone)),
             )}
             title={t.common.paperToneSwitchTo.replace(
               '{tone}',
-              paperTone === 'cotton' ? t.common.paperToneDowling : t.common.paperToneCotton,
+              toneLabel(t, cyclePaperTone(paperTone)),
             )}
           >
             <FileSpreadsheet className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
-            <span>{paperTone === 'cotton' ? t.common.paperToneCotton : t.common.paperToneDowling}</span>
+            <span>{toneLabel(t, paperTone)}</span>
           </button>
 
           <button
@@ -394,17 +409,15 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
             <div className="flex items-center gap-1.5">
               <button
                 id="btn-paper-toggle"
-                onClick={() => setPaperTone(paperTone === 'cotton' ? 'dowling' : 'cotton')}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors"
+                onClick={() => setPaperTone((prev) => cyclePaperTone(prev))}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors cursor-pointer"
                 title={t.common.paperToneSwitchTo.replace(
                   '{tone}',
-                  paperTone === 'cotton' ? t.common.paperToneDowling : t.common.paperToneCotton,
+                  toneLabel(t, cyclePaperTone(paperTone)),
                 )}
               >
                 <FileSpreadsheet className="h-3 w-3 text-[var(--ink-muted)]" />
-                <span>
-                  {paperTone === 'cotton' ? t.common.paperToneCotton : t.common.paperToneDowling}
-                </span>
+                <span>{toneLabel(t, paperTone)}</span>
               </button>
 
               <button

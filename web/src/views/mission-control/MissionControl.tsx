@@ -113,7 +113,13 @@ export function MissionControl() {
   const navigate = useNavigate()
   const { jobId } = useParams<{ jobId: string }>()
   const currentJobId = jobId ?? null
-  const onSelectJob = (id: string) => navigate(`/jobs/${id}`)
+  const detailSectionRef = useRef<HTMLDivElement>(null)
+  const onSelectJob = (id: string) => {
+    navigate(`/jobs/${id}`)
+    setTimeout(() => {
+      detailSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 60)
+  }
   const onInspectQuality = (id: string) => navigate(`/jobs/${id}/quality`)
   const onOpenReview = (id: string) => navigate(`/jobs/${id}/review`)
   // Seeded from the cross-route history so returning to this job restores what
@@ -974,9 +980,10 @@ export function MissionControl() {
                     {jobs.map((job) => (
                       <tr
                         key={job.job_id}
-                        className={`transition-colors ${
+                        onClick={() => onSelectJob(job.job_id)}
+                        className={`transition-colors cursor-pointer ${
                           job.job_id === currentJobId
-                            ? 'bg-[var(--paper-subsurface)]'
+                            ? 'bg-[var(--paper-subsurface)] font-medium shadow-2xs'
                             : 'hover:bg-[var(--paper-subsurface)]'
                         }`}
                       >
@@ -1182,7 +1189,7 @@ export function MissionControl() {
       ) : (
         <>
       {/* Slim Pipeline Stepper */}
-      <div className="p-3 sm:p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shrink-0 shadow-2xs">
+      <div ref={detailSectionRef} className="p-3 sm:p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shrink-0 shadow-2xs">
         <div className="flex items-center justify-between text-xs font-mono uppercase text-[var(--ink-muted)] mb-2 px-1 font-semibold">
           <span>{t.mission.pipelineGraph}</span>
           <span className="text-[var(--ink-primary)] font-bold">

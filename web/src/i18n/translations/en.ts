@@ -18,6 +18,7 @@ export const en: TranslationDictionary = {
     dismiss: 'Dismiss',
     paperToneCotton: 'Cotton',
     paperToneDowling: 'Dowling',
+    paperToneObsidian: 'Obsidian',
     paperToneSwitchTo: 'Switch to {tone} paper tone',
     switchLanguage: 'Switch language',
   },
@@ -869,6 +870,7 @@ export const en: TranslationDictionary = {
   review: {
     title: 'Review & Post-Editing Workbench',
     modeSegments: 'Segment Alignment Grid',
+    modeFlow: 'Reading Flow',
     modeVisual: 'Pixel Witness Diff (PDF)',
     sourceSegment: 'Source Segment',
     targetSegment: 'Target Translation (Editable)',
