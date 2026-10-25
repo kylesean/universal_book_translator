@@ -323,6 +323,10 @@ export interface TranslationDictionary {
     rowRehearsal: string
     resuming: string
     downloadPrimary: string
+    oneClickExport: string
+    exportFormats: string
+    exportPreparing: string
+    exportSuccess: string
     noDeliverables: string
     deleteJob: string
     deleteConfirm: string
@@ -832,6 +836,18 @@ export interface TranslationDictionary {
     //: Shown when the ledger is held by another writer (HTTP 409), so the
     //: operator knows to stop the run or retry rather than assume the save lost.
     saveConflict: string
+    oneClickExport: string
+    exportFormats: string
+    exportPreparing: string
+    exportRerendering: string
+    exportSuccess: string
+    exportFailed: string
+    exportBlockedTitle: string
+    exportBlockedBody: string
+    exportBlockedConfirm: string
+    exportBlockedCancel: string
+    exportPrimaryBadge: string
+    exportQuickHelp: string
   }
   errorBoundary: {
     title: string

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useRef } from 'react'
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Terminal,
@@ -29,6 +29,7 @@ import {
   reExportJob,
   reparseJob,
   subscribeJobProgress,
+  type DeliverableItem,
   type DeliverableListing,
   type JobSummary,
   type PipelineStage,
@@ -36,6 +37,28 @@ import {
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
 import { useToast } from '@/components/ui/useToast'
+
+const getFormatBadge = (filename: string): string => {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
+  switch (ext) {
+    case 'pdf': return 'PDF'
+    case 'epub': return 'EPUB'
+    case 'docx': return 'DOCX'
+    case 'md':
+    case 'markdown': return 'MD'
+    case 'html':
+    case 'htm': return 'HTML'
+    case 'xliff': return 'XLIFF'
+    default: return ext.toUpperCase() || 'FILE'
+  }
+}
+
+const formatBytes = (bytes: number): string => {
+  if (bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
+}
 
 type LogLevel = 'INFO' | 'WARN' | 'ERROR'
 
@@ -236,6 +259,68 @@ export function MissionControl() {
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [resuming, setResuming] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [deliverables, setDeliverables] = useState<DeliverableItem[]>([])
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const exportContainerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let alive = true
+    if (currentJobId && statusStr === 'completed') {
+      listDeliverables(currentJobId)
+        .then((listing) => {
+          if (alive) setDeliverables(listing.items)
+        })
+        .catch(() => {
+          if (alive) setDeliverables([])
+        })
+    } else {
+      queueMicrotask(() => {
+        if (alive) setDeliverables((prev) => (prev.length > 0 ? [] : prev))
+      })
+    }
+    return () => {
+      alive = false
+    }
+  }, [currentJobId, statusStr])
+
+  useEffect(() => {
+    if (!exportMenuOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exportContainerRef.current && !exportContainerRef.current.contains(e.target as Node)) {
+        setExportMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [exportMenuOpen])
+
+  const readingDeliverables = useMemo(() => {
+    return deliverables.filter((d) => {
+      const ext = d.filename.split('.').pop()?.toLowerCase() ?? ''
+      return (
+        d.key === 'primary' ||
+        d.key === 'secondary' ||
+        d.key === 'epub' ||
+        d.key === 'html' ||
+        d.key === 'xliff' ||
+        ext === 'pdf' ||
+        ext === 'epub' ||
+        ext === 'docx' ||
+        ext === 'md' ||
+        ext === 'html' ||
+        ext === 'xliff'
+      )
+    })
+  }, [deliverables])
+
+  const primaryDeliverable = useMemo(() => {
+    return (
+      readingDeliverables.find((d) => d.key === 'primary') ??
+      readingDeliverables[0] ??
+      deliverables[0] ??
+      null
+    )
+  }, [readingDeliverables, deliverables])
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   // Confirmation for the destructive re-parse: every block is discarded and
   // the book re-translated at full cost, so it takes a typed phrase, not a click.
@@ -612,8 +697,10 @@ export function MissionControl() {
    * than letting the 409 arrive) keeps the decision in front of the operator
    * instead of in a blank tab.
    */
-  const handleDownload = async () => {
+  const handleDownload = async (key?: string) => {
     if (!currentJobId || downloading) return
+    setExportMenuOpen(false)
+    const targetKey = key ?? primaryDeliverable?.key ?? 'primary'
     let verdict: DeliverableListing['deliveryVerdict'] = null
     try {
       verdict = (await listDeliverables(currentJobId)).deliveryVerdict
@@ -625,7 +712,7 @@ export function MissionControl() {
       setPendingBlockedDownload(currentJobId)
       return
     }
-    await issueDownload(currentJobId, 'primary')
+    await issueDownload(currentJobId, targetKey)
   }
 
   // History management: removes the ledger + deliverables of a finished job.
@@ -864,10 +951,86 @@ export function MissionControl() {
 
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           {currentJobId && isCompleted && (
-            <Button onClick={handleDownload} variant="primary" size="sm" disabled={downloading} className="h-9 sm:h-7 px-2.5 text-xs">
-              <Download className="h-3.5 w-3.5 mr-1" />
-              {t.mission.downloadPrimary}
-            </Button>
+            <div ref={exportContainerRef} className="relative inline-flex items-center shadow-xs">
+              <Button
+                onClick={() => void handleDownload()}
+                variant="primary"
+                size="sm"
+                disabled={downloading}
+                className={`h-9 sm:h-7 px-2.5 text-xs font-bold ${
+                  readingDeliverables.length > 1 ? 'rounded-r-none pr-2 border-r border-white/20' : ''
+                }`}
+                title={t.review.exportQuickHelp}
+              >
+                {downloading ? (
+                  <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Download className="h-3.5 w-3.5 mr-1" />
+                )}
+                {t.mission.oneClickExport}
+                {primaryDeliverable && !downloading && (
+                  <span className="hidden sm:inline-block ml-1 text-[10px] font-mono opacity-80 uppercase px-1 py-0.2 bg-black/15 rounded">
+                    {getFormatBadge(primaryDeliverable.filename)}
+                  </span>
+                )}
+              </Button>
+              {readingDeliverables.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setExportMenuOpen((prev) => !prev)}
+                  disabled={downloading}
+                  title={t.mission.exportFormats}
+                  className="h-9 sm:h-7 px-1.5 text-xs bg-[var(--btn-bg)] text-[var(--btn-fg)] hover:bg-[var(--btn-hover)] rounded-r transition-all flex items-center justify-center cursor-pointer border-l border-white/20 disabled:opacity-60"
+                >
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${exportMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+              )}
+
+              {/* Format Dropdown Menu */}
+              {exportMenuOpen && (
+                <div
+                  className="absolute left-0 top-full mt-1.5 w-64 bg-[var(--paper-surface)] border border-[var(--paper-border)] rounded-md shadow-lg py-1 z-50 text-xs"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="px-3 py-1.5 text-[11px] font-semibold text-[var(--ink-muted)] border-b border-[var(--paper-border)] uppercase tracking-wider">
+                    {t.mission.exportFormats}
+                  </div>
+                  <div className="max-h-60 overflow-y-auto py-1">
+                    {readingDeliverables.map((item) => {
+                      const isPrimary = item.key === 'primary' || item === primaryDeliverable
+                      const badge = getFormatBadge(item.filename)
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => void handleDownload(item.key)}
+                          className="w-full px-3 py-2 text-left hover:bg-[var(--paper-subsurface)] flex items-center justify-between gap-2 transition-colors cursor-pointer"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-[var(--paper-border)] text-[var(--ink-primary)]">
+                                {badge}
+                              </span>
+                              <span className="font-medium text-[var(--ink-primary)] truncate">
+                                {item.label || item.filename}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-[var(--ink-muted)] font-mono mt-0.5 truncate">
+                              {item.filename} · {formatBytes(item.size_bytes)}
+                            </div>
+                          </div>
+                          {isPrimary && (
+                            <span className="shrink-0 text-[10px] px-1 py-0.2 rounded bg-[#15803d]/15 text-[#15803d] font-semibold font-mono">
+                              {t.review.exportPrimaryBadge}
+                            </span>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           <Button

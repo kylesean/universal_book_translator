@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { useVirtualizer } from '@tanstack/react-virtual'
+import { useVirtualizer, type VirtualItem } from '@tanstack/react-virtual'
 import {
   SplitSquareVertical,
   Save,
@@ -14,14 +14,18 @@ import {
   Wand2,
   RefreshCw,
   Sparkles,
+  Download,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { useToast } from '@/components/ui/useToast'
 import {
   ApiError,
   listSegments,
   listIssues,
   listDeliverables,
+  deliverableDownloadUrl,
   editSegment,
   reExportJob,
   getBlockTerms,
@@ -31,6 +35,8 @@ import {
   type Segment,
   type IssuesReport,
   type TermViolation,
+  type DeliverableItem,
+  type DeliverableListing,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
 
@@ -106,6 +112,28 @@ function writeDrafts(jobId: string | null, drafts: Record<string, string>): void
 //: fault past the cut was invisible to the F8 fault walk).
 const PAGE_LIMIT = 200
 
+const getFormatBadge = (filename: string): string => {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
+  switch (ext) {
+    case 'pdf': return 'PDF'
+    case 'epub': return 'EPUB'
+    case 'docx': return 'DOCX'
+    case 'md':
+    case 'markdown': return 'MD'
+    case 'html':
+    case 'htm': return 'HTML'
+    case 'xliff': return 'XLIFF'
+    default: return ext.toUpperCase() || 'FILE'
+  }
+}
+
+const formatBytes = (bytes: number): string => {
+  if (bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
+}
+
 export function ReviewWorkbench() {
   const { t } = useI18n()
   const { jobId: routeJobId } = useParams<{ jobId: string }>()
@@ -119,6 +147,7 @@ export function ReviewWorkbench() {
   const [issues, setIssues] = useState<IssuesReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
+  const toast = useToast()
   const [error, setError] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, string>>(() => readDrafts(jobId))
   const [editing, setEditing] = useState<Record<string, boolean>>({})
@@ -127,6 +156,13 @@ export function ReviewWorkbench() {
   const [reExportNotice, setReExportNotice] = useState<string | null>(null)
   const [reExporting, setReExporting] = useState(false)
   const [reExportPending, setReExportPending] = useState(false)
+  const [deliverables, setDeliverables] = useState<DeliverableItem[]>([])
+  const [deliveryVerdict, setDeliveryVerdict] = useState<DeliverableListing['deliveryVerdict']>(null)
+  const [exporting, setExporting] = useState(false)
+  const [exportStatusText, setExportStatusText] = useState<string | null>(null)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [pendingBlockedExport, setPendingBlockedExport] = useState<string | null>(null)
+  const exportContainerRef = useRef<HTMLDivElement>(null)
   const [issueCursor, setIssueCursor] = useState(0)
   const [openPreviews, setOpenPreviews] = useState<Record<number, boolean>>({})
   const [previewBust, setPreviewBust] = useState(0)
@@ -165,7 +201,11 @@ export function ReviewWorkbench() {
       setIssues(issueData)
       setSaved({})
       setIssueCursor(0)
-      if (listing) setReExportPending(listing.stale)
+      if (listing) {
+        setDeliverables(listing.items)
+        setDeliveryVerdict(listing.deliveryVerdict)
+        setReExportPending(listing.stale)
+      }
     } catch (err) {
       if (seq !== loadSeqRef.current) return // stale failure
       setError(err instanceof Error ? err.message : t.review.loadFailed)
@@ -173,6 +213,47 @@ export function ReviewWorkbench() {
       if (seq === loadSeqRef.current) setLoading(false)
     }
   }, [jobId, filter, t])
+
+  // Close export dropdown on outside click
+  useEffect(() => {
+    if (!exportMenuOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exportContainerRef.current && !exportContainerRef.current.contains(e.target as Node)) {
+        setExportMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [exportMenuOpen])
+
+  // Filter reading-facing books / documents from internal inspection JSONs
+  const readingDeliverables = useMemo(() => {
+    return deliverables.filter((d) => {
+      const ext = d.filename.split('.').pop()?.toLowerCase() ?? ''
+      return (
+        d.key === 'primary' ||
+        d.key === 'secondary' ||
+        d.key === 'epub' ||
+        d.key === 'html' ||
+        d.key === 'xliff' ||
+        ext === 'pdf' ||
+        ext === 'epub' ||
+        ext === 'docx' ||
+        ext === 'md' ||
+        ext === 'html' ||
+        ext === 'xliff'
+      )
+    })
+  }, [deliverables])
+
+  const primaryDeliverable = useMemo(() => {
+    return (
+      readingDeliverables.find((d) => d.key === 'primary') ??
+      readingDeliverables[0] ??
+      deliverables[0] ??
+      null
+    )
+  }, [readingDeliverables, deliverables])
 
   // Append the next window. The backend returns ``total`` with every page, so
   // the "load more" button can state how much is left instead of guessing.
@@ -226,24 +307,83 @@ export function ReviewWorkbench() {
     setDrafts(readDrafts(jobId))
   }, [jobId])
 
-  // Virtualize the segment list: a 10k-segment book keeps a constant DOM node
-  // count (PRD §9 risk 1) instead of one card per segment.
-  // @tanstack/react-virtual returns non-memoizable values by design; the compiler
-  // skipping this hook's output is its documented behaviour, not a defect here.
+  // Snapshots of measured item heights to survive tab switches and eliminate layout shift
+  const flowMeasurementsCacheRef = useRef<VirtualItem[]>([])
+  const segmentMeasurementsCacheRef = useRef<VirtualItem[]>([])
+
+  const getSegmentKey = useCallback(
+    (index: number) => segments[index]?.block_id ?? index,
+    [segments]
+  )
+
+  // Dynamic estimateSize calculation based on source and target character counts
+  const estimateFlowSize = useCallback(
+    (index: number) => {
+      const seg = segments[index]
+      if (!seg) return 130
+      const sourceLen = seg.source_text?.length ?? 0
+      const draftText = drafts[seg.block_id] ?? seg.delivered_text ?? ''
+      const targetLen = draftText.length
+      // In dual-column reading flow:
+      // Left column: source text (monospace ~40 chars/line)
+      // Right column: target text (prose ~30 chars/line)
+      const sourceLines = Math.ceil(sourceLen / 40)
+      const targetLines = Math.ceil(targetLen / 30)
+      const maxLines = Math.max(1, Math.max(sourceLines, targetLines))
+      // Metadata header + p-4 card padding + bottom spacing = 68px. Line height = 24px.
+      const base = 68 + maxLines * 24
+      const hasIssues = seg.issues.length > 0 || seg.quarantined || seg.repair_failed
+      return Math.min(850, Math.max(90, base + (hasIssues ? 24 : 0)))
+    },
+    [segments, drafts]
+  )
+
+  const estimateSegmentSize = useCallback(
+    (index: number) => {
+      const seg = segments[index]
+      if (!seg) return 210
+      const sourceLen = seg.source_text?.length ?? 0
+      const draftText = drafts[seg.block_id] ?? seg.delivered_text ?? ''
+      const targetLen = draftText.length
+      const sourceLines = Math.ceil(sourceLen / 38)
+      const targetLines = Math.ceil(targetLen / 30)
+      const maxLines = Math.max(1, Math.max(sourceLines, targetLines))
+      // Header (34px) + action footer (38px) + padding (32px) + bottom pb-4 (16px) = 120px
+      const base = 120 + maxLines * 24
+      const previewExtra = seg.page !== null && openPreviews[seg.page] ? 380 : 0
+      const failExtra = seg.repair_failed ? 36 : 0
+      const termExtra = seg.issues.includes('terminology') ? 60 : 0
+      return Math.min(1000, Math.max(160, base + previewExtra + failExtra + termExtra))
+    },
+    [segments, drafts, openPreviews]
+  )
+
+  // Virtualize the segment list with dynamic size measurement and key-based cache
   // oxlint-disable-next-line react/incompatible-library
   const virtualizer = useVirtualizer({
     count: segments.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 210,
+    estimateSize: estimateSegmentSize,
+    getItemKey: getSegmentKey,
+    initialMeasurementsCache: segmentMeasurementsCacheRef.current,
+    onChange: (instance) => {
+      segmentMeasurementsCacheRef.current = instance.takeSnapshot()
+    },
     overscan: 6,
   })
 
   const flowScrollRef = useRef<HTMLDivElement>(null)
+  // Virtualize Reading Flow with dynamic height measurement and persistent cache snapshot
   // oxlint-disable-next-line react/incompatible-library
   const flowVirtualizer = useVirtualizer({
     count: segments.length,
     getScrollElement: () => flowScrollRef.current,
-    estimateSize: () => 130,
+    estimateSize: estimateFlowSize,
+    getItemKey: getSegmentKey,
+    initialMeasurementsCache: flowMeasurementsCacheRef.current,
+    onChange: (instance) => {
+      flowMeasurementsCacheRef.current = instance.takeSnapshot()
+    },
     overscan: 6,
   })
 
@@ -374,6 +514,54 @@ export function ReviewWorkbench() {
     } finally {
       setReExporting(false)
     }
+  }
+
+  const issueWorkbenchDownload = async (key: string, force = false) => {
+    if (!jobId || exporting) return
+    setExporting(true)
+    setExportMenuOpen(false)
+    const tab = window.open('', '_blank')
+    try {
+      let currentItems = deliverables
+      if (reExportPending) {
+        setExportStatusText(t.review.exportRerendering)
+        toast.push(t.review.exportRerendering, 'info')
+        await reExportJob(jobId)
+        setReExportPending(false)
+        const refreshed = await listDeliverables(jobId).catch(() => null)
+        if (refreshed) {
+          setDeliverables(refreshed.items)
+          setDeliveryVerdict(refreshed.deliveryVerdict)
+          currentItems = refreshed.items
+        }
+      }
+      const target = currentItems.find((d) => d.key === key) ?? currentItems[0]
+      if (target) {
+        const url = deliverableDownloadUrl(jobId, target.key, { force })
+        if (tab) tab.location.href = url
+        else window.open(url, '_blank')
+        toast.push(t.review.exportSuccess, 'success')
+      } else {
+        tab?.close()
+        toast.push(t.mission.noDeliverables, 'error')
+      }
+    } catch (err) {
+      tab?.close()
+      toast.push(err instanceof Error ? err.message : t.review.exportFailed, 'error')
+    } finally {
+      setExporting(false)
+      setExportStatusText(null)
+    }
+  }
+
+  const handleOneClickExport = async (key?: string) => {
+    if (!jobId || exporting) return
+    const targetKey = key ?? primaryDeliverable?.key ?? 'primary'
+    if (deliveryVerdict === 'blocked') {
+      setPendingBlockedExport(targetKey)
+      return
+    }
+    await issueWorkbenchDownload(targetKey, false)
   }
 
   const togglePreview = (page: number | null) => {
@@ -612,7 +800,7 @@ export function ReviewWorkbench() {
               runs once per review session rather than on every save. */}
           <button
             onClick={() => void handleReExport()}
-            disabled={reExporting}
+            disabled={reExporting || exporting}
             className={`min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-[4px] border transition-colors font-medium cursor-pointer disabled:cursor-wait ${
               reExportPending
                 ? 'border-[#b45309]/40 bg-[#b45309]/10 text-[#b45309] font-semibold'
@@ -626,6 +814,88 @@ export function ReviewWorkbench() {
                 ? t.review.reExportStale
                 : t.review.reExportAction}
           </button>
+
+          {/* Prominent One-Click Export & Deliver Primary Action */}
+          <div ref={exportContainerRef} className="relative inline-flex items-center shadow-xs">
+            <Button
+              onClick={() => void handleOneClickExport()}
+              disabled={exporting}
+              variant="primary"
+              size="sm"
+              className={`min-h-[30px] md:min-h-0 px-3 py-1 text-xs font-bold transition-all flex items-center gap-1.5 ${
+                readingDeliverables.length > 1 ? 'rounded-r-none pr-2 border-r border-white/20' : ''
+              }`}
+              title={t.review.exportQuickHelp}
+            >
+              {exporting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )}
+              <span>{exporting && exportStatusText ? exportStatusText : t.review.oneClickExport}</span>
+              {primaryDeliverable && !exporting && (
+                <span className="hidden sm:inline-block text-[10px] font-mono opacity-80 uppercase px-1 py-0.2 bg-black/15 rounded">
+                  {getFormatBadge(primaryDeliverable.filename)}
+                </span>
+              )}
+            </Button>
+            {readingDeliverables.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setExportMenuOpen((prev) => !prev)}
+                disabled={exporting}
+                title={t.review.exportFormats}
+                className="min-h-[30px] md:min-h-0 px-1.5 py-1 text-xs bg-[var(--btn-bg)] text-[var(--btn-fg)] hover:bg-[var(--btn-hover)] rounded-r transition-all flex items-center justify-center cursor-pointer border-l border-white/20 disabled:opacity-60"
+              >
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${exportMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+            )}
+
+            {/* Format Dropdown Menu */}
+            {exportMenuOpen && (
+              <div
+                className="absolute right-0 top-full mt-1.5 w-64 bg-[var(--paper-surface)] border border-[var(--paper-border)] rounded-md shadow-lg py-1 z-50 text-xs"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-3 py-1.5 text-[11px] font-semibold text-[var(--ink-muted)] border-b border-[var(--paper-border)] uppercase tracking-wider">
+                  {t.review.exportFormats}
+                </div>
+                <div className="max-h-60 overflow-y-auto py-1">
+                  {readingDeliverables.map((item) => {
+                    const isPrimary = item.key === 'primary' || item === primaryDeliverable
+                    const badge = getFormatBadge(item.filename)
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => void handleOneClickExport(item.key)}
+                        className="w-full px-3 py-2 text-left hover:bg-[var(--paper-subsurface)] flex items-center justify-between gap-2 transition-colors cursor-pointer"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-[var(--paper-border)] text-[var(--ink-primary)]">
+                              {badge}
+                            </span>
+                            <span className="font-medium text-[var(--ink-primary)] truncate">
+                              {item.label || item.filename}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-[var(--ink-muted)] font-mono mt-0.5 truncate">
+                            {item.filename} · {formatBytes(item.size_bytes)}
+                          </div>
+                        </div>
+                        {isPrimary && (
+                          <span className="shrink-0 text-[10px] px-1 py-0.2 rounded bg-[#15803d]/15 text-[#15803d] font-semibold font-mono">
+                            {t.review.exportPrimaryBadge}
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1312,6 +1582,21 @@ export function ReviewWorkbench() {
           </aside>
         </>
       )}
+
+      <ConfirmDialog
+        open={pendingBlockedExport !== null}
+        title={t.review.exportBlockedTitle}
+        body={t.review.exportBlockedBody}
+        confirmLabel={t.review.exportBlockedConfirm}
+        cancelLabel={t.review.exportBlockedCancel}
+        danger
+        onConfirm={() => {
+          const key = pendingBlockedExport ?? 'primary'
+          setPendingBlockedExport(null)
+          void issueWorkbenchDownload(key, true)
+        }}
+        onCancel={() => setPendingBlockedExport(null)}
+      />
     </div>
   )
 }
