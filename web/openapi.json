@@ -3414,6 +3414,80 @@
         }
       }
     },
+    "/assets/glossary/import": {
+      "post": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Import Glossary",
+        "description": "Bulk-import CSV/TSV/JSON pairs into the configured glossary file.\n\nMirrors the TM import: parsing is strict, so a malformed payload is a\n422 rather than a silent partial import, and the file's existing format\nis preserved row-for-row. Pairs with an empty side are skipped.",
+        "operationId": "import_glossary_assets_glossary_import_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GlossaryImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/assets/tm": {
       "get": {
         "tags": [
@@ -4214,6 +4288,34 @@
         ],
         "title": "GlossaryDeleteResponse",
         "description": "A delete also reports whether the source was present."
+      },
+      "GlossaryImportRequest": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "csv",
+              "tsv",
+              "json"
+            ],
+            "title": "Format",
+            "description": "Payload format"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Content",
+            "description": "Raw CSV/TSV text or JSON glossary"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "format",
+          "content"
+        ],
+        "title": "GlossaryImportRequest",
+        "description": "Bulk glossary import payload, mirroring the TM import's strictness."
       },
       "GlossaryResponse": {
         "properties": {
@@ -5280,6 +5382,28 @@
             "type": "boolean",
             "title": "Rehearsal",
             "default": false
+          },
+          "agent_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent State"
+          },
+          "next_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Action"
           },
           "page_scope": {
             "anyOf": [

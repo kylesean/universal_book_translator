@@ -833,6 +833,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/assets/glossary/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Glossary
+         * @description Bulk-import CSV/TSV/JSON pairs into the configured glossary file.
+         *
+         *     Mirrors the TM import: parsing is strict, so a malformed payload is a
+         *     422 rather than a silent partial import, and the file's existing format
+         *     is preserved row-for-row. Pairs with an empty side are skipped.
+         */
+        post: operations["import_glossary_assets_glossary_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/assets/tm": {
         parameters: {
             query?: never;
@@ -1103,6 +1127,23 @@ export interface components {
             }[];
             /** Removed */
             removed: boolean;
+        };
+        /**
+         * GlossaryImportRequest
+         * @description Bulk glossary import payload, mirroring the TM import's strictness.
+         */
+        GlossaryImportRequest: {
+            /**
+             * Format
+             * @description Payload format
+             * @enum {string}
+             */
+            format: "csv" | "tsv" | "json";
+            /**
+             * Content
+             * @description Raw CSV/TSV text or JSON glossary
+             */
+            content: string;
         };
         /**
          * GlossaryResponse
@@ -1614,6 +1655,10 @@ export interface components {
              * @default false
              */
             rehearsal: boolean;
+            /** Agent State */
+            agent_state?: string | null;
+            /** Next Action */
+            next_action?: string | null;
             /** Page Scope */
             page_scope?: string | null;
             /** Last Error */
@@ -3903,6 +3948,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GlossaryConflictsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_glossary_assets_glossary_import_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GlossaryImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
