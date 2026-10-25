@@ -44,6 +44,18 @@ def _preview_media_type(path: Path, registered: str) -> str:
     return _INLINE_SUFFIX_TYPES.get(path.suffix.lower(), registered)
 
 
+#: Deliverables whose contents are *for the reader*: the translated book, its
+#: companion render, and the reflowable EPUB. These are what a ``blocked``
+#: verdict is about — the reader meets untranslated source in them.
+#:
+#: Everything else in :data:`DELIVERABLE_LABELS` is an audit or handoff
+#: artifact (the quality report, the delivery contract, the XLIFF, the run
+#: metrics, the visual report). Those stay downloadable from a blocked job on
+#: purpose: they are the only way an operator can find out *why* it was
+#: blocked, and refusing them would turn a recoverable refusal into a dead end.
+_READER_FACING_DELIVERABLES = frozenset({"primary", "secondary", "epub"})
+
+
 def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
     """Routes for the artifact surface."""
     app_config = scope.config
@@ -101,6 +113,52 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
 
         summary = summarize_job(_job_db_path(job_id))
         return summary is not None and str(summary.get("job_id")) == job_id
+
+    def _delivery_verdict_sync(job_id: str) -> str | None:
+        """The shared three-state verdict for this job, or ``None`` if unknown.
+
+        ``None`` means "no quality report on disk" — the run has not reached the
+        export stage, or its report was never written. Callers must treat that
+        as *not blocked*: a job whose report is missing is a job with nothing to
+        judge, and refusing its download would break every in-flight poll.
+
+        Never raises, for the same reason ``_delivery_is_stale`` never does: this
+        runs on the download path, and a probe that threw would replace every
+        download with a 500. A corrupt report reads as ``None`` and the download
+        behaves as it did before this check existed.
+
+        Deliberately re-reads the report sidecar instead of caching: the verdict
+        changes when a reviewer clears a quarantined block, and a stale cached
+        "blocked" would keep refusing a delivery that is now clean.
+        """
+        report_file = None
+        record = manager.get_job(job_id)
+        if record is not None:
+            report_file = record.progress.report_file
+        if not report_file:
+            db_path = _job_db_path(job_id)
+            if not db_path.exists() or not _is_job_ledger_sync(job_id):
+                return None
+            try:
+                with SQLiteJobLedger(db_path, read_only=True) as ledger:
+                    report_file = ledger.get_job_metadata_value(job_id, "report_file")
+            except Exception as exc:  # noqa: BLE001 - a probe must not break delivery
+                logger.warning("delivery verdict probe failed for %s: %s", job_id, exc)
+                return None
+        if not report_file:
+            return None
+        try:
+            path = Path(str(report_file))
+            if not path.is_file():
+                return None
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001 - see the docstring
+            logger.warning("quality report unreadable for %s: %s", job_id, exc)
+            return None
+        summary = data.get("summary") if isinstance(data, dict) else None
+        if not isinstance(summary, dict):
+            return None
+        return delivery_verdict_from_summary(summary)
 
     @api_app.get(
         "/jobs/{job_id}/report",
