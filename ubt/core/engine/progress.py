@@ -82,13 +82,6 @@ def _processed_blocks(completed: int, failed: int, needs_human: int, blocked_hum
     return completed + failed + needs_human + blocked_human
 
 
-def _progress_percent(processed: int, total: int) -> float:
-    """0-100 completion percent; 0.0 while the total is still unknown."""
-    if total <= 0:
-        return 0.0
-    return round(min(1.0, processed / total) * 100, 1)
-
-
 def live_progress_percent(finalized: int, drafted: int, total: int) -> float:
     """Percent of work started, with 100 reserved for a finalized run.
 
