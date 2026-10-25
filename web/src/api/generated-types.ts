@@ -80,6 +80,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/boundary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get System Boundary
+         * @description The forbidden-path list actually in force, for the console's panel.
+         *
+         *     The panel used to hardcode Unix paths, which on Windows described a
+         *     deny list this server does not have. This returns the same resolved
+         *     prefix tuple the request guard compares against, so what the panel
+         *     shows is what the server refuses — per platform, not per folklore.
+         */
+        get: operations["get_system_boundary_system_boundary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/qe-config": {
         parameters: {
             query?: never;
@@ -2722,6 +2747,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RuntimeConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_system_boundary_system_boundary_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

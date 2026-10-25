@@ -279,6 +279,70 @@
         }
       }
     },
+    "/system/boundary": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get System Boundary",
+        "description": "The forbidden-path list actually in force, for the console's panel.\n\nThe panel used to hardcode Unix paths, which on Windows described a\ndeny list this server does not have. This returns the same resolved\nprefix tuple the request guard compares against, so what the panel\nshows is what the server refuses \u2014 per platform, not per folklore.",
+        "operationId": "get_system_boundary_system_boundary_get",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/system/qe-config": {
       "get": {
         "tags": [

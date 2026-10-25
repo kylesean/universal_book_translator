@@ -212,6 +212,12 @@ def warn_world_readable(directory: Path, extra_dirs: Iterable[Path] = ()) -> Non
     pointing the operator at the already-owner-only ``directory`` changed
     nothing.
     """
+    if sys.platform == "win32":
+        # Windows synthesizes POSIX mode bits (a writable file reports 0666),
+        # so the scan would flag every file and the chmod remedy it prints is
+        # meaningless there. Privacy on Windows is an NTFS-ACL question; the
+        # doctor reports this honestly as a SKIP instead of a standing warn.
+        return
     exposed = world_readable_files(directory, extra_dirs=extra_dirs)
     if not exposed:
         return

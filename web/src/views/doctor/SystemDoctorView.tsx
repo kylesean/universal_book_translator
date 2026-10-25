@@ -18,6 +18,7 @@ import { Donut } from '@/views/quality-gate/charts'
 import {
   getDoctor,
   getRuntimeConfig,
+  getSystemBoundary,
   getSystemInfo,
   setDefaultProvider,
   type DoctorCheck,
@@ -50,6 +51,10 @@ export function SystemDoctorView() {
   const [checks, setChecks] = useState<DoctorCheck[]>([])
   const [runtime, setRuntime] = useState<RuntimeConfig | null>(null)
   const [info, setInfo] = useState<SystemInfo | null>(null)
+  // The server's own forbidden-path list: on Windows it is C:\Windows and
+  // friends, not the Unix paths the panel used to hardcode. Null = unknown,
+  // which renders as the same quiet dash as every other unloaded fact.
+  const [boundary, setBoundary] = useState<{ forbidden_prefixes: string[] } | null>(null)
   // ``undefined`` = closed, ``null`` = creating a new block, a string = editing
   // that one. A single ``string | null`` cannot express all three, and the
   // difference between "closed" and "create" is the difference between a dead
@@ -71,14 +76,16 @@ export function SystemDoctorView() {
   const load = useCallback(async (probe: boolean) => {
     setLoading(true)
     try {
-      const [doctor, systemInfo, runtimeCfg] = await Promise.all([
+      const [doctor, systemInfo, runtimeCfg, boundaryInfo] = await Promise.all([
         getDoctor(probe),
         getSystemInfo().catch(() => null),
         getRuntimeConfig().catch(() => null),
+        getSystemBoundary().catch(() => null),
       ])
       setChecks(doctor.checks)
       setInfo(systemInfo)
       setRuntime(runtimeCfg)
+      setBoundary(boundaryInfo)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Doctor check failed')
@@ -798,8 +805,13 @@ export function SystemDoctorView() {
                   {t.doctor.forbiddenPaths}
                 </span>
                 <span className="flex items-center gap-1.5 min-w-0">
-                  <span className="type-help font-mono truncate" title="/etc, /root, /var/run, ~/.ssh">
-                    /etc, /root, /var/run, ~/.ssh
+                  <span
+                    className="type-help font-mono truncate"
+                    title={boundary?.forbidden_prefixes.join('  ')}
+                  >
+                    {boundary
+                      ? boundary.forbidden_prefixes.join(', ')
+                      : '—'}
                   </span>
                   <Badge variant="outline" className="text-xs shrink-0">
                     {t.doctor.securityForbiddenBadge}

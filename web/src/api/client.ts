@@ -986,3 +986,10 @@ export async function getSystemInfo(): Promise<SystemInfo> {
   if (!res.ok) throw await apiError(res, "Failed to load system info")
   return res.json()
 }
+
+/** The forbidden-path prefixes the server actually refuses (platform-specific). */
+export async function getSystemBoundary(): Promise<{ forbidden_prefixes: string[] }> {
+  const res = await apiFetch(`${BASE_URL}/system/boundary`)
+  if (!res.ok) throw await apiError(res, "Failed to load the boundary list")
+  return res.json()
+}

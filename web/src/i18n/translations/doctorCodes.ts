@@ -77,6 +77,7 @@ export const doctorCodesZh: DoctorCodeTables = {
     'ledger_dir.not_writable': '不可写：{path}（{error}）',
     'ledger_permissions.exposed': '{count} 个含书籍正文的文件对 group/other 可读，例如 {example}',
     'ledger_permissions.ok': '仅所有者可读，位于 {db_dir}',
+    'ledger_permissions.windows_acl': 'Windows 通过 NTFS ACL 管理权限，POSIX 权限位在此不可度量；账本目录位于当前用户目录下时，仅本账户可读。',
     'translation_memory.ok': '共享 tm.sqlite，模糊匹配阈值 {threshold}',
     'translation_memory.disabled': '已禁用',
     'disk_space.critical':
@@ -155,8 +156,8 @@ export const doctorCodesZh: DoctorCodeTables = {
     'ocr_engine.cloud_blocked': '开启页面外发，或安装本地 rapidocr/sidecar',
     'ocr_engine.none': 'uv sync --all-extras（或 docker run -d -p 8765:8765 ubt-ocr-sidecar）',
     'typst.missing': '安装它（brew install typst / cargo install typst-cli），或改用文本输出格式（.md / .docx / .epub）',
-    'cjk_fonts_render.missing': '安装 CJK 字体（例如 noto-fonts-cjk）',
-    'poppler.missing': '安装 poppler-utils',
+    'cjk_fonts_render.missing': '安装 CJK 字体（Linux 发行版包如 noto-fonts-cjk；macOS 可 brew install --cask font-noto-cjk；Windows 一般自带雅黑）',
+    'poppler.missing': '安装 poppler 并加入 PATH（apt / brew / Windows 官方构建均可）',
     'pdf_raster.missing': '重装项目环境（uv sync）',
     'pillow.missing': '安装 pillow',
   },

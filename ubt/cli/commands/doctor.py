@@ -4,6 +4,8 @@ import importlib
 import importlib.util
 import json
 import shutil
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
@@ -98,6 +100,7 @@ CHECK_CODES: dict[str, tuple[str, ...]] = {
         "ledger_dir.not_writable",
         "ledger_permissions.exposed",
         "ledger_permissions.ok",
+        "ledger_permissions.windows_acl",
         "translation_memory.ok",
         "translation_memory.disabled",
         "disk_space.critical",
@@ -370,6 +373,73 @@ def doctor_command(
         _emit_human(checks)
     if any(check.status == "FAIL" for check in checks):
         raise typer.Exit(code=1)
+
+
+def _record_ledger_permissions(config: UBTConfig, record: Callable[..., None]) -> None:
+    """The ledger-permissions probe, platform-gated.
+
+    On Windows, POSIX mode bits are synthesized — a writable file always
+    reports 0666 — so the group/other scan would flag every file, and the
+    chmod remedy it prints would be noise. SKIP says honestly: not measurable
+    on this platform; privacy there is an NTFS-ACL question.
+    """
+    if sys.platform == "win32":
+        record(
+            "Ledger permissions",
+            "SKIP",
+            "Windows enforces permissions through NTFS ACLs, not POSIX bits; "
+            "keep the ledger under your user profile and it stays private "
+            "to your account.",
+            code="ledger_permissions",
+            detail_code="ledger_permissions.windows_acl",
+            params={"platform": "windows"},
+        )
+        return
+    docling_cache = cache_root() / "docling_cache"
+    output_dir = default_output_dir_for_scan()
+    exposed = world_readable_files(config.db_dir, extra_dirs=(docling_cache, output_dir))
+    if exposed:
+        # Name the scan roots that hold an exposed file, not each file's
+        # immediate parent: the docling cache keeps one hash directory per
+        # asset, so listing parents printed five long paths where
+        # ``docling_cache`` covers them all — and stays correct as new
+        # hash directories appear.
+        def _under(root: Path, file: Path) -> bool:
+            try:
+                file.resolve().relative_to(root.resolve())
+                return True
+            except ValueError:
+                return False
+
+        roots = [
+            root
+            for root in (config.db_dir, docling_cache, output_dir)
+            if any(_under(root, path) for path in exposed)
+        ]
+        record(
+            "Ledger permissions",
+            "WARN",
+            f"{len(exposed)} file(s) carrying book text are group/other-readable, "
+            f"e.g. {exposed[0]}",
+            fix="chmod -R go-rwx " + " ".join(f"'{root}'" for root in roots),
+            code="ledger_permissions",
+            detail_code="ledger_permissions.exposed",
+            fix_code="ledger_permissions.exposed",
+            params={
+                "count": len(exposed),
+                "example": str(exposed[0]),
+                "roots": [str(r) for r in roots],
+            },
+        )
+    else:
+        record(
+            "Ledger permissions",
+            "OK",
+            f"owner-only under {config.db_dir}",
+            code="ledger_permissions",
+            detail_code="ledger_permissions.ok",
+            params={"db_dir": str(config.db_dir)},
+        )
 
 
 def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
@@ -678,51 +748,7 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
     group_code = _GROUPS[1][0]
     group = _GROUPS[1][1]
     probe_writable("Ledger dir", config.db_dir, "ledger_dir")
-    docling_cache = cache_root() / "docling_cache"
-    output_dir = default_output_dir_for_scan()
-    exposed = world_readable_files(config.db_dir, extra_dirs=(docling_cache, output_dir))
-    if exposed:
-        # Name the scan roots that hold an exposed file, not each file's
-        # immediate parent: the docling cache keeps one hash directory per
-        # asset, so listing parents printed five long paths where
-        # ``docling_cache`` covers them all — and stays correct as new
-        # hash directories appear.
-        def _under(root: Path, file: Path) -> bool:
-            try:
-                file.resolve().relative_to(root.resolve())
-                return True
-            except ValueError:
-                return False
-
-        roots = [
-            root
-            for root in (config.db_dir, docling_cache, output_dir)
-            if any(_under(root, path) for path in exposed)
-        ]
-        record(
-            "Ledger permissions",
-            "WARN",
-            f"{len(exposed)} file(s) carrying book text are group/other-readable, "
-            f"e.g. {exposed[0]}",
-            fix="chmod -R go-rwx " + " ".join(f"'{root}'" for root in roots),
-            code="ledger_permissions",
-            detail_code="ledger_permissions.exposed",
-            fix_code="ledger_permissions.exposed",
-            params={
-                "count": len(exposed),
-                "example": str(exposed[0]),
-                "roots": [str(r) for r in roots],
-            },
-        )
-    else:
-        record(
-            "Ledger permissions",
-            "OK",
-            f"owner-only under {config.db_dir}",
-            code="ledger_permissions",
-            detail_code="ledger_permissions.ok",
-            params={"db_dir": str(config.db_dir)},
-        )
+    _record_ledger_permissions(config, record)
     if config.tm_enabled:
         record(
             "Translation memory",

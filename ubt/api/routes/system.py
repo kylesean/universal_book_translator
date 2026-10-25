@@ -162,6 +162,28 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
             )
         )
 
+    @api_app.get("/system/boundary", tags=["System"])
+    async def get_system_boundary() -> JSONResponse:
+        """The forbidden-path list actually in force, for the console's panel.
+
+        The panel used to hardcode Unix paths, which on Windows described a
+        deny list this server does not have. This returns the same resolved
+        prefix tuple the request guard compares against, so what the panel
+        shows is what the server refuses — per platform, not per folklore.
+        """
+        from ubt.core.fs_perms import SYSTEM_DISALLOWED_PREFIXES
+
+        return JSONResponse(
+            {
+                "forbidden_prefixes": sorted(
+                    # usrmerge symlinks (/bin -> /usr/bin) resolve two declared
+                    # prefixes onto one path; the panel wants the set, not the
+                    # parse history.
+                    {str(p) for p in SYSTEM_DISALLOWED_PREFIXES}
+                )
+            }
+        )
+
     @api_app.get(
         "/system/qe-config",
         response_model=QESettingsResponse,

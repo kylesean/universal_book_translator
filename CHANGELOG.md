@@ -11,6 +11,22 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Changed
 
+- **The doctor stops measuring what the platform cannot measure.** The
+  ledger-permissions probe reads POSIX mode bits; on Windows those bits are
+  synthesized — a writable file always reports 0666 — so the scan would flag
+  every file as group/other-readable forever, and the printed remedy
+  （`chmod -R go-rwx`）would be noise. On win32 the check now SKIPs honestly
+  （Windows 通过 NTFS ACL 管理权限，POSIX 权限位在此不可度量）and the
+  runtime warning path stays silent; on POSIX the scan is unchanged. The
+  security panel's forbidden-path row was hardcoded Unix paths, which on
+  Windows described a deny list the server does not have — it now renders
+  `GET /system/boundary`, the same resolved prefix tuple the request guard
+  compares against（usrmerge duplicates deduped）, so the panel shows what
+  the server actually refuses, per platform. Remedies that named one
+  distro's packages get cross-platform wording. The path guard itself was
+  already cross-platform — win32 prefixes and casefolded filename parts —
+  and now the panel agrees with it.
+
 - **The system doctor leads with a verdict.** The page's only real question —
   is anything wrong? — was answerable by scanning fifteen same-sized 正常
   badges to the bottom. Now a verdict band opens the page: a health donut
