@@ -265,6 +265,7 @@ export function LanguageAssetsView() {
               <input
                 type="text"
                 placeholder={t.assets.sourceTerm}
+                aria-label={t.assets.sourceTerm}
                 value={newSource}
                 onChange={(e) => setNewSource(e.target.value)}
                 className="h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-3 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none font-mono placeholder:text-[var(--ink-muted)]"
@@ -272,6 +273,7 @@ export function LanguageAssetsView() {
               <input
                 type="text"
                 placeholder={t.assets.targetTerm}
+                aria-label={t.assets.targetTerm}
                 value={newTarget}
                 onChange={(e) => setNewTarget(e.target.value)}
                 className="h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-3 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none placeholder:text-[var(--ink-muted)]"
@@ -339,6 +341,7 @@ export function LanguageAssetsView() {
                 <input
                   type="text"
                   placeholder={t.common.search}
+                  aria-label={t.common.search}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full h-7 pl-8 pr-3 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none placeholder:text-[var(--ink-muted)]"
@@ -434,6 +437,7 @@ export function LanguageAssetsView() {
               max="100"
               step="5"
               value={tmFuzzyThreshold}
+              aria-label={t.assets.fuzzyThreshold}
               onChange={(e) => setTmFuzzyThreshold(parseInt(e.target.value, 10))}
               className="w-full h-1.5 bg-[var(--paper-border)] rounded-lg appearance-none cursor-pointer accent-[var(--ink-primary)]"
             />
@@ -465,6 +469,7 @@ export function LanguageAssetsView() {
               <input
                 type="text"
                 value={importSrcLang}
+                aria-label={t.wizard.sourceLang}
                 onChange={(e) => setImportSrcLang(e.target.value)}
                 className="h-7 w-16 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2 text-xs font-mono text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none"
               />
@@ -472,6 +477,7 @@ export function LanguageAssetsView() {
               <input
                 type="text"
                 value={importTgtLang}
+                aria-label={t.wizard.targetLang}
                 onChange={(e) => setImportTgtLang(e.target.value)}
                 className="h-7 w-16 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2 text-xs font-mono text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none"
               />
@@ -514,6 +520,7 @@ export function LanguageAssetsView() {
                   <input
                     type="text"
                     placeholder={t.common.search}
+                    aria-label={t.common.search}
                     value={tmSearchQuery}
                     onChange={(e) => setTmSearchQuery(e.target.value)}
                     className="w-full h-7 pl-7 pr-2.5 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none placeholder:text-[var(--ink-muted)]"

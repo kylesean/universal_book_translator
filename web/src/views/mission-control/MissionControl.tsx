@@ -1276,6 +1276,7 @@ export function MissionControl() {
                 value={logSearch}
                 onChange={(e) => setLogSearch(e.target.value)}
                 placeholder={t.mission.logSearch}
+                aria-label={t.mission.logSearch}
                 className="h-7 sm:h-6 w-32 sm:w-40 px-2 rounded-[4px] bg-[var(--paper-surface)] border border-[var(--paper-border)] text-xs font-mono text-[var(--ink-primary)] placeholder:text-[var(--ink-muted)] focus:outline-none focus:border-[var(--paper-border-hover)]"
               />
               <div className="flex bg-[var(--paper-surface)] border border-[var(--paper-border)] rounded-[4px] p-0.5">
