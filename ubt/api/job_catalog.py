@@ -52,6 +52,7 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
         output_file = ledger.get_job_metadata_value(job_id, "output_file")
         identity = ledger.get_job_metadata_value(job_id, "run_identity")
         selected_pages = ledger.get_job_metadata_value(job_id, "selected_pages")
+        agent_session = ledger.get_job_metadata_value(job_id, "agent_session")
         stored_status = str(snapshot["status"])
         last_error = (
             ledger.get_job_metadata_value(job_id, "last_error")
@@ -85,6 +86,11 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
             has_live_writer=_has_live_writer(db_path, job_id),
             total=total,
             completed=completed,
+            agent_state=(
+                str(agent_session.get("state"))
+                if isinstance(agent_session, dict) and agent_session.get("state")
+                else None
+            ),
         ),
         "total_blocks": total,
         "drafted_blocks": drafted,
@@ -110,7 +116,14 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
 _TERMINAL_LEDGER_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
-def _reportable_status(stored: str, *, has_live_writer: bool, total: int, completed: int) -> str:
+def _reportable_status(
+    stored: str,
+    *,
+    has_live_writer: bool,
+    total: int,
+    completed: int,
+    agent_state: str | None = None,
+) -> str:
     """The status a listing may show, normalizing a ledger row left mid-run.
 
     ``job_meta.status`` has no ``running`` value: the row is written
@@ -124,9 +137,11 @@ def _reportable_status(stored: str, *, has_live_writer: bool, total: int, comple
     completed — that is exactly the condition ``finalize_job("completed")`` is
     guarded on, and the export stage finalizes *before* it records the rendered
     digest, so a process lost in that window leaves a fully translated book
-    behind a row that still says ``initialized``. Any other row is ``running``
-    while a live writer holds the lease and ``failed`` once nothing does — the
-    same test ``/status`` applies
+    behind a row that still says ``initialized``. Agent states are reported only
+    after that completion check, so a finished book cannot be mislabeled merely
+    because its session row was not updated. Any other row is ``running`` while
+    a live writer holds the lease and ``failed`` once nothing does — the same
+    test ``/status`` applies
     (:meth:`ubt.core.engine.writer_lock.LedgerWriterLock.lease_holder`).
 
     The lease, not the file's mtime, is what makes this safe. A run spends
@@ -141,6 +156,10 @@ def _reportable_status(stored: str, *, has_live_writer: bool, total: int, comple
         return stored
     if total > 0 and completed >= total:
         return "completed"
+    # An Agent job is intentionally lock-free between tool calls. No writer
+    # lease is therefore the normal steady state, not evidence of a crash.
+    if agent_state in ("awaiting_agent", "needs_attention"):
+        return agent_state
     return "running" if has_live_writer else "failed"
 
 

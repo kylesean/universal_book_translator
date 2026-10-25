@@ -1326,6 +1326,7 @@ def register_job_routes(
                         progress = ProgressSnapshot.from_ledger(
                             snap, lambda key: ledger.get_job_metadata_value(valid_id, key)
                         )
+                        agent_session = ledger.get_job_metadata_value(valid_id, "agent_session")
                         status_value = str(snap["status"])
                         error_note: str | None = None
                         stored_error = ledger.get_job_metadata_value(valid_id, "last_error")
@@ -1372,8 +1373,15 @@ def register_job_routes(
                                     "blocked_human",
                                 )
                             )
+                            agent_state = (
+                                str(agent_session.get("state"))
+                                if isinstance(agent_session, dict)
+                                else ""
+                            )
                             if _total > 0 and _done >= _total:
                                 status_value = JobStatus.COMPLETED
+                            elif agent_state in ("awaiting_agent", "needs_attention"):
+                                status_value = agent_state
                             else:
                                 holder = LedgerWriterLock.lease_holder(db_path, valid_id)
                                 if holder is None:
@@ -1391,6 +1399,24 @@ def register_job_routes(
                             status=status_value,
                             created_at=created_dt,
                             error=error_note,
+                            agent_state=(
+                                str(agent_session.get("state"))
+                                if isinstance(agent_session, dict)
+                                else None
+                            ),
+                            next_action=(
+                                "ubt_agent_finish"
+                                if isinstance(agent_session, dict)
+                                and agent_session.get("state") == "awaiting_agent"
+                                and int(progress.drafted_blocks or 0) == 0
+                                and int(progress.total_blocks or 0) > 0
+                                else (
+                                    "ubt_agent_claim"
+                                    if isinstance(agent_session, dict)
+                                    and agent_session.get("state") == "awaiting_agent"
+                                    else None
+                                )
+                            ),
                             # The ledger is the authority on what this run actually
                             # was. ``run_identity.mock_run`` is written by the
                             # ingest stage on every run, so a rehearsal reads as a

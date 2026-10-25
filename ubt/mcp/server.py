@@ -11,6 +11,10 @@ calling agent is the orchestrator):
   fallback, idempotent: terminal jobs return as-is).
 - ``ubt_inspect_book`` — manifest JSON (title/doc_id/chapters), no Rich text.
 - ``ubt_assess_book`` — profile a cold document into a quote (route, expected cost, risks).
+- ``ubt_agent_prepare`` — parse a document for host-Agent translation (no model calls).
+- ``ubt_agent_claim`` — lease a package of blocks and prompts to the host Agent.
+- ``ubt_agent_submit`` — accept the host Agent's translations for that package.
+- ``ubt_agent_finish`` — run deterministic quality gates and render the deliverable.
 - ``ubt_list_issues`` — list translation issues/defects for HITL review.
 - ``ubt_edit_segment`` — apply human/agent post-edit revision to a segment.
 - ``ubt_doctor`` — preflight checks (API key, writable ledger dir, deps).
@@ -33,11 +37,14 @@ import logging
 import shutil
 import time
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
+
+from pydantic import Field
 
 try:
     from mcp.server.mcpserver import MCPServer
     from mcp.server.mcpserver.exceptions import ToolError
+    from mcp.types import ToolAnnotations
 except ModuleNotFoundError as exc:  # pragma: no cover - install-shape guard
     # Only a missing ``mcp`` itself means the extra is absent. A transitive
     # import that fails *inside* an installed mcp (e.g. jsonschema) must keep
@@ -66,6 +73,18 @@ from ubt.api.manager import JobManager
 from ubt.api.models import JobSubmitRequest
 from ubt.core.config import UBTConfig, credential_required, has_real_credential
 from ubt.core.config import parse_page_ranges as parse_page_ranges
+from ubt.core.engine.agent_translation import (
+    AgentBlockSubmission,
+    AgentClaimRequest,
+    AgentClaimResult,
+    AgentFinishRequest,
+    AgentFinishResult,
+    AgentPrepareRequest,
+    AgentPrepareResult,
+    AgentSubmitRequest,
+    AgentSubmitResult,
+    AgentTranslationService,
+)
 
 # Re-exported so the ceiling the server enforces is the number the registry
 # carries (``import as`` is the explicit-reexport spelling mypy wants).
@@ -99,7 +118,21 @@ from ubt.core.language_profile import is_supported_lang, supported_lang_codes
 from ubt.core.policy.layout_policy import MCP_MAX_RUNNING_JOBS as MCP_MAX_RUNNING_JOBS
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket, build_rate_limiter
 
-mcp = MCPServer(name="ubt")
+mcp = MCPServer(
+    name="ubt",
+    title="Universal Book Translator",
+    description=(
+        "Translate structured books and documents while preserving layout, "
+        "terminology and protected spans."
+    ),
+    instructions=(
+        "For Agent-hosted translation, call ubt_agent_prepare, then repeatedly "
+        "ubt_agent_claim / ubt_agent_submit with your own model, and finally "
+        "ubt_agent_finish. Agent mode makes no model calls inside UBT. Use "
+        "ubt_translate_book only when UBT should call a configured provider."
+    ),
+    version="0.4",
+)
 
 
 def _mcp_error_boundary(func: Any) -> Any:
@@ -174,6 +207,12 @@ _MANAGER = JobManager(
 #: which is what keeps a shallow burst from exhausting threads.
 _DEEP_ASSESS_SLOTS = 2
 _deep_assess_semaphore = asyncio.Semaphore(_DEEP_ASSESS_SLOTS)
+
+#: Heavy Agent prepare/finish operations parse or render a whole document. Cap
+#: concurrent calls independently of the provider token bucket, which exists to
+#: protect outbound LLM quota and must not be used as an inbound MCP limiter.
+_AGENT_HEAVY_SLOTS = 2
+_agent_heavy_semaphore = asyncio.Semaphore(_AGENT_HEAVY_SLOTS)
 
 
 def _check_job_id(job_id: str) -> str:
@@ -314,7 +353,194 @@ def _safe_output_path(raw: str) -> Path:
     return _sandbox_path(raw, must_exist=False)
 
 
-@mcp.tool()
+def _default_output_in_sandbox(
+    resolved_input: Path,
+    *,
+    monolingual: bool = False,
+    pages: set[int] | None = None,
+) -> str:
+    """The default deliverable path, relocated inside the MCP sandbox.
+
+    The engine's own default lands in ~/Documents/UBT, which the allowlist
+    would refuse if a caller named it explicitly — derive the same name inside
+    the allowed bases instead: the input's directory when allowed, else the
+    first base, else the ledger directory.
+    """
+    candidate = default_output_path(resolved_input, monolingual=monolingual, pages=pages)
+    try:
+        _sandbox_path(str(candidate), must_exist=False)
+        return str(candidate)
+    except UBTError:
+        config_env = UBTConfig.from_env()
+        bases = config_env.allowed_base_dirs()
+        if any(resolved_input.parent == b or b in resolved_input.parent.parents for b in bases):
+            relocated = resolved_input.parent / candidate.name
+        elif bases:
+            relocated = bases[0] / candidate.name
+        else:
+            relocated = Path(config_env.db_dir) / candidate.name
+        return str(_sandbox_path(str(relocated), must_exist=False))
+
+
+def _agent_db_dir(db_dir: str | None) -> Path:
+    return _safe_output_path(str(db_dir)) if db_dir else UBTConfig.from_env().db_dir
+
+
+@mcp.tool(
+    title="Prepare Agent translation",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+)
+@_mcp_error_boundary
+async def ubt_agent_prepare(
+    input_path: Annotated[
+        str, Field(min_length=1, max_length=4096, description="Source document path.")
+    ],
+    target_lang: Annotated[str, Field(min_length=2, max_length=16)] = "zh",
+    source_lang: Annotated[str, Field(min_length=2, max_length=16)] = "en",
+    profile: Annotated[str, Field(min_length=1, max_length=64)] = "auto",
+    output_path: Annotated[str | None, Field(max_length=4096)] = None,
+    job_id: Annotated[str | None, Field(min_length=1, max_length=80)] = None,
+    glossary: Annotated[str | None, Field(max_length=4096)] = None,
+    pages: Annotated[str | None, Field(max_length=256)] = None,
+    domain: Annotated[str | None, Field(max_length=200)] = None,
+    dual_mode: Annotated[
+        Literal["auto", "dual", "mono"], Field(pattern="^(auto|dual|mono)$")
+    ] = "auto",
+    layout_columns: Annotated[Literal[1, 2] | None, Field(ge=1, le=2)] = None,
+    package_size: Annotated[int, Field(ge=1, le=64)] = 8,
+    lease_seconds: Annotated[float, Field(ge=30, le=86400)] = 900.0,
+    fresh: bool = False,
+    db_dir: Annotated[str | None, Field(max_length=4096)] = None,
+) -> AgentPrepareResult:
+    """Parse a document into resumable Agent work. Makes zero model calls."""
+    resolved = _resolve_input(input_path)
+    if output_path is not None:
+        resolved_output: str | None = str(_safe_output_path(output_path))
+    else:
+        resolved_output = _default_output_in_sandbox(
+            resolved,
+            monolingual=(dual_mode == "mono"),
+            pages=parse_page_ranges(pages),
+        )
+    resolved_glossary = str(_resolve_input(glossary)) if glossary else None
+    base = _agent_db_dir(db_dir)
+    service = AgentTranslationService(
+        config=UBTConfig.from_env().model_copy(update={"db_dir": base})
+    )
+    request = AgentPrepareRequest(
+        input_path=str(resolved),
+        output_path=resolved_output,
+        target_lang=_check_lang(target_lang, "target_lang"),
+        source_lang=_check_lang(source_lang, "source_lang"),
+        profile=_check_profile(profile),
+        job_id=_check_job_id(job_id) if job_id else None,
+        glossary=resolved_glossary,
+        pages=_check_pages(pages),
+        domain=domain,
+        dual_mode=dual_mode,
+        layout_columns=layout_columns,
+        package_size=package_size,
+        lease_seconds=lease_seconds,
+        fresh=fresh,
+    )
+    async with _agent_heavy_semaphore:
+        return await service.prepare(request)
+
+
+@mcp.tool(
+    title="Claim Agent translation work",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+)
+@_mcp_error_boundary
+async def ubt_agent_claim(
+    job_id: Annotated[str, Field(min_length=1, max_length=80)],
+    max_blocks: Annotated[int | None, Field(ge=1, le=64)] = None,
+    db_dir: Annotated[str | None, Field(max_length=4096)] = None,
+) -> AgentClaimResult:
+    """Lease the next package of blocks, prompts and protected placeholders."""
+    service = AgentTranslationService(
+        config=UBTConfig.from_env().model_copy(update={"db_dir": _agent_db_dir(db_dir)})
+    )
+    return await service.claim(
+        AgentClaimRequest(
+            job_id=_check_job_id(job_id),
+            max_blocks=max_blocks,
+        )
+    )
+
+
+@mcp.tool(
+    title="Submit Agent translations",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+)
+@_mcp_error_boundary
+async def ubt_agent_submit(
+    job_id: Annotated[str, Field(min_length=1, max_length=80)],
+    package_id: Annotated[str, Field(min_length=1, max_length=128)],
+    lease_token: Annotated[str, Field(min_length=16, max_length=512)],
+    blocks: Annotated[list[AgentBlockSubmission], Field(min_length=1, max_length=64)],
+    db_dir: Annotated[str | None, Field(max_length=4096)] = None,
+) -> AgentSubmitResult:
+    """Submit translations for exactly the blocks leased in one package."""
+    service = AgentTranslationService(
+        config=UBTConfig.from_env().model_copy(update={"db_dir": _agent_db_dir(db_dir)})
+    )
+    return await service.submit(
+        AgentSubmitRequest(
+            job_id=_check_job_id(job_id),
+            package_id=package_id,
+            lease_token=lease_token,
+            blocks=blocks,
+        )
+    )
+
+
+@mcp.tool(
+    title="Finish Agent translation",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+)
+@_mcp_error_boundary
+async def ubt_agent_finish(
+    job_id: Annotated[str, Field(min_length=1, max_length=80)],
+    db_dir: Annotated[str | None, Field(max_length=4096)] = None,
+) -> AgentFinishResult:
+    """Run deterministic quality gates and render a fully submitted Agent job."""
+    service = AgentTranslationService(
+        config=UBTConfig.from_env().model_copy(update={"db_dir": _agent_db_dir(db_dir)})
+    )
+    async with _agent_heavy_semaphore:
+        return await service.finish(AgentFinishRequest(job_id=_check_job_id(job_id)))
+
+
+@mcp.tool(
+    title="Translate with a configured provider",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=True,
+    ),
+)
 @_mcp_error_boundary
 async def ubt_translate_book(
     input_path: str,
@@ -371,6 +597,75 @@ async def ubt_translate_book(
     profile = _check_profile(profile)
     pages = _check_pages(pages)
     resolved = _resolve_input(input_path)
+    jid = _check_job_id(job_id) if job_id else ""
+    # The knobs a retry must repeat verbatim for idempotent reuse. output_path
+    # is resolved after this check (a completed run's file exists, and the
+    # retry must still be recognized); dry_run is compared separately because
+    # intake auto-rehearses when the operator has no provider credential.
+    requested: dict[str, Any] = {
+        "input_path": str(resolved),
+        "target_lang": target_lang,
+        "source_lang": source_lang,
+        "profile": profile,
+        "draft_model": draft_model,
+        "repair_model": repair_model,
+        "pdf_engine": pdf_engine,
+        "dual_mode": dual_mode,
+        "preset": preset,
+        "glossary": str(_resolve_input(glossary)) if glossary else None,
+        "pages": pages,
+        "layout_columns": layout_columns,
+        "start_chapter": start_chapter,
+        "max_chapters": max_chapters,
+        "fresh": fresh,
+        "budget_usd": budget_usd,
+        "max_concurrency": max_concurrency,
+        "batch_limit": batch_limit,
+        "macro_chunk_size": macro_chunk_size,
+        "short_max_pages": short_max_pages,
+        "enable_rolling_summary": enable_rolling_summary,
+        "chapter_streaming_enabled": chapter_streaming_enabled,
+        "offline_batch_enabled": offline_batch_enabled,
+        "visual_judge_enabled": visual_judge_enabled,
+        "visual_judge_model": visual_judge_model,
+        "translate_chrome": translate_chrome,
+        "emit_both": emit_both,
+        "ocr_mode": ocr_mode,
+        "domain": domain,
+    }
+    # Idempotency comes before any output-file guard. A retry of an already
+    # accepted job must return that job even though its deliverable now exists;
+    # otherwise the retry reports "output_path already exists" and hides the
+    # successful run it was trying to recover.
+    existing = _MANAGER.get_job(jid) if jid else None
+    if existing is not None and existing.status not in (
+        JobStatus.FAILED,
+        JobStatus.CANCELLED,
+    ):
+        prior = existing.request.model_dump(mode="json")
+        if prior.get("input_path") != str(resolved):
+            raise ToolError(
+                f"job_id {jid} is already bound to a different input document; "
+                "use a different job_id"
+            )
+        changed = sorted(key for key, value in requested.items() if prior.get(key) != value)
+        if changed:
+            raise ToolError(
+                f"job_id {jid} already exists with different arguments: "
+                + ", ".join(changed)
+                + "; use a different job_id"
+            )
+        if dry_run and not existing.request.dry_run:
+            raise ToolError(
+                f"job_id {jid} already runs as a real translation; "
+                "rehearsal needs a different job_id"
+            )
+        return {
+            "job_id": existing.job_id,
+            "status": existing.status,
+            "rehearsal": bool(existing.request.dry_run),
+            "reused": True,
+        }
     if output_path is not None:
         resolved_out = _safe_output_path(output_path)
         target_candidate = resolve_target_output(resolved_out, resolved)
@@ -400,41 +695,10 @@ async def ubt_translate_book(
     else:
         # The implicit deliverable defaults to ~/Documents/UBT, which is outside
         # the MCP sandbox; REST relocates it inside the allowlist, so MCP must
-        # too instead of writing outside its own contract. Relocate into the
-        # input book's directory (REST parity) or allowed bases with the same file name.
-        candidate = default_output_path(resolved)
-        try:
-            _sandbox_path(str(candidate), must_exist=False)
-            output_path = str(candidate)
-        except UBTError:
-            config_env = UBTConfig.from_env()
-            bases = config_env.allowed_base_dirs()
-            if any(resolved.parent == b or b in resolved.parent.parents for b in bases):
-                relocated = resolved.parent / candidate.name
-            elif bases:
-                relocated = bases[0] / candidate.name
-            else:
-                relocated = Path(config_env.db_dir) / candidate.name
-            output_path = str(_sandbox_path(str(relocated), must_exist=False))
+        # too instead of writing outside its own contract.
+        output_path = _default_output_in_sandbox(resolved)
         if Path(output_path).exists() and not fresh:
             raise ToolError(f"output_path already exists; refusing to overwrite it: {output_path}")
-    jid = _check_job_id(job_id) if job_id else ""
-    # A stable job_id that is still live is a resubmit, not a second run: the
-    # REST surface returns the existing job (idempotent), and an agent that
-    # retries after a timeout must see the same answer rather than an error it
-    # cannot act on. A failed/cancelled id falls through so the resubmit really
-    # re-runs it.
-    existing = _MANAGER.get_job(jid) if jid else None
-    if existing is not None and existing.status not in (
-        JobStatus.FAILED,
-        JobStatus.CANCELLED,
-    ):
-        return {
-            "job_id": existing.job_id,
-            "status": existing.status,
-            "rehearsal": bool(existing.request.dry_run),
-        }
-
     base_config = UBTConfig.from_env()
     if db_dir:
         # A server-side path: it rides on the base config rather than the request
@@ -451,36 +715,8 @@ async def ubt_translate_book(
         credential_required(base_config) and not has_real_credential(base_config)
     )
     payload: dict[str, Any] = {
-        "input_path": str(resolved),
+        **requested,
         "output_path": output_path,
-        "target_lang": target_lang,
-        "source_lang": source_lang,
-        "profile": profile,
-        "draft_model": draft_model,
-        "repair_model": repair_model,
-        "pdf_engine": pdf_engine,
-        "dual_mode": dual_mode,
-        "preset": preset,
-        "glossary": str(_resolve_input(glossary)) if glossary else None,
-        "pages": pages,
-        "layout_columns": layout_columns,
-        "start_chapter": start_chapter,
-        "max_chapters": max_chapters,
-        "fresh": fresh,
-        "budget_usd": budget_usd,
-        "max_concurrency": max_concurrency,
-        "batch_limit": batch_limit,
-        "macro_chunk_size": macro_chunk_size,
-        "short_max_pages": short_max_pages,
-        "enable_rolling_summary": enable_rolling_summary,
-        "chapter_streaming_enabled": chapter_streaming_enabled,
-        "offline_batch_enabled": offline_batch_enabled,
-        "visual_judge_enabled": visual_judge_enabled,
-        "visual_judge_model": visual_judge_model,
-        "translate_chrome": translate_chrome,
-        "emit_both": emit_both,
-        "ocr_mode": ocr_mode,
-        "domain": domain,
         "dry_run": rehearsal,
     }
     # Reject an out-of-vocabulary enum here, synchronously: otherwise the tool
@@ -515,7 +751,15 @@ def _ledger_is_stale(db_path: Path) -> bool:
         return True
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Poll job status",
+    annotations=ToolAnnotations(
+        read_only_hint=True,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+)
 @_mcp_error_boundary
 async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, Any]:
     """Poll translation progress. Falls back to the SQLite ledger when the job is unknown in memory."""
@@ -567,6 +811,7 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
             stats,
             metadata=lambda k: ledger.get_job_metadata_value(jid, k),
         )
+        agent_session = await asyncio.to_thread(ledger.get_job_metadata_value, jid, "agent_session")
         # Honor the persisted terminal status first — a job that
         # FAILED before the restart must not read as "running" forever to a
         # polling agent.
@@ -579,14 +824,24 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
             + progress.needs_human_blocks
             + progress.blocked_human_blocks
         )
+        agent_state = (
+            str(agent_session.get("state"))
+            if isinstance(agent_session, dict) and agent_session.get("state")
+            else None
+        )
+        status: str
         if persisted == "failed":
-            status = JobStatus.FAILED
+            status = JobStatus.FAILED.value
         elif persisted == "cancelled":
             # The pipeline records a cancel as terminal; reading it as "running"
             # would leave a polling agent waiting on a job that already stopped.
-            status = JobStatus.CANCELLED
+            status = JobStatus.CANCELLED.value
         elif persisted == "completed" or (total_b > 0 and done_b >= total_b):
-            status = JobStatus.COMPLETED
+            status = JobStatus.COMPLETED.value
+        elif agent_state in ("awaiting_agent", "needs_attention"):
+            # Agent jobs are intentionally lock-free between MCP calls. Neither
+            # an absent writer lease nor a quiet ledger means the job crashed.
+            status = agent_state
         else:
             # Check the writer lock lease first. In SQLite WAL mode with an open
             # connection, the main .sqlite file's mtime is never touched, so an
@@ -594,12 +849,12 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
             # A live lease holder confirms the process is actively translating.
             holder = await asyncio.to_thread(LedgerWriterLock.lease_holder, db_path, jid)
             if holder is not None:
-                status = JobStatus.RUNNING
+                status = JobStatus.RUNNING.value
             elif _ledger_is_stale(db_path):
-                status = JobStatus.FAILED
+                status = JobStatus.FAILED.value
                 interrupted = True
             else:
-                status = JobStatus.RUNNING
+                status = JobStatus.RUNNING.value
         disk: dict[str, Any] = {
             "job_id": jid,
             "status": status,
@@ -619,8 +874,16 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
             "output_file": sanitize_display_path(progress.output_file),
             "report_file": sanitize_display_path(progress.report_file),
             "visual_report_file": sanitize_display_path(progress.visual_report_file),
+            "agent_state": agent_state,
+            "next_action": (
+                "ubt_agent_finish"
+                if agent_state == "awaiting_agent"
+                and progress.drafted_blocks == 0
+                and progress.total_blocks > 0
+                else ("ubt_agent_claim" if agent_state == "awaiting_agent" else None)
+            ),
         }
-        if status == JobStatus.FAILED:
+        if status == JobStatus.FAILED.value:
             disk["error"] = (
                 "Job was interrupted before it reached a terminal state (no ledger "
                 "write within the staleness window); re-run it to resume."
@@ -632,7 +895,15 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
         ledger.close()
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Cancel job",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+)
 @_mcp_error_boundary
 async def ubt_cancel_job(job_id: str, db_dir: str | None = None) -> dict[str, Any]:
     """Cancel an in-flight translation job. Idempotent: terminal jobs return their status as-is."""
@@ -691,7 +962,15 @@ async def ubt_cancel_job(job_id: str, db_dir: str | None = None) -> dict[str, An
     return await asyncio.to_thread(_cancel_locked)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Inspect document",
+    annotations=ToolAnnotations(
+        read_only_hint=True,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+)
 @_mcp_error_boundary
 async def ubt_inspect_book(input_path: str) -> dict[str, Any]:
     """Return a document manifest (title/doc_id/chapters) as JSON-serializable dict."""
@@ -710,7 +989,15 @@ async def ubt_inspect_book(input_path: str) -> dict[str, Any]:
     }
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Assess document",
+    annotations=ToolAnnotations(
+        read_only_hint=True,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+)
 @_mcp_error_boundary
 async def ubt_assess_book(
     input_path: str,
@@ -743,7 +1030,15 @@ async def ubt_assess_book(
     return await _assess()
 
 
-@mcp.tool()
+@mcp.tool(
+    title="List translation issues",
+    annotations=ToolAnnotations(
+        read_only_hint=True,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+)
 @_mcp_error_boundary
 async def ubt_list_issues(
     job_id: str,
@@ -798,7 +1093,15 @@ async def ubt_list_issues(
     return await asyncio.to_thread(_query)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Edit segment",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+)
 @_mcp_error_boundary
 async def ubt_edit_segment(
     job_id: str,
@@ -867,7 +1170,15 @@ async def ubt_edit_segment(
     return await asyncio.to_thread(_edit)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Re-render deliverable",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+)
 @_mcp_error_boundary
 async def ubt_re_export(job_id: str, db_dir: str | None = None) -> dict[str, Any]:
     """Re-render a finished job's deliverable from its current ledger text.
@@ -904,7 +1215,15 @@ async def ubt_re_export(job_id: str, db_dir: str | None = None) -> dict[str, Any
     }
 
 
-@mcp.tool()
+@mcp.tool(
+    title="List jobs",
+    annotations=ToolAnnotations(
+        read_only_hint=True,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+)
 @_mcp_error_boundary
 async def ubt_list_jobs(db_dir: str | None = None, limit: int = 50) -> dict[str, Any]:
     """List jobs found on disk (newest first), with status and artifact path.
@@ -925,7 +1244,15 @@ async def ubt_list_jobs(db_dir: str | None = None, limit: int = 50) -> dict[str,
     return {"jobs": capped, "total": len(summaries)}
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Run diagnostics",
+    annotations=ToolAnnotations(
+        read_only_hint=True,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+)
 @_mcp_error_boundary
 async def ubt_doctor() -> dict[str, Any]:
     """Preflight checks: API key, writable ledger dir, key optional deps."""

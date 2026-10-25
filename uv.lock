@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
@@ -3708,8 +3708,8 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.111.0" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.27.0" },
     { name = "jieba", specifier = ">=0.42.1" },
-    { name = "mcp", marker = "extra == 'dev'", specifier = ">=2.0.0" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.0.0" },
+    { name = "mcp", marker = "extra == 'dev'", specifier = ">=2.0.0,<3" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.0.0,<3" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },
     { name = "numpy", marker = "extra == 'academic'", specifier = ">=1.26.0" },
     { name = "numpy", marker = "extra == 'ocr'", specifier = ">=1.26.0" },

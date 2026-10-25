@@ -121,7 +121,7 @@ dev = [
     # `uv sync --extra dev` left mcp absent and the type gate broke.
     # Kept in lockstep with the `mcp` extra below on purpose —
     # optional-dependencies cannot reference another extra.
-    "mcp>=2.0.0",
+    "mcp>=2.0.0,<3",
     # Fixture PDFs are written with pypdf (tests/pdf_builders.py) — a
     # deliberately independent, permissive writer so the extraction tests
     # are not also testing the extraction engine under test. Runtime pypdf
@@ -135,7 +135,7 @@ dev = [
 ]
 # Agent entry point: MCP stdio server (Cursor/Codex call ubt_* tools).
 mcp = [
-    "mcp>=2.0.0",
+    "mcp>=2.0.0,<3",
 ]
 pdf = [
     "docling>=2.136.0",

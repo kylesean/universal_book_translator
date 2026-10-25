@@ -1453,6 +1453,9 @@ async def run_export_stage(
         {
             "bilingual_mode": render.bilingual_mode,
             "effective_dual_mode": render.effective_dual_mode,
+            "dual_mode_downgraded": render.dual_mode_downgraded,
+            "translate_chrome": render.translate_chrome,
+            "bilingual_advisory": render.bilingual_advisory,
             "emit_secondary_mode": render.emit_secondary_mode,
         },
     )

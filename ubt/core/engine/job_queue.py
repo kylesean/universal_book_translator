@@ -49,6 +49,10 @@ class JobStatus(StrEnum):
     SUBMITTED = "submitted"
     QUEUED = "queued"
     RUNNING = "running"
+    #: A durable Agent job is waiting between MCP calls. It holds no writer
+    #: lease by design, so the normal "no lease means failed" projection must
+    #: not apply to it.
+    AWAITING_AGENT = "awaiting_agent"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"

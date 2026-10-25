@@ -102,6 +102,29 @@ def _fast_pass_screen(
     return suspicious_blocks, passed_updates
 
 
+def screen_drafted_blocks(
+    blocks: list[IRBlock],
+    *,
+    fast_pass: FastPassFilter,
+    glossary_validator: GlossaryConsistencyValidator | None,
+    glossary_terms: list[str] | None = None,
+    rehearsal: bool = False,
+) -> tuple[list[IRBlock], list[dict[str, Any]]]:
+    """Public name for the deterministic FastPass screen used by Agent mode.
+
+    The provider pipeline's gate and the Agent finish path must apply the same
+    invariant checks. Keeping the implementation in one place prevents an Agent
+    submission from bypassing a rule the normal pipeline would enforce.
+    """
+    return _fast_pass_screen(
+        blocks,
+        fast_pass=fast_pass,
+        glossary_validator=glossary_validator,
+        glossary_terms=glossary_terms,
+        rehearsal=rehearsal,
+    )
+
+
 async def _audit_pass_sample(
     qe_runner: BaseQERunner,
     blocks: list[IRBlock],

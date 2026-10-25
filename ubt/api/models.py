@@ -430,6 +430,11 @@ class JobSummary(BaseModel):
     #: queue row that does not say so reads exactly like a real delivery — the
     #: console listed rehearsals and real runs side by side with no distinction.
     rehearsal: bool = False
+    #: Present for Agent-driven jobs: the next durable Agent state. ``None``
+    #: for provider jobs.
+    agent_state: str | None = None
+    #: The MCP tool the host Agent should call next, when known.
+    next_action: str | None = None
     #: The page scope of a ``--pages`` run (e.g. ``"1-6"``), else ``None``. A
     #: sample run and a full delivery were otherwise indistinguishable in the
     #: queue.

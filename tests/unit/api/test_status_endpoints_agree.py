@@ -56,6 +56,11 @@ def _seed(db_dir: Path, *, block: BlockStatus, age: float) -> Path:
                 doc_id=_JOB, chapter_id="c1", title="C", spine_index=0, blocks=[_block(block)]
             ),
         )
+        ledger.set_job_metadata_value(
+            _JOB,
+            "agent_session",
+            {"state": "awaiting_agent", "packages": {}},
+        )
     stamp = time.time() - age
     os.utime(db, (stamp, stamp))
     return db
@@ -83,6 +88,8 @@ def _both(tmp_path: Path, db_dir: Path, db: Path) -> tuple[str, str]:
 def test_a_crashed_job_reads_failed_in_both(tmp_path: Path) -> None:
     db_dir = tmp_path / "db"
     db = _seed(db_dir, block=BlockStatus.DRAFTED, age=_QUIET_FOR)
+    with SQLiteJobLedger(db) as ledger:
+        ledger.set_job_metadata_value(_JOB, "agent_session", {"state": "running"})
     status, catalog = _both(tmp_path, db_dir, db)
     assert status == catalog == "failed"
 
@@ -91,6 +98,8 @@ def test_a_live_writer_reads_running_in_both(tmp_path: Path) -> None:
     """The case an mtime rule got wrong: quiet ledger, working process."""
     db_dir = tmp_path / "db"
     db = _seed(db_dir, block=BlockStatus.DRAFTED, age=_QUIET_FOR)
+    with SQLiteJobLedger(db) as ledger:
+        ledger.set_job_metadata_value(_JOB, "agent_session", {"state": "running"})
     lock = LedgerWriterLock(db, _JOB)
     lock.acquire()
     try:
@@ -105,3 +114,11 @@ def test_a_fully_processed_book_reads_completed_in_both(tmp_path: Path) -> None:
     db = _seed(db_dir, block=BlockStatus.MTQE_PASSED, age=_QUIET_FOR)
     status, catalog = _both(tmp_path, db_dir, db)
     assert status == catalog == "completed"
+
+
+def test_an_agent_job_waiting_for_input_reads_awaiting_agent_in_both(tmp_path: Path) -> None:
+    """An Agent job holds no writer lease between MCP calls by design."""
+    db_dir = tmp_path / "db"
+    db = _seed(db_dir, block=BlockStatus.PENDING, age=_QUIET_FOR)
+    status, catalog = _both(tmp_path, db_dir, db)
+    assert status == catalog == "awaiting_agent"

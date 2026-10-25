@@ -638,6 +638,7 @@ class LedgerBase:
             conn.execute(f"DROP TABLE IF EXISTS {table};")
         conn.executescript(_SCHEMA_SQL)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION};")
+        self._job_scope = None
 
     def _verify_block_columns(self, conn: sqlite3.Connection, version: int) -> None:
         """Fail loudly if the ``blocks`` table is missing a column we read.

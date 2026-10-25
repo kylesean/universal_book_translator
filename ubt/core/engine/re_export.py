@@ -42,6 +42,7 @@ from ubt.core.engine.writer_lock import LedgerWriterLock, keep_lease_fresh
 from ubt.core.exceptions import LedgerWriterLeaseLostError, UnsupportedDocumentFormatError
 from ubt.core.ir.models import BookManifest, ChapterMeta
 from ubt.core.ir.render_plan import RenderPlan
+from ubt.core.ir.run_metadata import RunMetadata
 from ubt.core.ports import resolve_adapter
 from ubt.core.qe.fast_pass import FastPassFilter
 
@@ -70,6 +71,7 @@ def _manifest_from_ledger(ledger: SQLiteJobLedger, job_id: str) -> BookManifest:
     target_lang = ledger.get_job_target_lang(job_id) or "zh"
     title = str(ledger.get_job_metadata_value(job_id, "title") or "")
     source_lang = str(ledger.get_job_metadata_value(job_id, "source_lang") or "en")
+    metadata = ledger.get_job_metadata(job_id)
     raw_chapters = ledger.get_job_metadata_value(job_id, "chapters") or []
     chapters: list[ChapterMeta] = []
     if isinstance(raw_chapters, list):
@@ -79,6 +81,10 @@ def _manifest_from_ledger(ledger: SQLiteJobLedger, job_id: str) -> BookManifest:
                     chapters.append(ChapterMeta.model_validate(entry))
                 except Exception:  # a malformed chapter row must not sink the export
                     logger.debug("Skipping malformed chapter metadata for %s: %r", job_id, entry)
+    run = RunMetadata()
+    for field in RunMetadata.model_fields:
+        if field in metadata:
+            setattr(run, field, metadata[field])
     return BookManifest(
         doc_id=job_id,
         title=title,
@@ -86,6 +92,22 @@ def _manifest_from_ledger(ledger: SQLiteJobLedger, job_id: str) -> BookManifest:
         source_lang=source_lang,
         target_lang=target_lang,
         chapters=chapters,
+        metadata={
+            key: value
+            for key, value in metadata.items()
+            if key
+            in {
+                "author",
+                "chapter_translations",
+                "opf_path",
+                "pdf_parser_engine",
+                "boilerplate_footers",
+                "is_page_slice_epub",
+                "page_kinds",
+                "typst_version",
+            }
+        },
+        run=run,
     )
 
 
@@ -102,6 +124,9 @@ def _render_plan_from_ledger(ledger: SQLiteJobLedger, job_id: str) -> RenderPlan
     return RenderPlan(
         bilingual_mode=stored.get("bilingual_mode") or "monolingual",
         effective_dual_mode=stored.get("effective_dual_mode") or "mono",
+        dual_mode_downgraded=stored.get("dual_mode_downgraded"),
+        translate_chrome=stored.get("translate_chrome"),
+        bilingual_advisory=stored.get("bilingual_advisory"),
         emit_secondary_mode=stored.get("emit_secondary_mode"),
     )
 

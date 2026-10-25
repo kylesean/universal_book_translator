@@ -192,11 +192,19 @@ def _flag_literals() -> dict[str, set[str]]:
     # which it imports from the QE package, so a per-module table would see
     # only the ``": "`` separator.
     global_constants = _global_constants()
+    modules: list[tuple[str, ast.Module, set[str]]] = []
     for path in sorted(_ROOT.rglob("*.py")):
         rel = str(path.relative_to(_ROOT.parent))
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        modules.append((rel, tree, _shadowed_bindings(tree)))
+    for rel, tree, shadowed in modules:
+        # A name bound to a call *in this module* is this module's truth: the
+        # package table must not hand its scan another module's same-named
+        # literal (``detail`` is bound both to a template in draft.py and to
+        # ``format_defect_flag(...)`` in agent_translation.py).
+        constants = {n: v for n, v in global_constants.items() if n not in shadowed}
         for node in ast.walk(tree):
-            for value in _appended_literals(node, flag_ctors, global_constants):
+            for value in _appended_literals(node, flag_ctors, constants):
                 if value and value not in _NOT_FLAGS:
                     found.setdefault(rel, set()).add(value)
     return found
@@ -283,6 +291,24 @@ def _module_constants(tree: ast.Module) -> dict[str, str]:
                 if isinstance(target, ast.Name):
                     for literal in _literal_prefix(node.value, {}):
                         out[target.id] = literal
+    return out
+
+
+def _shadowed_bindings(tree: ast.Module) -> set[str]:
+    """Names this module binds to a call, not to a literal.
+
+    ``detail = format_defect_flag(...)`` declares its category and severity at
+    the call site, so the name does not stand for a free-text literal. Keeping
+    it out of the scan is what makes a structured writer invisible to the
+    legacy-writer ratchet — and keeps it from *inheriting* a same-named
+    literal that some other module binds.
+    """
+    out: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    out.add(target.id)
     return out
 
 

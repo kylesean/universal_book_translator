@@ -669,15 +669,16 @@ def summarize_render_skips(defect_flags: dict[str, int]) -> tuple[int, int, str]
 
 
 # `math_token_corrupt missing=[..] mismatched=[..] mutated=[..] [reordered=[..]]
-# [duplicated=[..]]` (draft stage). One rule for all four maskers -- math, cite,
-# code AND soup -- so the alternation must list every family the draft stage can
-# emit: dropping ``soup`` made a corrupt soup span invisible to the counter and
-# the KDP audit printed "Full retention" while the ledger flagged corruption.
-# ``reordered``/``duplicated`` are optional: a block whose masked spans came
-# back out of order or doubled is just as corrupt as one with a missing span, so
-# both must count.
+# [duplicated=[..]]` (draft stage), or its structured equivalent
+# `math_token_corrupt:critical:missing=[..] …` (Agent submit). One rule for all
+# four maskers -- math, cite, code AND soup -- so the alternation must list
+# every family the draft stage can emit: dropping ``soup`` made a corrupt soup
+# span invisible to the counter and the KDP audit printed "Full retention"
+# while the ledger flagged corruption. ``reordered``/``duplicated`` are
+# optional: a block whose masked spans came back out of order or doubled is
+# just as corrupt as one with a missing span, so both must count.
 _CORRUPT_FLAG_RE = re.compile(
-    r"(?:email|math|cite|code|soup)_token_corrupt missing=(\[.*?\]) mismatched=(\[.*?\]) mutated=(\[.*?\])"
+    r"(?:email|math|cite|code|soup)_token_corrupt(?::critical:)? missing=(\[.*?\]) mismatched=(\[.*?\]) mutated=(\[.*?\])"
     r"(?: reordered=(\[.*?\]))?(?: duplicated=(\[.*?\]))?"
 )
 

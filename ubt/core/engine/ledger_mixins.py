@@ -46,8 +46,23 @@ if TYPE_CHECKING:
     # ``SQLiteJobLedger`` (LedgerBase + these mixins), at type-check time the
     # mixin methods type against LedgerBase's API.
     from ubt.core.engine.ledger_base import LedgerBase as _LedgerHost
+
+    class _LedgerHostWithMetadata(_LedgerHost):
+        def get_job_metadata_value(self, job_id: str, key: str) -> Any | None: ...
 else:
     _LedgerHost = object
+    _LedgerHostWithMetadata = object
+
+#: Metadata key holding the Agent translation session (leases and package
+#: state). Kept in ``job_meta.metadata_json`` rather than a new table: the
+#: session is a small, job-scoped state machine and must commit atomically with
+#: the block rows it owns.
+AGENT_SESSION_KEY = "agent_session"
+
+#: Metadata key holding the deterministic request fingerprint used by Agent
+#: prepare. A repeated prepare with the same id and different inputs must not
+#: silently reuse the prior ledger.
+AGENT_REQUEST_FINGERPRINT_KEY = "agent_request_fingerprint"
 
 #: Terminal ``job_meta.status`` values. A ``completed`` finalize must not
 #: overwrite any of these (the string mirror of the queue's terminal set).
@@ -341,6 +356,27 @@ class LedgerJobsMixin(_LedgerHost):
             if not isinstance(meta, dict):
                 return None
             return meta.get(key)
+
+    def get_job_metadata(self, job_id: str) -> dict[str, Any]:
+        """Return a defensive copy of the job's top-level metadata object."""
+        with self._get_conn() as conn:
+            try:
+                actual_id = self._resolve_actual_job_id(conn, job_id)
+            except sqlite3.Error as exc:
+                logger.warning("get_job_metadata(%r): job_id resolution failed: %s", job_id, exc)
+                return {}
+            row = conn.execute(
+                "SELECT metadata_json FROM job_meta WHERE job_id = ?", (actual_id,)
+            ).fetchone()
+            if not row:
+                return {}
+            try:
+                meta = json.loads(row["metadata_json"] or "{}")
+            except (TypeError, ValueError):
+                return {}
+            if not isinstance(meta, dict):
+                return {}
+            return {str(key): value for key, value in meta.items()}
 
     def set_job_metadata_value(self, job_id: str, key: str, value: Any) -> None:
         """Write one top-level key into the job's metadata_json.
@@ -864,6 +900,476 @@ class LedgerJobsMixin(_LedgerHost):
 
 class LedgerBlocksMixin(_LedgerHost):
     """Block writes, checkpoints and status/type/chapter reads."""
+
+    def claim_next_agent_work(
+        self,
+        job_id: str,
+        *,
+        package_id: str,
+        lease_token_hash: str,
+        expires_at: float,
+        now: float,
+        limit: int,
+        package_state: dict[str, Any] | None = None,
+    ) -> tuple[list[IRBlock], dict[str, Any]]:
+        """Select and lease the next Agent package in one transaction.
+
+        Selection and the lease must share one transaction: two concurrent
+        claims could otherwise read the same pending rows before either write
+        committed. This method performs the read and the ``BEGIN IMMEDIATE``
+        write under one connection lock, so at most one claim can win a block.
+
+        Repair candidates take precedence over fresh blocks, and a package is
+        homogeneous: when any repair is pending the claim contains only repairs;
+        otherwise it contains only fresh blocks. Mixing the two would make a
+        single prompt kind and ``repair_rounds`` accounting wrong for part of
+        the package. The returned blocks are the rows as they were before being
+        marked ``drafted``; their status is persisted as ``expected_statuses``
+        so lease expiry can restore the correct pre-claim state.
+        """
+        if limit < 1:
+            raise LedgerError("Agent claim limit must be positive")
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            actual_id = self._resolve_actual_job_id(conn, job_id)
+            row = conn.execute(
+                "SELECT metadata_json FROM job_meta WHERE job_id = ?", (actual_id,)
+            ).fetchone()
+            if row is None:
+                conn.execute("ROLLBACK;")
+                raise LedgerError(f"cannot claim work: unknown job '{job_id}'")
+            try:
+                meta = json.loads(row["metadata_json"] or "{}")
+            except (TypeError, ValueError) as exc:
+                conn.execute("ROLLBACK;")
+                raise LedgerError(
+                    f"job_meta.metadata_json for '{actual_id}' is corrupt; "
+                    "refusing to claim Agent work"
+                ) from exc
+            if not isinstance(meta, dict):
+                conn.execute("ROLLBACK;")
+                raise LedgerError(f"job_meta.metadata_json for '{actual_id}' is not a JSON object")
+            session = meta.get(AGENT_SESSION_KEY)
+            if isinstance(session, dict) and session.get("state") == "finishing":
+                conn.execute("ROLLBACK;")
+                raise LedgerError(
+                    f"Agent job {job_id} is finishing; wait for ubt_agent_finish to return"
+                )
+            status = BlockStatus.REPAIR_PENDING
+            candidates = conn.execute(
+                """
+                SELECT * FROM blocks
+                 WHERE job_id = ? AND skip_translate = 0 AND status = ?
+                 ORDER BY spine_index ASC, block_id ASC
+                 LIMIT ?
+                """,
+                (actual_id, status.value, int(limit)),
+            ).fetchall()
+            if not candidates:
+                status = BlockStatus.PENDING
+                candidates = conn.execute(
+                    """
+                    SELECT * FROM blocks
+                     WHERE job_id = ? AND skip_translate = 0 AND status = ?
+                     ORDER BY spine_index ASC, block_id ASC
+                     LIMIT ?
+                    """,
+                    (actual_id, status.value, int(limit)),
+                ).fetchall()
+            blocks = [self._row_to_block(r) for r in candidates]
+            if not blocks:
+                conn.execute("ROLLBACK;")
+                return [], {}
+            expected_by_block = {block.id: block.status.value for block in blocks}
+            if not isinstance(session, dict):
+                session = {}
+            packages = session.get("packages")
+            if not isinstance(packages, dict):
+                packages = {}
+            package = {
+                "package_id": package_id,
+                "lease_token_hash": lease_token_hash,
+                "expires_at": float(expires_at),
+                "claimed_at": float(now),
+                "block_ids": [block.id for block in blocks],
+                "expected_statuses": expected_by_block,
+                "kind": "repair" if status is BlockStatus.REPAIR_PENDING else "translate",
+                "state": "claimed",
+                **(package_state or {}),
+            }
+            packages[package_id] = package
+            session["packages"] = packages
+            session["state"] = "awaiting_agent"
+            session["updated_at"] = float(now)
+            meta[AGENT_SESSION_KEY] = session
+            conn.execute(
+                "UPDATE job_meta SET metadata_json = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE job_id = ?",
+                (json.dumps(meta, ensure_ascii=False), actual_id),
+            )
+            placeholders = ",".join("?" for _ in blocks)
+            conn.execute(
+                f"UPDATE blocks SET status = ?, updated_at = CURRENT_TIMESTAMP "
+                f"WHERE job_id = ? AND block_id IN ({placeholders})",
+                (BlockStatus.DRAFTED.value, actual_id, *[block.id for block in blocks]),
+            )
+            conn.execute("COMMIT;")
+            self._mark_blocks_changed()
+            return blocks, package
+
+    def submit_agent_work(
+        self,
+        job_id: str,
+        *,
+        package_id: str,
+        lease_token_hash: str,
+        now: float,
+        updates: list[dict[str, Any]],
+        package_state: dict[str, Any] | None = None,
+        submission_hash: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically accept one Agent submission.
+
+        The lease is checked against the stored digest; every block must belong
+        to the package and still be ``drafted`` (the claim marker). The package
+        becomes ``submitted`` in the same transaction as the block updates, so a
+        crash can never leave translated blocks attached to a still-claimable
+        package.
+
+        Repeating an identical submission is idempotent: the package is already
+        ``submitted`` and the method returns its stored state. A different
+        submission for that package is a conflict.
+        """
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            actual_id = self._resolve_actual_job_id(conn, job_id)
+            row = conn.execute(
+                "SELECT metadata_json FROM job_meta WHERE job_id = ?", (actual_id,)
+            ).fetchone()
+            if row is None:
+                conn.execute("ROLLBACK;")
+                raise LedgerError(f"cannot submit work: unknown job '{job_id}'")
+            try:
+                meta = json.loads(row["metadata_json"] or "{}")
+            except (TypeError, ValueError) as exc:
+                conn.execute("ROLLBACK;")
+                raise LedgerError(
+                    f"job_meta.metadata_json for '{actual_id}' is corrupt; "
+                    "refusing to accept Agent work"
+                ) from exc
+            if not isinstance(meta, dict):
+                conn.execute("ROLLBACK;")
+                raise LedgerError(f"job_meta.metadata_json for '{actual_id}' is not a JSON object")
+            session = meta.get(AGENT_SESSION_KEY)
+            packages = session.get("packages") if isinstance(session, dict) else None
+            package = packages.get(package_id) if isinstance(packages, dict) else None
+            if not isinstance(package, dict):
+                conn.execute("ROLLBACK;")
+                raise LedgerError(f"unknown Agent package: {package_id}")
+            if not isinstance(session, dict):
+                conn.execute("ROLLBACK;")
+                raise LedgerError("Agent session metadata is not an object")
+            if not isinstance(packages, dict):
+                conn.execute("ROLLBACK;")
+                raise LedgerError("Agent package map is not an object")
+            state = str(package.get("state") or "")
+            if session.get("state") == "finishing" and state != "submitted":
+                conn.execute("ROLLBACK;")
+                raise LedgerError(
+                    f"Agent job {job_id} is finishing; this package can no longer be submitted"
+                )
+            if package.get("lease_token_hash") != lease_token_hash:
+                conn.execute("ROLLBACK;")
+                raise LedgerError("Agent lease token does not match this package")
+            if state == "submitted":
+                if submission_hash and package.get("submission_hash") != submission_hash:
+                    conn.execute("ROLLBACK;")
+                    raise LedgerError(
+                        f"Agent package {package_id} was already submitted with different text"
+                    )
+                conn.execute("ROLLBACK;")
+                return package
+            if state != "claimed":
+                conn.execute("ROLLBACK;")
+                raise LedgerError(
+                    f"Agent package {package_id} is {state or 'unknown'}, not claimable for submit"
+                )
+            expires_at = float(package.get("expires_at") or 0.0)
+            if now > expires_at:
+                conn.execute("ROLLBACK;")
+                raise LedgerError(
+                    f"Agent package {package_id} lease expired at {expires_at:.0f}; "
+                    "claim a fresh package"
+                )
+            package_blocks = [str(b) for b in package.get("block_ids", [])]
+            update_ids = [str(item.get("block_id")) for item in updates]
+            if sorted(update_ids) != sorted(package_blocks):
+                conn.execute("ROLLBACK;")
+                raise LedgerError(
+                    "Agent submission must update exactly the package's blocks "
+                    f"(expected {len(package_blocks)}, got {len(update_ids)})"
+                )
+            placeholders = ",".join("?" for _ in package_blocks)
+            rows = conn.execute(
+                f"SELECT block_id, status FROM blocks "
+                f"WHERE job_id = ? AND block_id IN ({placeholders})",
+                (actual_id, *package_blocks),
+            ).fetchall()
+            statuses = {str(r["block_id"]): str(r["status"]) for r in rows}
+            wrong = {
+                block_id: status
+                for block_id, status in statuses.items()
+                if status != BlockStatus.DRAFTED.value
+            }
+            if wrong:
+                conn.execute("ROLLBACK;")
+                raise LedgerError(
+                    "Agent package blocks changed while it was leased: "
+                    + ", ".join(f"{b}={s}" for b, s in sorted(wrong.items())[:10])
+                )
+            for item in updates:
+                fields = ["status = ?", "target_text = ?", "updated_at = CURRENT_TIMESTAMP"]
+                params: list[Any] = [
+                    (
+                        item["status"].value
+                        if isinstance(item["status"], BlockStatus)
+                        else str(item["status"])
+                    ),
+                    item.get("target_text"),
+                ]
+                optional = {
+                    "draft_text": "draft_text = ?",
+                    "mtqe_score": "mtqe_score = ?",
+                    "repair_rounds": "repair_rounds = ?",
+                    "mqm_severity": "mqm_severity = ?",
+                }
+                for key, clause in optional.items():
+                    if key in item:
+                        fields.append(clause)
+                        params.append(item[key])
+                if "error_flags" in item:
+                    fields.append("error_flags_json = ?")
+                    params.append(json.dumps(item["error_flags"], ensure_ascii=False))
+                if "mqm_spans" in item:
+                    fields.append("mqm_spans_json = ?")
+                    params.append(json.dumps(item["mqm_spans"], ensure_ascii=False))
+                if "style" in item:
+                    fields.append("style_json = ?")
+                    params.append(_style_json(item["style"]))
+                params.extend([item["block_id"], actual_id])
+                conn.execute(
+                    f"UPDATE blocks SET {', '.join(fields)} WHERE block_id = ? AND job_id = ?",
+                    params,
+                )
+            package.update(package_state or {})
+            if submission_hash:
+                package["submission_hash"] = submission_hash
+            package["state"] = "submitted"
+            package["submitted_at"] = float(now)
+            packages[package_id] = package
+            session["packages"] = packages
+            session["state"] = "awaiting_agent"
+            session["updated_at"] = float(now)
+            meta[AGENT_SESSION_KEY] = session
+            conn.execute(
+                "UPDATE job_meta SET metadata_json = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE job_id = ?",
+                (json.dumps(meta, ensure_ascii=False), actual_id),
+            )
+            conn.execute("COMMIT;")
+            self._mark_blocks_changed()
+            return package
+
+    def agent_session_packages(self, job_id: str) -> dict[str, dict[str, Any]]:
+        """Return the Agent package map as a defensive copy."""
+        raw = cast("_LedgerHostWithMetadata", self).get_job_metadata_value(
+            job_id, AGENT_SESSION_KEY
+        )
+        if not isinstance(raw, dict):
+            return {}
+        packages = raw.get("packages")
+        if not isinstance(packages, dict):
+            return {}
+        return {
+            str(package_id): dict(package)
+            for package_id, package in packages.items()
+            if isinstance(package, dict)
+        }
+
+    def expire_agent_packages(self, job_id: str, *, now: float) -> list[str]:
+        """Release expired, unsubmitted Agent leases and re-pend their blocks.
+
+        Expiry is a maintenance operation, not a state transition the Agent can
+        perform: a package that was leased but never submitted must become
+        claimable again. The block reset and lease release commit together.
+        """
+        expired: list[str] = []
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            actual_id = self._resolve_actual_job_id(conn, job_id)
+            row = conn.execute(
+                "SELECT metadata_json FROM job_meta WHERE job_id = ?", (actual_id,)
+            ).fetchone()
+            if row is None:
+                conn.execute("ROLLBACK;")
+                return []
+            try:
+                meta = json.loads(row["metadata_json"] or "{}")
+            except (TypeError, ValueError):
+                conn.execute("ROLLBACK;")
+                return []
+            if not isinstance(meta, dict):
+                conn.execute("ROLLBACK;")
+                return []
+            session = meta.get(AGENT_SESSION_KEY)
+            packages = session.get("packages") if isinstance(session, dict) else None
+            if not isinstance(packages, dict):
+                conn.execute("ROLLBACK;")
+                return []
+            if not isinstance(session, dict):
+                conn.execute("ROLLBACK;")
+                return []
+            for package_id, package in list(packages.items()):
+                if not isinstance(package, dict) or package.get("state") != "claimed":
+                    continue
+                if float(package.get("expires_at") or 0.0) >= now:
+                    continue
+                block_ids = [str(b) for b in package.get("block_ids", [])]
+                if block_ids:
+                    expected = package.get("expected_statuses")
+                    for block_id in block_ids:
+                        restore = (
+                            str(expected.get(block_id))
+                            if isinstance(expected, dict) and expected.get(block_id)
+                            else BlockStatus.PENDING.value
+                        )
+                        conn.execute(
+                            "UPDATE blocks SET status = ?, updated_at = CURRENT_TIMESTAMP "
+                            "WHERE job_id = ? AND block_id = ? AND status = ?",
+                            (restore, actual_id, block_id, BlockStatus.DRAFTED.value),
+                        )
+                package["state"] = "expired"
+                package["expired_at"] = float(now)
+                expired.append(package_id)
+            if expired:
+                session["packages"] = packages
+                session["updated_at"] = float(now)
+                meta[AGENT_SESSION_KEY] = session
+                conn.execute(
+                    "UPDATE job_meta SET metadata_json = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE job_id = ?",
+                    (json.dumps(meta, ensure_ascii=False), actual_id),
+                )
+                conn.execute("COMMIT;")
+                self._mark_blocks_changed()
+                return expired
+            conn.execute("ROLLBACK;")
+            return []
+
+    def begin_agent_finish(self, job_id: str, *, now: float) -> list[str]:
+        """Expire stale leases and atomically enter the finishing state.
+
+        Returns the ids of packages that are still actively leased. When that
+        list is non-empty the session stays ``awaiting_agent`` and no caller may
+        screen or render its drafted blocks. When it is empty the session becomes
+        ``finishing`` in the same transaction that released every expired
+        package, so a concurrent claim cannot slip in between the check and the
+        quality screen.
+        """
+        active: list[str] = []
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            actual_id = self._resolve_actual_job_id(conn, job_id)
+            row = conn.execute(
+                "SELECT metadata_json FROM job_meta WHERE job_id = ?", (actual_id,)
+            ).fetchone()
+            if row is None:
+                conn.execute("ROLLBACK;")
+                raise LedgerError(f"cannot finish: unknown job '{job_id}'")
+            try:
+                meta = json.loads(row["metadata_json"] or "{}")
+            except (TypeError, ValueError) as exc:
+                conn.execute("ROLLBACK;")
+                raise LedgerError(
+                    f"job_meta.metadata_json for '{actual_id}' is corrupt; "
+                    "refusing to finish Agent work"
+                ) from exc
+            if not isinstance(meta, dict):
+                conn.execute("ROLLBACK;")
+                raise LedgerError(f"job_meta.metadata_json for '{actual_id}' is not a JSON object")
+            session = meta.get(AGENT_SESSION_KEY)
+            if not isinstance(session, dict):
+                conn.execute("ROLLBACK;")
+                raise LedgerError(f"Agent job {job_id} has no Agent session")
+            packages = session.get("packages")
+            if not isinstance(packages, dict):
+                conn.execute("ROLLBACK;")
+                raise LedgerError(f"Agent job {job_id} has a malformed package map")
+            for package_id, package in list(packages.items()):
+                if not isinstance(package, dict) or package.get("state") != "claimed":
+                    continue
+                if float(package.get("expires_at") or 0.0) >= now:
+                    active.append(str(package_id))
+                    continue
+                block_ids = [str(block_id) for block_id in package.get("block_ids", [])]
+                expected = package.get("expected_statuses")
+                for block_id in block_ids:
+                    restore = (
+                        str(expected.get(block_id))
+                        if isinstance(expected, dict) and expected.get(block_id)
+                        else BlockStatus.PENDING.value
+                    )
+                    conn.execute(
+                        "UPDATE blocks SET status = ?, updated_at = CURRENT_TIMESTAMP "
+                        "WHERE job_id = ? AND block_id = ? AND status = ?",
+                        (restore, actual_id, block_id, BlockStatus.DRAFTED.value),
+                    )
+                package["state"] = "expired"
+                package["expired_at"] = float(now)
+            session["packages"] = packages
+            session["state"] = "awaiting_agent" if active else "finishing"
+            session["updated_at"] = float(now)
+            meta[AGENT_SESSION_KEY] = session
+            conn.execute(
+                "UPDATE job_meta SET metadata_json = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE job_id = ?",
+                (json.dumps(meta, ensure_ascii=False), actual_id),
+            )
+            conn.execute("COMMIT;")
+            self._mark_blocks_changed()
+            return active
+
+    def set_agent_session_state(self, job_id: str, state: str, *, now: float) -> None:
+        """Update only the durable Agent state, preserving packages and leases."""
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            actual_id = self._resolve_actual_job_id(conn, job_id)
+            row = conn.execute(
+                "SELECT metadata_json FROM job_meta WHERE job_id = ?", (actual_id,)
+            ).fetchone()
+            if row is None:
+                conn.execute("ROLLBACK;")
+                raise LedgerError(f"cannot update Agent state: unknown job '{job_id}'")
+            try:
+                meta = json.loads(row["metadata_json"] or "{}")
+            except (TypeError, ValueError) as exc:
+                conn.execute("ROLLBACK;")
+                raise LedgerError(f"job_meta.metadata_json for '{actual_id}' is corrupt") from exc
+            if not isinstance(meta, dict):
+                conn.execute("ROLLBACK;")
+                raise LedgerError(f"job_meta.metadata_json for '{actual_id}' is not a JSON object")
+            session = meta.get(AGENT_SESSION_KEY)
+            if not isinstance(session, dict):
+                session = {}
+            session["state"] = state
+            session["updated_at"] = float(now)
+            meta[AGENT_SESSION_KEY] = session
+            conn.execute(
+                "UPDATE job_meta SET metadata_json = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE job_id = ?",
+                (json.dumps(meta, ensure_ascii=False), actual_id),
+            )
+            conn.execute("COMMIT;")
 
     def append_chapter(self, job_id: str, chapter: ChapterIR) -> None:
         """Atomically append a ChapterIR partition using non-destructive ON CONFLICT update."""
