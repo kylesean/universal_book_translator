@@ -33,7 +33,10 @@ from ubt.core.memory.glossary_table import (
     build_chunk_glossary_table,
     build_global_glossary_table,
 )
-from ubt.core.memory.hierarchical_memory import HierarchicalMemoryManager
+from ubt.core.memory.hierarchical_memory import (
+    DEFAULT_MAX_EPOCHS,
+    HierarchicalMemoryManager,
+)
 from ubt.core.memory.rolling_summary import extract_chapter_id
 from ubt.core.memory.tm import (
     PROMPT_VERSION,
@@ -1542,6 +1545,8 @@ async def _build_draft_runtime(
         # slot -- is what stops a single-chapter PDF from paying L2 llm_summary
         # calls for summaries the policy then refuses to inject.
         enabled=rolling_enabled,
+        max_epochs=getattr(config, "memory_max_epochs", DEFAULT_MAX_EPOCHS),
+        sliding_window=getattr(config, "memory_sliding_window", False),
     )
     global_glossary_table = build_global_glossary_table(
         glossary_dicts or [], config.glossary_max_global_entries

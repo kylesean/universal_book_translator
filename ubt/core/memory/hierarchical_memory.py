@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_STEP_CHARS = 3500
 DEFAULT_L3_EPOCH_STEPS = 4
+DEFAULT_MAX_EPOCHS = 50
 _MAX_L3_CHARS = 1200
 # A chapter transition forces a macro snapshot only once the buffer holds real
 # content; below this the transition folds into the next regular snapshot.
@@ -75,11 +76,17 @@ class HierarchicalMemoryManager:
         neighbor_chars: int = DEFAULT_NEIGHBOR_CHARS,
         l3_epoch_steps: int = DEFAULT_L3_EPOCH_STEPS,
         enabled: bool = True,
+        max_epochs: int | None = DEFAULT_MAX_EPOCHS,
+        max_l3_chars: int = _MAX_L3_CHARS,
+        sliding_window: bool = False,
     ) -> None:
         self.step_chars = step_chars
         self.neighbor_builder = NeighborContextBuilder(neighbor_chars=neighbor_chars)
         self.l3_epoch_steps = max(1, l3_epoch_steps)
         self.enabled = enabled
+        self.max_epochs = max_epochs
+        self.max_l3_chars = max(1, max_l3_chars)
+        self.sliding_window = sliding_window
 
         self._snapshots: list[StepSnapshot] = []
         self._epochs: list[EpochSnapshot] = []
@@ -233,13 +240,16 @@ class HierarchicalMemoryManager:
         compressed = deterministic_summary(combined, _MAX_L3_CHARS).strip()
         if not compressed:
             compressed = combined[:_MAX_L3_CHARS]
+        epoch_idx = (self._epochs[-1].epoch_index + 1) if self._epochs else 0
         epoch = EpochSnapshot(
-            epoch_index=len(self._epochs),
+            epoch_index=epoch_idx,
             start_spine=window[0].start_spine,
             end_spine=window[-1].end_spine,
             summary_text=compressed,
         )
         self._epochs.append(epoch)
+        if self.max_epochs is not None and len(self._epochs) > self.max_epochs:
+            self._epochs = self._epochs[-self.max_epochs :]
         logger.info(
             "L3 epoch %d compressed (%d L2 steps, spine %d-%d)",
             epoch.epoch_index,
@@ -248,30 +258,36 @@ class HierarchicalMemoryManager:
             epoch.end_spine,
         )
 
-    def get_l3_summary(self) -> str:
-        """Cumulative L3 epoch summary text across closed epochs (clamped to _MAX_L3_CHARS).
+    def get_l3_summary(self, *, sliding_window: bool | None = None) -> str:
+        """Cumulative L3 epoch summary text across closed epochs (clamped to max_l3_chars).
 
         The clamp keeps the *earliest* whole epochs: this slot is the long-range
         anchor ("chapter 30 knows what happened in chapters 1-10"), while recent
-        context is carried by the L2 snapshots and L1 neighbours. The previous
-        tail-keep did the opposite and discarded exactly the early history this
-        exists for. Epochs are kept whole; only a single over-budget first epoch
-        is truncated.
+        context is carried by the L2 snapshots and L1 neighbours.
+        When ``sliding_window`` is True (or configured on the manager), keeps the
+        most recent whole epochs within the budget instead. Epochs are kept whole;
+        only a single over-budget epoch is truncated.
         """
         if not self.enabled:
             return ""
-        parts = [e.summary_text.strip() for e in self._epochs if e.summary_text.strip()]
+        use_sliding = self.sliding_window if sliding_window is None else sliding_window
+        epochs = self._epochs[-self.max_epochs :] if self.max_epochs is not None else self._epochs
+        parts = [e.summary_text.strip() for e in epochs if e.summary_text.strip()]
         if not parts:
             return ""
+        if use_sliding:
+            parts = list(reversed(parts))
         kept: list[str] = []
         used = 0
         for part in parts:
             extra = len(part) + (1 if kept else 0)
-            if kept and used + extra > _MAX_L3_CHARS:
+            if kept and used + extra > self.max_l3_chars:
                 break
             kept.append(part)
             used += extra
-        return "\n".join(kept)[:_MAX_L3_CHARS]
+        if use_sliding:
+            kept.reverse()
+        return "\n".join(kept)[: self.max_l3_chars]
 
     def format_l3_prompt_block(self, summary_text: str) -> str:
         """Render the L3 epoch block for prompt injection (static-prefix slot)."""
@@ -308,6 +324,8 @@ class HierarchicalMemoryManager:
         snapshots = [StepSnapshot(**s) for s in state.get("snapshots", []) if isinstance(s, dict)]
         epochs = [EpochSnapshot(**e) for e in state.get("epochs", []) if isinstance(e, dict)]
         self._snapshots = snapshots
+        if self.max_epochs is not None and len(epochs) > self.max_epochs:
+            epochs = epochs[-self.max_epochs :]
         self._epochs = epochs
         try:
             self._step_counter = int(state.get("step_counter", len(snapshots)))
@@ -334,3 +352,13 @@ class HierarchicalMemoryManager:
 
         # 3. No past snapshot prior to this block
         return ""
+
+
+__all__ = [
+    "DEFAULT_L3_EPOCH_STEPS",
+    "DEFAULT_MAX_EPOCHS",
+    "DEFAULT_STEP_CHARS",
+    "EpochSnapshot",
+    "HierarchicalMemoryManager",
+    "StepSnapshot",
+]

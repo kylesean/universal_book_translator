@@ -341,6 +341,50 @@ def test_format_l3_prompt_block() -> None:
     assert rendered == "### Book Continuity (Compressed History)\nhistory"
 
 
+def test_get_l3_summary_sliding_window() -> None:
+    manager = HierarchicalMemoryManager(sliding_window=True)
+    manager._epochs = [
+        EpochSnapshot(0, 0, 1, "Old" * 200),
+        EpochSnapshot(1, 2, 3, "Middle" * 50),
+        EpochSnapshot(2, 4, 5, "Recent" * 50),
+    ]
+    # Sliding window keeps the most recent epochs within budget
+    summary = manager.get_l3_summary()
+    assert "Recent" in summary
+    assert "Middle" in summary
+    assert "Old" not in summary
+    assert len(summary) <= 1200
+
+
+async def test_max_epochs_capping_in_ultra_long_books() -> None:
+    manager = HierarchicalMemoryManager(l3_epoch_steps=1, max_epochs=3)
+    for i in range(10):
+        await _snapshot(manager, [_block(f"ch1#b{i}", i, target="x" * 40)], f"summary_{i}")
+    assert len(manager.epochs) == 3
+    assert [e.epoch_index for e in manager.epochs] == [7, 8, 9]
+
+
+def test_restore_state_caps_max_epochs() -> None:
+    from ubt.core.memory.hierarchical_memory import DEFAULT_MAX_EPOCHS
+
+    manager = HierarchicalMemoryManager(max_epochs=3)
+    state = {
+        "snapshots": [],
+        "epochs": [
+            {"epoch_index": i, "start_spine": i, "end_spine": i, "summary_text": f"s_{i}"}
+            for i in range(10)
+        ],
+        "step_counter": 10,
+    }
+    manager.restore_state(state)
+    assert len(manager.epochs) == 3
+    assert [e.epoch_index for e in manager.epochs] == [7, 8, 9]
+
+    # Default manager has bounded max_epochs
+    default_mgr = HierarchicalMemoryManager()
+    assert default_mgr.max_epochs == DEFAULT_MAX_EPOCHS == 50
+
+
 # --------------------------------------------------------------------------- #
 # Latest summary / export / restore
 # --------------------------------------------------------------------------- #
