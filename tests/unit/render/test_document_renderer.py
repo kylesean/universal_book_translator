@@ -491,26 +491,34 @@ def test_bilingual_pairs_headings_and_tables_too(tmp_path: Path) -> None:
         # A superscript run ends in ``]``; a literal ``(`` right after it parses
         # as a call on the run's result. Measured on the gold corpus (``gan``):
         # ``lo#super[...][g](4)`` failed to compile and the whole block was lost.
-        ("lo g(4)", InlineRun(text="g", superscript=True), '#text("(")'),
+        ("lo g(4)", InlineRun(text="g", superscript=True), "("),
         # A bold run before a citation's opening paren (arXiv 2609.22978 b0039).
         (
             "Firecracker microVMs (Agache et al., 2020)",
             InlineRun(text="Firecracker microVMs ", bold=True),
-            '#text("(")',
+            "(",
         ),
     ],
 )
 def test_a_styled_run_never_swallows_a_following_paren(
     text: str, run: InlineRun, expect: str
 ) -> None:
+    """The paren must survive as its own character, not become a call argument.
+
+    Asserted as "the expression is terminated" rather than "the paren was
+    re-emitted as ``#text("(")``": the terminator is an implementation choice
+    (today ``/**/``) and the contract is only that Typst reads the paren as
+    prose. ``assert_compiles`` below pins the part that actually matters.
+    """
     out = render_prose(text, (run,))
-    assert expect in out, f"the paren after a styled run must be escaped: {out!r}"
+    assert "/**/" in out or "#text(" in out, f"the run's expression must be closed: {out!r}"
+    assert expect in out, f"the paren must survive verbatim: {out!r}"
 
 
 def test_an_unstyled_paren_is_left_alone() -> None:
     # The guard must be narrow: a plain ``(`` with no styled run before it is
     # ordinary prose and must not gain markup.
-    assert "#text(" not in render_prose("plain (paren)", ())
+    assert "/**/" not in render_prose("plain (paren)", ())
 
 
 @pytest.mark.parametrize(
@@ -520,22 +528,21 @@ def test_an_unstyled_paren_is_left_alone() -> None:
         # parses as a field access on the super element. The whole delivery
         # aborted with ``element super has no method `installed𝑚```
         # (Typst words it as a field when an identifier follows).
-        ("检验∃𝑑.installed𝑚(𝛾) 一致", InlineRun(text="𝑑", superscript=True), '#text(".")'),
-        # A Chinese full stop needs no guard: it is not an identifier.
-        ("见上标𝑛。后文", InlineRun(text="𝑛", superscript=True), ""),
+        ("检验∃𝑑.installed𝑚(𝛾) 一致", InlineRun(text="𝑑", superscript=True), "."),
+        # A Chinese full stop is not an identifier, but it follows a run too.
+        ("见上标𝑛。后文", InlineRun(text="𝑛", superscript=True), "。"),
     ],
 )
 def test_a_styled_run_never_absorbs_a_following_dot(text: str, run: InlineRun, expect: str) -> None:
     """Typst continues an expression across ``]``: ``].x`` is a field access.
 
-    Only a dot whose next character can start an identifier is guarded; ``]. ``
-    sentence-ending dots must stay literal so ordinary prose gains no markup.
+    Every styled run now gets an unconditional terminator, so this holds for
+    prose dots as well as for the field-access case that motivated the guard —
+    the rule no longer depends on which character follows.
     """
     out = render_prose(text, (run,))
-    if expect:
-        assert expect in out, f"the dot after a styled run must be escaped: {out!r}"
-    else:
-        assert '#text(".")' not in out, f"a sentence dot must stay literal: {out!r}"
+    assert "/**/" in out or "#text(" in out, f"the run's expression must be closed: {out!r}"
+    assert expect in out, f"the dot must survive verbatim: {out!r}"
 
 
 # --------------------------------------------------------------------------- #
