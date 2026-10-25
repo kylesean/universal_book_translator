@@ -1637,3 +1637,65 @@ def test_two_figures_sharing_a_basename_both_survive(tmp_path: Path) -> None:
     # drawn from the other's copy.
     for name in copied:
         assert f'image("{name}"' in source
+
+
+def test_render_table_dense_single_col_landscape_contingency() -> None:
+    # 9-column dense table in single-column layout with allow_landscape=True
+    header = "| " + " | ".join(f"Col{i}" for i in range(9)) + " |"
+    sep = "| " + " | ".join("---" for _ in range(9)) + " |"
+    row = "| " + " | ".join(f"Value{i}" for i in range(9)) + " |"
+    md = f"{header}\n{sep}\n{row}\n"
+
+    # Default allow_landscape=False: scoped in #[ ... ]
+    out_default = render_table(md, page_columns=1, allow_landscape=False)
+    assert out_default.strip().startswith("#[")
+    assert "#page(flipped: true)" not in out_default
+
+    # With allow_landscape=True: wraps in #page(flipped: true)[ ... ]
+    out_landscape = render_table(md, page_columns=1, allow_landscape=True)
+    assert out_landscape.strip().startswith("#page(flipped: true)[")
+    assert out_landscape.strip().endswith("]")
+
+
+def test_typst_document_renderer_dense_table_landscape(tmp_path: Path) -> None:
+    from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock, make_element
+    from ubt.render.typst.document_renderer import TypstDocumentRenderer
+
+    header = "| " + " | ".join(f"Col{i}" for i in range(9)) + " |"
+    sep = "| " + " | ".join("---" for _ in range(9)) + " |"
+    row = "| " + " | ".join(f"Value{i}" for i in range(9)) + " |"
+    table_md = f"{header}\n{sep}\n{row}\n"
+
+    table_block = IRBlock(
+        element=make_element(
+            id="t1",
+            spine_index=1,
+            block_type=BlockType.TABLE,
+            flow_id=FlowID.TABLE_GRID,
+            source_text=table_md,
+            bbox=BoundingBox(page=1, x0=10.0, y0=10.0, x1=400.0, y1=100.0),
+        ),
+        target_text=table_md,
+    )
+
+    build_dir = tmp_path / "build"
+
+    # Default single-column renderer enables landscape tables
+    renderer_default = TypstDocumentRenderer(columns=1)
+    source_default, _ = renderer_default.build_source([table_block], build_dir)
+    assert "#page(flipped: true)[" in source_default
+
+    # Explicitly disabled
+    renderer_no_ls = TypstDocumentRenderer(columns=1, allow_landscape_tables=False)
+    source_no_ls, _ = renderer_no_ls.build_source([table_block], build_dir)
+    assert "#page(flipped: true)[" not in source_no_ls
+
+    # Dual columns does not flip to landscape
+    renderer_2col = TypstDocumentRenderer(columns=2)
+    source_2col, _ = renderer_2col.build_source([table_block], build_dir)
+    assert "#page(flipped: true)[" not in source_2col
+
+    # Bilingual mode does not flip to landscape (avoids illegal container nesting)
+    renderer_bilingual = TypstDocumentRenderer(columns=1, bilingual=True)
+    source_bilingual, _ = renderer_bilingual.build_source([table_block], build_dir)
+    assert "#page(flipped: true)[" not in source_bilingual

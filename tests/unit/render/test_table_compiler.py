@@ -103,3 +103,49 @@ def test_probe_table_complexity_prose_cells() -> None:
     comp = probe_table_complexity(md)
     assert comp.is_complex
     assert comp.reason == "prose_paragraphs_in_cells"
+
+
+def test_probe_table_complexity_dense_single_col_suggests_landscape() -> None:
+    # 8 columns in single column layout
+    header = "| " + " | ".join(f"Col{i}" for i in range(8)) + " |"
+    sep = "| " + " | ".join("---" for _ in range(8)) + " |"
+    row = "| " + " | ".join(f"Val{i}" for i in range(8)) + " |"
+    md = f"{header}\n{sep}\n{row}\n"
+
+    comp = probe_table_complexity(md, page_columns=1)
+    assert comp.is_complex is True
+    assert "too_many_columns_8" in comp.reason
+    assert comp.suggests_landscape is True
+    assert comp.contingency == "landscape"
+
+
+def test_probe_table_complexity_dense_dual_col_no_landscape() -> None:
+    # 8 columns in dual column layout
+    header = "| " + " | ".join(f"Col{i}" for i in range(8)) + " |"
+    sep = "| " + " | ".join("---" for _ in range(8)) + " |"
+    row = "| " + " | ".join(f"Val{i}" for i in range(8)) + " |"
+    md = f"{header}\n{sep}\n{row}\n"
+
+    comp = probe_table_complexity(md, page_columns=2)
+    assert comp.is_complex is True
+    assert comp.suggests_landscape is False
+    assert comp.contingency == "appendix"
+
+    # Even with narrow column content width (e.g. 219.5pt in academic dual-col),
+    # dual-column tables must NOT suggest landscape
+    comp_narrow = probe_table_complexity(md, page_columns=2, content_width_pt=219.5)
+    assert comp_narrow.suggests_landscape is False
+    assert comp_narrow.contingency == "appendix"
+
+
+def test_probe_table_complexity_narrow_width_suggests_landscape() -> None:
+    # 6 columns in narrow single-column layout (content_width_pt=300)
+    header = "| " + " | ".join(f"Col{i}" for i in range(6)) + " |"
+    sep = "| " + " | ".join("---" for _ in range(6)) + " |"
+    row = "| " + " | ".join(f"Val{i}" for i in range(6)) + " |"
+    md = f"{header}\n{sep}\n{row}\n"
+
+    comp = probe_table_complexity(md, page_columns=1, content_width_pt=300.0)
+    assert comp.is_complex is True
+    assert comp.suggests_landscape is True
+    assert comp.contingency == "landscape"

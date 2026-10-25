@@ -21,6 +21,8 @@ class TableComplexity:
     reason: str
     rows: int
     cols: int
+    suggests_landscape: bool = False
+    contingency: str = "none"
 
 
 def _split_row(line: str) -> list[str]:
@@ -247,7 +249,13 @@ def verify_table_reconstruction(source_markup: str, target_markup: str) -> Table
     return TableReconstruction(ok=True, rows=rows, cols=cols)
 
 
-def probe_table_complexity(markup: str, bbox: Any | None = None) -> TableComplexity:
+def probe_table_complexity(
+    markup: str,
+    bbox: Any | None = None,
+    *,
+    page_columns: int = 1,
+    content_width_pt: float | None = None,
+) -> TableComplexity:
     """Assess whether a table can be safely overlaid in-place without clipping or overflow."""
     text_lower = markup.lower()
     # 1. Merged cells or complex HTML markers
@@ -257,20 +265,56 @@ def probe_table_complexity(markup: str, bbox: Any | None = None) -> TableComplex
         or r"\multicolumn" in markup
         or r"\multirow" in markup
     ):
-        return TableComplexity(is_complex=True, reason="merged_cells", rows=0, cols=0)
+        return TableComplexity(
+            is_complex=True,
+            reason="merged_cells",
+            rows=0,
+            cols=0,
+            suggests_landscape=False,
+            contingency="appendix",
+        )
 
     parsed = parse_markdown_table(markup)
     if parsed is None:
-        return TableComplexity(is_complex=True, reason="non_standard_grid", rows=0, cols=0)
+        return TableComplexity(
+            is_complex=True,
+            reason="non_standard_grid",
+            rows=0,
+            cols=0,
+            suggests_landscape=False,
+            contingency="appendix",
+        )
 
     headers, rows = parsed
     cols = len(headers)
     total_rows = len(rows) + 1  # Including header
 
-    # 2. Too many columns
-    if cols >= 6:
+    # 2. Too many columns & single-column density
+    # In single-column layout, dense tables (>= 8 columns) lack column space and warrant
+    # a landscape contingency or appendix. 6-7 columns in narrow layout also suggest landscape.
+    if cols >= 8:
+        is_single_col_dense = page_columns == 1 and (
+            content_width_pt is None or content_width_pt < 600.0
+        )
         return TableComplexity(
-            is_complex=True, reason=f"too_many_columns_{cols}", rows=total_rows, cols=cols
+            is_complex=True,
+            reason=f"too_many_columns_{cols}",
+            rows=total_rows,
+            cols=cols,
+            suggests_landscape=is_single_col_dense,
+            contingency="landscape" if is_single_col_dense else "appendix",
+        )
+    if cols >= 6:
+        is_narrow_dense = page_columns == 1 and (
+            content_width_pt is not None and content_width_pt < 350.0
+        )
+        return TableComplexity(
+            is_complex=True,
+            reason=f"too_many_columns_{cols}",
+            rows=total_rows,
+            cols=cols,
+            suggests_landscape=is_narrow_dense,
+            contingency="landscape" if is_narrow_dense else "appendix",
         )
 
     # 3. Geometry density check
@@ -290,6 +334,8 @@ def probe_table_complexity(markup: str, bbox: Any | None = None) -> TableComplex
                     reason=f"dense_row_height_{row_height:.1f}pt",
                     rows=total_rows,
                     cols=cols,
+                    suggests_landscape=False,
+                    contingency="appendix",
                 )
 
         if width is not None and 0 < width < 120.0 and cols >= 4:
@@ -298,6 +344,8 @@ def probe_table_complexity(markup: str, bbox: Any | None = None) -> TableComplex
                 reason=f"too_narrow_{width:.1f}pt",
                 rows=total_rows,
                 cols=cols,
+                suggests_landscape=False,
+                contingency="appendix",
             )
 
     # 4. Long prose in table cells
@@ -306,10 +354,22 @@ def probe_table_complexity(markup: str, bbox: Any | None = None) -> TableComplex
         avg_len = sum(len(c) for c in all_cells) / len(all_cells)
         if avg_len > 100 or any(len(c) > 250 for c in all_cells):
             return TableComplexity(
-                is_complex=True, reason="prose_paragraphs_in_cells", rows=total_rows, cols=cols
+                is_complex=True,
+                reason="prose_paragraphs_in_cells",
+                rows=total_rows,
+                cols=cols,
+                suggests_landscape=False,
+                contingency="appendix",
             )
 
-    return TableComplexity(is_complex=False, reason="simple_grid", rows=total_rows, cols=cols)
+    return TableComplexity(
+        is_complex=False,
+        reason="simple_grid",
+        rows=total_rows,
+        cols=cols,
+        suggests_landscape=False,
+        contingency="none",
+    )
 
 
 __all__ = [

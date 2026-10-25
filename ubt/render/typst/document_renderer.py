@@ -703,6 +703,7 @@ def render_table(
     page_columns: int = 1,
     content_width_pt: float | None = None,
     scale_out: list[float] | None = None,
+    allow_landscape: bool = False,
 ) -> str:
     """Render a Markdown table as a Typst ``#table`` with a three-line frame.
 
@@ -1043,7 +1044,8 @@ def render_table(
         or sum(weights) * TABLE_BASE_PT > width
     )
     full_page = page_columns > 1 and too_wide
-    shrink = too_wide and not full_page
+    landscape = allow_landscape and page_columns == 1 and columns >= _TABLE_MAX_COMFORTABLE_COLUMNS
+    shrink = too_wide and not full_page and not landscape
 
     # When promoting to full-page float across dual columns, re-solve column widths
     # against the full text width (493.2pt) rather than keeping the narrow 219.5pt column spec.
@@ -1079,8 +1081,44 @@ def render_table(
         widths = _alloc_fp(table_scale_fp)
         column_spec = "(" + ", ".join(f"{w * slack_ratio:.1f}pt" for w in widths) + ")"
         table_scale = table_scale_fp
+    elif landscape:
+        # A dense table in single-column layout given landscape permission flips
+        # to a dedicated landscape page, measuring against landscape text width.
+        # When content_width_pt is specified, landscape width gains the A4 orientation difference
+        # (297mm - 210mm = 87mm = 246.6pt); otherwise defaults to 717.0pt (standard A4 book margins).
+        ls_width_pt = (content_width_pt + 246.6) if content_width_pt is not None else 717.0
+        share_available_ls = max(
+            ls_width_pt - (columns - 1) * _TABLE_GUTTER_EM * TABLE_BASE_PT,
+            1.0,
+        )
 
-    indent = "  " if full_page else "    "
+        def _alloc_ls(scale: float) -> list[float]:
+            run_mins = [run * TABLE_BASE_PT * scale + 2 * _TABLE_CELL_INSET_PT for run in runs]
+            total_run_min = sum(run_mins)
+            if total_run_min >= share_available_ls:
+                return [m * share_available_ls / total_run_min for m in run_mins]
+            floor = [w / _TABLE_HEADER_LINES * TABLE_BASE_PT * scale for w in weights]
+            base = [max(m, f) for m, f in zip(run_mins, floor, strict=True)]
+            base_total = sum(base)
+            if base_total >= share_available_ls:
+                return [b * share_available_ls / base_total for b in base]
+            slack = share_available_ls - base_total
+            return [b + slack * w / total_weight for b, w in zip(base, weights, strict=True)]
+
+        required_scale_ls = (
+            1.0
+            if total_run_em * TABLE_BASE_PT + inset_budget <= share_available_ls
+            else (share_available_ls - inset_budget) / (total_run_em * TABLE_BASE_PT)
+        )
+        required_scale_ls = max(required_scale_ls, 0.0)
+        table_scale_ls = (
+            max(required_scale_ls, _TABLE_MIN_TEXT_SCALE) if required_scale_ls < 1.0 else 1.0
+        )
+        widths = _alloc_ls(table_scale_ls)
+        column_spec = "(" + ", ".join(f"{w * slack_ratio:.1f}pt" for w in widths) + ")"
+        table_scale = table_scale_ls
+
+    indent = "  " if (full_page or landscape) else "    "
     # The body scale the columns were actually sized for. ``_alloc(table_scale)``
     # computes every column's minimum as ``run * TABLE_BASE_PT * table_scale``,
     # so the text must be emitted at that same scale. Emitting the constant
@@ -1098,6 +1136,11 @@ def render_table(
         scale_out.append(emitted_scale)
     if full_page:
         lines = ['#place(top + center, scope: "parent", float: true, rect(width: 98%)[']
+        if emitted_scale < 1.0:
+            lines.append(f"  #set text(size: {emitted_scale:.2f}em)")
+        lines.append("  #table(")
+    elif landscape:
+        lines = ["#page(flipped: true)["]
         if emitted_scale < 1.0:
             lines.append(f"  #set text(size: {emitted_scale:.2f}em)")
         lines.append("  #table(")
@@ -1520,6 +1563,7 @@ class TypstDocumentRenderer:
         paper_title: str = "",
         abstract: str = "",
         toc_mode: str = "auto",
+        allow_landscape_tables: bool = True,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
@@ -1528,6 +1572,7 @@ class TypstDocumentRenderer:
         self.columns = columns
         self.paper_title = paper_title
         self.abstract = abstract
+        self.allow_landscape_tables = allow_landscape_tables
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: ``auto`` is none for a paper (by convention) and one for a book that
         #: carries TOC rows; see :func:`resolve_toc_mode`.
@@ -1868,17 +1913,23 @@ class TypstDocumentRenderer:
                         is_math_ok=self._math_gate,
                         page_columns=self.columns,
                         content_width_pt=table_width,
+                        allow_landscape=False,
                     )
                     or None
                 )
                 target_text = _block_text(block)
                 table_scale: list[float] = []
+                # Flipping to landscape is allowed for single-column dense tables
+                # when landscape tables are enabled and not in bilingual paired mode
+                # (where nested #page inside container blocks is illegal in Typst).
+                allow_landscape = self.allow_landscape_tables and not self.bilingual
                 markup = render_table(
                     target_text,
                     is_math_ok=self._math_gate,
                     page_columns=self.columns,
                     content_width_pt=table_width,
                     scale_out=table_scale,
+                    allow_landscape=allow_landscape,
                 )
                 fell_back = False
                 if not markup:
