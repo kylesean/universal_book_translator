@@ -698,6 +698,7 @@ export function NewJobWizard() {
               ref={fileInputRef}
               onChange={handleFileInputChange}
               accept=".pdf,.epub,.docx,.md,.markdown,.txt,.html,.htm"
+              aria-label={t.wizard.uploadAria}
               className="hidden"
             />
             {/* A div with onClick is unreachable by keyboard, and the real
@@ -765,6 +766,7 @@ export function NewJobWizard() {
                 value={filePath}
                 onChange={(e) => setFilePath(e.target.value)}
                 placeholder={t.wizard.manualPathPlaceholder}
+                aria-label={t.wizard.manualPathPlaceholder}
                 className="flex-1 min-w-0 h-9 sm:h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-3 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none font-mono placeholder:text-[var(--ink-muted)] shadow-2xs"
               />
               <Button
@@ -805,10 +807,11 @@ export function NewJobWizard() {
             {declaredProviders.length > 0 ? (
               <div>
                 <div className="flex items-center gap-1 mb-1">
-                  <label className="type-label">{t.wizard.provider}</label>
+                  <label htmlFor="wizard-provider" className="type-label">{t.wizard.provider}</label>
                   <InfoTip label={t.wizard.providerHelp}>{t.wizard.providerHelp}</InfoTip>
                 </div>
                 <select
+                  id="wizard-provider"
                   value={provider}
                   onChange={(e) => setProvider(e.target.value)}
                   className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
@@ -842,10 +845,11 @@ export function NewJobWizard() {
             {/* Language Pair */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="type-label block mb-1">
+                <label htmlFor="wizard-source-lang" className="type-label block mb-1">
                   {t.wizard.sourceLang}
                 </label>
                 <select
+                  id="wizard-source-lang"
                   value={sourceLang}
                   onChange={(e) => setSourceLang(e.target.value)}
                   className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
@@ -858,10 +862,11 @@ export function NewJobWizard() {
                 </select>
               </div>
               <div>
-                <label className="type-label block mb-1">
+                <label htmlFor="wizard-target-lang" className="type-label block mb-1">
                   {t.wizard.targetLang}
                 </label>
                 <select
+                  id="wizard-target-lang"
                   value={targetLang}
                   onChange={(e) => setTargetLang(e.target.value)}
                   className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
@@ -1041,10 +1046,11 @@ export function NewJobWizard() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
                     <div>
                       <div className="flex items-center gap-1 mb-1">
-                        <label className="type-label">{t.wizard.domainProfile}</label>
+                        <label htmlFor="wizard-domain-profile" className="type-label">{t.wizard.domainProfile}</label>
                         <InfoTip label={t.wizard.domainProfile}>{t.wizard.domainProfileHelp}</InfoTip>
                       </div>
                       <select
+                        id="wizard-domain-profile"
                         value={domainProfile}
                         onChange={(e) => {
                           hasUserSelectedDomainRef.current = true
@@ -1064,10 +1070,11 @@ export function NewJobWizard() {
 
                     <div>
                       <div className="flex items-center gap-1 mb-1">
-                        <label className="type-label">{t.wizard.dualMode}</label>
+                        <label htmlFor="wizard-dual-mode" className="type-label">{t.wizard.dualMode}</label>
                         <InfoTip label={t.wizard.dualMode}>{t.wizard.dualModeHelp}</InfoTip>
                       </div>
                       <select
+                        id="wizard-dual-mode"
                         value={dualMode}
                         onChange={(e) => {
                           hasUserSelectedDualModeRef.current = true
@@ -1086,12 +1093,13 @@ export function NewJobWizard() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
                     <div>
                       <div className="flex items-center gap-1 mb-1">
-                        <label className="type-label">{t.wizard.layoutColumns}</label>
+                        <label htmlFor="wizard-layout-columns" className="type-label">{t.wizard.layoutColumns}</label>
                         <InfoTip label={t.wizard.layoutColumns}>
                           {t.wizard.layoutColumnsHelp}
                         </InfoTip>
                       </div>
                       <select
+                        id="wizard-layout-columns"
                         value={layoutColumns}
                         onChange={(e) => setLayoutColumns(e.target.value as any)}
                         className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
@@ -1104,12 +1112,13 @@ export function NewJobWizard() {
 
                     <div>
                       <div className="flex items-center gap-1 mb-1">
-                        <label className="type-label">{t.wizard.translateChrome}</label>
+                        <label htmlFor="wizard-translate-chrome" className="type-label">{t.wizard.translateChrome}</label>
                         <InfoTip label={t.wizard.translateChrome}>
                           {t.wizard.translateChromeHelp}
                         </InfoTip>
                       </div>
                       <select
+                        id="wizard-translate-chrome"
                         value={translateChrome}
                         onChange={(e) => setTranslateChrome(e.target.value as any)}
                         className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
@@ -1132,10 +1141,11 @@ export function NewJobWizard() {
                       wins. */}
                   <div>
                     <div className="flex items-center gap-1 mb-1">
-                      <label className="type-label">{t.wizard.ocrMode}</label>
+                      <label htmlFor="wizard-ocr-mode" className="type-label">{t.wizard.ocrMode}</label>
                       <InfoTip label={t.wizard.ocrMode}>{t.wizard.ocrModeHelp}</InfoTip>
                     </div>
                     <select
+                      id="wizard-ocr-mode"
                       value={ocrMode}
                       onChange={(e) => setOcrMode(e.target.value as any)}
                       className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
@@ -1160,7 +1170,7 @@ export function NewJobWizard() {
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-1">
-                        <label className="type-label">{t.wizard.pageFilter}</label>
+                        <label htmlFor="wizard-page-range" className="type-label">{t.wizard.pageFilter}</label>
                         <InfoTip label={t.wizard.pageFilter}>
                           {t.wizard.pageFilterHelp}
                         </InfoTip>
@@ -1174,10 +1184,12 @@ export function NewJobWizard() {
                       </button>
                     </div>
                     <input
+                      id="wizard-page-range"
                       type="text"
                       value={pageRange}
                       onChange={(e) => setPageRange(e.target.value)}
                       placeholder={t.wizard.pageFilterPlaceholder}
+                      aria-label={t.wizard.pageFilter}
                       className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
                     />
                   </div>
@@ -1185,16 +1197,18 @@ export function NewJobWizard() {
                   {/* Row 4: External Glossary Path */}
                   <div>
                     <div className="flex items-center gap-1 mb-1">
-                      <label className="type-label">{t.wizard.glossaryPath}</label>
+                      <label htmlFor="wizard-glossary-path" className="type-label">{t.wizard.glossaryPath}</label>
                       <InfoTip label={t.wizard.glossaryPath}>
                         {t.wizard.glossaryPathHelp}
                       </InfoTip>
                     </div>
                     <input
+                      id="wizard-glossary-path"
                       type="text"
                       value={glossaryPath}
                       onChange={(e) => setGlossaryPath(e.target.value)}
                       placeholder={t.wizard.glossaryPathPlaceholder}
+                      aria-label={t.wizard.glossaryPath}
                       className={`type-value w-full h-8 rounded-[5px] border bg-[var(--paper-surface)] px-2.5 font-mono focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)] ${
                         glossaryError
                           ? 'border-[#b91c1c] focus:border-[#b91c1c]'
@@ -1216,10 +1230,11 @@ export function NewJobWizard() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
                     <div>
                       <div className="flex items-center gap-1 mb-1">
-                        <label className="type-label">{t.wizard.emitBoth}</label>
+                        <label htmlFor="wizard-emit-both" className="type-label">{t.wizard.emitBoth}</label>
                         <InfoTip label={t.wizard.emitBoth}>{t.wizard.emitBothHelp}</InfoTip>
                       </div>
                       <select
+                        id="wizard-emit-both"
                         value={emitBoth}
                         onChange={(e) => setEmitBoth(e.target.value as any)}
                         className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
@@ -1232,12 +1247,13 @@ export function NewJobWizard() {
 
                     <div>
                       <div className="flex items-center gap-1 mb-1">
-                        <label className="type-label">{t.wizard.visualJudge}</label>
+                        <label htmlFor="wizard-visual-judge" className="type-label">{t.wizard.visualJudge}</label>
                         <InfoTip label={t.wizard.visualJudge}>
                           {t.wizard.visualJudgeHelp}
                         </InfoTip>
                       </div>
                       <select
+                        id="wizard-visual-judge"
                         value={visualJudge}
                         onChange={(e) => setVisualJudge(e.target.value as any)}
                         disabled={pageEgressClosed}

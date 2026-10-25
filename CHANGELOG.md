@@ -117,6 +117,12 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Fixed
 
+- **The wizard's unnamed controls have names.** The hidden file input, the
+  manual path field and four `<select>`s (provider, source/target language)
+  carried no accessible name and no label association — reachable only by
+  position, silent to a screen reader. `aria-label`s and `htmlFor`/`id` pairs
+  fix the read-out, and clicking a label now focuses its control.
+
 - **A page whose text rects are nested no longer ships its text 12x over.**
   `extract_lines` reads one `get_text_bounded` per pdfium rect, and a box that
   selects far more characters than its own width can hold is a duplication —
