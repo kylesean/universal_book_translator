@@ -513,6 +513,31 @@ def test_an_unstyled_paren_is_left_alone() -> None:
     assert "#text(" not in render_prose("plain (paren)", ())
 
 
+@pytest.mark.parametrize(
+    ("text", "run", "expect"),
+    [
+        # arXiv 2608.25512: a superscripted variable followed by a literal dot
+        # parses as a field access on the super element. The whole delivery
+        # aborted with ``element super has no method `installed𝑚```
+        # (Typst words it as a field when an identifier follows).
+        ("检验∃𝑑.installed𝑚(𝛾) 一致", InlineRun(text="𝑑", superscript=True), '#text(".")'),
+        # A Chinese full stop needs no guard: it is not an identifier.
+        ("见上标𝑛。后文", InlineRun(text="𝑛", superscript=True), ""),
+    ],
+)
+def test_a_styled_run_never_absorbs_a_following_dot(text: str, run: InlineRun, expect: str) -> None:
+    """Typst continues an expression across ``]``: ``].x`` is a field access.
+
+    Only a dot whose next character can start an identifier is guarded; ``]. ``
+    sentence-ending dots must stay literal so ordinary prose gains no markup.
+    """
+    out = render_prose(text, (run,))
+    if expect:
+        assert expect in out, f"the dot after a styled run must be escaped: {out!r}"
+    else:
+        assert '#text(".")' not in out, f"a sentence dot must stay literal: {out!r}"
+
+
 # --------------------------------------------------------------------------- #
 # A masker token must never be transpiled as math
 # --------------------------------------------------------------------------- #

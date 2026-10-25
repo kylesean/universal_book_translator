@@ -469,25 +469,54 @@ def _unbalanced_delimiters(text: str) -> bool:
 
 
 def _break_run_call_chains(segments: Sequence[str]) -> str:
-    """Join segments without letting a styled run absorb a following ``(``.
+    """Join segments without letting a styled run absorb a following ``(`` or ``.``.
 
-    A styled run ends in ``]`` (``#strong[...]``). Typst parses a following ``(``
-    as another call on that run's *result* — ``#strong[x](y)`` calls the content
-    ``x`` as a function — so a citation's opening paren right after a bold run
-    (``#strong[Firecracker microVMs ](Agache et al., 2020)``) fails to compile
-    and the whole fragment descends to the source. Emit that one literal ``(`` as
-    an explicit ``#text("(")``, which renders identically and ends the code
-    expression cleanly. A literal ``[`` needs no such guard: ``typst_escape``
-    already backslash-escapes it.
+    A styled run ends in ``]`` (``#strong[...]``). Typst continues parsing from
+    that closing bracket: a following ``(`` is another *call* on the run's
+    result (``#strong[x](y)`` calls the content ``x`` as a function), and a
+    following ``.`` is a *field access* (``#super[...][m].installed`` asks the
+    superscript element for a field named ``installed``). Both fail to compile,
+    and the whole fragment descends to the source.
+
+    * ``(`` — measured on the gold corpus (``gan``): ``lo#super[...][g](4)``,
+      and a citation's opening paren after a bold run (arXiv 2609.22978 b0039).
+    * ``.`` — measured on arXiv 2608.25512: a Chinese sentence with a
+      superscripted variable followed by a literal dot, ``…[𝑚].installed𝑚``,
+      aborted the entire delivery with ``element super has no method
+      `installed𝑚` ``. A number ending a sentence (``[𝑛].``) hits the same parse.
+
+    Emitting the punctuation as an explicit ``#text("…")`` renders it
+    identically (same glyph, same advance — verified against Typst 0.15.1) and
+    ends the code expression cleanly. A literal ``[`` needs no guard:
+    ``typst_escape`` already backslash-escapes it.
     """
     merged: list[str] = []
     for segment in segments:
-        if merged and merged[-1].endswith("]") and segment[:1] == "(":
-            merged.append('#text("(")')
-            merged.append(segment[1:])
-        else:
-            merged.append(segment)
+        if merged and merged[-1].endswith("]"):
+            if segment[:1] == "(":
+                merged.append('#text("(")')
+                merged.append(segment[1:])
+                continue
+            # A dot only continues the expression when an identifier follows it:
+            # ``].installed`` is a field access, while ``]. `` (sentence end)
+            # ``].5`` and ``].[x]`` all parse as prose and need no markup. The
+            # guard is deliberately narrow so ordinary prose gains no ``#text``.
+            if segment[:1] == "." and len(segment) > 1 and _continues_field_access(segment[1]):
+                merged.append('#text(".")')
+                merged.append(segment[1:])
+                continue
+        merged.append(segment)
     return "".join(merged)
+
+
+def _continues_field_access(char: str) -> bool:
+    """Whether ``char`` can start a Typst identifier (so ``.`` before it is a field).
+
+    Letters, digits and CJK all qualify: ``.installed``, ``.5`` in ``x.5em``-style
+    text (typed as prose here), and ``.中文`` were each measured to compile-fail
+    as a field access on the styled run's result.
+    """
+    return char.isidentifier() or char.isdigit() or "\u4e00" <= char <= "\u9fff"
 
 
 #: A masker placeholder (``⟦SOUP_MASK_0001-333⟧`` and the other families) or an
