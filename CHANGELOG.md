@@ -133,6 +133,19 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Fixed
 
+- **The wizard's quote panel keeps up with the form, and the copy speaks
+  operator.** The right column — the quote and the compile entry — scrolled
+  away with the page: while the operator worked through presets, budget and
+  the advanced drawer, the one panel the page exists to inform was off-screen
+  (the mobile bar had a sticky summary; desktop had nothing). The column is
+  now `lg:sticky`. The step headers（① ② ③）gained a dedicated `.type-step`
+  style — as the page's primary structure they must not render identically to
+  the advanced drawer's inner group headings. The assess button beside the
+  path input is demoted to a re-run icon: auto-assess fires on every
+  path/preset change, so a primary-looking button there read as a required
+  step. Copy: 「硬预算熔断红线」→「预算上限（超支自动拦截）」, and the header
+  subtitle drops the engine voice（底层编译流水线）.
+
 - **The pre-flight quote's token breakdown sums, and the duration owns its
   heuristic.** The wizard showed 源文 beside 提示 under a total of
   提示+补全, but the engine bills prompt = (per-call prefix × calls) +

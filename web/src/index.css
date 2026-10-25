@@ -125,6 +125,17 @@ body {
 /* Group heading inside the advanced drawer. The drawer holds seven controls
    with no visible structure; this separates "how it is laid out" from "what
    reads the pages" so a whole block can be skipped at a glance. */
+/* Step header for the wizard's task-order sections (① 提供文件 …). One
+   step above .type-group on purpose: the drawer's group headings organise
+   controls *inside* a section, these organise the page itself. */
+.type-step {
+  font-size: 12px;
+  line-height: 1.4;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-primary);
+  font-weight: 700;
+}
 .type-group {
   font-size: 11px;
   line-height: 1.4;

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   UploadCloud,
   FileText,
-  Sparkles,
+  RefreshCw,
   ArrowRight,
   AlertTriangle,
   Loader2,
@@ -736,7 +736,7 @@ export function NewJobWizard() {
         <div className="lg:col-span-7 space-y-6">
           {/* File Dropzone */}
           <div>
-            <div className="type-group">{t.wizard.stepFile}</div>
+            <div className="type-step">{t.wizard.stepFile}</div>
             <input
               type="file"
               ref={fileInputRef}
@@ -822,15 +822,16 @@ export function NewJobWizard() {
                 }}
                 disabled={!filePath.trim() || isAssessing}
                 variant="secondary"
-                size="sm"
-                className="shrink-0 h-9 sm:h-8 px-3"
+                size="icon"
+                className="shrink-0 h-9 sm:h-8 w-9 sm:w-8"
+                aria-label={t.wizard.assessBtn}
+                title={t.wizard.assessBtn}
               >
                 {isAssessing ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--ink-primary)]" />
                 ) : (
-                  <Sparkles className="h-3.5 w-3.5 mr-1.5 text-[var(--ink-primary)]" />
+                  <RefreshCw className="h-3.5 w-3.5 text-[var(--ink-secondary)]" />
                 )}
-                {t.wizard.assessBtn}
               </Button>
             </div>
 
@@ -844,7 +845,7 @@ export function NewJobWizard() {
 
             {/* Presets List */}
             <div>
-              <div className="type-group">{t.wizard.stepQuality}</div>
+              <div className="type-step">{t.wizard.stepQuality}</div>
               <div className="space-y-2">
                 {presetOptions.map((p) => {
                   const isSelected = preset === p.id
@@ -1005,7 +1006,7 @@ export function NewJobWizard() {
                 removes both traps, and keeps the default (no cap) visible
                 instead of hidden at one end of a track. */}
             <div className="pt-2">
-              <div className="type-group">{t.wizard.stepBudget}</div>
+              <div className="type-step">{t.wizard.stepBudget}</div>
               <div className="flex items-center justify-between text-xs mb-1.5">
                 <span className="type-label">{t.wizard.budgetCeiling}</span>
                 <label className="flex items-center gap-1.5 cursor-pointer select-none">
@@ -1464,7 +1465,7 @@ export function NewJobWizard() {
           </div>
 
         {/* Right Column: Pre-flight Assessment Radar */}
-        <div className="lg:col-span-5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] flex flex-col justify-between overflow-hidden shadow-[0_1px_4px_rgba(0,0,0,0.03)]">
+        <div className="lg:col-span-5 lg:sticky lg:top-6 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] flex flex-col justify-between overflow-hidden shadow-[0_1px_4px_rgba(0,0,0,0.03)]">
           <div className="p-5 space-y-5">
             <div className="flex items-center justify-between border-b border-[var(--paper-border)] pb-3">
               <div>
