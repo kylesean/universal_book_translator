@@ -80,9 +80,127 @@ class BilingualStyle:
     target_fill: str = "black"
 
 
-#: The renderer's default body leading. Kept as a module constant so the
-#: dataclass default, ``resolve_theme``'s default and the renderer read one name.
-_DEFAULT_LEADING_EM = 0.78
+@dataclass(frozen=True, slots=True)
+class TypographicConvention:
+    """Per-language body-text metrics, from published typesetting standards.
+
+    **Why this exists as data rather than a literal in the preamble.** The
+    renderer emitted one rule for every target: ``first-line-indent: 2em``. For
+    Chinese that is correct — GB/T 15834-2011 and the ROC handbook both require
+    two characters (首行缩进两格). For Japanese it is wrong: the convention is
+    ``一字下げ``, one character. Korean takes one character as well, inherited
+    from 원고지 manuscript practice. So two of the three languages this engine
+    renders most were indented twice as far as their own tradition — a defect
+    that reads as "the typesetting was done by someone who only knows Chinese",
+    and that no test could catch because nothing owned the value.
+
+    ``first_line_indent_em`` is in **em**, which equals one character width for
+    a CJK target and one lowercase-advance-unit for a Latin one. Zero means the
+    convention is a block paragraph with spacing and no indent (the modern
+    English trade default).
+
+    ``leading_em`` is Typst's ``par(leading:)``, which is the *gap* added
+    between lines, not the total line advance. The relationship measured
+    against Typst 0.15.1 with a CJK face is roughly
+    ``advance ≈ 1 + leading``, so 0.78em of leading yields ~1.78em advance —
+    inside the 1.5-1.8em band that CJK books use. It is kept per-language so a
+    future measure that wants looser Thai or Latin can be expressed here
+    instead of in the renderer.
+
+    RTL targets are absent on purpose: they set from a different set of
+    conventions (no first-line indent in Arabic book typography, and
+    ``leading`` interacts with the taller Naskh line box), and inventing
+    values without a source would be worse than leaving the Latin default.
+    """
+
+    #: First-line paragraph indent, in em (= one CJK character).
+    first_line_indent_em: float
+    #: ``par(leading:)`` in em, i.e. the gap between line boxes.
+    leading_em: float
+    #: Where the numbers come from, for whoever tunes them next.
+    source: str
+
+
+#: Measured, not guessed. Each entry names the standard it encodes so a reader
+#: can check it rather than trust it.
+_TYPOGRAPHIC_CONVENTIONS: dict[str, TypographicConvention] = {
+    # GB/T 15834-2011 and the ROC《重訂標點符號手冊》 both require 首行缩进
+    # two characters; the rule dates to the 1919/1920 punctuation reform.
+    "zh": TypographicConvention(
+        first_line_indent_em=2.0,
+        leading_em=0.78,
+        source="GB/T 15834-2011 (首行缩进两格); 行送り 1.5-1.8em",
+    ),
+    # 一字下げ: one character, not two. Codified in Japanese publishing practice
+    # after WWII and standard on 原稿用紙.
+    "ja": TypographicConvention(
+        first_line_indent_em=1.0,
+        leading_em=0.78,
+        source="一字下げ (one-character indent); JIS X 4051 行間 1/2-1em",
+    ),
+    # 원고지 practice leaves one 칸 blank; W3C klreq §4.2 line-head indentation.
+    # Book leading runs 1.5-1.9x (Morisawa Hangeul guide).
+    "ko": TypographicConvention(
+        first_line_indent_em=1.0,
+        leading_em=0.78,
+        source="원고지 한 칸 들여쓰기; W3C klreq §4.2; Morisawa 150-190%",
+    ),
+    # Latin book practice: a one-em first-line indent (Chicago Manual of Style
+    # §2.11 "indent the first line of each paragraph"), with ~1.2-1.35x leading.
+    # The renderer emitted the Chinese two-character indent for English too,
+    # which is twice the convention *and* twice the intended visual step.
+    "en": TypographicConvention(
+        first_line_indent_em=1.0,
+        # Typst's `leading` is the gap, not the advance: measured with Typst
+        # 0.15.1, advance ≈ 1 + leading, so 0.35em gives ~1.35x line height.
+        leading_em=0.35,
+        source="Chicago Manual of Style §2.11 (1em indent); 1.2-1.35x leading",
+    ),
+}
+
+#: Languages that set from their own conventions but have none recorded here.
+#: They keep whatever the renderer emitted before this module existed rather
+#: than receiving a value invented for them: Arabic and Hebrew book typography
+#: do not simply inherit the Latin indent rule, and Thai/Khmer line-breaking
+#: conventions are their own subject. Recording a guess would make the
+#: delivery *look* researched while being wrong, which is worse than an
+#: admitted default.
+_UNRECORDED_CONVENTION_LANGUAGES: frozenset[str] = frozenset(
+    {"ar", "he", "fa", "ur", "ps", "sd", "ug", "yi", "dv", "th", "lo", "my", "km"}
+)
+
+#: What the renderer emitted before this table existed. Used for a language
+#: whose convention is not recorded, so no unrelated output changes.
+_LEGACY_CONVENTION = TypographicConvention(
+    first_line_indent_em=2.0,
+    leading_em=0.78,
+    source="pre-table renderer literal (CJK two-character indent)",
+)
+
+
+def convention_for(language: str | None) -> TypographicConvention:
+    """The typographic convention for a target, or the Latin default.
+
+    Resolution order: an exact tag, then its base language, then the default.
+    A Chinese target keeps the two-character indent the renderer has always
+    emitted, so Chinese output does not change. Japanese and Korean stop being
+    indented twice as far as their own convention. Every other language with a
+    recorded convention (today: the Latin default) gets one-em paragraphs;
+    languages whose convention is *not* recorded keep the previous literal so
+    this change cannot silently restyle them.
+    """
+    tag = (language or "").strip().lower().replace("_", "-")
+    base = tag.split("-")[0]
+    for key in (tag, base):
+        if key in _TYPOGRAPHIC_CONVENTIONS:
+            return _TYPOGRAPHIC_CONVENTIONS[key]
+    if base in _UNRECORDED_CONVENTION_LANGUAGES:
+        return _LEGACY_CONVENTION
+    # `zh-TW`/`zh-HK` share the Chinese rule; anything else with a recorded
+    # script falls to the Latin book convention.
+    if base == "zh":
+        return _TYPOGRAPHIC_CONVENTIONS["zh"]
+    return _TYPOGRAPHIC_CONVENTIONS["en"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +220,11 @@ class Theme:
     #: layout; the academic template keeps its tighter per-column values because
     #: the tighter measure genuinely wants them.
     leading_em: float = 0.78
+    #: First-line paragraph indent, in em (= one CJK character). Resolved per
+    #: language from :data:`_TYPOGRAPHIC_CONVENTIONS`; ``None`` means "not
+    #: resolved", and the renderer then falls back to the Chinese two-character
+    #: value it has always emitted.
+    first_line_indent_em: float | None = None
     paper_size: str = "a4"
     figure_prefix: str = "Fig."
     table_prefix: str = "Table"
@@ -150,13 +273,17 @@ def resolve_theme(
     # orchestrator cannot drift from what the preamble builders emit.
     resolved = resolve_for_render(target_lang, font_override=font_override)
     config = resolve_font_config(target_lang)
+    convention = convention_for(target_lang)
     return Theme(
         source_lang=(source_lang or "en").strip().lower().replace("_", "-"),
         target_lang=(target_lang or "zh").strip().lower().replace("_", "-"),
         fonts=resolved.families,
         font_override=None,
         base_size_pt=10.5 if base_size_pt is None else base_size_pt,
-        leading_em=_DEFAULT_LEADING_EM if leading_em is None else leading_em,
+        # The per-language convention supplies the default; an explicit
+        # argument still wins, so a caller that measured its own value keeps it.
+        leading_em=convention.leading_em if leading_em is None else leading_em,
+        first_line_indent_em=convention.first_line_indent_em,
         paper_size=paper_size,
         figure_prefix=config.figure_prefix,
         table_prefix=config.table_prefix,

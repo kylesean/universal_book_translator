@@ -233,10 +233,21 @@ def academic_preamble(
     col_str = "  columns: 2," if is_dual else "  columns: 1,"
     margin_str = "  margin: (x: 1.8cm, y: 2.0cm)," if is_dual else "  margin: (x: 2.5cm, y: 2.5cm),"
     font_size = "9.5pt" if is_dual else "10.5pt"
+    # The indent follows the target's own convention (ja/ko indent one
+    # character, zh two); only the tight leading is a property of the measure.
+    # A paper keeps a first-line indent even in a Latin target — that is
+    # academic submission style, unlike the trade book default — so this
+    # template reads the convention for the *amount* and keeps its own leading.
+    from ubt.layout.theme import convention_for
+
+    indent_em = convention_for(lang).first_line_indent_em
+    indent_rule = (
+        f", first-line-indent: (amount: {indent_em:g}em, all: true)" if indent_em > 0 else ""
+    )
     par_rules = (
-        "#set par(justify: true, leading: 0.65em, spacing: 0.75em, first-line-indent: (amount: 1.5em, all: true))"
+        f"#set par(justify: true, leading: 0.65em, spacing: 0.75em{indent_rule})"
         if is_dual
-        else "#set par(justify: true, leading: 0.75em, spacing: 0.85em, first-line-indent: (amount: 2.0em, all: true))"
+        else f"#set par(justify: true, leading: 0.75em, spacing: 0.85em{indent_rule})"
     )
 
     lines = [

@@ -35,7 +35,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ubt.core.content.nodes import ReconstructionRecord
-from ubt.layout.theme import Theme
 
 # The wrapper predicates are re-exported under their historical private names:
 # existing callers and tests import ``_unwrap_mark`` / ``_is_placeholder`` here.
@@ -135,10 +134,6 @@ _CAPTION_RE = re.compile(
     r"^\s*(?:Figure|Fig\.?|Table|Listing|Algorithm|图|表|附图|附表)\s*[\d.]+\s*[:：.|｜]",
     re.IGNORECASE,
 )
-
-#: Body leading for the default (single-column) layout, read from the Theme
-#: owner so a theme change actually reaches the page.
-_BODY_LEADING_EM = Theme().leading_em
 
 #: Figures narrower than this (in PDF points) render at their own physical width
 #: rather than the page-spanning default. A4 text width is ~470pt, so anything
@@ -1470,15 +1465,33 @@ class TypstDocumentRenderer:
         # Headings reverse the order (CJK face first). Routing is applied to the
         # reversed list so a Latin heading face is still scoped inside CJK text.
         cjk_first = typst_font_list(tuple(reversed(stack)), lang)
+        # Body metrics come from the per-language convention, not from a
+        # literal here: the previous single rule indented *every* target by two
+        # characters, which is the Chinese rule only. Japanese and Korean
+        # indent one character (一字下げ / 원고지 한 칸), and a Latin target
+        # takes a one-em indent. `0` is a real value (no indent), so the
+        # `all: true` form is only emitted when there is an indent to apply —
+        # `first-line-indent: (amount: 0em, all: true)` would be a no-op with
+        # extra ceremony, and dropping the setting entirely is what a block
+        # paragraph wants.
+        from ubt.layout.theme import convention_for
+
+        convention = convention_for(lang)
+        if convention.first_line_indent_em > 0:
+            indent_rule = (
+                f" first-line-indent: (amount: {convention.first_line_indent_em:g}em, all: true))"
+            )
+        else:
+            indent_rule = ")"
         return "\n".join(
             [
                 TypstDocumentRenderer._PAGE_SETUP,
                 f"#set text(font: ({body}), size: 10.5pt{typst_lang_arguments(lang)})" + rtl,
-                # Leading comes from the Theme owner, not a literal here: this
-                # line and ``Theme.leading_em`` disagreed (0.78 vs 0.85), so a
-                # maintainer tuning the theme tuned nothing.
-                f"#set par(justify: true, leading: {_BODY_LEADING_EM}em, spacing: 0.9em,"
-                " first-line-indent: (amount: 2em, all: true))",
+                # Leading comes from the same convention owner, not a literal
+                # here: this line and ``Theme.leading_em`` disagreed (0.78 vs
+                # 0.85), so a maintainer tuning the theme tuned nothing.
+                f"#set par(justify: true, leading: {convention.leading_em:g}em, spacing: 0.9em,"
+                + indent_rule,
                 "#show heading.where(level: 1): it => [",
                 "  #v(0.6em)",
                 f'  #block(text(size: 15pt, weight: "bold", font: ({cjk_first}))[#it.body])',

@@ -10,6 +10,22 @@ profile, the ``font_family`` override) rather than restating them, so the
 
 from __future__ import annotations
 
-from ubt.layout.theme import BilingualStyle, Direction, Theme, direction_for, resolve_theme
+from ubt.layout.theme import (
+    BilingualStyle,
+    Direction,
+    Theme,
+    TypographicConvention,
+    convention_for,
+    direction_for,
+    resolve_theme,
+)
 
-__all__ = ["BilingualStyle", "Direction", "Theme", "direction_for", "resolve_theme"]
+__all__ = [
+    "BilingualStyle",
+    "Direction",
+    "Theme",
+    "TypographicConvention",
+    "convention_for",
+    "direction_for",
+    "resolve_theme",
+]
