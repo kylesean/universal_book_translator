@@ -594,6 +594,11 @@ class JobStatusResponse(ProgressSnapshot):
     # endpoint carried this but the detail endpoint did not, so a --pages
     # fragment looked identical to a full delivery once the operator opened it.
     page_scope: str | None = None
+    # Agent workflow: the ledger's agent-session state ("awaiting_agent", …),
+    # and the next MCP tool call the session is waiting on. None for a run
+    # that never entered the agent loop.
+    agent_state: str | None = None
+    next_action: str | None = None
 
 
 # --------------------------------------------------------------------------- #

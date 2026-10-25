@@ -46,7 +46,7 @@ def test_ledger_permissions_skips_on_windows(
     monkeypatch.setattr(sys, "platform", "win32")
     from ubt.cli.commands.doctor import _record_ledger_permissions
 
-    recorded: list[tuple[str, str | None]] = []
+    recorded: list[tuple[str, object]] = []
 
     def _record(name: str, status: str, detail: str, fix: str | None = None, **kw: object) -> None:
         recorded.append((status, kw.get("detail_code") or None))

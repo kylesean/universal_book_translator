@@ -31,7 +31,7 @@ import time
 from collections.abc import Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -84,10 +84,13 @@ from ubt.core.router.provider import BaseModelProvider
 from ubt.core.router.rate_limiter import NullRateLimiter
 from ubt.core.router.router import ModelRouter
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
-from ubt.segment.placeholders import PlaceholderEngine, default_placeholder_engine
-from ubt.translate.engine import TranslationEngine
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    # Compiler-layer type only; the runtime import lives in __init__ so the
+    # layering invariant (module-level core -> compiler) stays clean.
+    from ubt.segment.placeholders import PlaceholderEngine
 
 AGENT_MODE = "agent"
 _AGENT_ENGINE_SIGNATURE = "agent"
@@ -420,6 +423,13 @@ class AgentTranslationService:
         placeholder_engine: PlaceholderEngine | None = None,
     ) -> None:
         self.config = config
+        # Deferred: ubt.segment / ubt.translate.engine are compiler layer, and
+        # the layering invariant forbids module-level core imports of them.
+        # With `from __future__ import annotations` the signature annotation
+        # needs nothing at runtime; only these calls do.
+        from ubt.segment.placeholders import default_placeholder_engine
+        from ubt.translate.engine import TranslationEngine
+
         self.placeholders = placeholder_engine or default_placeholder_engine()
         self.engine = TranslationEngine(
             placeholders=self.placeholders,

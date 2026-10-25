@@ -119,7 +119,7 @@ def _with_existing_record(monkeypatch: pytest.MonkeyPatch, record: _Record | Non
 
 
 async def _call(**kwargs: Any) -> dict[str, Any]:
-    return await ubt_translate_book(**kwargs)
+    return dict(await ubt_translate_book(**kwargs))
 
 
 @pytest.mark.asyncio
