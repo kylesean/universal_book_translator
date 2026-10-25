@@ -133,6 +133,15 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Fixed
 
+- **The disabled-compile hint only speaks when the cause is hidden.** The
+  greyed Start Compile carried a standing reason line —「先提供要翻译的文件」—
+  which in the empty state restates what the dropzone already says and
+  clutters the panel's close. The line is gone; the signal now sits where the
+  cause lives: budget and numeric field errors already show inline at their
+  fields, and the one invisible case — an invalid field inside the collapsed
+  advanced drawer — raises an amber「高级选项有误」marker on the drawer's toggle
+  row.
+
 - **The wizard's quote panel keeps up with the form, and the copy speaks
   operator.** The right column — the quote and the compile entry — scrolled
   away with the page: while the operator worked through presets, budget and

@@ -109,10 +109,10 @@ export interface TranslationDictionary {
     quoteRiskConfirm: string
     quoteRiskCancel: string
     budgetSuggest: string
-    /** Why Start Compile is grey. */
-    compileNeedFile: string
-    compileBudgetInvalid: string
-    compileAdvancedInvalid: string
+    /** Amber marker on the advanced-options toggle when a field inside
+     *  the collapsed drawer is invalid — the signal sits where the fix
+     *  happens, not under the disabled button. */
+    advancedErrorTag: string
     /** Mechanism detail for each preset, folded behind an InfoTip. */
     presetHFDetail: string
     presetStandardDetail: string

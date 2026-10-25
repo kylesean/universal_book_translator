@@ -503,17 +503,13 @@ export function NewJobWizard() {
   const chapterCountInvalid = numericFieldInvalid(chapterCount, 1)
   const advancedNumericInvalid =
     concurrencyInvalid || chapterStartInvalid || chapterCountInvalid
-  /** 为什么「开始编译」是灰的：禁用态不说明原因就是一个死胡同。 */
-  const compileDisabledReason = !filePath.trim()
-    ? t.wizard.compileNeedFile
-    : glossaryError
-      ? glossaryError
-      : budgetInvalid
-        ? t.wizard.compileBudgetInvalid
-        : advancedNumericInvalid
-          ? t.wizard.compileAdvancedInvalid
-          : null
-  /** 报价是否存在且与当前表单一致——「先验后花」承诺的守门条件。 */
+  /**
+   * 报价是否存在且与当前表单一致——「先验后花」承诺的守门条件。
+   *
+   * 禁用态不另设文字说明：没文件时拖拽区就是说明，预算/数值无效时错误
+   * 就在字段旁；唯一不可见的场景是错误藏在收起的高级抽屉里——那个信号
+   * 放在抽屉的开关行上（下方高级选项的琥珀标记），而不是按钮底下。
+   */
   const quoteCost = assessment?.cost.total_cost_usd ?? null
   const quoteRiskPending = assessment === null || assessStale
   /**
@@ -1105,12 +1101,18 @@ export function NewJobWizard() {
                 onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
                 className="w-full flex items-center justify-between py-1 text-left type-value font-semibold text-[var(--ink-primary)] hover:text-black transition-colors focus:outline-none group cursor-pointer"
               >
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <Sliders className="h-3.5 w-3.5 text-[var(--ink-secondary)] group-hover:text-[var(--ink-primary)]" />
                   <span>{t.wizard.advancedOptionsTitle}</span>
                   <Badge variant="outline" className="text-xs font-mono font-normal uppercase tracking-wider py-0 px-1.5">
                     {t.wizard.advancedOptionsTag}
                   </Badge>
+                  {(advancedNumericInvalid || glossaryError) && (
+                    <span className="inline-flex items-center gap-1 font-mono text-[10px] font-medium text-[#b45309] bg-[#b45309]/10 px-1.5 py-0.5 rounded border border-[#b45309]/20">
+                      <AlertTriangle className="h-3 w-3" />
+                      {t.wizard.advancedErrorTag}
+                    </span>
+                  )}
                 </div>
                 {isAdvancedOpen ? (
                   <ChevronDown className="h-4 w-4 text-[var(--ink-muted)] group-hover:text-[var(--ink-primary)] transition-transform" />
@@ -1827,11 +1829,6 @@ export function NewJobWizard() {
                 </>
               )}
             </Button>
-            {compileDisabledReason && (
-              <p className="type-help text-[var(--ink-muted)] mt-1.5 text-center">
-                {compileDisabledReason}
-              </p>
-            )}
           </div>
         </div>
       </div>
