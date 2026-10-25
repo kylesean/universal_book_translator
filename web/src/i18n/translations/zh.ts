@@ -52,17 +52,17 @@ export const zh: TranslationDictionary = {
     presets: '排版与翻译模式 (Presets)',
     presetHighFidelity: '高保真精排 (High-Fidelity)',
     presetHighFidelityDesc:
-      '强制富提示词 ＋ 全上下文；公式裁切源图保真 · 逐条视觉见证（适合学术研读与深度对照）。',
+      '最完整的处理：全上下文翻译，公式与版面保真最好，耗时与 token 也最多（适合学术研读与深度对照）。',
     presetStandard: '标准平衡模式 (Standard)',
     presetStandardDesc:
-      '由文档探测决定的自适应提示词；公式裁切源图保真（与高保真精排同一公式策略）。',
+      '平衡之选：处理深度由文档探测决定，公式与版面保真与高保真相同。',
     presetVectorMath: '高保真·公式矢量 (Vector Math)',
     presetVectorMathDesc:
-      '富提示词 ＋ 视觉模型逐条转写公式为矢量 LaTeX，可无级缩放；每条约 15-60 秒 CPU，仅公式需缩放时选此项。',
+      '公式需要无级缩放时选：逐条转写为矢量 LaTeX，每条约 15-60 秒 CPU。',
     presetFast: '极速轻量 (Fast)',
-    presetFastDesc: '短链执行、极简提示词、公式保留源图。零重型环境依赖。',
+    presetFastDesc: '最快出稿：短链极简处理，公式保留原图，适合先看整体效果。',
     presetPreview: '审校速览 (Preview)',
-    presetPreviewDesc: '跳过公式视觉识别，公式直接使用源图，用于排版走查与快速试读。',
+    presetPreviewDesc: '快速走查排版：跳过公式识别（公式保留原图），几分钟出试读。',
     // 徽章只写"能让这一档区别于其他档"的引擎参数，不复述质量门禁——
     // 预设从不改动任何门禁（ubt/core/presets.py 的文件头约定）。
     presetBadgeRich: 'DOCLING · 强制富提示词',
@@ -117,6 +117,26 @@ export const zh: TranslationDictionary = {
     heuristicTag: '启发式',
     estTimeHeuristicNote:
       '耗时为启发式区间：由速率限制（RPM/TPM、并发）与本地解析、编译开销推得，未持久化任何实测分阶段耗时。',
+    stepFile: '① 提供文件',
+    stepQuality: '② 质量与代价',
+    stepBudget: '③ 预算与提交',
+    basicsTitle: '提供商与语言',
+    quoteRiskTitle: '尚无有效报价',
+    quoteRiskBodyNoQuote:
+      '体检尚未完成或失败，提交后将没有费用、耗时与风险预估。建议先运行免费的「免消耗体检」。',
+    quoteRiskBodyStale: '当前报价与表单配置不一致（重新估价失败），费用预估可能不准确。',
+    quoteRiskUnlimited: '本次预估 {usd}，未设预算上限。',
+    quoteRiskConfirm: '仍要提交',
+    quoteRiskCancel: '先返回',
+    budgetSuggest: '按报价 ×1.5 设为 {usd}',
+    compileNeedFile: '先提供要翻译的文件',
+    compileBudgetInvalid: '预算上限需为大于 0 的数字',
+    compileAdvancedInvalid: '高级选项中存在无效数值',
+    presetHFDetail: '引擎 Docling 解析 · 强制富提示词（全上下文）· 公式裁切源图保真 · 逐条视觉见证。',
+    presetStandardDetail: '引擎 Docling 解析 · 自适应提示词 · 公式裁切源图保真（与高保真相同）。',
+    presetVectorDetail: '引擎 Docling 解析 · 富提示词 · 视觉模型逐条转写公式为矢量 LaTeX。',
+    presetPreviewDetail: '引擎 PDFIUM 解析 · 精简提示词 · 公式保留源图。',
+    presetFastDetail: '引擎 PDFIUM 短链 · 极简提示词 · 公式保留源图 · 零重型环境依赖。',
     confidence: '路由置信度',
     probeWarnings: '体检告警',
     // 与引擎 ubt/core/assess.py 的 detail_zh 保持同一措辞；这里按稳定 code

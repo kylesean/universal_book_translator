@@ -96,6 +96,29 @@ export interface TranslationDictionary {
      *  knobs rather than measured; the engine's basis rides in an InfoTip. */
     heuristicTag: string
     estTimeHeuristicNote: string
+    /** Task-order section headers. */
+    stepFile: string
+    stepQuality: string
+    stepBudget: string
+    basicsTitle: string
+    /** Submit guard: no valid quote for the current form. */
+    quoteRiskTitle: string
+    quoteRiskBodyNoQuote: string
+    quoteRiskBodyStale: string
+    quoteRiskUnlimited: string
+    quoteRiskConfirm: string
+    quoteRiskCancel: string
+    budgetSuggest: string
+    /** Why Start Compile is grey. */
+    compileNeedFile: string
+    compileBudgetInvalid: string
+    compileAdvancedInvalid: string
+    /** Mechanism detail for each preset, folded behind an InfoTip. */
+    presetHFDetail: string
+    presetStandardDetail: string
+    presetVectorDetail: string
+    presetPreviewDetail: string
+    presetFastDetail: string
     estCost: string
     pageCount: string
     recommendation: string

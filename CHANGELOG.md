@@ -11,6 +11,22 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Changed
 
+- **The wizard walks in task order, and spending has guardrails.** The form
+  read as a field inventory — upload, provider, languages, presets, budget,
+  advanced — while the operator's actual decision sequence is: provide a file,
+  weigh quality against cost, cap the spend, go. The sections now carry step
+  headers（① 提供文件 ② 质量与代价 ③ 预算与提交）; provider and languages fold
+  behind a summary badge（默认 · en→zh）because their defaults are sound and any
+  change re-prices automatically; each preset card now speaks in
+  user-perceivable consequences（最完整的处理…最快出稿…）with the engine
+  parameters that were the old copy（DOCLING · 强制富提示词）folded into a per-card
+  InfoTip. Two spending guardrails: compiling without a valid quote — the
+  assess failed, or a re-price landed stale — now confirms once per quote
+  fingerprint instead of silently skipping the page's core promise, and the
+  dialog states the estimated cost when the budget is uncapped; a one-click
+  chip offers a 1.5× quote cap when a paid quote exists; and a greyed Start
+  Compile finally says why.
+
 - **The quality gate speaks human first, and every deliverable previews
   in-console.** The gate screen rendered engine vocabulary to everyone —
   `0 corrupt / 172 masked`, `fail-closed 0 · coverage 100.0%` — summarized a

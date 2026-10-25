@@ -8,12 +8,14 @@ import {
   AlertTriangle,
   Loader2,
   Sliders,
+  Globe,
   ChevronDown,
   ChevronRight,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { InfoTip } from '@/components/ui/InfoTip'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
   assessJob,
   getRuntimeConfig,
@@ -149,6 +151,13 @@ export function NewJobWizard() {
 
   // Advanced compiler & layout options
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
+  // 提供商与语言：默认值已经足够好（默认提供商、en→zh），折叠不影响
+  // 正确性——摘要徽章让收起态仍有信息量。
+  const [basicsOpen, setBasicsOpen] = useState(false)
+  // 无有效报价时的提交确认（见 requestSubmit）。
+  const [quoteRiskOpen, setQuoteRiskOpen] = useState(false)
+  // 已确认过的报价指纹：同一配置确认一次即可。
+  const quoteRiskAckRef = useRef('')
   const [domainProfile, setDomainProfile] = useState('auto')
   const [dualMode, setDualMode] = useState<'auto' | 'dual' | 'mono'>('auto')
   // 'auto' submits as null, which lets the engine align the delivered layout to
@@ -494,6 +503,19 @@ export function NewJobWizard() {
   const chapterCountInvalid = numericFieldInvalid(chapterCount, 1)
   const advancedNumericInvalid =
     concurrencyInvalid || chapterStartInvalid || chapterCountInvalid
+  /** 为什么「开始编译」是灰的：禁用态不说明原因就是一个死胡同。 */
+  const compileDisabledReason = !filePath.trim()
+    ? t.wizard.compileNeedFile
+    : glossaryError
+      ? glossaryError
+      : budgetInvalid
+        ? t.wizard.compileBudgetInvalid
+        : advancedNumericInvalid
+          ? t.wizard.compileAdvancedInvalid
+          : null
+  /** 报价是否存在且与当前表单一致——「先验后花」承诺的守门条件。 */
+  const quoteCost = assessment?.cost.total_cost_usd ?? null
+  const quoteRiskPending = assessment === null || assessStale
   /**
    * OCR modes that ship rendered page images off this machine.
    *
@@ -606,20 +628,36 @@ export function NewJobWizard() {
     }
   }
 
+  /**
+   * 提交的守门入口：没有有效报价（体检未完成/失败，或重估价失败导致的
+   * 过期报价）时先确认一次。同一个报价指纹只问一次——确认过之后，同一
+   * 配置下的重复提交不再打扰；指纹变化（换文件、换配置又失败）会重新
+   * 要求确认。专家快路径（⌘⏎）走同一入口，护栏不因快捷键而失效。
+   */
+  const requestSubmit = () => {
+    if (quoteRiskPending && quoteRiskAckRef.current !== assessFingerprint) {
+      setQuoteRiskOpen(true)
+      return
+    }
+    void handleSubmit()
+  }
+
   // Keyboard shortcut: ⌘⏎ or Ctrl+Enter to compile
   const handleSubmitRef = useRef(handleSubmit)
+  const requestSubmitRef = useRef(requestSubmit)
   useEffect(() => {
     // Latest-ref pattern: the listener below is bound once and must call the
-    // current `handleSubmit`, so the ref is refreshed after each commit rather
+    // current handler, so the ref is refreshed after each commit rather
     // than written during render (which React forbids).
     handleSubmitRef.current = handleSubmit
+    requestSubmitRef.current = requestSubmit
   })
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         if (filePath.trim() && !isSubmitting) {
           e.preventDefault()
-          handleSubmitRef.current()
+          requestSubmitRef.current()
         }
       }
     }
@@ -640,18 +678,21 @@ export function NewJobWizard() {
       name: t.wizard.presetHighFidelity,
       desc: t.wizard.presetHighFidelityDesc,
       badge: t.wizard.presetBadgeRich,
+      detail: t.wizard.presetHFDetail,
     },
     {
       id: 'standard' as const,
       name: t.wizard.presetStandard,
       desc: t.wizard.presetStandardDesc,
       badge: t.wizard.presetBadgeAdaptive,
+      detail: t.wizard.presetStandardDetail,
     },
     {
       id: 'vector_math' as const,
       name: t.wizard.presetVectorMath,
       desc: t.wizard.presetVectorMathDesc,
       badge: t.wizard.presetBadgeVectorMath,
+      detail: t.wizard.presetVectorDetail,
       // The only preset that pays for VLM transcription; flagged so the cost
       // jump is visible before submission rather than after.
       slow: true,
@@ -661,12 +702,14 @@ export function NewJobWizard() {
       name: t.wizard.presetPreview,
       desc: t.wizard.presetPreviewDesc,
       badge: t.wizard.presetBadgeFormulaImage,
+      detail: t.wizard.presetPreviewDetail,
     },
     {
       id: 'fast' as const,
       name: t.wizard.presetFast,
       desc: t.wizard.presetFastDesc,
       badge: t.wizard.presetBadgeShortChain,
+      detail: t.wizard.presetFastDetail,
     },
   ]
 
@@ -693,6 +736,7 @@ export function NewJobWizard() {
         <div className="lg:col-span-7 space-y-6">
           {/* File Dropzone */}
           <div>
+            <div className="type-group">{t.wizard.stepFile}</div>
             <input
               type="file"
               ref={fileInputRef}
@@ -798,8 +842,78 @@ export function NewJobWizard() {
             )}
           </div>
 
-          {/* Languages & Preset */}
-          <div className="space-y-4 pt-4 border-t border-[var(--paper-border)]">
+            {/* Presets List */}
+            <div>
+              <div className="type-group">{t.wizard.stepQuality}</div>
+              <div className="space-y-2">
+                {presetOptions.map((p) => {
+                  const isSelected = preset === p.id
+                  const isRecommended =
+                    assessment?.route?.recommended_preset?.toLowerCase() === p.id
+                  return (
+                    <div
+                      key={p.id}
+                      onClick={() => {
+                        hasUserSelectedPresetRef.current = true
+                        setPreset(p.id)
+                      }}
+                      className={`p-3 rounded-[6px] border cursor-pointer transition-all ${
+                        isSelected
+                          ? 'border-[var(--ink-primary)] bg-[var(--paper-surface)] shadow-xs'
+                          : 'border-[var(--paper-border)] bg-[var(--paper-subsurface)] hover:bg-[var(--paper-surface)] hover:border-[var(--paper-border-hover)]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className={`type-value ${
+                            isSelected ? 'font-semibold' : 'font-medium'
+                          }`}
+                        >
+                          {p.name}
+                        </span>
+                        <InfoTip label={p.name}>{p.detail}</InfoTip>
+                          {isRecommended && (
+                            <span className="inline-flex items-center font-mono text-[10px] font-medium text-[#15803d] bg-[#15803d]/10 px-1.5 py-0.5 rounded border border-[#15803d]/20">
+                              {t.wizard.engineRecommended}
+                            </span>
+                          )}
+                          {p.slow && (
+                            <span className="inline-flex items-center font-mono text-[10px] font-medium text-[#b45309] bg-[#b45309]/10 px-1.5 py-0.5 rounded border border-[#b45309]/20">
+                              {t.wizard.presetSlowBadge}
+                            </span>
+                          )}
+                        </div>
+                      <div className="type-help mt-1">{p.desc}</div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* 提供商与语言：默认值已经足够好（默认提供商、en→zh 覆盖大多数
+                场景），折叠掉；摘要徽章让收起态仍有信息量。语言对影响报价的
+                输出膨胀率，所以它包含在自动体检的指纹里——展开改动会触发重报。 */}
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setBasicsOpen(!basicsOpen)}
+                className="w-full flex items-center justify-between py-1 text-left type-value font-semibold text-[var(--ink-primary)] hover:text-black transition-colors focus:outline-none group cursor-pointer"
+              >
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Globe className="h-3.5 w-3.5 text-[var(--ink-secondary)] group-hover:text-[var(--ink-primary)]" />
+                  <span>{t.wizard.basicsTitle}</span>
+                  <Badge variant="outline" className="text-xs font-mono font-normal py-0 px-1.5 normal-case tracking-normal">
+                    {(provider || t.wizard.providerDefault) + ` · ` + sourceLang + `→` + targetLang}
+                  </Badge>
+                </div>
+                {basicsOpen ? (
+                  <ChevronDown className="h-4 w-4 text-[var(--ink-muted)] group-hover:text-[var(--ink-primary)] transition-transform" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-[var(--ink-muted)] group-hover:text-[var(--ink-primary)] transition-transform" />
+                )}
+              </button>
+              {basicsOpen && (
+                <div className="space-y-4 pt-3 mt-2 border-t border-dashed border-[var(--paper-border)]">
             {/* Provider: which declared block does the work. A job may name one;
                 the server validates it against the operator's ubt.toml. Hidden
                 when nothing is declared, because then there is nothing to choose
@@ -879,59 +993,8 @@ export function NewJobWizard() {
                 </select>
               </div>
             </div>
-
-            {/* Presets List */}
-            <div>
-              <label className="type-label block mb-2">
-                {t.wizard.presets}
-              </label>
-              <div className="space-y-2">
-                {presetOptions.map((p) => {
-                  const isSelected = preset === p.id
-                  const isRecommended =
-                    assessment?.route?.recommended_preset?.toLowerCase() === p.id
-                  return (
-                    <div
-                      key={p.id}
-                      onClick={() => {
-                        hasUserSelectedPresetRef.current = true
-                        setPreset(p.id)
-                      }}
-                      className={`p-3 rounded-[6px] border cursor-pointer transition-all ${
-                        isSelected
-                          ? 'border-[var(--ink-primary)] bg-[var(--paper-surface)] shadow-xs'
-                          : 'border-[var(--paper-border)] bg-[var(--paper-subsurface)] hover:bg-[var(--paper-surface)] hover:border-[var(--paper-border-hover)]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span
-                            className={`type-value ${
-                              isSelected ? 'font-semibold' : 'font-medium'
-                            }`}
-                          >
-                            {p.name}
-                          </span>
-                          {isRecommended && (
-                            <span className="inline-flex items-center font-mono text-[10px] font-medium text-[#15803d] bg-[#15803d]/10 px-1.5 py-0.5 rounded border border-[#15803d]/20">
-                              {t.wizard.engineRecommended}
-                            </span>
-                          )}
-                          {p.slow && (
-                            <span className="inline-flex items-center font-mono text-[10px] font-medium text-[#b45309] bg-[#b45309]/10 px-1.5 py-0.5 rounded border border-[#b45309]/20">
-                              {t.wizard.presetSlowBadge}
-                            </span>
-                          )}
-                        </div>
-                        <span className="font-mono text-[10px] text-[var(--ink-muted)] uppercase tracking-wider shrink-0">
-                          {p.badge}
-                        </span>
-                      </div>
-                      <div className="type-help mt-1">{p.desc}</div>
-                    </div>
-                  )
-                })}
-              </div>
+                </div>
+              )}
             </div>
 
             {/* Budget Cap.
@@ -942,6 +1005,7 @@ export function NewJobWizard() {
                 removes both traps, and keeps the default (no cap) visible
                 instead of hidden at one end of a track. */}
             <div className="pt-2">
+              <div className="type-group">{t.wizard.stepBudget}</div>
               <div className="flex items-center justify-between text-xs mb-1.5">
                 <span className="type-label">{t.wizard.budgetCeiling}</span>
                 <label className="flex items-center gap-1.5 cursor-pointer select-none">
@@ -971,7 +1035,27 @@ export function NewJobWizard() {
               </div>
 
               {budgetUsd === null ? (
-                <p className="type-help">{t.wizard.budgetUnlimited}</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="type-help">{t.wizard.budgetUnlimited}</p>
+                  {/* 报价已知且 > 0 时给一键安全上限：不强迫，但把
+                      「随手设个上限」的成本降到一次点击。 */}
+                  {quoteCost !== null && quoteCost > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const v = Math.ceil(quoteCost * 1.5 * 100) / 100
+                        setBudgetInput(v.toFixed(2))
+                        setBudgetUsd(v)
+                      }}
+                      className="shrink-0 text-[11px] font-mono text-[var(--ink-secondary)] underline decoration-[var(--paper-border-hover)] hover:text-[var(--ink-primary)]"
+                    >
+                      {t.wizard.budgetSuggest.replace(
+                        '{usd}',
+                        (Math.ceil(quoteCost * 1.5 * 100) / 100).toFixed(2)
+                      )}
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div>
                   <div className="relative">
@@ -1378,7 +1462,6 @@ export function NewJobWizard() {
               )}
             </div>
           </div>
-        </div>
 
         {/* Right Column: Pre-flight Assessment Radar */}
         <div className="lg:col-span-5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] flex flex-col justify-between overflow-hidden shadow-[0_1px_4px_rgba(0,0,0,0.03)]">
@@ -1719,7 +1802,7 @@ export function NewJobWizard() {
               </div>
             )}
             <Button
-              onClick={handleSubmit}
+              onClick={requestSubmit}
               disabled={
                 !filePath.trim() ||
                 isSubmitting ||
@@ -1743,9 +1826,40 @@ export function NewJobWizard() {
                 </>
               )}
             </Button>
+            {compileDisabledReason && (
+              <p className="type-help text-[var(--ink-muted)] mt-1.5 text-center">
+                {compileDisabledReason}
+              </p>
+            )}
           </div>
         </div>
       </div>
+
+      {/* 提交护栏：无有效报价（或报价已过期）时确认一次。 */}
+      <ConfirmDialog
+        open={quoteRiskOpen}
+        title={t.wizard.quoteRiskTitle}
+        body={
+          <span className="block space-y-1.5">
+            <span className="block">
+              {assessStale ? t.wizard.quoteRiskBodyStale : t.wizard.quoteRiskBodyNoQuote}
+            </span>
+            {budgetUsd === null && quoteCost !== null && quoteCost > 0 && (
+              <span className="block font-medium">
+                {t.wizard.quoteRiskUnlimited.replace('{usd}', quoteCost.toFixed(2))}
+              </span>
+            )}
+          </span>
+        }
+        confirmLabel={t.wizard.quoteRiskConfirm}
+        cancelLabel={t.wizard.quoteRiskCancel}
+        onConfirm={() => {
+          quoteRiskAckRef.current = assessFingerprint
+          setQuoteRiskOpen(false)
+          void handleSubmit()
+        }}
+        onCancel={() => setQuoteRiskOpen(false)}
+      />
 
       {/* Mobile Submit Error Alert (Phase 2) */}
       {submitError && (
@@ -1778,7 +1892,7 @@ export function NewJobWizard() {
           </div>
         </div>
         <Button
-          onClick={handleSubmit}
+          onClick={requestSubmit}
           disabled={
             !filePath.trim() ||
             isSubmitting ||

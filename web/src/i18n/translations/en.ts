@@ -52,19 +52,17 @@ export const en: TranslationDictionary = {
     presets: 'Execution Profile',
     presetHighFidelity: 'High-Fidelity Reflow',
     presetHighFidelityDesc:
-      'Forced rich prompts with full context; formulas kept as cropped source images with per-item visual witness (recommended for academic & technical reading).',
+      'The most thorough pass: full-context translation, the best formula and layout fidelity — also the slowest and the most tokens.',
     presetStandard: 'Standard Balanced',
     presetStandardDesc:
-      'Model-adaptive prompts chosen by document probe; formulas cropped from source (same formula policy as High-Fidelity).',
+      'The balanced default: processing depth is probed from the document; formula and layout fidelity match High-Fidelity.',
     presetVectorMath: 'Vector Math Reflow',
     presetVectorMathDesc:
-      'Rich prompts plus the VLM transcribing each formula to scalable vector LaTeX (~15-60s per formula on CPU). Pick this only when the delivered math must scale.',
+      'For formulas that must scale: each is transcribed to vector LaTeX, ~15-60 s of CPU apiece.',
     presetFast: 'Fast Throughput',
-    presetFastDesc:
-      'Short-chain execution, minimal prompts, formula source images kept as-is. No heavy environment requirements.',
+    presetFastDesc: 'Fastest draft: short-chain minimal processing, formulas kept as images — see the whole picture first.',
     presetPreview: 'Preview Draft',
-    presetPreviewDesc:
-      'Skips formula visual recognition and keeps formula source images, for structure and layout proofing.',
+    presetPreviewDesc: 'A quick layout pass: formula recognition is skipped (source images kept) — a proofread copy in minutes.',
     // The badge names only the engine parameters that tell a preset apart; a
     // preset never changes a quality gate (ubt/core/presets.py says so), so
     // "gate" copy here was advertising something the engine does not do.
@@ -119,6 +117,27 @@ export const en: TranslationDictionary = {
     heuristicTag: 'heuristic',
     estTimeHeuristicNote:
       'The duration is a heuristic band, derived from the rate-limit knobs (RPM/TPM, concurrency) and local parsing/compile overhead — no measured per-stage timing is persisted anywhere.',
+    stepFile: '1 · Provide the file',
+    stepQuality: '2 · Quality & cost',
+    stepBudget: '3 · Budget & submit',
+    basicsTitle: 'Provider & languages',
+    quoteRiskTitle: 'No valid quote yet',
+    quoteRiskBodyNoQuote:
+      'The pre-flight assess has not produced a quote (still running or failed), so submitting now means no cost, duration or risk estimate. The free assess is recommended first.',
+    quoteRiskBodyStale:
+      'The current quote no longer matches the form (re-pricing failed); the cost estimate may be off.',
+    quoteRiskUnlimited: 'Estimated cost {usd} with no budget cap set.',
+    quoteRiskConfirm: 'Submit anyway',
+    quoteRiskCancel: 'Go back',
+    budgetSuggest: 'Cap at 1.5× quote ≈ {usd}',
+    compileNeedFile: 'Provide a file to compile first',
+    compileBudgetInvalid: 'Budget cap must be a positive number',
+    compileAdvancedInvalid: 'Fix invalid numbers in advanced options',
+    presetHFDetail: 'Docling parsing · rich prompts (full context) · formulas cropped from source · per-formula visual witness.',
+    presetStandardDetail: 'Docling parsing · adaptive prompts · formulas cropped from source (same as high fidelity).',
+    presetVectorDetail: 'Docling parsing · rich prompts · the vision model transcribes each formula to vector LaTeX.',
+    presetPreviewDetail: 'PDFIUM parsing · minimal prompts · formulas kept as source images.',
+    presetFastDetail: 'PDFIUM short chain · minimal prompts · formulas kept as source images · no heavy dependencies.',
     confidence: 'Route confidence',
     probeWarnings: 'Assessment warnings',
     // Keyed by the engine's stable warning code (ubt/core/assess.py). The
