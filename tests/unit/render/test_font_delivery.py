@@ -200,3 +200,68 @@ def test_the_emitted_list_keeps_the_resolved_order() -> None:
 
 def test_a_plain_target_emits_a_bare_tuple_body() -> None:
     assert typst_font_list(("Noto Serif", "DejaVu Serif"), "fr") == '"Noto Serif", "DejaVu Serif"'
+
+
+# --------------------------------------------------------------------------- #
+# Per-target isolation: reproducible where the set covers the script
+# --------------------------------------------------------------------------- #
+
+
+def test_isolation_is_decided_per_target_script(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Sealing system fonts is right only where the set carries the glyphs.
+
+    The bundled set measures 0% kana and 0% hangul coverage. Applying
+    ``--ignore-system-fonts`` to a Japanese book would typeset every page as
+    tofu — worse than a good page that is merely host-dependent.
+    """
+    from ubt.render.typst.fonts import can_isolate
+
+    _make_set(tmp_path)
+    monkeypatch.setenv("UBT_FONT_DIR", str(tmp_path))
+
+    # Covered scripts: simplified + traditional Chinese (same ideograph block)
+    # and Latin.
+    for lang in ("zh", "zh-CN", "zh-TW", "en", "fr"):
+        assert can_isolate(lang), f"{lang} should be reproducible from the set alone"
+    # Scripts the set does not carry.
+    for lang in ("ja", "ko", "ar", "he", "ru", "th"):
+        assert not can_isolate(lang), f"{lang} must keep system fonts"
+
+
+def test_no_set_means_no_isolation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from ubt.render.typst.fonts import can_isolate
+
+    monkeypatch.setenv("UBT_FONT_DIR", str(tmp_path / "absent"))
+    assert not can_isolate("zh")
+
+
+def test_a_partial_set_never_isolates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Isolation with an incomplete set would seal off the only working fonts."""
+    from ubt.render.typst.fonts import can_isolate
+
+    _make_set(tmp_path, skip=BUNDLED_FONTS[0].filename)
+    monkeypatch.setenv("UBT_FONT_DIR", str(tmp_path))
+    assert not can_isolate("zh")
+
+
+def test_compile_flags_follow_the_target(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The three states: no args, path only, path + isolation."""
+    from ubt.adapters.pdf.typst_compile import _font_args
+
+    # No set installed.
+    monkeypatch.setenv("UBT_FONT_DIR", str(tmp_path / "absent"))
+    assert _font_args("zh") == []
+
+    # Set present, target covered -> sealed.
+    _make_set(tmp_path)
+    monkeypatch.setenv("UBT_FONT_DIR", str(tmp_path))
+    zh_args = _font_args("zh")
+    assert "--font-path" in zh_args
+    assert "--ignore-system-fonts" in zh_args
+
+    # Set present, target not covered -> path only, system fonts stay.
+    ja_args = _font_args("ja")
+    assert "--font-path" in ja_args
+    assert "--ignore-system-fonts" not in ja_args

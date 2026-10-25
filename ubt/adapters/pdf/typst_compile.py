@@ -54,24 +54,37 @@ def typst_available(binary: str = "typst") -> bool:
     return resolve_typst_binary(binary) is not None
 
 
-def _bundled_font_dir() -> Path | None:
-    """The bundled font directory, or ``None`` when the set is not installed.
+def _font_args(target_lang: str | None) -> list[str]:
+    """Typst flags for this target: none, ``--font-path``, or fully isolated.
 
-    Imported lazily: this module sits on the compile hot path and must not pull
-    the render package's import graph at load time. A font lookup that fails
-    must never stop a compile — the caller falls back to system fonts, which is
-    the previous behaviour.
+    Three states, and the middle one is deliberate:
+
+    * no usable set → ``[]``: ambient fonts, previous behaviour;
+    * set present but it cannot typeset this script → ``--font-path`` only:
+      the extra faces are still a useful fallback, and system fonts stay
+      reachable so the book does not become tofu;
+    * set present and it covers the script → ``--font-path`` +
+      ``--ignore-system-fonts``: the reproducible path.
     """
     try:
-        from ubt.render.typst.fonts import bundled_font_dir
-
-        return bundled_font_dir()
-    except Exception:  # noqa: BLE001 - a probe failure degrades, never blocks
-        return None
+        from ubt.render.typst.fonts import bundled_font_dir, can_isolate
+    except Exception:  # noqa: BLE001 - a font lookup must never stop a compile
+        return []
+    directory = bundled_font_dir()
+    if directory is None:
+        return []
+    args = ["--font-path", str(directory)]
+    if can_isolate(target_lang):
+        args.append("--ignore-system-fonts")
+    return args
 
 
 def typst_compile(
-    typ_path: str, pdf_path: str, binary: str = "typst", timeout: float = 120.0
+    typ_path: str,
+    pdf_path: str,
+    binary: str = "typst",
+    timeout: float = 120.0,
+    target_lang: str | None = None,
 ) -> tuple[bool, str]:
     """Compile one Typst file; return ``(ok, stderr_tail)``. Never raises.
 
@@ -99,9 +112,17 @@ def typst_compile(
         return False, f"Typst compiler binary '{binary}' not found on PATH"
     # A bundled font set makes the PDF a function of the source alone: the same
     # book renders identically on a workstation and in an Alpine container.
-    # Without it the output depends on whatever the host happened to install.
-    bundled = _bundled_font_dir()
-    font_args = ["--font-path", str(bundled)] if bundled else []
+    #
+    # ``--ignore-system-fonts`` is what actually delivers that promise — the
+    # path flag alone only *adds* a search location, so a family the host
+    # happens to have can still win a glyph the bundled set should have served.
+    # But it is absolute: Typst then sees nothing outside ``--font-path``, and
+    # the current set carries no kana, no hangul and no Arabic. Applying it to
+    # a Japanese book would typeset every page as tofu, which is far worse than
+    # a good page that is merely host-dependent. So isolation is per target:
+    # only a language whose script the set actually covers is sealed off; the
+    # rest keep system fonts and the report says ``bundled: false``.
+    font_args = _font_args(target_lang)
     try:
         proc = subprocess.run(
             [

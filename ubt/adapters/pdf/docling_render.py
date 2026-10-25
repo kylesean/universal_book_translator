@@ -150,7 +150,11 @@ class DoclingRenderStrategy:
         typ_path = build_dir / "main.typ"
         typ_path.write_text(source, encoding="utf-8")
 
-        ok, stderr = typst_compile(str(typ_path), str(output_path))
+        # ``target_lang`` decides whether the compile seals system fonts off:
+        # the bundled set covers simplified/traditional Chinese and Latin, so
+        # those render reproducibly, while a Japanese or Arabic target keeps
+        # system fonts (the set carries no kana or Arabic glyphs).
+        ok, stderr = typst_compile(str(typ_path), str(output_path), target_lang=target_lang)
         if not ok:
             raise DocumentParseError(
                 f"publish render failed to compile: {stderr.strip() or 'unknown Typst error'} "

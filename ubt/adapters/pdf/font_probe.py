@@ -153,16 +153,41 @@ def _norm(name: str) -> str:
 
 
 @lru_cache(maxsize=8)
-def _typst_families_cached(resolved: str, mtime_ns: int) -> frozenset[str] | None:
+def _typst_families_cached(
+    resolved: str, mtime_ns: int, font_path: str | None = None, isolate: bool = False
+) -> frozenset[str] | None:
     """Families the Typst compiler itself can see, or None when it cannot answer.
 
     ``mtime_ns`` is part of the cache key (see ``_typst_families``); the probe
     re-runs after a Typst upgrade instead of pruning the font stack against a
     stale family set.
+
+    ``font_path`` mirrors the ``--font-path`` the compiler will receive. It is
+    part of the cache key for the same reason: a provider that appears or
+    disappears changes the answer, and the cache must not outlive that.
+
+    **Why the flag matters.** ``typst fonts`` without ``--font-path`` lists
+    only system and bundled-*with*-typst fonts. A compile of a book that ships
+    its own font set passes ``--font-path <set>``, so the probe would report a
+    face as "not installed" while the compile resolves it — the stack would be
+    pruned against a smaller set than the one the document is actually typeset
+    with, silently dropping the very faces this project ships. The two
+    invocations must agree on what "available" means.
     """
+    command = [resolved, "fonts"]
+    if font_path:
+        # Mirror the compile exactly, including whether system fonts are
+        # sealed off. A probe that adds the path but still scans system fonts
+        # answers a different question than the compile asks, and the two
+        # disagree in both directions. ``isolate`` is per-target: a Japanese
+        # book keeps system fonts (the bundled set has no kana), so its probe
+        # must see them too.
+        command.extend(["--font-path", font_path])
+        if isolate:
+            command.append("--ignore-system-fonts")
     try:
         proc = subprocess.run(
-            [resolved, "fonts"],
+            command,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -182,6 +207,32 @@ def _typst_families_cached(resolved: str, mtime_ns: int) -> frozenset[str] | Non
     return names or None
 
 
+def _should_isolate(target_lang: str | None) -> bool:
+    """Whether the compile will seal system fonts for this target."""
+    try:
+        from ubt.render.typst.fonts import can_isolate
+
+        return can_isolate(target_lang)
+    except Exception:  # noqa: BLE001 - absence of the set means "no isolation"
+        return False
+
+
+def _bundled_font_path() -> str | None:
+    """The bundled font directory in force, or ``None`` when not installed.
+
+    Imported lazily to keep this probe independent of the render package at
+    import time, and swallowed on failure: a font-set lookup must never turn a
+    font *probe* into a crash.
+    """
+    try:
+        from ubt.render.typst.fonts import bundled_font_dir
+
+        directory = bundled_font_dir()
+    except Exception:  # noqa: BLE001 - a missing set simply means "no extra path"
+        return None
+    return str(directory) if directory else None
+
+
 class _TypstFamilyProbe:
     """Callable wrapper keeping the public ``_typst_families(name)`` surface.
 
@@ -192,7 +243,7 @@ class _TypstFamilyProbe:
     fixture.
     """
 
-    def __call__(self, typst_binary: str) -> frozenset[str] | None:
+    def __call__(self, typst_binary: str, target_lang: str | None = None) -> frozenset[str] | None:
         resolved = shutil.which(typst_binary)
         if not resolved and Path(typst_binary).is_file():
             resolved = typst_binary
@@ -202,7 +253,12 @@ class _TypstFamilyProbe:
             mtime_ns = Path(resolved).stat().st_mtime_ns
         except OSError:
             mtime_ns = 0
-        return _typst_families_cached(resolved, int(mtime_ns))
+        # Ask the same question the compile asks, for the same target: the
+        # bundled set and (when the set covers the script) system-font
+        # isolation both change which families are reachable.
+        return _typst_families_cached(
+            resolved, int(mtime_ns), _bundled_font_path(), _should_isolate(target_lang)
+        )
 
     def cache_clear(self) -> None:
         _typst_families_cached.cache_clear()
@@ -244,9 +300,17 @@ def _fontconfig_families() -> frozenset[str] | None:
     return frozenset(found) or None
 
 
-def available_font_families(typst_binary: str = "typst") -> frozenset[str] | None:
-    """Font families the renderer can resolve, or None when no probe answered."""
-    return _typst_families(typst_binary) or _fontconfig_families()
+def available_font_families(
+    typst_binary: str = "typst", target_lang: str | None = None
+) -> frozenset[str] | None:
+    """Font families the renderer can resolve, or None when no probe answered.
+
+    ``target_lang`` matters: when the bundled set covers that language's
+    script, the compile seals system fonts off, so the probe must answer for
+    the smaller set. Asking without a language would report faces the compile
+    cannot reach.
+    """
+    return _typst_families(typst_binary, target_lang) or _fontconfig_families()
 
 
 def is_cjk_capable(family: str) -> bool:
@@ -448,7 +512,7 @@ def resolve_font_stack(
         return FontStack(families=(), script_available=not need)
 
     if available is None:
-        available = available_font_families(typst_binary)
+        available = available_font_families(typst_binary, target_lang)
 
     if available is None:
         return FontStack(

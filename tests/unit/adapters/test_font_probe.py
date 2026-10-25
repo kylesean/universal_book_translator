@@ -213,7 +213,7 @@ def test_no_probe_answer_passes_the_stack_through_untouched(
     """An unavailable probe is not evidence that a font is missing."""
     requested = ["Noto Serif CJK SC", "Source Han Serif SC"]
     # Both probes silent: no typst binary and no fontconfig.
-    monkeypatch.setattr("ubt.adapters.pdf.font_probe._typst_families", lambda _b: None)
+    monkeypatch.setattr("ubt.adapters.pdf.font_probe._typst_families", lambda _b, _lang=None: None)
     monkeypatch.setattr("ubt.adapters.pdf.font_probe._fontconfig_families", lambda: None)
 
     stack = resolve_font_stack(requested, target_lang="zh")
@@ -287,7 +287,7 @@ def test_resolve_for_render_prunes_through_the_profile(
 
     monkeypatch.setattr(
         "ubt.adapters.pdf.font_probe.available_font_families",
-        lambda _binary="typst": _LINUX_CJK,
+        lambda _binary="typst", _lang=None: _LINUX_CJK,
     )
     resolved = resolve_for_render("zh")
     assert resolved.families == ("Noto Serif CJK SC", "Noto Sans CJK SC", "Liberation Serif")
@@ -301,7 +301,7 @@ def test_resolve_for_render_keeps_a_user_override_first(
 
     monkeypatch.setattr(
         "ubt.adapters.pdf.font_probe.available_font_families",
-        lambda _binary="typst": _LINUX_CJK,
+        lambda _binary="typst", _lang=None: _LINUX_CJK,
     )
     resolved = resolve_for_render("zh", font_override="My Private Face")
     assert resolved.families[0] == "My Private Face"
@@ -349,3 +349,100 @@ def test_font_delivery_helper_reports_no_verdict_when_unprobed(
         job_id = "t"
 
     assert _font_delivery_for(cast("StageContext", _Ctx())) is None
+
+
+# --------------------------------------------------------------------------- #
+# The probe must ask the same question the compile asks
+# --------------------------------------------------------------------------- #
+
+
+def test_the_probe_passes_the_bundled_font_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A compile gets ``--font-path``; a probe without it sees a smaller set.
+
+    The failure this pins: a machine that has the bundled set installed but
+    none of those families as *system* fonts. ``typst fonts`` alone reports
+    "not installed", the stack is pruned against that report, and the very
+    faces this project ships are dropped from the emitted preamble — while the
+    compile would have resolved them fine.
+    """
+    import ubt.adapters.pdf.font_probe as probe
+
+    probe._typst_families.cache_clear()
+    captured: dict[str, list[str]] = {}
+
+    class _Result:
+        returncode = 0
+        stdout = "Noto Serif CJK SC\nNoto Serif\n"
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **_kwargs: object) -> _Result:
+        captured["cmd"] = cmd
+        return _Result()
+
+    monkeypatch.setattr("subprocess.run", _fake_run)
+    monkeypatch.setattr(probe, "_bundled_font_path", lambda: "/repo/fonts")
+
+    families = probe.available_font_families()
+
+    assert captured["cmd"][:2] == ["typst", "fonts"] or "fonts" in captured["cmd"]
+    assert "--font-path" in captured["cmd"], "the probe must mirror the compile's flag"
+    assert "/repo/fonts" in captured["cmd"]
+    assert "Noto Serif CJK SC" in (families or ())
+    probe._typst_families.cache_clear()
+
+
+def test_no_bundled_set_means_no_extra_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without a bundled set the probe stays a plain ``typst fonts``."""
+    import ubt.adapters.pdf.font_probe as probe
+
+    probe._typst_families.cache_clear()
+    captured: dict[str, list[str]] = {}
+
+    class _Result:
+        returncode = 0
+        stdout = "Liberation Serif\n"
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **_kwargs: object) -> _Result:
+        captured["cmd"] = cmd
+        return _Result()
+
+    monkeypatch.setattr("subprocess.run", _fake_run)
+    monkeypatch.setattr(probe, "_bundled_font_path", lambda: None)
+
+    probe.available_font_families()
+    assert "--font-path" not in captured["cmd"]
+    probe._typst_families.cache_clear()
+
+
+def test_a_changed_font_path_is_not_served_from_the_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Installing the font set mid-run must change the answer, not the cache.
+
+    The family set is cached on the resolved binary's mtime; adding a font path
+    is a second input the answer depends on, so it belongs in the key too.
+    """
+    import ubt.adapters.pdf.font_probe as probe
+
+    probe._typst_families.cache_clear()
+    calls: list[list[str]] = []
+
+    class _Result:
+        returncode = 0
+        stdout = "Something\n"
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **_kwargs: object) -> _Result:
+        calls.append(cmd)
+        return _Result()
+
+    monkeypatch.setattr("subprocess.run", _fake_run)
+    monkeypatch.setattr(probe, "_bundled_font_path", lambda: None)
+    probe.available_font_families()
+    first = len(calls)
+
+    monkeypatch.setattr(probe, "_bundled_font_path", lambda: "/newly/installed/fonts")
+    probe.available_font_families()
+    assert len(calls) > first, "the new font path must trigger a fresh probe"
+    probe._typst_families.cache_clear()

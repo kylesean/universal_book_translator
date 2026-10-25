@@ -85,14 +85,16 @@ BUNDLED_FONTS: tuple[BundledFont, ...] = (
         family="Noto Serif CJK SC",
         sha256="f4d53db237e74cb0be9bc0d8e3155ec50dc7b9e14b0769e0170bc8379a586c1d",
         license="OFL-1.1",
-        scripts=("hans", "cjk"),
+        # `hant` too: the traditional ideographs live in the same unified block
+        # the subset covers (measured against a traditional-only sample).
+        scripts=("hans", "hant", "cjk"),
     ),
     BundledFont(
         filename="NotoSansCJKsc-Regular-subset.otf",
         family="Noto Sans CJK SC",
         sha256="5ec607bb46f0d557e07c1aa6cf3e0c6619d656536cadbfbaa9e40651878630c9",
         license="OFL-1.1",
-        scripts=("hans", "cjk"),
+        scripts=("hans", "hant", "cjk"),
     ),
     BundledFont(
         filename="NotoSerif-Regular.ttf",
@@ -157,6 +159,78 @@ def bundled_font_dir(*, verify_digests: bool = False) -> Path | None:
     return directory
 
 
+#: Script coverage the bundled set actually provides. Derived from
+#: ``BUNDLED_FONTS[*].scripts`` so the declaration lives in one place.
+def bundled_script_coverage() -> frozenset[str]:
+    """Scripts this font set can typeset without any system font."""
+    covered: set[str] = set()
+    for face in BUNDLED_FONTS:
+        covered.update(face.scripts)
+    return frozenset(covered)
+
+
+#: Target-language script -> the coverage token that must be present before
+#: system fonts may be ignored. A language's script is *not* implied by another
+#: language's: the SC subset measured 0% kana and 0% hangul coverage, so
+#: isolating a Japanese book against it renders an entire page of tofu. Only a
+#: language whose script the set actually carries gets the hermetic treatment.
+_LANG_SCRIPT_TOKEN: dict[str, str] = {
+    "zh": "hans",
+    "zh-cn": "hans",
+    "zh-hans": "hans",
+    "zh-sg": "hans",
+    # Traditional Chinese shares the ideograph block the SC subset carries, so
+    # the SC face renders it (measured: no missing glyphs in a sample of
+    # traditional-only characters). It is still its own token because a future
+    # TC-specific face would declare it.
+    "zh-tw": "hant",
+    "zh-hant": "hant",
+    "zh-hk": "hant",
+    "zh-mo": "hant",
+    "en": "latin",
+    "fr": "latin",
+    "de": "latin",
+    "es": "latin",
+    "it": "latin",
+    "pt": "latin",
+    "nl": "latin",
+    "vi": "latin-ext",
+    "pl": "latin-ext",
+    "cs": "latin-ext",
+    "tr": "latin-ext",
+}
+
+
+def _lang_token(target_lang: str | None) -> str:
+    tag = (target_lang or "zh").strip().lower().replace("_", "-")
+    return _LANG_SCRIPT_TOKEN.get(tag) or _LANG_SCRIPT_TOKEN.get(tag.split("-")[0], "")
+
+
+def can_isolate(target_lang: str | None, *, verify_digests: bool = False) -> bool:
+    """Whether system fonts may be ignored for this target without losing glyphs.
+
+    Both conditions must hold:
+
+    1. the bundled set is installed and complete, and
+    2. it declares coverage for this target's script.
+
+    ``False`` is not a failure — the caller compiles with system fonts
+    available, which is the previous behaviour, and reports ``bundled: false``
+    because the output is no longer host-independent.
+
+    **Why the second condition carries the weight.** ``--ignore-system-fonts``
+    is the only flag that makes the render reproducible, but it is absolute:
+    Typst then sees nothing outside ``--font-path``. The SC subset measures 0%
+    kana and 0% hangul, so applying it to a Japanese or Korean book typesets
+    every page as tofu — strictly worse than a non-reproducible good page.
+    """
+    directory = bundled_font_dir(verify_digests=verify_digests)
+    if directory is None:
+        return False
+    token = _lang_token(target_lang)
+    return bool(token) and token in bundled_script_coverage()
+
+
 class FontDigestMismatch(RuntimeError):
     """A font file is not the one this build expects."""
 
@@ -196,6 +270,8 @@ __all__ = [
     "FONT_DIR_ENV",
     "FontDigestMismatch",
     "bundled_font_dir",
+    "bundled_script_coverage",
+    "can_isolate",
     "describe",
     "digest",
     "font_dir",

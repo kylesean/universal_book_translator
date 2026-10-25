@@ -39,7 +39,14 @@ class _FakeTypst:
         self.ok = ok
         self.calls = 0
 
-    def __call__(self, typ_path: str, pdf_path: str, binary: str = "typst") -> tuple[bool, str]:
+    def __call__(
+        self,
+        typ_path: str,
+        pdf_path: str,
+        binary: str = "typst",
+        timeout: float = 120.0,
+        target_lang: str | None = None,
+    ) -> tuple[bool, str]:
         self.calls += 1
         if not self.ok:
             return False, "fake compiler failure"
