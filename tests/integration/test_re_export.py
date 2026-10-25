@@ -23,7 +23,7 @@ from pdf_builders import write_text_pdf
 import ubt.adapters.pdf.oxide_render as oxide_render
 from ubt.api.review import apply_human_edit
 from ubt.core.config import UBTConfig
-from ubt.core.engine.dry_run import create_dry_run_orchestrator
+from ubt.core.engine.dry_run import create_dry_run_orchestrator, rehearsal_db_dir
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.progress import persist_progress_metadata
 from ubt.core.engine.re_export import re_export_job
@@ -71,7 +71,7 @@ async def _run_then_edit(tmp_path: Path) -> tuple[Path, str, str, Any]:
     # completion hook, so do it here exactly as they do — otherwise a re-export
     # has no recorded output path to overwrite.
     assert terminal is not None
-    db_path = config.db_dir / f"{job_id}.sqlite"
+    db_path = rehearsal_db_dir(config.db_dir) / f"{job_id}.sqlite"
     with SQLiteJobLedger(db_path) as ledger:
         persist_progress_metadata(terminal, ledger, job_id)
 
@@ -89,7 +89,7 @@ async def _run_then_edit(tmp_path: Path) -> tuple[Path, str, str, Any]:
 async def test_a_human_edit_reaches_the_delivered_file(tmp_path: Path) -> None:
     output, job_id, _block_id, orchestrator = await _run_then_edit(tmp_path)
     config = _config(tmp_path)
-    db_path = config.db_dir / f"{job_id}.sqlite"
+    db_path = rehearsal_db_dir(config.db_dir) / f"{job_id}.sqlite"
 
     before = _flat("\n".join(oxide_render.extract_page_texts(output)))
     assert _EDITED not in before, "the sentinel leaked into the pre-edit render"
@@ -111,7 +111,7 @@ async def test_a_re_export_writes_the_original_output_path_by_default(tmp_path: 
     """With no explicit path, the re-export overwrites the deliverable in place."""
     output, job_id, _, orchestrator = await _run_then_edit(tmp_path)
     config = _config(tmp_path)
-    db_path = config.db_dir / f"{job_id}.sqlite"
+    db_path = rehearsal_db_dir(config.db_dir) / f"{job_id}.sqlite"
 
     event = await re_export_job(
         db_path=db_path,
@@ -142,7 +142,7 @@ async def test_a_re_export_never_rewrites_a_block(tmp_path: Path) -> None:
     """
     output, job_id, block_id, orchestrator = await _run_then_edit(tmp_path)
     config = _config(tmp_path)
-    db_path = config.db_dir / f"{job_id}.sqlite"
+    db_path = rehearsal_db_dir(config.db_dir) / f"{job_id}.sqlite"
 
     with SQLiteJobLedger(db_path, read_only=True) as ledger:
         before = {

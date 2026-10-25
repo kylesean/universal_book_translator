@@ -40,7 +40,7 @@ from pdf_builders import write_text_pdf
 
 import ubt.adapters.pdf.oxide_render as oxide_render
 from ubt.core.config import UBTConfig
-from ubt.core.engine.dry_run import create_dry_run_orchestrator
+from ubt.core.engine.dry_run import create_dry_run_orchestrator, rehearsal_db_dir
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
 
@@ -78,7 +78,12 @@ _JOB_ID = "crash-resume-e2e"
 
 
 def _config(tmp_path: Path) -> UBTConfig:
-    """A hermetic config: ledgers under tmp, no page-image egress."""
+    """A hermetic config: ledgers under tmp, no page-image egress.
+
+    The ledger the rehearsal writes is ``rehearsal_db_dir(tmp_path/"ledgers")``
+    — a sibling of the path named here — because a dry run keeps its own store.
+    Every reader below derives the path the same way the orchestrator does.
+    """
     return UBTConfig().model_copy(
         update={
             "db_dir": tmp_path / "ledgers",
@@ -106,7 +111,7 @@ async def _cancelled_mid_draft_run(tmp_path: Path) -> Counter[str]:
                 cancel.set()
     # The run raised JobInterruptedError out of the generator; the abort path
     # marked the job and the flusher's close() committed every queued draft.
-    ledger = SQLiteJobLedger(tmp_path / "ledgers" / f"{_JOB_ID}.sqlite")
+    ledger = SQLiteJobLedger(rehearsal_db_dir(tmp_path / "ledgers") / f"{_JOB_ID}.sqlite")
     try:
         for block in ledger.get_all_blocks(_JOB_ID):
             statuses[block.status.value] += 1
@@ -117,7 +122,7 @@ async def _cancelled_mid_draft_run(tmp_path: Path) -> Counter[str]:
 
 async def _ledger_status_counts(tmp_path: Path) -> tuple[str, Counter[str]]:
     """(job status, block status histogram) straight from the ledger."""
-    ledger = SQLiteJobLedger(tmp_path / "ledgers" / f"{_JOB_ID}.sqlite")
+    ledger = SQLiteJobLedger(rehearsal_db_dir(tmp_path / "ledgers") / f"{_JOB_ID}.sqlite")
     try:
         blocks = ledger.get_all_blocks(_JOB_ID)
         counts: Counter[str] = Counter(b.status.value for b in blocks)
@@ -177,7 +182,7 @@ def test_a_resumed_run_finishes_the_book_and_delivers_the_pdf(tmp_path: Path) ->
     assert output.exists(), "the resumed run delivered no PDF"
     assert output.read_bytes()[:5] == b"%PDF-"
 
-    ledger = SQLiteJobLedger(tmp_path / "ledgers" / f"{_JOB_ID}.sqlite")
+    ledger = SQLiteJobLedger(rehearsal_db_dir(tmp_path / "ledgers") / f"{_JOB_ID}.sqlite")
     try:
         assert ledger.get_job_status(_JOB_ID) == "completed"
         blocks = ledger.get_all_blocks(_JOB_ID)
@@ -212,7 +217,7 @@ def test_the_resume_never_re_drafts_a_surviving_block(
     drafted_before = statuses_before.get("drafted", 0)
     assert drafted_before > 0, "the cancellation left nothing drafted; nothing to protect"
 
-    ledger = SQLiteJobLedger(tmp_path / "ledgers" / f"{_JOB_ID}.sqlite")
+    ledger = SQLiteJobLedger(rehearsal_db_dir(tmp_path / "ledgers") / f"{_JOB_ID}.sqlite")
     try:
         drafts_before = {b.id: b.draft_text for b in ledger.get_all_blocks(_JOB_ID)}
     finally:
@@ -243,7 +248,7 @@ def test_the_resume_never_re_drafts_a_surviving_block(
 
     asyncio.run(_resume_no_cache())
 
-    ledger = SQLiteJobLedger(tmp_path / "ledgers" / f"{_JOB_ID}.sqlite")
+    ledger = SQLiteJobLedger(rehearsal_db_dir(tmp_path / "ledgers") / f"{_JOB_ID}.sqlite")
     try:
         blocks_after = {b.id: b for b in ledger.get_all_blocks(_JOB_ID)}
         for block_id, draft_before in drafts_before.items():

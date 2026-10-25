@@ -32,7 +32,7 @@ from pdf_builders import write_text_pdf
 import ubt.adapters.pdf.oxide_render as oxide_render
 from ubt.core.config import UBTConfig
 from ubt.core.content.verify import contract_path_for_artifact, load_contract_file
-from ubt.core.engine.dry_run import create_dry_run_orchestrator
+from ubt.core.engine.dry_run import create_dry_run_orchestrator, rehearsal_db_dir
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.ir.models import TERMINAL_STATUSES
@@ -133,7 +133,7 @@ async def test_the_delivered_contract_is_balanced(tmp_path: Path) -> None:
 async def test_the_ledger_records_a_completed_job(tmp_path: Path) -> None:
     _, _, job_id = await _run(tmp_path)
 
-    ledger = SQLiteJobLedger(tmp_path / "ledgers" / f"{job_id}.sqlite")
+    ledger = SQLiteJobLedger(rehearsal_db_dir(tmp_path / "ledgers") / f"{job_id}.sqlite")
     try:
         assert ledger.get_job_status(job_id) == "completed"
         blocks = ledger.get_all_blocks(job_id)
