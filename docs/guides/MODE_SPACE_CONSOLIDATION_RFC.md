@@ -353,7 +353,7 @@ Sprint 2 只搬走了 `typstify_math`/`typst_escape`，**没有搬走全部数�
 if formula_heavy:
     # 理由："the overlay canvas preserves the formula-dense
     #        document's original vector formulas"
-    return False   # 跳过 VLM 数学 OCR
+    return False  # 跳过 VLM 数学 OCR
 ```
 
 **这个理由的前提是 overlay。** overlay 删除后，公式密集文档的公式既没有
@@ -660,8 +660,10 @@ job_id priority dry_run fresh start_chapter max_chapters
 # ubt/adapters/pdf/vlm/registry.py:186-205
 if clean_mode == "cloud":
     if not allow_page_upload:
-        raise ValueError("ocr_mode='cloud' ships rendered book pages to a remote "
-                         "endpoint, but allow_page_upload=false ... forbids ...")
+        raise ValueError(
+            "ocr_mode='cloud' ships rendered book pages to a remote "
+            "endpoint, but allow_page_upload=false ... forbids ..."
+        )
 ```
 
 实测（`allow_page_upload=False`，即默认）：
@@ -967,7 +969,7 @@ doc refs all resolve；死代码护栏 passed。
 #### bug ①：`_effective_level` 读了一个不存在的字段
 
 ```python
-level = getattr(block, "level", None)   # IRBlock 没有 level
+level = getattr(block, "level", None)  # IRBlock 没有 level
 ```
 
 `IRBlock` 是执行状态模型，**结构在 `block.element` 上**（`ledger_base.py:115`

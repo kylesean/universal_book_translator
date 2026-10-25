@@ -30,7 +30,12 @@ repos:
         name: ruff format
         entry: uv run ruff format --force-exclude
         language: system
-        types_or: [python, pyi]
+        # markdown: ruff formats Python code blocks inside .md files, and CI's
+        # `ruff format --check` runs over the whole tree — docs/guides/*.md
+        # included. Without markdown here, a docs-only commit passed this hook
+        # and failed CI on the same tree; that gap kept every CI run since
+        # Oct 23 red while the local gates stayed green.
+        types_or: [python, pyi, markdown]
         require_serial: true
 
       # Whole-tree checks: pass_filenames off so a push cannot pass just because

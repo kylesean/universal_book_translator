@@ -115,7 +115,7 @@
 ```python
 # ubt/core/presets.py 新增
 class FictionPreset(StrEnum):
-    FICTION_LIGHT = "fiction_light"      # 类型网文，成本优先
+    FICTION_LIGHT = "fiction_light"  # 类型网文，成本优先
     FICTION_PRESTIGE = "fiction_prestige"  # 纯文学，质量优先
 ```
 

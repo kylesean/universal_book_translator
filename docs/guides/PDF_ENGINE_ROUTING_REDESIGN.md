@@ -161,7 +161,7 @@ tokens = ['P','Zijlstra','J','Fernandes','and','V','Pillai', ...]
 `ubt/core/policy/layout_policy.py:252`：
 
 ```python
-PROBE_SAMPLE_FRACTIONS = (0.0, 0.25, 0.5, 0.75, 1.0)   # 1.0 = 末页
+PROBE_SAMPLE_FRACTIONS = (0.0, 0.25, 0.5, 0.75, 1.0)  # 1.0 = 末页
 ```
 
 学术论文的末页几乎必然是参考文献。实测四篇论文的末页：
@@ -202,8 +202,14 @@ Preset.FAST: PresetPolicy(
 但 `pdf_engine` **不在**预设控制范围内（`ubt/core/presets.py:64`）：
 
 ```python
-PRESET_ENGINE_FIELDS = ('exec_mode', 'prompt_strategy', 'formula_enrichment',
-                        'qe_engine', 'table_render_mode', 'emit_both')
+PRESET_ENGINE_FIELDS = (
+    "exec_mode",
+    "prompt_strategy",
+    "formula_enrichment",
+    "qe_engine",
+    "table_render_mode",
+    "emit_both",
+)
 #                        ↑ pdf_engine 不在这里
 ```
 
@@ -230,9 +236,7 @@ docling          ← 就是 docling
 `ubt/adapters/pdf/engine_selector.py:226`：
 
 ```python
-needs_docling = (
-    scanned_detected or has_formulas or has_multicolumn or has_vector_diagrams
-)
+needs_docling = scanned_detected or has_formulas or has_multicolumn or has_vector_diagrams
 ```
 
 四个信号的可靠性**不在一个量级**：
@@ -322,7 +326,7 @@ heading  '$1$1$17$17$1741$1741 $1$1$17$17$1741 $$$$$$ $1,7$1,7 AP'
 ```python
 # ubt/adapters/pdf/vlm/transcribe.py:34
 #: Four-tier fallback switch: "off" (default), "missing", "weak", "all".
-FALLBACK_ENV_VAR = "UBT_VLM_SCAN_FALLBACK"      # 默认 OFF
+FALLBACK_ENV_VAR = "UBT_VLM_SCAN_FALLBACK"  # 默认 OFF
 ```
 
 自研 VLM 扫描兜底（比 Docling 更重：调云端、花钱、出网）**默认 OFF**。
@@ -381,7 +385,7 @@ _NAME_INITIAL_RE = re.compile(r"\b[A-Z]\.(?:\s*[A-Z]\.)*\s+[A-Z][a-z]+")
 
 def formula_debris_share(text: str) -> float:
     """...（docstring 增补一句：先剔除姓名缩写）"""
-    text = _NAME_INITIAL_RE.sub(" ", text)   # 剔除人名缩写后再统计
+    text = _NAME_INITIAL_RE.sub(" ", text)  # 剔除人名缩写后再统计
     tokens = ASCII_WORD_RE.findall(text)
     if not tokens:
         return 0.0
@@ -422,6 +426,7 @@ def test_formula_debris_excludes_name_initials() -> None:
     assert formula_debris_share("P. Zijlstra, J. Fernandes, and V. Pillai.") < 0.05
     assert formula_debris_share("D. Guo, D. Yang, H. Zhang, J. Song") < 0.05
     assert formula_debris_share("J. K. Rowling wrote this") < 0.05
+
 
 def test_formula_debris_still_catches_real_debris() -> None:
     # 真实公式碎片必须仍然命中（回归护栏）
@@ -481,6 +486,7 @@ PROBE_MIN_SIGNAL_PAGES = 2
 def test_probe_ignores_single_reference_page() -> None:
     """单页参考文献不应翻转全书路由（2026-10-10 回归）。"""
 
+
 def test_probe_majority_still_routes_multicolumn() -> None:
     """真多栏论文（过半页命中）必须仍路由 docling。"""
 ```
@@ -501,8 +507,8 @@ def test_probe_majority_still_routes_multicolumn() -> None:
 class PDFRoutePlan:
     primary_engine: str
     # 新增：区分"自动路由"与"仅建议"
-    auto_route: bool          # True=可靠信号，直接路由；False=仅建议
-    advisory: str | None      # 给用户看的建议文案
+    auto_route: bool  # True=可靠信号，直接路由；False=仅建议
+    advisory: str | None  # 给用户看的建议文案
     ...
 ```
 
@@ -552,7 +558,7 @@ docling_device: str = "auto"
 
 ```python
 # ubt/adapters/pdf/docling_parser.py（extract_with_docling 内）
-options.accelerator_options.device = docling_device   # 替代隐式的 "auto"
+options.accelerator_options.device = docling_device  # 替代隐式的 "auto"
 ```
 
 用法：
@@ -590,13 +596,14 @@ def test_docling_device_override_reaches_pipeline_options() -> None:
 @dataclass(frozen=True)
 class PresetPolicy:
     ...
-    pdf_engine: str = "auto"        # 新增字段
+    pdf_engine: str = "auto"  # 新增字段
 
-PRESETS[Preset.FAST]    = PresetPolicy(..., pdf_engine="pdfium")
+
+PRESETS[Preset.FAST] = PresetPolicy(..., pdf_engine="pdfium")
 PRESETS[Preset.PREVIEW] = PresetPolicy(..., pdf_engine="pdfium")
 # high_fidelity / standard 保持 auto（质量优先）
 
-PRESET_ENGINE_FIELDS = (..., "pdf_engine")   # 加入字段表
+PRESET_ENGINE_FIELDS = (..., "pdf_engine")  # 加入字段表
 ```
 
 **注意**：`ubt/adapters/factory.py:85` 已有"强制 pdfium 但探测建议 docling"的告警逻辑，

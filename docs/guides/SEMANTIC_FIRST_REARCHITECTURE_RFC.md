@@ -163,28 +163,28 @@ from pathlib import Path
 
 
 class NodeKind(StrEnum):
-    DOCUMENT   = "document"
-    FRONT      = "front_matter"    # 标题/作者/摘要/关键词
-    SECTION    = "section"         # 带层级与编号
-    PARAGRAPH  = "paragraph"
-    TABLE      = "table"           # 结构化（Markdown/HTML 源）
-    FIGURE     = "figure"          # 图片资产 + caption
-    FORMULA    = "formula"         # 块级公式（LaTeX 源）
-    CODE       = "code_block"
-    BIBLIO     = "bibliography"
+    DOCUMENT = "document"
+    FRONT = "front_matter"  # 标题/作者/摘要/关键词
+    SECTION = "section"  # 带层级与编号
+    PARAGRAPH = "paragraph"
+    TABLE = "table"  # 结构化（Markdown/HTML 源）
+    FIGURE = "figure"  # 图片资产 + caption
+    FORMULA = "formula"  # 块级公式（LaTeX 源）
+    CODE = "code_block"
+    BIBLIO = "bibliography"
 
 
 @dataclass(slots=True)
 class Node:
-    id: str                         # 沿用 #b0012 格式（见 §7）
+    id: str  # 沿用 #b0012 格式（见 §7）
     kind: NodeKind
-    source: str                     # Markdown / LaTeX 源
-    target: str | None = None       # 译文
-    level: int = 0                  # SECTION 层级
+    source: str  # Markdown / LaTeX 源
+    target: str | None = None  # 译文
+    level: int = 0  # SECTION 层级
     children: list["Node"] = field(default_factory=list)
-    asset: str | None = None        # FIGURE 的图片路径
-    page_hint: int | None = None    # 源文档页码（粗粒度溯源）
-    source_anchor: str | None = None # 原文特征指纹（用于 Web 双语对照高亮联动）
+    asset: str | None = None  # FIGURE 的图片路径
+    page_hint: int | None = None  # 源文档页码（粗粒度溯源）
+    source_anchor: str | None = None  # 原文特征指纹（用于 Web 双语对照高亮联动）
 
 
 @dataclass(slots=True)
@@ -247,12 +247,13 @@ class DocumentTree:
 ```python
 # ubt/core/verify/ast_contract.py
 
+
 @dataclass
 class ContractResult:
-    structure_ok: bool          # 标题层级/列表嵌套/表格行列 完全保留
-    math_ok: bool               # 公式 AST 规范化后一致
-    placeholder_ok: bool        # 引用/邮箱/URL 占位符 100% 保留
-    completeness_ok: bool       # 句级覆盖率 ≥ 99%
+    structure_ok: bool  # 标题层级/列表嵌套/表格行列 完全保留
+    math_ok: bool  # 公式 AST 规范化后一致
+    placeholder_ok: bool  # 引用/邮箱/URL 占位符 100% 保留
+    completeness_ok: bool  # 句级覆盖率 ≥ 99%
     details: dict
 
 
@@ -325,6 +326,7 @@ def normalize_docling_math(body: str) -> str:
     s = re.sub(r"\s+\}", "}", s)
     return s
 
+
 _OP_RESCUE = re.compile(r"\\(arg|operatorname|mathop|bmod|pmod|limits|displaystyle)\b")
 ```
 
@@ -347,6 +349,7 @@ _OP_RESCUE = re.compile(r"\\(arg|operatorname|mathop|bmod|pmod|limits|displaysty
 
 ```python
 # ubt/render/typst/math_transpiler.py
+
 
 def latex_to_typst(body: str) -> str:
     """LaTeX 数学体 → Typst 数学体。
