@@ -1525,6 +1525,10 @@ export interface components {
             rehearsal: boolean;
             /** Page Scope */
             page_scope?: string | null;
+            /** Agent State */
+            agent_state?: string | null;
+            /** Next Action */
+            next_action?: string | null;
         };
         /**
          * JobSubmitRequest
