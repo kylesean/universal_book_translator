@@ -15,18 +15,11 @@ now pins the timestamp (see :data:`REPRODUCIBLE_TIMESTAMP`).
 
 from __future__ import annotations
 
-import importlib
 import shutil
 import subprocess
 from pathlib import Path
 
 from ubt.core.env import subprocess_env
-
-try:
-    _typst_mod = importlib.import_module("typst")
-    _HAS_TYPST_PY = hasattr(_typst_mod, "compile")
-except Exception:
-    _HAS_TYPST_PY = False
 
 #: The timestamp every compile stamps into the PDF's document info.
 #:
@@ -49,8 +42,6 @@ def resolve_typst_binary(binary: str = "typst") -> str | None:
 
 
 def typst_available(binary: str = "typst") -> bool:
-    if _HAS_TYPST_PY:
-        return True
     return resolve_typst_binary(binary) is not None
 
 
@@ -91,24 +82,8 @@ def typst_compile(
     The compile is pinned to :data:`REPRODUCIBLE_TIMESTAMP` so the produced PDF
     is a function of the Typst source alone. See the module docstring.
     """
-    last_err: str | None = None
-    if _HAS_TYPST_PY:
-        try:
-            typst = importlib.import_module("typst")
-            typst.compile(typ_path, output=pdf_path, creation_timestamp=REPRODUCIBLE_TIMESTAMP)
-            return True, ""
-        except TypeError:
-            # A ``typst-py`` that predates the keyword. Falling through to the
-            # CLI is deliberate: the binding would otherwise hand back a
-            # wall-clock artifact while the CLI path is reproducible.
-            pass
-        except Exception as exc:
-            last_err = str(exc)
-
     resolved = resolve_typst_binary(binary)
     if resolved is None:
-        if last_err is not None:
-            return False, f"Typst compilation failed: {last_err}"
         return False, f"Typst compiler binary '{binary}' not found on PATH"
     # A bundled font set makes the PDF a function of the source alone: the same
     # book renders identically on a workstation and in an Alpine container.
@@ -151,14 +126,6 @@ def typst_compile(
 
 def typst_version(binary: str = "typst") -> str | None:
     """Return the installed Typst version string, or None if unavailable."""
-    if _HAS_TYPST_PY:
-        try:
-            typst = importlib.import_module("typst")
-            v = getattr(typst, "__version__", None)
-            if v:
-                return f"typst-py {v}"
-        except Exception:
-            pass
     resolved = resolve_typst_binary(binary)
     if resolved is None:
         return None
