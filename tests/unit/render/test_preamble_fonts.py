@@ -31,12 +31,48 @@ def test_default_stack_is_unchanged_for_zh() -> None:
     language stack leads with the real CJK face so Chinese text does not
     fall through to the Latin serif, which is the point of the wiring.
     English still resolves Latin-first.
+
+    The assertion is about *shape*, not about a specific family name: which
+    Latin face survives is whatever the host (or the bundled set) provides, and
+    a test that pinned ``Liberation Serif`` passed only on machines where that
+    face was installed. What must hold everywhere is that an English preamble
+    never leads with a CJK face — the CJK-first ordering exists for Chinese.
     """
     source = TypstDocumentRenderer().preamble("zh")
     assert '#set text(font: ("Noto Serif CJK SC",' in source
     en = TypstDocumentRenderer().preamble("en")
     assert en.startswith("#set page(")
-    assert '"Liberation Serif"' in en
+    assert "CJK" not in en.split("#set text(font: ")[1].split(")")[0]
+
+
+def test_the_latin_default_names_a_face_the_bundled_set_carries() -> None:
+    """A Latin target must be able to isolate onto a face it actually names.
+
+    ``can_isolate`` seals system fonts for every Latin target. If the configured
+    Latin stack names only host faces, the sealed compiler cannot resolve any of
+    them and falls through to Typst's built-in Libertinus — while the quality
+    report still prints the host face it was asked for. The stack therefore has
+    to include the bundled Latin family, and that family has to be the one the
+    set declares.
+
+    This is deterministic: it reads the configured data, not the host's fonts.
+    """
+    from ubt.core.language_profile import resolve_font_config
+    from ubt.render.typst.fonts import BUNDLED_FONTS
+
+    bundled_latin = {
+        face.family
+        for face in BUNDLED_FONTS
+        if "latin" in face.scripts and "cjk" not in face.scripts
+    }
+    assert bundled_latin, "the set must ship at least one Latin face"
+
+    for lang in ("en", "fr", "de", "es", "it", "pt", "nl"):
+        configured = set(resolve_font_config(lang).typst_fonts)
+        assert configured & bundled_latin, (
+            f"{lang} resolves to {sorted(configured)}, none of which the bundled set carries; "
+            f"an isolated render would silently use Typst's builtin instead"
+        )
 
 
 def test_a_supplied_font_stack_leads_the_body() -> None:

@@ -222,13 +222,34 @@ def test_isolation_is_decided_per_target_script(
     monkeypatch.setenv("UBT_FONT_DIR", str(tmp_path))
 
     # The pan-CJK faces carry every CJK script (kana 96.9%, hangul 100%),
-    # and Arabic/Hebrew ship their own small files, so all of these render
-    # reproducibly from the set alone.
-    for lang in ("zh", "zh-CN", "zh-TW", "ja", "ko", "ar", "he", "en", "fr"):
+    # Arabic/Hebrew ship their own small files, and the Latin face measures
+    # 100% of assigned Cyrillic (through ext-B) and Greek — so all of these
+    # render reproducibly from the set alone.
+    for lang in (
+        "zh",
+        "zh-CN",
+        "zh-TW",
+        "ja",
+        "ko",
+        "ar",
+        "he",
+        "en",
+        "fr",
+        "ru",
+        "uk",
+        "bg",
+        "el",
+        "th",
+        "hi",
+        "mr",
+        "ne",
+    ):
         assert can_isolate(lang), f"{lang} should be reproducible from the set alone"
-    # Scripts the set still does not carry: Cyrillic text beyond Latin-1,
-    # Thai and the Indic scripts need faces this set does not bundle.
-    for lang in ("ru", "th", "hi"):
+    # Scripts with no bundled face. These are *different* Unicode blocks from
+    # the ones above, not variants: a Devanagari face renders no Bengali, and
+    # Thai is not Lao. They keep system fonts, which is the middle state — a
+    # useful --font-path, but not a sealed render.
+    for lang in ("bn", "pa", "gu", "my", "lo"):
         assert not can_isolate(lang), f"{lang} must keep system fonts"
 
 
@@ -268,11 +289,56 @@ def test_compile_flags_follow_the_target(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert "--ignore-system-fonts" in ar_args
 
     # Set present, target not covered -> path only, system fonts stay.
-    # (Cyrillic/Thai/Indic have no bundled face; sealing them off would ship
+    # (Bengali/Lao/Myanmar have no bundled face; sealing them off would ship
     # tofu, so the intermediate state is the correct one.)
-    th_args = _font_args("th")
-    assert "--font-path" in th_args
-    assert "--ignore-system-fonts" not in th_args
+    bn_args = _font_args("bn")
+    assert "--font-path" in bn_args
+    assert "--ignore-system-fonts" not in bn_args
+
+
+def test_isolation_never_claims_a_script_the_set_lacks() -> None:
+    """Every isolatable language's script must be declared by a real face.
+
+    ``can_isolate`` seals system fonts, so a wrong entry here is not a cosmetic
+    labelling bug — it is the difference between a typeset book and a PDF whose
+    every page is tofu. Bengali, Gurmukhi, Gujarati and Myanmar were previously
+    mapped to ``devanagari``, and Lao to ``thai``, which meant a Bengali book
+    asked for "Noto Serif Devanagari": a face that carries none of its
+    characters.
+
+    The check is structural: the token a language maps to must be one that some
+    face in the set actually declares.
+    """
+    from ubt.render.typst.fonts import _LANG_SCRIPT_TOKEN, bundled_script_coverage
+
+    coverage = bundled_script_coverage()
+    for lang, token in _LANG_SCRIPT_TOKEN.items():
+        assert token in coverage, f"{lang} claims script {token!r}, which no bundled face declares"
+
+
+def test_a_script_alias_is_never_used_for_a_different_script() -> None:
+    """Each language maps to its own script, not to a neighbouring one.
+
+    The script fallback table decides which face a target asks for. Aliasing a
+    language to another script's fallback names a face that cannot render it,
+    which is strictly worse than the Latin default: DejaVu at least draws the
+    digits and punctuation.
+    """
+    from ubt.core.language_profile import _SCRIPT_OF_LANGUAGE, resolve_font_config
+
+    # Languages the engine accepts whose script is neither Devanagari nor Thai.
+    not_devanagari = {"bn", "pa", "gu", "my"}
+    not_thai = {"lo"}
+    for lang in not_devanagari:
+        face = resolve_font_config(lang).typst_fonts[0]
+        assert "Devanagari" not in face, f"{lang} is not a Devanagari language but asks for {face}"
+    for lang in not_thai:
+        face = resolve_font_config(lang).typst_fonts[0]
+        assert "Thai" not in face, f"{lang} is Lao, not Thai, but asks for {face}"
+
+    # And the map must actually route them somewhere, not silently drop them.
+    for lang in not_devanagari | not_thai:
+        assert lang in _SCRIPT_OF_LANGUAGE, f"{lang} has no script mapping at all"
 
 
 def test_the_cjk_subset_spec_includes_kana_and_hangul() -> None:

@@ -813,7 +813,19 @@ class FontConfig:
     table_prefix: str = "Table"
 
 
-_DEFAULT_LATIN_FONTS: tuple[str, ...] = ("Liberation Serif", "Linux Libertine", "DejaVu Serif")
+#: The Latin default. ``Noto Serif`` sits last so an ordinary run still
+#: typesets with whatever the host has (Liberation on Linux, Times on macOS) —
+#: but it must *be* in the list, because those are host faces and the bundled
+#: set has a Latin face of its own. Without it, a Latin target that isolates
+#: reports a stack of families the isolated compiler cannot see, and the PDF
+#: silently ships in Typst's built-in Libertinus instead: the quality report
+#: would name a face the page was never set in.
+_DEFAULT_LATIN_FONTS: tuple[str, ...] = (
+    "Liberation Serif",
+    "Linux Libertine",
+    "DejaVu Serif",
+    "Noto Serif",
+)
 
 _FONT_CONFIGS: dict[str, FontConfig] = {
     "zh": FontConfig(
@@ -979,22 +991,51 @@ _SCRIPT_FALLBACKS: dict[str, FontConfig] = {
     "latin-ext": FontConfig(
         typst_fonts=("Liberation Serif", "DejaVu Serif", "Noto Serif"),
     ),
+    # The remaining Indic scripts plus Lao and Myanmar. These were previously
+    # aliased to `devanagari` and `thai`, which named a face that cannot render
+    # them: a Bengali target asked for "Noto Serif Devanagari", so even a
+    # machine with Noto Serif Bengali installed typeset Bengali with a
+    # Devanagari face — tofu for every character. One entry per script, naming
+    # the face that actually carries it. None of these is in the bundled set,
+    # so they stay non-isolated (see `_LANG_SCRIPT_TOKEN`).
+    "bengali": FontConfig(
+        typst_fonts=("Noto Serif Bengali", "Noto Sans Bengali", "DejaVu Sans"),
+    ),
+    "gurmukhi": FontConfig(
+        typst_fonts=("Noto Serif Gurmukhi", "Noto Sans Gurmukhi", "DejaVu Sans"),
+    ),
+    "gujarati": FontConfig(
+        typst_fonts=("Noto Serif Gujarati", "Noto Sans Gujarati", "DejaVu Sans"),
+    ),
+    "myanmar": FontConfig(
+        typst_fonts=("Noto Serif Myanmar", "Noto Sans Myanmar", "DejaVu Sans"),
+    ),
+    "lao": FontConfig(
+        typst_fonts=("Noto Serif Lao", "Noto Sans Lao", "DejaVu Sans"),
+    ),
 }
 
 #: Language -> fallback script family. Covers the languages the engine accepts
 #: but ``_FONT_CONFIGS`` does not name; anything absent still reaches the Latin
 #: default, and :func:`resolve_font_config` reports that as unconfigured.
+#:
+#: **One entry per Unicode script, never "close enough".** Bengali, Gurmukhi,
+#: Gujarati and Myanmar are distinct blocks that a Devanagari face does not
+#: carry, and Lao is not Thai: aliasing them produced a stack whose every
+#: character was tofu, which is worse than the Latin default it replaced
+#: (DejaVu at least renders the digits and punctuation).
 _SCRIPT_OF_LANGUAGE: dict[str, str] = {
     "el": "greek",
     "hi": "devanagari",
     "mr": "devanagari",
     "ne": "devanagari",
-    "bn": "devanagari",
-    "pa": "devanagari",
-    "gu": "devanagari",
+    "bn": "bengali",
+    "as": "bengali",
+    "pa": "gurmukhi",
+    "gu": "gujarati",
     "th": "thai",
-    "lo": "thai",
-    "my": "devanagari",
+    "lo": "lao",
+    "my": "myanmar",
     "vi": "latin-ext",
     "pl": "latin-ext",
     "cs": "latin-ext",

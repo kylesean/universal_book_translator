@@ -105,7 +105,14 @@ BUNDLED_FONTS: tuple[BundledFont, ...] = (
         family="Noto Serif",
         sha256="19e72cd8d595fae5bd74a5206f5d938512e1183d4fed7abb1ec1be1d7efa5f88",
         license="OFL-1.1",
-        scripts=("latin", "latin-ext"),
+        # Measured on the fetched file, not assumed: 100% of assigned Latin,
+        # Latin-1, Cyrillic (incl. ext-B, so Ukrainian/Bulgarian/Serbian
+        # letters are present) and Greek-extended; the Greek block's only gaps
+        # are the 14 Coptic letters that Unicode files inside it. So the
+        # Cyrillic and Greek targets need no separate face — they were simply
+        # not declared as covered, which kept them out of the reproducible
+        # path for no reason.
+        scripts=("latin", "latin-ext", "cyrillic", "greek"),
     ),
     # Regional CJK cuts. The SC face carries every CJK script's *characters*,
     # but shared ideographs are drawn differently per region (直, 骨, 角 …), so
@@ -144,6 +151,27 @@ BUNDLED_FONTS: tuple[BundledFont, ...] = (
         sha256="dfd5a6aefe97a99f68fe43388342913d50bb9fbf6d3afc4d2c7725661bc4a2b1",
         license="OFL-1.1",
         scripts=("hebrew",),
+    ),
+    # Thai and Devanagari. Neither block is in the Latin face (measured 0%), and
+    # neither can be served by a CJK face, so each needs its own file. Both are
+    # small because neither script has an ideograph block to carry — 88 KB and
+    # 312 KB, versus 9 MB per CJK face. Taken from the ``full`` variant of the
+    # upstream release: the ``hinted``/``unhinted`` builds are subset-per-script
+    # and carry 2/95 and 39/95 ASCII respectively, which would typeset embedded
+    # Latin and digits as tofu the moment isolation is on.
+    BundledFont(
+        filename="NotoSerifThai-Regular.ttf",
+        family="Noto Serif Thai",
+        sha256="428afb46af2c025ed2b9fe39bda2fffce9475fa5d2e7ae7911771633014b91b0",
+        license="OFL-1.1",
+        scripts=("thai",),
+    ),
+    BundledFont(
+        filename="NotoSerifDevanagari-Regular.ttf",
+        family="Noto Serif Devanagari",
+        sha256="e3aafe3baf7d8601b2c895fd10ee74ad6b108dad0f7617c3211f6fc7d7d2aada",
+        license="OFL-1.1",
+        scripts=("devanagari",),
     ),
 )
 
@@ -244,6 +272,27 @@ _LANG_SCRIPT_TOKEN: dict[str, str] = {
     "pl": "latin-ext",
     "cs": "latin-ext",
     "tr": "latin-ext",
+    # Cyrillic and Greek need no face of their own: the bundled Noto Serif
+    # carries 100% of assigned Cyrillic (through ext-B) and Greek. They were
+    # absent from this table, which kept them out of the reproducible path for
+    # no reason other than an unmeasured assumption.
+    "ru": "cyrillic",
+    "uk": "cyrillic",
+    "bg": "cyrillic",
+    "sr": "cyrillic",
+    "mk": "cyrillic",
+    "be": "cyrillic",
+    "kk": "cyrillic",
+    "el": "greek",
+    "th": "thai",
+    # Devanagari only. Bengali, Gurmukhi, Gujarati and Myanmar are *different
+    # scripts* with their own blocks and cannot be set from a Devanagari face;
+    # Lao is not Thai. Claiming otherwise here would isolate a Bengali book
+    # against a Devanagari face and ship a page of tofu, which is exactly the
+    # failure isolation must never introduce.
+    "hi": "devanagari",
+    "mr": "devanagari",
+    "ne": "devanagari",
 }
 
 

@@ -83,6 +83,24 @@ NOTO_SERIF_LATIN_URL = (
     "https://github.com/notofonts/latin-greek-cyrillic/releases/download/"
     "NotoSerif-v2.015/NotoSerif-v2.015.zip"
 )
+#: Thai and Devanagari. Every Noto release of these scripts ships four builds of
+#: the same family: ``full`` (the complete repertoire, ASCII included),
+#: ``googlefonts`` (identical to full), ``hinted`` and ``unhinted`` (subset to
+#: the script, carrying 2/95 and 39/95 ASCII). Only ``full`` can be isolated:
+#: with system fonts sealed, the hinted build typesets every Latin word and
+#: digit as tofu. The build is named in ``NOTO_VARIANT`` rather than globbed,
+#: for the same reason the CJK weight is named.
+NOTO_SERIF_THAI_URL = (
+    "https://github.com/notofonts/thai/releases/download/"
+    "NotoSerifThai-v2.002/NotoSerifThai-v2.002.zip"
+)
+NOTO_SERIF_DEVANAGARI_URL = (
+    "https://github.com/notofonts/devanagari/releases/download/"
+    "NotoSerifDevanagari-v2.006/NotoSerifDevanagari-v2.006.zip"
+)
+#: Which build of a script release to take. See above; ``hinted``/``unhinted``
+#: are deliberately unreachable.
+NOTO_VARIANT = "full"
 
 #: Coverage for the subset: every CJK unified ideograph plus the punctuation a
 #: book actually uses. Cutting to GB2312 (7,445 chars) is smaller but ships
@@ -225,6 +243,23 @@ def _obtain(filename: str, dest: Path) -> None:
             if not candidates:
                 raise SystemExit("NotoSerifHebrew-Regular.ttf not found in the release")
             shutil.copyfile(candidates[0], dest)
+        elif filename.startswith("NotoSerifThai") or filename.startswith("NotoSerifDevanagari"):
+            # Named before the generic `NotoSerif-Regular` branch, which would
+            # otherwise never match these anyway — but keeping the pattern
+            # explicit means a future face is added by name, not by luck.
+            is_thai = filename.startswith("NotoSerifThai")
+            url = NOTO_SERIF_THAI_URL if is_thai else NOTO_SERIF_DEVANAGARI_URL
+            archive = work / ("thai.zip" if is_thai else "deva.zip")
+            _download(url, archive)
+            shutil.unpack_archive(str(archive), str(work))
+            # Explicit path: the archive holds `full`, `googlefonts`, `hinted`
+            # and `unhinted` copies of the same filename, and `rglob` order is
+            # not a preference. Only `full` carries ASCII, so picking another
+            # build silently ships tofu for every digit under isolation.
+            found = sorted(work.rglob(f"{NOTO_VARIANT}/ttf/{filename}"))
+            if not found:
+                raise SystemExit(f"{filename} not found under {NOTO_VARIANT}/ttf in the release")
+            shutil.copyfile(found[0], dest)
         elif filename.startswith("NotoSerif-Regular"):
             archive = work / "noto-serif-latin.zip"
             _download(NOTO_SERIF_LATIN_URL, archive)
