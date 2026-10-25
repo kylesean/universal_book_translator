@@ -953,11 +953,28 @@ def test_the_wizard_shows_total_tokens_not_just_the_source_size() -> None:
     assert "cost.prompt_tokens + assessment.cost.completion_tokens" in source, (
         "the token row does not sum prompt+completion"
     )
-    # And the label must admit it is an estimate: no character heuristic can be
-    # exact across model families (the same English sentence is 29 tokens to
-    # XLM-R and 19 to DeepSeek).
+    # And the panel must admit the figure is an estimate: no character heuristic
+    # can be exact across model families (the same English sentence is 29 tokens
+    # to XLM-R and 19 to DeepSeek).
+    #
+    # Which string carries that admission is a copy decision, not a contract.
+    # ``estTokens`` once read "（估算）"; it now reads "（草稿阶段）" because the
+    # breakdown also has to say the figure excludes the repair fan-out and QE
+    # judging, and the disclaimer moved to ``tokensEstimateNote`` beside it. Pin
+    # the *pair* — a label and a note that together disclaim measurement — so
+    # rewording either one does not fail a test whose subject is the arithmetic.
     zh = (_EN_TS.parent / "zh.ts").read_text(encoding="utf-8")
-    assert "估算" in re.search(r"estTokens:\s*'([^']*)'", zh).group(1)  # type: ignore[union-attr]
+    label = re.search(r"estTokens:\s*'([^']*)'", zh)
+    note = re.search(r"tokensEstimateNote:\s*\n?\s*'([^']*)'", zh)
+    assert label and note, "zh.ts lost the token label or its estimate note"
+    combined = label.group(1) + note.group(1)
+    assert "估算" in combined, (
+        "nothing in the token panel says the figure is an estimate — a bare "
+        f"number reads as a measurement: {label.group(1)!r} / {note.group(1)!r}"
+    )
+    assert "非真实分词器" in note.group(1), (
+        "the note must still say the count is a character heuristic, not a tokenizer"
+    )
 
 
 def test_the_budget_control_has_no_zero_means_unlimited_trap() -> None:
