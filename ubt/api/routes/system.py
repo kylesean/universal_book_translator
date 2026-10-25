@@ -13,6 +13,8 @@ from ubt import __version__
 from ubt.api.models import (
     ProviderDetailResponse,
     ProviderEditRequest,
+    QESettingsRequest,
+    QESettingsResponse,
     RuntimeConfigResponse,
     SystemInfoResponse,
 )
@@ -135,6 +137,65 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
                 ),
             )
         )
+
+    @api_app.get(
+        "/system/qe-config",
+        response_model=QESettingsResponse,
+        tags=["System"],
+    )
+    async def system_qe_config() -> QESettingsResponse:
+        """The quality-estimation gate actually in force.
+
+        ``qe_engine`` and ``qe_judge_enabled`` are two switches, and only the
+        second one scores anything — ``qe_engine = "tiered"`` on its own is a
+        no-op the pipeline merely warns about. Reporting them separately is what
+        lets the console say which one is off instead of a bare "QE not measured".
+        """
+        from ubt.api.qe_settings import describe_qe_settings
+
+        return QESettingsResponse(**describe_qe_settings(live_config()))
+
+    @api_app.put(
+        "/system/qe-config",
+        response_model=QESettingsResponse,
+        tags=["System"],
+    )
+    async def put_qe_config(
+        request: QESettingsRequest,
+        x_api_key: str | None = Header(default=None),
+        ubt_session: str | None = Cookie(default=None),
+    ) -> QESettingsResponse:
+        """Write the QE gate into ``ubt.toml [defaults]``.
+
+        The engine re-reads the file per job, so the change applies to the next
+        submitted job without a restart — which is the only useful behaviour here,
+        since a finished job is never rescored.
+
+        **The pair is written together by the console.** Selecting "tiered" sends
+        both ``qe_engine = "tiered"`` and ``qe_judge_enabled = true``; selecting
+        "heuristic" sends both back. Exposing the keys independently would let an
+        operator save the documented-but-useless ``tiered`` + judge-off state.
+
+        An explicit gate check even though the middleware already ran: this route
+        writes a file the engine then trusts, so it must not inherit a future
+        relaxation of the global filter (same rule as ``put_provider``).
+        """
+        from ubt.api.provider_editor import ProviderEditError, update_qe_settings
+        from ubt.api.qe_settings import describe_qe_settings
+
+        verify_api_key(x_api_key, ubt_session, _config=app_config)
+        # ``exclude_unset``, not ``exclude_none``: an omitted key means "leave it
+        # alone", while an explicit ``null`` clears it back to "not declared".
+        changes = request.model_dump(exclude_unset=True)
+        try:
+            await asyncio.to_thread(update_qe_settings, changes)
+        except ProviderEditError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        # Make the save visible to the very next request: the mtime check in
+        # ConfigSource would catch it, but not within the same clock tick.
+        if scope.source is not None:
+            scope.source.invalidate()
+        return QESettingsResponse(**describe_qe_settings(live_config()))
 
     @api_app.get(
         "/system/providers/{name}",

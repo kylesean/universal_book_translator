@@ -1,7 +1,7 @@
 """Progress must count translation work, not blocks the skip rule finished.
 
 On a real 26-page PDF (259 blocks) the skip rule marked 154 of them
-``mtqe_passed`` without translating anything — images, list markers and short
+``mtqe_passed`` without translating anything — images, list entries and short
 headings. The old query counted every row on both sides of the fraction, so
 skipped blocks were "done" by construction:
 

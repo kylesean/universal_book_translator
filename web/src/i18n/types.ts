@@ -401,6 +401,10 @@ export interface TranslationDictionary {
     auditDraftModel: string
     auditRepairModel: string
     auditQeEngine: string
+    auditQeEngineRuleChecks: string
+    auditQeEngineModelScoring: string
+    auditQeEngineRehearsal: string
+    auditQeEngineUnknown: string
     auditRetries: string
     auditCacheHit: string
     auditTypst: string
@@ -509,6 +513,41 @@ export interface TranslationDictionary {
     save: string
     saving: string
     savedHint: string
+    qeTitle: string
+    qeHelp: string
+    qeMeasured: string
+    qeNotMeasured: string
+    qeNotMeasuredHelp: string
+    qeEngine: string
+    qeEngineHeuristic: string
+    qeEngineTiered: string
+    qeEngineHelp: string
+    qeJudge: string
+    qeJudgeOn: string
+    qeJudgeOff: string
+    qeJudgeProvider: string
+    qeJudgeProviderInherit: string
+    qeJudgeModel: string
+    qeJudgeModelInherit: string
+    qeThreshold: string
+    qeThresholdHelp: string
+    qeThresholdInvalid: string
+    qePassSample: string
+    qePassSampleHelp: string
+    qePassSampleInvalid: string
+    qePassSampleZero: string
+    qeSentences: string
+    qeSentencesHelp: string
+    qeInconsistent: string
+    qeEnvOverride: string
+    qeConfigSource: string
+    qeEdit: string
+    qeSave: string
+    qeSaving: string
+    qeSaveFailed: string
+    qeSaved: string
+    qeCancel: string
+    qeLoadFailed: string
     capabilityTitle: string
     capabilityHelp: string
     capabilitySystem: string

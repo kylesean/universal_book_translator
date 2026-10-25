@@ -48,6 +48,26 @@ export UBT_QE_JUDGE_PASS_SAMPLE=0.15
 export UBT_QE_JUDGE_MODEL=some-capable-model
 ```
 
+## From the console
+
+`ubt console` → **System Doctor** → **Quality estimation (QE)** writes the same
+`[defaults]` keys, and is the only surface that reports whether the current
+configuration can produce a score at all — before it existed, a finished job
+only said its score was not measured.
+
+Two things it does deliberately:
+
+* It writes `qe_engine` and `qe_judge_enabled` **together**. The label alone
+  selects no judge: the pipeline only warns about `qe_engine = "tiered"` without
+  `qe_judge_enabled = true`, so exposing them as two switches would let you save
+  a configuration that reads "tiered" and scores nothing.
+* It warns when `qe_judge_pass_sample` is `0`. Only blocks the deterministic
+  checks call ambiguous then reach the judge, so a book where every block passes
+  still reports no average.
+
+The judge's endpoint is still a `[providers.<name>]` block, which the same page
+edits; the card's provider select names one rather than repeating an endpoint.
+
 Three things about this are easy to get wrong, and each one was measured.
 
 ### 1. The judge needs a capable model

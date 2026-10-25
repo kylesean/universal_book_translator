@@ -123,15 +123,32 @@ export function MissionControl() {
   // Every write goes through here so the in-memory history can never drift from
   // what the panel shows. Two sinks, one update: state for this render, the map
   // for the next mount.
+  //
+  // Consecutive duplicates are dropped. The stream emits a frame per engine
+  // tick, and between two engine messages most frames carry the same counters
+  // and therefore the same rendered line: a measured run showed the identical
+  // "118/148 blocks (+49 preserved) · QE: rules only (no score)" tail repeated
+  // dozens of times, pushing the actual messages off the 400-line buffer. Only *adjacent*
+  // repeats are collapsed — a line that reappears after a different one is real
+  // history, and comparing against the whole buffer would hide it.
   // ``currentJobId`` is a dependency rather than a ref: the SSE effect below
   // re-subscribes when the job changes anyway, so a stable identity buys
   // nothing, and reading a ref during render is a real hydration hazard.
   const appendLog = useCallback(
     (entries: LogEntry[]) => {
       setLogs((prev) => {
-        const next = [...prev, ...entries].slice(-LOG_HISTORY_MAX_LINES)
-        rememberLogs(currentJobId, next)
-        return next
+        const next = [...prev]
+        for (const entry of entries) {
+          const last = next[next.length - 1]
+          if (last && last.text === entry.text && last.level === entry.level) continue
+          next.push(entry)
+        }
+        // Nothing new: return the same array so React skips the re-render and
+        // the bounded buffer keeps its identity.
+        if (next.length === prev.length) return prev
+        const bounded = next.slice(-LOG_HISTORY_MAX_LINES)
+        rememberLogs(currentJobId, bounded)
+        return bounded
       })
     },
     [currentJobId]
@@ -153,10 +170,10 @@ export function MissionControl() {
   const [totalBlocks, setTotalBlocks] = useState<number>(0)
   const [costUsd, setCostUsd] = useState<number>(0)
   const [avgQe, setAvgQe] = useState<number>(0)
-  // Blocks the skip rule finished without translating them (images, list
-  // markers, short headings). They are excluded from total/completed so the
-  // percentage reflects translation work, and reported separately so the panel
-  // does not appear to be describing a shorter book than the source.
+  // Blocks the policy finished without translating them — images, bibliography
+  // entries, bylines, short headings. They are excluded from total/completed so
+  // the percentage reflects translation work, and reported separately so the
+  // panel does not appear to be describing a shorter book than the source.
   const [skippedBlocks, setSkippedBlocks] = useState<number>(0)
   // Blocks that ended in a failure. The API always carried this; the panel never
   // rendered it, so a job with 15 failed blocks read as a clean 100%.
@@ -411,10 +428,10 @@ export function MissionControl() {
         const qePart =
           (frame.current_avg_qe ?? 0) > 0
             ? `QE ${(frame.current_avg_qe ?? 0).toFixed(3)}`
-            : // "not measured" is a fact about the QE engine (heuristic runs score
+            : // "no score" is a fact about the QE mode (rule checks only score
               // nothing), not a failure — say which, so the word does not read as
               // an error on an otherwise clean run.
-              'QE n/a (heuristic)'
+              'QE: rules only (no score)'
         // A terminal frame now carries its own counters; when it does not, keep
         // the last known ones instead of printing 0/0.
         const done = Math.max(
@@ -422,7 +439,10 @@ export function MissionControl() {
           frame.drafted_blocks ?? draftedRef.current
         )
         const total = frame.total_blocks ?? totalRef.current
-        const skippedPart = skippedRef.current > 0 ? ` (+${skippedRef.current} skipped)` : ''
+        // "preserved", not "skipped": most of these are bibliography entries the
+        // policy keeps verbatim for retrievability, not list markers nobody
+        // needed. The panel's own label says the same thing.
+        const skippedPart = skippedRef.current > 0 ? ` (+${skippedRef.current} preserved)` : ''
         const failPart = (frame.failed_blocks ?? failedRef.current) > 0
           ? ` · ${frame.failed_blocks ?? failedRef.current} failed`
           : ''

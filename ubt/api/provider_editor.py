@@ -63,6 +63,7 @@ from ubt.core.config import (
 from ubt.core.config import (
     VALID_REASONING_DIALECTS as _VALID_DIALECTS,
 )
+from ubt.core.config import ProviderConfig
 from ubt.core.exceptions import UBTError
 from ubt.core.providers import (
     PROTOCOL_ALIASES,
@@ -73,6 +74,7 @@ from ubt.core.providers import (
     find_config_file,
     load_defaults_config,
 )
+from ubt.core.qe.settings import QE_WRITABLE_FIELDS
 from ubt.core.router.pricing import endpoint_is_local
 
 
@@ -556,6 +558,67 @@ def default_provider_name() -> str | None:
     except Exception:  # a malformed [defaults] is reported by the doctor, not here
         return None
     return str(declared) if declared else None
+
+
+def update_qe_settings(changes: dict[str, Any]) -> None:
+    """Write the QE gate into ``[defaults]``; omitted keys are left alone.
+
+    Validated through :class:`ubt.core.config.ProviderConfig` — the very model
+    ``load_defaults_block`` applies on the next read — so a value the engine would
+    reject at job start is rejected here instead, while the operator is still
+    looking at the form that produced it. ``None`` removes a key, which restores
+    "not declared" (a different state from an explicit ``false``, and the reason
+    the request model uses ``exclude_unset`` rather than ``exclude_none``).
+
+    No credential is writable here: the QE keys name a provider *block*, and that
+    block owns its own key through the provider editor.
+    """
+    unknown = sorted(set(changes) - set(QE_WRITABLE_FIELDS))
+    if unknown:
+        raise ProviderEditError(
+            f"field(s) {', '.join(unknown)} cannot be set from the console; "
+            f"writable: {', '.join(QE_WRITABLE_FIELDS)}"
+        )
+    cleared = {field for field, value in changes.items() if value is None}
+    supplied = {field: value for field, value in changes.items() if value is not None}
+    try:
+        validated = ProviderConfig.model_validate(supplied)
+    except ValidationError as exc:
+        raise ProviderEditError(f"invalid QE setting: {exc}") from exc
+    coerced = validated.model_dump(exclude_unset=True)
+    if not coerced and not cleared:
+        raise ProviderEditError("no QE setting was supplied")
+
+    # A judge provider that names nothing is the failure `set_default_provider`
+    # refuses for `[defaults] provider`, with the same consequence: every judge
+    # call raises and the run silently keeps its deterministic verdict. The
+    # console's select only offers real blocks; this guards the direct API caller.
+    provider = coerced.get("qe_judge_provider")
+    if provider:
+        from ubt.core.providers import list_providers
+
+        try:
+            known = set(list_providers())
+        except Exception:  # noqa: BLE001 - a broken config is the doctor's finding
+            known = set()
+        if known and str(provider) not in known:
+            raise ProviderEditError(
+                f"{provider!r} is not a declared provider or shipped protocol; "
+                f"declare it first (known: {', '.join(sorted(known))})"
+            )
+
+    path = _config_path()
+    document = _load_document(path)
+    defaults = document.get("defaults")
+    if defaults is None:
+        defaults = tomlkit.table()
+        document["defaults"] = defaults
+    for field, value in coerced.items():
+        defaults[field] = tomlkit.item(value)
+    for field in cleared:
+        defaults.pop(field, None)
+    atomic_write_text(path, tomlkit.dumps(document))
+    _tighten_permissions(path)
 
 
 def read_provider(name: str) -> dict[str, Any]:

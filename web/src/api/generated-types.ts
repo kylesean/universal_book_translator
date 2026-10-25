@@ -80,6 +80,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/qe-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * System Qe Config
+         * @description The quality-estimation gate actually in force.
+         *
+         *     ``qe_engine`` and ``qe_judge_enabled`` are two switches, and only the
+         *     second one scores anything — ``qe_engine = "tiered"`` on its own is a
+         *     no-op the pipeline merely warns about. Reporting them separately is what
+         *     lets the console say which one is off instead of a bare "QE not measured".
+         */
+        get: operations["system_qe_config_system_qe_config_get"];
+        /**
+         * Put Qe Config
+         * @description Write the QE gate into ``ubt.toml [defaults]``.
+         *
+         *     The engine re-reads the file per job, so the change applies to the next
+         *     submitted job without a restart — which is the only useful behaviour here,
+         *     since a finished job is never rescored.
+         *
+         *     **The pair is written together by the console.** Selecting "tiered" sends
+         *     both ``qe_engine = "tiered"`` and ``qe_judge_enabled = true``; selecting
+         *     "heuristic" sends both back. Exposing the keys independently would let an
+         *     operator save the documented-but-useless ``tiered`` + judge-off state.
+         *
+         *     An explicit gate check even though the middleware already ran: this route
+         *     writes a file the engine then trusts, so it must not inherit a future
+         *     relaxation of the global filter (same rule as ``put_provider``).
+         */
+        put: operations["put_qe_config_system_qe_config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/providers/{name}": {
         parameters: {
             query?: never;
@@ -1852,6 +1894,103 @@ export interface components {
             fallback_models?: string[] | null;
         };
         /**
+         * QESettingsRequest
+         * @description One edit of the ``[defaults]`` QE keys.
+         *
+         *     ``extra="forbid"`` so a client sending ``qe_judge_api_key`` gets a 422 naming
+         *     the field rather than a silently ignored key: a judge credential belongs in
+         *     the provider block that owns it, not in this form. Every field is optional; an
+         *     omitted field is left untouched, and an explicit ``null`` removes it.
+         */
+        QESettingsRequest: {
+            /** Qe Engine */
+            qe_engine?: ("heuristic" | "tiered") | null;
+            /** Qe Judge Enabled */
+            qe_judge_enabled?: boolean | null;
+            /** Qe Judge Provider */
+            qe_judge_provider?: string | null;
+            /** Qe Judge Model */
+            qe_judge_model?: string | null;
+            /** Qe Threshold */
+            qe_threshold?: number | null;
+            /** Qe Judge Pass Sample */
+            qe_judge_pass_sample?: number | null;
+            /** Qe Judge Sentences */
+            qe_judge_sentences?: boolean | null;
+        };
+        /**
+         * QESettingsResponse
+         * @description The quality-estimation gate as the engine will run it.
+         *
+         *     ``engine`` and ``judge_enabled`` are reported separately on purpose: the
+         *     pipeline selects the LLM judge on ``judge_enabled`` alone and only warns when
+         *     ``engine`` says ``tiered`` without it, so the two can legitimately disagree in
+         *     a hand-edited file. ``measurable`` is the derived fact the console renders —
+         *     without a judge model, no block is scored and the average-QE fields stay at
+         *     their ``0.0`` sentinel.
+         */
+        QESettingsResponse: {
+            /**
+             * Engine
+             * @description Configured QE engine label (heuristic or tiered)
+             */
+            engine: string;
+            /**
+             * Judge Enabled
+             * @description Whether the LLM judge wrapper is on — the switch that scores anything
+             */
+            judge_enabled: boolean;
+            /**
+             * Judge Provider
+             * @description Provider block that answers judge calls, when not the translator
+             */
+            judge_provider?: string | null;
+            /**
+             * Judge Model
+             * @description Model id the judge will actually call; empty when unset
+             * @default
+             */
+            judge_model: string;
+            /**
+             * Judge Model Explicit
+             * @description The id written in qe_judge_model, without the repair_model or provider-block fallback. The edit form seeds from this: seeding from the resolved id would pin an inherited model on an unrelated save
+             */
+            judge_model_explicit?: string | null;
+            /**
+             * Threshold
+             * @description Pass threshold for the quality gate
+             */
+            threshold: number;
+            /**
+             * Judge Pass Sample
+             * @description Stable fraction of clean passes also sent to the judge
+             * @default 0
+             */
+            judge_pass_sample: number;
+            /**
+             * Judge Sentences
+             * @description Score sentence by sentence instead of per block
+             * @default true
+             */
+            judge_sentences: boolean;
+            /**
+             * Measurable
+             * @description True when a run would produce a measured average QE: the judge is on and it has a model to call
+             */
+            measurable: boolean;
+            /**
+             * Env Overrides
+             * @description Fields whose effective value comes from a UBT_QE_* variable. Editing the file cannot change these, so the form says so instead of reporting a save
+             */
+            env_overrides?: string[];
+            /**
+             * Config Source
+             * @description Where the QE settings live (ubt.toml [defaults] or UBT_QE_*)
+             * @default
+             */
+            config_source: string;
+        };
+        /**
          * RuntimeActiveModel
          * @description The provider and models the engine will actually call, right now.
          */
@@ -2434,6 +2573,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RuntimeConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    system_qe_config_system_qe_config_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QESettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_qe_config_system_qe_config_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QESettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QESettingsResponse"];
                 };
             };
             /** @description Validation Error */

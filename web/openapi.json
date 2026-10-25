@@ -279,6 +279,146 @@
         }
       }
     },
+    "/system/qe-config": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "System Qe Config",
+        "description": "The quality-estimation gate actually in force.\n\n``qe_engine`` and ``qe_judge_enabled`` are two switches, and only the\nsecond one scores anything \u2014 ``qe_engine = \"tiered\"`` on its own is a\nno-op the pipeline merely warns about. Reporting them separately is what\nlets the console say which one is off instead of a bare \"QE not measured\".",
+        "operationId": "system_qe_config_system_qe_config_get",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QESettingsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Put Qe Config",
+        "description": "Write the QE gate into ``ubt.toml [defaults]``.\n\nThe engine re-reads the file per job, so the change applies to the next\nsubmitted job without a restart \u2014 which is the only useful behaviour here,\nsince a finished job is never rescored.\n\n**The pair is written together by the console.** Selecting \"tiered\" sends\nboth ``qe_engine = \"tiered\"`` and ``qe_judge_enabled = true``; selecting\n\"heuristic\" sends both back. Exposing the keys independently would let an\noperator save the documented-but-useless ``tiered`` + judge-off state.\n\nAn explicit gate check even though the middleware already ran: this route\nwrites a file the engine then trusts, so it must not inherit a future\nrelaxation of the global filter (same rule as ``put_provider``).",
+        "operationId": "put_qe_config_system_qe_config_put",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QESettingsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QESettingsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/system/providers/{name}": {
       "get": {
         "tags": [
@@ -5743,6 +5883,188 @@
         "type": "object",
         "title": "ProviderEditRequest",
         "description": "One provider block edit from the console.\n\n``extra=\"forbid\"`` so a client that sends a credential gets a 422 naming the\nfield instead of a silently ignored key. Every field is optional: an edit\nsubmits only what changed, and an omitted field is left untouched in the file."
+      },
+      "QESettingsRequest": {
+        "properties": {
+          "qe_engine": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "heuristic",
+                  "tiered"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qe Engine"
+          },
+          "qe_judge_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qe Judge Enabled"
+          },
+          "qe_judge_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qe Judge Provider"
+          },
+          "qe_judge_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qe Judge Model"
+          },
+          "qe_threshold": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qe Threshold"
+          },
+          "qe_judge_pass_sample": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qe Judge Pass Sample"
+          },
+          "qe_judge_sentences": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qe Judge Sentences"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "QESettingsRequest",
+        "description": "One edit of the ``[defaults]`` QE keys.\n\n``extra=\"forbid\"`` so a client sending ``qe_judge_api_key`` gets a 422 naming\nthe field rather than a silently ignored key: a judge credential belongs in\nthe provider block that owns it, not in this form. Every field is optional; an\nomitted field is left untouched, and an explicit ``null`` removes it."
+      },
+      "QESettingsResponse": {
+        "properties": {
+          "engine": {
+            "type": "string",
+            "title": "Engine",
+            "description": "Configured QE engine label (heuristic or tiered)"
+          },
+          "judge_enabled": {
+            "type": "boolean",
+            "title": "Judge Enabled",
+            "description": "Whether the LLM judge wrapper is on \u2014 the switch that scores anything"
+          },
+          "judge_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judge Provider",
+            "description": "Provider block that answers judge calls, when not the translator"
+          },
+          "judge_model": {
+            "type": "string",
+            "title": "Judge Model",
+            "description": "Model id the judge will actually call; empty when unset",
+            "default": ""
+          },
+          "judge_model_explicit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judge Model Explicit",
+            "description": "The id written in qe_judge_model, without the repair_model or provider-block fallback. The edit form seeds from this: seeding from the resolved id would pin an inherited model on an unrelated save"
+          },
+          "threshold": {
+            "type": "number",
+            "title": "Threshold",
+            "description": "Pass threshold for the quality gate"
+          },
+          "judge_pass_sample": {
+            "type": "number",
+            "title": "Judge Pass Sample",
+            "description": "Stable fraction of clean passes also sent to the judge",
+            "default": 0.0
+          },
+          "judge_sentences": {
+            "type": "boolean",
+            "title": "Judge Sentences",
+            "description": "Score sentence by sentence instead of per block",
+            "default": true
+          },
+          "measurable": {
+            "type": "boolean",
+            "title": "Measurable",
+            "description": "True when a run would produce a measured average QE: the judge is on and it has a model to call"
+          },
+          "env_overrides": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Env Overrides",
+            "description": "Fields whose effective value comes from a UBT_QE_* variable. Editing the file cannot change these, so the form says so instead of reporting a save"
+          },
+          "config_source": {
+            "type": "string",
+            "title": "Config Source",
+            "description": "Where the QE settings live (ubt.toml [defaults] or UBT_QE_*)",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "engine",
+          "judge_enabled",
+          "threshold",
+          "measurable"
+        ],
+        "title": "QESettingsResponse",
+        "description": "The quality-estimation gate as the engine will run it.\n\n``engine`` and ``judge_enabled`` are reported separately on purpose: the\npipeline selects the LLM judge on ``judge_enabled`` alone and only warns when\n``engine`` says ``tiered`` without it, so the two can legitimately disagree in\na hand-edited file. ``measurable`` is the derived fact the console renders \u2014\nwithout a judge model, no block is scored and the average-QE fields stay at\ntheir ``0.0`` sentinel."
       },
       "RuntimeActiveModel": {
         "properties": {

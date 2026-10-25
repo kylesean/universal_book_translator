@@ -79,6 +79,40 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Fixed
 
+- **The console can turn quality measurement on.** Every finished job reported
+  "QE not measured (heuristic engine)" and stopped there: the remedy
+  (`qe_engine = "tiered"` **and** `qe_judge_enabled = true` **and** a judge
+  model) lived only in `ubt.toml`, so the status named a fix the reader could not
+  perform on the screen they were on. System Doctor now has a QE card that reads
+  the effective configuration, says whether a run can produce a score at all, and
+  writes `[defaults]` — `PUT /system/qe-config`. It writes `qe_engine` and
+  `qe_judge_enabled` together on purpose: the label alone selects no judge (the
+  pipeline only warns), so two independent switches could save a configuration
+  that reads "tiered" and scores nothing. The judge's endpoint stays a
+  `[providers.<name>]` block, named from the same card; `UBT_QE_*` variables are
+  reported as overrides rather than silently outvoted.
+- **The console describes quality estimation in the operator's terms.** The
+  badge said `QE 未测量（heuristic 引擎）` / "QE not measured (heuristic engine)",
+  which named an internal engine and left the reader to guess whether something
+  broke. It now reads "no quality score (rule checks only)", and the
+  Quality Gate explains what those checks are (structure, glossary, dropped text,
+  garbled characters → pass / warning / blocked), why that yields no averageable
+  score, and that `0.0` in the report is a placeholder rather than a bad result.
+  The remedy points at System Doctor → Quality estimation instead of an
+  environment variable, and the audit table's `qe_score_source` token is rendered
+  as "rule checks" / "model scoring" rather than the raw `heuristic` / `llm_judge`.
+- **Policy-preserved blocks are no longer described as skipped list markers.**
+  The Mission Control counter said "blocks skipped (images, list markers)", but
+  on the reference job 30 of the 49 were bibliography entries kept verbatim for
+  retrievability, 17 were image/formula assets, and the rest were a byline and an
+  arXiv stamp. Both locales and the SSE tail now say "preserved as-is" and name
+  the real population, so the number stops reading as work the engine refused.
+- **The live console log collapses adjacent duplicate frames.** The stream emits
+  a frame per engine tick and the panel appended every one, so the identical
+  `118/148 blocks (+49 preserved) · QE: rules only (no score)` line repeated
+  dozens of times between two engine messages and pushed the real messages out
+  of the 400-line buffer. Only *adjacent* repeats are dropped; a line that
+  reappears after a different one is real history.
 - **Dotted tables of contents no longer warn of geometry that never runs
   slow.** The pre-flight `PATHOLOGICAL_PAGE_RISK` gate read pdfium's raw
   rect-fragment count, and a Typst/LaTeX TOC dots each leader line: the

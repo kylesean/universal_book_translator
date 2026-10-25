@@ -36,6 +36,25 @@ interface Pillar {
   detail: React.ReactNode
 }
 
+/** Plain-language name for the QE engine token the report records. */
+function qeEngineLabel(
+  source: string | null | undefined,
+  t: ReturnType<typeof useI18n>['t']
+): string {
+  switch (source) {
+    case 'heuristic':
+      return t.quality.auditQeEngineRuleChecks
+    case 'llm_judge':
+      return t.quality.auditQeEngineModelScoring
+    case 'tiered':
+      return `${t.quality.auditQeEngineRuleChecks} + ${t.quality.auditQeEngineModelScoring}`
+    case 'mock':
+      return t.quality.auditQeEngineRehearsal
+    default:
+      return t.quality.auditQeEngineUnknown
+  }
+}
+
 /** i18n labels for the deliverable keys the backend serves. */
 function deliverableLabel(key: string, fallback: string, t: ReturnType<typeof useI18n>['t']): string {
   switch (key) {
@@ -519,7 +538,7 @@ export function QualityGateView() {
           {[
             [t.quality.auditDraftModel, config.draft_model ?? '—'],
             [t.quality.auditRepairModel, config.repair_model ?? '—'],
-            [t.quality.auditQeEngine, report?.qe_score_source ?? 'heuristic'],
+            [t.quality.auditQeEngine, qeEngineLabel(report?.qe_score_source, t)],
             [
               t.quality.auditRetries,
               `${repair.direct_pass_count ?? 0}/${repair.round_1_repaired_count ?? 0}/${repair.round_2_repaired_count ?? 0}/${repair.exhausted_count ?? 0}`,
@@ -690,10 +709,10 @@ export function QualityGateView() {
                 </span>
               )}
             </div>
-            {/* "QE not measured" on its own is a dead end: the reader cannot
+            {/* "No quality score" on its own is a dead end: the reader cannot
                 tell whether something broke, what it would take to measure, or
                 whether it matters. Both causes are on the report — the engine
-                that ran and whether the judge was enabled — so state the reason
+                that ran and whether scoring was enabled — so state the reason
                 and the remedy instead of the bare status. */}
             {!score.qe_measured && hasReport && (
               <p className="text-xs text-[var(--ink-secondary)] mt-1.5 leading-relaxed max-w-xl">

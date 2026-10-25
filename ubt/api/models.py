@@ -879,6 +879,82 @@ class RuntimeConfigResponse(BaseModel):
     )
 
 
+class QESettingsResponse(BaseModel):
+    """The quality-estimation gate as the engine will run it.
+
+    ``engine`` and ``judge_enabled`` are reported separately on purpose: the
+    pipeline selects the LLM judge on ``judge_enabled`` alone and only warns when
+    ``engine`` says ``tiered`` without it, so the two can legitimately disagree in
+    a hand-edited file. ``measurable`` is the derived fact the console renders —
+    without a judge model, no block is scored and the average-QE fields stay at
+    their ``0.0`` sentinel.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    engine: str = Field(description="Configured QE engine label (heuristic or tiered)")
+    judge_enabled: bool = Field(
+        description="Whether the LLM judge wrapper is on — the switch that scores anything"
+    )
+    judge_provider: str | None = Field(
+        default=None, description="Provider block that answers judge calls, when not the translator"
+    )
+    judge_model: str = Field(
+        default="", description="Model id the judge will actually call; empty when unset"
+    )
+    judge_model_explicit: str | None = Field(
+        default=None,
+        description=(
+            "The id written in qe_judge_model, without the repair_model or provider-block "
+            "fallback. The edit form seeds from this: seeding from the resolved id would "
+            "pin an inherited model on an unrelated save"
+        ),
+    )
+    threshold: float = Field(description="Pass threshold for the quality gate")
+    judge_pass_sample: float = Field(
+        default=0.0, description="Stable fraction of clean passes also sent to the judge"
+    )
+    judge_sentences: bool = Field(
+        default=True, description="Score sentence by sentence instead of per block"
+    )
+    measurable: bool = Field(
+        description=(
+            "True when a run would produce a measured average QE: the judge is on "
+            "and it has a model to call"
+        )
+    )
+    env_overrides: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Fields whose effective value comes from a UBT_QE_* variable. Editing the "
+            "file cannot change these, so the form says so instead of reporting a save"
+        ),
+    )
+    config_source: str = Field(
+        default="", description="Where the QE settings live (ubt.toml [defaults] or UBT_QE_*)"
+    )
+
+
+class QESettingsRequest(BaseModel):
+    """One edit of the ``[defaults]`` QE keys.
+
+    ``extra="forbid"`` so a client sending ``qe_judge_api_key`` gets a 422 naming
+    the field rather than a silently ignored key: a judge credential belongs in
+    the provider block that owns it, not in this form. Every field is optional; an
+    omitted field is left untouched, and an explicit ``null`` removes it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    qe_engine: Literal["heuristic", "tiered"] | None = None
+    qe_judge_enabled: bool | None = None
+    qe_judge_provider: str | None = None
+    qe_judge_model: str | None = None
+    qe_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    qe_judge_pass_sample: float | None = Field(default=None, ge=0.0, le=1.0)
+    qe_judge_sentences: bool | None = None
+
+
 class ProviderEditRequest(ProviderEditModel):
     """One provider block edit from the console.
 

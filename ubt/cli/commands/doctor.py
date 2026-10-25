@@ -881,16 +881,13 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
         # with `workbuddy/deepseek-v4.1-flash` while this line said `gemma4-e4b`,
         # and the same mismatch had already been measured at runtime as twelve
         # `404 no such model` answers in one run.
-        judge = config.qe_judge_model or config.repair_model
-        judge_provider = config.qe_judge_provider
-        if judge_provider:
-            from ubt.core.providers import load_layer_config
+        #
+        # Resolution lives in `ubt.core.qe.settings` so this row, the console's
+        # QE card and the pipeline cannot disagree about it again.
+        from ubt.core.qe.settings import resolve_judge_model
 
-            try:
-                j_cfg = load_layer_config(judge_provider)
-                judge = str(j_cfg.repair_model or j_cfg.draft_model or judge) or judge
-            except Exception:  # a broken block is reported by its own check
-                pass
+        judge = resolve_judge_model(config)
+        judge_provider = config.qe_judge_provider
         record(
             "QE (tiered)",
             "OK",

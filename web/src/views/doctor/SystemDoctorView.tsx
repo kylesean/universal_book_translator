@@ -25,6 +25,7 @@ import { useI18n } from '@/i18n/useI18n'
 import { localizeDoctorCheck } from '@/i18n/doctorText'
 import { doctorCodesEn, doctorCodesZh } from '@/i18n/translations/doctorCodes'
 import { ProviderEditor } from './ProviderEditor'
+import { QESettingsCard } from './QESettingsCard'
 
 function CheckIcon({ status }: { status: string }) {
   if (status === 'FAIL') return <XCircle className="h-4 w-4 text-[#b91c1c] shrink-0 mt-0.5" />
@@ -577,6 +578,15 @@ export function SystemDoctorView() {
           </div>
         </div>
       </div>
+
+      {/* Quality estimation, full width: the provider panel above is about what
+          the engine calls, this one is about whether the result is measured.
+          Kept out of the two-column grid because it is a form with a warning
+          paragraph, and squeezing it into a half-width cell is what made the
+          previous "QE not measured" label unreadable. */}
+      <QESettingsCard
+        providerNames={(runtime?.providers ?? []).filter((p) => p.declared).map((p) => p.name)}
+      />
 
       {/* Security Boundary Panel */}
       <div className="p-4 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] space-y-1.5 text-xs font-mono text-[var(--ink-secondary)] shadow-2xs break-words">

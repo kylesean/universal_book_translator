@@ -663,14 +663,14 @@ class LedgerJobsMixin(_LedgerHost):
                     conn.execute("ROLLBACK;" if conn.in_transaction else "COMMIT;")
             return {
                 # ``total``/``completed`` count only blocks that could be
-                # translated. Skipped blocks (images, list markers, short
-                # headings — 154 of 259 on the reference job) are marked
-                # ``mtqe_passed`` by the skip rule without any work, so counting
-                # them inflated both sides of the fraction equally: the panel
-                # reported "154/259 = 59.5%" for a job with 90 real translated
-                # blocks out of 105, and different books got different-looking
-                # progress for identical work depending on how many images they
-                # contained.
+                # translated. Policy-preserved blocks (images, bibliography
+                # entries, bylines, short headings — 154 of 259 on the reference
+                # job) are marked ``mtqe_passed`` by the skip rule without any
+                # work, so counting them inflated both sides of the fraction
+                # equally: the panel reported "154/259 = 59.5%" for a job with 90
+                # real translated blocks out of 105, and different books got
+                # different-looking progress for identical work depending on how
+                # many images they contained.
                 "total": row["total"] or 0,
                 "total_all": row["total_all"] or 0,
                 "skipped": row["skipped"] or 0,

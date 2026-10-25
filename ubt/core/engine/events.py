@@ -38,9 +38,10 @@ class TranslationProgressEvent(BaseModel):
     # Block counters
     total_blocks: int
     #: Blocks excluded from ``total_blocks`` because the skip rule marked them
-    #: ``mtqe_passed`` without translating them (images, list markers, short
-    #: headings). Reported so a panel can say "105 translatable, 154 skipped"
-    #: instead of silently showing a smaller book than the source.
+    #: ``mtqe_passed`` without translating them — images, bibliography entries,
+    #: bylines, short headings: whatever the policy keeps verbatim. Reported so a
+    #: panel can say "99 translatable, 49 preserved" instead of silently showing a
+    #: smaller book than the source.
     skipped_blocks: int = 0
     completed_blocks: int
     drafted_blocks: int = 0

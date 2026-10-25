@@ -14,6 +14,10 @@ export type JobUploadResponse = paths['/jobs/upload']['post']['responses']['201'
 export type JobSummary = paths['/jobs']['get']['responses']['200']['content']['application/json']['jobs'][number]
 export type ModelProfile = paths['/api/v1/model-profiles']['get']['responses']['200']['content']['application/json'][number]
 export type RuntimeConfig = paths['/system/runtime-config']['get']['responses']['200']['content']['application/json']
+/** The quality-estimation gate actually in force, and which fields an env var overrides. */
+export type QESettings = paths['/system/qe-config']['get']['responses']['200']['content']['application/json']
+/** An edit of the `[defaults]` QE keys; omitted fields are left untouched. */
+export type QESettingsRequest = paths['/system/qe-config']['put']['requestBody']['content']['application/json']
 export type ProviderDetail = paths['/system/providers/{name}']['get']['responses']['200']['content']['application/json']
 export type ProviderEditRequest = paths['/system/providers/{name}']['put']['requestBody']['content']['application/json']
 export type SystemInfo = paths['/system/info']['get']['responses']['200']['content']['application/json']
@@ -856,6 +860,39 @@ export async function setDefaultProvider(name: string): Promise<{ provider: stri
     method: 'PUT',
   })
   if (!res.ok) throw await apiError(res, `Failed to make ${name} the default provider`)
+  return res.json()
+}
+
+/**
+ * The quality-estimation gate the engine will run.
+ *
+ * `engine` and `judgeEnabled` are two switches and only the second one scores
+ * anything: `qe_engine = "tiered"` alone is a no-op the pipeline merely warns
+ * about. `measurable` is the derived answer the card renders — no judge model
+ * means no block is scored and the report's average QE stays at `0.0`.
+ */
+export async function getQeSettings(): Promise<QESettings> {
+  const res = await apiFetch(`${BASE_URL}/system/qe-config`)
+  if (!res.ok) throw await apiError(res, 'Failed to load QE configuration')
+  return res.json()
+}
+
+/**
+ * Write the QE gate into `ubt.toml [defaults]`.
+ *
+ * The console sends `qeEngine` and `judgeEnabled` together, because the two
+ * documented-but-useless states (`tiered` with the judge off, and the judge on
+ * with a `heuristic` label) are not worth offering as choices. The response
+ * re-reads the effective configuration: `UBT_QE_*` outranks the file, so a save
+ * can be written and still not be what the next job uses.
+ */
+export async function saveQeSettings(changes: QESettingsRequest): Promise<QESettings> {
+  const res = await apiFetch(`${BASE_URL}/system/qe-config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(changes),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to save QE configuration')
   return res.json()
 }
 

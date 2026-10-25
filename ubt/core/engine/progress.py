@@ -119,7 +119,8 @@ class ProgressSnapshot(BaseModel):
     #: separate from ``completed_blocks`` and from ``progress_percent`` so a
     #: draft is never misreported as a finished translation.
     drafted_blocks: int = 0
-    #: Blocks the skip rule marked done without translating them. Excluded from
+    #: Blocks the skip rule marked done without translating them — images,
+    #: bibliography entries, bylines, short headings. Excluded from
     #: ``total_blocks`` and from ``processed_blocks``: they are not work, and
     #: counting them made two books with identical translation load report wildly
     #: different progress depending on how many images they had.
