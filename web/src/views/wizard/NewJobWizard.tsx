@@ -20,6 +20,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
   assessJob,
   getRuntimeConfig,
+  saveEgressConfig,
   submitJob,
   uploadGlossaryFile,
   uploadSourceDocument,
@@ -216,22 +217,24 @@ export function NewJobWizard() {
   // what produced a mock deliverable nobody asked for.
   const [rehearsalAcknowledged, setRehearsalAcknowledged] = useState(false)
 
-  // One read on mount: whether a provider/model is configured decides whether a
-  // submit can be real. A failure is treated as "unknown" (no banner) rather than
-  // "unconfigured", so a transient error cannot block a working setup.
-  useEffect(() => {
-    let cancelled = false
-    void getRuntimeConfig()
-      .then((loaded) => {
-        if (!cancelled) setRuntime(loaded)
-      })
-      .catch(() => {
-        if (!cancelled) setRuntime(null)
-      })
-    return () => {
-      cancelled = true
+  // One read on mount, re-read after a settings change (enabling page egress
+  // must unlock the QC controls without a manual reload): whether a provider is
+  // configured decides whether a submit can be real. A failure is treated as
+  // "unknown" (no banner) rather than "unconfigured", so a transient error
+  // cannot block a working setup.
+  const refreshRuntime = useCallback(async () => {
+    try {
+      setRuntime(await getRuntimeConfig())
+    } catch {
+      setRuntime(null)
     }
   }, [])
+  useEffect(() => {
+    // Fetch-on-mount: the runtime verdict comes from the server, so syncing
+    // with it is exactly what this effect is for.
+    // oxlint-disable-next-line react/set-state-in-effect
+    void refreshRuntime()
+  }, [refreshRuntime])
 
   // The server's own verdict, not a client-side guess. The rule is "no model, or
   // no real credential" — an operator using a built-in protocol with
@@ -550,6 +553,30 @@ export function NewJobWizard() {
    * promise a quality gate the run cannot perform.
    */
   const pageEgressClosed = runtime !== null && !runtime.active.allow_page_upload
+
+  // The egress gate is server state, but the person who hits it is here: when
+  // a control that needs page images is blocked, the note carries its own
+  // enable action (confirmed once) instead of pointing at an env var. The
+  // choice is a runtime override on the server — in force immediately, gone at
+  // restart — and the dialog says exactly that.
+  const [egressConfirmOpen, setEgressConfirmOpen] = useState(false)
+  const [egressError, setEgressError] = useState<string | null>(null)
+
+  const enablePageEgress = async () => {
+    setEgressError(null)
+    try {
+      await saveEgressConfig({ allow_page_upload: true })
+      await refreshRuntime()
+      setEgressConfirmOpen(false)
+    } catch (err) {
+      setEgressError(err instanceof Error ? err.message : t.wizard.egressEnableFailed)
+    }
+  }
+
+  const openEgressConfirm = () => {
+    setEgressError(null)
+    setEgressConfirmOpen(true)
+  }
 
   /**
    * "The other edition" is only concrete once the primary form is: emit_both
@@ -1317,6 +1344,15 @@ export function NewJobWizard() {
                           {t.wizard.ocrModeEgressWarning}
                         </p>
                       )}
+                      {ocrNeedsEgress && pageEgressClosed && (
+                        <button
+                          type="button"
+                          onClick={openEgressConfirm}
+                          className="type-help mt-1 underline underline-offset-2 text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] cursor-pointer"
+                        >
+                          {t.wizard.egressEnableBtn}
+                        </button>
+                      )}
                     </div>
 
                     {/* A staged upload, not a typed path: browsers do not
@@ -1514,9 +1550,18 @@ export function NewJobWizard() {
                           skips every page and bills nothing, so offering the
                           switch would promise a gate the run cannot perform. */}
                       {pageEgressClosed && (
-                        <p className="type-help mt-1 text-[var(--ink-muted)]">
-                          {t.wizard.visualJudgeBlocked}
-                        </p>
+                        <>
+                          <p className="type-help mt-1 text-[var(--ink-muted)]">
+                            {t.wizard.visualJudgeBlocked}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={openEgressConfirm}
+                            className="type-help mt-1 underline underline-offset-2 text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] cursor-pointer"
+                          >
+                            {t.wizard.egressEnableBtn}
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -1916,6 +1961,24 @@ export function NewJobWizard() {
           void handleSubmit()
         }}
         onCancel={() => setQuoteRiskOpen(false)}
+      />
+
+      {/* Enabling page egress ships rendered manuscript pages off this machine,
+          so the action carries its scope in the dialog: what it unlocks, what
+          it costs in privacy, and that it reverts at restart. */}
+      <ConfirmDialog
+        open={egressConfirmOpen}
+        title={t.wizard.egressConfirmTitle}
+        body={
+          <span className="block space-y-1.5">
+            <span className="block">{t.wizard.egressConfirmBody}</span>
+            {egressError && <span className="block text-[#b91c1c]">{egressError}</span>}
+          </span>
+        }
+        confirmLabel={t.wizard.egressConfirmOn}
+        cancelLabel={t.wizard.egressConfirmCancel}
+        onConfirm={() => void enablePageEgress()}
+        onCancel={() => setEgressConfirmOpen(false)}
       />
 
       {/* Mobile Submit Error Alert (Phase 2) */}

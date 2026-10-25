@@ -159,6 +159,29 @@ class ConfigSource:
         with self._lock:
             self._signature = (None, 0, 0)
 
+    def set_overrides(self, updates: dict[str, Any]) -> UBTConfig:
+        """Merge runtime overrides and return the configuration now in force.
+
+        The console's page-egress toggle lands here rather than in ``ubt.toml``:
+        the file schema is ``[defaults]``/``[providers]`` only and has no key
+        for this field, so an honest toggle is an explicit runtime layer that
+        dies with the process — the restart reverts to the environment, which
+        is exactly the permanence the toggle's copy discloses. Merged into
+        ``_overrides`` (not swapped) so later file-triggered rebuilds keep the
+        operator's runtime choice.
+        """
+        with self._lock:
+            self._overrides.update(updates)
+            try:
+                rebuilt = UBTConfig.from_env(**self._overrides)
+            except Exception as exc:
+                self._last_error = str(exc)
+                raise
+            self._config = rebuilt
+            self._signature = _file_signature()
+            self._last_error = None
+            return self._config
+
     @property
     def last_error(self) -> str | None:
         """Why the most recent reload failed, or ``None`` when it succeeded."""

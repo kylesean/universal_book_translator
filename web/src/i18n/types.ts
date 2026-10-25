@@ -201,6 +201,13 @@ export interface TranslationDictionary {
     rehearsalBannerBody: string
     rehearsalBannerCta: string
     rehearsalBannerAck: string
+    /** The page-egress gate: inline enable action at the two controls it blocks. */
+    egressEnableBtn: string
+    egressEnableFailed: string
+    egressConfirmTitle: string
+    egressConfirmBody: string
+    egressConfirmOn: string
+    egressConfirmCancel: string
     rehearsalActiveWarning: string
     engineRecommended: string
     sliceSampleQuickBtn: string
@@ -659,6 +666,21 @@ export interface TranslationDictionary {
     qeSaved: string
     qeCancel: string
     qeLoadFailed: string
+    /** Page-egress card: a runtime toggle for UBTConfig.allow_page_upload. */
+    egressTitle: string
+    egressStateOn: string
+    egressStateOff: string
+    egressLabel: string
+    egressToggleOn: string
+    egressToggleOff: string
+    egressDescOff: string
+    egressDescOn: string
+    egressRuntimeNote: string
+    egressConfirmTitle: string
+    egressConfirmBody: string
+    egressConfirmOn: string
+    egressConfirmCancel: string
+    egressSaveFailed: string
     capabilityTitle: string
     capabilityHelp: string
     capabilitySystem: string

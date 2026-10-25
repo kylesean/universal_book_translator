@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import Cookie, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from ubt import __version__
 from ubt.api.models import (
@@ -27,6 +28,29 @@ from ubt.api.security import (
     verify_api_key,
 )
 from ubt.core.fs_perms import sanitize_display_path
+
+
+class EgressConfigResponse(BaseModel):
+    """The page-egress gate in force (``UBTConfig.allow_page_upload``)."""
+
+    allow_page_upload: bool
+
+
+class EgressConfigRequest(BaseModel):
+    """Flip the page-egress gate for this server process."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # StrictBool: this field is a privacy gate, and pydantic's lax coercion
+    # would let "yes"/"on"/1 through — a string the caller never meant as the
+    # strict contract this endpoint documents.
+    allow_page_upload: StrictBool = Field(
+        ...,
+        description=(
+            "Master gate for shipping rendered page images to model endpoints "
+            "(render QC, cloud/VLM OCR, visual repair). Text prompts are unaffected."
+        ),
+    )
 
 
 def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
@@ -196,6 +220,60 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
         if scope.source is not None:
             scope.source.invalidate()
         return QESettingsResponse(**describe_qe_settings(live_config()))
+
+    @api_app.get(
+        "/system/egress-config",
+        response_model=EgressConfigResponse,
+        tags=["System"],
+    )
+    async def get_egress_config() -> EgressConfigResponse:
+        """The page-egress gate in force right now.
+
+        Read from ``live_config()``, not the boot snapshot: a console toggle
+        must be visible the moment it lands, or the card lies exactly the way
+        the QE panel once did.
+        """
+        return EgressConfigResponse(allow_page_upload=live_config().allow_page_upload)
+
+    @api_app.put(
+        "/system/egress-config",
+        response_model=EgressConfigResponse,
+        tags=["System"],
+    )
+    async def put_egress_config(
+        request: EgressConfigRequest,
+        x_api_key: str | None = Header(default=None),
+        ubt_session: str | None = Cookie(default=None),
+    ) -> EgressConfigResponse:
+        """Flip the page-egress gate for this server process.
+
+        The gate is fail-closed by design — the rendered pages of an
+        unpublished manuscript are the sensitive half of the payload — so a
+        console toggle must stay an explicit, confirmed act, and its reach must
+        be stated honestly. ``ubt.toml`` has no key for this field (the file
+        schema is ``[defaults]``/``[providers]`` only), so the write is a
+        runtime override on the config source: in force for every job this
+        process submits, gone at restart. Permanent opt-in stays where the
+        config module documents it: the ``UBT_ALLOW_PAGE_UPLOAD`` environment
+        variable.
+        """
+        verify_api_key(x_api_key, ubt_session, _config=app_config)
+        if scope.source is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This server was started with a fixed configuration; set "
+                    "UBT_ALLOW_PAGE_UPLOAD in the environment instead."
+                ),
+            )
+        try:
+            config = await asyncio.to_thread(
+                scope.source.set_overrides,
+                {"allow_page_upload": request.allow_page_upload},
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        return EgressConfigResponse(allow_page_upload=config.allow_page_upload)
 
     @api_app.get(
         "/system/providers/{name}",

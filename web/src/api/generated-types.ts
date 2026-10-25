@@ -122,6 +122,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/egress-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Egress Config
+         * @description The page-egress gate in force right now.
+         *
+         *     Read from ``live_config()``, not the boot snapshot: a console toggle
+         *     must be visible the moment it lands, or the card lies exactly the way
+         *     the QE panel once did.
+         */
+        get: operations["get_egress_config_system_egress_config_get"];
+        /**
+         * Put Egress Config
+         * @description Flip the page-egress gate for this server process.
+         *
+         *     The gate is fail-closed by design — the rendered pages of an
+         *     unpublished manuscript are the sensitive half of the payload — so a
+         *     console toggle must stay an explicit, confirmed act, and its reach must
+         *     be stated honestly. ``ubt.toml`` has no key for this field (the file
+         *     schema is ``[defaults]``/``[providers]`` only), so the write is a
+         *     runtime override on the config source: in force for every job this
+         *     process submits, gone at restart. Permanent opt-in stays where the
+         *     config module documents it: the ``UBT_ALLOW_PAGE_UPLOAD`` environment
+         *     variable.
+         */
+        put: operations["put_egress_config_system_egress_config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/providers/{name}": {
         parameters: {
             query?: never;
@@ -1129,6 +1167,25 @@ export interface components {
             stale: boolean;
             /** Delivery Verdict */
             delivery_verdict?: string | null;
+        };
+        /**
+         * EgressConfigRequest
+         * @description Flip the page-egress gate for this server process.
+         */
+        EgressConfigRequest: {
+            /**
+             * Allow Page Upload
+             * @description Master gate for shipping rendered page images to model endpoints (render QC, cloud/VLM OCR, visual repair). Text prompts are unaffected.
+             */
+            allow_page_upload: boolean;
+        };
+        /**
+         * EgressConfigResponse
+         * @description The page-egress gate in force (``UBTConfig.allow_page_upload``).
+         */
+        EgressConfigResponse: {
+            /** Allow Page Upload */
+            allow_page_upload: boolean;
         };
         /**
          * ExtractionStrategy
@@ -2735,6 +2792,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QESettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_egress_config_system_egress_config_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EgressConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_egress_config_system_egress_config_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EgressConfigRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EgressConfigResponse"];
                 };
             };
             /** @description Validation Error */

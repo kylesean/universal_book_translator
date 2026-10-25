@@ -25,6 +25,7 @@ import { useI18n } from '@/i18n/useI18n'
 import { localizeDoctorCheck } from '@/i18n/doctorText'
 import { doctorCodesEn, doctorCodesZh } from '@/i18n/translations/doctorCodes'
 import { ProviderEditor } from './ProviderEditor'
+import { EgressSettingsCard } from './EgressSettingsCard'
 import { QESettingsCard } from './QESettingsCard'
 
 function CheckIcon({ status }: { status: string }) {
@@ -587,6 +588,11 @@ export function SystemDoctorView() {
       <QESettingsCard
         providerNames={(runtime?.providers ?? []).filter((p) => p.declared).map((p) => p.name)}
       />
+
+      {/* Page egress, full width: the privacy gate every egress-dependent
+          control names. Sits beside the security boundary panel below, because
+          it *is* one — but unlike that panel it is operator-settable here. */}
+      <EgressSettingsCard />
 
       {/* Security Boundary Panel */}
       <div className="p-4 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] space-y-1.5 text-xs font-mono text-[var(--ink-secondary)] shadow-2xs break-words">

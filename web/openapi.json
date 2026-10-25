@@ -419,6 +419,146 @@
         }
       }
     },
+    "/system/egress-config": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get Egress Config",
+        "description": "The page-egress gate in force right now.\n\nRead from ``live_config()``, not the boot snapshot: a console toggle\nmust be visible the moment it lands, or the card lies exactly the way\nthe QE panel once did.",
+        "operationId": "get_egress_config_system_egress_config_get",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EgressConfigResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Put Egress Config",
+        "description": "Flip the page-egress gate for this server process.\n\nThe gate is fail-closed by design \u2014 the rendered pages of an\nunpublished manuscript are the sensitive half of the payload \u2014 so a\nconsole toggle must stay an explicit, confirmed act, and its reach must\nbe stated honestly. ``ubt.toml`` has no key for this field (the file\nschema is ``[defaults]``/``[providers]`` only), so the write is a\nruntime override on the config source: in force for every job this\nprocess submits, gone at restart. Permanent opt-in stays where the\nconfig module documents it: the ``UBT_ALLOW_PAGE_UPLOAD`` environment\nvariable.",
+        "operationId": "put_egress_config_system_egress_config_put",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EgressConfigRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EgressConfigResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/system/providers/{name}": {
       "get": {
         "tags": [
@@ -4317,6 +4457,36 @@
         ],
         "title": "DeliverableListResponse",
         "description": "The deliverables endpoint's payload."
+      },
+      "EgressConfigRequest": {
+        "properties": {
+          "allow_page_upload": {
+            "type": "boolean",
+            "title": "Allow Page Upload",
+            "description": "Master gate for shipping rendered page images to model endpoints (render QC, cloud/VLM OCR, visual repair). Text prompts are unaffected."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "allow_page_upload"
+        ],
+        "title": "EgressConfigRequest",
+        "description": "Flip the page-egress gate for this server process."
+      },
+      "EgressConfigResponse": {
+        "properties": {
+          "allow_page_upload": {
+            "type": "boolean",
+            "title": "Allow Page Upload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "allow_page_upload"
+        ],
+        "title": "EgressConfigResponse",
+        "description": "The page-egress gate in force (``UBTConfig.allow_page_upload``)."
       },
       "ExtractionStrategy": {
         "type": "string",

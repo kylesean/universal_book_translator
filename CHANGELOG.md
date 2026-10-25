@@ -11,6 +11,23 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Changed
 
+- **The page-egress gate gets a console toggle.** Every egress-dependent
+  control (render QC, cloud/VLM OCR) named a fix the reader could not perform:
+  `UBT_ALLOW_PAGE_UPLOAD=true` lives in the server's environment, not on any
+  screen — the same dead end the QE card existed to remove. Now the gate is
+  settable where it is hit: System Doctor gains a 页面外发 card (on/off, with
+  what it unlocks, what it costs in privacy, and the runtime scope stated
+  plainly), and the wizard's two blocked notes carry an inline 开启页面外发
+  action that confirms once — shipping rendered manuscript pages off the
+  machine is worth one dialog — then re-reads the runtime so the controls
+  unlock without a reload. The write is a runtime override on the config
+  source (`PUT/GET /system/egress-config`, `ConfigSource.set_overrides`), not
+  a file write: `ubt.toml`'s schema has no key for this field, so the honest
+  contract is "in force for this service run, reverts at restart, permanent
+  path is the environment variable" — pinned by a test that replays exactly
+  that restart. The gate stays fail-closed by default; the toggle writes only
+  with the API key, like every other config write.
+
 - **The advanced drawer reads like a form again.** Twelve controls had
   accumulated label + visible help + scope note + placeholder each, and the
   per-book glossary asked the operator to type a server filesystem path — a

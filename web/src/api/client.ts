@@ -961,6 +961,25 @@ export async function saveQeSettings(changes: QESettingsRequest): Promise<QESett
   return res.json()
 }
 
+/** The page-egress gate in force (runtime override; reverts at restart). */
+export async function getEgressConfig(): Promise<{ allow_page_upload: boolean }> {
+  const res = await apiFetch(`${BASE_URL}/system/egress-config`)
+  if (!res.ok) throw await apiError(res, 'Failed to load egress configuration')
+  return res.json()
+}
+
+export async function saveEgressConfig(changes: {
+  allow_page_upload: boolean
+}): Promise<{ allow_page_upload: boolean }> {
+  const res = await apiFetch(`${BASE_URL}/system/egress-config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(changes),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to save egress configuration')
+  return res.json()
+}
+
 /** The live security boundary: reachable host, auth gate, and allowed roots. */
 export async function getSystemInfo(): Promise<SystemInfo> {
   const res = await apiFetch(`${BASE_URL}/system/info`)

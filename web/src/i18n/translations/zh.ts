@@ -234,6 +234,13 @@ export const zh: TranslationDictionary = {
       '未配置模型或未配置密钥，服务端会把该作业降级为零 token 演练，交付 mock 产物。先配置提供商才能真实翻译。',
     rehearsalBannerCta: '去配置模型',
     rehearsalBannerAck: '仍以演练模式运行',
+    egressEnableBtn: '开启页面外发',
+    egressEnableFailed: '开启失败，请稍后重试。',
+    egressConfirmTitle: '开启页面外发？',
+    egressConfirmBody:
+      '将允许把本书的渲染页面上传到外部模型服务——渲染质检、云端与视觉大模型 OCR、视觉修复都依赖它；纯文本翻译不受影响。此设置立即生效，但只对本次服务运行有效，重启后恢复关闭；要永久开启，请在服务端设置环境变量 UBT_ALLOW_PAGE_UPLOAD=true。',
+    egressConfirmOn: '确认开启',
+    egressConfirmCancel: '取消',
     rehearsalActiveWarning: '排练模式：产出为回显文本，不是译文。用于验证流程；确认后再以正式运行提交。',
     engineRecommended: '✦ 引擎推荐',
     sliceSampleQuickBtn: '前5页',
@@ -759,6 +766,24 @@ export const zh: TranslationDictionary = {
     qeSaved: '已保存——下次作业生效',
     qeCancel: '取消',
     qeLoadFailed: '无法读取 QE 配置。',
+    egressTitle: '页面外发',
+    egressStateOn: '已开启',
+    egressStateOff: '已关闭',
+    egressLabel: '允许页面图像上传',
+    egressToggleOn: '开启',
+    egressToggleOff: '关闭',
+    egressDescOff:
+      '当前关闭：书页图像不会离开本机；渲染质检、云端与视觉大模型 OCR、视觉修复都会跳过或拒绝启动。',
+    egressDescOn:
+      '当前开启：渲染质检与云端/视觉 OCR 会把抽样页面图像发送到你配置的模型服务。纯文本翻译不受此开关影响。',
+    egressRuntimeNote:
+      '此开关立即生效，但对本次服务运行有效：重启后恢复为环境变量的值。要永久开启，请设置 UBT_ALLOW_PAGE_UPLOAD=true。',
+    egressConfirmTitle: '开启页面外发？',
+    egressConfirmBody:
+      '开启后，渲染质检与云端/视觉 OCR 会把本书的页面图像上传到外部模型服务。要永久开启，请在服务端设置环境变量 UBT_ALLOW_PAGE_UPLOAD=true。',
+    egressConfirmOn: '确认开启',
+    egressConfirmCancel: '取消',
+    egressSaveFailed: '保存失败，请稍后重试。',
     capabilityTitle: '端点能力',
     capabilityHelp:
       '引擎无法自动探测端点的这些能力，只能由你声明。没有声明时按最常见的默认值处理。',

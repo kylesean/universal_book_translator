@@ -247,6 +247,13 @@ export const en: TranslationDictionary = {
       'No model or no credential is configured, so the server would downgrade this job to a zero-token rehearsal and deliver mock output. Configure a provider first to translate for real.',
     rehearsalBannerCta: 'Configure a model',
     rehearsalBannerAck: 'Run as rehearsal anyway',
+    egressEnableBtn: 'Enable page egress',
+    egressEnableFailed: 'Could not enable page egress. Try again.',
+    egressConfirmTitle: 'Enable page egress?',
+    egressConfirmBody:
+      'Allows this book\'s rendered page images to be uploaded to external model services — render QC, cloud/VLM OCR and visual repair all depend on it; text-only translation is unaffected. The setting applies immediately but lasts for this service run only: a restart reverts it. For a permanent setting, set UBT_ALLOW_PAGE_UPLOAD=true on the server.',
+    egressConfirmOn: 'Enable',
+    egressConfirmCancel: 'Cancel',
     rehearsalActiveWarning: 'Rehearsal mode: the output is echo text, NOT a translation. Use it to validate the pipeline, then re-submit with a real run.',
     engineRecommended: '✦ Engine Recommended',
     sliceSampleQuickBtn: 'First 5 pages',
@@ -791,6 +798,24 @@ export const en: TranslationDictionary = {
     qeSaved: 'Saved — applies to the next job',
     qeCancel: 'Cancel',
     qeLoadFailed: 'Could not read the QE configuration.',
+    egressTitle: 'Page egress',
+    egressStateOn: 'on',
+    egressStateOff: 'off',
+    egressLabel: 'Allow page-image upload',
+    egressToggleOn: 'On',
+    egressToggleOff: 'Off',
+    egressDescOff:
+      'Off: page images never leave this machine; render QC, cloud/VLM OCR and visual repair skip or refuse to start.',
+    egressDescOn:
+      'On: render QC and cloud/VLM OCR send sampled page images to the model services you configured. Text-only translation is unaffected.',
+    egressRuntimeNote:
+      'Applies immediately and lasts for this service run only; a restart falls back to the environment. For a permanent setting, set UBT_ALLOW_PAGE_UPLOAD=true.',
+    egressConfirmTitle: 'Enable page egress?',
+    egressConfirmBody:
+      'Once on, render QC and cloud/VLM OCR upload this book\'s page images to external model services. For a permanent setting, set UBT_ALLOW_PAGE_UPLOAD=true on the server.',
+    egressConfirmOn: 'Enable',
+    egressConfirmCancel: 'Cancel',
+    egressSaveFailed: 'Could not save. Try again.',
     capabilityTitle: 'Endpoint capability',
     capabilityHelp:
       'The engine cannot detect these endpoint capabilities, so you state them. Without a statement the most common default applies.',
