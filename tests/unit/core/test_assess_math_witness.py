@@ -283,12 +283,18 @@ def test_both_locales_carry_the_same_two_qualifiers() -> None:
             assert needle in copy, f"{name} lost {needle!r}"
 
 
-def test_pathological_gate_counts_grouped_rows_not_raw_rects() -> None:
-    """The gate's input is the row count the geometry engine orders.
+def test_pathological_gate_reads_extraction_cost() -> None:
+    """The gate's input is ``rects * chars``, the work extraction actually does.
 
-    A dotted table of contents puts 2,000+ raw pdfium rect fragments on an
-    ordinary page (arXiv 2608.25512: 2,289 rects -> 35 grouped rows, 0.02s),
-    so the old raw-rect gate warned of slowness that never came.
+    Two earlier inputs are pinned here as *non*-triggers, because both were
+    shipped and both were wrong:
+
+    * the raw fragment count warned on a dotted table of contents (arXiv
+      2608.25512: 2,289 rects over 5,363 characters, extracts in 0.02s);
+    * the grouped row count measured something uncorrelated with time
+      (corr = -0.02 over 844 pages) and scored the one genuinely slow page
+      *better* than an ordinary one (26 rows vs a typical 40-60), so it never
+      fired at all.
     """
     arch = Archetype(
         format_ext="pdf",
@@ -312,39 +318,57 @@ def test_pathological_gate_counts_grouped_rows_not_raw_rects() -> None:
     config = UBTConfig()
     config.draft_model = "test-model"
 
-    # A dotted TOC: raw fragments over the bar, grouped rows nowhere near it.
-    toc_shaped = {"max_text_rows": 35, "scan_page_share": 0.0}
+    # A dotted TOC: 2,289 fragments over 5,363 characters = 1.2e7. Far under.
+    toc_shaped = {
+        "max_extract_cost": 2289 * 5363,
+        "max_extract_page": 2,
+        "max_extract_rects": 2289,
+        "max_extract_chars": 5363,
+        "scan_page_share": 0.0,
+    }
     codes = [w.code for w in _synthesize_warnings(arch, toc_shaped, config, route, [])]
     assert "PATHOLOGICAL_PAGE_RISK" not in codes
 
-    # A stale payload from an older probe carries only the raw count; it must
-    # not warn either.
-    stale = {"max_rect_rows": 2289, "scan_page_share": 0.0}
-    codes = [w.code for w in _synthesize_warnings(arch, stale, config, route, [])]
-    assert "PATHOLOGICAL_PAGE_RISK" not in codes
+    # A payload from either retired probe carries only its own key; neither may
+    # warn (a missing cost reads as 0, which is under every bar).
+    for stale in (
+        {"max_rect_rows": 2289, "scan_page_share": 0.0},
+        {"max_text_rows": 2500, "scan_page_share": 0.0},
+    ):
+        codes = [w.code for w in _synthesize_warnings(arch, stale, config, route, [])]
+        assert "PATHOLOGICAL_PAGE_RISK" not in codes, stale
 
-    # A page that genuinely groups to thousands of rows still warns.
-    pathological = {"max_text_rows": 2500, "scan_page_share": 0.0}
+    # The measured pathological page: 9,395 fragments over 104,456 characters.
+    pathological = {
+        "max_extract_cost": 9395 * 104456,
+        "max_extract_page": 1,
+        "max_extract_rects": 9395,
+        "max_extract_chars": 104456,
+        "scan_page_share": 0.0,
+    }
     (warning,) = [
         w
         for w in _synthesize_warnings(arch, pathological, config, route, [])
         if w.code == "PATHOLOGICAL_PAGE_RISK"
     ]
-    assert warning.params == {"max_text_rows": 2500}
-    assert "2500" in warning.detail_zh
+    assert warning.params["rects"] == 9395
+    assert warning.params["chars"] == 104456
+    assert warning.params["page"] == 1
+    assert "9395" in warning.detail_zh
 
 
-def test_pathological_copy_counts_rows_in_both_locales() -> None:
+def test_pathological_copy_reports_the_cost_in_both_locales() -> None:
     """The console renders the i18n copy, not the engine's ``detail_zh``.
 
     Mirrors the FONT_RESIDUE_RISK parity test: fixing only the engine message
-    would leave the console warning about "rectangle rows" the gate no longer
-    counts.
+    would leave the console describing a measurement the gate no longer makes.
+    The copy must name the page and the fragment/character pair the params
+    carry, since the product alone ("9.8e8") means nothing to a reader.
     """
     repo = Path(__file__).resolve().parents[3]
     for name, needles in (
-        ("zh.ts", ("文本行数", "平方", "{max_text_rows}")),
-        ("en.ts", ("text rows", "quadratically", "{max_text_rows}")),
+        ("zh.ts", ("{page}", "{rects}", "{chars}")),
+        ("en.ts", ("{page}", "{rects}", "{chars}")),
     ):
         path = repo / "web" / "src" / "i18n" / "translations" / name
         if not path.exists():

@@ -40,7 +40,8 @@ _ONLINE_BIB_RE = re.compile(r"\[Online\]\.?\s*Available:\s*https?://", re.IGNORE
 #   B: single author + year + strong book cue (publisher / Chapter N).
 # Rationale (industry standard, GB/T 7714 practice): foreign-language
 # citations are kept in the original language — translating author names,
-# venues, or DOIs breaks retrievability and is never publication-grade.
+# venues, or DOIs breaks retrievability, which is the whole point of a
+# reference list.
 _ETAL_RE = re.compile(r"\bet\.?\s+al\.")
 _AUTHOR_RE = re.compile(r"(?<![A-Za-z0-9/])[A-Z]\.-?[A-Z]?\s*[A-Z][a-z]+")
 _YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")

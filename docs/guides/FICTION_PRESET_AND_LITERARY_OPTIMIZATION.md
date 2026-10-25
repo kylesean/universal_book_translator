@@ -5,7 +5,9 @@
 > 对照仓：TBL = `/home/kyle/Projects/python/TranslateBooksWithLLMs`，UBT = 本仓
 >
 > **时效提示**：本文写于预设只有 4 档（`publication / standard / preview / fast`）时。
-> 现已增至 5 档，新增的 `publication_math` 只改 `formula_enrichment=on`（公式转矢量 LaTeX），
+> 现已增至 5 档，且两个档位已改名：`publication` → `high_fidelity`，
+> `publication_math` → `vector_math`（旧名不再被接受，`Preset("publication")` 会抛错）。
+> `vector_math` 只改 `formula_enrichment=on`（公式转矢量 LaTeX），
 > 与本文论证的"缺 literary 旋钮"无关；下文所有"现有 4 preset"的表述按当时状态阅读。
 
 ---
@@ -77,7 +79,7 @@
 
 ### 2.1 现有 preset 与 prompt 三档
 
-- `ubt/core/presets.py`：`publication / standard / preview / fast`，旋钮 `exec_mode + prompt_strategy + formula_enrichment + qe_engine + table_render_mode + emit_both + pdf_engine`。其中 3 个与公式/表格相关，无语气/人称/对话旋钮。
+- `ubt/core/presets.py`：`high_fidelity（原 publication） / standard / preview / fast`，旋钮 `exec_mode + prompt_strategy + formula_enrichment + qe_engine + table_render_mode + emit_both + pdf_engine`。其中 3 个与公式/表格相关，无语气/人称/对话旋钮。
 - `ubt/core/router/capabilities.py:8-13`：`RICH / MINIMAL / HYBRID`。`ubt/core/router/prompts.py:134-176,179-277,280-392`：
   `minimal` 无 system、无记忆；`hybrid` 短 system + 全记忆；`rich` 长 system（8 Rules + Bible 服从 + 去翻译腔 + OCR 去噪）+ 三层缓存 + `<translation>` 信封。注册表默认全 RICH，小模型被标 MINIMAL 会静默失忆。
 - `fiction` 分支仅一句：`prompts.py:168-172,212-216,304-308` `Use standard X terminology / acclaimed literary translator`，记忆/门限/修复不跟随切换。

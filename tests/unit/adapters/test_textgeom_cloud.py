@@ -99,7 +99,10 @@ def test_extract_lines_reports_the_cloud_it_cleaned(
     assert "Real body line two." in texts
     (record,) = [r for r in caplog.records if r.levelno == logging.WARNING]
     message = record.getMessage()
-    assert "marker cloud" in message
+    # The message no longer diagnoses "marker cloud": the over-read guard that
+    # also feeds this line now fires on nested-rect pages too, so it reports the
+    # counts it dropped instead of the page shape. What an operator must be able
+    # to read out of it is the debris count and the loss.
     assert "dropped 700 debris rects" in message
     assert "not extracted" in message
 

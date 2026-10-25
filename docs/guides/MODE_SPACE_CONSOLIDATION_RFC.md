@@ -140,7 +140,7 @@ api_mode / docling_device / job_mode                               ← 运维
 | :--- | :--- |
 | `preview` | 快速试读，公式走图片 |
 | `standard` | 默认 |
-| `publication` | 出版级，最强提示词 |
+| `high_fidelity` | 高保真，最强提示词 |
 | `fast` | 极限省钱，短链 |
 
 **`preset` 现在只设 4 个字段**（实测：`prompt_strategy`/`exec_mode`/`formula_*`）。
@@ -598,7 +598,7 @@ advisory / reflow_loop / visual_gate / CLI / REST / MCP / web 全部移除。
 ### 9.3 `preset` 现在覆盖全部派生字段
 
 ```
-publication  exec_mode=auto  prompt=rich     enrich=auto  qe=heuristic  table=auto  pdf=auto
+high_fidelity  exec_mode=auto  prompt=rich     enrich=auto  qe=heuristic  table=auto  pdf=auto
 standard     exec_mode=auto  prompt=auto     enrich=auto  qe=heuristic  table=auto  pdf=auto
 preview      exec_mode=auto  prompt=minimal  enrich=off   qe=heuristic  table=auto  pdf=pdfium
 fast         exec_mode=short prompt=minimal  enrich=off   qe=heuristic  table=auto  pdf=pdfium
@@ -606,7 +606,7 @@ fast         exec_mode=short prompt=minimal  enrich=off   qe=heuristic  table=au
 
 选一个 preset = 选定全部内部旋钮。
 
-> **注**：`publication` 的 `qe_engine` 定为 `heuristic` 而非 `tiered`——
+> **注**：`high_fidelity` 的 `qe_engine` 定为 `heuristic` 而非 `tiered`——
 > `tiered` 需要可选神经 runner（`comet`），把 preset 绑到一个可能不存在的
 > 依赖上会在无 GPU 环境静默降级。保持行为不变优先。
 

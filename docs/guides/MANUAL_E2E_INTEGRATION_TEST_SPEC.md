@@ -247,7 +247,7 @@ UBT 官方支持输入格式权威清单见 `ubt.adapters.factory.supported_suff
 1. **许可**：优先公有领域（Gutenberg / Standard Ebooks / Internet Archive）或 CC（OpenStax / LibreTexts / arXiv 多为开放许可）。
 2. **文字层验证**：扫描件先用 `pdffonts`/`pdftotext` 确认无文字层，才能命中 TC-06 的 OCR 路由分支。
 3. **篇幅梯队**：按 §3 的 Tier-1~4 各备至少一份。
-4. **双栏 / 公式密度**：用 `ubt assess --deep --json` 预检 `PROBE_FORMULA_SHARE`，确认公式密度被正确识别并选择 publication preset。
+4. **双栏 / 公式密度**：用 `ubt assess --deep --json` 预检 `PROBE_FORMULA_SHARE`，确认公式密度被正确识别并选择 high_fidelity preset。
 5. **多语言对**：如需非 en→zh，可补充 OPUS (`opus.nlpl.eu`)、FLORES-200、WMT 测试集；注意 UBT 的 en→zh 是一等公民，同语系互译是能力降级（源与目标同属拉丁字母时 `min_target_ratio` 自动归零，字符类别比无法区分源残留与译文）。
 
 ---
@@ -396,7 +396,7 @@ flowchart TD
   ```
 - **验证核对点**：
   - [ ] 终端输出包含完整的文档特征分析（页数、Token 预算、数学公式密度、扫描占比）；
-  - [ ] 推荐合理的执行路线（短链/长链）与 preset（公式/表格密集推荐 `publication`，纯正文可用 `standard`）；
+  - [ ] 推荐合理的执行路线（短链/长链）与 preset（公式/表格密集推荐 `high_fidelity`，纯正文可用 `standard`）；
   - [ ] 给出精确预估美元区间（包含 Draft、Repair、QE、Visual 分项拆解），分项之和严格等于 Total Cost，绝不显示虚假的 `$0.0000`；
   - [ ] 针对异常文档正确触发警示码（如扫描件触发 `SCANNED_PAGE_OCR_ESTIMATED`）；
   - [ ] 命令末尾附带一条**照抄即用**的 `ubt translate ...` 推荐命令；
@@ -426,14 +426,14 @@ flowchart TD
 
 ---
 
-### TC-04: 双栏密集公式学术论文出版级重排 (PDF / publication / Mono)
+### TC-04: 双栏密集公式学术论文高保真重排 (PDF / high_fidelity / Mono)
 - **测试目的**：验证学术前沿论文在 Typst 出版级重排下的交付质量：公式转换、表格重建、图表资产与阅读体验（文本重排、页数会变化，交付物是新文档）。
 - **测试输入**：典型双栏 arXiv 论文 `attention.pdf`。
 - **执行命令**：
   ```bash
   uv run ubt translate attention.pdf \
     --provider test-gemini \
-    --preset publication \
+    --preset high_fidelity \
     --profile paper \
     --dual-mode mono \
     -o ./output/attention_zh.pdf \
@@ -448,14 +448,14 @@ flowchart TD
 
 ---
 
-### TC-05: 学术教材出版级重排与双语逐块配对 (PDF / publication / Dual)
+### TC-05: 学术教材高保真重排与双语逐块配对 (PDF / high_fidelity / Dual)
 - **测试目的**：验证出版级教材在 Typst 从零重排下的双语交付：每个块的源文行配对显示在其译文上方，长教材跨章阅读节奏自然。
 - **测试输入**：教材样卷 `cognitive_psychology_ch03.pdf`（或合成学术专著样章）。
 - **执行命令**：
   ```bash
   uv run ubt translate cognitive_psychology_ch03.pdf \
     --provider test-gemini \
-    --preset publication \
+    --preset high_fidelity \
     --profile textbook \
     --dual-mode dual \
     -o ./output/cognitive_psychology_dual.pdf \

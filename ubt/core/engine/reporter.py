@@ -218,7 +218,12 @@ class ReportEntityConsistency(BaseModel):
 
 
 class QualityReport(BaseModel):
-    """Complete publication-grade translation quality audit report."""
+    """Complete translation quality audit report.
+
+    Not "publication-grade": that describes a human workflow (translate -> review
+    -> typeset -> proof), not an artifact a machine pipeline produces. See
+    docs/guides/SEMANTIC_FIRST_REARCHITECTURE_RFC.md 1.3.
+    """
 
     model_config = ConfigDict(frozen=True)
 

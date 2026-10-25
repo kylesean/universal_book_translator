@@ -11,6 +11,20 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Changed
 
+- **The pre-flight slowness gate measures extraction cost, not a proxy.** The
+  `PATHOLOGICAL_PAGE_RISK` warning had two wrong inputs in a row: the raw
+  fragment count warned on every dotted table of contents (2,289 fragments over
+  5,363 characters, extracts in 0.02s), and its replacement — grouped text rows
+  — measured something uncorrelated with time. Across 844 corpus pages
+  `corr(extract_lines time, n_text_rows)` is -0.02 while
+  `corr(time, rects × chars)` is 1.000, because `extract_lines` pays one
+  `get_text_bounded` + `_probe_rect_font_style` per fragment and each walks the
+  page's characters. The row-count gate scored the one genuinely slow page
+  *better* than an ordinary one (26 rows vs a typical 40-60) and fired on 0 of
+  844 pages; the cost gate fires on that page and nothing else, with 8.1x
+  headroom over the worst legitimate page. `PageFacts.n_text_rows` and the
+  extra per-page `_group_rows` pass it required (1.3s on the page above) are
+  gone; the profile cache version moves to 5.
 - **The segments API owns mark unwrapping; the workbench's parallel parser is
   deleted.** The engine writes two `<mark>` wrappers with different meanings
   (`ubt-failed-draft` = a real draft whose repair call failed;
@@ -79,6 +93,34 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Fixed
 
+- **A page whose text rects are nested no longer ships its text 12x over.**
+  `extract_lines` reads one `get_text_bounded` per pdfium rect, and a box that
+  selects far more characters than its own width can hold is a duplication —
+  but that guard only ran when the scatter-debris cleanup had fired, i.e. only
+  on a marker cloud. A page can clear that precondition and still be nested:
+  arXiv 2609.20519 p1 is 9,395 rects over 104,456 characters whose boxes
+  intersect their neighbours' glyphs, summing to 3,220,105 characters (30.8x
+  the page's own text). Its rects are 3.6pt tall, above the cloud's 2pt median,
+  so 91% of them were kept and every one over-read: `extract_lines` emitted
+  1,331,556 characters, one block reached the translator carrying 146,289
+  characters of duplicated fragments, and the document parsed to 1,298,561
+  characters against an assessed 160,848 — a wrong delivery *and* an 8x
+  under-quote. The guard is now self-contained (a box that wide cannot hold
+  that much text) and needs no precondition. Across the 844-page corpus it
+  fires on exactly that one page; the measured text of every other page is
+  unchanged.
+- **The console no longer certifies a delivery its own gate refused.**
+  `completed` is the pipeline finishing, not the gate passing: the ledger
+  allows a terminal write with quarantined blocks in it, because `NEEDS_HUMAN`
+  and `BLOCKED_HUMAN` are terminal statuses. Mission Control read neither
+  counter and printed "compiler output certified" over a job whose delivery
+  verdict was `blocked`; it now reads `blocked_human_blocks` and distinguishes
+  certified / awaiting review / not released. On the quality gate, the READY
+  banner claimed "formula dropout is 0%, terminology drift within tolerances"
+  while the verdict it renders is computed from block counters alone
+  (`delivery_verdict_from_blocks`) and reads neither metric — it now says what
+  it can prove. The ledger pillar was a constant `pass`/100 over an unpriced
+  run; it warns when the run was never priced.
 - **The console can turn quality measurement on.** Every finished job reported
   "QE not measured (heuristic engine)" and stopped there: the remedy
   (`qe_engine = "tiered"` **and** `qe_judge_enabled = true` **and** a judge

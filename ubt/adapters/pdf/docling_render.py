@@ -240,7 +240,7 @@ class DoclingRenderStrategy:
         bilingual_mode: str | None = None,
         render_plan: RenderPlan | None = None,
     ) -> Path:
-        """Render publication-grade translated output from pre-fetched blocks.
+        """Render the translated output from pre-fetched blocks.
 
         A PDF target is rebuilt from the IR and laid out by Typst. Non-PDF
         targets (.md / .txt) export clean Markdown.

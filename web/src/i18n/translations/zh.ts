@@ -138,7 +138,7 @@ export const zh: TranslationDictionary = {
       FORMULA_HEAVY_NEEDS_ENRICHMENT:
         '文档公式密集但视觉公式增强已关闭（--preset preview 的常见取舍），公式转写质量可能受限。',
       PATHOLOGICAL_PAGE_RISK:
-        '存在单页文本行数达 {max_text_rows} 的异常版面（正常 A4 页约 30–100 行），栏序几何排序耗时随行数平方增长，--deep 或完整翻译可能明显变慢。',
+        '第 {page} 页有 {rects} 个文本片段、{chars} 个字符；逐片段抽取的成本是二者的乘积（正常页约 10⁶ 量级），该页解析会明显变慢，--deep 或完整翻译的耗时主要花在这里。',
       SCANNED_PAGE_OCR_ESTIMATED:
         '检测到文档无有效文本层（纯扫描件或图像化排版），已按预估 OCR 转写规模 (~{chars_per_page}字/页，共 ~{source_chars} 字)估算草稿翻译成本；实际费用将取决于 OCR 识别出的文本量。',
       PAGE_RANGE_FILTERED:
@@ -282,7 +282,10 @@ export const zh: TranslationDictionary = {
     totalSpend: '累计支出',
     executionState: '运行状态',
     blocksRemaining: '块待处理',
+    // ``completed`` 只代表流水线跑完，不代表门禁放行（隔离块也是终态）。
     stateCertified: '编译器产物已认证',
+    stateBlocked: '门禁未放行——存在隔离或失败块',
+    stateNeedsReview: '产物可交付——有块待人工复核',
     stateDrafting: '正在翻译与排版分块',
     stageStateExtract: '正在解析源文档结构与版式…',
     stageStateSegment: '正在智能分块与章节切分…',
@@ -377,7 +380,13 @@ export const zh: TranslationDictionary = {
     decisionReady: '校验通过 (READY)',
     decisionBlocked: '门禁阻断 (GATE BLOCKED)',
     decisionWarning: '可交付——待人工复核',
-    allPassedDesc: '已通过全部质量防线验证。公式无丢失，术语一致性在设定容差范围内。',
+    // 该判定只来自块计数器（job_options.delivery_verdict_from_blocks）：无失败块、
+    // 无隔离块、无待人工块、且至少完成一块。公式与术语指标在下方各柱子里单独展示，
+    // 并不参与这个判定，所以这句话不能声称它们"通过"。
+    allPassedDesc:
+      '每个块都已完成、没有失败块，也没有被隔离或转入人工复核的块。公式与术语的实测值见下方各柱，它们单独报告、不参与此判定。',
+    // 费用未知表示模型无价格表条目，绝不等于 $0（见 ReportSummary）。
+    costNotPriced: '费用未定价',
     blockedDesc: '触发质检拦截：需在审校台人工后编排查确认后再导出最终产物。',
     warningDesc: '产物可交付，部分段落已转人工复核——请到审校台处理。',
     // 展示值实为 summary.pass_rate（已完成块 / 总块数），并非像素/版面保真度测量。

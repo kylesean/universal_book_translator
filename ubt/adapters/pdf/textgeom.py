@@ -491,10 +491,25 @@ def extract_lines(pdf_path: Path, page_no: int) -> tuple[list[LineBox], tuple[fl
             for left, bottom, right, top in rects:
                 text = (textpage.get_text_bounded(left, bottom, right, top) or "").strip()
                 if text:
-                    if dropped_rects and len(text) > max(240, int((right - left) * 1.5)):
-                        # Stacked scatter-plot marker clouds put hundreds of
-                        # overlapping point labels inside one bounding box, so
-                        # the joined text is a duplication, not a line.
+                    if len(text) > max(240, int((right - left) * 1.5)):
+                        # The rect's box selected far more characters than a line
+                        # of that width can hold, so the joined text is a
+                        # duplication, not a line. Two shapes produce it: stacked
+                        # scatter-plot marker clouds (hundreds of point labels
+                        # inside one bounding box) and a page whose rects are
+                        # emitted nested, each box intersecting its neighbours'
+                        # glyphs (arXiv 2609.20519 p1: 9,395 rects over 104,456
+                        # characters summed to 3.2M -- 30x the page's own text, and
+                        # its blocks reached the translator at 8x the assessed
+                        # character count).
+                        #
+                        # This used to run only when ``_drop_scatter_debris`` had
+                        # dropped something, i.e. only on a *marker cloud*. That
+                        # made a page's debris profile stand in for "this page is
+                        # odd", and a nested-rect page clears it: its rects are
+                        # 3.6pt tall, above the cloud's 2pt median. This test is
+                        # self-contained -- a box that wide cannot hold that much
+                        # text -- so it needs no precondition.
                         skipped_long += 1
                         continue
                     fsz, is_bold, is_italic = _probe_rect_font_style(
@@ -512,12 +527,14 @@ def extract_lines(pdf_path: Path, page_no: int) -> tuple[list[LineBox], tuple[fl
             if dropped_rects or skipped_long:
                 # Never silent: a sub-5pt rect on a figure page can equally be a
                 # superscript or a footnote mark, and this drop is unrecoverable
-                # downstream. One line per page, not per rect.
+                # downstream. One line per page, not per rect. The two counts are
+                # independent now (the over-read guard no longer implies a marker
+                # cloud), so the message reports them instead of diagnosing the
+                # page shape.
                 logger.warning(
-                    "textgeom: %s page %s has %d text rects and looks like a "
-                    "vector/marker cloud; dropped %d debris rects (<%gpt, <%gpt "
-                    "wide, >%gpt tall) and %d over-long labels — text under those "
-                    "rects is not extracted",
+                    "textgeom: %s page %s has %d text rects; dropped %d debris "
+                    "rects (<%gpt, <%gpt wide, >%gpt tall) and %d over-long "
+                    "labels — text under those rects is not extracted",
                     pdf_path.name,
                     page_no,
                     n_rects,

@@ -143,7 +143,7 @@ export const en: TranslationDictionary = {
       FORMULA_HEAVY_NEEDS_ENRICHMENT:
         'The document is formula-heavy but visual formula enrichment is off (a common trade-off of --preset preview); formula transcription quality may suffer.',
       PATHOLOGICAL_PAGE_RISK:
-        'A page groups into {max_text_rows} text rows (a normal A4 page groups to 30-100); column ordering grows quadratically with row count, so --deep or a full translation may run noticeably slower.',
+        'Page {page} carries {rects} text fragments over {chars} characters, and extraction pays per fragment — so this page costs the product of the two (an ordinary page is ~10⁶). Parsing it dominates the run, and --deep or a full translation will be noticeably slower.',
       SCANNED_PAGE_OCR_ESTIMATED:
         'No usable text layer was found (a pure scan or image-based layout); the draft cost is estimated from the expected OCR volume (~{chars_per_page} chars/page, ~{source_chars} chars total). Actual cost depends on how much text OCR recovers.',
       PAGE_RANGE_FILTERED:
@@ -301,6 +301,8 @@ export const en: TranslationDictionary = {
     totalSpend: 'Total Spend',
     executionState: 'State',
     blocksRemaining: 'blocks remaining',
+    stateBlocked: 'Gate did not release — quarantined or failed blocks',
+    stateNeedsReview: 'Deliverable — blocks awaiting human review',
     stateCertified: 'Compiler output certified',
     stateDrafting: 'Drafting and typesetting blocks',
     stageStateExtract: 'Extracting source document layout…',
@@ -398,7 +400,15 @@ export const en: TranslationDictionary = {
     decisionReady: 'READY',
     decisionBlocked: 'GATE BLOCKED',
     decisionWarning: 'DELIVERABLE — HUMAN REVIEW PENDING',
-    allPassedDesc: 'All formal checks passed. Formula dropout is 0%, terminology drift within tolerances.',
+    // The verdict comes from block counters alone
+    // (job_options.delivery_verdict_from_blocks): no failed blocks, no
+    // quarantined blocks, no blocks awaiting human review, and at least one
+    // completed. Formula and terminology metrics are reported in the pillars
+    // below and do NOT feed this verdict, so this sentence must not claim them.
+    allPassedDesc:
+      'Every block completed — no failed, quarantined or human-review blocks. Formula and terminology measurements are reported in the pillars below; they do not feed this verdict.',
+    // Unpriced means the model has no price-table entry; it never means $0.
+    costNotPriced: 'Cost not priced',
     blockedDesc: 'Gate blocked: manual post-editing review required before exporting deliverables.',
     warningDesc: 'Deliverable, with blocks routed to human review — check the review workbench.',
     // The number shown is ``summary.pass_rate`` = completed / total blocks.

@@ -82,15 +82,24 @@ _ASSESS_JUDGE_SENTENCE_CHARS = 120
 # reservation constant) plus the judge scaffolding; answers are short.
 _VLM_PROMPT_TOKENS = 1500
 _VLM_COMPLETION_TOKENS = 300
-# A page whose *grouped text rows* (``PageFacts.n_text_rows``) reach this
-# count is a genuinely anomalous layout — an A4 text page groups to 30–100
-# rows — because textgeom's row merge and column ordering are quadratic in
-# that row count and a deep pass revisits them per witness. The old gate
-# counted raw pdfium rects, which a Typst/LaTeX table of contents dots along
-# its leader lines: 2,289 "rows" on an ordinary TOC page that groups back to
-# ~35 and orders in 0.02s (measured, arXiv 2608.25512), so every dotted TOC
-# warned of slowness that never came.
-PATHOLOGICAL_TEXT_ROWS = 2000
+# A page's text-extraction cost is ``rects x chars``, not its row count.
+#
+# ``extract_lines`` calls ``get_text_bounded`` and ``_probe_rect_font_style``
+# once per pdfium rect, and each of those walks the page's characters -- so the
+# work is the product, and that is what an 844-page corpus measurement tracks
+# (corr(time, rects*chars) = 1.000; corr(time, grouped rows) = -0.02, i.e.
+# nothing). The one slow page in that corpus (arXiv 2609.20519 p1, 8.5s vs
+# 0.14s for the next worst) is 9,395 rects x 104,456 chars ~ 9.8e8; the worst
+# *legitimate* page is 2,289 x 5,363 ~ 1.2e7, a dotted Typst TOC that extracts
+# in 0.02s. The bar sits 8.1x above that worst legitimate page and 9.8x below
+# the pathological one, so it separates them with room on both sides.
+#
+# This replaced a gate on grouped text rows (``n_text_rows`` >= 2000), which
+# fixed the TOC false positive but measured the wrong quantity: the TOC page
+# groups to 35 rows, and the slow page groups to 26 -- the slow page scored
+# *better* than an ordinary one, so the gate fired on 0 of 844 pages and the
+# slowness it existed to warn about went unreported.
+PATHOLOGICAL_EXTRACT_COST = 100_000_000
 
 _CENTS_EXCLUDED_NOTE = (
     "报价为「预期非保证」：修复/QE/视觉环节按配置上限与平均缺陷率外推，实际花费随真实缺陷率浮动；"
@@ -350,7 +359,14 @@ def _pdf_facts(
         out["page_count"] = n
         out["text_layer_coverage"] = round(with_text / n, 4)
         out["scan_page_share"] = round(scanned / n, 4)
-        out["max_text_rows"] = max(p.facts.n_text_rows for p in pages)
+        # Per-rect extraction cost, the quantity that actually drives time (see
+        # PATHOLOGICAL_EXTRACT_COST). Reported as the worst page's pair, not
+        # just the product, so the warning can say what made the page expensive.
+        worst = max(pages, key=lambda p: p.facts.n_rect_rows * p.facts.n_chars)
+        out["max_extract_cost"] = worst.facts.n_rect_rows * worst.facts.n_chars
+        out["max_extract_page"] = worst.facts.page
+        out["max_extract_rects"] = worst.facts.n_rect_rows
+        out["max_extract_chars"] = worst.facts.n_chars
         out["poster_pages"] = sum(1 for p in pages if p.kind == page_kind.POSTER_FIXED)
         out["resume_pages"] = sum(1 for p in pages if p.kind == page_kind.RESUME_DENSE)
 
@@ -901,14 +917,22 @@ def _synthesize_warnings(
                 "文档公式密集但视觉公式增强已关闭（--preset preview 的常见取舍），公式转写质量可能受限。",
             )
         )
-    if pdf.get("max_text_rows", 0) >= PATHOLOGICAL_TEXT_ROWS:
+    if pdf.get("max_extract_cost", 0) >= PATHOLOGICAL_EXTRACT_COST:
+        rects = int(pdf["max_extract_rects"])
+        chars = int(pdf["max_extract_chars"])
+        page = int(pdf["max_extract_page"])
         warnings.append(
             AssessmentWarning(
                 "PATHOLOGICAL_PAGE_RISK",
                 "warn",
-                f"存在单页文本行数达 {pdf['max_text_rows']} 的异常版面（正常 A4 页约 30–100 行），"
-                "栏序几何排序耗时随行数平方增长，--deep 或完整翻译可能明显变慢。",
-                {"max_text_rows": int(pdf["max_text_rows"])},
+                f"第 {page} 页有 {rects} 个文本片段、{chars} 个字符；逐片段抽取的成本是二者的乘积"
+                "（正常页约 10⁶ 量级），该页解析会明显变慢，--deep 或完整翻译的耗时主要花在这里。",
+                {
+                    "page": page,
+                    "rects": rects,
+                    "chars": chars,
+                    "extract_cost": int(pdf["max_extract_cost"]),
+                },
             )
         )
     if pdf.get("text_layer_coverage") is not None:

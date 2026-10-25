@@ -358,11 +358,11 @@ PY
 
 **C4 preset 与 judge 解耦（`ubt/core/presets.py`）**
 
-- 问题：所有 preset 都写 `qe_engine=heuristic`，`publication` 也用不上 `tiered`。
-- 改动：`PRESETS[…].qe_engine` 改为 `None`（不覆盖），让 config/env 决定；如果确实要“publication 默认 tiered”，
+- 问题：所有 preset 都写 `qe_engine=heuristic`，`high_fidelity` 也用不上 `tiered`。
+- 改动：`PRESETS[…].qe_engine` 改为 `None`（不覆盖），让 config/env 决定；如果确实要“high_fidelity 默认 tiered”，
   改成 `qe_engine="tiered"` 但 `qe_judge_enabled` 仍由用户显式开（并在 doctor 里 warning）。
-- 回归：`tests/unit/core/test_preset_routing.py` 加“env `UBT_QE_ENGINE=tiered` + preset publication 仍为 tiered”。
-- 验收：`overrides_from_request({"preset":"publication"}).get("qe_engine")` 为 `None` 或 `tiered`，不是 `heuristic`。
+- 回归：`tests/unit/core/test_preset_routing.py` 加“env `UBT_QE_ENGINE=tiered` + preset high_fidelity 仍为 tiered”。
+- 验收：`overrides_from_request({"preset":"high_fidelity"}).get("qe_engine")` 为 `None` 或 `tiered`，不是 `heuristic`。
 
 #### D. Phase 3 — 成书体验
 

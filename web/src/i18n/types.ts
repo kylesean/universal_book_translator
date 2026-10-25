@@ -242,6 +242,8 @@ export interface TranslationDictionary {
     executionState: string
     blocksRemaining: string
     stateCertified: string
+    stateBlocked: string
+    stateNeedsReview: string
     stateDrafting: string
     stageStateExtract: string
     stageStateSegment: string
@@ -324,6 +326,7 @@ export interface TranslationDictionary {
     allPassedDesc: string
     blockedDesc: string
     warningDesc: string
+    costNotPriced: string
     fidelityScore: string
     pillar1Title: string
     pillar1Desc: string

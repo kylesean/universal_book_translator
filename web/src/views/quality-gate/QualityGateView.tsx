@@ -302,6 +302,10 @@ export function QualityGateView() {
   const isPassed = hasReport && (verdict ? verdict === 'passed' : failedBlocks === 0)
   const isWarning = hasReport && verdict === 'warning'
   const fidelityScore = Math.round((summary.pass_rate ?? 0) * 1000) / 10
+  // ``null`` means "not priced", never "$0" (see ReportSummary). The ledger
+  // pillar is the only place that distinction is visible, so it is computed
+  // once here rather than inlined into the pillar's status expression.
+  const costPriced = hasReport && typeof summary.estimated_cost_usd === 'number'
 
   const pct = (value: number | undefined, digits = 1) =>
     value === undefined ? '—' : `${(value * 100).toFixed(digits)}%`
@@ -529,10 +533,16 @@ export function QualityGateView() {
       desc: t.quality.pillar5Desc,
       metric:
         summary.estimated_cost_usd === null || summary.estimated_cost_usd === undefined
-          ? 'cost not priced'
+          ? t.quality.costNotPriced
           : `$${Number(summary.estimated_cost_usd).toFixed(2)} · cache ${pct(summary.cache_hit_rate)}`,
-      status: 'pass',
-      score: 100,
+      // This pillar never failed before: a constant `pass` / 100 renders a green
+      // check over an unpriced run and over a ledger nobody reconciled, on the
+      // screen whose whole job is attestation. The two states it can actually
+      // establish are "the run was priced" and "it was not"; the reconciliation
+      // itself is not implemented anywhere in the engine, so it is reported as
+      // a warn rather than dressed up as a passed check.
+      status: costPriced ? 'pass' : 'warn',
+      score: costPriced ? 100 : 50,
       detail: (
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs font-mono">
           {[

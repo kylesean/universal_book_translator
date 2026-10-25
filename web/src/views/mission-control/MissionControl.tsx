@@ -179,6 +179,11 @@ export function MissionControl() {
   // rendered it, so a job with 15 failed blocks read as a clean 100%.
   const [failedBlocks, setFailedBlocks] = useState<number>(0)
   const [needsHumanBlocks, setNeedsHumanBlocks] = useState<number>(0)
+  // Quarantined blocks (MQM Critical). They ship as a source-only placeholder,
+  // not a translation, and they make the delivery verdict "blocked" — but the
+  // panel never read the counter, so a job whose gate refused it still read as
+  // "compiler output certified" as soon as its status reached completed.
+  const [blockedHumanBlocks, setBlockedHumanBlocks] = useState<number>(0)
   // Mirrors of the counters above, for the SSE log tail. The stream callback is
   // created once and closes over its first render's state, so reading the state
   // variables directly there would print the initial zeros on a terminal frame
@@ -353,6 +358,9 @@ export function MissionControl() {
       if (typeof res.needs_human_blocks === 'number') {
         setNeedsHumanBlocks(res.needs_human_blocks)
       }
+      if (typeof res.blocked_human_blocks === 'number') {
+        setBlockedHumanBlocks(res.blocked_human_blocks)
+      }
       // The engine already phrases a terminal error for the operator
       // (`public_job_error` keeps the actionable types verbatim). Without this
       // read, a failed job was a badge with no reason.
@@ -420,6 +428,8 @@ export function MissionControl() {
           failedRef.current = frame.failed_blocks
         }
         if (typeof frame.needs_human_blocks === 'number') setNeedsHumanBlocks(frame.needs_human_blocks)
+        if (typeof frame.blocked_human_blocks === 'number')
+          setBlockedHumanBlocks(frame.blocked_human_blocks)
 
         // Log the engine's own message when it has one — the stream is a build
         // log, not a counter echo. The counters stay on the line as the tail so
@@ -622,9 +632,21 @@ export function MissionControl() {
 
   const isCompleted = statusStr === 'completed'
   const isFailed = statusStr === 'failed' || statusStr === 'cancelled'
+  // ``completed`` is the *pipeline* finishing, not the gate passing: the ledger
+  // allows a terminal write with quarantined blocks in it, because NEEDS_HUMAN
+  // and BLOCKED_HUMAN are terminal statuses. So the subtext must not claim
+  // certification while the block counters say the delivery was refused — that
+  // is the same class of defect as the gate screen showing PASS over an
+  // unwritten report.
+  const gateBlocked = blockedHumanBlocks > 0 || failedBlocks > 0
+  const gateNeedsReview = !gateBlocked && needsHumanBlocks > 0
 
   const getExecutionSubtext = (): string => {
-    if (isCompleted) return t.mission.stateCertified
+    if (isCompleted) {
+      if (gateBlocked) return t.mission.stateBlocked
+      if (gateNeedsReview) return t.mission.stateNeedsReview
+      return t.mission.stateCertified
+    }
     if (isFailed) return t.mission.jobStatuses[statusStr] ?? statusStr
     switch (derivedStage) {
       case 'extract':

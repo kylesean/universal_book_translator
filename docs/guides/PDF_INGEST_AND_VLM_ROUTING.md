@@ -78,7 +78,7 @@ UBT_VLM_SCAN_FALLBACK=off   ─► 无文本页保留 0 块（整本无文本则
 
 **入口**：`ubt/adapters/factory.py:73-170`（`_resolve_pdf_adapter`）。
 **默认值**：`pdf_engine = "auto"`（`ubt/core/config.py:598`），语义是**恒选 docling**。
-CLI `--pdf-engine`（`translate.py`）。预设也控制它：`publication`/`standard` → `auto`，
+CLI `--pdf-engine`（`translate.py`）。预设也控制它：`high_fidelity`/`standard` → `auto`，
 `preview`/`fast` → `pdfium`；显式 `--pdf-engine` 永远优先。
 **探测实现**：`ubt/adapters/pdf/engine_selector.py`（只产出内容信号，不投票选引擎）。
 

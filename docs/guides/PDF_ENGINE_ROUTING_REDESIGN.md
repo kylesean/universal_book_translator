@@ -45,7 +45,7 @@ CLI --pdf-engine  >  预设 pdf_engine  >  config 默认 (auto)
 | 入口 | 引擎 |
 |---|---|
 | 默认（无 flag） | **`auto`** = **docling（无条件）**；探测结果只进 `assess` 报告 |
-| `--preset publication` / `standard` | `auto` |
+| `--preset high_fidelity` / `standard` | `auto` |
 | `--preset preview` / `fast` | `pdfium` |
 | `--pdf-engine docling` | `docling`（最高优先级） |
 | **扫描件**（任意模式） | `docling`（能力边界，pdfium 抽 0 块） |
@@ -531,7 +531,7 @@ class PDFRoutePlan:
 问题只是它是**独立命令**，没接到 `translate` 的流程里。L3 要做的就是把这份告知**内联到 translate 的前置输出**。
 
 **注意**：L3 会让"复杂 PDF 默认走 pdfium"——**会退化多栏/公式文档**。
-所以 L3 必须与 **L4 的预设档位**配合：`--preset publication`/`standard` 仍自动用 Docling，
+所以 L3 必须与 **L4 的预设档位**配合：`--preset high_fidelity`/`standard` 仍自动用 Docling，
 只有明确要求"快/省资源"时才退回 pdfium。**默认预设的行为需要单独决策**（见 §5 开放问题）。
 
 ---
@@ -594,7 +594,7 @@ class PresetPolicy:
 
 PRESETS[Preset.FAST]    = PresetPolicy(..., pdf_engine="pdfium")
 PRESETS[Preset.PREVIEW] = PresetPolicy(..., pdf_engine="pdfium")
-# publication / standard 保持 auto（质量优先）
+# high_fidelity / standard 保持 auto（质量优先）
 
 PRESET_ENGINE_FIELDS = (..., "pdf_engine")   # 加入字段表
 ```
@@ -613,7 +613,7 @@ PRESET_ENGINE_FIELDS = (..., "pdf_engine")   # 加入字段表
 | # | 问题 | 决策 | 理由 |
 |---|---|---|---|
 | Q1 | `pdf_engine` 默认值 | **`pdfium`** | 快路径无 torch/CUDA 依赖，不与本地 LLM 抢显存 |
-| Q2 | `publication`/`standard` 预设 | **`auto`**（质量优先探测路由） | 选这两个预设本身就是对质量的授权 |
+| Q2 | `high_fidelity`/`standard` 预设 | **`auto`**（质量优先探测路由） | 选这两个预设本身就是对质量的授权 |
 | Q3 | `preview`/`fast` 预设 | **`pdfium`**（强制快路径） | "快/零重型依赖"名实相符 |
 | Q4 | 扫描件 | **始终逃逸到 docling** | 这是**能力边界**，不是偏好：pdfium 对扫描件抽 0 块 |
 
@@ -711,7 +711,7 @@ book.pdf
 
 - [x] `pdf_engine` 加入 `PRESET_ENGINE_FIELDS`
 - [x] 默认 `pdf_engine` 改 `pdfium`
-- [x] `publication`/`standard` → `auto`；`preview`/`fast` → `pdfium`
+- [x] `high_fidelity`/`standard` → `auto`；`preview`/`fast` → `pdfium`
 - [x] 扫描逃逸：`pdfium` 模式下扫描件自动转 docling
 - [x] `factory._resolve_pdf_adapter` 重写（区分偏好 vs 能力边界）
 - [x] `PDFRoutePlan.has_scan` 新增
@@ -780,8 +780,8 @@ textgeom 重建后            : 'd O O C 1 n t r o d u c t o n L o o pe d T a n 
 | 入口 | 引擎 | 推导 |
 |---|---|---|
 | 默认（无 flag） | `auto` | 实测反转：pdfium 对表格/公式文档碎片化到不可交付 |
-| `publication` / `standard` | `auto` | 这两个预设就是"要质量"的授权 |
-| `preview` / `fast` | `pdfium` | 排除法：docling 只由显式或 publication/standard 触发 |
+| `high_fidelity` / `standard` | `auto` | 这两个预设就是"要质量"的授权 |
+| `preview` / `fast` | `pdfium` | 排除法：docling 只由显式或 high_fidelity/standard 触发 |
 | `--pdf-engine docling` | `docling` | 显式最高优先 |
 | 扫描件（任意模式） | `docling` | **能力边界**：pdfium 抽 0 块，不是偏好 |
 
@@ -913,7 +913,7 @@ uv run ubt verify --corpus corpus --run --require-all
 | 风险 | 缓解 |
 |---|---|
 | L2 改聚合口径导致多栏文档退化 | 阶段 0 基线对比；L2b 保留"过半"而非"全无" |
-| L3 让复杂 PDF 默认退化 | 与 L5 预设配合；`publication`/`standard` 仍自动用 Docling |
+| L3 让复杂 PDF 默认退化 | 与 L5 预设配合；`high_fidelity`/`standard` 仍自动用 Docling |
 | L1 正则误伤真公式 | 护栏测试（真碎片必须仍触发） |
 | L4 默认值改变现有行为 | 默认 `auto`，与现状一致 |
 
