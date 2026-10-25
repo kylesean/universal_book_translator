@@ -117,6 +117,22 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Fixed
 
+- **The pre-flight quote's token breakdown sums, and the duration owns its
+  heuristic.** The wizard showed 源文 beside 提示 under a total of
+  提示+补全, but the engine bills prompt = (per-call prefix × calls) +
+  source — the source term is a *subset* of 提示, so the three figures
+  over-summed by ~28% (114,244 vs 89,460 on the reference document). The
+  breakdown is now the additive one — source + call-prefix overhead +
+  completion — and sums to the total exactly; the prefix overhead is derived
+  client-side as `prompt_tokens − estimated_tokens`, which the engine's
+  `estimate_draft_cost_from_totals` guarantees is exactly the per-call prefix
+  fan-out. The total is relabeled 草稿阶段 with the footnote stating that the
+  repair fan-out and QE judging are not included (CostQuote's token fields
+  carry the draft stage only; repair is quoted separately in
+  `repair_blocks`). The duration row gains a (启发式) tag and an InfoTip
+  carrying the engine's own basis text — `runtime.heuristic` is always true,
+  and a bare "4m – 9m" read as a measurement.
+
 - **A blocked delivery is no longer downloadable by accident.** `blocked` means
   blocks were quarantined (MQM Critical unresolved) or failed, so they ship a
   source-only placeholder instead of a translation — the reader meets English

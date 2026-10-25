@@ -90,11 +90,12 @@ export const zh: TranslationDictionary = {
     assessBtn: '免消耗体检 (Assess)',
     startCompile: '开始编译书籍 (Compile)',
     compiling: '正在提交编译任务到引擎队列...',
-    estTokens: '预估消耗 Tokens（估算）',
+    estTokens: '预估消耗 Tokens（草稿阶段）',
     tokensSource: '源文',
-    tokensPrompt: '提示',
+    tokensPrompt: '调用前缀',
     tokensCompletion: '补全',
-    tokensEstimateNote: '按字符脚本启发式估算，非真实分词器；不同模型族相差 30-50%，实际以账单为准。',
+    tokensEstimateNote:
+      '按字符脚本启发式估算，非真实分词器；不同模型族相差 30-50%；仅含草稿阶段，修复扇出与 QE 判定不计入；实际以账单为准。',
     estCost: '预估费用 (USD)',
     pageCount: '全书总页数',
     recommendation: '引擎路由建议',
@@ -113,6 +114,9 @@ export const zh: TranslationDictionary = {
     mathDensityTextOnly: '文本符号密集；快速预检未定位独立公式框（转入高保真引擎处理）',
     mathDensityWithObjects: '文本符号密集；已检出独立公式版面对象',
     estTime: '预估编译耗时',
+    heuristicTag: '启发式',
+    estTimeHeuristicNote:
+      '耗时为启发式区间：由速率限制（RPM/TPM、并发）与本地解析、编译开销推得，未持久化任何实测分阶段耗时。',
     confidence: '路由置信度',
     probeWarnings: '体检告警',
     // 与引擎 ubt/core/assess.py 的 detail_zh 保持同一措辞；这里按稳定 code

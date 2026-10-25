@@ -92,6 +92,10 @@ export interface TranslationDictionary {
     tokensPrompt: string
     tokensCompletion: string
     tokensEstimateNote: string
+    /** Tag on the duration estimate, which is derived from rate-limit
+     *  knobs rather than measured; the engine's basis rides in an InfoTip. */
+    heuristicTag: string
+    estTimeHeuristicNote: string
     estCost: string
     pageCount: string
     recommendation: string

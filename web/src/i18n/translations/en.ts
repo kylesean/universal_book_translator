@@ -93,11 +93,12 @@ export const en: TranslationDictionary = {
     assessBtn: 'Run Pre-flight Assess',
     startCompile: 'Compile Book',
     compiling: 'Submitting job to engine...',
-    estTokens: 'Est. Tokens (estimated)',
+    estTokens: 'Est. Tokens (draft stage)',
     tokensSource: 'source',
-    tokensPrompt: 'prompt',
+    tokensPrompt: 'call prefixes',
     tokensCompletion: 'completion',
-    tokensEstimateNote: 'Script-aware character heuristic, not a real tokenizer; model families differ by 30-50%, so treat the invoice as authoritative.',
+    tokensEstimateNote:
+      'Script-aware character heuristic, not a real tokenizer; model families differ by 30-50%; draft stage only — the repair fan-out and QE judging are not included; treat the invoice as authoritative.',
     estCost: 'Est. Cost',
     pageCount: 'Page Count',
     recommendation: 'Engine Route Advisory',
@@ -115,6 +116,9 @@ export const en: TranslationDictionary = {
     mathDensityTextOnly: 'dense math symbols; layout formula boxes unverified in fast probe (handled by high-fidelity engine)',
     mathDensityWithObjects: 'dense math symbols; extractable formula layout boxes detected',
     estTime: 'Estimated compile time',
+    heuristicTag: 'heuristic',
+    estTimeHeuristicNote:
+      'The duration is a heuristic band, derived from the rate-limit knobs (RPM/TPM, concurrency) and local parsing/compile overhead — no measured per-stage timing is persisted anywhere.',
     confidence: 'Route confidence',
     probeWarnings: 'Assessment warnings',
     // Keyed by the engine's stable warning code (ubt/core/assess.py). The

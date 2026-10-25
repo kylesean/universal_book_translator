@@ -1542,12 +1542,18 @@ export function NewJobWizard() {
                       {t.wizard.estTokens}
                     </span>
                     <span className="text-right">
-                      {/* ``estimated_tokens`` is the *source* size only. The
-                          engine bills prompt (prefix per call + source) and
-                          completion (source × pair fertility) separately, so
-                          showing the source figure alone under-quoted the real
-                          spend by ~2.6x on the reference document. Both
-                          components are already on the assess payload. */}
+                      {/* The engine bills prompt = (per-call prefix × calls) +
+                          source and completion = source × pair fertility. The
+                          honest additive decomposition is therefore source +
+                          prefix-overhead + completion — three figures that SUM
+                          to the total. Showing the raw prompt beside its own
+                          source term read as three additive parts and
+                          over-summed by the source share (~28% on the
+                          reference document). The overhead is derived here as
+                          prompt_tokens − estimated_tokens, which the engine
+                          guarantees is exactly the prefix fan-out
+                          (estimate_draft_cost_from_totals: prompt = calls ×
+                          prefix + source, with the same source_tokens). */}
                       <span className="font-mono font-bold text-[var(--ink-primary)]">
                         {(assessment.cost.prompt_tokens + assessment.cost.completion_tokens).toLocaleString()}
                       </span>
@@ -1555,7 +1561,10 @@ export function NewJobWizard() {
                         {t.wizard.tokensSource}{' '}
                         {assessment.document.estimated_tokens.toLocaleString()} ·{' '}
                         {t.wizard.tokensPrompt}{' '}
-                        {assessment.cost.prompt_tokens.toLocaleString()} ·{' '}
+                        {Math.max(
+                          0,
+                          assessment.cost.prompt_tokens - assessment.document.estimated_tokens
+                        ).toLocaleString()} ·{' '}
                         {t.wizard.tokensCompletion}{' '}
                         {assessment.cost.completion_tokens.toLocaleString()}
                       </span>
@@ -1582,10 +1591,30 @@ export function NewJobWizard() {
                     </span>
                   </div>
                   <div className="py-2.5 flex items-center justify-between">
-                    <span className="type-help">{t.wizard.estTime}</span>
+                    <span className="type-help inline-flex items-center gap-1">
+                      {t.wizard.estTime}
+                      {/* ``runtime.heuristic`` is always true — no per-stage
+                          timing is persisted anywhere — so carry the engine's
+                          own basis text rather than let a bare minute range
+                          read as a measurement. */}
+                      <InfoTip label={t.wizard.estTime}>
+                        <span className="block space-y-1">
+                          <span className="block">{t.wizard.estTimeHeuristicNote}</span>
+                          {assessment.runtime.basis && (
+                            <span className="block text-[var(--ink-muted)]">
+                              {assessment.runtime.basis}
+                            </span>
+                          )}
+                        </span>
+                      </InfoTip>
+                    </span>
                     <span className="font-mono font-bold text-[var(--ink-primary)]">
                       {formatDuration(assessment.runtime.est_seconds_low)} –{' '}
                       {formatDuration(assessment.runtime.est_seconds_high)}
+                      <span className="text-[var(--ink-muted)] font-normal">
+                        {' '}
+                        ({t.wizard.heuristicTag})
+                      </span>
                     </span>
                   </div>
                   <div className="py-2.5 flex items-start justify-between gap-3">
