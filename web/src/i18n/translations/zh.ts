@@ -98,6 +98,12 @@ export const zh: TranslationDictionary = {
     estCost: '预估费用 (USD)',
     pageCount: '全书总页数',
     recommendation: '引擎路由建议',
+    // 路由徽标用短标签：引擎的 recommended_dual_mode / recommended_preset 枚举
+    // （mono/dual、high_fidelity/standard）不直接裸显给操作员。
+    routeMono: '单语',
+    routeDual: '双语',
+    routeHighFidelity: '高保真',
+    routeStandard: '标准',
     scannedRatio: '扫描件位图比例',
     sourceChars: '源文字符数',
     chapters: '章节数',
@@ -132,7 +138,7 @@ export const zh: TranslationDictionary = {
       FORMULA_HEAVY_NEEDS_ENRICHMENT:
         '文档公式密集但视觉公式增强已关闭（--preset preview 的常见取舍），公式转写质量可能受限。',
       PATHOLOGICAL_PAGE_RISK:
-        '存在矩形行数达 {max_rect_rows} 的异常页面，几何分析可能极慢（已知 O(n²) 缺陷），--deep 或完整翻译会明显耗时。',
+        '存在单页文本行数达 {max_text_rows} 的异常版面（正常 A4 页约 30–100 行），栏序几何排序耗时随行数平方增长，--deep 或完整翻译可能明显变慢。',
       SCANNED_PAGE_OCR_ESTIMATED:
         '检测到文档无有效文本层（纯扫描件或图像化排版），已按预估 OCR 转写规模 (~{chars_per_page}字/页，共 ~{source_chars} 字)估算草稿翻译成本；实际费用将取决于 OCR 识别出的文本量。',
       PAGE_RANGE_FILTERED:

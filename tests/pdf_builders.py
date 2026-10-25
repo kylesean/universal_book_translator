@@ -239,9 +239,52 @@ def write_marker_cloud_pdf(
     return path
 
 
+def write_dotted_toc_pdf(
+    path: Path,
+    rows: int,
+    *,
+    dots_per_row: int = 70,
+    width: float = PAGE_WIDTH,
+    height: float = PAGE_HEIGHT,
+    margin: float = _MARGIN,
+) -> Path:
+    """A table of contents whose leader lines are dotted one glyph per run.
+
+    The shape a Typst/LaTeX TOC presents to pdfium: every leader dot is its
+    own text-showing operator, so the raw rect count runs into the thousands
+    while the rows they spell stay a few dozen. Each of the ``rows`` rows is
+    one title run, ``dots_per_row`` single-dot runs across the gutter, and a
+    page-number run -- all on the same baseline.
+    """
+    number_x = width - margin - 60.0
+    dot_lo, dot_hi = 200.0, number_x - 20.0
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=width, height=height)
+    ops: list[str] = []
+    for index in range(rows):
+        y = height - margin - index * _LEADING
+        runs = [(margin, f"{index + 1}. Section Title")]
+        runs += [(dot_lo + j * (dot_hi - dot_lo) / dots_per_row, ".") for j in range(dots_per_row)]
+        runs.append((number_x, f"{index * 2 + 3}"))
+        for x, text in runs:
+            ops.append("BT")
+            ops.append(f"/F1 {_FONT_SIZE} Tf")
+            ops.append(f"1 0 0 1 {x:.2f} {y:.2f} Tm")
+            ops.append(f"({_escape(text)}) Tj")
+            ops.append("ET")
+    contents = DecodedStreamObject()
+    contents.set_data("\n".join(ops).encode("latin-1"))
+    page[NameObject("/Contents")] = writer._add_object(contents)  # noqa: SLF001
+    _attach_font(writer, page)
+    with path.open("wb") as handle:
+        writer.write(handle)
+    return path
+
+
 __all__ = [
     "PAGE_HEIGHT",
     "PAGE_WIDTH",
+    "write_dotted_toc_pdf",
     "write_marker_cloud_pdf",
     "write_text_pdf",
     "write_toc_pdf",

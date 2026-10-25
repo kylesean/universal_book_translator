@@ -101,6 +101,13 @@ export const en: TranslationDictionary = {
     estCost: 'Est. Cost',
     pageCount: 'Page Count',
     recommendation: 'Engine Route Advisory',
+    // Short labels for the route badge: the engine's recommended_dual_mode /
+    // recommended_preset enums (mono/dual, high_fidelity/standard) are not
+    // shown raw to the operator.
+    routeMono: 'Target-only',
+    routeDual: 'Bilingual',
+    routeHighFidelity: 'High-fidelity',
+    routeStandard: 'Standard',
     scannedRatio: 'Scanned Bitmap Ratio',
     sourceChars: 'Source characters',
     chapters: 'Chapters',
@@ -136,7 +143,7 @@ export const en: TranslationDictionary = {
       FORMULA_HEAVY_NEEDS_ENRICHMENT:
         'The document is formula-heavy but visual formula enrichment is off (a common trade-off of --preset preview); formula transcription quality may suffer.',
       PATHOLOGICAL_PAGE_RISK:
-        'A page has {max_rect_rows} rectangle rows; geometry analysis can be extremely slow (a known O(n²) defect) and --deep or a full translation will take noticeably longer.',
+        'A page groups into {max_text_rows} text rows (a normal A4 page groups to 30-100); column ordering grows quadratically with row count, so --deep or a full translation may run noticeably slower.',
       SCANNED_PAGE_OCR_ESTIMATED:
         'No usable text layer was found (a pure scan or image-based layout); the draft cost is estimated from the expected OCR volume (~{chars_per_page} chars/page, ~{source_chars} chars total). Actual cost depends on how much text OCR recovers.',
       PAGE_RANGE_FILTERED:

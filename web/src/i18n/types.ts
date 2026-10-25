@@ -95,6 +95,11 @@ export interface TranslationDictionary {
     estCost: string
     pageCount: string
     recommendation: string
+    /** Short labels for the route badge's dual-mode / preset enums. */
+    routeMono: string
+    routeDual: string
+    routeHighFidelity: string
+    routeStandard: string
     scannedRatio: string
     sourceChars: string
     chapters: string

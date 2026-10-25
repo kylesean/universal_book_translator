@@ -82,11 +82,15 @@ _ASSESS_JUDGE_SENTENCE_CHARS = 120
 # reservation constant) plus the judge scaffolding; answers are short.
 _VLM_PROMPT_TOKENS = 1500
 _VLM_COMPLETION_TOKENS = 300
-# Pages whose drawing-row count is this high make textgeom's line merge
-# quadratic-slow (documented defect: textgeom's row merge is quadratic on
-# rect-heavy pages): deep mode
-# on such a document can take minutes.
-PATHOLOGICAL_RECT_ROWS = 2000
+# A page whose *grouped text rows* (``PageFacts.n_text_rows``) reach this
+# count is a genuinely anomalous layout — an A4 text page groups to 30–100
+# rows — because textgeom's row merge and column ordering are quadratic in
+# that row count and a deep pass revisits them per witness. The old gate
+# counted raw pdfium rects, which a Typst/LaTeX table of contents dots along
+# its leader lines: 2,289 "rows" on an ordinary TOC page that groups back to
+# ~35 and orders in 0.02s (measured, arXiv 2608.25512), so every dotted TOC
+# warned of slowness that never came.
+PATHOLOGICAL_TEXT_ROWS = 2000
 
 _CENTS_EXCLUDED_NOTE = (
     "报价为「预期非保证」：修复/QE/视觉环节按配置上限与平均缺陷率外推，实际花费随真实缺陷率浮动；"
@@ -346,7 +350,7 @@ def _pdf_facts(
         out["page_count"] = n
         out["text_layer_coverage"] = round(with_text / n, 4)
         out["scan_page_share"] = round(scanned / n, 4)
-        out["max_rect_rows"] = max(p.facts.n_rect_rows for p in pages)
+        out["max_text_rows"] = max(p.facts.n_text_rows for p in pages)
         out["poster_pages"] = sum(1 for p in pages if p.kind == page_kind.POSTER_FIXED)
         out["resume_pages"] = sum(1 for p in pages if p.kind == page_kind.RESUME_DENSE)
 
@@ -897,14 +901,14 @@ def _synthesize_warnings(
                 "文档公式密集但视觉公式增强已关闭（--preset preview 的常见取舍），公式转写质量可能受限。",
             )
         )
-    if pdf.get("max_rect_rows", 0) >= PATHOLOGICAL_RECT_ROWS:
+    if pdf.get("max_text_rows", 0) >= PATHOLOGICAL_TEXT_ROWS:
         warnings.append(
             AssessmentWarning(
                 "PATHOLOGICAL_PAGE_RISK",
                 "warn",
-                f"存在矩形行数达 {pdf['max_rect_rows']} 的异常页面，几何分析可能极慢（已知 O(n²) 缺陷），"
-                "--deep 或完整翻译会明显耗时。",
-                {"max_rect_rows": int(pdf["max_rect_rows"])},
+                f"存在单页文本行数达 {pdf['max_text_rows']} 的异常版面（正常 A4 页约 30–100 行），"
+                "栏序几何排序耗时随行数平方增长，--deep 或完整翻译可能明显变慢。",
+                {"max_text_rows": int(pdf["max_text_rows"])},
             )
         )
     if pdf.get("text_layer_coverage") is not None:

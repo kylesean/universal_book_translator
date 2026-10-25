@@ -79,6 +79,18 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Fixed
 
+- **Dotted tables of contents no longer warn of geometry that never runs
+  slow.** The pre-flight `PATHOLOGICAL_PAGE_RISK` gate read pdfium's raw
+  rect-fragment count, and a Typst/LaTeX TOC dots each leader line: the
+  measured trigger (arXiv 2608.25512) was 2,289 "rows" on an ordinary
+  contents page that the geometry engine regroups into 35 rows and orders in
+  0.02 s — a warn-level false positive on every dotted TOC, claiming `--deep`
+  or a full translation would be noticeably slower. The profiler now reports
+  `n_text_rows` (fragments regrouped into rows by vertical overlap — the
+  input size textgeom's quadratic stages actually see) and the gate reads
+  that; the copy counts rows instead of "rectangle rows" in both locales.
+  The route badge also stops showing raw enums (`mono · high_fidelity`) and
+  renders localized labels.
 - **Swapped checksum-less placeholder echoes fail closed instead of restoring
   crossed spans.** A model that renumbered math/code tokens while dropping the
   checksum suffix had each bare index restored verbatim wherever its digits

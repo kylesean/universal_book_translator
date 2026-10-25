@@ -76,6 +76,25 @@ function warningText(
 }
 
 /**
+ * The route badge's short localized labels. The engine emits raw enums
+ * (`recommended_dual_mode` mono/dual, `recommended_preset`
+ * high_fidelity/standard); an unknown value still shows itself so a future
+ * preset renders as its own name rather than "undefined".
+ */
+function routeBadge(
+  dual: string,
+  preset: string,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  const duals: Record<string, string> = { mono: t.wizard.routeMono, dual: t.wizard.routeDual }
+  const presets: Record<string, string> = {
+    high_fidelity: t.wizard.routeHighFidelity,
+    standard: t.wizard.routeStandard,
+  }
+  return `${duals[dual] ?? dual} · ${presets[preset] ?? preset}`
+}
+
+/**
  * The languages the engine has a profile for (`ubt/core/language_profile.py`),
  * plus the two Chinese script variants the target validator accepts. Labels are
  * the language's own endonym, which needs no translation.
@@ -1558,7 +1577,11 @@ export function NewJobWizard() {
                       {t.wizard.recommendation}
                     </span>
                     <span className="font-mono text-[#15803d] text-xs font-semibold text-right">
-                      {assessment.route.recommended_dual_mode} · {assessment.route.recommended_preset}
+                      {routeBadge(
+                        assessment.route.recommended_dual_mode,
+                        assessment.route.recommended_preset,
+                        t,
+                      )}
                       <span className="text-[var(--ink-muted)] font-normal">
                         {' '}
                         ({t.wizard.confidence} {(assessment.route.confidence * 100).toFixed(0)}%)

@@ -283,6 +283,80 @@ def test_both_locales_carry_the_same_two_qualifiers() -> None:
             assert needle in copy, f"{name} lost {needle!r}"
 
 
+def test_pathological_gate_counts_grouped_rows_not_raw_rects() -> None:
+    """The gate's input is the row count the geometry engine orders.
+
+    A dotted table of contents puts 2,000+ raw pdfium rect fragments on an
+    ordinary page (arXiv 2608.25512: 2,289 rects -> 35 grouped rows, 0.02s),
+    so the old raw-rect gate warned of slowness that never came.
+    """
+    arch = Archetype(
+        format_ext="pdf",
+        page_or_ch_count=92,
+        is_scanned=False,
+        math_density=MathDensity.HIGH,
+        detected_domain="general",
+        domain_confidence=1.0,
+        category=DocCategory.TECHNICAL_BOOK,
+        sample_chars=5000,
+    )
+    route = RouteRecommendation(
+        mode="long",
+        reason="test",
+        recommended_preset="high_fidelity",
+        recommended_dual_mode="mono",
+        recommended_profile="textbook",
+        confidence=0.9,
+        confidence_basis="",
+    )
+    config = UBTConfig()
+    config.draft_model = "test-model"
+
+    # A dotted TOC: raw fragments over the bar, grouped rows nowhere near it.
+    toc_shaped = {"max_text_rows": 35, "scan_page_share": 0.0}
+    codes = [w.code for w in _synthesize_warnings(arch, toc_shaped, config, route, [])]
+    assert "PATHOLOGICAL_PAGE_RISK" not in codes
+
+    # A stale payload from an older probe carries only the raw count; it must
+    # not warn either.
+    stale = {"max_rect_rows": 2289, "scan_page_share": 0.0}
+    codes = [w.code for w in _synthesize_warnings(arch, stale, config, route, [])]
+    assert "PATHOLOGICAL_PAGE_RISK" not in codes
+
+    # A page that genuinely groups to thousands of rows still warns.
+    pathological = {"max_text_rows": 2500, "scan_page_share": 0.0}
+    (warning,) = [
+        w
+        for w in _synthesize_warnings(arch, pathological, config, route, [])
+        if w.code == "PATHOLOGICAL_PAGE_RISK"
+    ]
+    assert warning.params == {"max_text_rows": 2500}
+    assert "2500" in warning.detail_zh
+
+
+def test_pathological_copy_counts_rows_in_both_locales() -> None:
+    """The console renders the i18n copy, not the engine's ``detail_zh``.
+
+    Mirrors the FONT_RESIDUE_RISK parity test: fixing only the engine message
+    would leave the console warning about "rectangle rows" the gate no longer
+    counts.
+    """
+    repo = Path(__file__).resolve().parents[3]
+    for name, needles in (
+        ("zh.ts", ("文本行数", "平方", "{max_text_rows}")),
+        ("en.ts", ("text rows", "quadratically", "{max_text_rows}")),
+    ):
+        path = repo / "web" / "src" / "i18n" / "translations" / name
+        if not path.exists():
+            pytest.skip("web/ frontend is not present in this checkout")
+        text = path.read_text(encoding="utf-8")
+        block = re.search(r"PATHOLOGICAL_PAGE_RISK:\s*\n?\s*'([^']*)'", text)
+        assert block, f"{name} has no PATHOLOGICAL_PAGE_RISK copy"
+        copy = block.group(1)
+        for needle in needles:
+            assert needle in copy, f"{name} lost {needle!r}"
+
+
 def test_recommend_route_penalizes_confidence_on_font_damage() -> None:
     from ubt.core.assess import _recommend_route
     from ubt.core.router_mode import RouteDecision

@@ -152,6 +152,12 @@ class PageFacts:
     height_pt: float
     n_chars: int
     n_rect_rows: int
+    #: Raw ``count_rects`` fragments regrouped into text rows (``_group_rows``).
+    #: This — not ``n_rect_rows`` — is the size the geometry engine's quadratic
+    #: stages actually see: a Typst/LaTeX table of contents dots each leader
+    #: dot, so one TOC page carries 2,000+ raw rects that group back into a few
+    #: dozen rows.
+    n_text_rows: int
     right_row_share: float
     formula_density: float
     n_path_ops: int
@@ -263,6 +269,9 @@ class PageProbe:
     text: str
     n_rect_rows: int
     rects: tuple[Rect, ...]
+    #: ``len(_group_rows(rects))`` — the page's fragments regrouped into text
+    #: rows; the input size textgeom's row merge and column ordering pay for.
+    n_text_rows: int
 
 
 def probe_pdfium_page(page: Any) -> PageProbe:
@@ -292,7 +301,8 @@ def probe_pdfium_page(page: Any) -> PageProbe:
         rects = tuple(textpage.get_rect(i) for i in range(n_rect_rows))
     finally:
         textpage.close()
-    return PageProbe(width, height, unrotated_width, n_chars, text, n_rect_rows, rects)
+    n_text_rows = len(_group_rows(list(rects)))
+    return PageProbe(width, height, unrotated_width, n_chars, text, n_rect_rows, rects, n_text_rows)
 
 
 @pdfium_serialized
@@ -319,6 +329,7 @@ def _pdfium_facts(pdf_path: Path) -> list[dict[str, Any]]:
                         "height_pt": probe.height_pt,
                         "n_chars": probe.n_chars,
                         "n_rect_rows": probe.n_rect_rows,
+                        "n_text_rows": probe.n_text_rows,
                         "right_row_share": column_right_share(
                             list(probe.rects), probe.unrotated_width_pt
                         ),
@@ -380,6 +391,7 @@ def collect_page_facts(pdf_path: Path) -> list[PageFacts]:
                 height_pt=float(trow["height_pt"]),
                 n_chars=int(trow["n_chars"]),
                 n_rect_rows=int(trow["n_rect_rows"]),
+                n_text_rows=int(trow["n_text_rows"]),
                 right_row_share=float(trow["right_row_share"]),
                 formula_density=float(trow["formula_density"]),
                 n_path_ops=int(prow.get("n_path_ops", 0)),
@@ -393,8 +405,10 @@ def collect_page_facts(pdf_path: Path) -> list[PageFacts]:
 # Bump when ``PageFacts`` fields or ``classify_page`` thresholds change. The
 # The key must cover the profiler *logic*, not just the PDF bytes: an
 # mtime-only key silently reused profiles from older rules for any PDF that
-# had not been edited. Version 3 names the sharded DiskCacheStore layout.
-_PROFILE_CACHE_VERSION = 3
+# had not been edited. Version 3 names the sharded DiskCacheStore layout;
+# version 4 adds ``n_text_rows`` (older payloads lack the key, and serving
+# them with a default would report a row count nobody measured).
+_PROFILE_CACHE_VERSION = 4
 
 
 def _cache_key(pdf_path: Path) -> str:
