@@ -83,16 +83,20 @@ BUNDLED_FONTS: tuple[BundledFont, ...] = (
     BundledFont(
         filename="NotoSerifCJKsc-Regular-subset.otf",
         family="Noto Serif CJK SC",
-        sha256="f4d53db237e74cb0be9bc0d8e3155ec50dc7b9e14b0769e0170bc8379a586c1d",
+        sha256="6edad0c599e75f2f873b1f2d298067054ba5d2f5243a7e73d9e97d379e657313",
         license="OFL-1.1",
         # `hant` too: the traditional ideographs live in the same unified block
         # the subset covers (measured against a traditional-only sample).
+        # Every CJK character is here (kana 96.9%, hangul 100%, ideographs
+        # 100%), but the *regional forms* belong to the JP/KR cuts below: an
+        # SC 直 does not look like a Japanese 直, so those scripts are not
+        # claimed here even though the glyphs exist.
         scripts=("hans", "hant", "cjk"),
     ),
     BundledFont(
         filename="NotoSansCJKsc-Regular-subset.otf",
         family="Noto Sans CJK SC",
-        sha256="5ec607bb46f0d557e07c1aa6cf3e0c6619d656536cadbfbaa9e40651878630c9",
+        sha256="c88350d62d52e8676896f9e2487a1eba10ca3875e12e04d0271ac18f9c2c3552",
         license="OFL-1.1",
         scripts=("hans", "hant", "cjk"),
     ),
@@ -102,6 +106,44 @@ BUNDLED_FONTS: tuple[BundledFont, ...] = (
         sha256="19e72cd8d595fae5bd74a5206f5d938512e1183d4fed7abb1ec1be1d7efa5f88",
         license="OFL-1.1",
         scripts=("latin", "latin-ext"),
+    ),
+    # Regional CJK cuts. The SC face carries every CJK script's *characters*,
+    # but shared ideographs are drawn differently per region (直, 骨, 角 …), so
+    # typesetting Japanese with the SC face reads as Chinese. Each regional
+    # face is cut from the same upstream collection (same glyphs, different
+    # regional forms) and owns its own script token.
+    BundledFont(
+        filename="NotoSerifCJKjp-Regular-subset.otf",
+        family="Noto Serif CJK JP",
+        sha256="11fe500a9cdc0320819426720e339e60b68d5a9ecb013a9836310d7c6b34db78",
+        license="OFL-1.1",
+        scripts=("jpan",),
+    ),
+    BundledFont(
+        filename="NotoSerifCJKkr-Regular-subset.otf",
+        family="Noto Serif CJK KR",
+        sha256="beba6811a5b588b1e40c11a8e64f6a83e1f8b7c4c798755067fed2e9b6c5fc29",
+        license="OFL-1.1",
+        scripts=("kore",),
+    ),
+    # Arabic and Hebrew are absent from the pan-CJK faces (measured: 0% of
+    # both blocks), so they need their own files. Naskh is the conventional
+    # book face for Arabic prose; Hebrew uses the serif release for the same
+    # reason. Both are small (a few hundred KB) — unlike CJK, these scripts
+    # have no ideograph block to carry.
+    BundledFont(
+        filename="NotoNaskhArabic-Regular.ttf",
+        family="Noto Naskh Arabic",
+        sha256="c34fdbd98af4dbc45ca192a23d2eeb77032add83086f5fe32957d23b3f36b221",
+        license="OFL-1.1",
+        scripts=("arabic",),
+    ),
+    BundledFont(
+        filename="NotoSerifHebrew-Regular.ttf",
+        family="Noto Serif Hebrew",
+        sha256="dfd5a6aefe97a99f68fe43388342913d50bb9fbf6d3afc4d2c7725661bc4a2b1",
+        license="OFL-1.1",
+        scripts=("hebrew",),
     ),
 )
 
@@ -187,6 +229,10 @@ _LANG_SCRIPT_TOKEN: dict[str, str] = {
     "zh-hant": "hant",
     "zh-hk": "hant",
     "zh-mo": "hant",
+    "ja": "jpan",
+    "ko": "kore",
+    "ar": "arabic",
+    "he": "hebrew",
     "en": "latin",
     "fr": "latin",
     "de": "latin",

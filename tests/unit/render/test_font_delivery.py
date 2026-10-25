@@ -221,12 +221,14 @@ def test_isolation_is_decided_per_target_script(
     _make_set(tmp_path)
     monkeypatch.setenv("UBT_FONT_DIR", str(tmp_path))
 
-    # Covered scripts: simplified + traditional Chinese (same ideograph block)
-    # and Latin.
-    for lang in ("zh", "zh-CN", "zh-TW", "en", "fr"):
+    # The pan-CJK faces carry every CJK script (kana 96.9%, hangul 100%),
+    # and Arabic/Hebrew ship their own small files, so all of these render
+    # reproducibly from the set alone.
+    for lang in ("zh", "zh-CN", "zh-TW", "ja", "ko", "ar", "he", "en", "fr"):
         assert can_isolate(lang), f"{lang} should be reproducible from the set alone"
-    # Scripts the set does not carry.
-    for lang in ("ja", "ko", "ar", "he", "ru", "th"):
+    # Scripts the set still does not carry: Cyrillic text beyond Latin-1,
+    # Thai and the Indic scripts need faces this set does not bundle.
+    for lang in ("ru", "th", "hi"):
         assert not can_isolate(lang), f"{lang} must keep system fonts"
 
 
@@ -261,7 +263,61 @@ def test_compile_flags_follow_the_target(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert "--font-path" in zh_args
     assert "--ignore-system-fonts" in zh_args
 
+    # Set present, target covered by a script-specific file.
+    ar_args = _font_args("ar")
+    assert "--ignore-system-fonts" in ar_args
+
     # Set present, target not covered -> path only, system fonts stay.
-    ja_args = _font_args("ja")
-    assert "--font-path" in ja_args
-    assert "--ignore-system-fonts" not in ja_args
+    # (Cyrillic/Thai/Indic have no bundled face; sealing them off would ship
+    # tofu, so the intermediate state is the correct one.)
+    th_args = _font_args("th")
+    assert "--font-path" in th_args
+    assert "--ignore-system-fonts" not in th_args
+
+
+def test_the_cjk_subset_spec_includes_kana_and_hangul() -> None:
+    """The subset spec is what decides whether Japanese/Korean ship as tofu.
+
+    The first version cut only the ideograph block, so the set rendered Japanese
+    and Korean as blank squares even though the upstream pan-CJK face carries
+    both scripts. The ranges are data, so a future edit could silently drop them
+    again; this pins the intent, not the encoding.
+    """
+    from scripts.fetch_fonts import CJK_SUBSET_UNICODES as spec
+
+    # Hiragana/Katakana
+    assert "U+3040-30FF" in spec
+    # Hangul syllables and Jamo
+    assert "U+AC00-D7A3" in spec
+    assert "U+1100-11FF" in spec
+    # The ideograph block and CJK punctuation stay.
+    assert "U+4E00-9FFF" in spec
+    assert "U+3000-303F" in spec
+
+
+def test_each_cjk_region_has_its_own_face() -> None:
+    """JP/KR must not be served by the SC face.
+
+    Shared ideographs are drawn differently per region (直, 骨, 角 …), so an SC
+    face in a Japanese book is legible but reads as Chinese typesetting. Each
+    regional face is a separate file with its own digest — a shared digest means
+    the subset step extracted the same face three times, which is exactly what
+    happened before the branch order and weight selection were pinned.
+    """
+    cjk = [f for f in BUNDLED_FONTS if "CJK" in f.filename and "Sans" not in f.filename]
+    families = {f.family for f in cjk}
+    assert {"Noto Serif CJK SC", "Noto Serif CJK JP", "Noto Serif CJK KR"} <= families
+    digests = [f.sha256 for f in cjk]
+    assert len(set(digests)) == len(digests), "regional faces must be distinct files"
+
+
+def test_the_regional_faces_own_their_script_tokens() -> None:
+    """A script token claimed by two faces would make the isolation decision ambiguous."""
+    from ubt.render.typst.fonts import BUNDLED_FONTS
+
+    owners: dict[str, list[str]] = {}
+    for face in BUNDLED_FONTS:
+        for script in face.scripts:
+            owners.setdefault(script, []).append(face.family)
+    for script in ("jpan", "kore", "arabic", "hebrew"):
+        assert len(owners.get(script, [])) == 1, f"{script} has {owners.get(script)}"
