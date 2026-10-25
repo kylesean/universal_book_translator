@@ -137,7 +137,16 @@ jobs:
       - name: Slow test tier (synthetic PDF render e2e)
         env:
           PYTHONIOENCODING: "utf-8"
-        run: uv run pytest -m slow -q
+        # The gold-corpus sweep is deselected explicitly, not silently skipped.
+        # corpus/semantic_gold is gitignored (real papers, fetched by
+        # scripts/fetch_semantic_gold.py), so this job cannot run it — and its
+        # own guard fails rather than collecting zero cases, precisely so
+        # "measured nothing" can never read as green. Naming it here keeps that
+        # guard intact and makes the CI gap a stated fact: the sweep runs on a
+        # machine with the corpus, as its docstring instructs.
+        run: >
+          uv run pytest -m slow -q
+          --deselect tests/integration/test_publish_corpus_sweep.py
 
   # The `gate` job installs `--extra dev`, which does NOT include the `pdf`
   # extra (docling). Every PDF-path test there therefore ran on the pdfium
