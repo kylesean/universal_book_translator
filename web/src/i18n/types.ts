@@ -416,6 +416,74 @@ export interface TranslationDictionary {
     metricMaskedBlocks: string
     metricCorruptBlocks: string
     metricFormulaBlocks: string
+    //: View density toggle: 简明 for readers, 专业 for operators.
+    modeLabel: string
+    modeSimple: string
+    modePro: string
+    switchToPro: string
+    //: 简明 verdict card — one sentence per outcome, no engine jargon.
+    simpleReadyTitle: string
+    simpleReadyBody: string
+    simpleWarningTitle: string
+    simpleWarningBody: string
+    simpleBlockedTitle: string
+    simpleBlockedBody: string
+    //: Short check labels, shared by the verdict chips and the card titles.
+    chipMath: string
+    chipTerm: string
+    chipLayout: string
+    chipComplete: string
+    chipCost: string
+    //: One-line QE state for readers; the full explanation sits in the InfoTip.
+    qeSimpleNote: string
+    previewTranslation: string
+    //: 简明 per-check sentences. Placeholders interpolate report numbers.
+    simpleMathLine: string
+    simpleTermLine: string
+    simpleVisualCleanLine: string
+    simpleVisualFindingsLine: string
+    simpleVisualSkippedLine: string
+    simpleVisualMissingLine: string
+    simpleCompleteLine: string
+    simpleCompleteFailLine: string
+    simpleCostLine: string
+    simpleCostUnpricedLine: string
+    //: Honest pro-mode summary when some visual tiers ran and others did not.
+    visualPartialRan: string
+    radarUnmeasuredLabel: string
+    radarUnmeasuredNote: string
+    //: Deliverable groups — who each file is for, not what format it is.
+    delivGroupReading: string
+    delivGroupReadingDesc: string
+    delivGroupL10n: string
+    delivGroupL10nDesc: string
+    delivGroupAudit: string
+    delivGroupAuditDesc: string
+    //: One plain-language line per deliverable key.
+    descPrimary: string
+    descSecondary: string
+    descEpub: string
+    descHtml: string
+    descXliff: string
+    descContract: string
+    descQualityReport: string
+    descVisualReport: string
+    descMetrics: string
+    previewAction: string
+    downloadAction: string
+    previewLoading: string
+    previewDownloadInstead: string
+    previewRawJson: string
+    previewClose: string
+    previewSegmentsTotal: string
+    //: Digest labels for the JSON sidecar previews.
+    delivCostLabel: string
+    delivPagesScanned: string
+    delivOverlapPairs: string
+    delivTruncations: string
+    delivTypeIssues: string
+    delivRecall: string
+    refreshBtn: string
   }
   assets: {
     colSource: string

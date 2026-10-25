@@ -79,8 +79,8 @@ def test_every_deliverable_key_has_a_label() -> None:
     """
     from ubt.api.routes.shared import DELIVERABLE_LABELS
 
-    view = _source(_VIEWS / "quality-gate" / "QualityGateView.tsx")
-    switch = view[view.index("function deliverableLabel") :]
+    meta = _source(_VIEWS / "quality-gate" / "artifactMeta.ts")
+    switch = meta[meta.index("function deliverableName") :]
     switch = switch[: switch.index("\n}")]
 
     missing = [key for key in DELIVERABLE_LABELS if f"case '{key}':" not in switch]

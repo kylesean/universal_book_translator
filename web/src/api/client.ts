@@ -487,8 +487,28 @@ export async function listDeliverables(jobId: string): Promise<DeliverableListin
   return { items: data.deliverables ?? [], stale: Boolean(data.stale) }
 }
 
-export function deliverableDownloadUrl(jobId: string, key: string): string {
-  return `${BASE_URL}/jobs/${encodeURIComponent(jobId)}/download/${encodeURIComponent(key)}`
+export function deliverableDownloadUrl(
+  jobId: string,
+  key: string,
+  opts: { inline?: boolean } = {}
+): string {
+  const base = `${BASE_URL}/jobs/${encodeURIComponent(jobId)}/download/${encodeURIComponent(key)}`
+  // `inline` asks the server to drop Content-Disposition: attachment and serve
+  // a renderable media type, so the console's preview pane can embed the file
+  // instead of triggering a download. The server CSP-sandboxes the response.
+  return opts.inline ? `${base}?inline=1` : base
+}
+
+/**
+ * The raw bytes of one deliverable as text, for in-console previews that need
+ * to parse content (XLIFF segment tables, JSON digests). Binary deliverables
+ * (PDF, EPUB) are previewed via the `?inline=1` URL instead — the browser
+ * streams those itself.
+ */
+export async function fetchDeliverableText(jobId: string, key: string): Promise<string> {
+  const res = await apiFetch(deliverableDownloadUrl(jobId, key))
+  if (!res.ok) throw await apiError(res, "Failed to load preview")
+  return res.text()
 }
 
 // --------------------------------------------------------------------------- //

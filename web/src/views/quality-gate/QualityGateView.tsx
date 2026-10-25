@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { clsx } from 'clsx'
 import {
   ShieldCheck,
   FileCheck2,
@@ -10,9 +11,24 @@ import {
   ChevronDown,
   ChevronRight,
   Info,
+  Eye,
+  RefreshCw,
+  Sigma,
+  BookOpen,
+  LayoutTemplate,
+  ListChecks,
+  Wallet,
+  FileText,
+  FileStack,
+  Globe,
+  Languages,
+  ClipboardCheck,
+  ScanSearch,
+  Activity,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
+import { InfoTip } from '@/components/ui/InfoTip'
 import {
   getJobReport,
   getVisualReport,
@@ -20,11 +36,26 @@ import {
   deliverableDownloadUrl,
   reExportJob,
   pagePreviewUrl,
+  ApiError,
   type DeliverableItem,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
+import { BarRow, Donut, PageGrid, RadarChart, type RadarAxis } from './charts'
+import { PreviewDrawer } from './PreviewDrawer'
+import {
+  deliverableDesc,
+  deliverableGroup,
+  deliverableName,
+  fmtSize,
+  previewKind,
+  type DeliverableGroup,
+} from './artifactMeta'
 
 type PillarStatus = 'pass' | 'warn' | 'fail'
+
+/** Which density the page renders at. 默认简明：面向"等一本书的人"；专业面向操作员。 */
+type GateMode = 'simple' | 'pro'
+const MODE_STORAGE = 'ubt.quality.mode'
 
 interface Pillar {
   title: string
@@ -55,32 +86,6 @@ function qeEngineLabel(
   }
 }
 
-/** i18n labels for the deliverable keys the backend serves. */
-function deliverableLabel(key: string, fallback: string, t: ReturnType<typeof useI18n>['t']): string {
-  switch (key) {
-    case 'primary':
-      return t.quality.targetPdf
-    case 'secondary':
-      return t.quality.secondaryDoc
-    case 'epub':
-      return t.quality.epub
-    case 'contract':
-      return t.quality.contractJson
-    case 'quality_report':
-      return t.quality.qualityReportJson
-    case 'visual_report':
-      return t.quality.visualReportJson
-    case 'metrics':
-      return t.quality.metricsJson
-    case 'html':
-      return t.quality.htmlView
-    case 'xliff':
-      return t.quality.xliffDoc
-    default:
-      return fallback
-  }
-}
-
 /** The checklist's per-pillar verdict, translated. */
 function pillarStatusLabel(
   t: ReturnType<typeof useI18n>['t'],
@@ -91,74 +96,25 @@ function pillarStatusLabel(
   return t.quality.pillarStatusFail
 }
 
-/** A five-axis radar drawn as inline SVG (no chart dependency). */
-function RadarChart({ axes }: { axes: { label: string; value: number }[] }) {
-  const cx = 110
-  const cy = 100
-  const radius = 60
-  const point = (index: number, ratio: number): [number, number] => {
-    const angle = ((-90 + index * (360 / axes.length)) * Math.PI) / 180
-    return [cx + radius * ratio * Math.cos(angle), cy + radius * ratio * Math.sin(angle)]
-  }
-  const polygon = axes
-    .map((axis, index) => point(index, Math.min(1, Math.max(0, axis.value / 100))))
-    .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`)
-    .join(' ')
-
-  return (
-    <svg viewBox="0 0 220 200" className="w-48 h-44 sm:w-56 sm:h-52 shrink-0 max-w-full" role="img">
-      {[0.25, 0.5, 0.75, 1].map((ratio) => (
-        <polygon
-          key={ratio}
-          points={axes
-            .map((_, index) => point(index, ratio))
-            .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`)
-            .join(' ')}
-          fill="none"
-          stroke="var(--paper-border)"
-          strokeWidth={0.8}
-        />
-      ))}
-      {axes.map((_, index) => {
-        const [x, y] = point(index, 1)
-        return (
-          <line
-            key={index}
-            x1={cx}
-            y1={cy}
-            x2={x}
-            y2={y}
-            stroke="var(--paper-border)"
-            strokeWidth={0.8}
-          />
-        )
-      })}
-      <polygon
-        points={polygon}
-        fill="rgba(21,128,61,0.18)"
-        stroke="#15803d"
-        strokeWidth={1.4}
-      />
-      {axes.map((axis, index) => {
-        const [x, y] = point(index, 1.25)
-        return (
-          <text
-            key={axis.label}
-            x={x}
-            y={y}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fontSize={9}
-            fontFamily="monospace"
-            fill="var(--ink-muted)"
-          >
-            {axis.label} {Math.round(axis.value)}
-          </text>
-        )
-      })}
-    </svg>
-  )
+const PILLAR_TONE: Record<PillarStatus, string> = {
+  pass: 'text-[#15803d] bg-[#15803d]/10 border-[#15803d]/25',
+  warn: 'text-[#b45309] bg-[#b45309]/10 border-[#b45309]/25',
+  fail: 'text-[#b91c1c] bg-[#b91c1c]/10 border-[#b91c1c]/25',
 }
+
+const DELIVERABLE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  primary: FileText,
+  secondary: FileStack,
+  epub: BookOpen,
+  html: Globe,
+  xliff: Languages,
+  contract: FileCheck2,
+  quality_report: ClipboardCheck,
+  visual_report: ScanSearch,
+  metrics: Activity,
+}
+
+const GROUP_ORDER: DeliverableGroup[] = ['reading', 'l10n', 'audit']
 
 export function QualityGateView() {
   const { t } = useI18n()
@@ -182,51 +138,80 @@ export function QualityGateView() {
   // must not read as a clean gate.
   const [visualMissing, setVisualMissing] = useState(false)
   const [expanded, setExpanded] = useState<number | null>(null)
+  const [previewItem, setPreviewItem] = useState<DeliverableItem | null>(null)
+  // 简明 by default: this screen serves "is this book ready?" first and
+  // engine forensics second. The choice survives reloads in localStorage.
+  const [mode, setMode] = useState<GateMode>(() => {
+    try {
+      return localStorage.getItem(MODE_STORAGE) === 'pro' ? 'pro' : 'simple'
+    } catch {
+      return 'simple'
+    }
+  })
+  const switchMode = (next: GateMode) => {
+    setMode(next)
+    try {
+      localStorage.setItem(MODE_STORAGE, next)
+    } catch {
+      // Storage can be refused (private mode); the toggle still works live.
+    }
+  }
+  // Set when the report fetch answers 404: polling for a report that will
+  // never exist must stop, while a 409 (job still running) keeps polling.
+  const [jobMissing, setJobMissing] = useState(false)
+
+  const loadAll = useCallback(
+    async (isPoll: boolean = false) => {
+      if (!jobId) return
+      try {
+        const rep = await getJobReport(jobId)
+        setReport(rep)
+        setReportError(null)
+      } catch (err) {
+        // 404 latches "the report will never exist"; any other outcome —
+        // success, 409 while running, a network blip — clears the latch so
+        // polling continues. Both setStates run after the await, so the
+        // effect body itself triggers no synchronous cascade.
+        if (err instanceof ApiError && err.status === 404) setJobMissing(true)
+        else setJobMissing(false)
+        if (!isPoll) {
+          setReportError(err instanceof Error ? err.message : 'Report unavailable')
+        }
+        return
+      }
+      try {
+        const listing = await listDeliverables(jobId)
+        setDeliverables(listing.items)
+        setDeliveryStale(listing.stale)
+      } catch {
+        setDeliverables([])
+      }
+      try {
+        setVisual(await getVisualReport(jobId))
+        setVisualMissing(false)
+      } catch {
+        setVisual(null)
+        setVisualMissing(true)
+      }
+    },
+    [jobId]
+  )
 
   useEffect(() => {
-    if (!jobId) return
-    let isMounted = true
+    // Mount-time load: every setState inside `loadAll` runs after its first
+    // `await`, so there is no synchronous cascade for the rule to be about.
+    // oxlint-disable-next-line react/set-state-in-effect
+    void loadAll(false)
+  }, [loadAll])
 
-    getJobReport(jobId)
-      .then((rep) => {
-        if (isMounted) {
-          setReport(rep)
-          setReportError(null)
-        }
-      })
-      .catch((err) => {
-        if (isMounted) setReportError(err instanceof Error ? err.message : 'Report unavailable')
-      })
-
-    listDeliverables(jobId)
-      .then(({ items, stale }) => {
-        if (isMounted) {
-          setDeliverables(items)
-          setDeliveryStale(stale)
-        }
-      })
-      .catch(() => {
-        if (isMounted) setDeliverables([])
-      })
-
-    getVisualReport(jobId)
-      .then((rep) => {
-        if (isMounted) {
-          setVisual(rep)
-          setVisualMissing(false)
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setVisual(null)
-          setVisualMissing(true)
-        }
-      })
-
-    return () => {
-      isMounted = false
-    }
-  }, [jobId])
+  // A page that only ever fetched once would sit on "no verdict" forever if
+  // opened while the job was still running: the report appears server-side,
+  // and nothing told the reader it had. Poll until the report exists.
+  useEffect(() => {
+    if (!jobId || report !== null || jobMissing) return
+    const timer = setInterval(() => void loadAll(true), 5000)
+    return () => clearInterval(timer)
+  }, [jobId, report, jobMissing, loadAll])
 
   if (!jobId) {
     return (
@@ -247,23 +232,12 @@ export function QualityGateView() {
   const entity = report?.entity_consistency ?? {}
   // `report.fidelity` no longer exists — the overlay engine it described was
   // deleted, and nothing in the report schema carries `pages_measured` or
-  // `non_text_residual` any more. Reading it produced a permanent "0 pages ·
-  // residual —" with a 100 score and a PASS badge: a full-marks pillar for a
-  // measurement that had not been taken since the field was removed.
-  //
-  // The real pixel verdict lives on the *visual report* payload, which the
-  // route already serves beside it.
-  const visualPassed: boolean | null =
-    typeof visual?.passed === 'boolean' ? visual.passed : null
+  // `non_text_residual` any more. The real pixel verdict lives on the
+  // *visual report* payload, which the route serves beside it.
   const visualSkipped: string | null =
     typeof visual?.skipped_reason === 'string' && visual.skipped_reason
       ? visual.skipped_reason
       : null
-  // The report now carries the tier facts as lists and skip reasons as stable
-  // codes; ``skipped_reason`` is the English sentence built from them, kept for
-  // logs and the CLI. Rendering that sentence here printed raw English inside a
-  // Chinese panel — and, because it listed every skipped tier, it was long
-  // enough to squeeze the status badge into a two-character column.
   const tiersRan: string[] = Array.isArray(visual?.tiers_ran) ? visual.tiers_ran : []
   const tiersSkipped: string[] = Array.isArray(visual?.tiers_skipped) ? visual.tiers_skipped : []
   const skipCodes: string[] = Array.isArray(visual?.skip_codes) ? visual.skip_codes : []
@@ -280,31 +254,20 @@ export function QualityGateView() {
   // The gate decision is the shared three-state verdict the backend computes
   // (`job_options.delivery_verdict_from_summary` — the same rule the CLI banner
   // applies), falling back to failed-blocks-only for reports served before the
-  // field existed. Two report fields this screen used to read
-  // (`delivery_status` / `delivery_warning`) were removed: no engine code ever
-  // assigned them, so the advisory banner they fed could never appear.
+  // field existed.
   const verdict: string | null = report?.delivery_verdict ?? null
   // A rehearsal's artifact is echo text, not a translation. Every structural
-  // gate passes it by construction, so without this flag the screen showed
+  // gate passes it by construction, so the verdict must never read as
   // "PRODUCTION READY" over `[模拟翻译]` text.
   const rehearsal: boolean = report?.rehearsal === true
-  // No report means NO VERDICT — never a pass.
-  //
-  // `summary` defaults to `{}`, so `failed_blocks ?? 0` is 0 when the report
-  // failed to load, and the old `verdict ? ... : failedBlocks === 0` fallback
-  // rendered a green check, "PRODUCTION READY", a PASS badge, "All formal
-  // checks passed" and five passing pillars for a job whose report had never
-  // been written. The report fetch legitimately 409s while a job is still
-  // running and 404s before the reporter writes it, so this was reachable by
-  // simply opening the gate too early — an attestation of nothing, on the one
-  // screen whose entire purpose is attestation.
+  // No report means NO VERDICT — never a pass. The report fetch legitimately
+  // 409s while a job is still running and 404s before the reporter writes it,
+  // so a bare `failed_blocks === 0` fallback attested nothing.
   const hasReport = report !== null
   const isPassed = hasReport && (verdict ? verdict === 'passed' : failedBlocks === 0)
   const isWarning = hasReport && verdict === 'warning'
-  const fidelityScore = Math.round((summary.pass_rate ?? 0) * 1000) / 10
   // ``null`` means "not priced", never "$0" (see ReportSummary). The ledger
-  // pillar is the only place that distinction is visible, so it is computed
-  // once here rather than inlined into the pillar's status expression.
+  // pillar is the only place that distinction is visible.
   const costPriced = hasReport && typeof summary.estimated_cost_usd === 'number'
 
   const pct = (value: number | undefined, digits = 1) =>
@@ -322,9 +285,45 @@ export function QualityGateView() {
         .filter((page): page is number => typeof page === 'number')
     )
   ).sort((a, b) => a - b)
+  const findingsByPage = new Map<number, number>()
+  for (const finding of visualFindings) {
+    if (typeof finding.page === 'number') {
+      findingsByPage.set(finding.page, (findingsByPage.get(finding.page) ?? 0) + 1)
+    }
+  }
+  const sampledPages: number[] = Array.isArray(visual?.sampled_pages)
+    ? visual.sampled_pages.filter((p: unknown): p is number => typeof p === 'number')
+    : []
 
   const pillarStatus = (bad: boolean, warn = false): PillarStatus =>
     bad ? 'fail' : warn ? 'warn' : 'pass'
+
+  // The visual report's honest one-line state: which tiers ran, which did not.
+  // The old "像素校验已跳过" claimed the whole pixel gate was skipped whenever
+  // *any* tier was — for a job that ran four tiers over every page, that
+  // misdescribed a near-clean pass as "never ran" on the attestation screen.
+  const visualMetric = visualMissing
+    ? t.quality.visualNoReport
+    : visualSkipped
+      ? tiersRan.length > 0
+        ? t.quality.visualPartialRan
+            .replace('{ran}', String(tiersRan.length))
+            .replace('{skipped}', tiersSkipped.map(tierLabel).join('、'))
+        : t.quality.visualGateSkipped
+      : `${flaggedPages.length} ${t.quality.flaggedPages}`
+
+  const pillar3 = {
+    metric: visualMetric,
+    // A skipped gate is not a passing gate, and neither is an absent one.
+    status:
+      visualMissing || visualSkipped
+        ? ('warn' as PillarStatus)
+        : pillarStatus(
+            flaggedPages.length > 0 ||
+              (typeof visual?.passed === 'boolean' && visual.passed === false),
+            false
+          ),
+  }
 
   const pillars: Pillar[] = [
     {
@@ -404,32 +403,13 @@ export function QualityGateView() {
     {
       title: t.quality.pillar3Title,
       desc: t.quality.pillar3Desc,
-      // A short, translated summary. The full tier breakdown and the reason live
-      // in the expanded detail — the row header must stay one line so the badge
-      // beside it is not squeezed.
-      metric: visualMissing
-        ? t.quality.visualNoReport
-        : visualSkipped
-          ? skipCodes.length > 0
-            ? `${t.quality.visualGateSkipped} · ${skipCodes.map(skipLabel).join('、')}`
-            : t.quality.visualGateSkipped
-          : `${flaggedPages.length} ${t.quality.flaggedPages}`,
-      // A skipped gate is not a passing gate, and neither is an absent one:
-      // `visual_gate` reports `skipped_reason` when the tooling or the artifact
-      // type prevents the check (e.g. "not a rendered pdf"), and the visual
-      // *report itself* is missing entirely when the gate was disabled or the
-      // deliverable is not a PDF — this view used to render both as a green
-      // PASS because it only ever looked at `findings`, which are empty when
-      // the gate never ran.
-      status:
-        visualMissing || visualSkipped
-          ? 'warn'
-          : pillarStatus(flaggedPages.length > 0 || visualPassed === false, false),
+      metric: pillar3.metric,
+      status: pillar3.status,
       score: visualMissing
         ? 0
         : visualSkipped
           ? 0
-          : visualPassed === false
+          : typeof visual?.passed === 'boolean' && !visual.passed
             ? 55
             : flaggedPages.length > 0
               ? 60
@@ -441,9 +421,6 @@ export function QualityGateView() {
               {t.quality.visualNoReportDesc}
             </div>
           )}
-          {/* Which inspection tiers ran. This is the full statement the row
-              header summarizes; it wraps freely here, so it can afford the
-              names instead of a comma-separated code list. */}
           {tiersRan.length > 0 && (
             <div className="text-xs text-[var(--ink-secondary)]">
               <span className="text-[var(--ink-muted)]">{t.quality.visualTiersRan}: </span>
@@ -455,6 +432,12 @@ export function QualityGateView() {
                     {t.quality.visualTiersSkipped}:{' '}
                   </span>
                   {tiersSkipped.map(tierLabel).join(' · ')}
+                  {skipCodes.length > 0 && (
+                    <span className="text-[var(--ink-muted)]">
+                      {' '}
+                      ({skipCodes.map(skipLabel).join('、')})
+                    </span>
+                  )}
                 </>
               )}
             </div>
@@ -536,11 +519,11 @@ export function QualityGateView() {
           ? t.quality.costNotPriced
           : `$${Number(summary.estimated_cost_usd).toFixed(2)} · cache ${pct(summary.cache_hit_rate)}`,
       // This pillar never failed before: a constant `pass` / 100 renders a green
-      // check over an unpriced run and over a ledger nobody reconciled, on the
-      // screen whose whole job is attestation. The two states it can actually
-      // establish are "the run was priced" and "it was not"; the reconciliation
-      // itself is not implemented anywhere in the engine, so it is reported as
-      // a warn rather than dressed up as a passed check.
+      // check over an unpriced run and over a ledger nobody reconciled. The two
+      // states it can actually establish are "the run was priced" and "it was
+      // not"; the reconciliation against the pre-flight quote is not
+      // implemented anywhere in the engine, so it is reported as a warn rather
+      // than dressed up as a passed check.
       status: costPriced ? 'pass' : 'warn',
       score: costPriced ? 100 : 50,
       detail: (
@@ -566,13 +549,20 @@ export function QualityGateView() {
     },
   ]
 
-  const radarAxes = [
-    { label: t.quality.axisMath, value: pillars[0].score },
-    { label: t.quality.axisTerminology, value: pillars[1].score },
-    { label: t.quality.axisVisual, value: pillars[2].score },
-    { label: t.quality.axisCompleteness, value: pillars[3].score },
-    { label: t.quality.axisDelivered, value: clampScore(summary.pass_rate) },
+  const radarAxes: RadarAxis[] = [
+    { label: t.quality.axisMath, value: pillars[0].score, measured: true },
+    { label: t.quality.axisTerminology, value: pillars[1].score, measured: true },
+    // A gate that never ran is not a zero: the radar chords across it instead
+    // of drawing a failure spike, and the label drops its number.
+    {
+      label: t.quality.axisVisual,
+      value: pillars[2].score,
+      measured: !(visualMissing || visualSkipped),
+    },
+    { label: t.quality.axisCompleteness, value: pillars[3].score, measured: true },
+    { label: t.quality.axisDelivered, value: clampScore(summary.pass_rate), measured: true },
   ]
+  const radarHasUnmeasured = radarAxes.some((axis) => axis.measured === false)
 
   // A stale delivery is re-rendered before the download, the same way Mission
   // Control does it: the backend guard exists so a customer never receives the
@@ -584,8 +574,7 @@ export function QualityGateView() {
     // The tab is opened inside the click gesture, before any await: a stale
     // delivery re-renders first (whole-book, easily past the browser's ~5 s
     // transient-activation window), and a `window.open` after that wait is
-    // silently swallowed by the popup blocker — the click "did nothing".
-    // Mission Control fixed the same bug the same way.
+    // silently swallowed by the popup blocker.
     const tab = window.open('', '_blank')
     try {
       if (deliveryStale) {
@@ -607,6 +596,192 @@ export function QualityGateView() {
   const statusBadge = (status: PillarStatus) =>
     status === 'pass' ? 'success' : status === 'warn' ? 'warning' : 'destructive'
 
+  // ----------------------------------------------------------------------- //
+  // 简明视图 pieces: five human checks, each with a chart and one sentence.
+  // ----------------------------------------------------------------------- //
+  const checkChips = [
+    { Icon: Sigma, label: t.quality.chipMath, status: pillars[0].status },
+    { Icon: BookOpen, label: t.quality.chipTerm, status: pillars[1].status },
+    { Icon: LayoutTemplate, label: t.quality.chipLayout, status: pillars[2].status },
+    { Icon: ListChecks, label: t.quality.chipComplete, status: pillars[3].status },
+    { Icon: Wallet, label: t.quality.chipCost, status: pillars[4].status },
+  ]
+  const simpleTitle = rehearsal
+    ? t.quality.rehearsalBadge
+    : isPassed
+      ? t.quality.simpleReadyTitle
+      : isWarning
+        ? t.quality.simpleWarningTitle
+        : t.quality.simpleBlockedTitle
+  const simpleBody = rehearsal
+    ? t.quality.rehearsalBody
+    : isPassed
+      ? t.quality.simpleReadyBody
+      : isWarning
+        ? t.quality.simpleWarningBody
+        : t.quality.simpleBlockedBody.replace('{failed}', String(failedBlocks))
+
+  const visualStats = visual?.stats ?? {}
+  const simpleCards = [
+    {
+      Icon: Sigma,
+      title: t.quality.chipMath,
+      status: pillars[0].status,
+      chart: (
+        <Donut
+          value={(clampScore(placeholder.retention_rate)) / 100}
+          tone={pillars[0].status === 'fail' ? 'fail' : pillars[0].status === 'warn' ? 'warn' : 'pass'}
+          center={`${Math.round(clampScore(placeholder.retention_rate))}%`}
+        />
+      ),
+      line: t.quality.simpleMathLine
+        .replace('{masked}', String(placeholder.masked_spans ?? 0))
+        .replace('{corrupt}', String(placeholder.corrupt_spans ?? 0)),
+      extra: null,
+    },
+    {
+      Icon: BookOpen,
+      title: t.quality.chipTerm,
+      status: pillars[1].status,
+      chart: (
+        <div className="flex-1 min-w-[120px] self-center">
+          <BarRow
+            label={t.quality.delivRecall}
+            value={typeof terminology.term_recall === 'number' ? terminology.term_recall : 0}
+            tone={pillars[1].status === 'warn' ? 'warn' : 'pass'}
+            display={pct(terminology.term_recall)}
+          />
+        </div>
+      ),
+      line: t.quality.simpleTermLine
+        .replace('{audited}', String(entity.terms_audited ?? 0))
+        .replace('{drift}', String(entity.terms_with_drift ?? 0)),
+      extra: null,
+    },
+    {
+      Icon: LayoutTemplate,
+      title: t.quality.chipLayout,
+      status: pillars[2].status,
+      chart: null,
+      line: visualMissing
+        ? t.quality.simpleVisualMissingLine
+        : visualFindings.length > 0
+          ? t.quality.simpleVisualFindingsLine.replace('{count}', String(flaggedPages.length))
+          : visualSkipped
+            ? t.quality.simpleVisualSkippedLine.replace('{ran}', String(tiersRan.length))
+            : t.quality.simpleVisualCleanLine.replace(
+                '{pages}',
+                String(visualStats.sampled ?? sampledPages.length)
+              ),
+      extra: (
+        <div className="space-y-2">
+          {sampledPages.length > 0 && !visualMissing && (
+            <PageGrid pages={sampledPages} findingsByPage={findingsByPage} />
+          )}
+          {flaggedPages.length > 0 && (
+            <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
+              {flaggedPages.map((page) => (
+                <div
+                  key={page}
+                  className="rounded-[4px] border border-[var(--paper-border)] overflow-hidden bg-white"
+                >
+                  <img
+                    src={pagePreviewUrl(jobId, page, { dpi: 70 })}
+                    alt={t.quality.pageAlt.replace('{n}', String(page))}
+                    className="w-full h-20 object-contain"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none'
+                    }}
+                  />
+                  <div className="text-center text-[10px] font-mono text-[var(--ink-muted)] py-0.5 border-t border-[var(--paper-border)]">
+                    P{page}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      Icon: ListChecks,
+      title: t.quality.chipComplete,
+      status: pillars[3].status,
+      chart: (
+        <Donut
+          value={(clampScore(coverage.render_coverage)) / 100}
+          tone={pillars[3].status === 'fail' ? 'fail' : 'pass'}
+          center={`${Math.round(clampScore(coverage.render_coverage))}%`}
+        />
+      ),
+      line:
+        (coverage.fail_closed_blocks ?? 0) > 0
+          ? t.quality.simpleCompleteFailLine.replace(
+              '{failClosed}',
+              String(coverage.fail_closed_blocks ?? 0)
+            )
+          : t.quality.simpleCompleteLine.replace(
+              '{skipped}',
+              String(coverage.skipped_blocks ?? 0)
+            ),
+      extra: null,
+    },
+    {
+      Icon: Wallet,
+      title: t.quality.chipCost,
+      status: pillars[4].status,
+      chart: (
+        <div className="flex-1 min-w-[120px] self-center">
+          <BarRow
+            label={t.quality.auditCacheHit}
+            value={typeof summary.cache_hit_rate === 'number' ? summary.cache_hit_rate : 0}
+            tone="muted"
+            display={pct(summary.cache_hit_rate)}
+          />
+        </div>
+      ),
+      line: costPriced
+        ? t.quality.simpleCostLine
+            .replace('{cost}', `$${Number(summary.estimated_cost_usd).toFixed(2)}`)
+            .replace('{cache}', pct(summary.cache_hit_rate))
+        : t.quality.simpleCostUnpricedLine,
+      extra: null,
+    },
+  ]
+
+  const primaryItem = deliverables.find((item) => item.key === 'primary')
+  const primaryPreviewable = primaryItem !== undefined && previewKind(primaryItem) === 'embed'
+
+  const groupMeta: Record<DeliverableGroup, { title: string; desc: string }> = {
+    reading: { title: t.quality.delivGroupReading, desc: t.quality.delivGroupReadingDesc },
+    l10n: { title: t.quality.delivGroupL10n, desc: t.quality.delivGroupL10nDesc },
+    audit: { title: t.quality.delivGroupAudit, desc: t.quality.delivGroupAuditDesc },
+  }
+
+  const modeToggle = (
+    <div
+      role="group"
+      aria-label={t.quality.modeLabel}
+      className="inline-flex rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-subsurface)] p-0.5"
+    >
+      {(['simple', 'pro'] as const).map((m) => (
+        <button
+          key={m}
+          onClick={() => switchMode(m)}
+          aria-pressed={mode === m}
+          className={clsx(
+            'h-7 px-2.5 text-xs rounded-[4px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ink-primary)]',
+            mode === m
+              ? 'bg-[var(--paper-surface)] shadow-sm font-semibold text-[var(--ink-primary)]'
+              : 'text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]'
+          )}
+        >
+          {m === 'simple' ? t.quality.modeSimple : t.quality.modePro}
+        </button>
+      ))}
+    </div>
+  )
+
   return (
     <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-7 space-y-5 sm:space-y-7 max-w-5xl mx-auto w-full">
       {/* View Header */}
@@ -617,11 +792,13 @@ export function QualityGateView() {
           </h1>
           <p className="text-xs text-[var(--ink-secondary)] mt-1">{t.quality.subtitle}</p>
         </div>
-
-        <Button onClick={() => onOpenReview(jobId)} variant="secondary" size="sm">
-          {t.mission.openWorkbench}
-          <ArrowUpRight className="h-3.5 w-3.5 ml-1 text-[var(--ink-secondary)]" />
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {modeToggle}
+          <Button onClick={() => onOpenReview(jobId)} variant="secondary" size="sm">
+            {t.mission.openWorkbench}
+            <ArrowUpRight className="h-3.5 w-3.5 ml-1 text-[var(--ink-secondary)]" />
+          </Button>
+        </div>
       </div>
 
       {reportError && !report && (
@@ -631,178 +808,282 @@ export function QualityGateView() {
         </div>
       )}
 
-      {/* Rehearsal watermark. A dry run's artifact is the source text behind
-          `[模拟翻译]`, and every structural gate passes it by construction —
-          so without this banner the screen's "PRODUCTION READY / PASS" is a
-          statement about echo text. */}
-      {rehearsal && (
-        <div className="p-3 rounded-lg border border-[#1d4ed8]/30 bg-[#1d4ed8]/5 text-xs flex items-start gap-2">
-          <Info className="h-4 w-4 text-[#1d4ed8] shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <div className="font-mono uppercase tracking-wider text-xs font-semibold text-[#1d4ed8]">
-              {t.quality.rehearsalBadge}
-            </div>
-            <p className="text-[var(--ink-secondary)] leading-relaxed">{t.quality.rehearsalBody}</p>
-          </div>
-        </div>
-      )}
-
       {/* No report yet: say so, and do not render a verdict block at all.
           The pillars below read from the same absent payload, so they would
           otherwise all render as passing. */}
       {!hasReport && (
         <div className="p-5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] flex items-start gap-3 shadow-2xs">
           <AlertTriangle className="h-5 w-5 text-[#b45309] shrink-0 mt-0.5" />
-          <div className="space-y-1">
+          <div className="space-y-2">
             <div className="text-sm font-semibold text-[var(--ink-primary)]">
               {t.quality.noVerdictTitle}
             </div>
             <p className="text-xs text-[var(--ink-secondary)] leading-relaxed">
               {t.quality.noVerdictBody}
             </p>
-          </div>
-        </div>
-      )}
-
-      {/* Decision Banner + Radar */}
-      {hasReport && (
-      <div className="p-4 sm:p-5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] flex flex-col md:flex-row items-start md:items-center justify-between gap-5 md:gap-6 shadow-2xs">
-        <div className="flex items-start sm:items-center gap-3.5">
-          <div
-            className={`h-10 w-10 rounded-[6px] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] flex items-center justify-center shrink-0 ${
-              isPassed ? 'text-[#15803d]' : isWarning ? 'text-[#b45309]' : 'text-[#b91c1c]'
-            }`}
-          >
-            {isPassed ? <CheckCircle2 className="h-6 w-6" /> : <AlertTriangle className="h-6 w-6" />}
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-bold text-[var(--ink-primary)]">
-                {isPassed
-                  ? t.quality.decisionReady
-                  : isWarning
-                    ? t.quality.decisionWarning
-                    : t.quality.decisionBlocked}
-              </span>
-              <Badge
-                variant={isPassed ? 'success' : isWarning ? 'warning' : 'destructive'}
-                dot
-              >
-                {isPassed
-                  ? t.quality.verdictPass
-                  : isWarning
-                    ? t.quality.verdictWarning
-                    : t.quality.verdictBlocked}
-              </Badge>
-            </div>
-            <p className="text-xs text-[var(--ink-secondary)] mt-0.5">
-              {isPassed
-                ? t.quality.allPassedDesc
-                : isWarning
-                  ? t.quality.warningDesc
-                  : t.quality.blockedDesc}
-            </p>
-            <div className="text-xs font-mono text-[var(--ink-muted)] mt-1.5">
-              {t.quality.passRate.replace('{value}', pct(summary.pass_rate))} ·{' '}
-              {score.qe_measured ? (
-                <span>
-                  {t.quality.avgQeValue.replace('{score}', Number(score.avg_qe ?? 0).toFixed(3))}
-                  {' · '}
-                  {t.quality.qeMeasuredOn.replace(
-                    '{count}',
-                    String(score.scored_blocks ?? 0)
-                  )}
-                </span>
-              ) : (
-                <span className="uppercase" title={t.quality.qeNotMeasuredHint}>
-                  {t.quality.qeNotMeasured}
-                </span>
-              )}
-            </div>
-            {/* "No quality score" on its own is a dead end: the reader cannot
-                tell whether something broke, what it would take to measure, or
-                whether it matters. Both causes are on the report — the engine
-                that ran and whether scoring was enabled — so state the reason
-                and the remedy instead of the bare status. */}
-            {!score.qe_measured && hasReport && (
-              <p className="text-xs text-[var(--ink-secondary)] mt-1.5 leading-relaxed max-w-xl">
-                {config.qe_judge_enabled
-                  ? t.quality.qeNotMeasuredWhyJudge
-                  : t.quality.qeNotMeasuredWhyHeuristic}{' '}
-                <span className="text-[var(--ink-muted)]">{t.quality.qeNotMeasuredHow}</span>
-              </p>
+            {!jobMissing && (
+              <Button variant="secondary" size="sm" onClick={() => void loadAll(false)}>
+                <RefreshCw className="h-3.5 w-3.5" />
+                {t.quality.refreshBtn}
+              </Button>
             )}
           </div>
         </div>
-
-        <div className="flex flex-col sm:flex-row items-center justify-center md:justify-end gap-4 w-full md:w-auto pt-3 md:pt-0 border-t md:border-t-0 border-[var(--paper-border)]">
-          <div className="text-center sm:text-right">
-            <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-              {t.quality.fidelityScore}
-            </div>
-            <div className="text-2xl font-bold font-mono text-[var(--ink-primary)] mt-0.5">
-              {report ? fidelityScore.toFixed(1) : '—'}{' '}
-              <span className="text-xs text-[var(--ink-muted)] font-normal">/ 100</span>
-            </div>
-          </div>
-          {report && <RadarChart axes={radarAxes} />}
-        </div>
-      </div>
       )}
 
-      {/* Formal Verification Checklist — only with a report: every pillar is
-          derived from it, so without one they would all render as passing. */}
       {hasReport && (
-      <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
-        <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-          {t.quality.pillarsTitle}
-        </div>
-        <div className="divide-y divide-[var(--paper-border)]">
-          {pillars.map((item, idx) => (
-            <div key={idx}>
-              <button
-                onClick={() => setExpanded(expanded === idx ? null : idx)}
-                className="w-full p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4 hover:bg-[var(--paper-subsurface)] transition-colors text-left"
+        mode === 'simple' && (
+          <>
+          {/* 简明结论卡: one verdict, five check chips, one obvious next action. */}
+          <div className="p-4 sm:p-5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] flex flex-col lg:flex-row gap-4 lg:gap-6 shadow-2xs">
+            <div className="flex items-start gap-3.5 flex-1 min-w-0">
+              <div
+                className={clsx(
+                  'h-10 w-10 rounded-[6px] border flex items-center justify-center shrink-0',
+                  rehearsal
+                    ? 'text-[#1d4ed8] bg-[#1d4ed8]/5 border-[#1d4ed8]/30'
+                    : isPassed
+                      ? 'text-[#15803d] bg-[#15803d]/10 border-[#15803d]/25'
+                      : isWarning
+                        ? 'text-[#b45309] bg-[#b45309]/10 border-[#b45309]/25'
+                        : 'text-[#b91c1c] bg-[#b91c1c]/10 border-[#b91c1c]/25'
+                )}
               >
-                <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                  {expanded === idx ? (
-                    <ChevronDown className="h-4 w-4 mt-0.5 text-[var(--ink-muted)] shrink-0" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4 mt-0.5 text-[var(--ink-muted)] shrink-0" />
-                  )}
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold text-[var(--ink-primary)]">
-                      {item.title}
-                    </div>
-                    <div className="text-xs text-[var(--ink-secondary)] mt-0.5 leading-relaxed">
-                      {item.desc}
-                    </div>
-                  </div>
+                {isPassed && !rehearsal ? (
+                  <CheckCircle2 className="h-6 w-6" />
+                ) : (
+                  <AlertTriangle className="h-6 w-6" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="text-base font-bold text-[var(--ink-primary)] leading-snug">
+                  {simpleTitle}
                 </div>
-                {/* The metric is a *sentence* for some pillars — pillar 3 says the
-                    pixel check was skipped and lists the tiers that did run — so it
-                    must wrap and truncate rather than push the status badge into a
-                    column three characters wide. It shrinks before the title does:
-                    the title identifies the row, the metric explains it. */}
-                <div className="flex items-center gap-3 shrink-0 w-full sm:w-auto sm:max-w-[45%] justify-between sm:justify-end pl-6 sm:pl-0">
-                  <span className="font-mono text-xs text-[var(--ink-primary)] font-medium text-left sm:text-right leading-snug break-words">
-                    {item.metric}
-                  </span>
-                  <Badge variant={statusBadge(item.status)} dot className="shrink-0 whitespace-nowrap">
-                    {pillarStatusLabel(t, item.status)}
+                <p className="text-xs text-[var(--ink-secondary)] mt-1 leading-relaxed max-w-xl">
+                  {simpleBody}
+                </p>
+                <div className="flex flex-wrap gap-1.5 mt-3">
+                  {checkChips.map(({ Icon, label, status }) => (
+                    <span
+                      key={label}
+                      className={clsx(
+                        'inline-flex items-center gap-1 rounded-[4px] border px-1.5 py-0.5 text-[11px] font-medium',
+                        PILLAR_TONE[status]
+                      )}
+                    >
+                      <Icon className="h-3 w-3" />
+                      {label}
+                    </span>
+                  ))}
+                </div>
+                {!score.qe_measured && (
+                  <p className="text-xs text-[var(--ink-muted)] mt-2.5 leading-relaxed flex items-start gap-1">
+                    <span className="inline-flex items-center gap-1">
+                      <Info className="h-3 w-3 shrink-0" />
+                      {t.quality.qeSimpleNote}
+                    </span>
+                    <InfoTip label={t.quality.qeNotMeasured}>
+                      <span className="block space-y-1">
+                        <span className="block">
+                          {config.qe_judge_enabled
+                            ? t.quality.qeNotMeasuredWhyJudge
+                            : t.quality.qeNotMeasuredWhyHeuristic}
+                        </span>
+                        <span className="block text-[var(--ink-muted)]">
+                          {t.quality.qeNotMeasuredHow}
+                        </span>
+                      </span>
+                    </InfoTip>
+                  </p>
+                )}
+              </div>
+            </div>
+            {primaryPreviewable && (
+              <div className="flex lg:flex-col gap-2 lg:justify-center shrink-0">
+                <Button variant="primary" size="md" onClick={() => setPreviewItem(primaryItem!)}>
+                  <Eye className="h-3.5 w-3.5" />
+                  {t.quality.previewTranslation}
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* 五张检查卡：图标 + 图表 + 一句人话。 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {simpleCards.map(({ Icon, title, status, chart, line, extra }) => (
+              <div
+                key={title}
+                className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] p-3.5 flex flex-col gap-2.5 shadow-2xs"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className={clsx(
+                        'h-6 w-6 rounded-[4px] border flex items-center justify-center shrink-0',
+                        PILLAR_TONE[status]
+                      )}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                    </span>
+                    <span className="text-xs font-semibold text-[var(--ink-primary)] truncate">
+                      {title}
+                    </span>
+                  </div>
+                  <Badge variant={statusBadge(status)} dot className="shrink-0">
+                    {pillarStatusLabel(t, status)}
                   </Badge>
                 </div>
-              </button>
-              {expanded === idx && (
-                <div className="px-4 pb-4 pl-8 sm:pl-11 text-[var(--ink-primary)] overflow-x-auto">{item.detail}</div>
+                {chart}
+                <p className="text-xs text-[var(--ink-secondary)] leading-relaxed">{line}</p>
+                {extra}
+              </div>
+            ))}
+            <button
+              onClick={() => switchMode('pro')}
+              className="rounded-lg border border-dashed border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] p-3.5 flex items-center justify-center gap-2 text-xs text-[var(--ink-muted)] hover:text-[var(--ink-secondary)] transition-colors text-left"
+            >
+              {t.quality.switchToPro}
+              <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
+            </button>
+          </div>
+        </>
+      ))}
+
+      {hasReport && (
+        mode === 'pro' && (
+          <>
+          {/* Decision Banner + Radar */}
+          <div className="p-4 sm:p-5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] flex flex-col md:flex-row items-start md:items-center justify-between gap-5 md:gap-6 shadow-2xs">
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div
+                className={`h-10 w-10 rounded-[6px] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] flex items-center justify-center shrink-0 ${
+                  isPassed ? 'text-[#15803d]' : isWarning ? 'text-[#b45309]' : 'text-[#b91c1c]'
+                }`}
+              >
+                {isPassed ? <CheckCircle2 className="h-6 w-6" /> : <AlertTriangle className="h-6 w-6" />}
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-bold text-[var(--ink-primary)]">
+                    {isPassed
+                      ? t.quality.decisionReady
+                      : isWarning
+                        ? t.quality.decisionWarning
+                        : t.quality.decisionBlocked}
+                  </span>
+                  <Badge
+                    variant={isPassed ? 'success' : isWarning ? 'warning' : 'destructive'}
+                    dot
+                  >
+                    {isPassed
+                      ? t.quality.verdictPass
+                      : isWarning
+                        ? t.quality.verdictWarning
+                        : t.quality.verdictBlocked}
+                  </Badge>
+                </div>
+                <p className="text-xs text-[var(--ink-secondary)] mt-0.5">
+                  {isPassed
+                    ? t.quality.allPassedDesc
+                    : isWarning
+                      ? t.quality.warningDesc
+                      : t.quality.blockedDesc}
+                </p>
+                <div className="text-xs font-mono text-[var(--ink-muted)] mt-1.5">
+                  {t.quality.passRate.replace('{value}', pct(summary.pass_rate))} ·{' '}
+                  {score.qe_measured ? (
+                    <span>
+                      {t.quality.avgQeValue.replace('{score}', Number(score.avg_qe ?? 0).toFixed(3))}
+                      {' · '}
+                      {t.quality.qeMeasuredOn.replace(
+                        '{count}',
+                        String(score.scored_blocks ?? 0)
+                      )}
+                    </span>
+                  ) : (
+                    <span className="uppercase" title={t.quality.qeNotMeasuredHint}>
+                      {t.quality.qeNotMeasured}
+                    </span>
+                  )}
+                </div>
+                {!score.qe_measured && (
+                  <p className="text-xs text-[var(--ink-secondary)] mt-1.5 leading-relaxed max-w-xl">
+                    {config.qe_judge_enabled
+                      ? t.quality.qeNotMeasuredWhyJudge
+                      : t.quality.qeNotMeasuredWhyHeuristic}{' '}
+                    <span className="text-[var(--ink-muted)]">{t.quality.qeNotMeasuredHow}</span>
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-col items-center justify-center md:justify-end gap-1 w-full md:w-auto pt-3 md:pt-0 border-t md:border-t-0 border-[var(--paper-border)]">
+              <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold text-center">
+                {t.quality.fidelityScore}
+              </div>
+              <div className="text-2xl font-bold font-mono text-[var(--ink-primary)]">
+                {Math.round((summary.pass_rate ?? 0) * 1000) / 10}{' '}
+                <span className="text-xs text-[var(--ink-muted)] font-normal">/ 100</span>
+              </div>
+              <RadarChart axes={radarAxes} />
+              {radarHasUnmeasured && (
+                <div className="text-[11px] text-[var(--ink-muted)] text-center max-w-[220px] leading-snug">
+                  {t.quality.radarUnmeasuredNote}
+                </div>
               )}
             </div>
-          ))}
-        </div>
-      </div>
-      )}
+          </div>
 
-      {/* Deliverable Download Section */}
+          {/* Formal Verification Checklist */}
+          <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
+            <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+              {t.quality.pillarsTitle}
+            </div>
+            <div className="divide-y divide-[var(--paper-border)]">
+              {pillars.map((item, idx) => (
+                <div key={idx}>
+                  <button
+                    onClick={() => setExpanded(expanded === idx ? null : idx)}
+                    className="w-full p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4 hover:bg-[var(--paper-subsurface)] transition-colors text-left"
+                  >
+                    <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                      {expanded === idx ? (
+                        <ChevronDown className="h-4 w-4 mt-0.5 text-[var(--ink-muted)] shrink-0" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 mt-0.5 text-[var(--ink-muted)] shrink-0" />
+                      )}
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-[var(--ink-primary)]">
+                          {item.title}
+                        </div>
+                        <div className="text-xs text-[var(--ink-secondary)] mt-0.5 leading-relaxed">
+                          {item.desc}
+                        </div>
+                      </div>
+                    </div>
+                    {/* The metric is a *sentence* for some pillars, so it wraps
+                        rather than squeezing the status badge. */}
+                    <div className="flex items-center gap-3 shrink-0 w-full sm:w-auto sm:max-w-[45%] justify-between sm:justify-end pl-6 sm:pl-0">
+                      <span className="font-mono text-xs text-[var(--ink-primary)] font-medium text-left sm:text-right leading-snug break-words">
+                        {item.metric}
+                      </span>
+                      <Badge variant={statusBadge(item.status)} dot className="shrink-0 whitespace-nowrap">
+                        {pillarStatusLabel(t, item.status)}
+                      </Badge>
+                    </div>
+                  </button>
+                  {expanded === idx && (
+                    <div className="px-4 pb-4 pl-8 sm:pl-11 text-[var(--ink-primary)] overflow-x-auto">{item.detail}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      ))}
+
+      {/* Deliverables — grouped by who each file is for, with in-console
+          previews instead of a flat wall of identical download buttons. */}
       <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] p-4 sm:p-5 space-y-4 shadow-2xs">
         <div>
           <h3 className="text-xs font-bold text-[var(--ink-primary)] tracking-tight">
@@ -828,26 +1109,91 @@ export function QualityGateView() {
             {t.quality.noDeliverables}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
-            {deliverables.map((item) => (
-              <Button
-                key={item.key}
-                onClick={() => void handleDownload(item.key)}
-                disabled={downloadBusy}
-                variant="secondary"
-                className="h-10 justify-start px-3 text-xs w-full"
-              >
-                {item.key === 'contract' ? (
-                  <FileCheck2 className="h-3.5 w-3.5 mr-2 text-[#15803d]" />
-                ) : (
-                  <Download className="h-3.5 w-3.5 mr-2 text-[var(--ink-secondary)]" />
-                )}
-                <span className="truncate">{deliverableLabel(item.key, item.label, t)}</span>
-              </Button>
-            ))}
+          <div className="space-y-4">
+            {GROUP_ORDER.map((group) => {
+              const items = deliverables.filter((item) => deliverableGroup(item.key) === group)
+              if (items.length === 0) return null
+              return (
+                <div key={group}>
+                  <div className="flex items-baseline gap-2 mb-1">
+                    <h4 className="text-xs font-semibold text-[var(--ink-primary)]">
+                      {groupMeta[group].title}
+                    </h4>
+                    <span className="text-[11px] text-[var(--ink-muted)]">
+                      {groupMeta[group].desc}
+                    </span>
+                  </div>
+                  <div className="divide-y divide-[var(--paper-border)]">
+                    {items.map((item) => {
+                      const Icon = DELIVERABLE_ICONS[item.key] ?? FileText
+                      const kind = previewKind(item)
+                      const isPrimary = item.key === 'primary'
+                      return (
+                        <div
+                          key={item.key}
+                          className="flex flex-col sm:flex-row sm:items-center gap-2 py-2.5"
+                        >
+                          <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                            <Icon
+                              className={clsx(
+                                'h-4 w-4 mt-0.5 shrink-0',
+                                item.key === 'contract' ? 'text-[#15803d]' : 'text-[var(--ink-secondary)]'
+                              )}
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-baseline gap-2 flex-wrap">
+                                <span className="text-xs font-semibold text-[var(--ink-primary)]">
+                                  {deliverableName(item.key, item.label, t)}
+                                </span>
+                                <span className="text-[11px] font-mono text-[var(--ink-muted)]">
+                                  {item.filename} · {fmtSize(item.size_bytes)}
+                                </span>
+                              </div>
+                              <div className="text-xs text-[var(--ink-secondary)] mt-0.5 leading-relaxed">
+                                {deliverableDesc(item.key, t)}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 pl-6 sm:pl-0">
+                            {kind !== null && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => setPreviewItem(item)}
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                {t.quality.previewAction}
+                              </Button>
+                            )}
+                            <Button
+                              variant={isPrimary ? 'primary' : 'outline'}
+                              size="sm"
+                              disabled={downloadBusy}
+                              onClick={() => void handleDownload(item.key)}
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                              {t.quality.downloadAction}
+                            </Button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
+
+      {previewItem !== null && (
+        <PreviewDrawer
+          key={`${previewItem.key}:${previewItem.filename}`}
+          jobId={jobId}
+          item={previewItem}
+          onClose={() => setPreviewItem(null)}
+        />
+      )}
     </div>
   )
 }

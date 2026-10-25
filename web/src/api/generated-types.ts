@@ -558,6 +558,14 @@ export interface paths {
         /**
          * Download Deliverable
          * @description Serve one deliverable by key (see :data:`DELIVERABLE_LABELS`).
+         *
+         *     ``?inline=1`` renders the file in place (the console's preview pane)
+         *     instead of attaching it: no ``Content-Disposition: attachment``, and a
+         *     media type the browser can actually display. The response is served
+         *     under a CSP ``sandbox`` directive either way — the HTML deliverable is
+         *     generated from *book* content, which is untrusted input, so even a
+         *     fetched-directly preview runs scriptless in an opaque origin rather
+         *     than in the console's origin.
          */
         get: operations["download_deliverable_jobs__job_id__download__key__get"];
         put?: never;
@@ -3345,7 +3353,9 @@ export interface operations {
     };
     download_deliverable_jobs__job_id__download__key__get: {
         parameters: {
-            query?: never;
+            query?: {
+                inline?: boolean;
+            };
             header?: {
                 "x-ubt-tenant"?: string | null;
                 "x-api-key"?: string | null;

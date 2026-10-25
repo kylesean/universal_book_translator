@@ -11,6 +11,30 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Changed
 
+- **The quality gate speaks human first, and every deliverable previews
+  in-console.** The gate screen rendered engine vocabulary to everyone —
+  `0 corrupt / 172 masked`, `fail-closed 0 · coverage 100.0%` — summarized a
+  visual scan that ran four tiers over all 14 pages as「像素校验已跳过」because
+  *any* tier skip zeroed the row, and offered every artifact, from the
+  reader-facing PDF to the metrics JSON, as nothing but a download button. The
+  page now renders two densities: a default simple view (a verdict sentence,
+  five icon+chart check cards, a per-page scan grid that shows the gate really
+  looked at each page) and the previous professional view behind a toggle
+  persisted in `ubt.quality.mode`. The deliverables section groups its files by
+  audience — reading / translation hand-off / records — with one plain-language
+  line per file; PDF and HTML embed in a preview drawer, XLIFF renders as a
+  source/target segment table, and the JSON sidecars render as digests with the
+  raw payload behind a disclosure. Embeds ride a new `?inline=1` on the
+  download endpoint (`Content-Disposition` dropped, media type resolved by
+  suffix) served under a CSP `sandbox` directive — the HTML deliverable is
+  built from untrusted book text, so even a fetched-directly preview runs
+  scriptless in an opaque origin. Honesty repairs landed with the redesign: the
+  collapsed visual pillar states which tiers ran (「4 项扫描已运行 · 视觉语义判定未
+  运行」), the radar chords across an unmeasured axis instead of drawing a 0,
+  the ledger pillar's copy stops claiming a reconciliation the engine never
+  implemented, and the gate polls (5 s) while its report is absent so a page
+  opened mid-run no longer sits on「尚无判定结果」forever.
+
 - **The pre-flight slowness gate measures extraction cost, not a proxy.** The
   `PATHOLOGICAL_PAGE_RISK` warning had two wrong inputs in a row: the raw
   fragment count warned on every dotted table of contents (2,289 fragments over

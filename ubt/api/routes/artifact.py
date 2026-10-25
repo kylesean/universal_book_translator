@@ -26,6 +26,23 @@ from ubt.core.job_options import delivery_verdict_from_summary
 
 logger = logging.getLogger(__name__)
 
+#: Suffix-derived media types for inline preview. ``primary``/``secondary``
+#: register as ``application/octet-stream`` — a type browsers refuse to render,
+#: so an iframe pointing at the download URL would fall back to downloading
+#: even with ``Content-Disposition`` removed. The file suffix knows better.
+_INLINE_SUFFIX_TYPES = {
+    ".pdf": "application/pdf",
+    ".html": "text/html; charset=utf-8",
+    ".htm": "text/html; charset=utf-8",
+}
+
+
+def _preview_media_type(path: Path, registered: str) -> str:
+    """Media type for an ``?inline=1`` render of one deliverable."""
+    if registered != "application/octet-stream":
+        return registered
+    return _INLINE_SUFFIX_TYPES.get(path.suffix.lower(), registered)
+
 
 def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
     """Routes for the artifact surface."""
@@ -327,9 +344,21 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
         tags=["Jobs"],
     )
     async def download_deliverable(
-        job_id: str, key: str, x_ubt_tenant: str | None = Header(default=None)
+        job_id: str,
+        key: str,
+        inline: bool = False,
+        x_ubt_tenant: str | None = Header(default=None),
     ) -> FileResponse:
-        """Serve one deliverable by key (see :data:`DELIVERABLE_LABELS`)."""
+        """Serve one deliverable by key (see :data:`DELIVERABLE_LABELS`).
+
+        ``?inline=1`` renders the file in place (the console's preview pane)
+        instead of attaching it: no ``Content-Disposition: attachment``, and a
+        media type the browser can actually display. The response is served
+        under a CSP ``sandbox`` directive either way — the HTML deliverable is
+        generated from *book* content, which is untrusted input, so even a
+        fetched-directly preview runs scriptless in an opaque origin rather
+        than in the console's origin.
+        """
         valid_id = validate_job_id(job_id)
         if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):
             raise cross_tenant_404(valid_id)
@@ -390,6 +419,17 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
             )
 
         _, media_type = DELIVERABLE_LABELS[key]
+        if inline:
+            return FileResponse(
+                path=resolved,
+                media_type=_preview_media_type(resolved, media_type),
+                headers={
+                    # Opaque origin, no script execution — for engine-generated
+                    # HTML built out of untrusted book text.
+                    "Content-Security-Policy": "sandbox",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
         return FileResponse(
             path=resolved,
             filename=resolved.name,

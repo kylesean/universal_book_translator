@@ -2028,7 +2028,7 @@
           "Jobs"
         ],
         "summary": "Download Deliverable",
-        "description": "Serve one deliverable by key (see :data:`DELIVERABLE_LABELS`).",
+        "description": "Serve one deliverable by key (see :data:`DELIVERABLE_LABELS`).\n\n``?inline=1`` renders the file in place (the console's preview pane)\ninstead of attaching it: no ``Content-Disposition: attachment``, and a\nmedia type the browser can actually display. The response is served\nunder a CSP ``sandbox`` directive either way \u2014 the HTML deliverable is\ngenerated from *book* content, which is untrusted input, so even a\nfetched-directly preview runs scriptless in an opaque origin rather\nthan in the console's origin.",
         "operationId": "download_deliverable_jobs__job_id__download__key__get",
         "parameters": [
           {
@@ -2047,6 +2047,16 @@
             "schema": {
               "type": "string",
               "title": "Key"
+            }
+          },
+          {
+            "name": "inline",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Inline"
             }
           },
           {
