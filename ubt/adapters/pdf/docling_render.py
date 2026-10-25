@@ -190,23 +190,21 @@ class DoclingRenderStrategy:
         return output_path
 
     def _font_stack_for(self, target_lang: str) -> tuple[str, ...]:
-        """Body/heading font stack for the preamble, user override first.
+        """Body/heading font stack for the preamble, resolved against this machine.
 
         ``language_profile.resolve_font_config`` supplies the per-language
         stack (ja -> Noto Serif CJK JP, ko -> KR, ar -> Naskh, zh -> SC, ...);
-        ``config.font_family`` — the knob the preamble ignored for the whole
-        life of the field — replaces the first (body) face when set. The
-        language faces stay in the tail so missing glyphs still resolve.
+        ``font_probe`` then prunes it to the families Typst can actually
+        resolve. Without the probe every absent spare face warned on every
+        compile (arXiv 2608.25512 reported ``unknown font family: source han
+        serif sc`` three times) and a stack with no face for the target script
+        shipped tofu silently. ``config.font_family`` — the knob the preamble
+        ignored for the whole life of the field — leads as a protected entry:
+        an explicit choice is never silently replaced.
         """
-        from ubt.core.language_profile import resolve_font_config
+        from ubt.adapters.pdf.font_probe import resolve_for_render
 
-        stack = list(resolve_font_config(target_lang).typst_fonts)
-        override = self.font_family
-        if override:
-            override = override.strip().strip('"')
-            if override and override not in stack:
-                stack.insert(0, override)
-        return tuple(stack)
+        return resolve_for_render(target_lang, font_override=self.font_family).families
 
     def _assets_root(self, manifest: BookManifest) -> Path | None:
         """Directory holding the extracted figure assets for this job.

@@ -1452,12 +1452,14 @@ class TypstDocumentRenderer:
         # leading when supplied. Headings reverse the order (CJK face first):
         # a Latin heading is unchanged either way, a CJK one gets the real
         # face instead of falling through to the Latin serif.
-        from ubt.core.language_profile import resolve_font_config
+        from ubt.adapters.pdf.font_probe import resolve_for_render
 
         if self.font_stack:
             stack: tuple[str, ...] = self.font_stack
         else:
-            stack = tuple(resolve_font_config(lang).typst_fonts)
+            # No stack supplied: resolve the profile against this machine, so an
+            # absent spare face is pruned instead of warning on every compile.
+            stack = resolve_for_render(lang).families
         body = ", ".join(f'"{face}"' for face in stack)
         cjk_first = ", ".join(f'"{face}"' for face in reversed(stack))
         return "\n".join(

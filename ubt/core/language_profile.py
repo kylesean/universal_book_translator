@@ -949,8 +949,76 @@ _FONT_CONFIGS: dict[str, FontConfig] = {
 }
 
 
+#: Script-level fallbacks for languages with no explicit entry above.
+#:
+#: ``_FONT_CONFIGS`` names 18 languages, but the engine accepts any target the
+#: provider can translate. Falling straight to the Latin default meant a Thai,
+#: Hindi, Greek or Vietnamese book was typeset with a Latin-only stack and
+#: shipped tofu with no warning — the failure mode this table exists to bound.
+#: A script's fallback is still an approximation (it is why explicit entries
+#: win), but an approximation in the right script renders text.
+_SCRIPT_FALLBACKS: dict[str, FontConfig] = {
+    # Cyrillic: Greek and Cyrillic both need the extended blocks Liberation
+    # Serif does not carry, so Noto Serif (full coverage) leads.
+    "cyrillic": FontConfig(
+        typst_fonts=("Noto Serif", "DejaVu Serif", "Liberation Serif"),
+    ),
+    "greek": FontConfig(
+        typst_fonts=("Noto Serif", "DejaVu Serif", "Liberation Serif"),
+    ),
+    # Devanagari / Indic: shaping needs a script-specific face.
+    "devanagari": FontConfig(
+        typst_fonts=("Noto Serif Devanagari", "Noto Sans Devanagari", "DejaVu Sans"),
+    ),
+    # Thai: loopless vendor names exist; Noto Serif Thai is the portable one.
+    "thai": FontConfig(
+        typst_fonts=("Noto Serif Thai", "Noto Sans Thai", "DejaVu Sans"),
+    ),
+    # Latin with combining marks beyond Latin-1 (Vietnamese, Polish, Turkish
+    # extended). DejaVu carries them; Liberation is the typographic default.
+    "latin-ext": FontConfig(
+        typst_fonts=("Liberation Serif", "DejaVu Serif", "Noto Serif"),
+    ),
+}
+
+#: Language -> fallback script family. Covers the languages the engine accepts
+#: but ``_FONT_CONFIGS`` does not name; anything absent still reaches the Latin
+#: default, and :func:`resolve_font_config` reports that as unconfigured.
+_SCRIPT_OF_LANGUAGE: dict[str, str] = {
+    "el": "greek",
+    "hi": "devanagari",
+    "mr": "devanagari",
+    "ne": "devanagari",
+    "bn": "devanagari",
+    "pa": "devanagari",
+    "gu": "devanagari",
+    "th": "thai",
+    "lo": "thai",
+    "my": "devanagari",
+    "vi": "latin-ext",
+    "pl": "latin-ext",
+    "cs": "latin-ext",
+    "sk": "latin-ext",
+    "hu": "latin-ext",
+    "ro": "latin-ext",
+    "tr": "latin-ext",
+    "uk": "cyrillic",
+    "bg": "cyrillic",
+    "sr": "cyrillic",
+    "mk": "cyrillic",
+    "be": "cyrillic",
+    "kk": "cyrillic",
+}
+
+
 def resolve_font_config(target_lang: str) -> FontConfig:
-    """Resolve font family and figure caption prefix settings for ``target_lang``."""
+    """Resolve font family and figure caption prefix settings for ``target_lang``.
+
+    An explicit entry always wins. Otherwise the language's script fallback is
+    used, and :func:`font_profile_is_explicit` returns False so a caller can
+    say the profile is inherited rather than configured — a silent Latin
+    fallback for a Thai target is the failure this chain exists to bound.
+    """
     code = (target_lang or "zh").strip().lower().replace("_", "-")
     if code in _FONT_CONFIGS:
         return _FONT_CONFIGS[code]
@@ -959,4 +1027,24 @@ def resolve_font_config(target_lang: str) -> FontConfig:
         return _FONT_CONFIGS[prefix]
     if "zh" in code:
         return _FONT_CONFIGS["zh"]
+    script = _SCRIPT_OF_LANGUAGE.get(prefix)
+    if script:
+        return _SCRIPT_FALLBACKS[script]
     return _FONT_CONFIGS["en"]
+
+
+def font_profile_is_explicit(target_lang: str) -> bool:
+    """Whether this target has a configured entry rather than an inherited one.
+
+    False means the stack came from a script fallback (or the Latin default):
+    it renders, but the caption prefixes are English and the fonts are a
+    best guess. The doctor and the renderer log that as a fact rather than
+    presenting an inherited profile as a chosen one.
+    """
+    code = (target_lang or "zh").strip().lower().replace("_", "-")
+    if code in _FONT_CONFIGS:
+        return True
+    prefix = code.split("-")[0]
+    if prefix in _FONT_CONFIGS:
+        return True
+    return "zh" in code

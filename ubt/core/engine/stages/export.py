@@ -1173,6 +1173,41 @@ def _write_artifact_check(
         return None
 
 
+def _font_delivery_for(ctx: StageContext) -> dict[str, Any] | None:
+    """The font verdict the report carries, or None when nothing was measured.
+
+    A deliverable that cannot render the target script is a delivery-level
+    fact, not a log line: ``script_available=False`` means the PDF contains
+    tofu squares. Reporting it here puts it in the quality report the console
+    and the KPI artifact already read, so the reader learns it without
+    watching stderr.
+
+    ``None`` (rather than a guessed verdict) when the probe could not answer —
+    no typst binary and no fontconfig. An unmeasured fact must not be rendered
+    as a measured one.
+    """
+    try:
+        from ubt.adapters.pdf.font_probe import resolve_for_render
+
+        stack = resolve_for_render(
+            ctx.manifest.target_lang,
+            font_override=getattr(ctx.config, "font_family", None),
+        )
+    except Exception as exc:  # a reporting extra must never sink the delivery
+        logger.debug("font verdict unavailable for job %s: %s", ctx.job_id, exc)
+        return None
+    if not stack.probed:
+        return None
+    return {
+        "probed": stack.probed,
+        "families": list(stack.families),
+        "unavailable": list(stack.unavailable),
+        "substituted": list(stack.substituted),
+        # False = the delivered file cannot render the target script.
+        "script_available": stack.script_available,
+    }
+
+
 async def _build_reports(
     ctx: StageContext,
     final_blocks: list[IRBlock],
@@ -1278,6 +1313,7 @@ async def _build_reports(
         enforced_spans=enforced_spans,
         delivery_contract=delivery_contract,
         mode_advisory=mode_advisory,
+        font_delivery=_font_delivery_for(ctx),
     )
     if report.summary.failed_blocks > 0:
         logger.warning(

@@ -142,43 +142,18 @@ def resolve_theme(
     The metric defaults match the reconstructor's constructor. Nothing here
     duplicates a policy that already has an owner.
     """
-    import logging  # noqa: PLC0415 — deferred to avoid an import cycle
-
-    from ubt.adapters.pdf.font_probe import resolve_font_stack
+    from ubt.adapters.pdf.font_probe import resolve_for_render
     from ubt.core.language_profile import resolve_font_config
 
+    # One resolver for every renderer: profile + machine probe + the
+    # protected-override rule all live in ``resolve_for_render``, so this
+    # orchestrator cannot drift from what the preamble builders emit.
+    resolved = resolve_for_render(target_lang, font_override=font_override)
     config = resolve_font_config(target_lang)
-    requested = [font_override, *config.typst_fonts] if font_override else list(config.typst_fonts)
-    # The user override is protected: dropping it silently would be worse than
-    # Typst's own fallback (it is still reported in `unavailable`).
-    protected = (font_override,) if font_override else ()
-    resolved = resolve_font_stack(requested, target_lang=target_lang, protected=protected)
-    if resolved.probed:
-        if resolved.unavailable:
-            logging.getLogger(__name__).warning(
-                "font_probe: dropping unresolvable fonts %s from the render stack%s",
-                ", ".join(resolved.unavailable),
-                (
-                    f"; substituted {', '.join(resolved.substituted)}"
-                    if resolved.substituted
-                    else ""
-                ),
-            )
-        if not resolved.script_available:
-            logging.getLogger(__name__).warning(
-                "font_probe: no installed family can render the target script for %r — "
-                "the deliverable will contain tofu squares",
-                target_lang,
-            )
-        fonts = resolved.families
-    else:
-        # No probe answered (typst/fontconfig absent): pass the static stack
-        # through unchanged, previous behaviour.
-        fonts = tuple(requested)
     return Theme(
         source_lang=(source_lang or "en").strip().lower().replace("_", "-"),
         target_lang=(target_lang or "zh").strip().lower().replace("_", "-"),
-        fonts=fonts,
+        fonts=resolved.families,
         font_override=None,
         base_size_pt=10.5 if base_size_pt is None else base_size_pt,
         leading_em=_DEFAULT_LEADING_EM if leading_em is None else leading_em,

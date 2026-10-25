@@ -91,6 +91,19 @@ _CJK_NAME_MARKERS: tuple[str, ...] = (
     "droidsansfallback",
     "pingfang",
     "hiragino",
+    # macOS ships these under names carrying no "cjk" and no vendor stem:
+    # Songti/STSong are the built-in Song faces, and Apple SD Gothic Neo is the
+    # Korean system face. Without them a Mac reports "no CJK font installed"
+    # while holding three, and the substitute race falls to whatever Latin name
+    # sorts first.
+    "songti",
+    "stsong",
+    "kaiti",
+    "stkaiti",
+    "heiti",
+    "stheiti",
+    "applesdgothic",
+    "applegothic",
     "kochi",
     "heisei",
     "unifont",
@@ -377,7 +390,14 @@ def _substitution_rank(family: str, target_lang: str | None) -> tuple[int, str]:
     pan = any(m in normalized for m in _PAN_CJK)
     if tagged_ours or named_ours:
         rank = 0
-    elif pan and not tagged_theirs:
+    elif pan:
+        # A pan-CJK release (Noto/Source Han "CJK") carries every CJK script's
+        # glyphs regardless of the region tag in its name. Ranking it by that
+        # tag demoted Noto Serif CJK JP for a Chinese book to the same tier as
+        # a Korean-only face (``Malgun Gothic``), and the alphabetical
+        # tiebreak then picked the Korean one — the exact tofu this module
+        # exists to prevent. Any pan-CJK family outranks a script-specific
+        # face belonging to another language.
         rank = 1
     elif named_theirs or tagged_theirs:
         rank = 3
@@ -474,6 +494,95 @@ def resolve_font_stack(
     )
 
 
+def resolve_for_render(
+    target_lang: str | None,
+    *,
+    font_override: str | None = None,
+    typst_binary: str = "typst",
+) -> FontStack:
+    """The one entry point every renderer should call: profile + machine probe.
+
+    Three renderers used to read ``resolve_font_config(...).typst_fonts``
+    directly, so the probe existed but never ran on the delivery path and every
+    absent spare face warned on every compile (arXiv 2608.25512 showed
+    ``unknown font family: source han serif sc`` on each typeset). Routing them
+    through here prunes the stack against what the renderer can actually
+    resolve and turns the leftover risks — substituted face, no face for the
+    target script — into facts the caller can report.
+
+    An explicit ``font_override`` is ``protected``: a user who named a face
+    keeps it, and the stack still reports it as not installed.
+    """
+    from ubt.core.language_profile import font_profile_is_explicit, resolve_font_config
+
+    config = resolve_font_config(target_lang or "zh")
+    requested = [face for face in config.typst_fonts if face and face.strip()]
+    protected: tuple[str, ...] = ()
+    if font_override:
+        override = font_override.strip().strip('"')
+        if override and override not in requested:
+            requested.insert(0, override)
+            protected = (override,)
+    stack = resolve_font_stack(
+        requested,
+        target_lang=target_lang,
+        typst_binary=typst_binary,
+        protected=protected,
+    )
+    # An inherited profile renders, but its caption prefixes are English and its
+    # fonts are a script-level guess. Saying so is the difference between "this
+    # target is configured" and "this target fell through to a default".
+    if target_lang and not font_profile_is_explicit(target_lang):
+        _log_inherited_profile(target_lang, stack)
+    _log_font_verdict(stack, target_lang)
+    return stack
+
+
+def _log_inherited_profile(target_lang: str, stack: FontStack) -> None:
+    """Report an inherited (script-fallback) profile once per language."""
+    key = (f"inherited:{target_lang}", ",".join(stack.families))
+    if key in _FONT_VERDICTS_LOGGED:
+        return
+    _FONT_VERDICTS_LOGGED.add(key)
+    logger.info(
+        "no explicit font profile for target %r; using a script-level fallback (%s). "
+        "Caption prefixes will be English — add an entry to _FONT_CONFIGS to localize them.",
+        target_lang,
+        ", ".join(stack.families) or "none resolvable",
+    )
+
+
+#: ``(language, family)`` pairs already reported, so a run that renders many
+#: blocks does not repeat the same verdict per page.
+_FONT_VERDICTS_LOGGED: set[tuple[str, str]] = set()
+
+
+def _log_font_verdict(stack: FontStack, target_lang: str | None) -> None:
+    """One line per distinct verdict, not one per render call."""
+    if not stack.probed:
+        return
+    key = (target_lang or "", ",".join(stack.families))
+    if key in _FONT_VERDICTS_LOGGED:
+        return
+    _FONT_VERDICTS_LOGGED.add(key)
+    if stack.unavailable:
+        logger.info(
+            "font stack for %r resolved to %s (not installed: %s%s)",
+            target_lang or "zh",
+            ", ".join(stack.families),
+            ", ".join(stack.unavailable),
+            f"; substituted {', '.join(stack.substituted)}" if stack.substituted else "",
+        )
+    if not stack.script_available:
+        logger.warning(
+            "no installed font family can render the %s glyphs required by target %r — "
+            "the deliverable will show tofu squares; install one of: %s",
+            script_need(target_lang) or "requested",
+            target_lang or "zh",
+            ", ".join(stack.families) or "(the profile names none)",
+        )
+
+
 __all__ = [
     "FontStack",
     "available_font_families",
@@ -482,5 +591,6 @@ __all__ = [
     "needs_cjk",
     "needs_rtl",
     "resolve_font_stack",
+    "resolve_for_render",
     "script_need",
 ]

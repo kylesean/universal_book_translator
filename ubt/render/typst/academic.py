@@ -185,12 +185,14 @@ def academic_preamble(
     lang = (target_lang or "zh").replace("_", "-")
     rtl = "\n#set text(dir: rtl)" if direction == "rtl" else ""
 
-    from ubt.core.language_profile import resolve_font_config
+    from ubt.adapters.pdf.font_probe import resolve_for_render
 
     if font_stack:
         stack: tuple[str, ...] = tuple(font_stack)
     else:
-        stack = tuple(resolve_font_config(lang).typst_fonts)
+        # No stack supplied: resolve the profile against this machine, so an
+        # absent spare face is pruned instead of warning on every compile.
+        stack = resolve_for_render(lang).families
 
     body_fonts = ", ".join(f'"{face}"' for face in stack)
     cjk_first = ", ".join(f'"{face}"' for face in reversed(stack))
