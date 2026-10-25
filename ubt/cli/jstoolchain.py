@@ -25,6 +25,7 @@ manager is the operator's call, and this module only reports what is available.
 
 from __future__ import annotations
 
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,17 +64,26 @@ class JsToolchain:
         return self._has_local("vite") or bool(self.package_manager)
 
     def _has_local(self, tool: str) -> bool:
-        if self.local_bin is None:
-            return False
-        candidate = self.local_bin / _LOCAL_TOOLS[tool]
-        return candidate.is_file()
+        return self.local(tool) is not None
 
     def local(self, tool: str) -> Path | None:
-        """Absolute path to a local tool, or ``None`` when it is not installed."""
+        """Absolute path to a local tool, or ``None`` when it is not installed.
+
+        On Windows the bin stub is ``<tool>.cmd`` (a batch wrapper node's own
+        installer writes); the extensionless file beside it is a POSIX shell
+        script that ``CreateProcess`` cannot run, so preferring the stub that
+        the platform can actually execute is what makes ``--dev`` and the
+        auto-build work there at all.
+        """
         if self.local_bin is None:
             return None
-        candidate = self.local_bin / _LOCAL_TOOLS[tool]
-        return candidate if candidate.is_file() else None
+        base = _LOCAL_TOOLS[tool]
+        suffixes = (".cmd", ".exe") if os.name == "nt" else ("",)
+        for suffix in suffixes:
+            candidate = self.local_bin / f"{base}{suffix}"
+            if candidate.is_file():
+                return candidate
+        return None
 
     def build_steps(self) -> list[list[str]]:
         """Commands that type-check and bundle the console, in order.

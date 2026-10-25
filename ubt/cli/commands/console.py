@@ -116,7 +116,11 @@ def _forward_signals_to(proc: subprocess.Popen[str]) -> None:
     existing cleanup path runs. ``SIGINT`` is left alone: uvicorn installs its
     own handler and raises ``KeyboardInterrupt``.
     """
-    for signum in (signal.SIGTERM, signal.SIGHUP):
+    for signum in (signal.SIGTERM, getattr(signal, "SIGHUP", None)):
+        # SIGHUP does not exist on Windows; --dev there still gets SIGTERM
+        # (and Ctrl+C via KeyboardInterrupt), which is enough for a dev server.
+        if signum is None:
+            continue
 
         def _handler(received: int, frame: object) -> None:
             # Raise as the exception the ``finally`` already handles. Raising

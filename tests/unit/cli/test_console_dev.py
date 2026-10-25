@@ -267,3 +267,26 @@ def _alive(pid: int) -> bool:
     except (OSError, IndexError):
         return False
     return state != "Z"
+
+
+def test_a_platform_without_sighup_still_installs_the_sigterm_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows has no SIGHUP; --dev there must not crash installing handlers.
+
+    The loop reads the constant through ``getattr`` at call time, so deleting
+    the attribute is the platform simulation — and the assertion is that the
+    SIGTERM handler, the one that actually reaps the Vite child, still lands.
+    """
+    from ubt.cli.commands import console as console_mod
+
+    monkeypatch.delattr(signal, "SIGHUP")
+    original = signal.getsignal(signal.SIGTERM)
+    try:
+        console_mod._forward_signals_to(_FakeProc([]))  # type: ignore[arg-type]
+        handler = signal.getsignal(signal.SIGTERM)
+        assert callable(handler)
+        with pytest.raises(SystemExit):
+            handler(signal.SIGTERM, None)
+    finally:
+        signal.signal(signal.SIGTERM, original)

@@ -12,6 +12,7 @@ pnpm → npm → yarn) and the readable failure when nothing is available.
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from unittest.mock import patch
@@ -138,3 +139,41 @@ def test_the_repository_itself_resolves_without_pnpm() -> None:
     assert all("pnpm" not in part for step in argv for part in step) or (
         toolchain.local("vite") is None
     )
+
+
+def test_windows_prefers_the_cmd_stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """On Windows the executable stub is ``<tool>.cmd``; the bare file is a sh script.
+
+    ``node_modules/.bin`` carries both spellings on Windows, and CreateProcess
+    can run only the batch one — resolving the POSIX script there made --dev
+    and the auto-build crash with an exec error no error message explained.
+    """
+    monkeypatch.setattr(os, "name", "nt")
+    web = _fake_web(tmp_path, ("vite", "tsc"))
+    bin_dir = web / "node_modules" / ".bin"
+    # The Windows layout: batch stubs beside the POSIX scripts.
+    (bin_dir / "vite.cmd").write_text("@echo off\r\n", encoding="utf-8")
+    (bin_dir / "tsc.cmd").write_text("@echo off\r\n", encoding="utf-8")
+
+    with patch.object(shutil, "which", return_value=None):
+        toolchain = detect_js_toolchain(web)
+
+    assert toolchain.local("vite") == bin_dir / "vite.cmd"
+    assert toolchain.dev_argv() == [str(bin_dir / "vite.cmd")]
+    assert toolchain.can_build
+
+
+def test_windows_falls_back_to_the_plain_stub_without_a_batch_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No .cmd stub must not mean no tool: some setups expose .exe instead."""
+    monkeypatch.setattr(os, "name", "nt")
+    web = _fake_web(tmp_path, ("vite", "tsc"))
+    bin_dir = web / "node_modules" / ".bin"
+    (bin_dir / "vite.exe").write_bytes(b"MZ")
+    (bin_dir / "tsc.exe").write_bytes(b"MZ")
+
+    with patch.object(shutil, "which", return_value=None):
+        toolchain = detect_js_toolchain(web)
+
+    assert toolchain.local("vite") == bin_dir / "vite.exe"

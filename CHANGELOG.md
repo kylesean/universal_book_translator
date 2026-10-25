@@ -11,6 +11,25 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Changed
 
+- **Three-platform reality check, and the two Windows breaks it found.** The
+  backend's platform-critical layers were already sound — the single-writer
+  job lock is a SQLite lease (the old ``msvcrt``/``fcntl`` file-offset lock was
+  abandoned for exactly this reason), the path guard has win32 prefixes and
+  casefolded filename parts, no ``uvloop``/``fork``/``shell=True`` anywhere,
+  every text-mode ``open`` carries an explicit encoding, and the sidecar/OCR/
+  model channels are HTTP or per-platform binaries. The audit found two real
+  breaks, both fixed: ``ubt console --dev`` crashed on Windows because
+  ``signal.SIGHUP`` does not exist there（the loop now reads it through
+  ``getattr``, so SIGTERM — the handler that actually reaps the Vite child —
+  still installs）, and the JS toolchain resolved ``node_modules/.bin/vite``,
+  a POSIX shell script that ``CreateProcess`` cannot run, instead of the
+  ``<tool>.cmd`` batch stub Windows installs beside it（the same stub
+  preference makes the auto-build work there）. macOS needed nothing: same
+  Unix semantics, and the ``/etc``→``/private/etc`` resolution was already
+  handled. What the audit cannot give is runtime evidence — a Windows/macOS
+  CI matrix is the honest next step, because these conclusions are read from
+  the code, not run on the hardware.
+
 - **The doctor stops measuring what the platform cannot measure.** The
   ledger-permissions probe reads POSIX mode bits; on Windows those bits are
   synthesized — a writable file always reports 0666 — so the scan would flag
