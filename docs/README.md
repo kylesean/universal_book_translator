@@ -17,13 +17,13 @@
 | [`guides/PDF_RENDER_LAYOUT_AND_FIDELITY.md`](guides/PDF_RENDER_LAYOUT_AND_FIDELITY.md) | 产物 PDF 如何由 IR 重建并由 Typst 排版：数学、表格、内联样式、语言方向、已知限制 |
 | [`guides/PADDLEOCR_VL_SERVICE.md`](guides/PADDLEOCR_VL_SERVICE.md) | PaddleOCR-VL 作为表格/公式高保真读图通道：实测、服务部署、区域级接入与边界 |
 | [`guides/SEMANTIC_JUDGE_SETUP.md`](guides/SEMANTIC_JUDGE_SETUP.md) | 语义判官：开关、provider/TOML 配置、模型能力实测、句级比较、成本与边界 |
-| [`benchmarks/README.md`](benchmarks/README.md) | `scripts/cost_benchmark.py` 写出的无正文成本记录约定（本地证据，不进入 git） |
+| `benchmarks/README.md` | `scripts/cost_benchmark.py` 写出的无正文成本记录约定（本地证据，不进入 git，故此处不设链接） |
 
 ## 产品文档
 
 | 文档 | 内容 |
 | --- | --- |
-| [`UBT_OPERATOR_CONSOLE_PRD.md`](UBT_OPERATOR_CONSOLE_PRD.md) | 操作台与审校台的产品需求文档（控制台已落地，实现细节以源码为准） |
+| `UBT_OPERATOR_CONSOLE_PRD.md` | 操作台与审校台的产品需求文档（控制台已落地，实现细节以源码为准；本地文档，不进入 git） |
 
 ## 已落地的设计记录
 
@@ -48,8 +48,8 @@
 
 | 文档 | 内容 |
 | --- | --- |
-| [`reviews/2026-10-20-round4-deep-review.md`](reviews/2026-10-20-round4-deep-review.md) | 第四轮深度审查：50 条问题台账与对抗性复核；基线 `fec23f0` + 同批未提交改动 |
-| [`reviews/2026-10-20-round4-deep-review-verdict.md`](reviews/2026-10-20-round4-deep-review-verdict.md) | 对第四轮审查的独立复核结论：50 条中 44 条成立、5 条 PARTIAL、1 条核心事实错误 |
+| `reviews/2026-10-20-round4-deep-review.md` | 第四轮深度审查：50 条问题台账与对抗性复核；基线 `fec23f0` + 同批未提交改动 |
+| `reviews/2026-10-20-round4-deep-review-verdict.md` | 对第四轮审查的独立复核结论：50 条中 44 条成立、5 条 PARTIAL、1 条核心事实错误 |
 
 > 提案文档中的文件与行号是**计划落点**，未必已存在；活文档里的引用以 `ubt/` 源码为准。
 > 手动核对活文档的 `path:line` 引用：`python scripts/check_doc_refs.py`。

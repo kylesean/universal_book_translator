@@ -1,8 +1,8 @@
 # 当前待办与未闭环结论
 
 本文件记录 `docs/` 里仍活动的待办，以及刚从待办转为已修复的结论（保留以便追溯）。
-当前审查报告见 [`../reviews/2026-10-20-round4-deep-review.md`](../reviews/2026-10-20-round4-deep-review.md)
-与 [`../reviews/2026-10-20-round4-deep-review-verdict.md`](../reviews/2026-10-20-round4-deep-review-verdict.md)；
+当前审查报告见 `reviews/2026-10-20-round4-deep-review.md`
+与 `reviews/2026-10-20-round4-deep-review-verdict.md`（本地工作笔记，不进入 git）；
 那 50 条问题以报告为准，这里只保留不在其中的事项和历史遗留的 triage 清单。
 
 ## 1. 已修复：加密 PDF 在 translate 路径的报错不可行动（第三轮 U-10）
