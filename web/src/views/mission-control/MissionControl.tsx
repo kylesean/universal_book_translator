@@ -168,6 +168,10 @@ export function MissionControl() {
   // during the long draft stage while ``completed_blocks`` correctly stays at
   // zero until quality/repair reaches a terminal disposition.
   const [draftedBlocks, setDraftedBlocks] = useState<number>(0)
+  // Repair candidates are the same kind of live work: the stage will process
+  // them into a terminal disposition, but starting it must not drop them from
+  // the progress fraction.
+  const [repairPendingBlocks, setRepairPendingBlocks] = useState<number>(0)
   const [totalBlocks, setTotalBlocks] = useState<number>(0)
   const [costUsd, setCostUsd] = useState<number>(0)
   const [avgQe, setAvgQe] = useState<number>(0)
@@ -194,6 +198,7 @@ export function MissionControl() {
   // is always current.
   const completedRef = useRef(0)
   const draftedRef = useRef(0)
+  const repairPendingRef = useRef(0)
   const totalRef = useRef(0)
   const skippedRef = useRef(0)
   const failedRef = useRef(0)
@@ -212,7 +217,11 @@ export function MissionControl() {
     completedBlocks + failedBlocks + needsHumanBlocks,
     totalBlocks > 0 && progressPct > 0 ? Math.round((progressPct / 100) * totalBlocks) : 0
   )
-  const detailLivePct = liveProgressPct(finalizedBlocks, draftedBlocks, totalBlocks)
+  const detailLivePct = liveProgressPct(
+    finalizedBlocks,
+    draftedBlocks + repairPendingBlocks,
+    totalBlocks
+  )
   // oxlint-disable-next-line react/refs
   const displayedProgressPct = Math.max(detailLivePct, monotonicProgressRef.current)
   // The run is over, so its live log can no longer be replayed.
@@ -319,6 +328,7 @@ export function MissionControl() {
     // reset above cannot reach them.
     completedRef.current = 0
     draftedRef.current = 0
+    repairPendingRef.current = 0
     totalRef.current = 0
     skippedRef.current = 0
     failedRef.current = 0
@@ -342,6 +352,10 @@ export function MissionControl() {
       if (typeof res.drafted_blocks === 'number') {
         setDraftedBlocks(res.drafted_blocks)
         draftedRef.current = res.drafted_blocks
+      }
+      if (typeof res.repair_pending_blocks === 'number') {
+        setRepairPendingBlocks(res.repair_pending_blocks)
+        repairPendingRef.current = res.repair_pending_blocks
       }
       if (typeof res.total_blocks === 'number') {
         setTotalBlocks(res.total_blocks)
@@ -418,11 +432,17 @@ export function MissionControl() {
         if (typeof frame.progress_percent === 'number') setProgressPct(frame.progress_percent)
         if (typeof frame.completed_blocks === 'number') setCompletedBlocks(frame.completed_blocks)
         if (typeof frame.drafted_blocks === 'number') setDraftedBlocks(frame.drafted_blocks)
+        if (typeof frame.repair_pending_blocks === 'number') {
+          setRepairPendingBlocks(frame.repair_pending_blocks)
+        }
         if (typeof frame.total_blocks === 'number') setTotalBlocks(frame.total_blocks)
         if (typeof frame.estimated_cost_usd === 'number') setCostUsd(frame.estimated_cost_usd)
         if (typeof frame.current_avg_qe === 'number') setAvgQe(frame.current_avg_qe)
         if (typeof frame.completed_blocks === 'number') completedRef.current = frame.completed_blocks
         if (typeof frame.drafted_blocks === 'number') draftedRef.current = frame.drafted_blocks
+        if (typeof frame.repair_pending_blocks === 'number') {
+          repairPendingRef.current = frame.repair_pending_blocks
+        }
         if (typeof frame.total_blocks === 'number') totalRef.current = frame.total_blocks
         if (typeof frame.skipped_blocks === 'number') {
           setSkippedBlocks(frame.skipped_blocks)
@@ -451,7 +471,8 @@ export function MissionControl() {
         // the last known ones instead of printing 0/0.
         const done = Math.max(
           frame.completed_blocks ?? completedRef.current,
-          frame.drafted_blocks ?? draftedRef.current
+          (frame.drafted_blocks ?? draftedRef.current) +
+            (frame.repair_pending_blocks ?? repairPendingRef.current)
         )
         const total = frame.total_blocks ?? totalRef.current
         // "preserved", not "skipped": most of these are bibliography entries the
@@ -995,7 +1016,7 @@ export function MissionControl() {
                                 ? Math.round((job.progress_percent / 100) * job.total_blocks)
                                 : 0
                             ),
-                            job.drafted_blocks,
+                            job.drafted_blocks + (job.repair_pending_blocks ?? 0),
                             job.total_blocks
                           ).toFixed(1)}
                           %
@@ -1087,7 +1108,7 @@ export function MissionControl() {
                               ? Math.round((job.progress_percent / 100) * job.total_blocks)
                               : 0
                           ),
-                          job.drafted_blocks,
+                          job.drafted_blocks + (job.repair_pending_blocks ?? 0),
                           job.total_blocks
                         ).toFixed(1)}
                         %

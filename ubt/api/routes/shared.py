@@ -166,6 +166,7 @@ def terminal_frame(
                 for key in (
                     "total_blocks",
                     "drafted_blocks",
+                    "repair_pending_blocks",
                     "completed_blocks",
                     "skipped_blocks",
                     "failed_blocks",

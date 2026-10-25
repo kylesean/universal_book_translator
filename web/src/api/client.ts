@@ -103,6 +103,8 @@ export interface ProgressStreamFrame {
   /** Blocks drafted but not yet finalized. Shown as live translation work,
    * distinct from ``completed_blocks`` so a draft is never read as delivered. */
   drafted_blocks?: number
+  /** Drafted blocks now queued for another repair pass. Live work, not done. */
+  repair_pending_blocks?: number
   /** Blocks the skip rule finished without translating them (images, list
    * markers, short headings). Excluded from total/completed. */
   skipped_blocks?: number

@@ -808,6 +808,7 @@ class PipelineOrchestrator:
         drafted = int(stats.get("drafted", 0))
         repaired = int(stats.get("repaired", 0))
         failed = int(stats.get("failed", 0))
+        repair_pending = int(stats.get("repair_pending", 0))
         needs_human = int(stats.get("needs_human", 0))
         blocked_human = int(stats.get("blocked_human", 0))
         avg_qe = float(stats.get("avg_qe_score", 0.0))
@@ -832,6 +833,7 @@ class PipelineOrchestrator:
             skipped_blocks=skipped,
             completed_blocks=completed,
             drafted_blocks=drafted,
+            repair_pending_blocks=repair_pending,
             repaired_blocks=repaired,
             failed_blocks=failed,
             needs_human_blocks=needs_human,
@@ -1418,6 +1420,7 @@ class PipelineOrchestrator:
                 job_id=actual_job_id,
                 total_blocks=int((failure_stats or {}).get("total", 0) or 0),
                 drafted_blocks=int((failure_stats or {}).get("drafted", 0) or 0),
+                repair_pending_blocks=int((failure_stats or {}).get("repair_pending", 0) or 0),
                 completed_blocks=int((failure_stats or {}).get("completed", 0) or 0),
                 failed_blocks=int((failure_stats or {}).get("failed", 0) or 0),
                 needs_human_blocks=int((failure_stats or {}).get("needs_human", 0) or 0),

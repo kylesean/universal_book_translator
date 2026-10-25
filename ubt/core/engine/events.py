@@ -45,6 +45,10 @@ class TranslationProgressEvent(BaseModel):
     skipped_blocks: int = 0
     completed_blocks: int
     drafted_blocks: int = 0
+    #: Drafted blocks queued for targeted repair. The event query counts them
+    #: with ``drafted_blocks`` so a stage transition cannot report a progress
+    #: regression.
+    repair_pending_blocks: int = 0
     repaired_blocks: int = 0
     failed_blocks: int = 0
     needs_human_blocks: int = 0

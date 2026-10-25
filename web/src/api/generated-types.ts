@@ -1444,6 +1444,11 @@ export interface components {
              */
             drafted_blocks: number;
             /**
+             * Repair Pending Blocks
+             * @default 0
+             */
+            repair_pending_blocks: number;
+            /**
              * Skipped Blocks
              * @default 0
              */
@@ -1752,6 +1757,11 @@ export interface components {
              * @default 0
              */
             drafted_blocks: number;
+            /**
+             * Repair Pending Blocks
+             * @default 0
+             */
+            repair_pending_blocks: number;
             /** Completed Blocks */
             completed_blocks: number;
             /** Failed Blocks */

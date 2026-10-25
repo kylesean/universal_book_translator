@@ -658,6 +658,8 @@ class LedgerJobsMixin(_LedgerHost):
                         SUM(CASE WHEN status IN ('mtqe_passed', 'repaired')
                                   AND COALESCE(skip_translate, 0) = 0 THEN 1 ELSE 0 END) as completed,
                         SUM(CASE WHEN status = 'drafted' THEN 1 ELSE 0 END) as drafted,
+                        SUM(CASE WHEN status = 'repair_pending' THEN 1 ELSE 0 END)
+                            as repair_pending,
                         SUM(CASE WHEN status = 'repaired' THEN 1 ELSE 0 END) as repaired,
                         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
                         SUM(CASE WHEN status = 'needs_human' THEN 1 ELSE 0 END) as needs_human,
@@ -712,6 +714,7 @@ class LedgerJobsMixin(_LedgerHost):
                 "skipped": row["skipped"] or 0,
                 "completed": row["completed"] or 0,
                 "drafted": row["drafted"] or 0,
+                "repair_pending": row["repair_pending"] or 0,
                 "repaired": row["repaired"] or 0,
                 "failed": row["failed"] or 0,
                 "needs_human": row["needs_human"] or 0,

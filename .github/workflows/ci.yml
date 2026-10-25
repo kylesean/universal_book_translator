@@ -196,6 +196,35 @@ jobs:
           sudo install "/tmp/typst-x86_64-unknown-linux-musl/typst" /usr/local/bin/typst
           typst --version
 
+      - name: Warm the docling model cache (offline tests afterwards)
+        # docling downloads its layout/OCR models from HuggingFace on first
+        # conversion. The e2e suites below run under the test suite's outbound
+        # network block (tests/conftest.py), so a cold cache surfaced as
+        # "Regex pattern did not match" — the cancel-token assertion received
+        # a network RuntimeError instead. Warm the cache here, in a process
+        # the fixture does not touch, then pin offline mode so a missed model
+        # fails loudly in the warm-up instead of inside a blocked test.
+        env:
+          HF_HUB_OFFLINE: "0"
+        run: |
+          uv run python - <<'PY'
+          import tempfile
+          from pathlib import Path
+          from pypdf import PdfWriter
+
+          writer = PdfWriter()
+          writer.add_blank_page(width=200, height=200)
+          pdf = Path(tempfile.mkdtemp()) / "warm.pdf"
+          with pdf.open("wb") as handle:
+              writer.write(handle)
+
+          from docling.document_converter import DocumentConverter
+
+          result = DocumentConverter().convert(pdf)
+          assert len(result.document.pages) == 1
+          print("docling models cached and conversion verified")
+          PY
+
       - name: Default-engine PDF tier (docling)
         # `-m fast` here selected the unit tests only: the two suites that run
         # a real document through the docling engine are `slow`-marked, so the
@@ -203,6 +232,7 @@ jobs:
         # slow-marked PDF suites are named explicitly and `-m` is cleared.
         env:
           PYTHONIOENCODING: "utf-8"
+          HF_HUB_OFFLINE: "1"
         run: |
           uv run pytest -m fast -q -n auto --dist=loadscope \
             tests/unit/adapters/ tests/integration/

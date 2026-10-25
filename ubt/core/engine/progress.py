@@ -76,7 +76,8 @@ def _processed_blocks(completed: int, failed: int, needs_human: int, blocked_hum
     within one run the pipeline only moves blocks into terminal states (repair
     selection skips finalized blocks) or between them (triage/render flips),
     so this value never regresses mid-run. Drafted/repair-pending blocks are
-    in-flight, not done, and are deliberately excluded.
+    in-flight, not done, and are deliberately excluded from this numerator;
+    the snapshot's live percent adds them separately.
     """
     return completed + failed + needs_human + blocked_human
 
@@ -92,10 +93,11 @@ def live_progress_percent(finalized: int, drafted: int, total: int) -> float:
     """Percent of work started, with 100 reserved for a finalized run.
 
     ``progress_percent`` counts only terminal dispositions; during the long
-    draft phase that stays at zero. ``drafted`` is live work, so the console
-    uses the larger numerator. An unfinished run is capped at 99.9%; a fully
-    finalized one reports 100%. This is shared by the detail view and queue
-    rows so the two cannot disagree about the same job.
+    draft phase that stays at zero. ``drafted`` is live work (drafted plus
+    repair-pending), so the console uses the larger numerator. An unfinished
+    run is capped at 99.9%; a fully finalized one reports 100%. This is shared
+    by the detail view and queue rows so the two cannot disagree about the same
+    job.
     """
     if total <= 0:
         return 0.0
@@ -119,6 +121,11 @@ class ProgressSnapshot(BaseModel):
     #: separate from ``completed_blocks`` and from ``progress_percent`` so a
     #: draft is never misreported as a finished translation.
     drafted_blocks: int = 0
+    #: Blocks queued for another targeted repair pass. Like ``drafted_blocks``,
+    #: this is live work rather than a disposition: the repair stage processes
+    #: it in batches and will land it in a terminal state, so progress must not
+    #: fall backward merely because the stage started.
+    repair_pending_blocks: int = 0
     #: Blocks the skip rule marked done without translating them — images,
     #: bibliography entries, bylines, short headings. Excluded from
     #: ``total_blocks`` and from ``processed_blocks``: they are not work, and
@@ -131,16 +138,17 @@ class ProgressSnapshot(BaseModel):
     needs_human_blocks: int = 0
     blocked_human_blocks: int = 0
     # Blocks that reached ANY final disposition (completed + failed +
-    # needs_human + blocked_human): the numerator of ``progress_percent``.
-    # ``completed_blocks`` keeps its narrow ledger meaning — it is the same
-    # number the quality report's ``summary.completed_blocks`` reads — while
-    # this counter answers "how much of the book has been fully processed",
-    # which is what a progress bar must show.
+    # needs_human + blocked_human): the finalized numerator of
+    # ``progress_percent``. ``completed_blocks`` keeps its narrow ledger
+    # meaning — it is the same number the quality report's
+    # ``summary.completed_blocks`` reads — while this counter answers "how much
+    # of the book has been fully processed". The live fraction additionally
+    # credits drafted/repair-pending work without calling it done.
     processed_blocks: int = 0
-    # 0-100 completion percent derived from ``processed_blocks``. Monotone
-    # non-decreasing within a run: drafted work is never credited (the old
-    # numerator counted drafts, so the bar hit 100% during the draft stage and
-    # fell back once drafts were finalized elsewhere).
+    # 0-100 live percent over finalized work plus drafted/repair-pending work.
+    # It never claims 100 before the run is terminal, and never regresses when
+    # in-flight drafts or repair candidates lose their ``drafted`` label during
+    # a stage transition.
     progress_percent: float = 0.0
     current_avg_qe: float = 0.0
     bottom_15_avg_qe: float = 0.0
@@ -187,9 +195,12 @@ class ProgressSnapshot(BaseModel):
         message = (
             None if event.event_type is EventType.EXPORT_COMPLETED else (event.message or None)
         )
+        live_work = event.drafted_blocks + event.repair_pending_blocks
+        live_percent = live_progress_percent(processed, live_work, event.total_blocks)
         return cls(
             total_blocks=event.total_blocks,
             drafted_blocks=event.drafted_blocks,
+            repair_pending_blocks=event.repair_pending_blocks,
             skipped_blocks=event.skipped_blocks,
             completed_blocks=event.completed_blocks,
             repaired_blocks=event.repaired_blocks,
@@ -197,7 +208,7 @@ class ProgressSnapshot(BaseModel):
             needs_human_blocks=event.needs_human_blocks,
             blocked_human_blocks=event.blocked_human_blocks,
             processed_blocks=processed,
-            progress_percent=_progress_percent(processed, event.total_blocks),
+            progress_percent=live_percent,
             current_avg_qe=event.current_avg_qe,
             bottom_15_avg_qe=event.bottom_15_avg_qe,
             estimated_cost_usd=event.estimated_cost_usd,
@@ -229,9 +240,12 @@ class ProgressSnapshot(BaseModel):
         processed = _processed_blocks(completed, failed, needs_human, blocked_human)
         stage_raw = meta("stage")
         stage = stage_raw if stage_raw in _PIPELINE_STAGES else None
+        live_work = int(stats.get("drafted", 0)) + int(stats.get("repair_pending", 0))
+        live_percent = live_progress_percent(processed, live_work, total)
         return cls(
             total_blocks=total,
             drafted_blocks=int(stats.get("drafted", 0)),
+            repair_pending_blocks=int(stats.get("repair_pending", 0)),
             # Carried through: the query excludes skipped blocks from
             # ``total``/``completed``, and the panel needs the skipped count to
             # explain why the denominator is smaller than the source block count.
@@ -242,7 +256,7 @@ class ProgressSnapshot(BaseModel):
             needs_human_blocks=needs_human,
             blocked_human_blocks=blocked_human,
             processed_blocks=processed,
-            progress_percent=_progress_percent(processed, total),
+            progress_percent=live_percent,
             current_avg_qe=float(stats.get("avg_qe_score", 0.0)),
             bottom_15_avg_qe=float(stats.get("bottom_15_avg_qe", 0.0)),
             estimated_cost_usd=_as_float(meta("estimated_cost_usd")),

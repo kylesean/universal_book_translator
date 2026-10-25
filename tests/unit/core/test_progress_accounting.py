@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from ubt.core.engine.ledger import SQLiteJobLedger
-from ubt.core.engine.progress import live_progress_percent
+from ubt.core.engine.progress import ProgressSnapshot, live_progress_percent
 
 pytestmark = pytest.mark.fast
 
@@ -122,3 +122,30 @@ def test_live_progress_uses_drafts_but_reserves_100_for_finalization() -> None:
     assert live_progress_percent(100, 0, 100) == 100.0
     assert live_progress_percent(0, 100, 100) == 99.9
     assert live_progress_percent(0, 0, 0) == 0.0
+
+
+def test_repair_pending_is_live_progress_not_a_regression(ledger: SQLiteJobLedger) -> None:
+    """Starting repair must not erase already-credited live work.
+
+    A real run reached 86.6% while 504 blocks were drafted; repair then moved
+    all of them to repair_pending. The old snapshot only credited drafted, so
+    the next repair heartbeat fell to 31.4% even though the same blocks were
+    still queued for work.
+    """
+    job_id = "job_repair_pending_live"
+    _seed(
+        ledger,
+        job_id,
+        [
+            ("mtqe_passed", 0),
+            ("failed", 0),
+            ("repair_pending", 0),
+            ("repair_pending", 0),
+            ("repair_pending", 0),
+        ],
+    )
+
+    snapshot = ProgressSnapshot.from_ledger(ledger.get_job_stats(job_id))
+    assert snapshot.processed_blocks == 2
+    assert snapshot.repair_pending_blocks == 3
+    assert snapshot.progress_percent == 60.0

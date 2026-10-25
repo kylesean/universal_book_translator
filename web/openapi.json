@@ -4986,6 +4986,11 @@
             "title": "Drafted Blocks",
             "default": 0
           },
+          "repair_pending_blocks": {
+            "type": "integer",
+            "title": "Repair Pending Blocks",
+            "default": 0
+          },
           "skipped_blocks": {
             "type": "integer",
             "title": "Skipped Blocks",
@@ -5667,6 +5672,11 @@
           "drafted_blocks": {
             "type": "integer",
             "title": "Drafted Blocks",
+            "default": 0
+          },
+          "repair_pending_blocks": {
+            "type": "integer",
+            "title": "Repair Pending Blocks",
             "default": 0
           },
           "completed_blocks": {

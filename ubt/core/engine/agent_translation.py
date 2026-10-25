@@ -896,6 +896,7 @@ class AgentTranslationService:
                 skipped_blocks=int(stats.get("skipped", 0) or 0),
                 completed_blocks=int(stats.get("completed", 0) or 0),
                 drafted_blocks=int(stats.get("drafted", 0) or 0),
+                repair_pending_blocks=int(stats.get("repair_pending", 0) or 0),
                 repaired_blocks=int(stats.get("repaired", 0) or 0),
                 failed_blocks=int(stats.get("failed", 0) or 0),
                 needs_human_blocks=int(stats.get("needs_human", 0) or 0),

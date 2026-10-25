@@ -417,6 +417,8 @@ class JobSummary(BaseModel):
     #: Drafted but not yet finalized. A live-work counter, so the queue row can
     #: show motion during a long draft stage without claiming the job is done.
     drafted_blocks: int = 0
+    #: Drafted blocks queued for another repair pass. Live work, not completed.
+    repair_pending_blocks: int = 0
     completed_blocks: int
     failed_blocks: int
     needs_human_blocks: int

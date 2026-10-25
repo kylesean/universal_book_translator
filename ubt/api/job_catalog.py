@@ -67,6 +67,7 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
 
     total = int(snapshot.get("total", 0) or 0)
     drafted = int(snapshot.get("drafted", 0) or 0)
+    repair_pending = int(snapshot.get("repair_pending", 0) or 0)
     completed = int(snapshot.get("completed", 0) or 0)
     failed = int(snapshot.get("failed", 0) or 0)
     needs_human = int(snapshot.get("needs_human", 0) or 0)
@@ -94,10 +95,11 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
         ),
         "total_blocks": total,
         "drafted_blocks": drafted,
+        "repair_pending_blocks": repair_pending,
         "completed_blocks": completed,
         "failed_blocks": failed,
         "needs_human_blocks": needs_human,
-        "progress_percent": live_progress_percent(processed, drafted, total),
+        "progress_percent": live_progress_percent(processed, drafted + repair_pending, total),
         "estimated_cost_usd": float(cost) if isinstance(cost, (int, float)) else None,
         "created_at": snapshot.get("created_at"),
         "updated_at": snapshot.get("updated_at"),
@@ -214,12 +216,14 @@ def summarize_queued_job(job: Any) -> dict[str, Any]:
         "status": job.status.value,
         "total_blocks": int(progress.get("total_blocks", 0) or 0),
         "drafted_blocks": int(progress.get("drafted_blocks", 0) or 0),
+        "repair_pending_blocks": int(progress.get("repair_pending_blocks", 0) or 0),
         "completed_blocks": int(progress.get("completed_blocks", 0) or 0),
         "failed_blocks": int(progress.get("failed_blocks", 0) or 0),
         "needs_human_blocks": int(progress.get("needs_human_blocks", 0) or 0),
         "progress_percent": live_progress_percent(
             int(progress.get("processed_blocks", 0) or 0),
-            int(progress.get("drafted_blocks", 0) or 0),
+            int(progress.get("drafted_blocks", 0) or 0)
+            + int(progress.get("repair_pending_blocks", 0) or 0),
             int(progress.get("total_blocks", 0) or 0),
         ),
         "estimated_cost_usd": None,
