@@ -236,6 +236,108 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Fixed
 
+- **Every language the engine accepts now either isolates or says why not.**
+  The bundled font set could typeset Chinese, Japanese, Korean, Arabic and
+  Hebrew with system fonts sealed; Russian, Greek, Thai and Hindi could not, so
+  they kept the "path but not sealed" middle state and their output stayed
+  host-dependent. Two of those needed no new bytes at all: the bundled Noto
+  Serif measures 100% of assigned Cyrillic (through ext-B, so Ukrainian,
+  Bulgarian and Serbian are included) and Greek-extended — the Greek block's
+  only gaps are the 14 Coptic letters Unicode files inside it — and they were
+  merely absent from the script table. Thai and Devanagari needed their own
+  small faces (88 KB and 312 KB, from the `full` build of their releases; the
+  `hinted`/`unhinted` builds are subset-per-script and carry 2/95 and 39/95
+  ASCII, which would typeset embedded Latin and digits as tofu once isolation
+  is on). Two defects surfaced while wiring this up: five languages were
+  aliased to another script's face (`bn`/`pa`/`gu`/`my` → Devanagari, `lo` →
+  Thai), so a Bengali book asked for a face that renders none of its characters
+  — worse than the Latin default it replaced, since DejaVu at least draws the
+  digits; and every Latin target isolates, but the default stack named only
+  host faces, so with system fonts sealed none of them resolved and Typst fell
+  through to its built-in Libertinus while the quality report printed the host
+  face it had been asked for (verified by reading the embedded font out of the
+  PDF). `Noto Serif` is now in the default, last. Ten languages isolate that
+  did not before; `bn`/`pa`/`gu`/`my`/`lo` still cannot, and now say so instead
+  of naming the wrong face.
+
+- **Body metrics follow the target's own typesetting convention.** The renderer
+  emitted `first-line-indent: 2em` for every target, in both the book preamble
+  and the academic template. That is the Chinese rule (首行缩进两格, GB/T
+  15834-2011) and it was wrong for two of the three languages this engine
+  renders most: Japanese is 一字下げ (one character) and Korean inherits one
+  character from 원고지 practice (W3C klreq §4.2), so both were indented twice
+  as far as their own tradition. Measured on the rendered PDF before the
+  change: zh, ja and ko all came out at exactly 2.00em; after, 2.00 / 1.00 /
+  1.00em, with Chinese output unchanged. Nothing owned the value — it was a
+  literal in two preamble builders — so no test could catch it.
+  `TypographicConvention` is now the owner, one entry per language, and each
+  entry names the standard it encodes (GB/T 15834-2011, 一字下げ / JIS X 4051,
+  W3C klreq §4.2, Chicago §2.11) so the next reader can check the number
+  instead of trusting it. Arabic, Hebrew, Thai, Lao, Myanmar and Khmer keep the
+  previous literal and are marked `pre-table` in their source: inventing values
+  would make the delivery look researched while being wrong.
+
+- **A styled run no longer swallows what follows it — as a rule, not a list.**
+  Typst keeps parsing across a styled run's closing `]`, so whatever comes next
+  is read in code mode: `#strong[x](y)` calls the content as a function and
+  `#super[...][m].installed` is a field access. Both fail to compile and the
+  whole fragment descends to the source. The old guard was a two-entry
+  blacklist (`(` and `.` + identifier) that re-emitted the character as
+  `#text("…")`. It happened to be correct — an exhaustive sweep of all 32 ASCII
+  punctuation characters plus 14 CJK marks found no compile failure and no
+  content loss — but only because an undocumented invariant held: that
+  `typst_escape` had already backslash-escaped every other follower. Nothing
+  asserted that, so a later change to the escaper would have broken rendering
+  silently. Every styled run now ends with `/**/` — a Typst comment, which
+  terminates the expression with no output, no advance and no glyph. Measured
+  against Typst 0.15.1: identical glyph positions and identical extracted text
+  versus the old emission, and it also neutralises the followers the blacklist
+  never considered (`/`, `-`, `*`, `_`, `[`, `{`, `@`, `<`, `#`, `$`, `` ` ``).
+  A new slow-tier test compiles all 32 followers to prove the class is closed.
+
+- **The artifact check locates text instead of guessing which page it is on.**
+  The check asked what fraction of a block's *characters* appeared in a page's
+  token set within a ±1-page window of its source page. Both halves of that
+  were wrong on a reflowing translation. The window: measured on job
+  `web_mvnvgck2` (a 92-page paper that renders as 73 in Chinese), 562 of 614
+  locatable blocks sat more than one page from their source page — median
+  displacement -9, worst -75 — so present text was reported missing. The signal:
+  in a CJK book common ideographs appear on nearly every page, so the token
+  overlap had almost no discriminative power — 46 of 60 sampled *present* blocks
+  also scored ≥0.9 against a page when their text was removed. The check now
+  searches each block's page text for a contiguous 16-character fragment, trying
+  five distributed offsets and accepting any hit; a matched run of characters
+  proves they appear in order on one page, which a lost paragraph cannot
+  satisfy. Result on the same job: 894/894 realizations located (was 800/894),
+  five false failures gone, and the two blocks that remain unlocated are
+  accounted for — one carries a `<mark class="ubt-failed-draft">` marker instead
+  of prose, the other is a table whose `|` separators are not drawn. Short
+  blocks (headings, `证明。`) still use token overlap, now documented as the
+  weaker claim it is. The guard test that a genuinely lost paragraph must be
+  caught still passes, so this widened detection rather than loosening it.
+
+- **Chinese deliverables keep their punctuation in the text layer.** A Chinese
+  page rendered with system fonts sealed drew `：`, `；` and `？` as CID 0. The
+  page looked correct — the punctuation was visible — but the PDF's CIDSet
+  declared only CID 0, so those characters were absent from the text layer and
+  copy, search and the artifact check all failed on text a reader could see.
+  Root cause, measured with Typst 0.15.1: a bundled subset holding ideographs
+  plus *both* kana and hangul (33,624 glyphs) triggers it, while ideographs+kana
+  (21,799), ideographs+hangul (32,597) and the un-subsetted 65,535-glyph face
+  are all clean — so the fault is in the subsetting path, not the font (glyphs,
+  cmap, charstrings, FDArray subrs and CID assignment all verified correct). The
+  Simplified-Chinese cut no longer carries kana or hangul: they belong to the
+  Japanese and Korean faces, which each own their script and were already
+  separate files. That removes the trigger and 2.8 MB (serif 9.6 → 6.8 MB, sans
+  6.2 → 5.0 MB) with Chinese coverage unchanged (ideographs 100%, CJK
+  punctuation 100%, fullwidth forms 93.8%, ASCII 100%). Two regression tests:
+  a fast-tier guard reads the shipped files with a stdlib cmap parser (fontTools
+  is not a runtime dependency) and fails if either block reappears, and a
+  slow-tier test extracts the produced PDF with `pypdf` and asserts no NUL —
+  deliberately not with the project's own reader, because pdfium and `textgeom`
+  both turn the NUL glyph into whitespace, which is why the defect was invisible
+  to the audit that should have caught it.
+
 - **The wizard earns its width on large screens.** The workbench container
   was capped at `max-w-6xl` (1152px) — a reading-page width applied to a
   two-column tool, leaving ~370px of bare paper to the right of the report
