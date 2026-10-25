@@ -857,6 +857,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/assets/glossary/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Glossary File
+         * @description Stage a per-book glossary; returns the path a job submit accepts.
+         *
+         *     The console cannot send a filesystem path (browsers do not expose one),
+         *     and asking the operator to type a server-side path was a CLI reflex
+         *     wearing a web form. This stages the bytes the same way ``/jobs/upload``
+         *     stages source documents — timestamped, collision-free, inside the
+         *     managed uploads dir — and the returned ``path`` goes into the job's
+         *     ``glossary`` field untouched.
+         */
+        post: operations["upload_glossary_file_assets_glossary_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/assets/tm": {
         parameters: {
             query?: never;
@@ -1059,6 +1086,11 @@ export interface components {
             params?: {
                 [key: string]: unknown;
             };
+        };
+        /** Body_upload_glossary_file_assets_glossary_upload_post */
+        Body_upload_glossary_file_assets_glossary_upload_post: {
+            /** File */
+            file: string;
         };
         /** Body_upload_source_document_jobs_upload_post */
         Body_upload_source_document_jobs_upload_post: {
@@ -3975,6 +4007,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["GlossaryImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_glossary_file_assets_glossary_upload_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_glossary_file_assets_glossary_upload_post"];
             };
         };
         responses: {

@@ -187,17 +187,16 @@ export const en: TranslationDictionary = {
     warningAtRiskClause: 'A further {count} page(s) use fonts with no /ToUnicode map — at risk, though no residue was confirmed. ',
     listSeparator: ', ',
     advancedOptionsTitle: 'Advanced Compiler & Layout Options',
-    advancedOptionsSubtitle:
-      'Fine-tune columns and delivery mode, domain profile, page slicing and glossary mounting',
+    advancedOptionsSubtitle: 'Defaults are recommended; every control below can stay as-is.',
     advancedOptionsTag: 'Advanced Controls',
-    domainProfile: 'Domain Profile',
+    domainProfile: 'Content type',
     // The profile's real effects are only three: the seed-glossary directory,
     // the rolling-summary switch and the genre string in the prompt.
     // ``semiconductor`` is a subject, not a genre, so it left the dropdown;
     // its packaged seed glossary now applies when auto-detection lands on it.
     domainProfileHelp:
-      'Shapes the prompt register and the glossary source. Auto-detect probes the document; when it lands on a domain with a packaged glossary (e.g. semiconductor), the engine applies its curated term table automatically.',
-    domainAuto: 'Auto-detect (from the document)',
+      'Shapes the prompt register and the glossary source; auto-detect probes the document and applies a packaged term table when it lands on one.',
+    domainAuto: 'Auto-detect from the document',
     domainGeneral: 'General (General)',
     domainTextbook: 'Textbook (Textbook)',
     domainPaper: 'Academic Paper (Paper)',
@@ -206,9 +205,9 @@ export const en: TranslationDictionary = {
     dualMode: 'Delivery Mode',
     dualModeHelp:
       'Smart Auto starts bilingual and lets the layout advisor step it down to target-only when the layout cannot pair cleanly.',
-    dualModeAuto: 'Smart Auto (starts bilingual, may step down to target-only)',
-    dualModeDual: 'Bilingual (each source line above its translation; warns but never downgrades)',
-    dualModeMono: 'Target only (translation without the source)',
+    dualModeAuto: 'Smart Auto (default)',
+    dualModeDual: 'Bilingual',
+    dualModeMono: 'Target only',
     layoutColumns: 'Columns',
     layoutColumnsHelp:
       'Leave on Auto to mirror the source layout (a two-column paper stays two-column). An explicit value forces that count.',
@@ -220,12 +219,9 @@ export const en: TranslationDictionary = {
     translateChromeAuto: 'Follow engine default',
     translateChromeOn: 'Translate page furniture',
     translateChromeOff: 'Keep source page furniture',
-    groupLayout: 'Layout & delivery',
-    groupEngines: 'Reading & processing',
     ocrMode: 'OCR engine',
     ocrModeHelp:
       'OCR only turns scanned / font-damaged page images into text; translation is always done by your model. Auto falls back sidecar → rapidocr → cloud (last, needs egress permission).',
-    ocrModeScope: 'Covers only the image-to-text step; translation quality and model come from your provider config.',
     ocrModeEgressWarning:
       'This mode uploads whole page images to an external service. It requires UBT_ALLOW_PAGE_UPLOAD=true, or the job is refused.',
     ocrModeAuto: 'Follow engine default (Auto)',
@@ -234,16 +230,17 @@ export const en: TranslationDictionary = {
     ocrModeCloud: 'Cloud OCR (billed per page, needs egress permission)',
     ocrModeVlm: 'Vision LLM (a separate reading model, needs egress permission)',
     ocrModeOff: 'OCR off (unreadable pages are skipped)',
-    pageFilter: 'Page Range Filter (Pages)',
-    pageFilterPlaceholder: 'e.g. 1-10 or 1,3,5 (leave blank for entire book)',
+    pageFilter: 'Page range',
+    pageFilterPlaceholder: 'e.g. 1-10',
     pageFilterHelp: 'Only compile specified pages for fast layout proofing and sampling',
-    glossaryPath: 'Per-book glossary (Glossary)',
-    glossaryPathPlaceholder: 'e.g. /path/to/glossary.csv or .json (optional)',
+    glossaryPath: 'Per-book glossary',
     glossaryPathHelp:
-      'The glossary managed in Language Assets applies to every job automatically — nothing to enter here. This mounts one extra per-book table (.csv / .tsv / .json, absolute path); a missing path is logged and skipped, never an error.',
+      'The glossary in Language Assets applies to every job; upload one extra table for this book (.csv / .tsv / .json) — it only affects this run.',
     glossaryPathInvalid: 'Enter an absolute path (starting with /) ending in .csv, .tsv or .json.',
-    glossaryManageLink: 'View & manage the glossary in Language Assets →',
-    rehearsalLabel: 'Rehearsal (zero-token dry run)',
+    glossaryManageLink: 'Standing glossary is managed in Language Assets →',
+    glossaryUploadBtn: 'Upload a glossary file',
+    glossaryRemove: 'Remove the uploaded glossary',
+    rehearsalLabel: 'Rehearsal',
     rehearsalHelp: 'Runs the full pipeline with an echo provider: proves the plumbing reaches a rendered artifact, spends nothing, and the result is not a translation.',
     rehearsalBannerTitle: 'This would run as a rehearsal',
     rehearsalBannerBody:
@@ -252,7 +249,7 @@ export const en: TranslationDictionary = {
     rehearsalBannerAck: 'Run as rehearsal anyway',
     rehearsalActiveWarning: 'Rehearsal mode: the output is echo text, NOT a translation. Use it to validate the pipeline, then re-submit with a real run.',
     engineRecommended: '✦ Engine Recommended',
-    sliceSampleQuickBtn: 'Sample 1-5',
+    sliceSampleQuickBtn: 'First 5 pages',
     localFreeLabel: 'Free (Local Model)',
     sliceTestingTag: 'Slice Test',
     estimateExact: 'exact',
@@ -261,8 +258,11 @@ export const en: TranslationDictionary = {
       'A job with this key already exists, so nothing new was started — open it to see its progress.',
     quoteProviderNote: 'Priced against {provider}',
     groupDelivery: 'What the reader gets',
+    groupContent: 'Content & parsing',
+    groupScope: 'Scope & rehearsal',
+    groupExec: 'Execution & checks',
     emitBoth: 'Companion deliverable',
-    emitBothAuto: 'Follow server config (off by default)',
+    emitBothAuto: 'Follow server config',
     emitBothOn: 'Render both forms',
     emitBothOff: 'Primary form only',
     emitBothHelpAuto:
@@ -271,22 +271,18 @@ export const en: TranslationDictionary = {
       'The primary deliverable is the bilingual PDF; when on, a mono-translation PDF is rendered alongside it (roughly double time and size).',
     emitBothHelpMono:
       'The primary deliverable is the mono-translation PDF; when on, a bilingual PDF is rendered alongside it (roughly double time and size).',
-    groupQuality: 'Quality checks',
-    visualJudge: 'Render QC (visual sampling)',
+    visualJudge: 'Render QC',
     visualJudgeHelp:
       'After rendering, up to 3 sampled pages go to a vision model to catch broken layout and split formulas; findings land in the quality report. Costs extra tokens and needs page egress enabled.',
     visualJudgeBlocked:
       'Page egress is off (UBT_ALLOW_PAGE_UPLOAD=false), so the judge would skip every page and bill nothing. Enable egress on the server to use it.',
-    groupBudget: 'Time & cost',
     concurrency: 'Parallel requests',
     concurrencyHelp:
       'How many model requests may be in flight at once. Higher finishes sooner but hits rate limits more often.',
-    concurrencyAuto: 'Operator default',
-    domainHint: 'Subject / domain hint',
-    domainHintPlaceholder:
-      'e.g. wireless communications / Ming–Qing economic history / computational neuroscience',
+    concurrencyAuto: 'Auto',
+    domainHint: 'Subject hint',
     domainHintHelp:
-      'One sentence describing the book\'s field: the engine appends "Use standard {subject} terminology." to every draft prompt to steer term choices. Left empty, the domain profile above generates the same kind of instruction.',
+      'Appends "Use standard {subject} terminology." to every draft prompt to steer term choices; empty falls back to the content type.',
     chapterWindow: 'Chapter window',
     chapterWindowHelp:
       'Translate only a slice of chapters. Leave empty for the whole book. 1-based; the window is what gets billed.',

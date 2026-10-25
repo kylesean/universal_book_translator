@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import re
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import FastAPI, Header, HTTPException, status
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
 
 from ubt.api.assets import (
@@ -35,6 +39,7 @@ from ubt.api.models import (
 from ubt.api.routes.shared import UNPROCESSABLE_ENTITY
 from ubt.api.scope import ApiScope
 from ubt.api.security import resolve_secure_path, verify_api_key
+from ubt.core.fs_perms import ensure_private_dir
 from ubt.core.router import ModelProfile, get_default_registry
 
 
@@ -170,6 +175,58 @@ def register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
         except GlossaryFormatError as exc:
             raise HTTPException(status_code=UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         return JSONResponse({"parsed": len(pairs), "imported": imported})
+
+    @api_app.post("/assets/glossary/upload", tags=["Assets"])
+    async def upload_glossary_file(
+        file: Annotated[UploadFile, File()],
+    ) -> JSONResponse:
+        """Stage a per-book glossary; returns the path a job submit accepts.
+
+        The console cannot send a filesystem path (browsers do not expose one),
+        and asking the operator to type a server-side path was a CLI reflex
+        wearing a web form. This stages the bytes the same way ``/jobs/upload``
+        stages source documents — timestamped, collision-free, inside the
+        managed uploads dir — and the returned ``path`` goes into the job's
+        ``glossary`` field untouched.
+        """
+        original_name = Path(file.filename or "").name.strip()
+        if not original_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing file name",
+            )
+        suffix = Path(original_name).suffix.lower()
+        if suffix not in (".csv", ".tsv", ".json"):
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="Unsupported glossary format. Supported: .csv, .tsv, .json.",
+            )
+        # A terminology table beyond 10 MB is not a glossary but a corpus;
+        # refusing it here keeps a mistaken pick from parking on the disk.
+        glossary_max_bytes = 10 * 1024 * 1024
+        stem = (
+            re.sub(r"[^\w.\- ]+", "_", Path(original_name).stem, flags=re.UNICODE).strip()
+            or "glossary"
+        )
+        uploads_dir = ensure_private_dir(scope.uploads_dir())
+        dest = (
+            uploads_dir / f"{datetime.now(UTC):%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}-{stem}{suffix}"
+        )
+        size = 0
+        try:
+            with dest.open("wb") as out:
+                while chunk := await file.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > glossary_max_bytes:
+                        raise HTTPException(
+                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail="Uploaded glossary exceeds the 10 MB limit",
+                        )
+                    out.write(chunk)
+        except HTTPException:
+            dest.unlink(missing_ok=True)
+            raise
+        return JSONResponse({"path": str(dest), "name": original_name})
 
     @api_app.get("/assets/tm", response_model=TMListResponse, tags=["Assets"])
     async def get_translation_memory(

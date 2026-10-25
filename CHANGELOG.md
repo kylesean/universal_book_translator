@@ -11,6 +11,22 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Changed
 
+- **The advanced drawer reads like a form again.** Twelve controls had
+  accumulated label + visible help + scope note + placeholder each, and the
+  per-book glossary asked the operator to type a server filesystem path — a
+  CLI reflex wearing a web form. The drawer is now four paired-column groups
+  （读者拿到什么 / 内容与解析 / 范围与试跑 / 执行与质检）; every explanation
+  moved into its InfoTip, visible prose is reserved for consequences the
+  operator must act on (a refused upload, a closed egress gate), and
+  placeholders shrink to a format example（如 1-10）or vanish. Delivery-mode
+  options speak in outcomes（智能选择（默认）/ 双语对照 / 仅译文）now that the
+  details live one hover away, and the subject hint loses its placeholder
+  plus the semiconductor example. The glossary field becomes 本书术语表: a
+  staged upload (new `POST /assets/glossary/upload`, 10 MB cap, timestamped
+  name in the managed uploads dir) rendered as a removable file chip — the
+  engine's own loader reads the staged file back in tests — with the
+  always-on standing glossary one link away in Language Assets.
+
 - **The advanced drawer says what each control actually does, and the glossary
   gains an import path.** Five controls were mechanically correct but spoke in
   engine shorthands. The domain dropdown drops「半导体」— a subject sitting in a

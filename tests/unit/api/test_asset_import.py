@@ -24,6 +24,7 @@ from ubt.api.assets import (
     parse_tm_json,
     parse_tm_payload,
     parse_tmx,
+    read_glossary_terms,
 )
 from ubt.core.config import UBTConfig
 from ubt.core.memory.tm import PROVENANCE_HUMAN_PE, PROVENANCE_MACHINE, TranslationMemory
@@ -374,3 +375,32 @@ def test_glossary_import_endpoint_rejects_a_malformed_payload(tmp_path: Path) ->
         headers=_AUTH,
     )
     assert res.status_code == 422
+
+
+def test_glossary_upload_endpoint_stages_a_path_jobs_can_use(tmp_path: Path) -> None:
+    client = TestClient(create_app(_config(tmp_path)))
+    res = client.post(
+        "/assets/glossary/upload",
+        files={"file": ("terms.csv", b"source,translation\nMOSFET,MOSFET\n", "text/csv")},
+        headers=_AUTH,
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["name"] == "terms.csv"
+    staged = Path(body["path"])
+    assert staged.exists()
+    # The staged path must sit inside the managed uploads dir the engine can
+    # read, and the engine's own loader must be able to parse it back — the
+    # job submit hands this path to the pipeline untouched.
+    assert "uploads" in staged.parts
+    assert read_glossary_terms(staged) == [{"source": "MOSFET", "target": "MOSFET"}]
+
+
+def test_glossary_upload_endpoint_rejects_non_glossary_formats(tmp_path: Path) -> None:
+    client = TestClient(create_app(_config(tmp_path)))
+    res = client.post(
+        "/assets/glossary/upload",
+        files={"file": ("book.pdf", b"%PDF-1.4 fake", "application/pdf")},
+        headers=_AUTH,
+    )
+    assert res.status_code == 415

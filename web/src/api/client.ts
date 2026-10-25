@@ -585,6 +585,20 @@ export async function importGlossary(payload: {
   return res.json()
 }
 
+/** Stage a per-book glossary server-side; returns the path a job submit accepts. */
+export async function uploadGlossaryFile(file: File): Promise<{ path: string; name: string }> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await apiFetch(`${BASE_URL}/assets/glossary/upload`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!res.ok) {
+    throw await apiError(res, "Failed to upload glossary")
+  }
+  return res.json()
+}
+
 export async function deleteGlossaryTerm(source: string): Promise<GlossaryTerm[]> {
   const res = await apiFetch(`${BASE_URL}/assets/glossary?source=${encodeURIComponent(source)}`, {
     method: 'DELETE',

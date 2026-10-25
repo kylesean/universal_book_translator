@@ -3488,6 +3488,80 @@
         }
       }
     },
+    "/assets/glossary/upload": {
+      "post": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Upload Glossary File",
+        "description": "Stage a per-book glossary; returns the path a job submit accepts.\n\nThe console cannot send a filesystem path (browsers do not expose one),\nand asking the operator to type a server-side path was a CLI reflex\nwearing a web form. This stages the bytes the same way ``/jobs/upload``\nstages source documents \u2014 timestamped, collision-free, inside the\nmanaged uploads dir \u2014 and the returned ``path`` goes into the job's\n``glossary`` field untouched.",
+        "operationId": "upload_glossary_file_assets_glossary_upload_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_glossary_file_assets_glossary_upload_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/assets/tm": {
       "get": {
         "tags": [
@@ -4143,6 +4217,20 @@
         ],
         "title": "AssessWarning",
         "description": "One degraded probe: a stable machine code plus Chinese human copy.\n\n``params`` carries the values interpolated into ``detail_zh`` so a\nnon-Chinese console can render the warning from its own catalogue; it falls\nback to ``detail_zh`` for a code it does not know."
+      },
+      "Body_upload_glossary_file_assets_glossary_upload_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_glossary_file_assets_glossary_upload_post"
       },
       "Body_upload_source_document_jobs_upload_post": {
         "properties": {

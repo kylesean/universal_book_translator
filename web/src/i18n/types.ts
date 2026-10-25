@@ -172,12 +172,12 @@ export interface TranslationDictionary {
     translateChromeOn: string
     translateChromeOff: string
     /** Headings that group the advanced drawer by intent. */
-    groupLayout: string
-    groupEngines: string
+    groupDelivery: string
+    groupContent: string
+    groupScope: string
+    groupExec: string
     ocrMode: string
     ocrModeHelp: string
-    /** Scope note: OCR extracts text from images; translation stays with the model. */
-    ocrModeScope: string
     ocrModeEgressWarning: string
     ocrModeAuto: string
     ocrModeRapidocr: string
@@ -189,11 +189,12 @@ export interface TranslationDictionary {
     pageFilterPlaceholder: string
     pageFilterHelp: string
     glossaryPath: string
-    glossaryPathPlaceholder: string
     glossaryPathHelp: string
     glossaryPathInvalid: string
     /** Cross-link from the per-book glossary field to the asset manager. */
     glossaryManageLink: string
+    glossaryUploadBtn: string
+    glossaryRemove: string
     rehearsalLabel: string
     rehearsalHelp: string
     rehearsalBannerTitle: string
@@ -211,7 +212,6 @@ export interface TranslationDictionary {
     submitReusedNote: string
     /** Names the provider the quote was priced against. */
     quoteProviderNote: string
-    groupDelivery: string
     emitBoth: string
     emitBothAuto: string
     emitBothOn: string
@@ -220,18 +220,14 @@ export interface TranslationDictionary {
     emitBothHelpAuto: string
     emitBothHelpDual: string
     emitBothHelpMono: string
-    /** Visual QC gets its own group: it is a post-render check, not a deliverable. */
-    groupQuality: string
     /** The page-egress gate: the visual judge cannot run while it is closed. */
     visualJudge: string
     visualJudgeHelp: string
     visualJudgeBlocked: string
-    groupBudget: string
     concurrency: string
     concurrencyHelp: string
     concurrencyAuto: string
     domainHint: string
-    domainHintPlaceholder: string
     domainHintHelp: string
     chapterWindow: string
     chapterWindowHelp: string

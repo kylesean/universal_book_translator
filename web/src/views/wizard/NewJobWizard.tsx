@@ -11,6 +11,7 @@ import {
   Globe,
   ChevronDown,
   ChevronRight,
+  X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -20,6 +21,7 @@ import {
   assessJob,
   getRuntimeConfig,
   submitJob,
+  uploadGlossaryFile,
   uploadSourceDocument,
   type JobAssessResponse,
   type JobSubmitRequest,
@@ -169,7 +171,15 @@ export function NewJobWizard() {
     'auto' | 'rapidocr' | 'sidecar' | 'cloud' | 'vlm' | 'off'
   >('auto')
   const [pageRange, setPageRange] = useState('')
-  const [glossaryPath, setGlossaryPath] = useState('')
+  // Per-book glossary: a staged upload, never a typed server path. Browsers do
+  // not expose filesystem paths, so the old input asked the operator to type a
+  // location they could not know; the console stages bytes like it stages the
+  // source document, and the server answers with the path the job accepts.
+  const [glossaryFile, setGlossaryFile] = useState<{ name: string; path: string } | null>(null)
+  const [glossaryUploading, setGlossaryUploading] = useState(false)
+  // Set only when a pick or an upload fails; a working flow renders no prose.
+  const [glossaryError, setGlossaryError] = useState<string | null>(null)
+  const glossaryFileRef = useRef<HTMLInputElement>(null)
   const [dryRun, setDryRun] = useState(false)
   // Delivery shape and spend knobs the REST model has always accepted but no
   // control reached. Only the ones a user can actually reason about are here;
@@ -470,22 +480,31 @@ export function NewJobWizard() {
     }
   }
 
-  /**
-   * Whether the glossary field would be silently ignored by the engine.
-   *
-   * ``load_external_glossary`` logs a warning and returns ``[]`` for a path that
-   * does not exist, so a typo'd path starts a full run with no glossary and no
-   * error. We cannot stat the server's filesystem from here, but we can reject
-   * the shapes that cannot possibly load: a relative path, or an extension the
-   * loader does not parse.
-   */
-  const glossaryError = (() => {
-    const p = glossaryPath.trim()
-    if (!p) return null
-    if (!p.startsWith('/')) return t.wizard.glossaryPathInvalid
-    if (!/\.(csv|tsv|json)$/i.test(p)) return t.wizard.glossaryPathInvalid
-    return null
-  })()
+  // The file picker already filters by extension; this second check catches a
+  // drag-typed name and keeps the honest error at the control, not the API.
+  const handleGlossaryFile = async (file: File) => {
+    setGlossaryError(null)
+    if (!/\.(csv|tsv|json)$/i.test(file.name)) {
+      setGlossaryError(t.wizard.glossaryPathInvalid)
+      return
+    }
+    setGlossaryUploading(true)
+    try {
+      const staged = await uploadGlossaryFile(file)
+      setGlossaryFile({ name: file.name, path: staged.path })
+    } catch (err) {
+      setGlossaryError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setGlossaryUploading(false)
+    }
+  }
+
+  const handleGlossaryInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (file) void handleGlossaryFile(file)
+  }
+
   /**
    * A cap is enabled but no usable positive number was entered.
    *
@@ -575,7 +594,7 @@ export function NewJobWizard() {
     start_chapter: chapterStart.trim() ? Number(chapterStart) : null,
     max_chapters: chapterCount.trim() ? Number(chapterCount) : null,
     pages: pageRange.trim() ? pageRange.trim() : null,
-    glossary: glossaryPath.trim() ? glossaryPath.trim() : null,
+    glossary: glossaryFile?.path ?? null,
     priority: 0,
     dry_run: dryRun,
     budget_usd: budgetUsd,
@@ -1143,36 +1162,16 @@ export function NewJobWizard() {
 
               {isAdvancedOpen && (
                 <div className="space-y-4 pt-3 pb-1 border-t border-dashed border-[var(--paper-border)] mt-2">
-                  {/* Grouped by intent: "what the reader gets" vs "what reads
-                      the source". Seven flat controls with no headings made the
-                      drawer one undifferentiated block. */}
-                  <div className="type-group -mb-1">{t.wizard.groupLayout}</div>
+                  {/* Four groups, one line per control. The label names the
+                      thing, the InfoTip carries the depth, and visible prose is
+                      reserved for consequences the operator must act on (a
+                      refused upload, a closed egress gate). Defaults are sound;
+                      nothing here is required. */}
+                  <div className="type-group -mb-1">{t.wizard.groupDelivery}</div>
 
-                  {/* Row 1: Profile & Dual Mode */}
+                  {/* Delivery shape pairs with its companion artifact; layout
+                      and page furniture pair as the second row. */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
-                    <div>
-                      <div className="flex items-center gap-1 mb-1">
-                        <label htmlFor="wizard-domain-profile" className="type-label">{t.wizard.domainProfile}</label>
-                        <InfoTip label={t.wizard.domainProfile}>{t.wizard.domainProfileHelp}</InfoTip>
-                      </div>
-                      <select
-                        id="wizard-domain-profile"
-                        value={domainProfile}
-                        onChange={(e) => {
-                          hasUserSelectedDomainRef.current = true
-                          setDomainProfile(e.target.value)
-                        }}
-                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
-                      >
-                        <option value="auto">{t.wizard.domainAuto}</option>
-                        <option value="general">{t.wizard.domainGeneral}</option>
-                        <option value="textbook">{t.wizard.domainTextbook}</option>
-                        <option value="paper">{t.wizard.domainPaper}</option>
-                        <option value="fiction">{t.wizard.domainFiction}</option>
-                        <option value="humanities">{t.wizard.domainHumanities}</option>
-                      </select>
-                    </div>
-
                     <div>
                       <div className="flex items-center gap-1 mb-1">
                         <label htmlFor="wizard-dual-mode" className="type-label">{t.wizard.dualMode}</label>
@@ -1192,9 +1191,25 @@ export function NewJobWizard() {
                         <option value="mono">{t.wizard.dualModeMono}</option>
                       </select>
                     </div>
+
+                    <div>
+                      <div className="flex items-center gap-1 mb-1">
+                        <label htmlFor="wizard-emit-both" className="type-label">{t.wizard.emitBoth}</label>
+                        <InfoTip label={t.wizard.emitBoth}>{emitBothHelpText}</InfoTip>
+                      </div>
+                      <select
+                        id="wizard-emit-both"
+                        value={emitBoth}
+                        onChange={(e) => setEmitBoth(e.target.value as any)}
+                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
+                      >
+                        <option value="auto">{t.wizard.emitBothAuto}</option>
+                        <option value="on">{t.wizard.emitBothOn}</option>
+                        <option value="off">{t.wizard.emitBothOff}</option>
+                      </select>
+                    </div>
                   </div>
 
-                  {/* Row 2: Layout columns & page furniture */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
                     <div>
                       <div className="flex items-center gap-1 mb-1">
@@ -1235,220 +1250,177 @@ export function NewJobWizard() {
                     </div>
                   </div>
 
-                  <div className="type-group -mb-1 pt-1">{t.wizard.groupEngines}</div>
+                  <div className="type-group -mb-1 pt-1">{t.wizard.groupContent}</div>
 
-                  {/* Row 2b: OCR engine.
-                      Reachable from the CLI (--ocr) and REST (ocr_mode) since
-                      the beginning, but not from the console — so the operator
-                      reading a FONT_RESIDUE_RISK warning had no way to act on
-                      its own advice. 'auto' is the engine default and is left
-                      as the null sentinel so an operator's UBT_OCR_MODE still
-                      wins. */}
-                  <div>
-                    <div className="flex items-center gap-1 mb-1">
-                      <label htmlFor="wizard-ocr-mode" className="type-label">{t.wizard.ocrMode}</label>
-                      <InfoTip label={t.wizard.ocrMode}>{t.wizard.ocrModeHelp}</InfoTip>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
+                    <div>
+                      <div className="flex items-center gap-1 mb-1">
+                        <label htmlFor="wizard-domain-profile" className="type-label">{t.wizard.domainProfile}</label>
+                        <InfoTip label={t.wizard.domainProfile}>{t.wizard.domainProfileHelp}</InfoTip>
+                      </div>
+                      <select
+                        id="wizard-domain-profile"
+                        value={domainProfile}
+                        onChange={(e) => {
+                          hasUserSelectedDomainRef.current = true
+                          setDomainProfile(e.target.value)
+                        }}
+                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
+                      >
+                        <option value="auto">{t.wizard.domainAuto}</option>
+                        <option value="general">{t.wizard.domainGeneral}</option>
+                        <option value="textbook">{t.wizard.domainTextbook}</option>
+                        <option value="paper">{t.wizard.domainPaper}</option>
+                        <option value="fiction">{t.wizard.domainFiction}</option>
+                        <option value="humanities">{t.wizard.domainHumanities}</option>
+                      </select>
                     </div>
-                    <select
-                      id="wizard-ocr-mode"
-                      value={ocrMode}
-                      onChange={(e) => setOcrMode(e.target.value as any)}
-                      className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
-                    >
-                      <option value="auto">{t.wizard.ocrModeAuto}</option>
-                      <option value="rapidocr">{t.wizard.ocrModeRapidocr}</option>
-                      <option value="sidecar">{t.wizard.ocrModeSidecar}</option>
-                      <option value="cloud">{t.wizard.ocrModeCloud}</option>
-                      <option value="vlm">{t.wizard.ocrModeVlm}</option>
-                      <option value="off">{t.wizard.ocrModeOff}</option>
-                    </select>
-                    {/* The one misunderstanding this control invites is "does
-                        it change how the book is translated?" — answered once,
-                        visibly, instead of buried in the InfoTip. */}
-                    <p className="type-help mt-1 text-[var(--ink-muted)]">
-                      {t.wizard.ocrModeScope}
-                    </p>
-                    {/* Dynamic, not static: only shown when the choice has a
-                        consequence the operator must know before submitting. */}
-                    {ocrNeedsEgress && (
-                      <p className="type-help mt-1 text-[#b45309]">
-                        {t.wizard.ocrModeEgressWarning}
-                      </p>
-                    )}
+
+                    <div>
+                      <div className="flex items-center gap-1 mb-1">
+                        <label htmlFor="wizard-domain-hint" className="type-label">{t.wizard.domainHint}</label>
+                        <InfoTip label={t.wizard.domainHint}>{t.wizard.domainHintHelp}</InfoTip>
+                      </div>
+                      <input
+                        id="wizard-domain-hint"
+                        type="text"
+                        value={domainHint}
+                        onChange={(e) => setDomainHint(e.target.value)}
+                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
+                      />
+                    </div>
                   </div>
 
-                  {/* Row 3: Pages Range Filter */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-1">
-                        <label htmlFor="wizard-page-range" className="type-label">{t.wizard.pageFilter}</label>
-                        <InfoTip label={t.wizard.pageFilter}>
-                          {t.wizard.pageFilterHelp}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
+                    <div>
+                      <div className="flex items-center gap-1 mb-1">
+                        <label htmlFor="wizard-ocr-mode" className="type-label">{t.wizard.ocrMode}</label>
+                        <InfoTip label={t.wizard.ocrMode}>{t.wizard.ocrModeHelp}</InfoTip>
+                      </div>
+                      <select
+                        id="wizard-ocr-mode"
+                        value={ocrMode}
+                        onChange={(e) => setOcrMode(e.target.value as any)}
+                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
+                      >
+                        <option value="auto">{t.wizard.ocrModeAuto}</option>
+                        <option value="rapidocr">{t.wizard.ocrModeRapidocr}</option>
+                        <option value="sidecar">{t.wizard.ocrModeSidecar}</option>
+                        <option value="cloud">{t.wizard.ocrModeCloud}</option>
+                        <option value="vlm">{t.wizard.ocrModeVlm}</option>
+                        <option value="off">{t.wizard.ocrModeOff}</option>
+                      </select>
+                      {/* Dynamic, not static: only shown when the choice has a
+                          consequence the operator must know before submitting. */}
+                      {ocrNeedsEgress && (
+                        <p className="type-help mt-1 text-[#b45309]">
+                          {t.wizard.ocrModeEgressWarning}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* A staged upload, not a typed path: browsers do not
+                        expose filesystem paths, and a server-side location was
+                        never something the operator could know. The standing
+                        glossary in /assets always applies; this adds one file
+                        for this book. */}
+                    <div>
+                      <div className="flex items-center gap-1 mb-1">
+                        <label className="type-label">{t.wizard.glossaryPath}</label>
+                        <InfoTip label={t.wizard.glossaryPath}>{t.wizard.glossaryPathHelp}</InfoTip>
+                      </div>
+                      <input
+                        ref={glossaryFileRef}
+                        type="file"
+                        accept=".csv,.tsv,.json"
+                        className="hidden"
+                        aria-label={t.wizard.glossaryPath}
+                        onChange={handleGlossaryInputChange}
+                      />
+                      {glossaryFile ? (
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className="type-value inline-flex items-center gap-1.5 h-8 min-w-0 px-2.5 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] text-xs"
+                            title={glossaryFile.name}
+                          >
+                            <FileText className="h-3.5 w-3.5 text-[var(--ink-muted)] shrink-0" />
+                            <span className="truncate">{glossaryFile.name}</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setGlossaryFile(null)}
+                            aria-label={t.wizard.glossaryRemove}
+                            title={t.wizard.glossaryRemove}
+                            className="h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-muted)] hover:text-[var(--ink-primary)] hover:border-[var(--ink-secondary)] transition-colors cursor-pointer"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={glossaryUploading}
+                          onClick={() => glossaryFileRef.current?.click()}
+                          className="type-value inline-flex items-center gap-1.5 h-8 px-2.5 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] hover:border-[var(--ink-secondary)] transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                          {glossaryUploading ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <UploadCloud className="h-3.5 w-3.5" />
+                          )}
+                          {t.wizard.glossaryUploadBtn}
+                        </button>
+                      )}
+                      {glossaryError && (
+                        <p className="type-help mt-1 text-[#b91c1c]">{glossaryError}</p>
+                      )}
+                      <Link
+                        to="/assets"
+                        className="type-help mt-1.5 inline-block text-[var(--ink-secondary)] underline underline-offset-2 hover:text-[var(--ink-primary)]"
+                      >
+                        {t.wizard.glossaryManageLink}
+                      </Link>
+                    </div>
+                  </div>
+
+                  <div className="type-group -mb-1 pt-1">{t.wizard.groupScope}</div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-1">
+                          <label htmlFor="wizard-page-range" className="type-label">{t.wizard.pageFilter}</label>
+                          <InfoTip label={t.wizard.pageFilter}>
+                            {t.wizard.pageFilterHelp}
+                          </InfoTip>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setPageRange('1-5')}
+                          className="type-help underline hover:text-[var(--ink-primary)] cursor-pointer"
+                        >
+                          {t.wizard.sliceSampleQuickBtn}
+                        </button>
+                      </div>
+                      <input
+                        id="wizard-page-range"
+                        type="text"
+                        value={pageRange}
+                        onChange={(e) => setPageRange(e.target.value)}
+                        placeholder={t.wizard.pageFilterPlaceholder}
+                        aria-label={t.wizard.pageFilter}
+                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center gap-1 mb-1">
+                        <label className="type-label">{t.wizard.chapterWindow}</label>
+                        <InfoTip label={t.wizard.chapterWindow}>
+                          {t.wizard.chapterWindowHelp}
                         </InfoTip>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setPageRange('1-5')}
-                        className="type-help underline hover:text-[var(--ink-primary)] cursor-pointer"
-                      >
-                        {t.wizard.sliceSampleQuickBtn}
-                      </button>
-                    </div>
-                    <input
-                      id="wizard-page-range"
-                      type="text"
-                      value={pageRange}
-                      onChange={(e) => setPageRange(e.target.value)}
-                      placeholder={t.wizard.pageFilterPlaceholder}
-                      aria-label={t.wizard.pageFilter}
-                      className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
-                    />
-                  </div>
-
-                  {/* Row 4: External Glossary Path */}
-                  <div>
-                    <div className="flex items-center gap-1 mb-1">
-                      <label htmlFor="wizard-glossary-path" className="type-label">{t.wizard.glossaryPath}</label>
-                      <InfoTip label={t.wizard.glossaryPath}>
-                        {t.wizard.glossaryPathHelp}
-                      </InfoTip>
-                    </div>
-                    <input
-                      id="wizard-glossary-path"
-                      type="text"
-                      value={glossaryPath}
-                      onChange={(e) => setGlossaryPath(e.target.value)}
-                      placeholder={t.wizard.glossaryPathPlaceholder}
-                      aria-label={t.wizard.glossaryPath}
-                      className={`type-value w-full h-8 rounded-[5px] border bg-[var(--paper-surface)] px-2.5 font-mono focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)] ${
-                        glossaryError
-                          ? 'border-[#b91c1c] focus:border-[#b91c1c]'
-                          : 'border-[var(--paper-border)] focus:border-[var(--ink-primary)]'
-                      }`}
-                    />
-                    {/* Only rendered when invalid — the format rules live in
-                        the InfoTip, so a valid path costs no vertical space. */}
-                    {glossaryError && (
-                      <p className="type-help mt-1 text-[#b91c1c]">{glossaryError}</p>
-                    )}
-                    {/* The standing glossary lives in /assets and always
-                        applies; this field only adds one extra per-book file,
-                        and /assets is where its terms are actually edited. */}
-                    <Link
-                      to="/assets"
-                      className="type-help mt-1 inline-block text-[var(--ink-secondary)] underline underline-offset-2 hover:text-[var(--ink-primary)]"
-                    >
-                      {t.wizard.glossaryManageLink}
-                    </Link>
-                  </div>
-
-                  {/* What the reader receives. Both of these were REST-only:
-                      the engine emits them, the API accepts them, and no
-                      control ever reached them. */}
-                  <div className="type-group -mb-1 pt-1">{t.wizard.groupDelivery}</div>
-
-                  <div>
-                    <div className="flex items-center gap-1 mb-1">
-                      <label htmlFor="wizard-emit-both" className="type-label">{t.wizard.emitBoth}</label>
-                      <InfoTip label={t.wizard.emitBoth}>{emitBothHelpText}</InfoTip>
-                    </div>
-                    <select
-                      id="wizard-emit-both"
-                      value={emitBoth}
-                      onChange={(e) => setEmitBoth(e.target.value as any)}
-                      className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
-                    >
-                      <option value="auto">{t.wizard.emitBothAuto}</option>
-                      <option value="on">{t.wizard.emitBothOn}</option>
-                      <option value="off">{t.wizard.emitBothOff}</option>
-                    </select>
-                  </div>
-
-                  {/* Post-render QC is not a deliverable — it inspects one —
-                      so it sits in its own group instead of beside emit-both,
-                      where two unrelated selects read as one dimension. */}
-                  <div className="type-group -mb-1 pt-1">{t.wizard.groupQuality}</div>
-
-                  <div>
-                    <div className="flex items-center gap-1 mb-1">
-                      <label htmlFor="wizard-visual-judge" className="type-label">{t.wizard.visualJudge}</label>
-                      <InfoTip label={t.wizard.visualJudge}>
-                        {t.wizard.visualJudgeHelp}
-                      </InfoTip>
-                    </div>
-                    <select
-                      id="wizard-visual-judge"
-                      value={visualJudge}
-                      onChange={(e) => setVisualJudge(e.target.value as any)}
-                      disabled={pageEgressClosed}
-                      className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      <option value="auto">{t.wizard.toggleAuto}</option>
-                      <option value="on">{t.wizard.toggleOn}</option>
-                      <option value="off">{t.wizard.toggleOff}</option>
-                    </select>
-                    {/* Stated, not guessed: with egress closed the judge
-                        skips every page and bills nothing, so offering the
-                        switch would promise a gate the run cannot perform. */}
-                    {pageEgressClosed && (
-                      <p className="type-help mt-1 text-[var(--ink-muted)]">
-                        {t.wizard.visualJudgeBlocked}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Subject hint: one free-text sentence the engine injects
-                      verbatim into every draft prompt as a terminology
-                      instruction — distinct from the profile dropdown above,
-                      which picks a style and a seed-glossary directory. */}
-                  <div>
-                    <div className="flex items-center gap-1 mb-1">
-                      <label className="type-label">{t.wizard.domainHint}</label>
-                      <InfoTip label={t.wizard.domainHint}>{t.wizard.domainHintHelp}</InfoTip>
-                    </div>
-                    <input
-                      type="text"
-                      value={domainHint}
-                      onChange={(e) => setDomainHint(e.target.value)}
-                      placeholder={t.wizard.domainHintPlaceholder}
-                      className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
-                    />
-                  </div>
-
-                  {/* Time and cost. Both feed the quote directly: the runtime
-                      estimate scales with concurrency, and the chapter window
-                      decides how much of the book is billed. */}
-                  <div className="type-group -mb-1 pt-1">{t.wizard.groupBudget}</div>
-
-                  <div>
-                    <div className="flex items-center gap-1 mb-1">
-                      <label className="type-label">{t.wizard.concurrency}</label>
-                      <InfoTip label={t.wizard.concurrency}>
-                        {t.wizard.concurrencyHelp}
-                      </InfoTip>
-                    </div>
-                    <input
-                      type="number"
-                      min={1}
-                      value={concurrency}
-                      onChange={(e) => setConcurrency(e.target.value)}
-                      placeholder={t.wizard.concurrencyAuto}
-                      className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
-                    />
-                    {concurrencyInvalid && (
-                      <p className="type-help mt-1 text-[#b91c1c]">{t.wizard.fieldMinOne}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <div className="flex items-center gap-1 mb-1">
-                      <label className="type-label">{t.wizard.chapterWindow}</label>
-                      <InfoTip label={t.wizard.chapterWindow}>
-                        {t.wizard.chapterWindowHelp}
-                      </InfoTip>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3.5">
-                      <div>
+                      <div className="grid grid-cols-2 gap-2.5">
                         <input
                           type="number"
                           min={1}
@@ -1458,11 +1430,6 @@ export function NewJobWizard() {
                           aria-label={t.wizard.chapterStart}
                           className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
                         />
-                        {chapterStartInvalid && (
-                          <p className="type-help mt-1 text-[#b91c1c]">{t.wizard.fieldMinOne}</p>
-                        )}
-                      </div>
-                      <div>
                         <input
                           type="number"
                           min={1}
@@ -1472,32 +1439,86 @@ export function NewJobWizard() {
                           aria-label={t.wizard.chapterCount}
                           className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
                         />
-                        {chapterCountInvalid && (
-                          <p className="type-help mt-1 text-[#b91c1c]">{t.wizard.fieldMinOne}</p>
-                        )}
                       </div>
+                      {(chapterStartInvalid || chapterCountInvalid) && (
+                        <p className="type-help mt-1 text-[#b91c1c]">{t.wizard.fieldMinOne}</p>
+                      )}
                     </div>
                   </div>
 
-                  {/* Rehearsal: zero-token dry run through the same pipeline */}
-                  <div className="pt-3 border-t border-[var(--paper-border)]">
-                    <label className="flex items-start gap-2 cursor-pointer">
+                  {/* Rehearsal: one checkbox row; the explanation lives in the
+                      InfoTip and the honest warning only appears when it runs. */}
+                  <div className="pt-1">
+                    <div className="flex items-center gap-2">
                       <input
                         type="checkbox"
+                        id="wizard-dry-run"
                         checked={dryRun}
                         onChange={(e) => setDryRun(e.target.checked)}
-                        className="mt-0.5 h-3.5 w-3.5 rounded border-[var(--paper-border)] accent-[var(--ink-primary)] cursor-pointer"
+                        className="h-3.5 w-3.5 rounded border-[var(--paper-border)] accent-[var(--ink-primary)] cursor-pointer"
                       />
-                      <span>
-                        <span className="type-value font-semibold">{t.wizard.rehearsalLabel}</span>
-                        <span className="type-help block mt-0.5">{t.wizard.rehearsalHelp}</span>
-                      </span>
-                    </label>
+                      <label htmlFor="wizard-dry-run" className="type-label cursor-pointer">
+                        {t.wizard.rehearsalLabel}
+                      </label>
+                      <InfoTip label={t.wizard.rehearsalLabel}>{t.wizard.rehearsalHelp}</InfoTip>
+                    </div>
                     {dryRun && (
                       <div className="mt-2 rounded-[5px] border border-[#b45309]/30 bg-[#b45309]/5 p-2 type-help text-[#b45309]">
                         {t.wizard.rehearsalActiveWarning}
                       </div>
                     )}
+                  </div>
+
+                  <div className="type-group -mb-1 pt-1">{t.wizard.groupExec}</div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
+                    <div>
+                      <div className="flex items-center gap-1 mb-1">
+                        <label className="type-label">{t.wizard.concurrency}</label>
+                        <InfoTip label={t.wizard.concurrency}>
+                          {t.wizard.concurrencyHelp}
+                        </InfoTip>
+                      </div>
+                      <input
+                        type="number"
+                        min={1}
+                        value={concurrency}
+                        onChange={(e) => setConcurrency(e.target.value)}
+                        placeholder={t.wizard.concurrencyAuto}
+                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
+                      />
+                      {concurrencyInvalid && (
+                        <p className="type-help mt-1 text-[#b91c1c]">{t.wizard.fieldMinOne}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="flex items-center gap-1 mb-1">
+                        <label htmlFor="wizard-visual-judge" className="type-label">{t.wizard.visualJudge}</label>
+                        <InfoTip label={t.wizard.visualJudge}>
+                          {t.wizard.visualJudgeHelp}
+                        </InfoTip>
+                      </div>
+                      <select
+                        id="wizard-visual-judge"
+                        value={visualJudge}
+                        onChange={(e) => setVisualJudge(e.target.value as any)}
+                        disabled={pageEgressClosed}
+                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <option value="auto">{t.wizard.toggleAuto}</option>
+                        <option value="on">{t.wizard.toggleOn}</option>
+                        <option value="off">{t.wizard.toggleOff}</option>
+                      </select>
+                      {/* Stated, not guessed: with egress closed the judge
+                          skips every page and bills nothing, so offering the
+                          switch would promise a gate the run cannot perform. */}
+                      {pageEgressClosed && (
+                        <p className="type-help mt-1 text-[var(--ink-muted)]">
+                          {t.wizard.visualJudgeBlocked}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
