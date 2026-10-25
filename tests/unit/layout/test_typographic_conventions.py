@@ -122,3 +122,70 @@ def test_the_academic_template_follows_the_target_too() -> None:
             source = academic_preamble(target_lang=lang, columns=columns)
             par_line = next(line for line in source.splitlines() if line.startswith("#set par"))
             assert f"amount: {indent}" in par_line, f"{lang}/{columns}col: {par_line}"
+
+
+# --------------------------------------------------------------------------- #
+# The source's own indent is measured, and deliberately not applied
+# --------------------------------------------------------------------------- #
+
+
+def test_the_source_indent_is_never_used_as_the_target_indent() -> None:
+    """A translated edition is re-set, not copied.
+
+    Multilingual typesetting practice keeps the source's *structure* and
+    re-sets its *typography* to the target's conventions; a Chinese page
+    carried into English must not keep its two-character indent. The parser
+    still records ``first_line_indent_pt`` because it is the measurement an
+    opt-in "match the source layout" mode would need — but the renderer must
+    take its amount from the convention table, never from the block.
+
+    This test exists because the field looks like dead code and the obvious
+    "fix" is to wire it up, which would silently reintroduce the defect the
+    convention table was built to remove. It pins the decision, not the code
+    shape: a block carrying a source indent still emits the target's own
+    amount.
+    """
+    from ubt.core.ir.models import StyleMeta
+    from ubt.render.typst.document_renderer import TypstDocumentRenderer
+
+    # A Chinese target always emits 2em regardless of the blocks it renders.
+    source = TypstDocumentRenderer().preamble("zh")
+    par_line = next(line for line in source.splitlines() if line.startswith("#set par"))
+    assert "amount: 2em" in par_line
+
+    # The field itself stays measurable and serialisable, so a diagnostic (or a
+    # future explicit print mode) can read it back off the ledger.
+    style = StyleMeta(first_line_indent_pt=17.4)
+    assert style.model_dump()["first_line_indent_pt"] == pytest.approx(17.4)
+
+
+def test_the_renderer_does_not_read_the_source_indent() -> None:
+    """No render-layer module may consume ``first_line_indent_pt``.
+
+    Stated as a source check rather than a behaviour check because the defect
+    this guards against is a *future* wiring: once the renderer reads the
+    field, the emitted indent starts following the source page — which no
+    single-language golden test would notice, and which is wrong for every
+    translation whose source and target set type differently.
+    """
+    import re
+    from pathlib import Path
+
+    import ubt.render as render_pkg
+
+    render_root = Path(render_pkg.__file__).resolve().parent
+    offenders: list[str] = []
+    for path in render_root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"first_line_indent_pt", text):
+            line_no = text.count("\n", 0, match.start()) + 1
+            line = text.splitlines()[line_no - 1]
+            # Comments and docstrings explain the decision; only code that
+            # reads the attribute is a violation.
+            if line.strip().startswith("#"):
+                continue
+            offenders.append(f"{path.relative_to(render_root)}:{line_no} {line.strip()}")
+    assert not offenders, (
+        "the render layer must take its indent from the target-language convention, "
+        "not from the source block: " + "; ".join(offenders)
+    )

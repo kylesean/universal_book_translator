@@ -131,15 +131,32 @@ class StyleMeta(BaseModel):
     font_name: str | None = None
     font_size: float | None = None
     color_hex: str | None = None
-    #: Horizontal alignment measured from the source's own line boxes; the
-    #: compositor re-centers a heading recorded as ``"center"`` instead of
-    #: drawing its fragment left-aligned. ``None`` (the default) means
-    #: left-aligned, the layout every other block type uses.
+    #: Horizontal alignment measured from the source's own line boxes; recorded
+    #: so a *centered* title can be re-centered rather than drawn flush left.
+    #: The Typst renderer centers headings by its own rules, so this is
+    #: measurement rather than a live input; it stays in the model because the
+    #: fact is cheap to capture and survives in the ledger.
     alignment: str | None = None
-    #: First-line indent (pt) of a body paragraph, or of a list item's marker
-    #: column, measured from the source's own line boxes. Rendered as a leading
-    #: ``#h`` on the first line; ``None`` for headings and blocks the source
-    #: did not indent.
+    #: First-line indent (pt) of the source paragraph, or of a list item's
+    #: marker column, measured from the source's own line boxes.
+    #:
+    #: **Deliberately not applied to the target text.** Professional
+    #: multilingual typesetting preserves the source's *structure* — which
+    #: blocks exist, what is a heading, where emphasis falls — and re-sets the
+    #: *typography* to the target language's conventions. Per multilingual
+    #: typesetting practice, a translated edition is "set to the conventions its
+    #: readers expect, while keeping the design recognizably the same book";
+    #: carrying the source's own metrics across is how a page reads as
+    #: "second-hand" to its intended audience. Concretely: a Chinese book
+    #: translated into English must not keep a two-character indent (English
+    #: sets one em, or none with paragraph spacing), and an English book into
+    #: Chinese should not keep its flush-left paragraphs.
+    #:
+    #: So the value stays a *measurement*, and the renderer takes the amount
+    #: from :data:`ubt.layout.theme._TYPOGRAPHIC_CONVENTIONS` instead. It is not
+    #: dead: it is retained per block in the ledger, it feeds diagnostics, and
+    #: it is the evidence a future "match the source geometry" print mode would
+    #: need — a mode this engine would only offer when asked explicitly.
     first_line_indent_pt: float | None = None
     #: Styled spans of the source text (colour, superscript, weight), applied to
     #: the target where the span survives verbatim. Empty for an unstyled block.

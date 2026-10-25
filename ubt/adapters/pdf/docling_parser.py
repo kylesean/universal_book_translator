@@ -594,13 +594,22 @@ def annotate_layout_metadata(blocks: list[IRBlock], pdf_path: Path | None) -> li
     (textgeom):
 
     - a body paragraph's first-line indent (``first_line_indent_pt``);
-    - a list item's marker-column indent — the block box starts at the
-      *wrapped* lines' margin, so without the recorded indent the compositor
-      draws the marker flush with the body margin where the source hangs it
-      to the right;
+    - a list item's marker-column indent, recorded in the same field — the
+      block box starts at the *wrapped* lines' margin, so the indent is what
+      separates the marker column from the body margin;
     - a heading's centering (``alignment="center"``) — a centered title's
-      short lines hang symmetrically inside the box; without the flag the
-      fragment is drawn left-aligned and the title hugs the margin.
+      short lines hang symmetrically inside the box.
+
+    **These are measurements, and the Typst renderer does not read them.**
+    That is deliberate, not an oversight: the target's typography follows the
+    target language's conventions (see the ``first_line_indent_pt`` docstring
+    in :mod:`ubt.core.ir.models`), and the renderer takes its indent amount
+    from :data:`ubt.layout.theme._TYPOGRAPHIC_CONVENTIONS`. They were live
+    inputs for the overlay renderer, which drew each fragment back onto its
+    source page and therefore had to copy the source's own geometry; that
+    engine was removed when PDF delivery moved to Typst. The records stay
+    because they are cheap, they persist in the ledger, and they are what a
+    future opt-in "match the source layout" mode would consume.
 
     A page whose lines cannot be read (a scan with no text layer) simply gets
     no metadata.
