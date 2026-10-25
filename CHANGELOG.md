@@ -11,6 +11,25 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Changed
 
+- **The advanced drawer says what each control actually does, and the glossary
+  gains an import path.** Five controls were mechanically correct but spoke in
+  engine shorthands. The domain dropdown drops「半导体」— a subject sitting in a
+  list of genres; its curated seed glossary now applies when auto-detection
+  lands on it, and the help says so. The OCR row states its scope once,
+  visibly（只影响「图像→文字」这一步；翻译仍由你的模型完成）and its options carry
+  consequences（按页计费 / 独立的取文模型 / 跳过取不出文字的页）. The per-book
+  glossary field no longer pretends to be the only terminology store: it names
+  the Language-Assets glossary as the always-on one and links to it. "Also
+  produce the other edition" becomes 附加互补版本 with a help line that names
+  the concrete companion PDF for the chosen delivery mode, and the visual
+  judge moves out of the delivery group into its own 质检与校验 group under a
+  label that says what it inspects（渲染质检·视觉抽查·至多 3 页）. The subject
+  hint states its actual mechanism — one terminology sentence injected into
+  every draft prompt — and its placeholder stops example-ing semiconductors.
+  The asset center's glossary tab gains a file import（.csv/.tsv/.json,
+  parsed by the same header vocabulary the engine reads back, strict 422 on
+  a malformed payload via the new `POST /assets/glossary/import`）.
+
 - **The wizard walks in task order, and spending has guardrails.** The form
   read as a field inventory — upload, provider, languages, presets, budget,
   advanced — while the operator's actual decision sequence is: provide a file,
@@ -132,6 +151,14 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
   notes in `pyproject.toml` are corrected.
 
 ### Fixed
+
+- **The wizard earns its width on large screens.** The workbench container
+  was capped at `max-w-6xl` (1152px) — a reading-page width applied to a
+  two-column tool, leaving ~370px of bare paper to the right of the report
+  panel on a ~2000px display. The cap moves to 1500px: the surplus feeds the
+  form column (~840px, field widths still naturally bounded by the column)
+  and the report column (~580px, so the token breakdown stops wrapping), with
+  ~120px margins on each side. Reading pages keep their own max-w-5xl/6xl.
 
 - **The disabled-compile hint only speaks when the cause is hidden.** The
   greyed Start Compile carried a standing reason line —「先提供要翻译的文件」—

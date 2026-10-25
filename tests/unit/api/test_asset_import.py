@@ -16,9 +16,11 @@ from pydantic import SecretStr
 
 from ubt.api.app import create_app
 from ubt.api.assets import (
+    GlossaryFormatError,
     TMImportError,
     detect_glossary_conflicts,
     import_tm_entries,
+    parse_glossary_payload,
     parse_tm_json,
     parse_tm_payload,
     parse_tmx,
@@ -300,6 +302,75 @@ def test_tm_import_endpoint_rejects_a_malformed_payload(tmp_path: Path) -> None:
     res = client.post(
         "/assets/tm/import",
         json={"format": "tmx", "content": "<broken", "src_lang": "en", "tgt_lang": "zh"},
+        headers=_AUTH,
+    )
+    assert res.status_code == 422
+
+
+# --------------------------------------------------------------------------- #
+# Glossary bulk import
+# --------------------------------------------------------------------------- #
+
+
+def test_parse_glossary_payload_reads_header_and_headerless_csv() -> None:
+    with_header = parse_glossary_payload("source,translation\nMOSFET,MOSFET\n", "csv")
+    assert with_header == [("MOSFET", "MOSFET")]
+    # Headerless two-column rows are what a hand-maintained file often is.
+    assert parse_glossary_payload("threshold voltage,阈值电压\n", "csv") == [
+        ("threshold voltage", "阈值电压")
+    ]
+    assert parse_glossary_payload("gate oxide\t栅氧化层\n", "tsv") == [("gate oxide", "栅氧化层")]
+
+
+def test_parse_glossary_payload_accepts_both_json_shapes() -> None:
+    as_dict = parse_glossary_payload('{"SPICE": "SPICE", "BSIM": "BSIM"}', "json")
+    assert as_dict == [("SPICE", "SPICE"), ("BSIM", "BSIM")]
+    as_list = parse_glossary_payload('[{"term": "GAA", "translation": "GAA"}]', "json")
+    assert as_list == [("GAA", "GAA")]
+
+
+def test_parse_glossary_payload_rejects_malformed_content() -> None:
+    with pytest.raises(GlossaryFormatError):
+        parse_glossary_payload("{not json", "json")
+    with pytest.raises(GlossaryFormatError):
+        parse_glossary_payload('["a string, not an object"]', "json")
+    with pytest.raises(GlossaryFormatError):
+        parse_glossary_payload("a,b", "xml")
+
+
+def test_glossary_import_endpoint_roundtrips_and_preserves_format(tmp_path: Path) -> None:
+    glossary = tmp_path / "terms.csv"
+    glossary.write_text("source,translation\nMOSFET,MOSFET\n", encoding="utf-8")
+    client = TestClient(create_app(_config(tmp_path, glossary_path=glossary)))
+
+    res = client.post(
+        "/assets/glossary/import",
+        json={
+            "format": "csv",
+            "content": "source,translation\nsubthreshold swing,亚阈值摆幅\nMOSFET,MOSFET\n",
+        },
+        headers=_AUTH,
+    )
+    assert res.status_code == 200
+    assert res.json() == {"parsed": 2, "imported": 2}
+
+    listed = client.get("/assets/glossary", headers=_AUTH).json()
+    assert {term["source"]: term["target"] for term in listed["terms"]} == {
+        "MOSFET": "MOSFET",
+        "subthreshold swing": "亚阈值摆幅",
+    }
+    # The file keeps its header + CSV shape: the engine's own loader must
+    # still read it, which is the whole point of editing it in place.
+    assert glossary.read_text(encoding="utf-8").startswith("source,translation")
+
+
+def test_glossary_import_endpoint_rejects_a_malformed_payload(tmp_path: Path) -> None:
+    glossary = tmp_path / "terms.json"
+    glossary.write_text("{}\n", encoding="utf-8")
+    client = TestClient(create_app(_config(tmp_path, glossary_path=glossary)))
+    res = client.post(
+        "/assets/glossary/import",
+        json={"format": "json", "content": "{not json"},
         headers=_AUTH,
     )
     assert res.status_code == 422

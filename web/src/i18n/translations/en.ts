@@ -192,18 +192,17 @@ export const en: TranslationDictionary = {
     advancedOptionsTag: 'Advanced Controls',
     domainProfile: 'Domain Profile',
     // The profile's real effects are only three: the seed-glossary directory,
-    // the rolling-summary switch and the genre string in the prompt. Only
-    // ``semiconductor`` ships a glossary (ubt/resources/glossaries/).
+    // the rolling-summary switch and the genre string in the prompt.
+    // ``semiconductor`` is a subject, not a genre, so it left the dropdown;
+    // its packaged seed glossary now applies when auto-detection lands on it.
     domainProfileHelp:
-      'Drives the seed glossary, the rolling-summary switch and the prompt genre. Only Semiconductor ships a built-in glossary today.',
+      'Shapes the prompt register and the glossary source. Auto-detect probes the document; when it lands on a domain with a packaged glossary (e.g. semiconductor), the engine applies its curated term table automatically.',
     domainAuto: 'Auto-detect (from the document)',
     domainGeneral: 'General (General)',
     domainTextbook: 'Textbook (Textbook)',
     domainPaper: 'Academic Paper (Paper)',
     domainFiction: 'Fiction (Fiction)',
     domainHumanities: 'Humanities (Humanities)',
-    domainSemiconductor: 'Semiconductor Engineering (Semiconductor)',
-    domainSeedAvailable: 'built-in glossary',
     dualMode: 'Delivery Mode',
     dualModeHelp:
       'Smart Auto starts bilingual and lets the layout advisor step it down to target-only when the layout cannot pair cleanly.',
@@ -225,23 +224,25 @@ export const en: TranslationDictionary = {
     groupEngines: 'Reading & processing',
     ocrMode: 'OCR engine',
     ocrModeHelp:
-      'Reads scanned pages and font-damaged pages. Auto: local sidecar → local rapidocr → cloud (last, and only with page-egress permission).',
+      'OCR only turns scanned / font-damaged page images into text; translation is always done by your model. Auto falls back sidecar → rapidocr → cloud (last, needs egress permission).',
+    ocrModeScope: 'Covers only the image-to-text step; translation quality and model come from your provider config.',
     ocrModeEgressWarning:
       'This mode uploads whole page images to an external service. It requires UBT_ALLOW_PAGE_UPLOAD=true, or the job is refused.',
     ocrModeAuto: 'Follow engine default (Auto)',
     ocrModeRapidocr: 'Local rapidocr (free, offline)',
     ocrModeSidecar: 'Docker sidecar (local HTTP service)',
-    ocrModeCloud: 'Cloud OCR (needs egress permission)',
-    ocrModeVlm: 'Vision model (needs egress permission)',
-    ocrModeOff: 'OCR off',
+    ocrModeCloud: 'Cloud OCR (billed per page, needs egress permission)',
+    ocrModeVlm: 'Vision LLM (a separate reading model, needs egress permission)',
+    ocrModeOff: 'OCR off (unreadable pages are skipped)',
     pageFilter: 'Page Range Filter (Pages)',
     pageFilterPlaceholder: 'e.g. 1-10 or 1,3,5 (leave blank for entire book)',
     pageFilterHelp: 'Only compile specified pages for fast layout proofing and sampling',
-    glossaryPath: 'External Glossary File (Path)',
+    glossaryPath: 'Per-book glossary (Glossary)',
     glossaryPathPlaceholder: 'e.g. /path/to/glossary.csv or .json (optional)',
     glossaryPathHelp:
-      'Absolute path to external domain terminology (.csv / .tsv / .json). A missing path is only logged and skipped, never an error.',
+      'The glossary managed in Language Assets applies to every job automatically — nothing to enter here. This mounts one extra per-book table (.csv / .tsv / .json, absolute path); a missing path is logged and skipped, never an error.',
     glossaryPathInvalid: 'Enter an absolute path (starting with /) ending in .csv, .tsv or .json.',
+    glossaryManageLink: 'View & manage the glossary in Language Assets →',
     rehearsalLabel: 'Rehearsal (zero-token dry run)',
     rehearsalHelp: 'Runs the full pipeline with an echo provider: proves the plumbing reaches a rendered artifact, spends nothing, and the result is not a translation.',
     rehearsalBannerTitle: 'This would run as a rehearsal',
@@ -260,23 +261,32 @@ export const en: TranslationDictionary = {
       'A job with this key already exists, so nothing new was started — open it to see its progress.',
     quoteProviderNote: 'Priced against {provider}',
     groupDelivery: 'What the reader gets',
-    visualJudge: 'Visual quality check',
+    emitBoth: 'Companion deliverable',
+    emitBothAuto: 'Follow server config (off by default)',
+    emitBothOn: 'Render both forms',
+    emitBothOff: 'Primary form only',
+    emitBothHelpAuto:
+      'The engine picks the primary form (bilingual or mono) from the layout; when on, the complementary form is rendered too — roughly double the time and size.',
+    emitBothHelpDual:
+      'The primary deliverable is the bilingual PDF; when on, a mono-translation PDF is rendered alongside it (roughly double time and size).',
+    emitBothHelpMono:
+      'The primary deliverable is the mono-translation PDF; when on, a bilingual PDF is rendered alongside it (roughly double time and size).',
+    groupQuality: 'Quality checks',
+    visualJudge: 'Render QC (visual sampling)',
     visualJudgeHelp:
-      'Sends sampled rendered pages to a vision model to catch layout damage and broken formulas. Costs extra tokens and needs page egress enabled.',
+      'After rendering, up to 3 sampled pages go to a vision model to catch broken layout and split formulas; findings land in the quality report. Costs extra tokens and needs page egress enabled.',
     visualJudgeBlocked:
       'Page egress is off (UBT_ALLOW_PAGE_UPLOAD=false), so the judge would skip every page and bill nothing. Enable egress on the server to use it.',
-    emitBoth: 'Also produce the other edition',
-    emitBothHelp:
-      'Emits both the monolingual and the bilingual deliverables in one run. Roughly doubles render time and output size.',
     groupBudget: 'Time & cost',
     concurrency: 'Parallel requests',
     concurrencyHelp:
       'How many model requests may be in flight at once. Higher finishes sooner but hits rate limits more often.',
     concurrencyAuto: 'Operator default',
-    domainHint: 'Subject hint',
-    domainHintPlaceholder: 'e.g. semiconductor device physics',
+    domainHint: 'Subject / domain hint',
+    domainHintPlaceholder:
+      'e.g. wireless communications / Ming–Qing economic history / computational neuroscience',
     domainHintHelp:
-      'Free-text subject fed to the glossary and prompt hints. Leave empty to let the profile decide.',
+      'One sentence describing the book\'s field: the engine appends "Use standard {subject} terminology." to every draft prompt to steer term choices. Left empty, the domain profile above generates the same kind of instruction.',
     chapterWindow: 'Chapter window',
     chapterWindowHelp:
       'Translate only a slice of chapters. Leave empty for the whole book. 1-based; the window is what gets billed.',
@@ -656,6 +666,10 @@ export const en: TranslationDictionary = {
     stepBadge: 'Step {n}',
     noTerms: 'No glossary terms yet.',
     glossaryNotConfigured: 'No glossary file is configured, so there is nothing to check. Set glossary_path in ubt.toml (or pass --glossary) — otherwise no terminology is enforced for any job.',
+    glossaryImportTitle: 'Import a glossary file',
+    glossaryImportHint: '.csv / .tsv / .json in the same format the engine reads; existing terms are updated in place.',
+    glossaryImportBtn: 'Choose file',
+    glossaryImportDone: 'Imported {n} terms',
     deleteTermTitle: 'Delete this glossary term?',
     deleteTermBody: 'The term "{term}" will be removed from the glossary file on disk. This cannot be undone, and it stops being enforced for future jobs.',
     evictTmTitle: 'Remove this translation-memory entry?',

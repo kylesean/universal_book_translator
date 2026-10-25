@@ -10,12 +10,15 @@ from fastapi.responses import JSONResponse
 
 from ubt.api.assets import (
     GlossaryFormatError,
+    GlossaryImportRequest,
     TMImportError,
     add_glossary_term,
     detect_glossary_conflicts,
     evict_tm_entries,
+    import_glossary_entries,
     import_tm_entries,
     list_tm_entries,
+    parse_glossary_payload,
     parse_tm_payload,
     read_glossary_terms,
     remove_glossary_term,
@@ -151,6 +154,22 @@ def register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
         except GlossaryFormatError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         return JSONResponse({"conflicts": detect_glossary_conflicts(terms)})
+
+    @api_app.post("/assets/glossary/import", tags=["Assets"])
+    async def import_glossary(req: GlossaryImportRequest) -> JSONResponse:
+        """Bulk-import CSV/TSV/JSON pairs into the configured glossary file.
+
+        Mirrors the TM import: parsing is strict, so a malformed payload is a
+        422 rather than a silent partial import, and the file's existing format
+        is preserved row-for-row. Pairs with an empty side are skipped.
+        """
+        path = _resolved_glossary_path()
+        try:
+            pairs = await asyncio.to_thread(parse_glossary_payload, req.content, req.format)
+            imported = await asyncio.to_thread(import_glossary_entries, path, pairs)
+        except GlossaryFormatError as exc:
+            raise HTTPException(status_code=UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        return JSONResponse({"parsed": len(pairs), "imported": imported})
 
     @api_app.get("/assets/tm", response_model=TMListResponse, tags=["Assets"])
     async def get_translation_memory(

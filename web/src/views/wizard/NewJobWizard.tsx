@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   UploadCloud,
   FileText,
@@ -334,7 +334,10 @@ export function NewJobWizard() {
           }
           if (!hasUserSelectedDomainRef.current && res.route?.recommended_profile) {
             const recDom = res.route.recommended_profile.toLowerCase()
-            if (['auto', 'general', 'textbook', 'paper', 'fiction', 'humanities', 'semiconductor'].includes(recDom)) {
+            // 'semiconductor' is intentionally absent: it is a subject, not a
+            // genre, and 'auto' already resolves to it server-side (the probe
+            // re-runs on submit), where its built-in seed glossary applies.
+            if (['auto', 'general', 'textbook', 'paper', 'fiction', 'humanities'].includes(recDom)) {
               setDomainProfile(recDom)
             }
           }
@@ -528,6 +531,19 @@ export function NewJobWizard() {
    * promise a quality gate the run cannot perform.
    */
   const pageEgressClosed = runtime !== null && !runtime.active.allow_page_upload
+
+  /**
+   * "The other edition" is only concrete once the primary form is: emit_both
+   * renders the *complementary* form next to whatever dual_mode picks. The
+   * help text therefore follows the delivery-mode select instead of describing
+   * an abstraction.
+   */
+  const emitBothHelpText =
+    dualMode === 'dual'
+      ? t.wizard.emitBothHelpDual
+      : dualMode === 'mono'
+        ? t.wizard.emitBothHelpMono
+        : t.wizard.emitBothHelpAuto
 
   /**
    * The submit payload, built once so the idempotency fingerprint and the
@@ -1154,7 +1170,6 @@ export function NewJobWizard() {
                         <option value="paper">{t.wizard.domainPaper}</option>
                         <option value="fiction">{t.wizard.domainFiction}</option>
                         <option value="humanities">{t.wizard.domainHumanities}</option>
-                        <option value="semiconductor">{t.wizard.domainSemiconductor}</option>
                       </select>
                     </div>
 
@@ -1247,6 +1262,12 @@ export function NewJobWizard() {
                       <option value="vlm">{t.wizard.ocrModeVlm}</option>
                       <option value="off">{t.wizard.ocrModeOff}</option>
                     </select>
+                    {/* The one misunderstanding this control invites is "does
+                        it change how the book is translated?" — answered once,
+                        visibly, instead of buried in the InfoTip. */}
+                    <p className="type-help mt-1 text-[var(--ink-muted)]">
+                      {t.wizard.ocrModeScope}
+                    </p>
                     {/* Dynamic, not static: only shown when the choice has a
                         consequence the operator must know before submitting. */}
                     {ocrNeedsEgress && (
@@ -1310,6 +1331,15 @@ export function NewJobWizard() {
                     {glossaryError && (
                       <p className="type-help mt-1 text-[#b91c1c]">{glossaryError}</p>
                     )}
+                    {/* The standing glossary lives in /assets and always
+                        applies; this field only adds one extra per-book file,
+                        and /assets is where its terms are actually edited. */}
+                    <Link
+                      to="/assets"
+                      className="type-help mt-1 inline-block text-[var(--ink-secondary)] underline underline-offset-2 hover:text-[var(--ink-primary)]"
+                    >
+                      {t.wizard.glossaryManageLink}
+                    </Link>
                   </div>
 
                   {/* What the reader receives. Both of these were REST-only:
@@ -1317,55 +1347,60 @@ export function NewJobWizard() {
                       control ever reached them. */}
                   <div className="type-group -mb-1 pt-1">{t.wizard.groupDelivery}</div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
-                    <div>
-                      <div className="flex items-center gap-1 mb-1">
-                        <label htmlFor="wizard-emit-both" className="type-label">{t.wizard.emitBoth}</label>
-                        <InfoTip label={t.wizard.emitBoth}>{t.wizard.emitBothHelp}</InfoTip>
-                      </div>
-                      <select
-                        id="wizard-emit-both"
-                        value={emitBoth}
-                        onChange={(e) => setEmitBoth(e.target.value as any)}
-                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
-                      >
-                        <option value="auto">{t.wizard.toggleAuto}</option>
-                        <option value="on">{t.wizard.toggleOn}</option>
-                        <option value="off">{t.wizard.toggleOff}</option>
-                      </select>
+                  <div>
+                    <div className="flex items-center gap-1 mb-1">
+                      <label htmlFor="wizard-emit-both" className="type-label">{t.wizard.emitBoth}</label>
+                      <InfoTip label={t.wizard.emitBoth}>{emitBothHelpText}</InfoTip>
                     </div>
-
-                    <div>
-                      <div className="flex items-center gap-1 mb-1">
-                        <label htmlFor="wizard-visual-judge" className="type-label">{t.wizard.visualJudge}</label>
-                        <InfoTip label={t.wizard.visualJudge}>
-                          {t.wizard.visualJudgeHelp}
-                        </InfoTip>
-                      </div>
-                      <select
-                        id="wizard-visual-judge"
-                        value={visualJudge}
-                        onChange={(e) => setVisualJudge(e.target.value as any)}
-                        disabled={pageEgressClosed}
-                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        <option value="auto">{t.wizard.toggleAuto}</option>
-                        <option value="on">{t.wizard.toggleOn}</option>
-                        <option value="off">{t.wizard.toggleOff}</option>
-                      </select>
-                      {/* Stated, not guessed: with egress closed the judge
-                          skips every page and bills nothing, so offering the
-                          switch would promise a gate the run cannot perform. */}
-                      {pageEgressClosed && (
-                        <p className="type-help mt-1 text-[var(--ink-muted)]">
-                          {t.wizard.visualJudgeBlocked}
-                        </p>
-                      )}
-                    </div>
+                    <select
+                      id="wizard-emit-both"
+                      value={emitBoth}
+                      onChange={(e) => setEmitBoth(e.target.value as any)}
+                      className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
+                    >
+                      <option value="auto">{t.wizard.emitBothAuto}</option>
+                      <option value="on">{t.wizard.emitBothOn}</option>
+                      <option value="off">{t.wizard.emitBothOff}</option>
+                    </select>
                   </div>
 
-                  {/* Subject hint: a free-text descriptor, distinct from the
-                      profile dropdown above (which picks a term directory). */}
+                  {/* Post-render QC is not a deliverable — it inspects one —
+                      so it sits in its own group instead of beside emit-both,
+                      where two unrelated selects read as one dimension. */}
+                  <div className="type-group -mb-1 pt-1">{t.wizard.groupQuality}</div>
+
+                  <div>
+                    <div className="flex items-center gap-1 mb-1">
+                      <label htmlFor="wizard-visual-judge" className="type-label">{t.wizard.visualJudge}</label>
+                      <InfoTip label={t.wizard.visualJudge}>
+                        {t.wizard.visualJudgeHelp}
+                      </InfoTip>
+                    </div>
+                    <select
+                      id="wizard-visual-judge"
+                      value={visualJudge}
+                      onChange={(e) => setVisualJudge(e.target.value as any)}
+                      disabled={pageEgressClosed}
+                      className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      <option value="auto">{t.wizard.toggleAuto}</option>
+                      <option value="on">{t.wizard.toggleOn}</option>
+                      <option value="off">{t.wizard.toggleOff}</option>
+                    </select>
+                    {/* Stated, not guessed: with egress closed the judge
+                        skips every page and bills nothing, so offering the
+                        switch would promise a gate the run cannot perform. */}
+                    {pageEgressClosed && (
+                      <p className="type-help mt-1 text-[var(--ink-muted)]">
+                        {t.wizard.visualJudgeBlocked}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Subject hint: one free-text sentence the engine injects
+                      verbatim into every draft prompt as a terminology
+                      instruction — distinct from the profile dropdown above,
+                      which picks a style and a seed-glossary directory. */}
                   <div>
                     <div className="flex items-center gap-1 mb-1">
                       <label className="type-label">{t.wizard.domainHint}</label>

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Search,
   Plus,
@@ -19,6 +19,7 @@ import {
   getGlossaryConflicts,
   upsertGlossaryTerm,
   deleteGlossaryTerm,
+  importGlossary,
   listTm,
   evictTm,
   importTm,
@@ -47,6 +48,11 @@ export function LanguageAssetsView() {
   const [pendingEvictId, setPendingEvictId] = useState<number | null>(null)
   const [glossaryError, setGlossaryError] = useState<string | null>(null)
   const [glossaryLoading, setGlossaryLoading] = useState(false)
+  // Bulk import: one local file, parsed server-side with the same parser the
+  // engine reads back, so what lands here is exactly what a run would enforce.
+  const [glossaryImporting, setGlossaryImporting] = useState(false)
+  const [glossaryImportNotice, setGlossaryImportNotice] = useState<string | null>(null)
+  const glossaryFileRef = useRef<HTMLInputElement>(null)
   const [newSource, setNewSource] = useState('')
   const [newTarget, setNewTarget] = useState('')
   const [savingTerm, setSavingTerm] = useState(false)
@@ -145,6 +151,27 @@ export function LanguageAssetsView() {
       setGlossaryError(err instanceof Error ? err.message : 'Failed to save term')
     } finally {
       setSavingTerm(false)
+    }
+  }
+
+  // The format comes from the file's own extension; the server re-validates
+  // the content and rejects a malformed payload with a 422 rather than
+  // importing a silent partial set.
+  const handleGlossaryImport = async (file: File) => {
+    const ext = file.name.toLowerCase().split('.').pop()
+    const format = ext === 'json' ? 'json' : ext === 'tsv' ? 'tsv' : 'csv'
+    setGlossaryImporting(true)
+    setGlossaryError(null)
+    setGlossaryImportNotice(null)
+    try {
+      const content = await file.text()
+      const res = await importGlossary({ format, content })
+      setGlossaryImportNotice(t.assets.glossaryImportDone.replace('{n}', String(res.imported)))
+      await loadGlossary()
+    } catch (err) {
+      setGlossaryError(err instanceof Error ? err.message : 'Failed to import glossary')
+    } finally {
+      setGlossaryImporting(false)
     }
   }
 
@@ -293,6 +320,50 @@ export function LanguageAssetsView() {
             <div className="p-3 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] text-xs text-[var(--ink-secondary)] flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-[#b45309] shrink-0" />
               {glossaryError}
+            </div>
+          )}
+
+          {glossaryConfigured && (
+            <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs flex items-center justify-between gap-3 flex-wrap">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-[var(--ink-primary)]">
+                    {t.assets.glossaryImportTitle}
+                  </span>
+                  {glossaryImportNotice && (
+                    <span className="text-[#15803d] text-xs font-medium flex items-center gap-1">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      {glossaryImportNotice}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-[var(--ink-muted)] mt-0.5">{t.assets.glossaryImportHint}</p>
+              </div>
+              <input
+                ref={glossaryFileRef}
+                type="file"
+                accept=".csv,.tsv,.json"
+                className="hidden"
+                aria-label={t.assets.glossaryImportTitle}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) void handleGlossaryImport(file)
+                  e.target.value = ''
+                }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={glossaryImporting}
+                onClick={() => glossaryFileRef.current?.click()}
+              >
+                {glossaryImporting ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Upload className="h-3.5 w-3.5 mr-1" />
+                )}
+                {glossaryImporting ? t.assets.importing : t.assets.glossaryImportBtn}
+              </Button>
             </div>
           )}
 

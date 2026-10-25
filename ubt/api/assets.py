@@ -19,9 +19,12 @@ so they can be unit-tested without a running server.
 from __future__ import annotations
 
 import csv
+import io
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from ubt.core.memory.seed_glossary import load_external_glossary
 from ubt.core.memory.tm import (
@@ -132,6 +135,74 @@ def add_glossary_term(path: Path, source: str, target: str) -> None:
         rows.append(new_row)
     with path.open("w", encoding="utf-8", newline="") as handle:
         csv.writer(handle, delimiter=_detect_delimiter(path)).writerows(rows)
+
+
+class GlossaryImportRequest(BaseModel):
+    """Bulk glossary import payload, mirroring the TM import's strictness."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    format: Literal["csv", "tsv", "json"] = Field(..., description="Payload format")
+    content: str = Field(..., min_length=1, description="Raw CSV/TSV text or JSON glossary")
+
+
+def parse_glossary_payload(content: str, fmt: str) -> list[tuple[str, str]]:
+    """Parse an uploaded glossary into ``(source, target)`` pairs.
+
+    Accepts exactly the shapes the engine's own loader reads back: CSV/TSV with
+    the shared header vocabulary (or headerless two-column rows) and JSON as a
+    flat object or a list of objects. Strict by design — a malformed payload
+    raises instead of importing a silent partial set, because terminology the
+    operator believes is enforced but is not is worse than a visible 422.
+    """
+    fmt = fmt.strip().lower()
+    if fmt == "json":
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise GlossaryFormatError(f"invalid JSON: {exc}") from exc
+        pairs: list[tuple[str, str]] = []
+        if isinstance(data, dict):
+            pairs = [(str(k), str(v)) for k, v in data.items()]
+        elif isinstance(data, list):
+            for item in data:
+                if not isinstance(item, dict):
+                    raise GlossaryFormatError("JSON glossary entries must be objects")
+                source = item.get("source") or item.get("term") or item.get("src")
+                target = item.get("translation") or item.get("target") or item.get("tgt")
+                pairs.append((str(source or ""), str(target or "")))
+        else:
+            raise GlossaryFormatError("unsupported JSON glossary shape")
+        return pairs
+    if fmt in ("csv", "tsv"):
+        rows = list(csv.reader(io.StringIO(content), delimiter="\t" if fmt == "tsv" else ","))
+        src_col, tgt_col, start_row = _csv_columns(rows)
+        width = max(src_col, tgt_col) + 1
+        return [
+            (
+                ((row + [""] * width)[src_col]).strip(),
+                ((row + [""] * width)[tgt_col]).strip(),
+            )
+            for row in rows[start_row:]
+        ]
+    raise GlossaryFormatError(f"unsupported glossary format: {fmt}")
+
+
+def import_glossary_entries(path: Path, pairs: list[tuple[str, str]]) -> int:
+    """Merge parsed pairs into the glossary file; returns rows written.
+
+    ``add_glossary_term`` owns per-pair validation and the
+    preserve-existing-format write. Rows with an empty side are skipped rather
+    than failing the whole import — a CSV that merely has a trailing blank line
+    is not an error.
+    """
+    imported = 0
+    for source, target in pairs:
+        if not source.strip() or not target.strip():
+            continue
+        add_glossary_term(path, source, target)
+        imported += 1
+    return imported
 
 
 def remove_glossary_term(path: Path, source: str) -> bool:

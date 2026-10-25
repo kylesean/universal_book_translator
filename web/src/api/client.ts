@@ -569,6 +569,22 @@ export async function upsertGlossaryTerm(source: string, target: string): Promis
   return data.terms ?? []
 }
 
+/** Bulk-import CSV/TSV/JSON pairs into the configured glossary file. */
+export async function importGlossary(payload: {
+  format: 'csv' | 'tsv' | 'json'
+  content: string
+}): Promise<{ parsed: number; imported: number }> {
+  const res = await apiFetch(`${BASE_URL}/assets/glossary/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    throw await apiError(res, "Failed to import glossary")
+  }
+  return res.json()
+}
+
 export async function deleteGlossaryTerm(source: string): Promise<GlossaryTerm[]> {
   const res = await apiFetch(`${BASE_URL}/assets/glossary?source=${encodeURIComponent(source)}`, {
     method: 'DELETE',

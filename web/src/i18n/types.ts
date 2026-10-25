@@ -156,8 +156,6 @@ export interface TranslationDictionary {
     domainPaper: string
     domainFiction: string
     domainHumanities: string
-    domainSemiconductor: string
-    domainSeedAvailable: string
     dualMode: string
     dualModeHelp: string
     dualModeAuto: string
@@ -178,6 +176,8 @@ export interface TranslationDictionary {
     groupEngines: string
     ocrMode: string
     ocrModeHelp: string
+    /** Scope note: OCR extracts text from images; translation stays with the model. */
+    ocrModeScope: string
     ocrModeEgressWarning: string
     ocrModeAuto: string
     ocrModeRapidocr: string
@@ -192,6 +192,8 @@ export interface TranslationDictionary {
     glossaryPathPlaceholder: string
     glossaryPathHelp: string
     glossaryPathInvalid: string
+    /** Cross-link from the per-book glossary field to the asset manager. */
+    glossaryManageLink: string
     rehearsalLabel: string
     rehearsalHelp: string
     rehearsalBannerTitle: string
@@ -210,12 +212,20 @@ export interface TranslationDictionary {
     /** Names the provider the quote was priced against. */
     quoteProviderNote: string
     groupDelivery: string
+    emitBoth: string
+    emitBothAuto: string
+    emitBothOn: string
+    emitBothOff: string
+    /** Dynamic: names the concrete complementary deliverable for the chosen dual_mode. */
+    emitBothHelpAuto: string
+    emitBothHelpDual: string
+    emitBothHelpMono: string
+    /** Visual QC gets its own group: it is a post-render check, not a deliverable. */
+    groupQuality: string
     /** The page-egress gate: the visual judge cannot run while it is closed. */
     visualJudge: string
     visualJudgeHelp: string
     visualJudgeBlocked: string
-    emitBoth: string
-    emitBothHelp: string
     groupBudget: string
     concurrency: string
     concurrencyHelp: string
@@ -561,6 +571,10 @@ export interface TranslationDictionary {
     stepBadge: string
     noTerms: string
     glossaryNotConfigured: string
+    glossaryImportTitle: string
+    glossaryImportHint: string
+    glossaryImportBtn: string
+    glossaryImportDone: string
     deleteTermTitle: string
     deleteTermBody: string
     evictTmTitle: string
