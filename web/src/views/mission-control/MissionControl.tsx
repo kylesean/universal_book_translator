@@ -21,6 +21,7 @@ import {
   Sparkles,
   Copy,
   CheckCheck,
+  Search,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -274,6 +275,28 @@ export function MissionControl() {
   const isTerminal =
     statusStr === 'completed' || statusStr === 'failed' || statusStr === 'cancelled'
   const [jobs, setJobs] = useState<JobSummary[]>([])
+  const [queueFilter, setQueueFilter] = useState<'ALL' | 'ACTIVE' | 'COMPLETED' | 'FAILED'>('ALL')
+  const [queueSearch, setQueueSearch] = useState('')
+  const [isQueueCollapsed, setIsQueueCollapsed] = useState(false)
+
+  const filteredJobs = useMemo(() => {
+    return jobs.filter((job) => {
+      if (queueFilter === 'ACTIVE') {
+        if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') return false
+      } else if (queueFilter === 'COMPLETED') {
+        if (job.status !== 'completed') return false
+      } else if (queueFilter === 'FAILED') {
+        if (job.status !== 'failed' && job.status !== 'cancelled') return false
+      }
+      if (queueSearch.trim()) {
+        const q = queueSearch.trim().toLowerCase()
+        const idMatch = job.job_id.toLowerCase().includes(q)
+        const nameMatch = (job.file_name || '').toLowerCase().includes(q)
+        return idMatch || nameMatch
+      }
+      return true
+    })
+  }, [jobs, queueFilter, queueSearch])
   const [resuming, setResuming] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [deliverables, setDeliverables] = useState<DeliverableItem[]>([])
@@ -1179,249 +1202,298 @@ export function MissionControl() {
       {/* Global Job Queue (PRD §4.2.1) — read from the durable ledgers so a
           restarted console still lists finished runs. */}
       <div className="card-tactile rounded-xl border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shrink-0 shadow-[var(--shadow-card)]">
-        <div className="h-9 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between">
+        {/* Table Header Bar & Filter Controls */}
+        <div className="min-h-9 px-3.5 py-2 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Layers className="h-3.5 w-3.5 text-[var(--ink-secondary)]" />
             <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-primary)] font-bold">
               {t.mission.queueTitle}
             </span>
+            <Badge variant="outline" className="font-mono text-[11px] font-semibold">
+              {filteredJobs.length} / {jobs.length} RUNS
+            </Badge>
           </div>
-          <Badge variant="outline" className="font-mono text-[11px] font-semibold">
-            {jobs.length} RUNS
-          </Badge>
-        </div>
-        <div className="max-h-56 overflow-y-auto">
-          {jobs.length === 0 ? (
-            <div className="py-6 text-center text-xs text-[var(--ink-muted)]">
-              {t.mission.queueEmpty}
+
+          <div className="flex items-center gap-2">
+            {/* Search Input */}
+            <div className="relative">
+              <input
+                type="text"
+                placeholder={language === 'zh' ? '搜索任务或文件名...' : 'Search jobs...'}
+                value={queueSearch}
+                onChange={(e) => setQueueSearch(e.target.value)}
+                className="h-6.5 text-[11px] font-mono pl-6 pr-2 rounded-md bg-[var(--paper-surface)] border border-[var(--paper-border)] text-[var(--ink-primary)] placeholder-[var(--ink-muted)] focus:outline-hidden focus:border-[var(--ink-primary)] w-36 sm:w-48 transition-all"
+              />
+              <Search className="h-3 w-3 text-[var(--ink-muted)] absolute left-1.5 top-2 pointer-events-none" />
             </div>
-          ) : (
-            <>
-              {/* Desktop Table View (md+) */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full text-xs text-left">
-                  <thead className="bg-[var(--paper-subsurface)] text-[var(--ink-muted)] font-mono border-b border-[var(--paper-border)] sticky top-0 z-10">
-                    <tr>
-                      {[t.mission.colJob, t.mission.colFile, t.mission.colStatus, t.mission.colProgress, t.mission.colCost, t.mission.colUpdated].map(
-                        (label) => (
-                          <th
-                            key={label}
-                            className="py-2.5 px-3.5 font-semibold uppercase text-[11px] tracking-wider"
-                          >
-                            {label}
-                          </th>
+
+            {/* Filter Tabs */}
+            <div className="hidden sm:inline-flex items-center p-0.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] text-[10px] font-mono">
+              {(['ALL', 'ACTIVE', 'COMPLETED', 'FAILED'] as const).map((filterKey) => (
+                <button
+                  key={filterKey}
+                  type="button"
+                  onClick={() => setQueueFilter(filterKey)}
+                  className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer font-semibold ${
+                    queueFilter === filterKey
+                      ? 'bg-[var(--ink-primary)] text-[var(--paper-bg)] shadow-2xs'
+                      : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
+                  }`}
+                >
+                  {filterKey}
+                </button>
+              ))}
+            </div>
+
+            {/* Collapse toggle if inside a specific job */}
+            {currentJobId && (
+              <button
+                type="button"
+                onClick={() => setIsQueueCollapsed((prev) => !prev)}
+                className="btn-tactile h-6.5 px-2 text-[11px] font-mono flex items-center gap-1 rounded-md border border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] cursor-pointer"
+                title={isQueueCollapsed ? '展开任务队列' : '收起任务队列'}
+              >
+                <span>{isQueueCollapsed ? (language === 'zh' ? '展开' : 'Expand') : (language === 'zh' ? '收起' : 'Collapse')}</span>
+                {isQueueCollapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {!isQueueCollapsed && (
+          <div className={`${!currentJobId ? 'max-h-[500px]' : 'max-h-52'} overflow-y-auto`}>
+            {filteredJobs.length === 0 ? (
+              <div className="py-8 text-center text-xs text-[var(--ink-muted)] font-mono">
+                {jobs.length === 0 ? t.mission.queueEmpty : (language === 'zh' ? '未找到匹配的任务记录。' : 'No matching jobs found.')}
+              </div>
+            ) : (
+              <>
+                {/* Desktop Table View (md+) */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-[var(--paper-subsurface)] text-[var(--ink-muted)] font-mono border-b border-[var(--paper-border)] sticky top-0 z-10">
+                      <tr>
+                        {[t.mission.colJob, t.mission.colFile, t.mission.colStatus, t.mission.colProgress, t.mission.colCost, t.mission.colUpdated].map(
+                          (label) => (
+                            <th
+                              key={label}
+                              className="py-2.5 px-3.5 font-semibold uppercase text-[11px] tracking-wider"
+                            >
+                              {label}
+                            </th>
+                          )
+                        )}
+                        <th className="py-2.5 px-3.5" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--paper-border)]">
+                      {filteredJobs.map((job) => {
+                        const isActive = job.job_id === currentJobId
+                        const pct = liveProgressPct(
+                          Math.max(
+                            job.completed_blocks +
+                              job.failed_blocks +
+                              job.needs_human_blocks,
+                            job.progress_percent > 0
+                              ? Math.round((job.progress_percent / 100) * job.total_blocks)
+                              : 0
+                          ),
+                          job.drafted_blocks + (job.repair_pending_blocks ?? 0),
+                          job.total_blocks
                         )
-                      )}
-                      <th className="py-2.5 px-3.5" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[var(--paper-border)]">
-                    {jobs.map((job) => {
-                      const isActive = job.job_id === currentJobId
-                      const pct = liveProgressPct(
-                        Math.max(
-                          job.completed_blocks +
-                            job.failed_blocks +
-                            job.needs_human_blocks,
-                          job.progress_percent > 0
-                            ? Math.round((job.progress_percent / 100) * job.total_blocks)
-                            : 0
-                        ),
-                        job.drafted_blocks + (job.repair_pending_blocks ?? 0),
-                        job.total_blocks
-                      )
-                      return (
-                        <tr
-                          key={job.job_id}
-                          onClick={() => onSelectJob(job.job_id)}
-                          className={`transition-colors cursor-pointer border-l-[3px] ${
-                            isActive
-                              ? 'bg-[var(--paper-subsurface)] border-l-[var(--ink-primary)] font-medium shadow-2xs'
-                              : 'hover:bg-[var(--paper-subsurface)] border-l-transparent'
-                          }`}
-                        >
-                          <td className="py-2.5 px-3.5 font-mono text-[var(--ink-primary)] truncate max-w-[10rem] lg:max-w-[14rem]" title={job.job_id}>
-                            <div className="flex items-center gap-1.5">
-                              <span className="truncate">{job.job_id}</span>
-                              {isActive && (
-                                <span className="shrink-0 text-[9px] font-mono font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--ink-primary)] text-[var(--paper-bg)] leading-none">
-                                  {language === 'zh' ? '当前' : 'ACTIVE'}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-2.5 px-3.5 text-[var(--ink-secondary)] truncate max-w-[14rem]" title={job.file_name}>
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <FileText className="h-3.5 w-3.5 text-[var(--ink-muted)] shrink-0" />
-                              <span className="text-[var(--ink-primary)] font-medium truncate">
-                                {displayFileName(job.file_name)}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="py-2.5 px-3.5">
-                            <div className="flex items-center gap-1.5">
-                              <Badge variant={statusVariant(job.status)} dot className="text-xs">
-                                {jobStatusLabel(t, job.status)}
-                              </Badge>
-                              {job.rehearsal && (
-                                <Badge variant="outline" className="text-xs">
-                                  {t.mission.rowRehearsal}
-                                </Badge>
-                              )}
-                              {job.page_scope && (
-                                <Badge variant="outline" className="text-xs font-mono">
-                                  p{job.page_scope}
-                                </Badge>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-2.5 px-3.5 font-mono tabular-nums text-[var(--ink-primary)]">
-                            <div className="flex items-center gap-2">
-                              <div className="w-14 h-1.5 bg-[var(--paper-border)] rounded-full overflow-hidden shrink-0 hidden lg:block">
-                                <div
-                                  className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-emerald-500' : 'bg-[var(--ink-primary)]'}`}
-                                  style={{ width: `${pct}%` }}
-                                />
+                        return (
+                          <tr
+                            key={job.job_id}
+                            onClick={() => onSelectJob(job.job_id)}
+                            className={`transition-colors cursor-pointer border-l-[3px] ${
+                              isActive
+                                ? 'bg-[var(--paper-subsurface)] border-l-[var(--ink-primary)] font-medium shadow-2xs'
+                                : 'hover:bg-[var(--paper-subsurface)] border-l-transparent'
+                            }`}
+                          >
+                            <td className="py-2.5 px-3.5 font-mono text-[var(--ink-primary)] truncate max-w-[10rem] lg:max-w-[14rem]" title={job.job_id}>
+                              <div className="flex items-center gap-1.5">
+                                <span className="truncate">{job.job_id}</span>
+                                {isActive && (
+                                  <span className="shrink-0 text-[9px] font-mono font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--ink-primary)] text-[var(--paper-bg)] leading-none">
+                                    {language === 'zh' ? '当前' : 'ACTIVE'}
+                                  </span>
+                                )}
                               </div>
-                              <span className="font-semibold">{pct.toFixed(1)}%</span>
-                            </div>
-                          </td>
-                          <td className="py-2.5 px-3.5 font-mono tabular-nums text-[#b45309]">
+                            </td>
+                            <td className="py-2.5 px-3.5 text-[var(--ink-secondary)] truncate max-w-[14rem]" title={job.file_name}>
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <FileText className="h-3.5 w-3.5 text-[var(--ink-muted)] shrink-0" />
+                                <span className="text-[var(--ink-primary)] font-medium truncate">
+                                  {displayFileName(job.file_name)}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3.5">
+                              <div className="flex items-center gap-1.5">
+                                <Badge variant={statusVariant(job.status)} dot className="text-xs">
+                                  {jobStatusLabel(t, job.status)}
+                                </Badge>
+                                {job.rehearsal && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {t.mission.rowRehearsal}
+                                  </Badge>
+                                )}
+                                {job.page_scope && (
+                                  <Badge variant="outline" className="text-xs font-mono">
+                                    p{job.page_scope}
+                                  </Badge>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3.5 font-mono tabular-nums text-[var(--ink-primary)]">
+                              <div className="flex items-center gap-2">
+                                <div className="w-14 h-1.5 bg-[var(--paper-border)] rounded-full overflow-hidden shrink-0 hidden lg:block">
+                                  <div
+                                    className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-emerald-500' : 'bg-[var(--ink-primary)]'}`}
+                                    style={{ width: `${pct}%` }}
+                                  />
+                                </div>
+                                <span className="font-semibold">{pct.toFixed(1)}%</span>
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3.5 font-mono tabular-nums text-[#b45309]">
+                              {job.estimated_cost_usd === null || job.estimated_cost_usd === undefined
+                                ? '—'
+                                : `$${job.estimated_cost_usd.toFixed(3)}`}
+                            </td>
+                            <td className="py-2.5 px-3.5 font-mono tabular-nums text-xs text-[var(--ink-muted)]">
+                              {formatTimestamp(job.updated_at)}
+                            </td>
+                            <td className="py-2.5 px-3.5 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <Button
+                                  onClick={() => onSelectJob(job.job_id)}
+                                  variant="secondary"
+                                  size="sm"
+                                  className={`btn-tactile text-xs h-6.5 px-2 flex items-center gap-1 ${
+                                    isActive ? 'border-[var(--ink-primary)] font-semibold shadow-2xs' : ''
+                                  }`}
+                                >
+                                  <Eye className="h-3 w-3 text-[var(--ink-muted)]" />
+                                  <span>{isActive ? (language === 'zh' ? '查看中' : 'Viewing') : t.mission.selectJob}</span>
+                                </Button>
+                                <Button
+                                  onClick={() => handleDeleteJob(job.job_id)}
+                                  variant="secondary"
+                                  size="sm"
+                                  className="btn-tactile h-6.5 px-1.5 text-[#b91c1c] hover:bg-[#b91c1c]/10"
+                                  title={t.mission.deleteJob}
+                                  aria-label={t.mission.deleteJob}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card List (< md) */}
+                <div className="md:hidden divide-y divide-[var(--paper-border)]">
+                  {filteredJobs.map((job) => {
+                    const isActive = job.job_id === currentJobId
+                    const pct = liveProgressPct(
+                      Math.max(
+                        job.completed_blocks +
+                          job.failed_blocks +
+                          job.needs_human_blocks,
+                        job.progress_percent > 0
+                          ? Math.round((job.progress_percent / 100) * job.total_blocks)
+                          : 0
+                      ),
+                      job.drafted_blocks + (job.repair_pending_blocks ?? 0),
+                      job.total_blocks
+                    )
+                    return (
+                      <div
+                        key={job.job_id}
+                        className={`p-3 space-y-2 transition-colors border-l-[3px] ${
+                          isActive
+                            ? 'bg-[var(--paper-subsurface)] border-l-[var(--ink-primary)]'
+                            : 'hover:bg-[var(--paper-subsurface)] border-l-transparent'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono text-xs font-semibold text-[var(--ink-primary)] truncate">
+                            {job.job_id}
+                          </span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Badge variant={statusVariant(job.status)} dot className="text-xs">
+                              {jobStatusLabel(t, job.status)}
+                            </Badge>
+                            {job.rehearsal && (
+                              <Badge variant="outline" className="text-xs">
+                                {t.mission.rowRehearsal}
+                              </Badge>
+                            )}
+                            {job.page_scope && (
+                              <Badge variant="outline" className="text-xs font-mono">
+                                p{job.page_scope}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <div className="flex items-center gap-1.5 truncate flex-1" title={job.file_name}>
+                            <FileText className="h-3.5 w-3.5 text-[var(--ink-muted)] shrink-0" />
+                            <span className="text-[var(--ink-primary)] font-medium truncate">
+                              {displayFileName(job.file_name)}
+                            </span>
+                          </div>
+                          <span className="font-mono text-[var(--ink-muted)] shrink-0">
+                            {formatTimestamp(job.updated_at)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs font-mono tabular-nums">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[var(--ink-primary)] font-medium">
+                              {t.mission.colProgress}: {pct.toFixed(1)}%
+                            </span>
+                          </div>
+                          <span className="text-[#b45309]">
                             {job.estimated_cost_usd === null || job.estimated_cost_usd === undefined
                               ? '—'
                               : `$${job.estimated_cost_usd.toFixed(3)}`}
-                          </td>
-                          <td className="py-2.5 px-3.5 font-mono tabular-nums text-xs text-[var(--ink-muted)]">
-                            {formatTimestamp(job.updated_at)}
-                          </td>
-                          <td className="py-2.5 px-3.5 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <Button
-                                onClick={() => onSelectJob(job.job_id)}
-                                variant="secondary"
-                                size="sm"
-                                className={`btn-tactile text-xs h-6.5 px-2 flex items-center gap-1 ${
-                                  isActive ? 'border-[var(--ink-primary)] font-semibold shadow-2xs' : ''
-                                }`}
-                              >
-                                <Eye className="h-3 w-3 text-[var(--ink-muted)]" />
-                                <span>{isActive ? (language === 'zh' ? '查看中' : 'Viewing') : t.mission.selectJob}</span>
-                              </Button>
-                              <Button
-                                onClick={() => handleDeleteJob(job.job_id)}
-                                variant="secondary"
-                                size="sm"
-                                className="btn-tactile h-6.5 px-1.5 text-[#b91c1c] hover:bg-[#b91c1c]/10"
-                                title={t.mission.deleteJob}
-                                aria-label={t.mission.deleteJob}
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Mobile Card List (< md) */}
-              <div className="md:hidden divide-y divide-[var(--paper-border)]">
-                {jobs.map((job) => {
-                  const isActive = job.job_id === currentJobId
-                  const pct = liveProgressPct(
-                    Math.max(
-                      job.completed_blocks +
-                        job.failed_blocks +
-                        job.needs_human_blocks,
-                      job.progress_percent > 0
-                        ? Math.round((job.progress_percent / 100) * job.total_blocks)
-                        : 0
-                    ),
-                    job.drafted_blocks + (job.repair_pending_blocks ?? 0),
-                    job.total_blocks
-                  )
-                  return (
-                    <div
-                      key={job.job_id}
-                      className={`p-3 space-y-2 transition-colors border-l-[3px] ${
-                        isActive
-                          ? 'bg-[var(--paper-subsurface)] border-l-[var(--ink-primary)]'
-                          : 'hover:bg-[var(--paper-subsurface)] border-l-transparent'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-xs font-semibold text-[var(--ink-primary)] truncate">
-                          {job.job_id}
-                        </span>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <Badge variant={statusVariant(job.status)} dot className="text-xs">
-                            {jobStatusLabel(t, job.status)}
-                          </Badge>
-                          {job.rehearsal && (
-                            <Badge variant="outline" className="text-xs">
-                              {t.mission.rowRehearsal}
-                            </Badge>
-                          )}
-                          {job.page_scope && (
-                            <Badge variant="outline" className="text-xs font-mono">
-                              p{job.page_scope}
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between gap-2 text-xs">
-                        <div className="flex items-center gap-1.5 truncate flex-1" title={job.file_name}>
-                          <FileText className="h-3.5 w-3.5 text-[var(--ink-muted)] shrink-0" />
-                          <span className="text-[var(--ink-primary)] font-medium truncate">
-                            {displayFileName(job.file_name)}
                           </span>
                         </div>
-                        <span className="font-mono text-[var(--ink-muted)] shrink-0">
-                          {formatTimestamp(job.updated_at)}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs font-mono tabular-nums">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[var(--ink-primary)] font-medium">
-                            {t.mission.colProgress}: {pct.toFixed(1)}%
-                          </span>
+                        <div className="flex items-center gap-2 pt-1">
+                          <Button
+                            onClick={() => onSelectJob(job.job_id)}
+                            variant={isActive ? 'primary' : 'secondary'}
+                            size="sm"
+                            className="btn-tactile flex-1 h-9 min-h-[38px] text-xs font-semibold"
+                          >
+                            {t.mission.selectJob}
+                          </Button>
+                          <Button
+                            onClick={() => handleDeleteJob(job.job_id)}
+                            variant="secondary"
+                            size="sm"
+                            className="btn-tactile h-9 min-h-[38px] px-3 text-[#b91c1c] hover:bg-[#b91c1c]/10 shrink-0"
+                            title={t.mission.deleteJob}
+                            aria-label={t.mission.deleteJob}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-1" />
+                            <span>{t.mission.deleteJob}</span>
+                          </Button>
                         </div>
-                        <span className="text-[#b45309]">
-                          {job.estimated_cost_usd === null || job.estimated_cost_usd === undefined
-                            ? '—'
-                            : `$${job.estimated_cost_usd.toFixed(3)}`}
-                        </span>
                       </div>
-                      <div className="flex items-center gap-2 pt-1">
-                        <Button
-                          onClick={() => onSelectJob(job.job_id)}
-                          variant={isActive ? 'primary' : 'secondary'}
-                          size="sm"
-                          className="btn-tactile flex-1 h-9 min-h-[38px] text-xs font-semibold"
-                        >
-                          {t.mission.selectJob}
-                        </Button>
-                        <Button
-                          onClick={() => handleDeleteJob(job.job_id)}
-                          variant="secondary"
-                          size="sm"
-                          className="btn-tactile h-9 min-h-[38px] px-3 text-[#b91c1c] hover:bg-[#b91c1c]/10 shrink-0"
-                          title={t.mission.deleteJob}
-                          aria-label={t.mission.deleteJob}
-                        >
-                          <Trash2 className="h-3.5 w-3.5 mr-1" />
-                          <span>{t.mission.deleteJob}</span>
-                        </Button>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </>
-          )}
-        </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {statusMissing ? (
@@ -1444,15 +1516,28 @@ export function MissionControl() {
           </div>
         </div>
       ) : !currentJobId ? (
-        <div className="flex-1 flex items-center justify-center text-center text-[var(--ink-muted)]">
-          <div className="max-w-sm space-y-2">
-            <Activity className="h-8 w-8 mx-auto text-[var(--paper-border-hover)]" />
-            <h2 className="text-sm font-semibold text-[var(--ink-primary)]">
+        <div className="flex-1 flex items-center justify-center text-center text-[var(--ink-muted)] py-8">
+          <div className="max-w-md space-y-3 p-6 rounded-2xl border border-dashed border-[var(--paper-border)] bg-[var(--paper-subsurface)]">
+            <Activity className="h-9 w-9 mx-auto text-[var(--ink-muted)]" />
+            <h2 className="text-sm font-bold text-[var(--ink-primary)]">
               {t.mission.noActiveJobTitle}
             </h2>
             <p className="text-xs text-[var(--ink-secondary)] leading-relaxed">
               {t.mission.noActiveJobDesc}
             </p>
+            {jobs.length > 0 && (
+              <div className="pt-1">
+                <Button
+                  onClick={() => onSelectJob(jobs[0].job_id)}
+                  variant="primary"
+                  size="sm"
+                  className="btn-tactile text-xs font-semibold"
+                >
+                  <Eye className="h-3.5 w-3.5 mr-1.5" />
+                  <span>{language === 'zh' ? '进入最新任务驾驶舱' : 'Inspect Latest Run'}</span>
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       ) : (
@@ -1573,97 +1658,140 @@ export function MissionControl() {
         </div>
       </div>
 
-      {/* Metric Tiles (Hairline Dividers, Flat Container) */}
+      {/* Metric Tiles (Strict 3-Tier Hierarchy & Balanced Geometry) */}
       <div className="card-tactile grid grid-cols-2 md:grid-cols-4 rounded-xl border border-[var(--paper-border)] bg-[var(--paper-surface)] shrink-0 shadow-[var(--shadow-card)] overflow-hidden">
-        {/* Progress Tile */}
-        <div className="p-3.5 sm:p-4 border-r border-b md:border-b-0 border-[var(--paper-border)]">
-          <div className="flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-            <Layers className="h-3.5 w-3.5 text-[var(--ink-secondary)]" />
-            <span>{t.mission.progress}</span>
+        {/* Tile 1: 运行状态 (Execution State) - FIRST */}
+        <div className="p-3.5 sm:p-4 border-r border-b md:border-b-0 border-[var(--paper-border)] flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+            <div className="flex items-center gap-1.5">
+              <Activity className="h-3.5 w-3.5 text-[var(--ink-secondary)]" />
+              <span>{t.mission.executionState}</span>
+            </div>
+            {isLiveStreaming && !isCompleted && !isFailed && (
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+              </span>
+            )}
           </div>
-          <div className="text-2xl font-bold font-mono tabular-nums text-[var(--ink-primary)] mt-1">
-            {displayedProgressPct.toFixed(1)}%
-          </div>
-          <div className="w-full bg-[var(--paper-subsurface)] h-2 rounded-full mt-2.5 overflow-hidden border border-[var(--paper-border)] p-0.5">
-            <div
-              className="bg-gradient-to-r from-emerald-500 to-teal-400 dark:from-emerald-400 dark:to-teal-300 h-full transition-all duration-300 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.3)]"
-              style={{ width: `${Math.min(100, Math.max(0, displayedProgressPct))}%` }}
+          <div className="h-8 flex items-center gap-2 mt-1">
+            <span
+              className={`h-2.5 w-2.5 rounded-full shrink-0 ${
+                isCompleted
+                  ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]'
+                  : isFailed
+                    ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]'
+                    : 'bg-sky-500 animate-pulse'
+              }`}
             />
+            <span
+              className={`text-xl sm:text-2xl font-bold font-mono tracking-tight tabular-nums truncate ${
+                isCompleted
+                  ? 'text-emerald-700 dark:text-emerald-400'
+                  : isFailed
+                    ? 'text-rose-700 dark:text-rose-400'
+                    : 'text-[var(--ink-primary)]'
+              }`}
+            >
+              {jobStatusLabel(t, statusStr)}
+            </span>
+          </div>
+          <div
+            className="h-5 flex items-center text-xs font-mono text-[var(--ink-secondary)] mt-2 truncate"
+            title={getExecutionSubtext()}
+          >
+            {getExecutionSubtext() || (isCompleted ? '交付物就绪' : '后台处理中')}
           </div>
         </div>
 
-        {/* Blocks Volume & Quality Tile */}
-        <div className="p-3.5 sm:p-4 border-b md:border-b-0 md:border-r border-[var(--paper-border)]">
-          <div className="flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-            <FileText className="h-3.5 w-3.5 text-[var(--ink-secondary)]" />
-            <span>{t.mission.completedPages}</span>
+        {/* Tile 2: 任务进度 (Progress) - SECOND */}
+        <div className="p-3.5 sm:p-4 border-b md:border-b-0 md:border-r border-[var(--paper-border)] flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+            <div className="flex items-center gap-1.5">
+              <Layers className="h-3.5 w-3.5 text-[var(--ink-secondary)]" />
+              <span>{t.mission.progress}</span>
+            </div>
+            {queuePosition !== null && (
+              <span className="text-[10px] font-mono text-[var(--ink-muted)]">
+                {t.mission.queuePosition}: {queuePosition}
+              </span>
+            )}
           </div>
-          {queuePosition !== null && (
-            <div className="text-xs font-mono tabular-nums text-[var(--ink-secondary)] mt-1">
-              {t.mission.queuePosition}: <span className="font-bold">{queuePosition}</span>
-            </div>
-          )}
-          <div className="text-2xl font-bold font-mono tabular-nums text-[var(--ink-primary)] mt-1">
-            {completedBlocks} <span className="text-xs text-[var(--ink-muted)] font-normal font-sans">/ {totalBlocks || '—'}</span>
+          <div className="h-8 flex items-baseline gap-1 mt-1 text-2xl font-bold font-mono tabular-nums text-[var(--ink-primary)]">
+            {displayedProgressPct.toFixed(1)}
+            <span className="text-base font-normal text-[var(--ink-muted)]">%</span>
           </div>
-          {skippedBlocks > 0 && (
-            <div className="text-[11px] font-mono tabular-nums text-[var(--ink-muted)] mt-1 leading-normal">
-              +{skippedBlocks} {t.mission.skippedBlocks}
+          <div className="h-5 flex items-center gap-2 mt-2 w-full">
+            <div className="flex-1 bg-[var(--paper-subsurface)] h-2 rounded-full overflow-hidden border border-[var(--paper-border)] p-0.5">
+              <div
+                className="bg-gradient-to-r from-emerald-500 to-teal-400 dark:from-emerald-400 dark:to-teal-300 h-full transition-all duration-300 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.3)]"
+                style={{ width: `${Math.min(100, Math.max(0, displayedProgressPct))}%` }}
+              />
             </div>
-          )}
-          {(failedBlocks > 0 || needsHumanBlocks > 0) && (
-            <div className="text-xs font-mono tabular-nums mt-1 text-[#b45309] font-medium">
-              {failedBlocks > 0 && (
-                <span>
-                  {failedBlocks} {t.mission.failedBlocks}
-                </span>
-              )}
-              {failedBlocks > 0 && needsHumanBlocks > 0 ? ' · ' : null}
-              {needsHumanBlocks > 0 && (
-                <span>
-                  {needsHumanBlocks} {t.mission.needsHumanBlocks}
-                </span>
+            <span className="text-[10px] font-mono text-[var(--ink-muted)] shrink-0 truncate max-w-[45%]">
+              {stageLabel(t, derivedStage || statusStr)}
+            </span>
+          </div>
+        </div>
+
+        {/* Tile 3: 处理体量与质检 (Completed Blocks & Quality) - THIRD */}
+        <div className="p-3.5 sm:p-4 border-r border-[var(--paper-border)] flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+            <div className="flex items-center gap-1.5">
+              <FileText className="h-3.5 w-3.5 text-[var(--ink-secondary)]" />
+              <span>{t.mission.completedPages}</span>
+            </div>
+            <div className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-medium">
+              <Sparkles className="h-2.5 w-2.5" />
+              {qeMeasured ? (
+                <span>QE {avgQe.toFixed(3)}</span>
+              ) : (
+                <span>规则质检</span>
               )}
             </div>
-          )}
-          <div className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400 font-mono tabular-nums mt-1.5 font-medium px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20">
-            <Sparkles className="h-3 w-3 shrink-0" />
-            {qeMeasured ? (
-              <span>{t.mission.avgQe.replace('{score}', avgQe.toFixed(3))}</span>
+          </div>
+          <div className="h-8 flex items-baseline gap-1 mt-1 text-2xl font-bold font-mono tabular-nums text-[var(--ink-primary)]">
+            {completedBlocks}
+            <span className="text-xs font-mono font-normal text-[var(--ink-muted)]">
+              / {totalBlocks || '—'}
+            </span>
+          </div>
+          <div className="h-5 flex items-center text-xs font-mono mt-2 truncate">
+            {failedBlocks > 0 || needsHumanBlocks > 0 || skippedBlocks > 0 ? (
+              <div className="flex items-center gap-1.5 text-[11px] font-mono text-[#b45309] truncate">
+                {failedBlocks > 0 && <span>{failedBlocks} {t.mission.failedBlocks}</span>}
+                {failedBlocks > 0 && needsHumanBlocks > 0 ? ' · ' : null}
+                {needsHumanBlocks > 0 && <span>{needsHumanBlocks} {t.mission.needsHumanBlocks}</span>}
+                {skippedBlocks > 0 && <span className="text-[var(--ink-muted)]">+{skippedBlocks} {t.mission.skippedBlocks}</span>}
+              </div>
             ) : (
-              <span title={t.mission.qeHeuristicHint}>
-                {t.mission.qeNotMeasuredHeuristic}
+              <span className="text-[11px] text-[var(--ink-muted)] font-mono truncate">
+                {totalBlocks > 0 ? `${totalBlocks} 块全部校验通过` : '待提取内容块'}
               </span>
             )}
           </div>
         </div>
 
-        {/* Spend & Volume Tile */}
-        <div className="p-3.5 sm:p-4 border-r border-[var(--paper-border)]">
-          <div className="flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-            <Coins className="h-3.5 w-3.5 text-[var(--ink-secondary)]" />
-            <span>{t.mission.totalSpend}</span>
+        {/* Tile 4: 累计算力支出 (Cumulative Spend) - FOURTH */}
+        <div className="p-3.5 sm:p-4 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
+            <div className="flex items-center gap-1.5">
+              <Coins className="h-3.5 w-3.5 text-[var(--ink-secondary)]" />
+              <span>{t.mission.totalSpend}</span>
+            </div>
+            <span className="text-[10px] font-mono text-[var(--ink-muted)]">USD</span>
           </div>
-          <div className="text-2xl font-bold font-mono tabular-nums text-[#b45309] mt-1">
+          <div className="h-8 flex items-baseline gap-1 mt-1 text-2xl font-bold font-mono tabular-nums text-[#b45309]">
             ${costUsd.toFixed(3)}
           </div>
-          <div className="text-xs text-[var(--ink-secondary)] font-mono tabular-nums mt-2">
-            {totalBlocks - completedBlocks} {t.mission.blocksRemaining}
-          </div>
-        </div>
-
-        {/* Execution State Tile */}
-        <div className="p-3.5 sm:p-4">
-          <div className="flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-            <Activity className="h-3.5 w-3.5 text-[var(--ink-secondary)]" />
-            <span>{t.mission.executionState}</span>
-          </div>
-          <div className="text-sm font-bold font-mono text-[var(--ink-primary)] mt-1 flex items-center gap-1.5">
-            <span className={`h-2.5 w-2.5 rounded-full ${isCompleted ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : isFailed ? 'bg-rose-500' : 'bg-sky-500 animate-pulse'}`} />
-            {jobStatusLabel(t, statusStr)}
-          </div>
-          <div className="text-xs text-[var(--ink-secondary)] mt-2 truncate" title={getExecutionSubtext()}>
-            {getExecutionSubtext()}
+          <div className="h-5 flex items-center text-xs font-mono text-[var(--ink-muted)] mt-2 truncate">
+            {totalBlocks > completedBlocks ? (
+              <span>{totalBlocks - completedBlocks} {t.mission.blocksRemaining}</span>
+            ) : completedBlocks > 0 ? (
+              <span>均价 ${(costUsd / completedBlocks).toFixed(4)}/块</span>
+            ) : (
+              <span>0 {t.mission.blocksRemaining}</span>
+            )}
           </div>
         </div>
       </div>
