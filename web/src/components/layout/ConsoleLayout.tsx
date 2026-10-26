@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { NavLink, useLocation, useMatch } from 'react-router-dom'
+import { NavLink, useLocation, useMatch, useNavigate } from 'react-router-dom'
 import {
   PlusCircle,
   Activity,
@@ -23,6 +23,7 @@ import {
   type SystemInfo,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
+import { useUiMode } from '@/context/UiModeContext'
 
 interface ConsoleLayoutProps {
   children: React.ReactNode
@@ -52,6 +53,17 @@ function toneLabel(t: ReturnType<typeof useI18n>['t'], tone: PaperTone): string 
 
 export function ConsoleLayout({ children }: ConsoleLayoutProps) {
   const { t, language, setLanguage } = useI18n()
+  const { uiMode, toggleUiMode } = useUiMode()
+  const navigate = useNavigate()
+
+  const handleToggleMode = () => {
+    toggleUiMode()
+    if (uiMode === 'studio') {
+      navigate('/reader')
+    } else {
+      navigate('/wizard')
+    }
+  }
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [info, setInfo] = useState<SystemInfo | null>(null)
   const [paperTone, setPaperTone] = useState<PaperTone>(() => {
@@ -260,6 +272,21 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
         {/* Mobile Language & Paper Tone Controls */}
         <div className="flex items-center gap-1.5 shrink-0">
           <button
+            id="btn-mode-toggle-mobile"
+            type="button"
+            onClick={handleToggleMode}
+            className="flex items-center gap-1 min-h-[40px] h-10 px-2 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors cursor-pointer"
+            title={uiMode === 'reader' ? t.common.switchToStudio : t.common.switchToReader}
+          >
+            {uiMode === 'reader' ? (
+              <Terminal className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
+            ) : (
+              <BookOpen className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+            )}
+            <span>{uiMode === 'reader' ? '专家台' : '极简'}</span>
+          </button>
+
+          <button
             id="btn-paper-toggle-mobile"
             type="button"
             onClick={() => setPaperTone((prev) => cyclePaperTone(prev))}
@@ -386,104 +413,174 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
         </div>
       </div>
 
-      {/* Precision Left Sidebar on Paper Surface (Desktop: md+) */}
-      <aside className="hidden md:flex md:w-64 border-r border-[var(--paper-border)] bg-[var(--paper-surface)] flex-col justify-between shrink-0 select-none shadow-[1px_0_4px_rgba(0,0,0,0.02)]">
-        <div>
-          {/* Top Brand & Language Bar */}
-          <div className="h-14 px-4 border-b border-[var(--paper-border)] flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <span className="h-6 w-6 rounded-[4px] bg-[var(--ink-primary)] text-[var(--paper-bg)] flex items-center justify-center font-bold text-xs tracking-tighter shadow-sm font-mono">
+      {/* Precision Left Sidebar on Paper Surface (Desktop: md+) - Shown only in Studio Mode */}
+      {uiMode === 'studio' && (
+        <aside className="hidden md:flex md:w-64 border-r border-[var(--paper-border)] bg-[var(--paper-surface)] flex-col justify-between shrink-0 select-none shadow-[1px_0_4px_rgba(0,0,0,0.02)]">
+          <div>
+            {/* Top Brand & Language Bar */}
+            <div className="h-14 px-4 border-b border-[var(--paper-border)] flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="h-6 w-6 rounded-[4px] bg-[var(--ink-primary)] text-[var(--paper-bg)] flex items-center justify-center font-bold text-xs tracking-tighter shadow-sm font-mono">
+                  U
+                </span>
+                <div>
+                  <span className="font-bold text-xs tracking-tight text-[var(--ink-primary)] block leading-none">
+                    {t.common.compilerConsole}
+                  </span>
+                  <span className="text-xs text-[var(--ink-muted)] font-mono leading-tight block mt-0.5 uppercase tracking-wider">
+                    ENGINE 0.4
+                  </span>
+                </div>
+              </div>
+
+              {/* Language & Paper Tone Pills */}
+              <div className="flex items-center gap-1">
+                <button
+                  id="btn-mode-toggle"
+                  onClick={handleToggleMode}
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors cursor-pointer"
+                  title={t.common.switchToReader}
+                >
+                  <BookOpen className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                  <span>{t.common.modeReader}</span>
+                </button>
+
+                <button
+                  id="btn-paper-toggle"
+                  onClick={() => setPaperTone((prev) => cyclePaperTone(prev))}
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors cursor-pointer"
+                  title={t.common.paperToneSwitchTo.replace(
+                    '{tone}',
+                    toneLabel(t, cyclePaperTone(paperTone)),
+                  )}
+                >
+                  <FileSpreadsheet className="h-3 w-3 text-[var(--ink-muted)]" />
+                  <span>{toneLabel(t, paperTone)}</span>
+                </button>
+
+                <button
+                  id="btn-lang-toggle"
+                  onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors font-medium"
+                  title={t.common.switchLanguage}
+                >
+                  <Globe className="h-3 w-3 text-[var(--ink-muted)]" />
+                  <span>{language === 'zh' ? '中' : 'EN'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Navigation Sections */}
+            <div className="p-2.5 space-y-5">
+              <div>
+                <div className="px-2.5 py-1 text-xs font-mono uppercase tracking-widest text-[var(--ink-muted)] font-semibold">
+                  {t.nav.operatorControl}
+                </div>
+                <nav className="mt-1 space-y-0.5">{renderNav(navItems)}</nav>
+              </div>
+
+              <div>
+                <div className="px-2.5 py-1 text-xs font-mono uppercase tracking-widest text-[var(--ink-muted)] font-semibold">
+                  {t.nav.workbenches}
+                </div>
+                <nav className="mt-1 space-y-0.5">{renderNav(workbenchItems)}</nav>
+              </div>
+            </div>
+          </div>
+
+          {/* Engine Status Line */}
+          <div className="h-10 px-3.5 border-t border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between text-xs font-mono">
+            <div className="flex items-center gap-2">
+              <span
+                className={`h-2 w-2 rounded-full ${health ? 'bg-[#15803d]' : 'bg-[#b91c1c]'}`}
+              />
+              <span className="text-xs text-[var(--ink-secondary)] font-medium">
+                {health ? `Core ${health.version}` : t.common.disconnected}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-[var(--ink-muted)]">
+              <span className="flex items-center gap-1">
+                <Terminal className="h-3 w-3" />
+                <span>{info?.port ? `:${info.port}` : ''}</span>
+              </span>
+              {canSignOut && (
+                <button
+                  type="button"
+                  onClick={() => void handleSignOut()}
+                  title={t.doctor.auth.signOut}
+                  aria-label={t.doctor.auth.signOut}
+                  className="flex items-center hover:text-[var(--ink-primary)] transition-colors cursor-pointer"
+                >
+                  <LogOut className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          </div>
+        </aside>
+      )}
+
+      {/* Main Work Area with Reader Top Header */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--paper-bg)]">
+        {uiMode === 'reader' && (
+          <header className="hidden md:flex h-14 px-6 border-b border-[var(--paper-border)] bg-[var(--paper-surface)] items-center justify-between shrink-0 select-none z-20">
+            <div className="flex items-center gap-3">
+              <span className="h-7 w-7 rounded-[5px] bg-[var(--ink-primary)] text-[var(--paper-bg)] flex items-center justify-center font-bold text-sm tracking-tighter shadow-sm font-mono">
                 U
               </span>
               <div>
-                <span className="font-bold text-xs tracking-tight text-[var(--ink-primary)] block leading-none">
-                  {t.common.compilerConsole}
+                <span className="font-bold text-sm tracking-tight text-[var(--ink-primary)] block leading-none">
+                  UBT 智能翻译
                 </span>
-                <span className="text-xs text-[var(--ink-muted)] font-mono leading-tight block mt-0.5 uppercase tracking-wider">
-                  ENGINE 0.4
+                <span className="text-[10px] text-[var(--ink-muted)] block mt-0.5">
+                  图书与长文档全自动精美排版
                 </span>
               </div>
             </div>
 
-            {/* Language & Paper Tone Pills */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-2.5">
+              <button
+                id="btn-mode-toggle"
+                type="button"
+                onClick={handleToggleMode}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--paper-subsurface)] hover:bg-[var(--paper-surface)] border border-[var(--paper-border)] hover:border-[var(--ink-primary)] text-[var(--ink-primary)] shadow-2xs transition-all cursor-pointer"
+                title={t.common.switchToStudio}
+              >
+                <Terminal className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
+                <span>{t.common.modeStudio}</span>
+              </button>
+
               <button
                 id="btn-paper-toggle"
+                type="button"
                 onClick={() => setPaperTone((prev) => cyclePaperTone(prev))}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors cursor-pointer"
                 title={t.common.paperToneSwitchTo.replace(
                   '{tone}',
                   toneLabel(t, cyclePaperTone(paperTone)),
                 )}
               >
-                <FileSpreadsheet className="h-3 w-3 text-[var(--ink-muted)]" />
+                <FileSpreadsheet className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
                 <span>{toneLabel(t, paperTone)}</span>
               </button>
 
               <button
                 id="btn-lang-toggle"
+                type="button"
                 onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors font-medium"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors font-medium cursor-pointer"
                 title={t.common.switchLanguage}
               >
-                <Globe className="h-3 w-3 text-[var(--ink-muted)]" />
+                <Globe className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
                 <span>{language === 'zh' ? '中' : 'EN'}</span>
               </button>
             </div>
-          </div>
+          </header>
+        )}
 
-          {/* Navigation Sections */}
-          <div className="p-2.5 space-y-5">
-            <div>
-              <div className="px-2.5 py-1 text-xs font-mono uppercase tracking-widest text-[var(--ink-muted)] font-semibold">
-                {t.nav.operatorControl}
-              </div>
-              <nav className="mt-1 space-y-0.5">{renderNav(navItems)}</nav>
-            </div>
-
-            <div>
-              <div className="px-2.5 py-1 text-xs font-mono uppercase tracking-widest text-[var(--ink-muted)] font-semibold">
-                {t.nav.workbenches}
-              </div>
-              <nav className="mt-1 space-y-0.5">{renderNav(workbenchItems)}</nav>
-            </div>
-          </div>
-        </div>
-
-        {/* Engine Status Line */}
-        <div className="h-10 px-3.5 border-t border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between text-xs font-mono">
-          <div className="flex items-center gap-2">
-            <span
-              className={`h-2 w-2 rounded-full ${health ? 'bg-[#15803d]' : 'bg-[#b91c1c]'}`}
-            />
-            <span className="text-xs text-[var(--ink-secondary)] font-medium">
-              {health ? `Core ${health.version}` : t.common.disconnected}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-[var(--ink-muted)]">
-            <span className="flex items-center gap-1">
-              <Terminal className="h-3 w-3" />
-              <span>{info?.port ? `:${info.port}` : ''}</span>
-            </span>
-            {canSignOut && (
-              <button
-                type="button"
-                onClick={() => void handleSignOut()}
-                title={t.doctor.auth.signOut}
-                aria-label={t.doctor.auth.signOut}
-                className="flex items-center hover:text-[var(--ink-primary)] transition-colors cursor-pointer"
-              >
-                <LogOut className="h-3 w-3" />
-              </button>
-            )}
-          </div>
-        </div>
-      </aside>
-
-      {/* Main Work Area */}
-      <main className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--paper-bg)] pb-[env(safe-area-inset-bottom,0px)]">
-        {children}
-      </main>
+        <main className="flex-1 flex flex-col min-w-0 min-h-0 overflow-y-auto bg-[var(--paper-bg)] pb-[env(safe-area-inset-bottom,0px)]">
+          {children}
+        </main>
+      </div>
     </div>
   )
 }

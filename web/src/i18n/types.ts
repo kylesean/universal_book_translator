@@ -21,6 +21,46 @@ export interface TranslationDictionary {
     paperToneObsidian: string
     paperToneSwitchTo: string
     switchLanguage: string
+    modeReader: string
+    modeStudio: string
+    switchToReader: string
+    switchToStudio: string
+  }
+  reader: {
+    title: string
+    subtitle: string
+    dropzoneTitle: string
+    dropzoneSubtitle: string
+    selectFile: string
+    orEnterPath: string
+    targetLanguage: string
+    stylePreset: string
+    styleLiterary: string
+    styleLiteraryDesc: string
+    styleAcademic: string
+    styleAcademicDesc: string
+    styleTechnical: string
+    styleTechnicalDesc: string
+    startTranslation: string
+    translating: string
+    translatingDesc: string
+    stepParse: string
+    stepTranslate: string
+    stepRender: string
+    stepReady: string
+    recentBooks: string
+    noBooksYet: string
+    readAndExport: string
+    backToShelf: string
+    exportDeliverable: string
+    exporting: string
+    bilingualMode: string
+    targetOnlyMode: string
+    sourceOnlyMode: string
+    editParagraph: string
+    saveEdit: string
+    cancelEdit: string
+    quickEditHint: string
   }
   nav: {
     operatorControl: string
