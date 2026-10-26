@@ -848,6 +848,10 @@ export interface TranslationDictionary {
     exportBlockedCancel: string
     exportPrimaryBadge: string
     exportQuickHelp: string
+    editShortcutHint: string
+    collapseInspector: string
+    expandInspector: string
+    exportSavingDrafts: string
   }
   errorBoundary: {
     title: string

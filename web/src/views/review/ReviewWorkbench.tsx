@@ -40,6 +40,7 @@ import {
   type DeliverableListing,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
+import { deliverableName } from '@/views/quality-gate/artifactMeta'
 
 type Filter = 'issues' | 'all' | 'needs_human' | string
 
@@ -113,7 +114,8 @@ function writeDrafts(jobId: string | null, drafts: Record<string, string>): void
 //: fault past the cut was invisible to the F8 fault walk).
 const PAGE_LIMIT = 200
 
-const getFormatBadge = (filename: string): string => {
+const getFormatBadge = (filename?: string): string => {
+  if (!filename) return 'FILE'
   const ext = filename.split('.').pop()?.toLowerCase() ?? ''
   switch (ext) {
     case 'pdf': return 'PDF'
@@ -128,8 +130,8 @@ const getFormatBadge = (filename: string): string => {
   }
 }
 
-const formatBytes = (bytes: number): string => {
-  if (bytes <= 0) return '0 B'
+const formatBytes = (bytes?: number): string => {
+  if (!bytes || bytes <= 0 || isNaN(bytes)) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
   return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
@@ -521,9 +523,54 @@ export function ReviewWorkbench() {
     if (!jobId || exporting) return
     setExporting(true)
     setExportMenuOpen(false)
+    setExportStatusText(t.review.exportPreparing)
     try {
+      // 1. Flush any uncommitted in-memory edits to the ledger before exporting
+      const unsavedEntries = Object.entries(drafts).filter(([blockId, text]) => {
+        const seg = segments.find((s) => s.block_id === blockId)
+        return seg && text !== seg.delivered_text
+      })
+      let reExportNeeded = reExportPending
+      if (unsavedEntries.length > 0) {
+        setExportStatusText(t.review.exportSavingDrafts)
+        for (const [blockId, draftText] of unsavedEntries) {
+          try {
+            const res = await editSegment(jobId, blockId, draftText)
+            if (res.segment) {
+              const updated = res.segment
+              setSegments((prev) => prev.map((s) => (s.block_id === updated.block_id ? updated : s)))
+            }
+            setSaved((prev) => ({ ...prev, [blockId]: true }))
+            setEditing((prev) => ({ ...prev, [blockId]: false }))
+            setDrafts((prev) => {
+              const next = { ...prev }
+              delete next[blockId]
+              return next
+            })
+          } catch (err) {
+            console.error('Failed to auto-save draft for block', blockId, err)
+          }
+        }
+        reExportNeeded = true
+      }
+
+      // 2. Fetch fresh deliverable listing to check freshness and gate status
       let currentItems = deliverables
-      if (reExportPending) {
+      let listing: DeliverableListing | null = null
+      try {
+        listing = await listDeliverables(jobId)
+        setDeliverables(listing.items)
+        setDeliveryVerdict(listing.deliveryVerdict)
+        currentItems = listing.items
+        if (listing.stale) {
+          reExportNeeded = true
+        }
+      } catch {
+        // Fall back to currentItems if listDeliverables fails
+      }
+
+      // 3. Re-export if needed due to edits, pending changes, or stale deliverables
+      if (reExportNeeded) {
         setExportStatusText(t.review.exportRerendering)
         toast.push(t.review.exportRerendering, 'info')
         await reExportJob(jobId)
@@ -538,7 +585,22 @@ export function ReviewWorkbench() {
             return
           }
         }
+      } else if (listing && listing.deliveryVerdict === 'blocked' && !force) {
+        setPendingBlockedExport(key)
+        return
       }
+
+      // 4. If current items are empty, try fetching one last time
+      if (currentItems.length === 0) {
+        const refreshed = await listDeliverables(jobId).catch(() => null)
+        if (refreshed) {
+          setDeliverables(refreshed.items)
+          setDeliveryVerdict(refreshed.deliveryVerdict)
+          currentItems = refreshed.items
+        }
+      }
+
+      // 5. Trigger download
       const target = currentItems.find((d) => d.key === key) ?? currentItems[0]
       if (target) {
         const url = deliverableDownloadUrl(jobId, target.key, { force })
@@ -823,7 +885,7 @@ export function ReviewWorkbench() {
               disabled={exporting}
               variant="primary"
               size="sm"
-              className={`min-h-[30px] md:min-h-0 px-3 py-1 text-xs font-bold transition-all flex items-center gap-1.5 ${
+              className={`h-9 sm:h-7 px-3 text-xs font-bold transition-all flex items-center gap-1.5 ${
                 readingDeliverables.length > 1 ? 'rounded-r-none pr-2 border-r border-white/20' : ''
               }`}
               title={t.review.exportQuickHelp}
@@ -846,7 +908,7 @@ export function ReviewWorkbench() {
                 onClick={() => setExportMenuOpen((prev) => !prev)}
                 disabled={exporting}
                 title={t.review.exportFormats}
-                className="min-h-[30px] md:min-h-0 px-1.5 py-1 text-xs bg-[var(--btn-bg)] text-[var(--btn-fg)] hover:bg-[var(--btn-hover)] rounded-r transition-all flex items-center justify-center cursor-pointer border-l border-white/20 disabled:opacity-60"
+                className="h-9 sm:h-7 px-1.5 text-xs bg-[var(--btn-bg)] text-[var(--btn-fg)] hover:bg-[var(--btn-hover)] rounded-r transition-all flex items-center justify-center cursor-pointer border-l border-white/20 disabled:opacity-60"
               >
                 <ChevronDown className={`h-3.5 w-3.5 transition-transform ${exportMenuOpen ? 'rotate-180' : ''}`} />
               </button>
@@ -878,7 +940,7 @@ export function ReviewWorkbench() {
                               {badge}
                             </span>
                             <span className="font-medium text-[var(--ink-primary)] truncate">
-                              {item.label || item.filename}
+                              {deliverableName(item.key, item.label || item.filename, t)}
                             </span>
                           </div>
                           <div className="text-[10px] text-[var(--ink-muted)] font-mono mt-0.5 truncate">
@@ -1293,7 +1355,7 @@ export function ReviewWorkbench() {
                             className="w-full text-xs md:text-sm font-sans bg-[var(--paper-surface)] border border-[var(--paper-border)] p-2.5 rounded focus:border-[var(--ink-primary)] focus:outline-none resize-none leading-relaxed text-[var(--ink-primary)] shadow-2xs"
                           />
                           <div className="flex items-center justify-between text-xs">
-                            <span className="text-[var(--ink-muted)] font-mono text-[10px]">Ctrl+Enter 保存 · Esc 取消</span>
+                            <span className="text-[var(--ink-muted)] font-mono text-[10px]">{t.review.editShortcutHint}</span>
                             <Button
                               size="sm"
                               className="text-xs h-7 px-2.5"
@@ -1485,7 +1547,7 @@ export function ReviewWorkbench() {
             <div
               className="md:hidden flex justify-center pt-2 pb-1 shrink-0 cursor-pointer"
               onClick={() => setMobileInspectorExpanded(!mobileInspectorExpanded)}
-              title={mobileInspectorExpanded ? '收起检查器' : '展开检查器'}
+              title={mobileInspectorExpanded ? t.review.collapseInspector : t.review.expandInspector}
             >
               <div className="w-10 h-1.5 rounded-full bg-[var(--paper-border)] hover:bg-[var(--ink-muted)] transition-colors" />
             </div>

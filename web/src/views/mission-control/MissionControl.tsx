@@ -38,8 +38,10 @@ import {
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
 import { useToast } from '@/components/ui/useToast'
+import { deliverableName } from '@/views/quality-gate/artifactMeta'
 
-const getFormatBadge = (filename: string): string => {
+const getFormatBadge = (filename?: string): string => {
+  if (!filename) return 'FILE'
   const ext = filename.split('.').pop()?.toLowerCase() ?? ''
   switch (ext) {
     case 'pdf': return 'PDF'
@@ -54,8 +56,8 @@ const getFormatBadge = (filename: string): string => {
   }
 }
 
-const formatBytes = (bytes: number): string => {
-  if (bytes <= 0) return '0 B'
+const formatBytes = (bytes?: number): string => {
+  if (!bytes || bytes <= 0 || isNaN(bytes)) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
   return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
@@ -1025,7 +1027,7 @@ export function MissionControl() {
                                 {badge}
                               </span>
                               <span className="font-medium text-[var(--ink-primary)] truncate">
-                                {item.label || item.filename}
+                                {deliverableName(item.key, item.label || item.filename, t)}
                               </span>
                             </div>
                             <div className="text-[10px] text-[var(--ink-muted)] font-mono mt-0.5 truncate">

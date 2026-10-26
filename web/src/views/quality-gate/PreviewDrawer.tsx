@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import {
   deliverableDownloadUrl,
+  triggerBrowserDownload,
   fetchDeliverableText,
   getJobReport,
   getVisualReport,
@@ -341,7 +342,7 @@ export function PreviewDrawer({
       <div className="flex-1 flex flex-col items-center justify-center gap-3 p-8 text-center">
         <AlertTriangle className="h-6 w-6 text-[#b45309]" />
         <p className="text-xs text-[var(--ink-secondary)] max-w-sm">{error}</p>
-        <Button variant="secondary" size="sm" onClick={() => window.open(deliverableDownloadUrl(jobId, item.key), '_blank')}>
+        <Button variant="secondary" size="sm" onClick={() => triggerBrowserDownload(deliverableDownloadUrl(jobId, item.key), item.filename)}>
           <Download className="h-3.5 w-3.5" />
           {t.quality.previewDownloadInstead}
         </Button>
@@ -401,7 +402,7 @@ export function PreviewDrawer({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => window.open(deliverableDownloadUrl(jobId, item.key), '_blank')}
+              onClick={() => triggerBrowserDownload(deliverableDownloadUrl(jobId, item.key), item.filename)}
             >
               <Download className="h-3.5 w-3.5" />
               {t.quality.downloadAction}

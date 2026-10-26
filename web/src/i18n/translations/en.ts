@@ -987,6 +987,10 @@ export const en: TranslationDictionary = {
     exportBlockedCancel: 'Cancel',
     exportPrimaryBadge: 'Primary',
     exportQuickHelp: 'One-click direct export of the translated book (PDF / EPUB / DOCX / Markdown)',
+    editShortcutHint: 'Ctrl+Enter to save · Esc to cancel',
+    collapseInspector: 'Collapse inspector',
+    expandInspector: 'Expand inspector',
+    exportSavingDrafts: 'Saving pending edits…',
   },
   errorBoundary: {
     title: 'This screen failed to render',

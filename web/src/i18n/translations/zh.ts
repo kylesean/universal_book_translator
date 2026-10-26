@@ -953,6 +953,10 @@ export const zh: TranslationDictionary = {
     exportBlockedCancel: '取消',
     exportPrimaryBadge: '推荐',
     exportQuickHelp: '一键直接导出最终图书成品（PDF / EPUB / DOCX / Markdown）',
+    editShortcutHint: 'Ctrl+Enter 保存 · Esc 取消',
+    collapseInspector: '收起检查器',
+    expandInspector: '展开检查器',
+    exportSavingDrafts: '正在保存未提交的修改…',
   },
   errorBoundary: {
     title: '此页面渲染失败',

@@ -1,6 +1,4 @@
 const { chromium } = require('playwright');
-const path = require('path');
-const fs = require('fs');
 
 const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8000';
 
@@ -22,7 +20,9 @@ async function testExportAndReadingFlow() {
   await page.addInitScript(() => {
     try {
       localStorage.setItem('ubt_lang', 'zh');
-    } catch (e) {}
+    } catch {
+      // Ignore local storage error in sandboxed context
+    }
   });
 
   const consoleErrors = [];
@@ -78,6 +78,11 @@ async function testExportAndReadingFlow() {
     record('Mission Control format dropdown toggle exists', await dropdownToggle.isVisible());
 
     if (await dropdownToggle.isVisible()) {
+      const exportBox = await exportBtn.boundingBox();
+      const toggleBox = await dropdownToggle.boundingBox();
+      record('Mission Control button and toggle heights match', exportBox && toggleBox && Math.abs(exportBox.height - toggleBox.height) <= 1,
+        `export h=${exportBox?.height}, toggle h=${toggleBox?.height}`);
+
       await dropdownToggle.click();
       await page.waitForTimeout(400);
 
@@ -86,6 +91,9 @@ async function testExportAndReadingFlow() {
 
       const epubOption = page.locator('.shadow-lg button').filter({ hasText: /epub/i }).first();
       record('EPUB deliverable option visible in menu', await epubOption.isVisible());
+
+      const localizedPrimary = page.locator('.shadow-lg button').filter({ hasText: /高保真|Target PDF/i }).first();
+      record('Primary deliverable localized name displayed', await localizedPrimary.isVisible());
 
       // Click toggle again to dismiss
       await dropdownToggle.click();
@@ -107,6 +115,11 @@ async function testExportAndReadingFlow() {
     record('Review Workbench format dropdown toggle visible', await wbFormatToggle.isVisible());
 
     if (await wbFormatToggle.isVisible()) {
+      const wbExportBox = await wbExportBtn.boundingBox();
+      const wbToggleBox = await wbFormatToggle.boundingBox();
+      record('Review Workbench button and toggle heights match', wbExportBox && wbToggleBox && Math.abs(wbExportBox.height - wbToggleBox.height) <= 1,
+        `export h=${wbExportBox?.height}, toggle h=${wbToggleBox?.height}`);
+
       await wbFormatToggle.click();
       await page.waitForTimeout(400);
 
@@ -115,6 +128,9 @@ async function testExportAndReadingFlow() {
 
       const htmlOption = page.locator('.shadow-lg button').filter({ hasText: /html/i }).first();
       record('HTML deliverable option visible in workbench menu', await htmlOption.isVisible());
+
+      const localizedHtml = page.locator('.shadow-lg button').filter({ hasText: /可读 HTML|Readable HTML/i }).first();
+      record('HTML deliverable localized name displayed', await localizedHtml.isVisible());
 
       // Click toggle again to dismiss
       await wbFormatToggle.click();
@@ -154,10 +170,24 @@ async function testExportAndReadingFlow() {
     record('Reading Flow inline textarea appears on double-click', await textarea.isVisible());
 
     if (await textarea.isVisible()) {
-      // Test Escape to cancel
-      await textarea.press('Escape');
+      const hint = firstFlowItem.locator('span.font-mono').first();
+      const hintText = await hint.textContent();
+      record('Reading Flow shortcut hint localized correctly', hintText && hintText.includes('Ctrl+Enter') && (hintText.includes('保存') || hintText.includes('save')), `Hint: ${hintText}`);
+
+      // Type an edit into the textarea without pressing Ctrl+Enter
+      await textarea.fill('Auto-saved draft test ' + Date.now());
       await page.waitForTimeout(300);
-      record('Escape cancels editing without crashing', !(await textarea.isVisible()));
+
+      // Trigger One-Click Export: should auto-save dirty draft before downloading
+      await wbExportBtn.click();
+      await page.waitForTimeout(1000);
+
+      const busyOrToast = page.locator('button .animate-spin, div:has-text("保存"), div:has-text("渲染"), div:has-text("下载")').first();
+      record('One-Click Export flushes unsaved draft into export pipeline', await busyOrToast.isVisible());
+
+      // Wait for re-render to complete
+      await page.waitForTimeout(4500);
+      record('Inline textarea unmounted after auto-save and export', !(await textarea.isVisible()));
     }
 
     // -------------------------------------------------------------

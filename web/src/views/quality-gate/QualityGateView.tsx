@@ -34,6 +34,7 @@ import {
   getVisualReport,
   listDeliverables,
   deliverableDownloadUrl,
+  triggerBrowserDownload,
   reExportJob,
   pagePreviewUrl,
   ApiError,
@@ -571,22 +572,20 @@ export function QualityGateView() {
   const handleDownload = async (key: string) => {
     if (downloadBusy) return
     setDownloadBusy(true)
-    // The tab is opened inside the click gesture, before any await: a stale
-    // delivery re-renders first (whole-book, easily past the browser's ~5 s
-    // transient-activation window), and a `window.open` after that wait is
-    // silently swallowed by the popup blocker.
-    const tab = window.open('', '_blank')
+    setDownloadError(null)
     try {
+      let currentItems = deliverables
       if (deliveryStale) {
         await reExportJob(jobId)
         const refreshed = await listDeliverables(jobId)
         setDeliverables(refreshed.items)
         setDeliveryStale(refreshed.stale)
+        currentItems = refreshed.items
       }
-      if (tab) tab.location.href = deliverableDownloadUrl(jobId, key)
-      else window.open(deliverableDownloadUrl(jobId, key), '_blank')
+      const target = currentItems.find((d) => d.key === key) ?? currentItems[0]
+      const url = deliverableDownloadUrl(jobId, key)
+      triggerBrowserDownload(url, target?.filename)
     } catch (err) {
-      tab?.close()
       setDownloadError(err instanceof Error ? err.message : t.quality.downloadFailed)
     } finally {
       setDownloadBusy(false)
