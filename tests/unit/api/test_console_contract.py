@@ -2116,3 +2116,47 @@ def test_the_review_page_has_one_name_in_each_locale() -> None:
     assert "审校后编台" not in text
     # The replacement says what the page does.
     assert "逐块审校台" in text
+
+
+# --------------------------------------------------------------------------- #
+# The SPA shell must revalidate; the hashed bundles may be cached forever
+# --------------------------------------------------------------------------- #
+
+
+def test_the_shell_is_never_cached_and_the_bundles_always_are(tmp_path: Path) -> None:
+    """A stale shell hides every rebuild behind it.
+
+    With no ``Cache-Control`` a browser falls back to heuristic caching and may
+    not revalidate ``index.html`` for hours. The shell is the one file whose
+    staleness masks everything else: a rebuilt bundle gets a new hash in its
+    name, so no client holds a stale copy of *it*, but the shell that points at
+    the bundle is never re-fetched — which presents as "rebuilt, restarted,
+    hard-refreshed, still the old UI".
+
+    The bundles are safe to cache immutably precisely because Vite puts the
+    content hash in the filename: a changed file is a changed URL.
+    """
+    client = TestClient(create_app(_config(tmp_path)))
+
+    shell = client.get("/")
+    assert shell.status_code == 200
+    assert shell.headers.get("cache-control") == "no-cache"
+
+    # The SPA fallback serves the same document for a client route; it must not
+    # be cached under that route's URL either. The fallback is gated on
+    # `Accept: text/html` on purpose — an API client probing a closed surface
+    # must still get a JSON 404 — so the browser header is what a navigation
+    # sends.
+    route = client.get("/wizard", headers={"Accept": "text/html"})
+    assert route.status_code == 200
+    assert route.headers.get("cache-control") == "no-cache"
+
+    # A content-hashed bundle is immutable.
+    body = shell.text
+    import re
+
+    match = re.search(r"assets/(index-[A-Za-z0-9_-]+\.js)", body)
+    assert match, "the shell must reference a hashed entry bundle"
+    asset = client.get(f"/assets/{match.group(1)}")
+    assert asset.status_code == 200
+    assert asset.headers.get("cache-control") == "public, max-age=31536000, immutable"

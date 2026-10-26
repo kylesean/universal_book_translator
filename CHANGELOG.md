@@ -236,6 +236,23 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Fixed
 
+- **The console shell is never cached, so a rebuild is visible on the next
+  load.** The SPA's `index.html` was served with no `Cache-Control` at all, so
+  a browser fell back to heuristic caching and might not revalidate it for
+  hours. That one file hid every other change: a rebuilt bundle gets a fresh
+  content hash in its name (so no client ever held a stale copy of *it*), but
+  the shell that points at the bundle was never re-fetched — which presents
+  exactly as "rebuilt the frontend, restarted, hard-refreshed, still the old
+  UI". Measured on this machine: a build completed at 07:51 while the served
+  `index.html` was from 07:46, and the running server's response carried no
+  cache header. The shell now sends `no-cache` (revalidate every load; the ETag
+  turns the usual answer into a cheap 304) and the content-hashed files under
+  `assets/` send `public, max-age=31536000, immutable` — safe precisely because
+  a changed file is a changed URL. The SPA fallback is covered too, so a client
+  route cannot cache the shell under its own path. One fast-tier test asserts
+  both halves against the real `create_app()`; verified it fails when the policy
+  is removed.
+
 - **Rehearsals write to their own store, not the operator's ledger.** A
   `--dry-run` used to write into the same `.ubt/ledgers/` as real work,
   distinguished only by a `_mock` segment in the job id. Nothing prunes a

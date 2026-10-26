@@ -462,13 +462,26 @@ def create_app(
             The fallback is gated on ``Accept: text/html``: an API client probing
             a closed surface (``/docs`` on a keyed server, a typo'd endpoint)
             must still get a JSON 404 rather than the SPA shell.
+
+            **The shell is never cached; the bundles always are.** With no
+            explicit ``Cache-Control``, a browser falls back to heuristic caching
+            and may not revalidate ``index.html`` for hours. That is the one file
+            whose staleness hides every other change: a rebuilt bundle has a
+            fresh hash in its name and no client keeps a stale copy of it, but
+            the shell that *points at* the bundle never asks again, so a
+            frontend rebuild appeared to do nothing — "restarted, hard-refreshed,
+            still the old UI" — until the cache expired. The shell therefore
+            carries ``no-cache`` (revalidate on every load; the response still
+            has an ETag, so the normal answer is a cheap 304), and the
+            content-hashed files under ``assets/`` carry ``immutable``, which is
+            safe precisely because their names change with their contents.
             """
 
             async def get_response(self, path: str, scope: Any) -> Response:
                 from starlette.exceptions import HTTPException as StarletteHTTPException
 
                 try:
-                    return await super().get_response(path, scope)
+                    response = await super().get_response(path, scope)
                 except StarletteHTTPException as exc:
                     accepts_html = any(
                         key == b"accept" and b"text/html" in value.lower()
@@ -476,7 +489,26 @@ def create_app(
                     )
                     if exc.status_code != 404 or not accepts_html:
                         raise
-                    return await super().get_response("index.html", scope)
+                    response = await super().get_response("index.html", scope)
+                    # The SPA fallback served the shell for a client route; it
+                    # must not be cached under that route's URL.
+                    path = "index.html"
+
+                self._apply_cache_policy(path, response)
+                return response
+
+            @staticmethod
+            def _apply_cache_policy(path: str, response: Response) -> None:
+                """The policy this class documents; one place, so it cannot drift."""
+                if path.startswith("assets/"):
+                    # Vite names bundles `<name>-<hash>.<ext>`, so a changed file
+                    # is a changed URL and the old one is never served again for
+                    # this build.
+                    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                else:
+                    # index.html, the favicon, and the SPA fallback: revalidate
+                    # every load, and let the ETag make it a 304 when unchanged.
+                    response.headers["Cache-Control"] = "no-cache"
 
         api_app.mount("/", _SPAStaticFiles(directory=str(static_dir), html=True), name="console")
 
