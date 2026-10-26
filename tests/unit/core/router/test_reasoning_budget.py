@@ -88,7 +88,7 @@ async def test_reasoning_budget_is_widened_when_the_request_left_it_unset() -> N
 @pytest.mark.asyncio
 async def test_reasoning_draft_sets_a_scaled_budget_before_the_first_call() -> None:
     """A gateway default must not be the first budget a reasoning draft sees."""
-    from ubt.core.ir.models import IRBlock
+    from ubt.core.ir.models import BlockStatus, IRBlock
     from ubt.model.ast import Paragraph
     from ubt.model.span import Span
 
@@ -101,7 +101,7 @@ async def test_reasoning_draft_sets_a_scaled_budget_before_the_first_call() -> N
             span=Span(page=1),
             text="word " * 10_000,
         ),
-        status="pending",
+        status=BlockStatus.PENDING,
     )
 
     await router.draft(block=block, target_lang="zh", source_lang="en")
@@ -116,7 +116,7 @@ async def test_reasoning_draft_sets_a_scaled_budget_before_the_first_call() -> N
 @pytest.mark.asyncio
 async def test_reasoning_macro_chunk_budget_covers_all_blocks() -> None:
     """One eight-block macro call must budget for the whole chunk, not one block."""
-    from ubt.core.ir.models import IRBlock
+    from ubt.core.ir.models import BlockStatus, IRBlock
     from ubt.model.ast import Paragraph
     from ubt.model.span import Span
 
@@ -130,7 +130,7 @@ async def test_reasoning_macro_chunk_budget_covers_all_blocks() -> None:
                 span=Span(page=1),
                 text="word " * 1_000,
             ),
-            status="pending",
+            status=BlockStatus.PENDING,
         )
         for i in range(8)
     ]
@@ -146,7 +146,7 @@ async def test_reasoning_macro_chunk_budget_covers_all_blocks() -> None:
 @pytest.mark.asyncio
 async def test_reasoning_repair_uses_a_scaled_budget_too() -> None:
     """Repair is the same reasoning model and must not fall back to 1024."""
-    from ubt.core.ir.models import IRBlock
+    from ubt.core.ir.models import BlockStatus, IRBlock
     from ubt.model.ast import Paragraph
     from ubt.model.span import Span
 
@@ -159,7 +159,7 @@ async def test_reasoning_repair_uses_a_scaled_budget_too() -> None:
             span=Span(page=1),
             text="word " * 10_000,
         ),
-        status="drafted",
+        status=BlockStatus.DRAFTED,
     )
 
     await router.repair(
@@ -194,7 +194,7 @@ async def test_reasoning_batch_requests_carry_an_explicit_budget() -> None:
     from ubt.core.router.registry import ModelCapabilityRegistry
     from ubt.core.router.router_errors import BatchDraftRequest
 
-    captured: list[list[dict[str, object]]] = []
+    captured: list[dict[str, object]] = []
 
     class _BatchProvider(MockModelProvider):
         @property
@@ -231,6 +231,6 @@ async def test_reasoning_batch_requests_carry_an_explicit_budget() -> None:
 
     await router.draft_batch([BatchDraftRequest(custom_id="c1", source_text="word " * 10_000)])
 
-    body = captured[0]["body"]  # type: ignore[index]
+    body = captured[0]["body"]
     assert isinstance(body, dict)
     assert body["max_tokens"] >= _REASONING_MIN_OUTPUT_TOKENS

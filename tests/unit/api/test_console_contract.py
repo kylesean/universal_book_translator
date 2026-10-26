@@ -1474,29 +1474,29 @@ def test_can_translate_is_the_servers_own_verdict() -> None:
     # developer's ubt.toml, and its provider credential must not decide this
     # contract test. The predicate under test is the server's, not the file's.
     keyless = describe_runtime_config(
-        UBTConfig(base_url=HOSTED, draft_model="m", api_key=MOCK_API_KEY)
+        UBTConfig(base_url=HOSTED, draft_model="m", api_key=SecretStr(MOCK_API_KEY))
     )["active"]
     assert keyless["can_translate"] is False
 
     # A model with no credential cannot translate …
     assert (
-        describe_runtime_config(UBTConfig(base_url=HOSTED, draft_model="", api_key="sk-real"))[
-            "active"
-        ]["can_translate"]
+        describe_runtime_config(
+            UBTConfig(base_url=HOSTED, draft_model="", api_key=SecretStr("sk-real"))
+        )["active"]["can_translate"]
         is False
     )
     # … and the placeholder sentinel is not a credential either.
     assert (
-        describe_runtime_config(UBTConfig(base_url=HOSTED, draft_model="m", api_key=MOCK_API_KEY))[
-            "active"
-        ]["can_translate"]
+        describe_runtime_config(
+            UBTConfig(base_url=HOSTED, draft_model="m", api_key=SecretStr(MOCK_API_KEY))
+        )["active"]["can_translate"]
         is False
     )
     # Real key plus a model is the only combination that translates.
     assert (
-        describe_runtime_config(UBTConfig(base_url=HOSTED, draft_model="m", api_key="sk-real"))[
-            "active"
-        ]["can_translate"]
+        describe_runtime_config(
+            UBTConfig(base_url=HOSTED, draft_model="m", api_key=SecretStr("sk-real"))
+        )["active"]["can_translate"]
         is True
     )
 

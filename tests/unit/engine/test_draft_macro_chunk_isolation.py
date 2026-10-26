@@ -29,7 +29,7 @@ class _FakeEngine:
 
     cache = None
 
-    async def draft(self, masked_source: str, generate: Any, *, context: str = "") -> str:
+    async def draft(self, masked_source: str, generate: Any, *, context: str = "") -> object:
         return await generate(masked_source)
 
     def resolve(self, raw: str, masked: Any) -> SimpleNamespace:

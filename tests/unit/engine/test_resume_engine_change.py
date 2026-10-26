@@ -52,6 +52,7 @@ def test_a_terminal_job_may_resume_after_the_provider_model_changes(
         )
 
         identity = ledger.get_job_metadata_value("job-1", "run_identity")
+        assert isinstance(identity, dict)
         assert identity["engine_signature"] == ("dmindex-translate-9b-rmindex-translate-9b-psrich")
         assert ledger.get_job_metadata_value("job-1", "resume_engine_change") == {
             "from_engine_signature": "dmold-model-rmold-model-psrich",
