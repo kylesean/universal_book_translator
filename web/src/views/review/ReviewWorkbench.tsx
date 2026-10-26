@@ -26,6 +26,7 @@ import {
   listIssues,
   listDeliverables,
   deliverableDownloadUrl,
+  triggerBrowserDownload,
   editSegment,
   reExportJob,
   getBlockTerms,
@@ -520,7 +521,6 @@ export function ReviewWorkbench() {
     if (!jobId || exporting) return
     setExporting(true)
     setExportMenuOpen(false)
-    const tab = window.open('', '_blank')
     try {
       let currentItems = deliverables
       if (reExportPending) {
@@ -533,20 +533,21 @@ export function ReviewWorkbench() {
           setDeliverables(refreshed.items)
           setDeliveryVerdict(refreshed.deliveryVerdict)
           currentItems = refreshed.items
+          if (refreshed.deliveryVerdict === 'blocked' && !force) {
+            setPendingBlockedExport(key)
+            return
+          }
         }
       }
       const target = currentItems.find((d) => d.key === key) ?? currentItems[0]
       if (target) {
         const url = deliverableDownloadUrl(jobId, target.key, { force })
-        if (tab) tab.location.href = url
-        else window.open(url, '_blank')
+        triggerBrowserDownload(url, target.filename)
         toast.push(t.review.exportSuccess, 'success')
       } else {
-        tab?.close()
         toast.push(t.mission.noDeliverables, 'error')
       }
     } catch (err) {
-      tab?.close()
       toast.push(err instanceof Error ? err.message : t.review.exportFailed, 'error')
     } finally {
       setExporting(false)
@@ -1233,7 +1234,7 @@ export function ReviewWorkbench() {
           >
             {flowVirtualizer.getVirtualItems().map((virtualRow) => {
               const seg = segments[virtualRow.index]
-              const draft = drafts[seg.block_id] ?? seg.delivered_text
+              const draft = drafts[seg.block_id] ?? seg.delivered_text ?? ''
               const hasIssues = seg.issues.length > 0 || seg.quarantined || seg.repair_failed
               const isSelected = selectedBlockId === seg.block_id
               const isEditingThis = editing[seg.block_id]

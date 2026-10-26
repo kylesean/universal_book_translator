@@ -26,6 +26,7 @@ import {
   listJobs,
   listDeliverables,
   deliverableDownloadUrl,
+  triggerBrowserDownload,
   reExportJob,
   reparseJob,
   subscribeJobProgress,
@@ -344,7 +345,7 @@ export function MissionControl() {
   // Set when the operator asked to download a delivery the quality gate
   // blocked. The server refuses those by default, so the click opens this
   // dialog instead of a download; confirming re-issues it with `force`.
-  const [pendingBlockedDownload, setPendingBlockedDownload] = useState<string | null>(null)
+  const [pendingBlockedDownload, setPendingBlockedDownload] = useState<{ jobId: string; key: string } | null>(null)
   const [cancelling, setCancelling] = useState(false)
   // The job's terminal error, as the engine phrased it for an operator. The
   // status payload always carried it and the console never read it, so a
@@ -432,6 +433,8 @@ export function MissionControl() {
     // flag is set before either cleanup runs; the interval and subscription
     // are also cleared by the unmount cleanup below.
     let missing = false
+    let timer: ReturnType<typeof setInterval> | undefined = undefined
+    let unsubscribe = () => {}
     const applyStatus = (res: Record<string, unknown>) => {
       if (res.status) setStatusStr(String(res.status))
       if (typeof res.stage === 'string') setStage(res.stage as PipelineStage)
@@ -495,12 +498,112 @@ export function MissionControl() {
       setStatusMissing(true)
     }
 
+    const startStream = () => {
+      if (!isMounted || missing) return
+      unsubscribe = subscribeJobProgress(
+        currentJobId,
+        (frame: ProgressStreamFrame) => {
+          if (!isMounted) return
+          if (frame.status) setStatusStr(frame.status)
+          if (frame.stage) setStage(frame.stage)
+          if (typeof frame.progress_percent === 'number') setProgressPct(frame.progress_percent)
+          if (typeof frame.completed_blocks === 'number') setCompletedBlocks(frame.completed_blocks)
+          if (typeof frame.drafted_blocks === 'number') setDraftedBlocks(frame.drafted_blocks)
+          if (typeof frame.repair_pending_blocks === 'number') {
+            setRepairPendingBlocks(frame.repair_pending_blocks)
+          }
+          if (typeof frame.total_blocks === 'number') setTotalBlocks(frame.total_blocks)
+          if (typeof frame.estimated_cost_usd === 'number') setCostUsd(frame.estimated_cost_usd)
+          if (typeof frame.current_avg_qe === 'number') setAvgQe(frame.current_avg_qe)
+          if (typeof frame.completed_blocks === 'number') completedRef.current = frame.completed_blocks
+          if (typeof frame.drafted_blocks === 'number') draftedRef.current = frame.drafted_blocks
+          if (typeof frame.repair_pending_blocks === 'number') {
+            repairPendingRef.current = frame.repair_pending_blocks
+          }
+          if (typeof frame.total_blocks === 'number') totalRef.current = frame.total_blocks
+          if (typeof frame.skipped_blocks === 'number') {
+            setSkippedBlocks(frame.skipped_blocks)
+            skippedRef.current = frame.skipped_blocks
+          }
+          if (typeof frame.failed_blocks === 'number') {
+            setFailedBlocks(frame.failed_blocks)
+            failedRef.current = frame.failed_blocks
+          }
+          if (typeof frame.needs_human_blocks === 'number') setNeedsHumanBlocks(frame.needs_human_blocks)
+          if (typeof frame.blocked_human_blocks === 'number')
+            setBlockedHumanBlocks(frame.blocked_human_blocks)
+
+          // Log the engine's own message when it has one — the stream is a build
+          // log, not a counter echo. The counters stay on the line as the tail so
+          // a frame without a message still reads as progress.
+          const level: LogLevel = frame.error ? 'ERROR' : frame.status === 'failed' ? 'ERROR' : 'INFO'
+          const qePart =
+            (frame.current_avg_qe ?? 0) > 0
+              ? `QE ${(frame.current_avg_qe ?? 0).toFixed(3)}`
+              : // "no score" is a fact about the QE mode (rule checks only score
+                // nothing), not a failure — say which, so the word does not read as
+                // an error on an otherwise clean run.
+                'QE: rules only (no score)'
+          // A terminal frame now carries its own counters; when it does not, keep
+          // the last known ones instead of printing 0/0.
+          const done = Math.max(
+            frame.completed_blocks ?? completedRef.current,
+            (frame.drafted_blocks ?? draftedRef.current) +
+              (frame.repair_pending_blocks ?? repairPendingRef.current)
+          )
+          const total = frame.total_blocks ?? totalRef.current
+          // "preserved", not "skipped": most of these are bibliography entries the
+          // policy keeps verbatim for retrievability, not list markers nobody
+          // needed. The panel's own label says the same thing.
+          const skippedPart = skippedRef.current > 0 ? ` (+${skippedRef.current} preserved)` : ''
+          const failPart = (frame.failed_blocks ?? failedRef.current) > 0
+            ? ` · ${frame.failed_blocks ?? failedRef.current} failed`
+            : ''
+          const counters = `${done}/${total} blocks${skippedPart}${failPart} · ${qePart}`
+          const text = frame.error
+            ? `ERROR ${frame.error}`
+            : frame.message
+              ? `${frame.message} · ${counters}`
+              : `${frame.status ?? 'running'} · ${counters}`
+          appendLog([{ text, level }])
+
+          if (frame.status && ['completed', 'failed', 'cancelled'].includes(frame.status)) {
+            clearInterval(timer)
+            unsubscribe()
+            setIsLiveStreaming(false)
+          }
+        },
+        () => {
+          // EventSource does not expose the HTTP status. Only stop when the
+          // status poll has already proved the job absent; a transient stream
+          // failure on a live job must still use the API client's backoff.
+          if (missing) {
+            unsubscribe()
+            setIsLiveStreaming(false)
+          }
+        },
+        (connected: boolean) => {
+          if (isMounted && !missing) setIsLiveStreaming(connected)
+        }
+      )
+    }
+
     const fetchStatus = async () => {
       if (missing) return
       try {
         const res = await getJobStatus(currentJobId)
         if (isMounted) {
           applyStatus(res as unknown as Record<string, unknown>)
+          const isTerm =
+            res.status && ['completed', 'failed', 'cancelled'].includes(String(res.status))
+          if (isTerm) {
+            clearInterval(timer)
+            unsubscribe()
+            setIsLiveStreaming(false)
+          } else if (timer === undefined) {
+            timer = setInterval(fetchStatus, 3000)
+            startStream()
+          }
         }
       } catch (err) {
         // A 404 is not a transient poll failure: the job does not exist, so
@@ -512,90 +615,6 @@ export function MissionControl() {
       }
     }
 
-    const timer = setInterval(fetchStatus, 3000)
-
-    const unsubscribe = subscribeJobProgress(
-      currentJobId,
-      (frame: ProgressStreamFrame) => {
-        if (!isMounted) return
-        if (frame.status) setStatusStr(frame.status)
-        if (frame.stage) setStage(frame.stage)
-        if (typeof frame.progress_percent === 'number') setProgressPct(frame.progress_percent)
-        if (typeof frame.completed_blocks === 'number') setCompletedBlocks(frame.completed_blocks)
-        if (typeof frame.drafted_blocks === 'number') setDraftedBlocks(frame.drafted_blocks)
-        if (typeof frame.repair_pending_blocks === 'number') {
-          setRepairPendingBlocks(frame.repair_pending_blocks)
-        }
-        if (typeof frame.total_blocks === 'number') setTotalBlocks(frame.total_blocks)
-        if (typeof frame.estimated_cost_usd === 'number') setCostUsd(frame.estimated_cost_usd)
-        if (typeof frame.current_avg_qe === 'number') setAvgQe(frame.current_avg_qe)
-        if (typeof frame.completed_blocks === 'number') completedRef.current = frame.completed_blocks
-        if (typeof frame.drafted_blocks === 'number') draftedRef.current = frame.drafted_blocks
-        if (typeof frame.repair_pending_blocks === 'number') {
-          repairPendingRef.current = frame.repair_pending_blocks
-        }
-        if (typeof frame.total_blocks === 'number') totalRef.current = frame.total_blocks
-        if (typeof frame.skipped_blocks === 'number') {
-          setSkippedBlocks(frame.skipped_blocks)
-          skippedRef.current = frame.skipped_blocks
-        }
-        if (typeof frame.failed_blocks === 'number') {
-          setFailedBlocks(frame.failed_blocks)
-          failedRef.current = frame.failed_blocks
-        }
-        if (typeof frame.needs_human_blocks === 'number') setNeedsHumanBlocks(frame.needs_human_blocks)
-        if (typeof frame.blocked_human_blocks === 'number')
-          setBlockedHumanBlocks(frame.blocked_human_blocks)
-
-        // Log the engine's own message when it has one — the stream is a build
-        // log, not a counter echo. The counters stay on the line as the tail so
-        // a frame without a message still reads as progress.
-        const level: LogLevel = frame.error ? 'ERROR' : frame.status === 'failed' ? 'ERROR' : 'INFO'
-        const qePart =
-          (frame.current_avg_qe ?? 0) > 0
-            ? `QE ${(frame.current_avg_qe ?? 0).toFixed(3)}`
-            : // "no score" is a fact about the QE mode (rule checks only score
-              // nothing), not a failure — say which, so the word does not read as
-              // an error on an otherwise clean run.
-              'QE: rules only (no score)'
-        // A terminal frame now carries its own counters; when it does not, keep
-        // the last known ones instead of printing 0/0.
-        const done = Math.max(
-          frame.completed_blocks ?? completedRef.current,
-          (frame.drafted_blocks ?? draftedRef.current) +
-            (frame.repair_pending_blocks ?? repairPendingRef.current)
-        )
-        const total = frame.total_blocks ?? totalRef.current
-        // "preserved", not "skipped": most of these are bibliography entries the
-        // policy keeps verbatim for retrievability, not list markers nobody
-        // needed. The panel's own label says the same thing.
-        const skippedPart = skippedRef.current > 0 ? ` (+${skippedRef.current} preserved)` : ''
-        const failPart = (frame.failed_blocks ?? failedRef.current) > 0
-          ? ` · ${frame.failed_blocks ?? failedRef.current} failed`
-          : ''
-        const counters = `${done}/${total} blocks${skippedPart}${failPart} · ${qePart}`
-        const text = frame.error
-          ? `ERROR ${frame.error}`
-          : frame.message
-            ? `${frame.message} · ${counters}`
-            : `${frame.status ?? 'running'} · ${counters}`
-        appendLog([{ text, level }])
-      },
-      () => {
-        // EventSource does not expose the HTTP status. Only stop when the
-        // status poll has already proved the job absent; a transient stream
-        // failure on a live job must still use the API client's backoff.
-        if (missing) {
-          unsubscribe()
-          setIsLiveStreaming(false)
-        }
-      },
-      (connected: boolean) => {
-        if (isMounted && !missing) setIsLiveStreaming(connected)
-      }
-    )
-
-    // After the subscription exists, so a 404 can tear it down immediately.
     void fetchStatus()
 
     return () => {
@@ -658,32 +677,26 @@ export function MissionControl() {
   /** Issue the download for `key`, optionally overriding a blocked verdict. */
   const issueDownload = async (jobId: string, key: string, force = false) => {
     setDownloading(true)
-    // Open the tab SYNCHRONOUSLY, while still inside the click gesture. The
-    // previous version called window.open after up to three awaits (the stale
-    // branch re-renders, then re-lists), and browsers treat that as a popup
-    // rather than a user-initiated navigation — so a download on a job with
-    // un-rendered edits appeared to do nothing at all.
-    const tab = window.open('', '_blank')
     try {
       let listing = await listDeliverables(jobId)
       if (listing.stale) {
         toast.push(t.mission.reRenderingBeforeDownload, 'info')
         await reExportJob(jobId)
         listing = await listDeliverables(jobId)
+        if (listing.deliveryVerdict === 'blocked' && !force) {
+          setPendingBlockedDownload({ jobId, key })
+          return
+        }
       }
-      const primary = listing.items.find((d) => d.key === key) ?? listing.items[0]
-      if (primary) {
-        const url = deliverableDownloadUrl(jobId, primary.key, { force })
-        if (tab) tab.location.href = url
-        else window.open(url, '_blank')
+      const target = listing.items.find((d) => d.key === key) ?? listing.items[0]
+      if (target) {
+        const url = deliverableDownloadUrl(jobId, target.key, { force })
+        triggerBrowserDownload(url, target.filename)
+        toast.push(t.mission.exportSuccess, 'success')
       } else {
-        tab?.close()
         toast.push(t.mission.noDeliverables, 'error')
       }
     } catch (err) {
-      // The blank tab was opened up front; leaving it open on failure would
-      // strand an empty window the operator has to close by hand.
-      tab?.close()
       toast.push(err instanceof Error ? err.message : t.mission.downloadFailed, 'error')
     } finally {
       setDownloading(false)
@@ -695,7 +708,7 @@ export function MissionControl() {
    * in place of a translation, and the server refuses those files — so ask
    * first, and only then issue the request with `force`. Checking here (rather
    * than letting the 409 arrive) keeps the decision in front of the operator
-   * instead of in a blank tab.
+   * instead of in an error popup.
    */
   const handleDownload = async (key?: string) => {
     if (!currentJobId || downloading) return
@@ -709,7 +722,7 @@ export function MissionControl() {
       // own error path reports the real problem.
     }
     if (verdict === 'blocked') {
-      setPendingBlockedDownload(currentJobId)
+      setPendingBlockedDownload({ jobId: currentJobId, key: targetKey })
       return
     }
     await issueDownload(currentJobId, targetKey)
@@ -869,9 +882,9 @@ export function MissionControl() {
         cancelLabel={t.common.cancel}
         danger
         onConfirm={() => {
-          const jobId = pendingBlockedDownload
+          const pending = pendingBlockedDownload
           setPendingBlockedDownload(null)
-          if (jobId) void issueDownload(jobId, 'primary', true)
+          if (pending) void issueDownload(pending.jobId, pending.key, true)
         }}
         onCancel={() => setPendingBlockedDownload(null)}
       />

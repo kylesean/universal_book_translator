@@ -517,6 +517,22 @@ export function deliverableDownloadUrl(
 }
 
 /**
+ * Trigger browser native download of a file from a URL.
+ * Uses an invisible link element with download attribute to avoid creating
+ * blank about:blank tabs or running into browser popup blocker heuristics.
+ */
+export function triggerBrowserDownload(url: string, filename?: string): void {
+  const link = document.createElement('a')
+  link.href = url
+  if (filename) link.download = filename
+  link.style.display = 'none'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+}
+
+
+/**
  * The raw bytes of one deliverable as text, for in-console previews that need
  * to parse content (XLIFF segment tables, JSON digests). Binary deliverables
  * (PDF, EPUB) are previewed via the `?inline=1` URL instead — the browser
