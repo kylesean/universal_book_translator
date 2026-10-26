@@ -51,6 +51,12 @@ PROVIDER_ALLOWED_KEYS: frozenset[str] = frozenset(ProviderConfig.model_fields.ke
 #: Forbidden keys in outbound provider blocks. Inbound service auth uses UBT_API_KEY.
 PROVIDER_FORBIDDEN_KEYS = frozenset({"service_api_key"})
 
+#: Fields ``[defaults]`` may set but an individual provider block may not.
+#: These describe deployment-wide state, not a model connection. Switching the
+#: shared glossary with a provider would make enforced terminology depend on
+#: which endpoint happened to be selected.
+DEFAULTS_ONLY_KEYS: frozenset[str] = frozenset({"glossary_path"})
+
 
 def _search_candidates() -> list[Path]:
     """Every path ``find_config_file`` will try, in order, without stat-ing them.
@@ -170,6 +176,13 @@ def _validate_block(label: str, fields: Mapping[str, Any]) -> dict[str, Any]:
             f"{label} must not contain inbound gate secret(s) {', '.join(leaked)}: "
             "service_api_key is for the inbound REST API service gate (configure via UBT_API_KEY)."
         )
+    if label != "[defaults]":
+        defaults_only = sorted(set(fields) & DEFAULTS_ONLY_KEYS)
+        if defaults_only:
+            raise ProviderConfigError(
+                f"{label} must not set global field(s) {', '.join(defaults_only)}; "
+                "declare them in [defaults]"
+            )
     unknown = sorted(set(fields) - PROVIDER_ALLOWED_KEYS)
     if unknown:
         raise ProviderConfigError(

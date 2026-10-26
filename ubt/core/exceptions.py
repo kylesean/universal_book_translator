@@ -113,6 +113,18 @@ class QueueDepthExceededError(UBTError):
     """
 
 
+class ProviderUnreachableError(UBTError):
+    """The fail-fast circuit tripped because the provider endpoint is dead.
+
+    Every block failed with ``transport_unreachable`` (connection refused /
+    DNS failure), so the job aborted to stop burning blocks against a dead
+    endpoint. The message names the original transport error, and the class
+    itself is operator-displayable: ``public_job_error`` must let it through
+    so the console can show "cannot reach the translation service" instead of
+    a generic "(see server logs)".
+    """
+
+
 class ServerCapacityError(UBTError):
     """Raised when the server has reached maximum concurrent running jobs."""
 
@@ -141,7 +153,9 @@ ACTIONABLE_ERROR_TYPES: tuple[type[Exception], ...] = (
     BudgetExceededError,
     DocumentParseError,
     UnsupportedDocumentFormatError,
+    IntegrityViolationError,
     QueueDepthExceededError,
+    ProviderUnreachableError,
 )
 
 

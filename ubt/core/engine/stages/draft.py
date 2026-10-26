@@ -20,7 +20,12 @@ from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.ledger_flusher import CheckpointBatchFlusher
 from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
-from ubt.core.exceptions import BudgetExceededError, JobInterruptedError, UBTError
+from ubt.core.exceptions import (
+    BudgetExceededError,
+    JobInterruptedError,
+    ProviderUnreachableError,
+    UBTError,
+)
 from ubt.core.ir.document_tree import section_context_for
 from ubt.core.ir.emphasis import (
     mark_emphasis_spans,
@@ -44,7 +49,11 @@ from ubt.core.memory.tm import (
     compute_tm_context,
     format_few_shot_reference,
 )
-from ubt.core.qe.defect_taxonomy import DRAFTING_ERROR_PREFIX, NON_RETRYABLE_DRAFT_PREFIX
+from ubt.core.qe.defect_taxonomy import (
+    DRAFTING_ERROR_PREFIX,
+    NON_RETRYABLE_DRAFT_PREFIX,
+    RETRYABLE_CONFIG_DRAFT_PREFIX,
+)
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.qe.heuristic import glossary_violation_flag
 from ubt.core.router.router import (
@@ -328,6 +337,29 @@ class DraftPolicy:
     #: Kept equal to ``UBTConfig.macro_chunk_size``'s default so a DraftPolicy
     #: built without the config kwarg does not silently disagree with production.
     macro_chunk_size: int = 8
+
+
+def _draft_failure_prefix(exc: BaseException) -> str:
+    """Choose the resume marker for a failed provider call.
+
+    A missing route/model or rejected credential is not worth retrying against
+    the same configuration, so the fail-fast breaker still trips. It becomes
+    recoverable after the operator fixes the provider, though, so it must not
+    share the permanent marker used for malformed source/content failures.
+    """
+    if classify_provider_error(exc).retryable:
+        return DRAFTING_ERROR_PREFIX
+    details = getattr(exc, "details", {})
+    details = details if isinstance(details, dict) else {}
+    # A missing local endpoint is a configuration problem the operator can fix
+    # (start the server, correct the URL, switch provider) and then resume. It
+    # must not become the permanent marker used for malformed source content.
+    if details.get("reason") == "transport_unreachable":
+        return RETRYABLE_CONFIG_DRAFT_PREFIX
+    status = details.get("status_code")
+    if status in (401, 403, 404):
+        return RETRYABLE_CONFIG_DRAFT_PREFIX
+    return NON_RETRYABLE_DRAFT_PREFIX
 
 
 @dataclass
@@ -830,7 +862,7 @@ class _DraftProcessor:
                 # A non-retryable failure is recorded under a prefix the resume
                 # path does NOT treat as transient: the same 401/402/400 recurs
                 # on every run, so re-queueing the block only re-bills it.
-                prefix = DRAFTING_ERROR_PREFIX if retryable else NON_RETRYABLE_DRAFT_PREFIX
+                prefix = _draft_failure_prefix(exc)
                 fail_update = {
                     "block_id": block.id,
                     "status": BlockStatus.FAILED,
@@ -1270,11 +1302,7 @@ class _DraftProcessor:
                         b.id,
                         exc,
                     )
-                    prefix = (
-                        DRAFTING_ERROR_PREFIX
-                        if classify_provider_error(exc).retryable
-                        else NON_RETRYABLE_DRAFT_PREFIX
-                    )
+                    prefix = _draft_failure_prefix(exc)
                     await self.runtime.flusher.enqueue(
                         {
                             "block_id": b.id,
@@ -1382,11 +1410,7 @@ class _DraftProcessor:
                 continue
             if isinstance(res, Exception):
                 logger.warning("Draft task failed with exception: %s", res)
-                prefix = (
-                    DRAFTING_ERROR_PREFIX
-                    if classify_provider_error(res).retryable
-                    else NON_RETRYABLE_DRAFT_PREFIX
-                )
+                prefix = _draft_failure_prefix(res)
                 for b in group:
                     stranded.append(
                         {
@@ -1752,7 +1776,7 @@ async def run_draft_stage(
                 # every remaining block through the batch fallback instead of
                 # aborting the job the way the interactive path does.
                 if processor.runtime.fail_fast_consecutive >= processor.policy.fail_fast_threshold:
-                    raise UBTError(
+                    raise ProviderUnreachableError(
                         f"Whole-book offline batch aborted after "
                         f"{processor.runtime.fail_fast_consecutive} consecutive "
                         "non-retryable provider failures (fail-fast circuit). "
@@ -1867,7 +1891,7 @@ async def run_draft_stage(
                 # repeat that burn for nothing, so abort the job with the
                 # original reason (surfaces via the pipeline's failure handler)
                 # instead of silently failing thousands of blocks.
-                raise UBTError(
+                raise ProviderUnreachableError(
                     f"Draft aborted after {processor.runtime.fail_fast_consecutive} consecutive "
                     f"non-retryable provider failures (fail-fast circuit). "
                     f"Last error: {processor.runtime.last_fail_fast_reason}"

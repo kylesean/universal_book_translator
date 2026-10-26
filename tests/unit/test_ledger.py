@@ -654,6 +654,97 @@ def test_reset_blocks_to_pending_clears_the_whole_verdict(ledger: SQLiteJobLedge
     assert block.mqm_severity is None
 
 
+def test_resume_requeues_transient_failures_but_keeps_triage_verdicts(
+    ledger: SQLiteJobLedger,
+) -> None:
+    """A provider outage is retryable; a human-review verdict is not.
+
+    Resume used to strand transient failures forever because FAILED was a
+    terminal state. Requeueing every FAILED row would be worse: it would erase
+    deliberate triage verdicts and silently ship blocks that a human still has
+    to inspect.
+    """
+    _init(ledger)
+    ledger.append_chapter(
+        "job",
+        _chapter(
+            "ch1",
+            [
+                _block("ch1#transient", status=BlockStatus.FAILED),
+                _block("ch1#review", status=BlockStatus.NEEDS_HUMAN),
+                _block("ch1#blocked", status=BlockStatus.NEEDS_HUMAN),
+            ],
+        ),
+    )
+    ledger.save_checkpoint(
+        "ch1#transient",
+        BlockStatus.FAILED,
+        error_flags=["Drafting error: provider 503"],
+        job_id="job",
+    )
+    ledger.save_checkpoint(
+        "ch1#review",
+        BlockStatus.NEEDS_HUMAN,
+        error_flags=["Drafting error: provider 503", "needs_human_review"],
+        job_id="job",
+    )
+    ledger.save_checkpoint(
+        "ch1#blocked",
+        BlockStatus.NEEDS_HUMAN,
+        error_flags=["Drafting error: provider 503", "mqm_critical_blocked"],
+        job_id="job",
+    )
+
+    assert ledger.reset_transient_failures("job") == ["ch1#transient"]
+    assert ledger.get_block("ch1#transient", job_id="job").status is BlockStatus.PENDING  # type: ignore[union-attr]
+    assert ledger.get_block("ch1#review", job_id="job").status is BlockStatus.NEEDS_HUMAN  # type: ignore[union-attr]
+    assert ledger.get_block("ch1#blocked", job_id="job").status is BlockStatus.NEEDS_HUMAN  # type: ignore[union-attr]
+
+
+def test_resume_recovers_legacy_configuration_failures_only(
+    ledger: SQLiteJobLedger,
+) -> None:
+    """The 404 that broke a job is fixed once the model route exists.
+
+    Older ledgers used the permanent ``Drafting unrecoverable:`` marker for
+    both a missing model and malformed source content. Resume must requeue the
+    former after the operator fixes the provider, while leaving the latter
+    terminal instead of paying for the same failure again.
+    """
+    _init(ledger)
+    ledger.append_chapter(
+        "job",
+        _chapter(
+            "ch1",
+            [
+                _block("ch1#route", status=BlockStatus.FAILED),
+                _block("ch1#source", status=BlockStatus.FAILED),
+            ],
+        ),
+    )
+    ledger.save_checkpoint(
+        "ch1#route",
+        BlockStatus.FAILED,
+        error_flags=[
+            'Drafting unrecoverable: Model API error (404): {"error":'
+            '{"message":"no router for requested model"}}'
+        ],
+        job_id="job",
+    )
+    ledger.save_checkpoint(
+        "ch1#source",
+        BlockStatus.FAILED,
+        error_flags=["Drafting unrecoverable: Model API error (422): malformed source"],
+        job_id="job",
+    )
+
+    assert ledger.reset_transient_failures("job") == ["ch1#route"]
+    route = ledger.get_block("ch1#route", job_id="job")
+    source = ledger.get_block("ch1#source", job_id="job")
+    assert route is not None and route.status is BlockStatus.PENDING
+    assert source is not None and source.status is BlockStatus.FAILED
+
+
 def test_get_job_stats_counts_by_status(ledger: SQLiteJobLedger) -> None:
     _init(ledger)
     statuses = [

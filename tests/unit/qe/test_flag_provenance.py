@@ -53,6 +53,7 @@ _ROOT = pathlib.Path(__file__).resolve().parents[3] / "ubt"
 EXEMPT: dict[str, str] = {
     # --- lifecycle: about the *call*, not the text ---------------------------
     "Drafting error": "provider call failed transiently; the resume path re-queues it",
+    "Drafting config error": "provider route/auth was broken; retry after configuration changes",
     "Drafting unrecoverable": "non-retryable provider failure; re-running would re-bill it",
     "Repair error": "repair call failed transiently; the resume path re-queues it",
     "untranslated:": "export's stale-block sweep; a resume must retry it",

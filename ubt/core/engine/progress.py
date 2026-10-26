@@ -65,32 +65,37 @@ _PIPELINE_STAGES: frozenset[str] = frozenset(_STAGE_BY_EVENT.values())
 
 
 def _processed_blocks(completed: int, failed: int, needs_human: int, blocked_human: int) -> int:
-    """Blocks that reached a *final disposition* — the percent numerator.
+    """Blocks that reached a *final disposition* — the diagnostic numerator.
 
-    The quality report's ``summary.completed_blocks`` (mtqe_passed + repaired)
-    alone is too narrow for a progress bar: a successful run whose blocks were
-    all routed to the human queue or quarantined reports 0 completed, and a bar
-    reading only completed blocks would fall from 100% at draft time back to 0%
-    at export. Counting
-    every terminal status keeps the numerator honest *and* non-decreasing:
-    within one run the pipeline only moves blocks into terminal states (repair
-    selection skips finalized blocks) or between them (triage/render flips),
-    so this value never regresses mid-run. Drafted/repair-pending blocks are
-    in-flight, not done, and are deliberately excluded from this numerator;
-    the snapshot's live percent adds them separately.
+    This counter answers "how many blocks have a terminal outcome", including
+    failures. It is deliberately separate from ``live_progress_percent``: a
+    failed block is finished work for retry purposes, but it is not translation
+    progress. A run whose provider endpoint is down must not walk its progress
+    bar to 100% while producing zero translated blocks.
     """
     return completed + failed + needs_human + blocked_human
 
 
-def live_progress_percent(finalized: int, drafted: int, total: int) -> float:
-    """Percent of work started, with 100 reserved for a finalized run.
+def _successful_work(completed: int, needs_human: int, blocked_human: int) -> int:
+    """Terminal work that represents usable translation progress.
 
-    ``progress_percent`` counts only terminal dispositions; during the long
-    draft phase that stays at zero. ``drafted`` is live work (drafted plus
-    repair-pending), so the console uses the larger numerator. An unfinished
-    run is capped at 99.9%; a fully finalized one reports 100%. This is shared
-    by the detail view and queue rows so the two cannot disagree about the same
-    job.
+    ``needs_human`` is a successfully produced draft awaiting review, and
+    ``blocked_human`` is deliberately quarantined rather than lost. Both are
+    finished work. ``failed`` is excluded: the block produced no usable result
+    and is reported as a separate failure count.
+    """
+    return completed + needs_human + blocked_human
+
+
+def live_progress_percent(finalized: int, drafted: int, total: int) -> float:
+    """Percent of work completed or in flight, never counting failures.
+
+    ``finalized`` is successful terminal work (completed, needs-human, blocked);
+    ``drafted`` is live work (drafted plus repair-pending). Failures are not a
+    numerator: a dead provider would otherwise report 100% for a book with zero
+    translated blocks. An unfinished run is capped at 99.9%; a fully finalized
+    successful run reports 100%. This is shared by the detail view and queue
+    rows so the two cannot disagree about the same job.
     """
     if total <= 0:
         return 0.0
@@ -157,6 +162,10 @@ class ProgressSnapshot(BaseModel):
     #: artifact) are dropped here — the wire form must not leak host layout; the
     #: artifact keys above carry the resolved paths (sanitized on external endpoints).
     message: str | None = None
+    #: Machine-readable activity kind for the console's localized activity
+    #: timeline. ``message`` remains diagnostic text and is never the primary
+    #: UI copy: backend prose is English and would leak into a Chinese screen.
+    event_type: str | None = None
     output_file: str | None = None
     report_file: str | None = None
     visual_report_file: str | None = None
@@ -182,6 +191,11 @@ class ProgressSnapshot(BaseModel):
             event.needs_human_blocks,
             event.blocked_human_blocks,
         )
+        successful = _successful_work(
+            event.completed_blocks,
+            event.needs_human_blocks,
+            event.blocked_human_blocks,
+        )
         # EXPORT_COMPLETED's message names the output path; the snapshot carries
         # the path in ``output_file`` instead, so the raw message text is dropped
         # rather than forwarded to the wire.
@@ -189,7 +203,7 @@ class ProgressSnapshot(BaseModel):
             None if event.event_type is EventType.EXPORT_COMPLETED else (event.message or None)
         )
         live_work = event.drafted_blocks + event.repair_pending_blocks
-        live_percent = live_progress_percent(processed, live_work, event.total_blocks)
+        live_percent = live_progress_percent(successful, live_work, event.total_blocks)
         return cls(
             total_blocks=event.total_blocks,
             drafted_blocks=event.drafted_blocks,
@@ -207,6 +221,7 @@ class ProgressSnapshot(BaseModel):
             estimated_cost_usd=event.estimated_cost_usd,
             stage=_STAGE_BY_EVENT.get(event.event_type),
             message=message,
+            event_type=event.event_type.value,
             **files,
         )
 
@@ -231,10 +246,11 @@ class ProgressSnapshot(BaseModel):
         completed = int(stats.get("completed", 0))
         total = int(stats.get("total", 0))
         processed = _processed_blocks(completed, failed, needs_human, blocked_human)
+        successful = _successful_work(completed, needs_human, blocked_human)
         stage_raw = meta("stage")
         stage = stage_raw if stage_raw in _PIPELINE_STAGES else None
         live_work = int(stats.get("drafted", 0)) + int(stats.get("repair_pending", 0))
-        live_percent = live_progress_percent(processed, live_work, total)
+        live_percent = live_progress_percent(successful, live_work, total)
         return cls(
             total_blocks=total,
             drafted_blocks=int(stats.get("drafted", 0)),
@@ -255,6 +271,7 @@ class ProgressSnapshot(BaseModel):
             estimated_cost_usd=_as_float(meta("estimated_cost_usd")),
             stage=stage,
             message=_as_str(meta("message")),
+            event_type=_as_str(meta("event_type")),
             output_file=_as_str(meta("output_file")),
             report_file=_as_str(meta("report_file")),
             visual_report_file=_as_str(meta("visual_report_file")),
@@ -305,7 +322,7 @@ def persist_progress_metadata(
     configured (WAL, busy timeout).
     """
     progress = ProgressSnapshot.from_event(event)
-    for metadata_key in (*ARTIFACT_KEYS, "estimated_cost_usd", "stage", "message"):
+    for metadata_key in (*ARTIFACT_KEYS, "estimated_cost_usd", "stage", "message", "event_type"):
         value = getattr(progress, metadata_key)
         if value is not None:
             ledger.set_job_metadata_value(job_id, metadata_key, value)

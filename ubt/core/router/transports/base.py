@@ -564,6 +564,15 @@ class BaseTransport(ABC):
             return await client.post(url, headers=self._auth_headers(), json=payload)
         except httpx.TimeoutException as exc:
             raise ModelProviderError(f"Request timed out after {self._timeout}s: {exc}") from exc
+        except httpx.ConnectError as exc:
+            # A refused/unreachable endpoint is a configuration failure, not a
+            # transient model response. Letting it ride the normal retry ladder
+            # burns one timeout per block and can turn a dead local server into
+            # an entire-book failure before the operator sees the real cause.
+            raise ModelProviderError(
+                f"HTTP connection failed: {exc}",
+                details={"fail_fast": True, "reason": "transport_unreachable"},
+            ) from exc
         except httpx.RequestError as exc:
             raise ModelProviderError(f"HTTP request error: {exc}") from exc
 
@@ -641,6 +650,11 @@ class BaseTransport(ABC):
         except httpx.TimeoutException as exc:
             raise ModelProviderError(
                 f"Vision request timed out after {self._timeout}s: {exc}"
+            ) from exc
+        except httpx.ConnectError as exc:
+            raise ModelProviderError(
+                f"Vision HTTP connection failed: {exc}",
+                details={"fail_fast": True, "reason": "transport_unreachable"},
             ) from exc
         except httpx.RequestError as exc:
             raise ModelProviderError(f"HTTP request error: {exc}") from exc

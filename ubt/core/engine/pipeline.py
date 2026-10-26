@@ -45,6 +45,7 @@ from ubt.core.exceptions import (
     LedgerWriterLeaseLostError,
     UBTError,
     UnsupportedDocumentFormatError,
+    public_job_error,
 )
 from ubt.core.fs_perms import warn_world_readable
 from ubt.core.ir.models import BookManifest
@@ -222,7 +223,11 @@ async def _close_adapter_off_loop(adapter: Any, job_id: str) -> None:
 
 
 async def _mark_failed_unless_completed(
-    ledger: SQLiteJobLedger | None, job_id: str, status: str = "failed"
+    ledger: SQLiteJobLedger | None,
+    job_id: str,
+    status: str = "failed",
+    *,
+    error: str | None = None,
 ) -> None:
     """Finalize a job as failed/cancelled on abort, but never flip a completed job.
 
@@ -236,6 +241,8 @@ async def _mark_failed_unless_completed(
         current = await asyncio.to_thread(ledger.get_job_status, job_id)
         if current in ("completed", "cancelled"):
             return
+        if error is not None:
+            await asyncio.to_thread(ledger.set_job_metadata_value, job_id, "last_error", error)
         await asyncio.to_thread(ledger.finalize_job, job_id, status=status)
     except Exception as fin_exc:
         logger.warning("Failed to finalize aborted job %s in ledger: %s", job_id, fin_exc)
@@ -1405,7 +1412,12 @@ class PipelineOrchestrator:
             # not abandon it, or the job reads as "running" forever and keeps
             # counting against max_running_jobs.
             await asyncio.shield(
-                _mark_failed_unless_completed(ledger, actual_job_id, status="failed")
+                _mark_failed_unless_completed(
+                    ledger,
+                    actual_job_id,
+                    status="failed",
+                    error=public_job_error(exc, actual_job_id),
+                )
             )
             # Report the job's real progress on the failure event: a run that
             # paid for 900/1000 blocks must not read as 0% on /status, SSE, or
@@ -1425,7 +1437,7 @@ class PipelineOrchestrator:
                 failed_blocks=int((failure_stats or {}).get("failed", 0) or 0),
                 needs_human_blocks=int((failure_stats or {}).get("needs_human", 0) or 0),
                 blocked_human_blocks=int((failure_stats or {}).get("blocked_human", 0) or 0),
-                message=f"Pipeline failed: {type(exc).__name__}: {exc}",
+                message=public_job_error(exc, actual_job_id),
             )
             try:
                 yield failure_event

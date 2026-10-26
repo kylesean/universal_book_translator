@@ -150,6 +150,20 @@ class OpenAIChatTransport(BaseTransport):
                 # A null content is a content-filter refusal or a malformed
                 # response, never a translation; returning reasoning_content
                 # here shipped the chain-of-thought as the draft.
+                if finish_reason == "length" and reasoning_tokens:
+                    # Some reasoning models (e.g. hy3) spend the whole output
+                    # budget on hidden reasoning and then return null content.
+                    # This is a retryable budget failure, not a refusal: the
+                    # router can reissue the call with a larger budget instead
+                    # of failing every block in the book.
+                    raise ModelProviderError(
+                        "LLM response exhausted its output budget on reasoning "
+                        f"(finish_reason=length, reasoning_tokens={reasoning_tokens})",
+                        details={
+                            "reasoning_budget_exhausted": True,
+                            "reasoning_tokens": reasoning_tokens,
+                        },
+                    )
                 raise ModelProviderError(
                     "LLM response has no message content "
                     f"(finish_reason={finish_reason or 'unknown'})",

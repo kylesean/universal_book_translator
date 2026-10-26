@@ -439,6 +439,11 @@ DRAFTING_ERROR_PREFIX = "Drafting error:"
 # not *start with* ``DRAFTING_ERROR_PREFIX``, or ``startswith`` would match it
 # as transient anyway — hence the different wording.
 NON_RETRYABLE_DRAFT_PREFIX = "Drafting unrecoverable:"
+# A provider configuration failure (missing route/model, rejected credential)
+# fails identically until the operator fixes that configuration. It still trips
+# the fail-fast breaker, but unlike a malformed source it becomes translatable
+# after the fix, so an explicit resume may re-queue it.
+RETRYABLE_CONFIG_DRAFT_PREFIX = "Drafting config error:"
 REPAIR_ERROR_PREFIX = "Repair error:"
 # Export's stale-block sweep force-fails any block still non-terminal when the
 # render stage starts (a stage crashed mid flight); without this prefix a resume
@@ -447,6 +452,7 @@ UNTRANSLATED_PREFIX = "untranslated:"
 
 TRANSIENT_FAILURE_PREFIXES: tuple[str, ...] = (
     DRAFTING_ERROR_PREFIX,
+    RETRYABLE_CONFIG_DRAFT_PREFIX,
     REPAIR_ERROR_PREFIX,
     UNTRANSLATED_PREFIX,
 )

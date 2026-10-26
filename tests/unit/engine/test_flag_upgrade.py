@@ -122,6 +122,7 @@ def _is_lifecycle(flag: str) -> bool:
         DRAFTING_ERROR_PREFIX,
         NON_RETRYABLE_DRAFT_PREFIX,
         REPAIR_ERROR_PREFIX,
+        RETRYABLE_CONFIG_DRAFT_PREFIX,
         UNTRANSLATED_PREFIX,
     )
 
@@ -130,6 +131,7 @@ def _is_lifecycle(flag: str) -> bool:
             DRAFTING_ERROR_PREFIX,
             NON_RETRYABLE_DRAFT_PREFIX,
             REPAIR_ERROR_PREFIX,
+            RETRYABLE_CONFIG_DRAFT_PREFIX,
             UNTRANSLATED_PREFIX,
         )
     )
@@ -171,6 +173,7 @@ def test_upgrading_twice_changes_nothing(legacy: str) -> None:
     "lifecycle",
     [
         "Drafting error: provider 500",
+        "Drafting config error: missing model",
         "Drafting unrecoverable: 401",
         "Repair error: timeout",
         "untranslated: stale block swept by export",

@@ -12,6 +12,11 @@ from __future__ import annotations
 
 import pytest
 
+from ubt.core.exceptions import (
+    IntegrityViolationError,
+    ProviderUnreachableError,
+    public_job_error,
+)
 from ubt.core.ir.models import (
     BlockStatus,
     BlockType,
@@ -125,3 +130,52 @@ def test_the_checkpoint_falls_back_to_the_source_when_nothing_was_translated() -
 
     result = failed_draft_checkpoint(_block(target_text="", repair_rounds=0), RuntimeError("boom"))
     assert result["target_text"] == "Original English prose"
+
+
+def test_an_integrity_gate_explains_how_to_recover() -> None:
+    """The completion floor is a deliberate gate, not an opaque crash.
+
+    ``IntegrityViolationError`` messages name the missing translations and the
+    recovery action ("resume" or lower the floor). Masking them as
+    ``(see server logs)`` left the operator unable to tell a partial book from
+    a corrupt ledger.
+    """
+    error = IntegrityViolationError(
+        "Export blocked: only 0% of 218 blocks carry a translation. Resume the job to retry them."
+    )
+
+    message = public_job_error(error, "job-1")
+
+    assert message.startswith("IntegrityViolationError: ")
+    assert "Resume the job" in message
+    assert "see server logs" not in message
+
+
+def test_generic_errors_do_not_expose_provider_bodies_or_host_paths() -> None:
+    error = RuntimeError('Model API error: {"body":"secret manuscript"} at /home/operator/book.pdf')
+
+    message = public_job_error(error, "job-1")
+
+    assert message == "RuntimeError (see server logs; job_id=job-1)"
+    assert "secret manuscript" not in message
+    assert "/home/operator" not in message
+
+
+def test_a_tripped_fail_fast_circuit_names_the_dead_endpoint() -> None:
+    """The breaker aborts a dead provider, so the console must be able to map it.
+
+    The breaker's message carries the original ``transport_unreachable``
+    detail; folding it into "(see server logs)" left the failure banner
+    generic exactly when the fix is specific (start the gateway, fix the URL).
+    """
+    error = ProviderUnreachableError(
+        "Draft aborted after 30 consecutive non-retryable provider failures "
+        "(fail-fast circuit). Last error: HTTP connection failed: All connection "
+        "attempts failed [details={'fail_fast': True, 'reason': 'transport_unreachable'}]"
+    )
+
+    message = public_job_error(error, "job-1")
+
+    assert message.startswith("ProviderUnreachableError: ")
+    assert "transport_unreachable" in message
+    assert "see server logs" not in message

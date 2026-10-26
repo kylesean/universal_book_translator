@@ -261,12 +261,44 @@ def _guard_run_identity(
     # that would block a legitimate resume.
     if not isinstance(stored, dict):
         return
-    if stored != requested:
+    stored_profile = stored.get("profile_name")
+    stored_mock = stored.get("mock_run")
+    if stored_profile != requested["profile_name"] or stored_mock != requested["mock_run"]:
         raise DocumentParseError(
             f"Job {job_id} was created with {stored} but is being resumed with "
             f"{requested}. A different profile, engine preset, or rehearsal mode "
             "would mix its output into this ledger. Use a different --job-id, "
             "re-run with the original settings, or add --fresh to restart the job."
+        )
+    if stored.get("engine_signature") != engine_sig:
+        # Model/preset changes are a normal operator response to a provider
+        # failure: the first job may have failed because its configured model
+        # did not exist. Profile and rehearsal mode stay hard guards (they change
+        # what the ledger means), but an explicit resume of a terminal job may
+        # continue its pending blocks under the new engine settings. Derived
+        # job ids still namespace the engine, so a fresh submission cannot
+        # silently inherit this ledger.
+        if ledger.get_job_status(job_id) not in ("failed", "cancelled"):
+            raise DocumentParseError(
+                f"Job {job_id} was created with {stored} but is being resumed with "
+                f"{requested}. Engine settings can only change when resuming a "
+                "failed or cancelled job; use a different --job-id or add --fresh."
+            )
+        ledger.set_job_metadata_value(
+            job_id,
+            "resume_engine_change",
+            {
+                "from_engine_signature": stored.get("engine_signature"),
+                "to_engine_signature": engine_sig,
+            },
+        )
+        ledger.set_job_metadata_value(job_id, _RUN_IDENTITY_KEY, requested)
+        logger.warning(
+            "Job %s: engine settings changed on resume (%s -> %s); "
+            "pending blocks continue under the new settings",
+            job_id,
+            stored.get("engine_signature"),
+            engine_sig,
         )
 
 

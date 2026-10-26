@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.progress import ProgressSnapshot, live_progress_percent
 
@@ -124,6 +125,37 @@ def test_live_progress_uses_drafts_but_reserves_100_for_finalization() -> None:
     assert live_progress_percent(0, 0, 0) == 0.0
 
 
+def test_failed_blocks_never_advance_the_progress_bar() -> None:
+    """A dead endpoint must not turn 163 failures into 81.5% translated."""
+    assert live_progress_percent(0, 0, 200) == 0.0
+    assert live_progress_percent(10, 0, 200) == 5.0
+    assert live_progress_percent(10, 50, 200) == 25.0
+
+
+def test_needs_human_is_successful_progress_but_failed_is_not(
+    ledger: SQLiteJobLedger,
+) -> None:
+    job_id = "job_progress_failed_vs_human"
+    _seed(
+        ledger,
+        job_id,
+        [
+            ("mtqe_passed", 0),
+            ("needs_human", 0),
+            ("failed", 0),
+            ("failed", 0),
+        ],
+    )
+
+    snapshot = ProgressSnapshot.from_ledger(ledger.get_job_stats(job_id))
+
+    assert snapshot.processed_blocks == 4
+    assert snapshot.completed_blocks == 1
+    assert snapshot.needs_human_blocks == 1
+    assert snapshot.failed_blocks == 2
+    assert snapshot.progress_percent == 50.0
+
+
 def test_repair_pending_is_live_progress_not_a_regression(ledger: SQLiteJobLedger) -> None:
     """Starting repair must not erase already-credited live work.
 
@@ -149,3 +181,25 @@ def test_repair_pending_is_live_progress_not_a_regression(ledger: SQLiteJobLedge
     assert snapshot.processed_blocks == 2
     assert snapshot.repair_pending_blocks == 3
     assert snapshot.progress_percent == 60.0
+
+
+def test_progress_snapshot_exposes_a_machine_readable_event_type() -> None:
+    """The console localizes an event kind, never the engine's English prose.
+
+    ``message`` remains available for diagnostics, but the status card and the
+    activity timeline need a stable identifier. Sending only the English
+    sentence made a Chinese console show
+    "Translation Bible established with 30 entries ..." under "编译中".
+    """
+    event = TranslationProgressEvent(
+        event_type=EventType.BIBLE_EXTRACTED,
+        job_id="job-activity",
+        total_blocks=10,
+        completed_blocks=0,
+        message="Translation Bible established with 30 entries",
+    )
+
+    snapshot = ProgressSnapshot.from_event(event)
+
+    assert snapshot.event_type == "bible_extracted"
+    assert snapshot.message == "Translation Bible established with 30 entries"

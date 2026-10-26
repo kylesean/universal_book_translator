@@ -34,12 +34,41 @@ from ubt.core.ir.models import (
 )
 from ubt.core.qe.defect_taxonomy import (
     DRAFTING_ERROR_PREFIX,
+    NON_RETRYABLE_DRAFT_PREFIX,
+    RETRYABLE_CONFIG_DRAFT_PREFIX,
     TRANSIENT_FAILURE_PREFIXES,
     has_triage_verdict,
     is_repair_only_transient_failure,
     is_transient_failure,
 )
 from ubt.core.qe.score_policy import QE_SCORED_SQL
+
+
+def _is_recoverable_config_failure(flag: str) -> bool:
+    """Whether a legacy "unrecoverable" draft failure is a fixed configuration.
+
+    ``NON_RETRYABLE_DRAFT_PREFIX`` also covers malformed source/content errors
+    that must stay terminal. Only provider routing/auth failures become
+    retryable after an operator changes the configuration, so this predicate
+    accepts the known status codes and llama-swap's missing-route sentence.
+    """
+    lowered = flag.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "(401)",
+            "(403)",
+            "(404)",
+            "status_code': 401",
+            "status_code': 403",
+            "status_code': 404",
+            'status_code": 401',
+            'status_code": 403',
+            'status_code": 404',
+            "no router for requested model",
+        )
+    )
+
 
 if TYPE_CHECKING:
     # Methods reach into the host's connection/scope; at runtime the host is
@@ -853,6 +882,20 @@ class LedgerJobsMixin(_LedgerHost):
             )
             if cursor.rowcount == 0:
                 raise LedgerError(f"finalize_job: unknown job '{job_id}'")
+            if status in ("completed", "cancelled"):
+                # ``last_error`` explains why a terminal job needs recovery. A
+                # successful completion or an explicit cancel supersedes the
+                # previous attempt's failure, so it must not remain attached to
+                # the current terminal state. Removing it in this transaction
+                # prevents a stale IntegrityViolationError from reappearing on a
+                # later resume that actually finished the book.
+                conn.execute(
+                    "UPDATE job_meta "
+                    "   SET metadata_json = json_remove("
+                    "       COALESCE(NULLIF(metadata_json, ''), '{}'), '$.last_error') "
+                    " WHERE job_id = ?",
+                    (actual_id,),
+                )
             if rendered_digest is not None:
                 # Same transaction as the status flip: json_set keeps the rest
                 # of metadata_json untouched, and a failed digest write rolls
@@ -1965,6 +2008,14 @@ class LedgerBlocksMixin(_LedgerHost):
             rows = cursor.fetchall()
         reset_ids: list[str] = []
         repair_only_ids: set[str] = set()
+        # Old ledgers marked every fail-fast provider error "unrecoverable",
+        # including the missing model/route family. Once the operator has fixed
+        # that configuration, those rows are safe to retry; source/content
+        # failures with the same prefix stay terminal. This migration is
+        # intentionally narrow (401/403/404 and llama-swap's missing-route
+        # sentence) so a resume cannot silently re-bill a genuinely bad block.
+        config_failure_ids: list[str] = []
+        config_failure_flags: dict[str, list[str]] = {}
         for row in rows:
             raw = row["error_flags_json"]
             if not raw:
@@ -1977,6 +2028,25 @@ class LedgerBlocksMixin(_LedgerHost):
                 if has_triage_verdict(flags):
                     continue
                 if row["mqm_severity"] is not None:
+                    continue
+                config_failure = next(
+                    (
+                        flag
+                        for flag in flags
+                        if flag.startswith(NON_RETRYABLE_DRAFT_PREFIX)
+                        and _is_recoverable_config_failure(flag)
+                    ),
+                    None,
+                )
+                if config_failure is not None:
+                    block_id = str(row["block_id"])
+                    config_failure_ids.append(block_id)
+                    config_failure_flags[block_id] = [
+                        f"{RETRYABLE_CONFIG_DRAFT_PREFIX} {config_failure.split(':', 1)[1].strip()}"
+                        if flag == config_failure
+                        else flag
+                        for flag in flags
+                    ]
                     continue
                 if is_transient_failure(flags):
                     block_id = str(row["block_id"])
@@ -1991,6 +2061,25 @@ class LedgerBlocksMixin(_LedgerHost):
                         row["has_text"] and not drafting_failed
                     ):
                         repair_only_ids.add(block_id)
+        if config_failure_ids:
+            with self._get_conn() as conn:
+                conn.execute("BEGIN IMMEDIATE;")
+                for block_id in config_failure_ids:
+                    conn.execute(
+                        """
+                        UPDATE blocks
+                           SET error_flags_json = ?, updated_at = CURRENT_TIMESTAMP
+                         WHERE block_id = ? AND job_id = ?
+                        """,
+                        (
+                            json.dumps(config_failure_flags[block_id], ensure_ascii=False),
+                            block_id,
+                            actual_id,
+                        ),
+                    )
+                conn.execute("COMMIT;")
+                self._mark_blocks_changed()
+            reset_ids.extend(config_failure_ids)
         if reset_ids:
             # Split by what actually failed. A repair-only failure kept its paid
             # draft, so it goes back to the repair queue with its text intact; a

@@ -106,6 +106,31 @@ async def test_openai_chat_does_not_double_the_bearer_prefix() -> None:
     assert rec.requests[0].headers["authorization"] == "Bearer sk-test"
 
 
+async def test_openai_chat_marks_a_refused_connection_as_fail_fast() -> None:
+    """A dead endpoint must not be retried once per block.
+
+    ``httpx.ConnectError`` used to become a generic provider error with no
+    structured status, so the router treated it as transient. A stopped local
+    model then burned the retry ladder and the draft fail-fast breaker counted
+    nothing, turning one configuration mistake into an entire-book failure.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("All connection attempts failed", request=request)
+
+    rec = _Recorder(handler)
+    t = OpenAIChatTransport(
+        api_key="k", base_url="http://127.0.0.1:2345/v1", default_model="m", transport=rec.transport
+    )
+    with pytest.raises(ModelProviderError) as exc:
+        await t.generate_with_finish_reason("hi")
+    assert exc.value.details == {
+        "fail_fast": True,
+        "reason": "transport_unreachable",
+    }
+    assert "HTTP connection failed" in str(exc.value)
+
+
 async def test_openai_chat_maps_429_to_a_retryable_provider_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(429, headers={"Retry-After": "7"}, text="slow down")
@@ -138,6 +163,42 @@ async def test_openai_chat_rejects_a_null_content_message() -> None:
     )
     with pytest.raises(ModelProviderError, match="no message content"):
         await t.generate_with_finish_reason("hi")
+
+
+async def test_openai_chat_marks_a_reasoning_budget_exhaustion_retryable() -> None:
+    """Null content after spending the budget on reasoning is not a refusal.
+
+    ``hy3`` returns ``content=None`` with ``finish_reason=length`` and all
+    completion tokens attributed to reasoning. The router needs to widen the
+    budget; treating this as a content refusal fails every block instead.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": None, "reasoning_content": "thinking"},
+                        "finish_reason": "length",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 1024,
+                    "completion_tokens_details": {"reasoning_tokens": 1024},
+                },
+            },
+        )
+
+    rec = _Recorder(handler)
+    t = OpenAIChatTransport(
+        api_key="k", base_url="https://x/v1", default_model="m", transport=rec.transport
+    )
+    with pytest.raises(ModelProviderError) as exc:
+        await t.generate_with_finish_reason("hi", max_tokens=1024)
+    assert exc.value.details["reasoning_budget_exhausted"] is True
+    assert exc.value.details["reasoning_tokens"] == 1024
 
 
 async def test_openai_chat_usage_is_recorded() -> None:

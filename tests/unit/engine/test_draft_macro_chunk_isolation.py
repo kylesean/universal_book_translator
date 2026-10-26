@@ -29,6 +29,9 @@ class _FakeEngine:
 
     cache = None
 
+    async def draft(self, masked_source: str, generate: Any, *, context: str = "") -> str:
+        return await generate(masked_source)
+
     def resolve(self, raw: str, masked: Any) -> SimpleNamespace:
         return SimpleNamespace(text=raw, dirty=[], clean=True)
 
@@ -38,9 +41,15 @@ class _FakeRouter:
 
     def __init__(self, drafts: dict[str, str]) -> None:
         self.drafts = drafts
+        self.calls: list[list[IRBlock]] = []
 
     async def draft_macro_chunk(self, *, blocks: list[IRBlock], **_kwargs: Any) -> dict[str, str]:
+        self.calls.append(list(blocks))
         return {b.id: self.drafts.get(b.id, "") for b in blocks}
+
+    async def draft(self, *, block: IRBlock, **_kwargs: Any) -> str:
+        self.calls.append([block])
+        return f"单块-{block.id}"
 
 
 class _FakeMemory:
@@ -128,3 +137,37 @@ async def test_a_finalize_failure_does_not_fail_already_drafted_siblings() -> No
     b1_updates = [u for u in updates if u["block_id"] == "b1"]
     assert b1_updates and all(str(u.get("status")) != "failed" for u in b1_updates)
     assert any(u.get("target_text") == "译文一" for u in b1_updates)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_macro_chunk_redrafts_blocks_individually() -> None:
+    """A group-level budget failure must not mark every block from one call.
+
+    The original job failed macro-chunks with ``finish_reason=length`` and then
+    marked all eight blocks FAILED without retrying them individually. Resume
+    re-queued the same group and repeated the failure. The group call is allowed
+    to fail, but each member must then get its own smaller request.
+    """
+    runtime = _runtime({})
+
+    class _ChunkFailsRouter(_FakeRouter):
+        async def draft_macro_chunk(
+            self, *, blocks: list[IRBlock], **kwargs: Any
+        ) -> dict[str, str]:
+            self.calls.append(list(blocks))
+            if len(blocks) > 1:
+                raise RuntimeError("macro-chunk exhausted its output budget")
+            block = blocks[0]
+            return {block.id: f"单块-{block.id}"}
+
+    router = _ChunkFailsRouter({})
+    runtime.router = router
+    processor = _DraftProcessor(runtime=runtime, policy=_Policy())  # type: ignore[arg-type]
+    b1, b2 = _block("b1"), _block("b2")
+
+    await processor.draft_macro_chunk_group([(b1, _inputs("b1")), (b2, _inputs("b2"))], [b1, b2])
+
+    assert [len(call) for call in router.calls] == [2, 1, 1]
+    statuses = {u["block_id"]: str(u.get("status")) for u in runtime.flusher.updates}
+    assert statuses["b1"] == "drafted"
+    assert statuses["b2"] == "drafted"

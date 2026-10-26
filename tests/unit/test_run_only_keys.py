@@ -56,14 +56,14 @@ def test_run_only_keys_are_dropped_from_overrides() -> None:
 
 @pytest.mark.parametrize(
     "key",
-    ["repair_provider", "base_url", "api_mode", "api_key", "ocr_endpoint"],
+    ["base_url", "api_mode", "api_key", "ocr_endpoint"],
 )
 def test_endpoint_and_credential_keys_are_rejected_on_untrusted_surfaces(key: str) -> None:
     """A payload may not choose *where* a request goes or *what secret* it carries.
 
-    ``provider`` is absent from this list on purpose: it is a name that must
-    already exist in the operator's file, so it selects among endpoints the
-    operator declared rather than introducing one. See
+    ``provider`` and ``repair_provider`` are absent from this list on purpose:
+    both are names that must already exist in the operator's file, so they select
+    among endpoints the operator declared rather than introducing one. See
     :func:`test_a_payload_may_name_a_declared_provider`.
     """
     with pytest.raises(UBTError, match="not accepted in job payloads"):

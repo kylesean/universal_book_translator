@@ -185,6 +185,9 @@ class ProviderConfig(BaseModel):
     max_repair_rounds: int | None = Field(default=None, ge=0)
     consistency_enforce: Literal["off", "report", "repair"] | None = None
     consistency_max_repairs: int | None = Field(default=None, ge=0)
+    #: Shared glossary file. This is global deployment state, not a provider
+    #: capability: ``[defaults]`` may set it, while provider blocks may not.
+    glossary_path: Path | None = None
 
     @field_validator(
         "supports_temperature",
@@ -929,10 +932,9 @@ class UBTConfig(BaseSettings):
     batch_poll_interval: float = Field(default=30.0, gt=0)
 
     # -- Decoupled External Glossary & Domain ----------------------------------
-    glossary_path: Path | None = Field(
-        default=None,
-        description="Path to custom external glossary file (.csv, .tsv, or .json) for domain terms",
-    )
+    # Declared here and on ProviderConfig because ``[defaults]`` shares that
+    # schema; the provider loader rejects it in a ``[providers.<name>]`` block.
+    glossary_path: Path | None = None
     glossary_max_global_entries: int = Field(
         default=100,
         ge=0,

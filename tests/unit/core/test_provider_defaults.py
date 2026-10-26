@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from ubt.core.providers import PROVIDER_ALLOWED_KEYS, ProviderConfigError, _validate_block
@@ -15,6 +17,20 @@ def test_db_dir_is_allowed_in_a_toml_block() -> None:
     # surface except TOML.
     assert "db_dir" in PROVIDER_ALLOWED_KEYS
     assert _validate_block("[defaults]", {"db_dir": "/tmp/ledgers"}) == {"db_dir": "/tmp/ledgers"}
+
+
+def test_the_shared_glossary_is_a_defaults_only_setting() -> None:
+    """A provider block cannot swap the shared terminology for its endpoint.
+
+    ``[defaults]`` owns deployment-wide assets. Allowing a provider block to
+    point ``glossary_path`` at a different file would make enforced terminology
+    change with the selected model provider.
+    """
+    assert _validate_block("[defaults]", {"glossary_path": "/tmp/terms.csv"}) == {
+        "glossary_path": Path("/tmp/terms.csv")
+    }
+    with pytest.raises(ProviderConfigError, match="global field"):
+        _validate_block("[providers.demo]", {"glossary_path": "/tmp/terms.csv"})
 
 
 def test_an_unknown_key_is_still_rejected() -> None:

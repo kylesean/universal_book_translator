@@ -168,6 +168,7 @@ def _is_lifecycle(flag: str) -> bool:
         DRAFTING_ERROR_PREFIX,
         NON_RETRYABLE_DRAFT_PREFIX,
         REPAIR_ERROR_PREFIX,
+        RETRYABLE_CONFIG_DRAFT_PREFIX,
         UNTRANSLATED_PREFIX,
     )
 
@@ -175,6 +176,7 @@ def _is_lifecycle(flag: str) -> bool:
         DRAFTING_ERROR_PREFIX,
         NON_RETRYABLE_DRAFT_PREFIX,
         REPAIR_ERROR_PREFIX,
+        RETRYABLE_CONFIG_DRAFT_PREFIX,
         UNTRANSLATED_PREFIX,
     )
     return flag.startswith(lifecycle)

@@ -71,6 +71,21 @@ from ubt.core.router.router_errors import (  # noqa: F401 -- re-exported
 
 logger = logging.getLogger(__name__)
 
+#: Floor for the one-shot budget widening when a reasoning model returns no
+#: visible content because hidden reasoning consumed ``max_tokens``.
+_REASONING_MIN_OUTPUT_TOKENS = 8192
+
+#: Reasoning tokens are not proportional to the visible translation alone: the
+#: model may spend several times the source length before writing anything. A
+#: macro-chunk of eight blocks therefore needs more headroom than one block.
+_REASONING_OUTPUT_HEADROOM = 8
+
+#: Protocols whose transport already translates reasoning effort into a token
+#: budget and raises ``max_tokens`` above it. The router must not pre-inflate
+#: those: Anthropic would then send ``budget + 1024`` over an already-scaled
+#: value, multiplying a routine repair call's request budget.
+_TRANSPORT_OWNS_REASONING_BUDGET = frozenset({"anthropic-messages"})
+
 #: Cooperative-cancel token for the CURRENT run's provider retry backoff.
 #: A ContextVar, not a router field, because one process can drive several
 #: jobs over ONE shared router (JobWorker with concurrency>1, the API
@@ -189,6 +204,27 @@ class ModelRouter:
         ) and self.repair_provider is not None:
             return self.repair_provider
         return self.provider
+
+    def _reasoning_output_tokens(
+        self,
+        source_tokens: int,
+        *,
+        provider: BaseModelProvider | None = None,
+    ) -> int:
+        """Output budget for a reasoning call, sized for hidden + visible tokens.
+
+        Chat-completions gateways (the common proxy case) apply their own tiny
+        default when ``max_tokens`` is omitted, so the router must send a value.
+        Gemini counts ``thinkingBudget`` inside ``maxOutputTokens`` and needs the
+        same headroom. Anthropic's transport raises ``max_tokens`` above its
+        ``budget_tokens`` itself, so the router sends only the ordinary cap and
+        lets that single owner do the addition once.
+        """
+        active = provider or self.provider
+        api_mode = str(getattr(active, "_api_mode", "") or "")
+        if api_mode in _TRANSPORT_OWNS_REASONING_BUDGET:
+            return max(4096, int(source_tokens * 4.0))
+        return max(_REASONING_MIN_OUTPUT_TOKENS, source_tokens * _REASONING_OUTPUT_HEADROOM)
 
     # ------------------------------------------------------------------
     # Real usage / cost accounting
@@ -742,6 +778,11 @@ class ModelRouter:
         effective_temp = temperature if profile.supports_temperature else None
 
         retries = 0
+        # A reasoning model can return null content with finish_reason=length
+        # because the hidden reasoning consumed the whole output budget. Retrying
+        # the identical max_tokens cannot help; widen it once before the normal
+        # provider retry ladder takes over.
+        reasoning_budget_retried = False
 
         while True:
             if attempt_budget is not None:
@@ -769,6 +810,7 @@ class ModelRouter:
 
                     async def _invoke_provider(
                         prov: BaseModelProvider = active_provider,
+                        output_limit: int | None = max_tokens,
                     ) -> tuple[str, str | None]:
                         try:
                             return await prov.generate_with_finish_reason(
@@ -776,7 +818,7 @@ class ModelRouter:
                                 system_prompt=effective_system_prompt,
                                 model=model,
                                 temperature=effective_temp,
-                                max_tokens=max_tokens,
+                                max_tokens=output_limit,
                                 reasoning_effort=effective_effort,
                             )
                         except TypeError as type_err:
@@ -790,7 +832,7 @@ class ModelRouter:
                                     system_prompt=effective_system_prompt,
                                     model=model,
                                     temperature=effective_temp,
-                                    max_tokens=max_tokens,
+                                    max_tokens=output_limit,
                                 )
                             raise
 
@@ -806,18 +848,51 @@ class ModelRouter:
                             ) from timeout_err
                     else:
                         result, finish_reason = await _invoke_provider()
-                except ModelProviderError as gateway_exc:
+                except ModelProviderError as exc:
                     # Gateway dropped a declared self-hosted model (401/404
-                    # "model not supported"): one localhost retry before the outer
-                    # fail-fast/retry classification runs.
-                    result, finish_reason = await self._generate_via_local_fallback(
-                        gateway_exc,
-                        model,
-                        effective_user_prompt,
-                        effective_system_prompt,
-                        effective_temp,
-                        max_tokens,
-                    )
+                    # "model not supported"): one localhost retry before the
+                    # budget/retry handling below.
+                    if self._is_self_hosted_rejection(exc, model):
+                        result, finish_reason = await self._generate_via_local_fallback(
+                            exc,
+                            model,
+                            effective_user_prompt,
+                            effective_system_prompt,
+                            effective_temp,
+                            max_tokens,
+                        )
+                        exc = None  # type: ignore[assignment]
+                    if exc is not None and (
+                        (exc.details or {}).get("reasoning_budget_exhausted")
+                        and not reasoning_budget_retried
+                    ):
+                        reasoning_budget_retried = True
+                        # A reasoning-capable provider may leave ``max_tokens``
+                        # unset (reasoning tokens share the output budget) and
+                        # the gateway may then impose its own tiny default. The
+                        # exhaustion response is the only evidence of that
+                        # default, so widen from the reported reasoning spend.
+                        observed = int((exc.details or {}).get("reasoning_tokens", 0) or 0)
+                        current = max_tokens or observed
+                        widened = max(current * 4, _REASONING_MIN_OUTPUT_TOKENS)
+                        logger.warning(
+                            "Model %s exhausted %s output tokens on reasoning; "
+                            "retrying once with max_tokens=%d",
+                            model,
+                            (
+                                f"max_tokens={max_tokens}"
+                                if max_tokens is not None
+                                else "the gateway default"
+                            ),
+                            widened,
+                        )
+                        max_tokens = widened
+                        retries += 1
+                        if retries > self.max_retries:
+                            raise
+                        continue
+                    elif exc is not None:
+                        raise
                 # Rate-limiter bookkeeping must never be misread as a provider
                 # failure: letting an exception here reach the broad handler
                 # below would re-run the already-billed request and relabel the
@@ -1150,12 +1225,16 @@ class ModelRouter:
             # provider's 400 recovery does not shrink max_tokens, so an
             # over-large request draws "max_tokens too large" from models capped
             # at 8k/16k output — the budget must be right the first time.
-            # Reasoning models are exempt — their reasoning tokens also count
-            # against max_tokens, and capping those corrupts the visible
-            # output. Truncation at the cap is handled by the continuation
-            # loop in the funnel.
             if cand_profile.supports_reasoning_effort:
-                return None
+                # Reasoning tokens also count against the output cap. Leaving
+                # it unset let a gateway apply its own tiny default (observed:
+                # hy3 spent all 1024 on hidden reasoning and returned null
+                # content). Size the budget from the source instead.
+                src_tokens = _estimate_prompt_tokens(block.source_text)
+                return self._reasoning_output_tokens(
+                    src_tokens,
+                    provider=self._provider_for(cand_model, is_repair=False),
+                )
             src_tokens = _estimate_prompt_tokens(block.source_text)
             return max(1024, int(src_tokens * 2.0))
 
@@ -1221,7 +1300,11 @@ class ModelRouter:
 
         def _calc_max_tokens(cand_model: str, cand_profile: ModelProfile) -> int | None:
             if cand_profile.supports_reasoning_effort:
-                return None
+                total_src_tokens = sum(_estimate_prompt_tokens(b.source_text) for b in blocks)
+                return self._reasoning_output_tokens(
+                    total_src_tokens,
+                    provider=self._provider_for(cand_model, is_repair=False),
+                )
             total_src_tokens = sum(_estimate_prompt_tokens(b.source_text) for b in blocks)
             return max(2048, int(total_src_tokens * 2.0) + 512)
 
@@ -1348,12 +1431,19 @@ class ModelRouter:
                 body["temperature"] = req.temperature
             if profile.supports_reasoning_effort and effort:
                 body["reasoning_effort"] = effort
-            if not profile.supports_reasoning_effort:
-                # Mirror the interactive path's output budget. Without a cap the
-                # provider's default truncates a long block, and the Batch path
-                # has no continuation loop — a half sentence would ship.
-                src_tokens = _estimate_prompt_tokens(req.source_text)
-                body["max_tokens"] = max(1024, int(src_tokens * 2.0))
+            # Mirror the interactive path's output budget. A reasoning model's
+            # hidden tokens share this cap, so leaving it unset let a gateway
+            # default (observed: 1024) starve the visible answer. The Batch path
+            # has no continuation loop, making a too-small budget fatal.
+            src_tokens = _estimate_prompt_tokens(req.source_text)
+            body["max_tokens"] = (
+                self._reasoning_output_tokens(
+                    src_tokens,
+                    provider=self._provider_for(self.draft_model, is_repair=False),
+                )
+                if profile.supports_reasoning_effort
+                else max(1024, int(src_tokens * 2.0))
+            )
 
             # Match the interactive path: a server relying on
             # {"enable_thinking": false} must not start emitting thinking
@@ -1655,7 +1745,11 @@ class ModelRouter:
 
         def _calc_repair_max_tokens(cand_model: str, cand_profile: ModelProfile) -> int | None:
             if cand_profile.supports_reasoning_effort:
-                return None
+                src_tokens = _estimate_prompt_tokens(block.source_text)
+                return self._reasoning_output_tokens(
+                    src_tokens,
+                    provider=self._provider_for(cand_model, is_repair=True),
+                )
             src_tokens = _estimate_prompt_tokens(block.source_text)
             return max(4096, int(src_tokens * 4.0))
 

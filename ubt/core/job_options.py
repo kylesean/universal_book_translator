@@ -252,6 +252,11 @@ def overrides_from_request(
       ever select a different one, so a user with three configured endpoints could
       only use whichever ``[defaults] provider`` named — a capability the UI
       presented and the API silently ignored.
+    * ``repair_provider`` is the same kind of input as ``provider`` — a name
+      resolved through the same validator — so it moved out of the leaked-keys
+      list once the wizard grew a repair-tier selector. It was listed as a
+      credential key historically, but it never carried one: the pipeline builds
+      the repair tier from the *named block's* endpoint and credential.
 
     The name is validated against the declared set (:func:`_validated_provider_name`),
     so an unknown or malformed name is a clear error rather than a lookup that
@@ -261,7 +266,6 @@ def overrides_from_request(
         leaked = sorted(
             key
             for key in (
-                "repair_provider",
                 "base_url",
                 "api_mode",
                 "api_key",
@@ -290,6 +294,10 @@ def overrides_from_request(
     # from inside the pipeline, after the job has already been accepted.
     if request.get("provider") is not None:
         overrides["provider"] = _validated_provider_name(request["provider"])
+    # The repair tier is the same kind of reference; the named block supplies the
+    # endpoint and credential, so accepting the name accepts no secret.
+    if request.get("repair_provider") is not None:
+        overrides["repair_provider"] = _validated_provider_name(request["repair_provider"])
 
     valid_fields = set(UBTConfig.model_fields)
     for key, value in request.items():
@@ -299,6 +307,9 @@ def overrides_from_request(
         # ``provider`` is already handled above, validated; letting the generic
         # loop copy it again would bypass that check.
         if field == "provider":
+            continue
+        # Already validated above; a second copy would bypass that check.
+        if field == "repair_provider":
             continue
         if field in valid_fields:
             overrides[field] = value
