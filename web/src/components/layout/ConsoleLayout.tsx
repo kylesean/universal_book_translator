@@ -275,22 +275,22 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
             id="btn-mode-toggle-mobile"
             type="button"
             onClick={handleToggleMode}
-            className="flex items-center gap-1 min-h-[40px] h-10 px-2 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors cursor-pointer"
+            className="flex items-center gap-1 min-h-[40px] h-10 px-2 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors cursor-pointer whitespace-nowrap shrink-0"
             title={uiMode === 'reader' ? t.common.switchToStudio : t.common.switchToReader}
           >
             {uiMode === 'reader' ? (
-              <Terminal className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
+              <Terminal className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
             ) : (
-              <BookOpen className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+              <BookOpen className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
             )}
-            <span>{uiMode === 'reader' ? '专家台' : '极简'}</span>
+            <span className="whitespace-nowrap">{uiMode === 'reader' ? '专家台' : '极简'}</span>
           </button>
 
           <button
             id="btn-paper-toggle-mobile"
             type="button"
             onClick={() => setPaperTone((prev) => cyclePaperTone(prev))}
-            className="flex items-center gap-1.5 min-h-[40px] h-10 px-2.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 min-h-[40px] h-10 px-2.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors cursor-pointer whitespace-nowrap shrink-0"
             aria-label={t.common.paperToneSwitchTo.replace(
               '{tone}',
               toneLabel(t, cyclePaperTone(paperTone)),
@@ -300,20 +300,20 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
               toneLabel(t, cyclePaperTone(paperTone)),
             )}
           >
-            <FileSpreadsheet className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
-            <span>{toneLabel(t, paperTone)}</span>
+            <FileSpreadsheet className="h-3.5 w-3.5 text-[var(--ink-muted)] shrink-0" />
+            <span className="whitespace-nowrap">{toneLabel(t, paperTone)}</span>
           </button>
 
           <button
             id="btn-lang-toggle-mobile"
             type="button"
             onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
-            className="flex items-center gap-1.5 min-h-[40px] h-10 px-2.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors font-medium cursor-pointer"
+            className="flex items-center gap-1.5 min-h-[40px] h-10 px-2.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors font-medium cursor-pointer whitespace-nowrap shrink-0"
             aria-label={t.common.switchLanguage}
             title={t.common.switchLanguage}
           >
-            <Globe className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
-            <span>{language === 'zh' ? '中' : 'EN'}</span>
+            <Globe className="h-3.5 w-3.5 text-[var(--ink-muted)] shrink-0" />
+            <span className="whitespace-nowrap">{language === 'zh' ? '中' : 'EN'}</span>
           </button>
         </div>
       </header>
@@ -417,57 +417,65 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
       {uiMode === 'studio' && (
         <aside className="hidden md:flex md:w-64 border-r border-[var(--paper-border)] bg-[var(--paper-surface)] flex-col justify-between shrink-0 select-none shadow-[1px_0_4px_rgba(0,0,0,0.02)]">
           <div>
-            {/* Top Brand & Language Bar */}
-            <div className="h-14 px-4 border-b border-[var(--paper-border)] flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <span className="h-6 w-6 rounded-[4px] bg-[var(--ink-primary)] text-[var(--paper-bg)] flex items-center justify-center font-bold text-xs tracking-tighter shadow-sm font-mono">
+            {/* Top Brand Bar */}
+            <div className="h-14 px-3.5 border-b border-[var(--paper-border)] flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="h-6 w-6 rounded-[4px] bg-[var(--ink-primary)] text-[var(--paper-bg)] flex items-center justify-center font-bold text-xs tracking-tighter shadow-sm font-mono shrink-0">
                   U
                 </span>
-                <div>
-                  <span className="font-bold text-xs tracking-tight text-[var(--ink-primary)] block leading-none">
+                <div className="truncate">
+                  <span className="font-bold text-xs tracking-tight text-[var(--ink-primary)] block leading-none truncate">
                     {t.common.compilerConsole}
                   </span>
-                  <span className="text-xs text-[var(--ink-muted)] font-mono leading-tight block mt-0.5 uppercase tracking-wider">
+                  <span className="text-[10px] text-[var(--ink-muted)] font-mono leading-tight block mt-0.5 uppercase tracking-wider truncate">
                     ENGINE 0.4
                   </span>
                 </div>
               </div>
 
-              {/* Language & Paper Tone Pills */}
-              <div className="flex items-center gap-1">
-                <button
-                  id="btn-mode-toggle"
-                  onClick={handleToggleMode}
-                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors cursor-pointer"
-                  title={t.common.switchToReader}
-                >
-                  <BookOpen className="h-3 w-3 text-blue-600 dark:text-blue-400" />
-                  <span>{t.common.modeReader}</span>
-                </button>
-
+              {/* Language & Paper Tone Pills (Compact, no wrapping) */}
+              <div className="flex items-center gap-1 shrink-0">
                 <button
                   id="btn-paper-toggle"
                   onClick={() => setPaperTone((prev) => cyclePaperTone(prev))}
-                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors cursor-pointer"
+                  className="flex items-center gap-1 px-1.5 py-1 rounded text-[11px] font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors cursor-pointer whitespace-nowrap shrink-0"
                   title={t.common.paperToneSwitchTo.replace(
                     '{tone}',
                     toneLabel(t, cyclePaperTone(paperTone)),
                   )}
                 >
-                  <FileSpreadsheet className="h-3 w-3 text-[var(--ink-muted)]" />
-                  <span>{toneLabel(t, paperTone)}</span>
+                  <FileSpreadsheet className="h-3 w-3 text-[var(--ink-muted)] shrink-0" />
+                  <span className="whitespace-nowrap">{toneLabel(t, paperTone)}</span>
                 </button>
 
                 <button
                   id="btn-lang-toggle"
                   onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
-                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors font-medium"
+                  className="flex items-center gap-1 px-1.5 py-1 rounded text-[11px] font-mono text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] transition-colors font-medium whitespace-nowrap shrink-0"
                   title={t.common.switchLanguage}
                 >
-                  <Globe className="h-3 w-3 text-[var(--ink-muted)]" />
-                  <span>{language === 'zh' ? '中' : 'EN'}</span>
+                  <Globe className="h-3 w-3 text-[var(--ink-muted)] shrink-0" />
+                  <span className="whitespace-nowrap">{language === 'zh' ? '中' : 'EN'}</span>
                 </button>
               </div>
+            </div>
+
+            {/* Mode Switcher Banner (Spacious, prominent, first-class) */}
+            <div className="p-2.5 pb-0">
+              <button
+                id="btn-mode-toggle"
+                onClick={handleToggleMode}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold bg-[var(--paper-subsurface)] hover:bg-[var(--paper-surface)] border border-[var(--paper-border)] hover:border-[var(--ink-primary)] text-[var(--ink-primary)] shadow-2xs transition-all cursor-pointer group"
+                title={t.common.switchToReader}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <BookOpen className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span className="whitespace-nowrap font-medium">{t.common.modeReader}</span>
+                </div>
+                <span className="text-[10px] text-[var(--ink-muted)] group-hover:text-[var(--ink-primary)] font-mono whitespace-nowrap">
+                  切换 ➔
+                </span>
+              </button>
             </div>
 
             {/* Navigation Sections */}

@@ -1322,7 +1322,7 @@ export function ReviewWorkbench() {
                     }`}
                   >
                     {/* Left: Source text */}
-                    <div className="text-xs md:text-sm font-mono leading-relaxed text-[var(--ink-secondary)] select-text">
+                    <div className="min-w-0 break-words [overflow-wrap:anywhere] text-xs md:text-sm font-mono leading-relaxed text-[var(--ink-secondary)] select-text">
                       <div className="text-[10px] font-mono uppercase text-[var(--ink-muted)] mb-1">
                         {seg.block_id} · P{seg.page ?? '—'}
                       </div>
@@ -1330,7 +1330,7 @@ export function ReviewWorkbench() {
                     </div>
 
                     {/* Right: Target translation */}
-                    <div className="text-xs md:text-sm font-sans leading-relaxed text-[var(--ink-primary)]">
+                    <div className="min-w-0 break-words [overflow-wrap:anywhere] text-xs md:text-sm font-sans leading-relaxed text-[var(--ink-primary)]">
                       {isEditingThis ? (
                         <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
                           <AutoGrowTextarea

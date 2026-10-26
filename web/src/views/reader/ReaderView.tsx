@@ -11,6 +11,7 @@ import {
   Edit3,
   Check,
   ChevronDown,
+  Image as ImageIcon,
 } from 'lucide-react'
 import {
   listJobs,
@@ -233,7 +234,8 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
   const getActiveBookTitle = () => {
     const job = jobs.find((j) => j.job_id === activeJobId)
     if (job?.file_name) {
-      return job.file_name.split(/[/\\]/).pop() ?? job.file_name
+      const raw = job.file_name.split(/[/\\]/).pop() ?? job.file_name
+      return raw.replace(/^\d{8}-\d{6}-[a-f0-9]{8}-/, '')
     }
     return activeJobId ?? 'Book'
   }
@@ -456,9 +458,35 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
               <p className="text-sm text-[var(--ink-secondary)]">该任务正在解析或暂未提取到文本段落</p>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-4 pb-36">
               {segments.map((seg) => {
                 const isEditing = editingBlockId === seg.block_id
+
+                // Detect raw image asset paths or image block types
+                const isImage =
+                  seg.block_type === 'image' ||
+                  seg.source_text.includes('/docling_cache/assets/') ||
+                  (seg.source_text.startsWith('/') &&
+                    /\.(png|jpg|jpeg|webp|svg|gif)$/i.test(seg.source_text))
+
+                if (isImage) {
+                  return (
+                    <div
+                      key={seg.block_id}
+                      className="my-3 py-3.5 px-4 rounded-xl border border-dashed border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-center gap-2.5 text-xs text-[var(--ink-muted)] select-none"
+                    >
+                      <ImageIcon className="h-4 w-4 text-[var(--ink-secondary)] shrink-0" />
+                      <span className="font-medium text-[var(--ink-secondary)]">原书插图 / 视觉图表</span>
+                      {seg.page !== null && (
+                        <span className="text-[10px] font-mono text-[var(--ink-muted)]">
+                          · P{seg.page}
+                        </span>
+                      )}
+                    </div>
+                  )
+                }
+
+                const isHeading = seg.block_type === 'heading'
 
                 return (
                   <div
@@ -466,18 +494,32 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
                     className={`rounded-xl border border-transparent hover:border-[var(--paper-border)] p-4 transition-all duration-150 ${
                       isEditing
                         ? 'bg-[var(--paper-surface)] shadow-md border-[var(--paper-border-hover)]'
-                        : 'hover:bg-[var(--paper-subsurface)]'
+                        : isHeading
+                          ? 'bg-[var(--paper-subsurface)] font-semibold'
+                          : 'hover:bg-[var(--paper-subsurface)]'
                     }`}
                   >
                     {bilingualView === 'bilingual' ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8 items-start">
                         {/* Source column */}
-                        <div className="text-xs md:text-sm font-serif leading-relaxed text-[var(--ink-secondary)] select-text opacity-90">
+                        <div
+                          className={`min-w-0 break-words [overflow-wrap:anywhere] select-text ${
+                            isHeading
+                              ? 'text-sm md:text-base font-bold font-serif leading-snug text-[var(--ink-primary)]'
+                              : 'text-xs md:text-sm font-serif leading-relaxed text-[var(--ink-secondary)] opacity-90'
+                          }`}
+                        >
                           {seg.source_text}
                         </div>
 
                         {/* Target column */}
-                        <div className="text-xs md:text-sm font-sans leading-relaxed text-[var(--ink-primary)]">
+                        <div
+                          className={`min-w-0 break-words [overflow-wrap:anywhere] ${
+                            isHeading
+                              ? 'text-sm md:text-base font-bold font-sans leading-snug text-[var(--ink-primary)]'
+                              : 'text-xs md:text-sm font-sans leading-relaxed text-[var(--ink-primary)]'
+                          }`}
+                        >
                           {isEditing ? (
                             <div className="space-y-2">
                               <textarea
@@ -531,7 +573,7 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
                         </div>
                       </div>
                     ) : bilingualView === 'target_only' ? (
-                      <div className="text-sm md:text-base font-sans leading-relaxed text-[var(--ink-primary)] max-w-2xl mx-auto">
+                      <div className="text-sm md:text-base font-sans leading-relaxed text-[var(--ink-primary)] max-w-2xl mx-auto min-w-0 break-words [overflow-wrap:anywhere]">
                         {isEditing ? (
                           <div className="space-y-2">
                             <textarea
@@ -579,7 +621,7 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
                         )}
                       </div>
                     ) : (
-                      <div className="text-sm md:text-base font-serif leading-relaxed text-[var(--ink-secondary)] max-w-2xl mx-auto select-text">
+                      <div className="text-sm md:text-base font-serif leading-relaxed text-[var(--ink-secondary)] max-w-2xl mx-auto select-text min-w-0 break-words [overflow-wrap:anywhere]">
                         {seg.source_text}
                       </div>
                     )}
@@ -761,7 +803,8 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {jobs.map((job) => {
-              const fileName = job.file_name ? (job.file_name.split(/[/\\]/).pop() ?? job.file_name) : job.job_id
+              const rawName = job.file_name ? (job.file_name.split(/[/\\]/).pop() ?? job.file_name) : job.job_id
+              const fileName = rawName.replace(/^\d{8}-\d{6}-[a-f0-9]{8}-/, '')
               const isCompleted = job.status === 'completed'
               const isRunning = job.status === 'running' || job.status === 'pending'
 
