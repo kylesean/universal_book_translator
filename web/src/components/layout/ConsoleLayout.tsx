@@ -539,9 +539,6 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
                 <span className="font-bold text-sm tracking-tight text-[var(--ink-primary)] block leading-none">
                   UBT 智能翻译
                 </span>
-                <span className="text-[10px] text-[var(--ink-muted)] block mt-0.5">
-                  图书与长文档全自动精美排版
-                </span>
               </div>
             </div>
 

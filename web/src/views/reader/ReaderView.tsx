@@ -378,7 +378,9 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
                   <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                   {t.reader.translating}
                 </h3>
-                <p className="text-xs text-[var(--ink-muted)] mt-0.5">{t.reader.translatingDesc}</p>
+                {t.reader.translatingDesc ? (
+                  <p className="text-xs text-[var(--ink-muted)] mt-0.5">{t.reader.translatingDesc}</p>
+                ) : null}
               </div>
               <div className="text-right">
                 <span className="text-lg font-bold font-mono text-[var(--ink-primary)]">
@@ -444,10 +446,6 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
 
         {/* Reading Flow Body */}
         <div className="space-y-4">
-          <div className="text-[11px] text-[var(--ink-muted)] px-1">
-            {t.reader.quickEditHint}
-          </div>
-
           {loadingSegments && segments.length === 0 ? (
             <div className="py-20 text-center space-y-3">
               <div className="h-6 w-6 border-2 border-[var(--paper-border)] border-t-[var(--ink-primary)] rounded-full animate-spin mx-auto" />
@@ -641,13 +639,15 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 md:py-12 space-y-12">
       {/* Hero Header */}
-      <div className="text-center space-y-3">
-        <h1 className="text-2xl md:text-4xl font-extrabold tracking-tight text-[var(--ink-primary)] font-serif">
+      <div className="text-center space-y-2">
+        <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--ink-primary)] font-serif">
           {t.reader.title}
         </h1>
-        <p className="text-xs md:text-sm text-[var(--ink-secondary)] max-w-xl mx-auto leading-relaxed">
-          {t.reader.subtitle}
-        </p>
+        {t.reader.subtitle ? (
+          <p className="text-xs md:text-sm text-[var(--ink-secondary)] max-w-xl mx-auto leading-relaxed">
+            {t.reader.subtitle}
+          </p>
+        ) : null}
       </div>
 
       {/* Minimalist Upload & Settings Card */}
@@ -657,10 +657,10 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleFileDrop}
           onClick={() => fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-xl p-6 md:p-10 text-center transition-all cursor-pointer ${
+          className={`border-2 border-dashed rounded-xl p-6 md:p-8 text-center transition-all cursor-pointer ${
             file
               ? 'border-emerald-500/50 bg-emerald-500/5'
-              : 'border-[var(--paper-border)] hover:border-[var(--ink-primary)] bg-[var(--paper-subsurface)]'
+              : 'border-[var(--paper-border)] hover:border-[var(--ink-primary)] bg-[var(--paper-subsurface)] hover:bg-[var(--paper-surface)]'
           }`}
         >
           <input
@@ -678,8 +678,8 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
 
           {file ? (
             <div className="space-y-2">
-              <div className="h-12 w-12 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
-                <FileText className="h-6 w-6" />
+              <div className="h-11 w-11 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
+                <FileText className="h-5 w-5" />
               </div>
               <div className="font-semibold text-sm text-[var(--ink-primary)]">{file.name}</div>
               <div className="text-xs text-[var(--ink-muted)]">
@@ -687,29 +687,25 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
               </div>
             </div>
           ) : (
-            <div className="space-y-3">
-              <div className="h-12 w-12 rounded-full bg-[var(--paper-subsurface)] text-[var(--ink-muted)] flex items-center justify-center mx-auto">
-                <Upload className="h-6 w-6" />
+            <div className="space-y-2">
+              <div className="h-10 w-10 rounded-full bg-[var(--paper-surface)] text-[var(--ink-secondary)] flex items-center justify-center mx-auto border border-[var(--paper-border)]">
+                <Upload className="h-5 w-5" />
               </div>
-              <div>
-                <div className="text-sm font-semibold text-[var(--ink-primary)]">
-                  {t.reader.dropzoneTitle}
+              <div className="text-sm font-semibold text-[var(--ink-primary)]">
+                {t.reader.dropzoneTitle}
+              </div>
+              {t.reader.dropzoneSubtitle ? (
+                <div className="text-xs font-mono text-[var(--ink-muted)]">
+                  {t.reader.dropzoneSubtitle}
                 </div>
-                <div className="text-xs text-[var(--ink-muted)] mt-1">{t.reader.dropzoneSubtitle}</div>
-              </div>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium border border-[var(--paper-border)] bg-[var(--paper-surface)] hover:bg-[var(--paper-subsurface)] text-[var(--ink-primary)] transition-colors"
-              >
-                {t.reader.selectFile}
-              </button>
+              ) : null}
             </div>
           )}
         </div>
 
         {/* Manual path alternative (unobtrusive) */}
         {!file && (
-          <div className="text-center">
+          <div>
             <input
               type="text"
               value={manualPath}
@@ -721,7 +717,7 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
         )}
 
         {/* Translation Settings Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
           {/* Target Language */}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-[var(--ink-secondary)]">
@@ -732,13 +728,13 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
               onChange={(e) => setTargetLang(e.target.value)}
               className="w-full text-xs px-3 py-2 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-bg)] text-[var(--ink-primary)] focus:outline-hidden focus:border-[var(--ink-primary)] cursor-pointer"
             >
-              <option value="zh-Hans">简体中文 (Simplified Chinese)</option>
-              <option value="en">English (英语)</option>
-              <option value="ja">日本語 (Japanese)</option>
-              <option value="fr">Français (法语)</option>
-              <option value="de">Deutsch (德语)</option>
-              <option value="es">Español (西班牙语)</option>
-              <option value="ru">Русский (俄语)</option>
+              <option value="zh-Hans">简体中文 (zh-Hans)</option>
+              <option value="en">English (en)</option>
+              <option value="ja">日本語 (ja)</option>
+              <option value="fr">Français (fr)</option>
+              <option value="de">Deutsch (de)</option>
+              <option value="es">Español (es)</option>
+              <option value="ru">Русский (ru)</option>
             </select>
           </div>
 
@@ -752,9 +748,9 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
               onChange={(e) => setStylePreset(e.target.value as 'academic' | 'literary' | 'technical')}
               className="w-full text-xs px-3 py-2 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-bg)] text-[var(--ink-primary)] focus:outline-hidden focus:border-[var(--ink-primary)] cursor-pointer"
             >
-              <option value="academic">学术专著 (准确严谨 · 公式图表严密对齐)</option>
-              <option value="literary">文学随笔 (优美自然 · 语感流畅生动)</option>
-              <option value="technical">技术文档 (清晰简练 · 逻辑结构分明)</option>
+              <option value="academic">{t.reader.styleAcademic}</option>
+              <option value="literary">{t.reader.styleLiterary}</option>
+              <option value="technical">{t.reader.styleTechnical}</option>
             </select>
           </div>
         </div>

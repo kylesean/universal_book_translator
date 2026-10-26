@@ -1743,8 +1743,11 @@ export function NewJobWizard() {
                     </span>
                   </div>
                   <div className="py-2.5 flex items-start justify-between gap-3">
-                    <span className="text-[var(--ink-secondary)] shrink-0">
+                    <span className="text-[var(--ink-secondary)] shrink-0 inline-flex items-center gap-1">
                       {t.wizard.estTokens}
+                      <InfoTip label={t.wizard.estTokens}>
+                        {t.wizard.tokensEstimateNote}
+                      </InfoTip>
                     </span>
                     <span className="text-right">
                       {/* The engine bills prompt = (per-call prefix × calls) +
@@ -1838,13 +1841,6 @@ export function NewJobWizard() {
                       </span>
                     </span>
                   </div>
-
-                  {/* One disclaimer for the whole estimate block: the numbers
-                      above are a character heuristic, and no heuristic can be
-                      exact across model families. */}
-                  <p className="pt-2 text-xs text-[var(--ink-muted)] leading-relaxed border-t border-[var(--paper-border)]">
-                    {t.wizard.tokensEstimateNote}
-                  </p>
                 </div>
 
                 {assessment.warnings.length > 0 && (
