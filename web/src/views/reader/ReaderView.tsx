@@ -503,8 +503,8 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
                         <div
                           className={`min-w-0 break-words [overflow-wrap:anywhere] select-text ${
                             isHeading
-                              ? 'text-sm md:text-base font-bold font-serif leading-snug text-[var(--ink-primary)]'
-                              : 'text-xs md:text-sm font-serif leading-relaxed text-[var(--ink-secondary)] opacity-90'
+                              ? 'text-base md:text-lg font-bold font-serif leading-snug text-[var(--ink-primary)] [text-wrap:balance]'
+                              : 'text-xs md:text-sm font-serif leading-relaxed text-[var(--ink-secondary)] opacity-90 [text-wrap:pretty]'
                           }`}
                         >
                           {seg.source_text}
@@ -514,8 +514,8 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
                         <div
                           className={`min-w-0 break-words [overflow-wrap:anywhere] ${
                             isHeading
-                              ? 'text-sm md:text-base font-bold font-sans leading-snug text-[var(--ink-primary)]'
-                              : 'text-xs md:text-sm font-sans leading-relaxed text-[var(--ink-primary)]'
+                              ? 'text-base md:text-lg font-bold font-sans leading-snug text-[var(--ink-primary)] [text-wrap:balance]'
+                              : 'text-xs md:text-sm font-sans leading-relaxed text-[var(--ink-primary)] [text-wrap:pretty]'
                           }`}
                         >
                           {isEditing ? (
@@ -571,7 +571,7 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
                         </div>
                       </div>
                     ) : bilingualView === 'target_only' ? (
-                      <div className="text-sm md:text-base font-sans leading-relaxed text-[var(--ink-primary)] max-w-2xl mx-auto min-w-0 break-words [overflow-wrap:anywhere]">
+                      <div className="text-sm md:text-base font-sans leading-relaxed text-[var(--ink-primary)] max-w-[65ch] mx-auto min-w-0 break-words [overflow-wrap:anywhere] [text-wrap:pretty]">
                         {isEditing ? (
                           <div className="space-y-2">
                             <textarea
@@ -619,7 +619,7 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
                         )}
                       </div>
                     ) : (
-                      <div className="text-sm md:text-base font-serif leading-relaxed text-[var(--ink-secondary)] max-w-2xl mx-auto select-text min-w-0 break-words [overflow-wrap:anywhere]">
+                      <div className="text-sm md:text-base font-serif leading-relaxed text-[var(--ink-secondary)] max-w-[65ch] mx-auto select-text min-w-0 break-words [overflow-wrap:anywhere] [text-wrap:pretty]">
                         {seg.source_text}
                       </div>
                     )}
