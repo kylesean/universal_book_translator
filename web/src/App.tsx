@@ -5,7 +5,6 @@ import { AuthGate } from '@/components/layout/AuthGate'
 import { ConsoleLayout } from '@/components/layout/ConsoleLayout'
 import { ErrorBoundary } from '@/components/layout/ErrorBoundary'
 import { ToastProvider } from '@/components/ui/Toast'
-import { UiModeProvider, useUiMode } from '@/context/UiModeContext'
 
 // Route-level code splitting. Every screen used to be a static import, so an
 // operator downloaded the whole console (wizard, mission control, review
@@ -35,9 +34,6 @@ const SystemDoctorView = lazy(() =>
 const ReviewWorkbench = lazy(() =>
   import('@/views/review/ReviewWorkbench').then((m) => ({ default: m.ReviewWorkbench }))
 )
-const ReaderView = lazy(() =>
-  import('@/views/reader/ReaderView').then((m) => ({ default: m.ReaderView }))
-)
 
 /**
  * Route-scoped error boundary.
@@ -66,30 +62,23 @@ function RouteFallback() {
       aria-busy="true"
       aria-live="polite"
     >
-      <div className="h-5 w-5 rounded-full border-2 border-[var(--paper-border)] border-t-[var(--ink-primary)] animate-spin" />
+      <div className="h-5 w-5 rounded-full border-2 border-border border-t-primary animate-spin" />
     </div>
   )
 }
 
 function AppRoutes() {
-  const { uiMode } = useUiMode()
-
   return (
     <Routes>
-      <Route path="/" element={<Navigate to={uiMode === 'studio' ? '/wizard' : '/reader'} replace />} />
-      <Route path="/reader" element={<ReaderView />} />
-      <Route path="/reader/:jobId" element={<ReaderView />} />
-      <Route
-        path="/wizard"
-        element={uiMode === 'reader' ? <ReaderView /> : <NewJobWizard />}
-      />
+      <Route path="/" element={<Navigate to="/wizard" replace />} />
+      <Route path="/wizard" element={<NewJobWizard />} />
       <Route path="/jobs" element={<MissionControl />} />
       <Route path="/jobs/:jobId" element={<MissionControl />} />
       <Route path="/jobs/:jobId/quality" element={<QualityGateView />} />
       <Route path="/jobs/:jobId/review" element={<ReviewWorkbench />} />
       <Route path="/assets" element={<LanguageAssetsView />} />
       <Route path="/system" element={<SystemDoctorView />} />
-      <Route path="*" element={<Navigate to={uiMode === 'studio' ? '/wizard' : '/reader'} replace />} />
+      <Route path="*" element={<Navigate to="/wizard" replace />} />
     </Routes>
   )
 }
@@ -98,25 +87,23 @@ export function App() {
   return (
     <I18nProvider>
       <ToastProvider>
-        <UiModeProvider>
-          <BrowserRouter>
-            <AuthGate>
-              <ConsoleLayout>
-                {/* One boundary per route: a render error in one screen is
-                    contained there instead of unmounting the whole console
-                    (which would also blank a still-running job's dashboard). */}
-                <RouteBoundary>
-                  {/* Suspense sits inside the boundary so a failed chunk load
-                      surfaces through the error boundary rather than leaving a
-                      permanent spinner. */}
-                  <Suspense fallback={<RouteFallback />}>
-                    <AppRoutes />
-                  </Suspense>
-                </RouteBoundary>
-              </ConsoleLayout>
-            </AuthGate>
-          </BrowserRouter>
-        </UiModeProvider>
+        <BrowserRouter>
+          <AuthGate>
+            <ConsoleLayout>
+              {/* One boundary per route: a render error in one screen is
+                  contained there instead of unmounting the whole console
+                  (which would also blank a still-running job's dashboard). */}
+              <RouteBoundary>
+                {/* Suspense sits inside the boundary so a failed chunk load
+                    surfaces through the error boundary rather than leaving a
+                    permanent spinner. */}
+                <Suspense fallback={<RouteFallback />}>
+                  <AppRoutes />
+                </Suspense>
+              </RouteBoundary>
+            </ConsoleLayout>
+          </AuthGate>
+        </BrowserRouter>
       </ToastProvider>
     </I18nProvider>
   )

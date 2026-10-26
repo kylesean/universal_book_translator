@@ -1,75 +1,320 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Search,
-  Plus,
-  Trash2,
-  Loader2,
+  AlertCircle,
   AlertTriangle,
-  CheckCircle2,
+  ArrowDownToLine,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  FilterX,
+  Loader2,
+  Maximize2,
+  MoreHorizontal,
+  Plus,
+  Search,
+  Trash2,
   Upload,
-  Sliders,
-  BookOpen,
-  Layers,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/Alert'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { Badge } from '@/components/ui/Badge'
 import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
+import { useToast } from '@/components/ui/useToast'
+import { RichText } from '@/components/content/RichText'
+import {
+  ApiError,
+  deleteGlossaryTerm,
+  enableGlossary,
+  evictMatchingTm,
+  evictTm,
   getGlossary,
   getGlossaryConflicts,
-  upsertGlossaryTerm,
-  deleteGlossaryTerm,
   importGlossary,
-  listTm,
-  evictTm,
   importTm,
-  type GlossaryTerm,
+  listTm,
+  upsertGlossaryTerm,
   type GlossaryConflict,
+  type GlossaryTerm,
   type TmEntry,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
+import { cn } from '@/lib/utils'
 
-type Tab = 'glossary' | 'tm' | 'bible'
+type AssetTab = 'glossary' | 'tm'
+type TmImportFormat = 'tmx' | 'json'
+type TmProvenanceFilter = 'all' | 'machine' | 'human_pe'
+type TmUsageFilter = 'all' | 'never' | 'used'
+type TmSort = 'newest' | 'oldest' | 'most_used'
+
+const TM_PAGE_SIZES = [20, 50, 100] as const
+type TmPageSize = (typeof TM_PAGE_SIZES)[number]
+
+/** A count that stays readable without turning into another chrome badge. */
+function AssetCount({ value, label }: { value: number; label: string }) {
+  return (
+    <span className="tabular-nums text-xs text-muted-foreground">
+      <span className="font-medium text-foreground">{value}</span> {label}
+    </span>
+  )
+}
+
+/** Keep long TM passages scannable without hiding the full entry workflow. */
+function TmPassage({
+  text,
+  source,
+}: {
+  text: string
+  source: boolean
+}) {
+  return (
+    <div className="line-clamp-4 w-full text-left">
+      <RichText text={text} source={source} density="compact" />
+    </div>
+  )
+}
+
+function ToolbarSearch({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+}) {
+  return (
+    <div className="relative w-full sm:w-64">
+      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        className="h-9 bg-background pl-9"
+      />
+    </div>
+  )
+}
+
+function TableLoading({ columns }: { columns: number }) {
+  return (
+    <>
+      {[0, 1, 2].map((row) => (
+        <TableRow key={row}>
+          {Array.from({ length: columns }, (_, column) => (
+            <TableCell key={column} className="py-4">
+              <Skeleton className={cn('h-4', column === columns - 1 ? 'ml-auto w-8' : 'w-3/4')} />
+            </TableCell>
+          ))}
+        </TableRow>
+      ))}
+    </>
+  )
+}
+
+function StackedLoading({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="divide-y divide-border/70 md:hidden" aria-hidden="true">
+      {Array.from({ length: rows }, (_, row) => (
+        <div key={row} className="space-y-4 px-4 py-5">
+          <div className="space-y-2">
+            <Skeleton className="h-3 w-12" />
+            <Skeleton className="h-4 w-4/5" />
+          </div>
+          <div className="space-y-2">
+            <Skeleton className="h-3 w-10" />
+            <Skeleton className="h-4 w-3/5" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function AssetEmpty({
+  title,
+  description,
+  action,
+}: {
+  title: string
+  description: string
+  action?: React.ReactNode
+}) {
+  return (
+    <div className="border-t border-border/70 px-6 py-12">
+      <Empty className="gap-3 p-0">
+        <EmptyHeader className="max-w-md">
+          <EmptyTitle className="text-base">{title}</EmptyTitle>
+          <EmptyDescription>{description}</EmptyDescription>
+        </EmptyHeader>
+        {action ? <div>{action}</div> : null}
+      </Empty>
+    </div>
+  )
+}
+
+function FilterSelect<T extends string>({
+  value,
+  onValueChange,
+  label,
+  options,
+}: {
+  value: T
+  onValueChange: (value: T) => void
+  label: string
+  options: { value: T; label: string }[]
+}) {
+  return (
+    <Select value={value} onValueChange={(next) => onValueChange(next as T)}>
+      <SelectTrigger className="h-9 w-full bg-background sm:w-auto" aria-label={label}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+/** Row actions stay visible: a destructive action must never hide under a hover. */
+function RowActions({
+  label,
+  deleteLabel,
+  onDelete,
+  inspectLabel,
+  onInspect,
+}: {
+  label: string
+  deleteLabel: string
+  onDelete: () => void
+  inspectLabel?: string
+  onInspect?: () => void
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 text-muted-foreground"
+          aria-label={label}
+        >
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        {inspectLabel && onInspect ? (
+          <DropdownMenuItem onSelect={onInspect}>
+            <Maximize2 />
+            {inspectLabel}
+          </DropdownMenuItem>
+        ) : null}
+        <DropdownMenuItem
+          onSelect={onDelete}
+          className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+        >
+          <Trash2 />
+          {deleteLabel}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
 
 export function LanguageAssetsView() {
-  const { t } = useI18n()
-  const [activeTab, setActiveTab] = useState<Tab>('glossary')
-  const [searchQuery, setSearchQuery] = useState('')
+  const { language, t } = useI18n()
+  const toast = useToast()
+  const [activeTab, setActiveTab] = useState<AssetTab>('glossary')
 
-  // Glossary
   const [terms, setTerms] = useState<GlossaryTerm[]>([])
   const [conflicts, setConflicts] = useState<GlossaryConflict[]>([])
-  // False when the server reports no glossary file is configured at all.
   const [glossaryConfigured, setGlossaryConfigured] = useState(true)
-  // A glossary rewrite and a TM row removal are both irreversible, and a
-  // `human_pe` TM row is exactly the post-editing work this product exists
-  // to accumulate. One icon click was too cheap.
-  const [pendingDeleteTerm, setPendingDeleteTerm] = useState<string | null>(null)
-  const [pendingEvictId, setPendingEvictId] = useState<number | null>(null)
+  const [glossaryLoading, setGlossaryLoading] = useState(true)
   const [glossaryError, setGlossaryError] = useState<string | null>(null)
-  const [glossaryLoading, setGlossaryLoading] = useState(false)
-  // Bulk import: one local file, parsed server-side with the same parser the
-  // engine reads back, so what lands here is exactly what a run would enforce.
-  const [glossaryImporting, setGlossaryImporting] = useState(false)
-  const [glossaryImportNotice, setGlossaryImportNotice] = useState<string | null>(null)
-  const glossaryFileRef = useRef<HTMLInputElement>(null)
+  const [enablingGlossary, setEnablingGlossary] = useState(false)
+  const [glossarySearch, setGlossarySearch] = useState('')
+  const [pendingDeleteTerm, setPendingDeleteTerm] = useState<string | null>(null)
+  const [deletingTerm, setDeletingTerm] = useState(false)
+
   const [newSource, setNewSource] = useState('')
   const [newTarget, setNewTarget] = useState('')
   const [savingTerm, setSavingTerm] = useState(false)
+  const [glossaryImportOpen, setGlossaryImportOpen] = useState(false)
+  const [glossaryImporting, setGlossaryImporting] = useState(false)
+  const [glossaryImportFile, setGlossaryImportFile] = useState<File | null>(null)
+  const glossaryFileRef = useRef<HTMLInputElement>(null)
 
-  // Translation memory
   const [tmEntries, setTmEntries] = useState<TmEntry[]>([])
   const [tmTotal, setTmTotal] = useState(0)
+  const [tmMachineCount, setTmMachineCount] = useState(0)
+  const [tmHumanCount, setTmHumanCount] = useState(0)
+  const [tmNeverUsedCount, setTmNeverUsedCount] = useState(0)
   const [tmLoading, setTmLoading] = useState(false)
   const [tmError, setTmError] = useState<string | null>(null)
-  const [importFormat, setImportFormat] = useState<'tmx' | 'json'>('tmx')
-  const [importContent, setImportContent] = useState('')
-  const [importSrcLang, setImportSrcLang] = useState('en')
-  const [importTgtLang, setImportTgtLang] = useState('zh')
-  const [importing, setImporting] = useState(false)
-  const [importNotice, setImportNotice] = useState<string | null>(null)
-  const [tmFuzzyThreshold, setTmFuzzyThreshold] = useState<number>(85)
-  const [tmSearchQuery, setTmSearchQuery] = useState('')
+  const [tmSearch, setTmSearch] = useState('')
+  const [tmQuery, setTmQuery] = useState('')
+  const [tmProvenance, setTmProvenance] = useState<TmProvenanceFilter>('all')
+  const [tmUsage, setTmUsage] = useState<TmUsageFilter>('all')
+  const [tmSort, setTmSort] = useState<TmSort>('newest')
+  const [tmPage, setTmPage] = useState(1)
+  const [tmPageSize, setTmPageSize] = useState<TmPageSize>(20)
+  const [tmLoadedOnce, setTmLoadedOnce] = useState(false)
+  const [pendingEvict, setPendingEvict] = useState<TmEntry | null>(null)
+  const [inspectTm, setInspectTm] = useState<TmEntry | null>(null)
+  const [evicting, setEvicting] = useState(false)
+  const [selectedTmIds, setSelectedTmIds] = useState<Set<number>>(new Set())
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [deleteWholeScope, setDeleteWholeScope] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+
+  const [tmImportOpen, setTmImportOpen] = useState(false)
+  const [tmImportFormat, setTmImportFormat] = useState<TmImportFormat>('tmx')
+  const [tmImportContent, setTmImportContent] = useState('')
+  const [tmImportSourceLang, setTmImportSourceLang] = useState('en')
+  const [tmImportTargetLang, setTmImportTargetLang] = useState('zh')
+  const [tmImporting, setTmImporting] = useState(false)
+  const tmFileRef = useRef<HTMLInputElement>(null)
 
   const loadGlossary = useCallback(async () => {
     setGlossaryLoading(true)
@@ -78,673 +323,1297 @@ export function LanguageAssetsView() {
       const listing = await getGlossary()
       setTerms(listing.terms)
       setGlossaryConfigured(listing.configured)
-      // Conflicts are only meaningful when a glossary exists; asking anyway
-      // turns an unconfigured file into an empty (i.e. "clean") conflicts list.
       setConflicts(
         listing.configured
           ? await getGlossaryConflicts().catch(() => [] as GlossaryConflict[])
           : []
       )
     } catch (err) {
-      setGlossaryError(err instanceof Error ? err.message : 'Failed to load glossary')
+      setGlossaryError(err instanceof Error ? err.message : t.assets.loadGlossaryFailed)
     } finally {
       setGlossaryLoading(false)
     }
-  }, [])
+  }, [t.assets.loadGlossaryFailed])
 
-  const loadTm = useCallback(async () => {
+  const loadTm = useCallback(async (page = tmPage) => {
     setTmLoading(true)
     setTmError(null)
     try {
-      const data = await listTm({ limit: 200 })
+      const data = await listTm({
+        limit: tmPageSize,
+        offset: (page - 1) * tmPageSize,
+        query: tmQuery || undefined,
+        provenance: tmProvenance === 'all' ? undefined : tmProvenance,
+        usage: tmUsage === 'all' ? undefined : tmUsage,
+        sort: tmSort,
+      })
       setTmEntries(data.entries)
       setTmTotal(data.total)
+      setTmMachineCount(data.machine_count)
+      setTmHumanCount(data.human_count)
+      setTmNeverUsedCount(data.never_used_count)
+      setTmLoadedOnce(true)
+      setSelectedTmIds(new Set())
+      setDeleteWholeScope(false)
+      const lastPage = Math.max(1, Math.ceil(data.total / tmPageSize))
+      if (page > lastPage) {
+        setTmPage(lastPage)
+      }
     } catch (err) {
-      setTmError(err instanceof Error ? err.message : 'Failed to load translation memory')
+      setTmError(err instanceof Error ? err.message : t.assets.loadTmFailed)
     } finally {
       setTmLoading(false)
     }
-  }, [])
-
-  // The TM grows with every human revision; the endpoint serves at most 1000
-  // rows per call, so the window past the first page loads on demand. Without
-  // this the panel's client-side search only ever saw the first 200 rows, and
-  // older pairs were invisible (and unmanageable) forever.
-  const loadMoreTm = useCallback(async () => {
-    if (tmLoading || tmEntries.length >= tmTotal) return
-    setTmLoading(true)
-    try {
-      const data = await listTm({ limit: 200, offset: tmEntries.length })
-      setTmEntries((prev) => {
-        const seen = new Set(prev.map((entry) => `${entry.source_text}::${entry.target_text}`))
-        return [
-          ...prev,
-          ...data.entries.filter((entry) => !seen.has(`${entry.source_text}::${entry.target_text}`)),
-        ]
-      })
-      setTmTotal(data.total)
-    } catch {
-      /* keep the loaded window usable; the next click retries */
-    } finally {
-      setTmLoading(false)
-    }
-  }, [tmLoading, tmEntries.length, tmTotal])
+  }, [
+    t.assets.loadTmFailed,
+    tmPage,
+    tmPageSize,
+    tmProvenance,
+    tmQuery,
+    tmSort,
+    tmUsage,
+  ])
 
   useEffect(() => {
-    // Tab-switch load; both loaders' setStates run after their awaited fetches.
     // oxlint-disable-next-line react/set-state-in-effect
-    if (activeTab === 'glossary') void loadGlossary()
-    // oxlint-disable-next-line react/set-state-in-effect
-    if (activeTab === 'tm') void loadTm()
-  }, [activeTab, loadGlossary, loadTm])
+    void loadGlossary()
+  }, [loadGlossary])
 
-  const handleAddTerm = async (e: React.FormEvent) => {
-    e.preventDefault()
+  useEffect(() => {
+    if (activeTab !== 'tm') return
+    // oxlint-disable-next-line react/set-state-in-effect
+    void loadTm()
+  }, [activeTab, loadTm])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setTmQuery(tmSearch.trim())
+      setTmPage(1)
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [tmSearch])
+
+  const enableSharedGlossary = async () => {
+    setEnablingGlossary(true)
+    setGlossaryError(null)
+    try {
+      const created = await enableGlossary()
+      setTerms(created)
+      setGlossaryConfigured(true)
+      setConflicts([])
+      toast.push(t.assets.glossaryEnabled, 'success')
+    } catch (err) {
+      setGlossaryError(err instanceof Error ? err.message : t.assets.enableGlossaryFailed)
+    } finally {
+      setEnablingGlossary(false)
+    }
+  }
+
+  const addTerm = async (event: React.FormEvent) => {
+    event.preventDefault()
     if (!newSource.trim() || !newTarget.trim() || savingTerm) return
     setSavingTerm(true)
+    setGlossaryError(null)
     try {
       setTerms(await upsertGlossaryTerm(newSource.trim(), newTarget.trim()))
+      setConflicts(await getGlossaryConflicts().catch(() => conflicts))
       setNewSource('')
       setNewTarget('')
-      setGlossaryError(null)
+      toast.push(t.assets.termSaved, 'success')
     } catch (err) {
-      setGlossaryError(err instanceof Error ? err.message : 'Failed to save term')
+      setGlossaryError(err instanceof Error ? err.message : t.assets.saveTermFailed)
     } finally {
       setSavingTerm(false)
     }
   }
 
-  // The format comes from the file's own extension; the server re-validates
-  // the content and rejects a malformed payload with a 422 rather than
-  // importing a silent partial set.
-  const handleGlossaryImport = async (file: File) => {
-    const ext = file.name.toLowerCase().split('.').pop()
-    const format = ext === 'json' ? 'json' : ext === 'tsv' ? 'tsv' : 'csv'
+  const deleteTerm = async () => {
+    const source = pendingDeleteTerm
+    if (!source || deletingTerm) return
+    setDeletingTerm(true)
+    setGlossaryError(null)
+    try {
+      setTerms(await deleteGlossaryTerm(source))
+      setConflicts(await getGlossaryConflicts().catch(() => conflicts))
+      setPendingDeleteTerm(null)
+      toast.push(t.assets.termDeleted, 'success')
+    } catch (err) {
+      setGlossaryError(err instanceof Error ? err.message : t.assets.deleteTermFailed)
+    } finally {
+      setDeletingTerm(false)
+    }
+  }
+
+  const importGlossaryFile = async () => {
+    const file = glossaryImportFile
+    if (!file || glossaryImporting) return
+    const extension = file.name.toLowerCase().split('.').pop()
+    const format = extension === 'json' ? 'json' : extension === 'tsv' ? 'tsv' : 'csv'
     setGlossaryImporting(true)
     setGlossaryError(null)
-    setGlossaryImportNotice(null)
     try {
-      const content = await file.text()
-      const res = await importGlossary({ format, content })
-      setGlossaryImportNotice(t.assets.glossaryImportDone.replace('{n}', String(res.imported)))
+      const result = await importGlossary({ format, content: await file.text() })
+      setGlossaryImportOpen(false)
+      setGlossaryImportFile(null)
       await loadGlossary()
+      toast.push(t.assets.glossaryImportDone.replace('{n}', String(result.imported)), 'success')
     } catch (err) {
-      setGlossaryError(err instanceof Error ? err.message : 'Failed to import glossary')
+      setGlossaryError(err instanceof Error ? err.message : t.assets.importGlossaryFailed)
     } finally {
       setGlossaryImporting(false)
     }
   }
 
-  const handleDeleteTerm = async (source: string) => {
-    setPendingDeleteTerm(null)
-    try {
-      setTerms(await deleteGlossaryTerm(source))
-    } catch (err) {
-      setGlossaryError(err instanceof Error ? err.message : 'Failed to delete term')
-    }
-  }
-
-  const handleEvict = async (id: number) => {
-    setPendingEvictId(null)
-    try {
-      await evictTm([id])
-      setTmEntries((prev) => prev.filter((entry) => entry.id !== id))
-      setTmTotal((prev) => Math.max(0, prev - 1))
-    } catch (err) {
-      setTmError(err instanceof Error ? err.message : 'Failed to evict entry')
-    }
-  }
-
-  const handleImport = async () => {
-    if (!importContent.trim() || importing) return
-    setImporting(true)
+  const importTranslationMemory = async () => {
+    if (!tmImportContent.trim() || tmImporting) return
+    setTmImporting(true)
     setTmError(null)
-    setImportNotice(null)
     try {
-      const res = await importTm({
-        format: importFormat,
-        content: importContent,
-        src_lang: importSrcLang,
-        tgt_lang: importTgtLang,
+      const result = await importTm({
+        format: tmImportFormat,
+        content: tmImportContent,
+        src_lang: tmImportSourceLang,
+        tgt_lang: tmImportTargetLang,
       })
-      setImportNotice(t.assets.importDone.replace('{n}', String(res.imported)))
-      setImportContent('')
+      setTmImportOpen(false)
+      setTmImportContent('')
       await loadTm()
+      toast.push(t.assets.importDone.replace('{n}', String(result.imported)), 'success')
     } catch (err) {
-      setTmError(err instanceof Error ? err.message : 'Failed to import translation memory')
+      setTmError(err instanceof Error ? err.message : t.assets.importTmFailed)
     } finally {
-      setImporting(false)
+      setTmImporting(false)
     }
   }
 
-  const filteredTerms = terms.filter(
-    (term) =>
-      term.source.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      term.target.includes(searchQuery)
-  )
+  const evictTranslation = async () => {
+    const entry = pendingEvict
+    if (!entry || evicting) return
+    setEvicting(true)
+    setTmError(null)
+    try {
+      await evictTm([entry.id])
+      setTmEntries((previous) => previous.filter((candidate) => candidate.id !== entry.id))
+      setTmTotal((previous) => Math.max(0, previous - 1))
+      setTmMachineCount((previous) =>
+        Math.max(0, previous - (entry.provenance === 'machine' ? 1 : 0))
+      )
+      setTmHumanCount((previous) =>
+        Math.max(0, previous - (entry.provenance === 'human_pe' ? 1 : 0))
+      )
+      setTmNeverUsedCount((previous) =>
+        Math.max(0, previous - (entry.use_count === 0 ? 1 : 0))
+      )
+      setPendingEvict(null)
+      toast.push(t.assets.tmDeleted, 'success')
+      if (tmEntries.length === 1 && tmPage > 1) {
+        setTmPage((previous) => Math.max(1, previous - 1))
+      }
+    } catch (err) {
+      setTmError(err instanceof Error ? err.message : t.assets.deleteTmFailed)
+    } finally {
+      setEvicting(false)
+    }
+  }
 
-  const filteredTmEntries = tmEntries.filter(
-    (entry) =>
-      !tmSearchQuery ||
-      entry.source_text.toLowerCase().includes(tmSearchQuery.toLowerCase()) ||
-      entry.target_text.toLowerCase().includes(tmSearchQuery.toLowerCase()) ||
-      (entry.domain && entry.domain.toLowerCase().includes(tmSearchQuery.toLowerCase()))
-  )
+  const evictSelected = async () => {
+    const ids = [...selectedTmIds]
+    if ((ids.length === 0 && !deleteWholeScope) || bulkDeleting) return
+    setBulkDeleting(true)
+    setTmError(null)
+    try {
+      const removed = deleteWholeScope
+        ? await evictMatchingTm({
+            expected_total: tmTotal,
+            query: tmQuery || undefined,
+            provenance: tmProvenance === 'all' ? undefined : tmProvenance,
+            usage: tmUsage === 'all' ? undefined : tmUsage,
+          })
+        : await evictTm(ids)
+      setBulkDeleteOpen(false)
+      setDeleteWholeScope(false)
+      setSelectedTmIds(new Set())
+      await loadTm(tmPage)
+      toast.push(t.assets.tmDeletedSelected.replace('{count}', String(removed)), 'success')
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setBulkDeleteOpen(false)
+        setDeleteWholeScope(false)
+        setSelectedTmIds(new Set())
+        setTmError(t.assets.tmScopeChanged)
+        await loadTm(tmPage)
+      } else {
+        setTmError(err instanceof Error ? err.message : t.assets.deleteTmFailed)
+      }
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
 
-  const tabs: { id: Tab; label: string }[] = [
-    { id: 'glossary', label: t.assets.tabGlossary },
-    { id: 'tm', label: t.assets.tabTm },
-    { id: 'bible', label: t.assets.tabBible },
-  ]
+  const readTmFile = async (file: File) => {
+    const extension = file.name.toLowerCase().split('.').pop()
+    setTmImportFormat(extension === 'json' ? 'json' : 'tmx')
+    setTmImportContent(await file.text())
+  }
+
+  const normalizedGlossarySearch = glossarySearch.trim().toLocaleLowerCase()
+  const filteredTerms = terms.filter((term) => {
+    if (!normalizedGlossarySearch) return true
+    return (
+      term.source.toLocaleLowerCase().includes(normalizedGlossarySearch) ||
+      term.target.toLocaleLowerCase().includes(normalizedGlossarySearch)
+    )
+  })
+
+  const glossaryHasSearch = normalizedGlossarySearch.length > 0
+  const tmHasFilters =
+    tmQuery.length > 0 || tmProvenance !== 'all' || tmUsage !== 'all'
+  const tmPageCount = Math.max(1, Math.ceil(tmTotal / tmPageSize))
+  const tmRangeStart = tmTotal === 0 ? 0 : (tmPage - 1) * tmPageSize + 1
+  const tmRangeEnd = Math.min(tmPage * tmPageSize, tmTotal)
+  const tmPageIds = tmEntries.map((entry) => entry.id)
+  const tmPageAllSelected =
+    tmPageIds.length > 0 && tmPageIds.every((id) => selectedTmIds.has(id))
+  const tmPageSomeSelected =
+    !tmPageAllSelected && tmPageIds.some((id) => selectedTmIds.has(id))
+
+  const toggleTmPage = (checked: boolean) => {
+    setDeleteWholeScope(false)
+    setSelectedTmIds((previous) => {
+      const next = new Set(previous)
+      for (const id of tmPageIds) {
+        if (checked) next.add(id)
+        else next.delete(id)
+      }
+      return next
+    })
+  }
+
+  const toggleTmEntry = (id: number, checked: boolean) => {
+    setDeleteWholeScope(false)
+    setSelectedTmIds((previous) => {
+      const next = new Set(previous)
+      if (checked) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+
+  const clearTmFilters = () => {
+    setTmSearch('')
+    setTmQuery('')
+    setTmProvenance('all')
+    setTmUsage('all')
+    setTmPage(1)
+    setDeleteWholeScope(false)
+    setSelectedTmIds(new Set())
+  }
+
+  const formatTmDate = (value: string) => {
+    if (!value) return ''
+    const parsed = new Date(`${value.replace(' ', 'T')}Z`)
+    if (Number.isNaN(parsed.getTime())) return value
+    return new Intl.DateTimeFormat(language === 'zh' ? 'zh-CN' : 'en', {
+      dateStyle: 'medium',
+    }).format(parsed)
+  }
 
   return (
-    <div className="flex-1 overflow-y-auto px-8 py-7 space-y-7 max-w-5xl mx-auto w-full">
-      <ConfirmDialog
-        open={pendingDeleteTerm !== null}
-        title={t.assets.deleteTermTitle}
-        body={(t.assets.deleteTermBody ?? '').replace('{term}', pendingDeleteTerm ?? '')}
-        confirmLabel={t.common.confirm}
-        cancelLabel={t.common.cancel}
-        danger
-        onConfirm={() => void handleDeleteTerm(pendingDeleteTerm ?? '')}
-        onCancel={() => setPendingDeleteTerm(null)}
-      />
-      <ConfirmDialog
-        open={pendingEvictId !== null}
-        title={t.assets.evictTmTitle}
-        body={t.assets.evictTmBody}
-        confirmLabel={t.common.confirm}
-        cancelLabel={t.common.cancel}
-        danger
-        onConfirm={() => void handleEvict(pendingEvictId ?? 0)}
-        onCancel={() => setPendingEvictId(null)}
-      />
-      {/* View Header */}
-      <div className="flex items-center justify-between border-b border-[var(--paper-border)] pb-4">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-[var(--ink-primary)]">
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 overflow-y-auto px-4 py-6 sm:px-7">
+      <header className="flex flex-col justify-between gap-4 border-b border-border/80 pb-5 sm:flex-row sm:items-end">
+        <div className="space-y-1.5">
+          <h1 className="text-2xl font-semibold tracking-[-0.025em] text-foreground">
             {t.assets.title}
           </h1>
-          <p className="text-xs text-[var(--ink-secondary)] mt-1">{t.assets.subtitle}</p>
+          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            {t.assets.subtitle}
+          </p>
         </div>
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as AssetTab)}>
+          <TabsList className="h-9 w-full sm:w-auto">
+            <TabsTrigger value="glossary" className="min-w-0 gap-1.5 px-3">
+              <span className="truncate">{t.assets.tabGlossary}</span>
+              <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
+                {glossaryConfigured ? terms.length : '—'}
+              </span>
+            </TabsTrigger>
+            <TabsTrigger value="tm" className="min-w-0 gap-1.5 px-3">
+              <span className="truncate">{t.assets.tabTm}</span>
+              <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
+                {tmLoadedOnce ? tmTotal : '—'}
+              </span>
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </header>
 
-        <div className="flex bg-[var(--paper-subsurface)] p-0.5 rounded-[5px] border border-[var(--paper-border)]">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-3 py-1 rounded-[4px] text-xs font-semibold transition-colors ${
-                activeTab === tab.id
-                  ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] shadow-2xs'
-                  : 'text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {activeTab === 'glossary' && (
-        <div className="space-y-4">
-          <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs">
-            <form onSubmit={handleAddTerm} className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-              <input
-                type="text"
-                placeholder={t.assets.sourceTerm}
-                aria-label={t.assets.sourceTerm}
-                value={newSource}
-                onChange={(e) => setNewSource(e.target.value)}
-                className="h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-3 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none font-mono placeholder:text-[var(--ink-muted)]"
-              />
-              <input
-                type="text"
-                placeholder={t.assets.targetTerm}
-                aria-label={t.assets.targetTerm}
-                value={newTarget}
-                onChange={(e) => setNewTarget(e.target.value)}
-                className="h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-3 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none placeholder:text-[var(--ink-muted)]"
-              />
-              <Button type="submit" variant="primary" size="sm" disabled={savingTerm}>
-                {savingTerm ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                ) : (
-                  <Plus className="h-3.5 w-3.5 mr-1" />
-                )}
-                {t.assets.submitTerm}
-              </Button>
-            </form>
-          </div>
-
-          {glossaryError && (
-            <div className="p-3 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] text-xs text-[var(--ink-secondary)] flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-[#b45309] shrink-0" />
-              {glossaryError}
+      {activeTab === 'glossary' ? (
+        <section className="min-w-0 space-y-4" aria-labelledby="glossary-heading">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 id="glossary-heading" className="text-base font-semibold text-foreground">
+                {t.assets.tabGlossary}
+              </h2>
+              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                {t.assets.glossaryDescription}
+              </p>
             </div>
-          )}
-
-          {glossaryConfigured && (
-            <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs flex items-center justify-between gap-3 flex-wrap">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-[var(--ink-primary)]">
-                    {t.assets.glossaryImportTitle}
-                  </span>
-                  {glossaryImportNotice && (
-                    <span className="text-[#15803d] text-xs font-medium flex items-center gap-1">
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      {glossaryImportNotice}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-[var(--ink-muted)] mt-0.5">{t.assets.glossaryImportHint}</p>
-              </div>
-              <input
-                ref={glossaryFileRef}
-                type="file"
-                accept=".csv,.tsv,.json"
-                className="hidden"
-                aria-label={t.assets.glossaryImportTitle}
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) void handleGlossaryImport(file)
-                  e.target.value = ''
-                }}
-              />
+            {glossaryConfigured ? (
               <Button
                 variant="outline"
                 size="sm"
-                disabled={glossaryImporting}
-                onClick={() => glossaryFileRef.current?.click()}
+                onClick={() => setGlossaryImportOpen(true)}
               >
-                {glossaryImporting ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                ) : (
-                  <Upload className="h-3.5 w-3.5 mr-1" />
-                )}
-                {glossaryImporting ? t.assets.importing : t.assets.glossaryImportBtn}
+                <Upload />
+                {t.assets.importAction}
               </Button>
-            </div>
-          )}
-
-          <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2">
-            <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-              {t.assets.conflictsTitle}
-            </div>
-            {!glossaryConfigured ? (
-              // No file configured is not "no conflicts": claiming a clean bill
-              // of health for a glossary that does not exist is the one thing
-              // this panel must never do.
-              <div className="text-xs text-[#b45309] flex items-start gap-2">
-                <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                <span>{t.assets.glossaryNotConfigured}</span>
-              </div>
-            ) : conflicts.length === 0 ? (
-              <div className="text-xs text-[var(--ink-muted)] flex items-center gap-2">
-                <CheckCircle2 className="h-3.5 w-3.5 text-[#15803d]" />
-                {t.assets.noConflicts}
-              </div>
-            ) : (
-              <ul className="space-y-1">
-                {conflicts.map((conflict) => (
-                  <li
-                    key={conflict.source}
-                    className="text-xs flex items-center gap-2 text-[#b45309]"
-                  >
-                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                    <span className="font-mono font-bold text-[var(--ink-primary)]">
-                      {conflict.source}
-                    </span>
-                    <span className="text-[var(--ink-muted)]">
-                      {t.assets.conflictTargets}:
-                    </span>
-                    <span className="font-mono">{conflict.targets.join(' / ')}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+            ) : null}
           </div>
 
-          <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
-            <div className="h-10 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between gap-3">
-              <div className="relative flex-1 max-w-xs">
-                <Search className="h-3.5 w-3.5 absolute left-2.5 top-2.5 text-[var(--ink-muted)]" />
-                <input
-                  type="text"
-                  placeholder={t.common.search}
-                  aria-label={t.common.search}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full h-7 pl-8 pr-3 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none placeholder:text-[var(--ink-muted)]"
-                />
-              </div>
-              <Badge variant="outline">
-                {filteredTerms.length} {t.assets.activeTerms}
-              </Badge>
-            </div>
+          {glossaryError ? (
+            <Alert variant="destructive">
+              <AlertCircle />
+              <AlertTitle>{t.assets.actionFailed}</AlertTitle>
+              <AlertDescription>{glossaryError}</AlertDescription>
+            </Alert>
+          ) : null}
 
-            <table className="w-full text-xs text-left">
-              <thead className="bg-[var(--paper-subsurface)] text-[var(--ink-muted)] font-mono border-b border-[var(--paper-border)]">
-                <tr>
-                  <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider">
-                    {t.assets.colSource}
-                  </th>
-                  <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider">
-                    {t.assets.colTarget}
-                  </th>
-                  <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider text-right">
-                    {t.assets.colAction}
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--paper-border)]">
-                {glossaryLoading ? (
-                  <tr>
-                    <td colSpan={3} className="py-6 text-center text-[var(--ink-muted)]">
-                      <Loader2 className="h-4 w-4 animate-spin mx-auto" />
-                    </td>
-                  </tr>
-                ) : filteredTerms.length === 0 ? (
-                  <tr>
-                    <td colSpan={3} className="py-6 text-center text-[var(--ink-muted)]">
-                      {t.assets.noTerms}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredTerms.map((term) => (
-                    <tr
-                      key={term.source}
-                      className="hover:bg-[var(--paper-subsurface)] transition-colors"
-                    >
-                      <td className="py-2 px-4 font-mono font-bold text-[var(--ink-primary)]">
-                        {term.source}
-                      </td>
-                      <td className="py-2 px-4 text-[#15803d] font-bold">{term.target}</td>
-                      <td className="py-2 px-4 text-right">
-                        <button
-                          onClick={() => setPendingDeleteTerm(term.source)}
-                          className="text-[var(--ink-muted)] hover:text-[#b91c1c] transition-colors p-1"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+          {conflicts.length > 0 ? (
+            <Alert variant="warning">
+              <AlertTriangle />
+              <AlertTitle>{t.assets.conflictsTitle}</AlertTitle>
+              <AlertDescription>
+                <ul className="space-y-1">
+                  {conflicts.map((conflict) => (
+                    <li key={conflict.source} className="break-words">
+                      <span className="font-medium text-foreground">{conflict.source}</span>
+                      <span className="mx-1.5 text-muted-foreground">→</span>
+                      <span>{conflict.targets.join(' / ')}</span>
+                    </li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          ) : null}
 
-      {activeTab === 'tm' && (
-        <div className="space-y-4">
-          {tmError && (
-            <div className="p-3 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] text-xs text-[var(--ink-secondary)] flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-[#b45309] shrink-0" />
-              {tmError}
+          {!glossaryConfigured ? (
+            <div className="rounded-xl border border-dashed border-border bg-card/60 px-6 py-10">
+              <Empty className="gap-4 p-0">
+                <EmptyHeader className="max-w-md">
+                  <EmptyTitle className="text-base">{t.assets.glossaryNotConfiguredTitle}</EmptyTitle>
+                  <EmptyDescription>{t.assets.glossaryNotConfigured}</EmptyDescription>
+                </EmptyHeader>
+                <Button onClick={() => void enableSharedGlossary()} disabled={enablingGlossary}>
+                  {enablingGlossary ? <Loader2 className="animate-spin" /> : <Plus />}
+                  {enablingGlossary ? t.assets.enablingGlossary : t.assets.enableGlossary}
+                </Button>
+              </Empty>
             </div>
-          )}
-
-          {/* TM Fuzzy Threshold Knobs */}
-          <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <div>
-                <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold flex items-center gap-1.5">
-                  <Sliders className="h-3.5 w-3.5" />
-                  {t.assets.fuzzyThreshold}
-                </span>
-                <p className="text-xs text-[var(--ink-secondary)] mt-0.5">
-                  {t.assets.fuzzyThresholdHelp}
-                </p>
-              </div>
-              <span className="font-mono text-xs font-bold text-[#15803d]">
-                {tmFuzzyThreshold}%
-              </span>
-            </div>
-            <input
-              type="range"
-              min="50"
-              max="100"
-              step="5"
-              value={tmFuzzyThreshold}
-              aria-label={t.assets.fuzzyThreshold}
-              onChange={(e) => setTmFuzzyThreshold(parseInt(e.target.value, 10))}
-              className="w-full h-1.5 bg-[var(--paper-border)] rounded-lg appearance-none cursor-pointer accent-[var(--ink-primary)]"
-            />
-          </div>
-
-          <div className="p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2.5">
-            <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-              {t.assets.importTitle}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex bg-[var(--paper-subsurface)] p-0.5 rounded-[4px] border border-[var(--paper-border)]">
-                {(['tmx', 'json'] as const).map((fmt) => (
-                  <button
-                    key={fmt}
-                    onClick={() => setImportFormat(fmt)}
-                    className={`px-2.5 py-1 text-xs rounded-[3px] font-medium transition-colors ${
-                      importFormat === fmt
-                        ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-2xs'
-                        : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
-                    }`}
-                  >
-                    {fmt.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-              <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)]">
-                {t.assets.importLangs}
-              </span>
-              <input
-                type="text"
-                value={importSrcLang}
-                aria-label={t.wizard.sourceLang}
-                onChange={(e) => setImportSrcLang(e.target.value)}
-                className="h-7 w-16 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2 text-xs font-mono text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none"
-              />
-              <span className="text-[var(--ink-muted)]">→</span>
-              <input
-                type="text"
-                value={importTgtLang}
-                aria-label={t.wizard.targetLang}
-                onChange={(e) => setImportTgtLang(e.target.value)}
-                className="h-7 w-16 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2 text-xs font-mono text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none"
-              />
-              {importNotice && (
-                <span className="text-[#15803d] text-xs font-medium">{importNotice}</span>
-              )}
-            </div>
-            <textarea
-              value={importContent}
-              onChange={(e) => setImportContent(e.target.value)}
-              placeholder={t.assets.importContent}
-              rows={4}
-              className="w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 py-2 text-xs font-mono text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none resize-y placeholder:text-[var(--ink-muted)]"
-            />
-            <div className="flex justify-end">
-              <Button
-                onClick={handleImport}
-                variant="primary"
-                size="sm"
-                disabled={!importContent.trim() || importing}
+          ) : (
+            <>
+              <form
+                onSubmit={addTerm}
+                className="grid grid-cols-1 gap-2.5 rounded-xl border border-border/80 bg-card p-3 shadow-card md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
               >
-                {importing ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                ) : (
-                  <Upload className="h-3.5 w-3.5 mr-1" />
-                )}
-                {importing ? t.assets.importing : t.assets.importBtn}
-              </Button>
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
-            <div className="h-10 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between gap-3">
-              <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold shrink-0">
-                {t.assets.tmTitle}
-              </span>
-              <div className="flex items-center gap-2 max-w-xs w-full">
-                <div className="relative flex-1">
-                  <Search className="h-3 w-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--ink-muted)]" />
-                  <input
-                    type="text"
-                    placeholder={t.common.search}
-                    aria-label={t.common.search}
-                    value={tmSearchQuery}
-                    onChange={(e) => setTmSearchQuery(e.target.value)}
-                    className="w-full h-7 pl-7 pr-2.5 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-surface)] text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none placeholder:text-[var(--ink-muted)]"
+                <div className="space-y-1.5">
+                  <Label htmlFor="new-term-source" className="text-xs text-muted-foreground">
+                    {t.assets.sourceTerm}
+                  </Label>
+                  <Input
+                    id="new-term-source"
+                    value={newSource}
+                    onChange={(event) => setNewSource(event.target.value)}
+                    placeholder={t.assets.sourceTermPlaceholder}
+                    className="h-9 bg-background"
                   />
                 </div>
-                <Badge variant="outline" className="shrink-0 text-xs font-mono">
-                  {filteredTmEntries.length} / {tmTotal}
-                </Badge>
-              </div>
-            </div>
-            <table className="w-full text-xs text-left">
-              <thead className="bg-[var(--paper-subsurface)] text-[var(--ink-muted)] font-mono border-b border-[var(--paper-border)]">
-                <tr>
-                  <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider">
-                    {t.assets.colSource}
-                  </th>
-                  <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider">
-                    {t.assets.colTarget}
-                  </th>
-                  <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider">
-                    {t.assets.colProvenance}
-                  </th>
-                  <th className="py-2.5 px-4 font-semibold uppercase text-xs tracking-wider text-right">
-                    {t.assets.colAction}
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--paper-border)]">
-                {tmLoading ? (
-                  <tr>
-                    <td colSpan={4} className="py-6 text-center text-[var(--ink-muted)]">
-                      <Loader2 className="h-4 w-4 animate-spin mx-auto" />
-                    </td>
-                  </tr>
-                ) : filteredTmEntries.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="py-6 text-center text-[var(--ink-muted)]">
-                      {t.assets.tmDesc}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredTmEntries.map((entry) => (
-                    <tr
-                      key={entry.id}
-                      className="hover:bg-[var(--paper-subsurface)] transition-colors"
-                    >
-                      <td className="py-2 px-4 font-mono text-[var(--ink-primary)] max-w-xs truncate">
-                        {entry.source_text}
-                      </td>
-                      <td className="py-2 px-4 text-[#15803d] max-w-xs truncate">
-                        {entry.target_text}
-                      </td>
-                      <td className="py-2 px-4 font-mono text-xs text-[var(--ink-muted)]">
-                        {entry.provenance}
-                      </td>
-                      <td className="py-2 px-4 text-right">
-                        <button
-                          onClick={() => setPendingEvictId(entry.id)}
-                          className="text-[var(--ink-muted)] hover:text-[#b91c1c] transition-colors p-1"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-            {tmEntries.length < tmTotal && (
-              <div className="py-2.5 text-center border-t border-[var(--paper-border)]">
-                <button
-                  onClick={() => void loadMoreTm()}
-                  disabled={tmLoading}
-                  className="type-help text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] disabled:opacity-50 transition-colors"
+                <div className="space-y-1.5">
+                  <Label htmlFor="new-term-target" className="text-xs text-muted-foreground">
+                    {t.assets.targetTerm}
+                  </Label>
+                  <Input
+                    id="new-term-target"
+                    value={newTarget}
+                    onChange={(event) => setNewTarget(event.target.value)}
+                    placeholder={t.assets.targetTermPlaceholder}
+                    className="h-9 bg-background"
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  className="h-9 self-end"
+                  disabled={!newSource.trim() || !newTarget.trim() || savingTerm}
                 >
-                  {tmLoading
-                    ? t.assets.tmLoadingMore
-                    : t.assets.tmLoadMore.replace('{n}', String(tmTotal - tmEntries.length))}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+                  {savingTerm ? <Loader2 className="animate-spin" /> : <Plus />}
+                  {t.assets.submitTerm}
+                </Button>
+              </form>
 
-      {activeTab === 'bible' && (
-        <div className="space-y-5 animate-in fade-in duration-150">
-          <div className="p-5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2">
-            <div className="flex items-center gap-2 text-xs font-bold text-[var(--ink-primary)]">
-              <BookOpen className="h-4 w-4 text-[var(--ink-secondary)]" />
-              <span>{t.assets.bibleOverviewTitle}</span>
-            </div>
-            <p className="text-xs text-[var(--ink-secondary)] leading-relaxed">
-              {t.assets.bibleOverviewDesc}
-            </p>
-          </div>
+              <div className="overflow-hidden rounded-xl border border-border/80 bg-card shadow-card">
+                <div className="flex flex-col gap-3 border-b border-border/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <ToolbarSearch
+                    value={glossarySearch}
+                    onChange={setGlossarySearch}
+                    placeholder={t.assets.searchTerms}
+                  />
+                  <AssetCount
+                    value={filteredTerms.length}
+                    label={
+                      glossaryHasSearch
+                        ? t.assets.matchingTerms
+                        : t.assets.glossaryEntries
+                    }
+                  />
+                </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-4 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2">
-              <div className="flex items-center gap-2 text-xs font-semibold text-[var(--ink-primary)]">
-                <Layers className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
-                <span>{t.assets.bibleStructureTitle}</span>
+                {glossaryLoading ? (
+                  <>
+                    <StackedLoading />
+                    <div className="hidden md:block">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>{t.assets.colSource}</TableHead>
+                            <TableHead>{t.assets.colTarget}</TableHead>
+                            <TableHead className="w-14">
+                              <span className="sr-only">{t.assets.colAction}</span>
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          <TableLoading columns={3} />
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </>
+                ) : filteredTerms.length === 0 ? (
+                  <AssetEmpty
+                    title={glossaryHasSearch ? t.assets.noMatchingTerms : t.assets.noTerms}
+                    description={
+                      glossaryHasSearch
+                        ? t.assets.noMatchingTermsDescription
+                        : t.assets.noTermsDescription
+                    }
+                  />
+                ) : (
+                  <>
+                    <ul className="divide-y divide-border/70 md:hidden">
+                      {filteredTerms.map((term) => (
+                        <li
+                          key={term.source}
+                          className="flex items-start gap-3 px-4 py-4"
+                        >
+                          <dl className="min-w-0 flex-1 space-y-3">
+                            <div>
+                              <dt className="text-xs font-medium text-muted-foreground">
+                                {t.assets.colSource}
+                              </dt>
+                              <dd className="mt-1 break-words font-medium text-foreground">
+                                {term.source}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="text-xs font-medium text-muted-foreground">
+                                {t.assets.colTarget}
+                              </dt>
+                              <dd className="mt-1 break-words text-foreground">{term.target}</dd>
+                            </div>
+                          </dl>
+                          <RowActions
+                            label={t.assets.termActions.replace('{term}', term.source)}
+                            deleteLabel={t.assets.deleteTermAction}
+                            onDelete={() => setPendingDeleteTerm(term.source)}
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="hidden md:block">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[46%]">{t.assets.colSource}</TableHead>
+                            <TableHead>{t.assets.colTarget}</TableHead>
+                            <TableHead className="w-14">
+                              <span className="sr-only">{t.assets.colAction}</span>
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredTerms.map((term) => (
+                            <TableRow key={term.source}>
+                              <TableCell className="font-medium text-foreground">
+                                <span className="block break-words">{term.source}</span>
+                              </TableCell>
+                              <TableCell className="text-foreground">
+                                <span className="block break-words">{term.target}</span>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <RowActions
+                                  label={t.assets.termActions.replace('{term}', term.source)}
+                                  deleteLabel={t.assets.deleteTermAction}
+                                  onDelete={() => setPendingDeleteTerm(term.source)}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </>
+                )}
               </div>
-              <p className="text-xs text-[var(--ink-secondary)] leading-relaxed">
-                {t.assets.bibleStructureDesc}
+            </>
+          )}
+        </section>
+      ) : (
+        <section className="min-w-0 space-y-4" aria-labelledby="tm-heading">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 id="tm-heading" className="text-base font-semibold text-foreground">
+                {t.assets.tabTm}
+              </h2>
+              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                {t.assets.tmDescription}
               </p>
-              <ol className="p-2.5 rounded bg-[var(--paper-subsurface)] border border-[var(--paper-border)] text-xs text-[var(--ink-secondary)] space-y-1.5 list-none">
-                {[
-                  t.assets.bibleSourceSeeds,
-                  t.assets.bibleSourceGlossary,
-                  t.assets.bibleSourceChapters,
-                  t.assets.bibleSourceMined,
-                ].map((source, index) => (
-                  <li key={source} className="flex items-center gap-2">
-                    <span className="shrink-0 text-xs font-mono px-1.5 py-0.5 rounded border border-[var(--paper-border)] text-[var(--ink-muted)]">
-                      {index + 1}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setTmImportOpen(true)}>
+              <ArrowDownToLine />
+              {t.assets.importAction}
+            </Button>
+          </div>
+
+          {tmError ? (
+            <Alert variant="destructive">
+              <AlertCircle />
+              <AlertTitle>{t.assets.actionFailed}</AlertTitle>
+              <AlertDescription>{tmError}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          <div className="overflow-hidden rounded-xl border border-border/80 bg-card shadow-card">
+            <div className="space-y-3 border-b border-border/70 px-4 py-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <ToolbarSearch
+                  value={tmSearch}
+                  onChange={setTmSearch}
+                  placeholder={t.assets.searchTm}
+                />
+                {tmLoadedOnce ? (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <span className="tabular-nums text-foreground">
+                      {t.assets.tmSummary
+                        .replace('{machine}', String(tmMachineCount))
+                        .replace('{human}', String(tmHumanCount))}
                     </span>
-                    <span>{source}</span>
-                  </li>
-                ))}
-              </ol>
+                    <span className="text-border">·</span>
+                    {tmNeverUsedCount > 0 ? (
+                      <button
+                        type="button"
+                        className={cn(
+                          'rounded-full border border-border/80 px-2 py-0.5 tabular-nums transition-colors hover:border-foreground/30 hover:text-foreground',
+                          tmUsage === 'never' &&
+                            'border-foreground/30 bg-muted/50 text-foreground'
+                        )}
+                        aria-pressed={tmUsage === 'never'}
+                        onClick={() => {
+                          setTmUsage((previous) =>
+                            previous === 'never' ? 'all' : 'never'
+                          )
+                          setTmPage(1)
+                        }}
+                      >
+                        {t.assets.tmNeverUsedSummary.replace(
+                          '{count}',
+                          String(tmNeverUsedCount)
+                        )}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <FilterSelect
+                  value={tmProvenance}
+                  onValueChange={(value) => {
+                    setTmProvenance(value)
+                    setTmPage(1)
+                  }}
+                  label={t.assets.tmFilterProvenance}
+                  options={[
+                    { value: 'all', label: `${t.assets.tmFilterProvenance}：${t.assets.tmFilterAll}` },
+                    { value: 'machine', label: t.assets.provenanceMachine },
+                    { value: 'human_pe', label: t.assets.provenanceHuman },
+                  ]}
+                />
+                <FilterSelect
+                  value={tmUsage}
+                  onValueChange={(value) => {
+                    setTmUsage(value)
+                    setTmPage(1)
+                  }}
+                  label={t.assets.tmFilterUsage}
+                  options={[
+                    { value: 'all', label: `${t.assets.tmFilterUsage}：${t.assets.tmFilterAll}` },
+                    { value: 'never', label: t.assets.tmUsageNever },
+                    { value: 'used', label: t.assets.tmUsageUsed },
+                  ]}
+                />
+                <FilterSelect
+                  value={tmSort}
+                  onValueChange={setTmSort}
+                  label={t.assets.tmSort}
+                  options={[
+                    { value: 'newest', label: t.assets.tmSortNewest },
+                    { value: 'oldest', label: t.assets.tmSortOldest },
+                    { value: 'most_used', label: t.assets.tmSortMostUsed },
+                  ]}
+                />
+                {tmHasFilters ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="justify-start text-muted-foreground sm:justify-center"
+                    onClick={clearTmFilters}
+                  >
+                    <FilterX />
+                    {t.assets.tmClearFilters}
+                  </Button>
+                ) : null}
+                {tmLoadedOnce && tmPageIds.length > 0 ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="justify-start text-muted-foreground lg:ml-auto"
+                    onClick={() => toggleTmPage(!tmPageAllSelected)}
+                  >
+                    <Checkbox
+                      checked={
+                        tmPageAllSelected
+                          ? true
+                          : tmPageSomeSelected
+                            ? 'indeterminate'
+                            : false
+                      }
+                      aria-hidden="true"
+                      tabIndex={-1}
+                    />
+                    {tmPageAllSelected
+                      ? t.assets.tmSelected.replace(
+                          '{count}',
+                          String(selectedTmIds.size)
+                        )
+                      : t.assets.tmSelectPage}
+                  </Button>
+                ) : null}
+              </div>
+
+              {selectedTmIds.size > 0 || deleteWholeScope ? (
+                <div className="flex flex-col gap-2 rounded-lg bg-muted/45 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                    <span className="font-medium text-foreground">
+                      {deleteWholeScope
+                        ? t.assets.tmAllFilteredSelected.replace(
+                            '{count}',
+                            String(tmTotal)
+                          )
+                        : t.assets.tmSelected.replace(
+                            '{count}',
+                            String(selectedTmIds.size)
+                          )}
+                    </span>
+                    {!deleteWholeScope && tmTotal > tmPageIds.length ? (
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="h-auto p-0 text-xs"
+                        onClick={() => setDeleteWholeScope(true)}
+                      >
+                        {t.assets.tmSelectAllFiltered.replace(
+                          '{count}',
+                          String(tmTotal)
+                        )}
+                      </Button>
+                    ) : null}
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="h-auto p-0 text-xs text-muted-foreground"
+                      onClick={() => {
+                        setSelectedTmIds(new Set())
+                        setDeleteWholeScope(false)
+                      }}
+                    >
+                      {t.assets.tmClearSelection}
+                    </Button>
+                  </div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setBulkDeleteOpen(true)}
+                  >
+                    <Trash2 />
+                    {t.assets.tmDeleteSelected}
+                  </Button>
+                </div>
+              ) : null}
             </div>
 
-            <div className="p-4 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs space-y-2">
-              <div className="flex items-center gap-2 text-xs font-semibold text-[var(--ink-primary)]">
-                <CheckCircle2 className="h-3.5 w-3.5 text-[#15803d]" />
-                <span>{t.assets.bibleWorkflowTitle}</span>
+            {tmLoading ? (
+              <>
+                <StackedLoading />
+                <div className="hidden md:block">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t.assets.colSource}</TableHead>
+                        <TableHead>{t.assets.colTarget}</TableHead>
+                        <TableHead className="w-28">{t.assets.colProvenance}</TableHead>
+                        <TableHead className="w-14">
+                          <span className="sr-only">{t.assets.colAction}</span>
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableLoading columns={4} />
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
+            ) : tmEntries.length === 0 ? (
+              <AssetEmpty
+                title={tmHasFilters ? t.assets.tmFilterNoResults : t.assets.noTm}
+                description={
+                  tmHasFilters
+                    ? t.assets.tmFilterNoResultsDescription
+                    : t.assets.noTmDescription
+                }
+                action={
+                  !tmHasFilters ? (
+                    <Button variant="outline" size="sm" onClick={() => setTmImportOpen(true)}>
+                      <ArrowDownToLine />
+                      {t.assets.importAction}
+                    </Button>
+                  ) : undefined
+                }
+              />
+            ) : (
+              <>
+                <ul className="divide-y divide-border/70 md:hidden">
+                  {tmEntries.map((entry) => (
+                    <li key={entry.id} className="px-4 py-4">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Checkbox
+                            checked={selectedTmIds.has(entry.id)}
+                            onCheckedChange={(checked) =>
+                              toggleTmEntry(entry.id, checked === true)
+                            }
+                            aria-label={t.assets.tmSelectEntry}
+                          />
+                          {t.assets.tmSelectEntry}
+                        </label>
+                        <span className="tabular-nums text-xs text-muted-foreground">
+                          {entry.use_count > 0
+                            ? t.assets.tmReuseCount.replace(
+                                '{count}',
+                                String(entry.use_count)
+                              )
+                            : t.assets.tmNeverReused}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setInspectTm(entry)}
+                          className="h-8 px-2 text-xs"
+                        >
+                          <Maximize2 />
+                          {t.assets.tmInspectEntry}
+                        </Button>
+                      </div>
+                      <dl className="space-y-3">
+                        <div>
+                          <dt className="text-xs font-medium text-muted-foreground">
+                            {t.assets.colSource}
+                          </dt>
+                          <dd className="mt-1">
+                              <TmPassage
+                                text={entry.source_text}
+                                source
+                              />
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs font-medium text-muted-foreground">
+                            {t.assets.colTarget}
+                          </dt>
+                          <dd className="mt-1">
+                              <TmPassage
+                                text={entry.target_text}
+                                source={false}
+                              />
+                          </dd>
+                        </div>
+                      </dl>
+                      <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="text-xs font-medium text-muted-foreground">
+                            {t.assets.colProvenance}
+                          </span>
+                          <Badge
+                            variant="outline"
+                            className="font-normal text-muted-foreground"
+                          >
+                            {entry.provenance === 'human_pe'
+                              ? t.assets.provenanceHuman
+                              : t.assets.provenanceMachine}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {entry.updated_at
+                              ? t.assets.tmUpdatedAt.replace(
+                                  '{date}',
+                                  formatTmDate(entry.updated_at)
+                                )
+                              : null}
+                          </span>
+                        </div>
+                        <RowActions
+                          label={t.assets.tmRowActions}
+                          inspectLabel={t.assets.tmInspectEntry}
+                          onInspect={() => setInspectTm(entry)}
+                          deleteLabel={t.assets.deleteTmAction}
+                          onDelete={() => setPendingEvict(entry)}
+                        />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                <div className="hidden md:block">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-10">
+                          <Checkbox
+                            checked={
+                              tmPageAllSelected
+                                ? true
+                                : tmPageSomeSelected
+                                  ? 'indeterminate'
+                                  : false
+                            }
+                            onCheckedChange={(checked) =>
+                              toggleTmPage(checked === true)
+                            }
+                            aria-label={t.assets.tmSelectPage}
+                          />
+                        </TableHead>
+                        <TableHead className="w-[38%]">{t.assets.colSource}</TableHead>
+                        <TableHead className="w-[34%]">{t.assets.colTarget}</TableHead>
+                        <TableHead className="w-36">{t.assets.colProvenance}</TableHead>
+                        <TableHead className="w-14">
+                          <span className="sr-only">{t.assets.colAction}</span>
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {tmEntries.map((entry) => (
+                        <TableRow key={entry.id}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedTmIds.has(entry.id)}
+                              onCheckedChange={(checked) =>
+                                toggleTmEntry(entry.id, checked === true)
+                              }
+                              aria-label={t.assets.tmSelectEntry}
+                            />
+                          </TableCell>
+                          <TableCell className="align-top py-2.5">
+                            <TmPassage
+                              text={entry.source_text}
+                              source
+                            />
+                          </TableCell>
+                          <TableCell className="align-top py-2.5">
+                            <TmPassage
+                              text={entry.target_text}
+                              source={false}
+                            />
+                          </TableCell>
+                          <TableCell className="align-top py-2.5">
+                            <div className="space-y-1.5">
+                              <Badge
+                                variant="outline"
+                                className="font-normal text-muted-foreground"
+                              >
+                                {entry.provenance === 'human_pe'
+                                  ? t.assets.provenanceHuman
+                                  : t.assets.provenanceMachine}
+                              </Badge>
+                              <div className="text-xs tabular-nums text-muted-foreground">
+                                {entry.use_count > 0
+                                  ? t.assets.tmReuseCount.replace(
+                                      '{count}',
+                                      String(entry.use_count)
+                                    )
+                                  : t.assets.tmNeverReused}
+                              </div>
+                              {entry.updated_at ? (
+                                <div className="text-xs text-muted-foreground">
+                                  {t.assets.tmUpdatedAt.replace(
+                                    '{date}',
+                                    formatTmDate(entry.updated_at)
+                                  )}
+                                </div>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <RowActions
+                              label={t.assets.tmRowActions}
+                              inspectLabel={t.assets.tmInspectEntry}
+                              onInspect={() => setInspectTm(entry)}
+                              deleteLabel={t.assets.deleteTmAction}
+                              onDelete={() => setPendingEvict(entry)}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
+            )}
+
+            {tmLoadedOnce && tmTotal > 0 ? (
+              <div className="flex flex-col gap-3 border-t border-border/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {t.assets.tmResultRange
+                    .replace('{from}', String(tmRangeStart))
+                    .replace('{to}', String(tmRangeEnd))
+                    .replace('{total}', String(tmTotal))}
+                </span>
+                <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
+                  <Select
+                    value={String(tmPageSize)}
+                    onValueChange={(value) => {
+                      setTmPageSize(Number(value) as TmPageSize)
+                      setTmPage(1)
+                    }}
+                  >
+                    <SelectTrigger
+                      className="h-8 w-auto bg-background text-xs"
+                      aria-label={t.assets.tmRowsPerPage.replace(
+                        '{count}',
+                        String(tmPageSize)
+                      )}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TM_PAGE_SIZES.map((size) => (
+                        <SelectItem key={size} value={String(size)}>
+                          {t.assets.tmRowsPerPage.replace('{count}', String(size))}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setTmPage((previous) => Math.max(1, previous - 1))}
+                    disabled={tmPage <= 1 || tmLoading}
+                  >
+                    <ChevronLeft />
+                    {t.assets.tmPagePrev}
+                  </Button>
+                  <span className="min-w-24 text-center text-xs tabular-nums text-muted-foreground">
+                    {t.assets.tmPageOf
+                      .replace('{page}', String(tmPage))
+                      .replace('{pages}', String(tmPageCount))}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setTmPage((previous) => Math.min(tmPageCount, previous + 1))
+                    }
+                    disabled={tmPage >= tmPageCount || tmLoading}
+                  >
+                    {t.assets.tmPageNext}
+                    <ChevronRight />
+                  </Button>
+                </div>
               </div>
-              <p className="text-xs text-[var(--ink-secondary)] leading-relaxed">
-                {t.assets.bibleWorkflowDesc}
-              </p>
-              <div className="p-2.5 rounded bg-[var(--paper-subsurface)] border border-[var(--paper-border)] text-xs text-[var(--ink-secondary)] space-y-1.5">
-                {[
-                  t.assets.bibleStep1,
-                  t.assets.bibleStep2,
-                  t.assets.bibleStep3,
-                ].map((step, index) => (
-                  <div key={step} className="flex items-start gap-2">
-                    {/* items-start + whitespace-nowrap: the badge is a label, not
-                        a column. With items-center the two-line step text
-                        vertically centred it, and the flex item was narrow enough
-                        that "步骤 3" broke between the word and the digit. */}
-                    <Badge variant="outline" className="text-xs font-mono shrink-0 whitespace-nowrap">
-                      {t.assets.stepBadge.replace('{n}', String(index + 1))}
-                    </Badge>
-                    <span className="min-w-0">{step}</span>
-                  </div>
-                ))}
+            ) : null}
+          </div>
+        </section>
+      )}
+
+      <Dialog open={glossaryImportOpen} onOpenChange={setGlossaryImportOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t.assets.glossaryImportTitle}</DialogTitle>
+            <DialogDescription>{t.assets.glossaryImportHint}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <input
+              ref={glossaryFileRef}
+              type="file"
+              accept=".csv,.tsv,.json"
+              className="sr-only"
+              aria-label={t.assets.glossaryImportTitle}
+              onChange={(event) => {
+                setGlossaryImportFile(event.target.files?.[0] ?? null)
+                event.target.value = ''
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => glossaryFileRef.current?.click()}
+              className="flex w-full items-center gap-3 rounded-lg border border-dashed border-border bg-muted/20 px-4 py-5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground">
+                <FileText className="size-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium text-foreground">
+                  {glossaryImportFile?.name ?? t.assets.glossaryChooseFile}
+                </span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  {glossaryImportFile
+                    ? t.assets.glossaryReplaceFile
+                    : t.assets.glossaryFileFormats}
+                </span>
+              </span>
+            </button>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="ghost">{t.common.cancel}</Button>
+            </DialogClose>
+            <Button
+              onClick={() => void importGlossaryFile()}
+              disabled={!glossaryImportFile || glossaryImporting}
+            >
+              {glossaryImporting ? <Loader2 className="animate-spin" /> : <Upload />}
+              {glossaryImporting ? t.assets.importing : t.assets.importAction}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={tmImportOpen} onOpenChange={setTmImportOpen}>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t.assets.importTitle}</DialogTitle>
+            <DialogDescription>{t.assets.importTmDescription}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <input
+              ref={tmFileRef}
+              type="file"
+              accept=".tmx,.xml,.json"
+              className="sr-only"
+              aria-label={t.assets.tmChooseFile}
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file) void readTmFile(file)
+                event.target.value = ''
+              }}
+            />
+            <div className="grid grid-cols-2 items-end gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">
+                  {t.assets.tmChooseFile}
+                </Label>
+                <Button
+                  variant="outline"
+                  className="h-9 w-full justify-start bg-background"
+                  onClick={() => tmFileRef.current?.click()}
+                >
+                  <FileText />
+                  {t.assets.tmChooseFile}
+                </Button>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="tm-import-format" className="text-xs text-muted-foreground">
+                  {t.assets.importFormat}
+                </Label>
+                <Select
+                  value={tmImportFormat}
+                  onValueChange={(value) => setTmImportFormat(value as TmImportFormat)}
+                >
+                  <SelectTrigger id="tm-import-format" className="h-9 w-full bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="tmx">TMX</SelectItem>
+                    <SelectItem value="json">JSON</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
+            <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="tm-source-lang" className="text-xs text-muted-foreground">
+                  {t.assets.importSourceLang}
+                </Label>
+                <Input
+                  id="tm-source-lang"
+                  value={tmImportSourceLang}
+                  onChange={(event) => setTmImportSourceLang(event.target.value)}
+                  className="font-mono"
+                />
+              </div>
+              <span className="pb-2.5 text-sm text-muted-foreground">→</span>
+              <div className="space-y-1.5">
+                <Label htmlFor="tm-target-lang" className="text-xs text-muted-foreground">
+                  {t.assets.importTargetLang}
+                </Label>
+                <Input
+                  id="tm-target-lang"
+                  value={tmImportTargetLang}
+                  onChange={(event) => setTmImportTargetLang(event.target.value)}
+                  className="font-mono"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="tm-import-content" className="text-xs text-muted-foreground">
+                {t.assets.importContent}
+              </Label>
+              <Textarea
+                id="tm-import-content"
+                value={tmImportContent}
+                onChange={(event) => setTmImportContent(event.target.value)}
+                placeholder={t.assets.importContentPlaceholder}
+                rows={8}
+                className="resize-y font-mono text-xs"
+              />
+            </div>
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="ghost">{t.common.cancel}</Button>
+            </DialogClose>
+            <Button
+              onClick={() => void importTranslationMemory()}
+              disabled={!tmImportContent.trim() || tmImporting}
+            >
+              {tmImporting ? <Loader2 className="animate-spin" /> : <ArrowDownToLine />}
+              {tmImporting ? t.assets.importing : t.assets.importBtn}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={pendingDeleteTerm !== null}
+        title={t.assets.deleteTermTitle}
+        body={t.assets.deleteTermBody.replace('{term}', pendingDeleteTerm ?? '')}
+        confirmLabel={t.assets.deleteTermAction}
+        cancelLabel={t.common.cancel}
+        danger
+        onConfirm={() => void deleteTerm()}
+        onCancel={() => setPendingDeleteTerm(null)}
+      />
+      <ConfirmDialog
+        open={pendingEvict !== null}
+        title={t.assets.evictTmTitle}
+        body={
+          <div className="space-y-2">
+            <p>{t.assets.evictTmBody}</p>
+            {pendingEvict ? (
+              <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-foreground">
+                {pendingEvict.source_text}
+              </p>
+            ) : null}
+          </div>
+        }
+        confirmLabel={t.assets.deleteTmAction}
+        cancelLabel={t.common.cancel}
+        danger
+        onConfirm={() => void evictTranslation()}
+        onCancel={() => setPendingEvict(null)}
+      />
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        title={
+          deleteWholeScope
+            ? t.assets.tmDeleteScopeTitle
+            : t.assets.tmDeleteSelectedTitle
+        }
+        body={(deleteWholeScope
+          ? t.assets.tmDeleteScopeBody
+          : t.assets.tmDeleteSelectedBody
+        ).replace('{count}', String(deleteWholeScope ? tmTotal : selectedTmIds.size))}
+        confirmLabel={(deleteWholeScope
+          ? t.assets.tmDeleteScopeConfirm
+          : t.assets.tmDeleteSelectedConfirm
+        ).replace('{count}', String(deleteWholeScope ? tmTotal : selectedTmIds.size))}
+        cancelLabel={t.common.cancel}
+        danger
+        onConfirm={() => void evictSelected()}
+        onCancel={() => {
+          if (!bulkDeleting) setBulkDeleteOpen(false)
+        }}
+      />
+      <Dialog open={inspectTm !== null} onOpenChange={(open) => !open && setInspectTm(null)}>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t.assets.tmInspectTitle}</DialogTitle>
+            <DialogDescription>{t.assets.tmInspectDescription}</DialogDescription>
+          </DialogHeader>
+          {inspectTm ? (
+            <div className="space-y-4">
+              <section className="rounded-lg border border-border/70 bg-card">
+                <h3 className="px-4 pt-3 text-xs font-medium text-muted-foreground">
+                  {t.assets.colSource}
+                </h3>
+                <div className="px-4 pb-4 text-sm leading-7 text-foreground">
+                  <RichText text={inspectTm.source_text} source />
+                </div>
+              </section>
+              <section className="rounded-lg border border-border/70 bg-card">
+                <h3 className="px-4 pt-3 text-xs font-medium text-muted-foreground">
+                  {t.assets.colTarget}
+                </h3>
+                <div className="px-4 pb-4 text-sm leading-7 text-foreground">
+                  <RichText text={inspectTm.target_text} />
+                </div>
+              </section>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border/70 pt-4 text-xs text-muted-foreground">
+                <Badge variant="outline" className="font-normal text-muted-foreground">
+                  {inspectTm.provenance === 'human_pe'
+                    ? t.assets.provenanceHuman
+                    : t.assets.provenanceMachine}
+                </Badge>
+                <span>
+                  {inspectTm.use_count > 0
+                    ? t.assets.tmReuseCount.replace(
+                        '{count}',
+                        String(inspectTm.use_count)
+                      )
+                    : t.assets.tmNeverReused}
+                </span>
+                {inspectTm.updated_at ? (
+                  <span>
+                    {t.assets.tmUpdatedAt.replace(
+                      '{date}',
+                      formatTmDate(inspectTm.updated_at)
+                    )}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">{t.common.close}</Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

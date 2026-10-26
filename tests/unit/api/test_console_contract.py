@@ -1117,7 +1117,7 @@ def test_the_wizard_offers_every_engine_ocr_mode() -> None:
         pytest.skip("web/ frontend is not present in this checkout")
     source = _WIZARD_SRC.read_text(encoding="utf-8")
 
-    offered = set(re.findall(r'<option value="(\w+)">\{t\.wizard\.ocrMode', source))
+    offered = set(re.findall(r"\{ value: '(\w+)', label: t\.wizard\.ocrMode", source))
     engine = set(typing.get_args(OcrMode))
     assert offered, "the wizard has no OCR mode select"
     # 'auto' is the sentinel the wizard submits as null, so it is offered but is
@@ -1241,7 +1241,7 @@ def test_the_doctor_no_longer_claims_a_latency_matrix() -> None:
     assert "runtimeConfig" in source, "the panel does not use the runtime-config endpoint"
     assert "getRuntimeConfig" in source
     # The alias/protocol split is what keeps the list readable.
-    assert ".filter((p) => p.declared)" in source
+    assert ".filter((provider) => provider.declared)" in source
 
 
 def test_the_doctor_renders_declared_capability_not_a_preset_table() -> None:
@@ -1255,13 +1255,16 @@ def test_the_doctor_renders_declared_capability_not_a_preset_table() -> None:
     from ubt.api.runtime_config import describe_runtime_config
     from ubt.core.config import UBTConfig
 
-    declared = describe_runtime_config(
-        UBTConfig.from_env(draft_model="m", supports_temperature=False)
-    )["active"]
+    # Built directly: ``from_env`` layers the developer's ubt.toml, whose
+    # declared flags would decide this contract test. Same reason
+    # ``test_can_translate_is_the_servers_own_verdict`` constructs directly.
+    declared = describe_runtime_config(UBTConfig(draft_model="m", supports_temperature=False))[
+        "active"
+    ]
     assert declared["declared_capability"] == ["supports_temperature"]
     assert declared["supports_temperature"] is False
 
-    assumed = describe_runtime_config(UBTConfig.from_env(draft_model="m"))["active"]
+    assumed = describe_runtime_config(UBTConfig(draft_model="m"))["active"]
     assert assumed["declared_capability"] == []
     assert assumed["supports_temperature"] is True
 
@@ -1328,6 +1331,63 @@ def test_the_console_can_create_the_first_provider() -> None:
     assert "setEditingProvider(null)" in source
 
 
+def test_translation_memory_rows_and_preview_share_one_markdown_renderer() -> None:
+    """TM text is often Markdown + TeX, not plain prose.
+
+    Rendering source and target as raw strings made tables and formulas readable
+    only as punctuation. The row and its full-pair dialog must use the same
+    renderer as review, with source markup protected from being interpreted.
+    """
+    repo = _REPO_ROOT
+    view = repo / "web" / "src" / "views" / "language-assets" / "LanguageAssetsView.tsx"
+    renderer = repo / "web" / "src" / "components" / "content" / "RichText.tsx"
+    if not view.exists() or not renderer.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    source = view.read_text(encoding="utf-8")
+    assert "RichText" in source
+    assert "<TmPassage" in source
+    assert "text={entry.source_text}" in source
+    assert "text={entry.target_text}" in source
+    assert "<RichText text={inspectTm.source_text} source />" in source
+    assert "<RichText text={inspectTm.target_text} />" in source
+    core = renderer.read_text(encoding="utf-8")
+    assert "remarkGfm" in core and "remarkMath" in core and "rehypeKatex" in core
+    assert "if (source && !hasStructuredMarkup(text))" in core
+
+
+def test_the_console_uses_two_themes_and_an_extensible_language_menu() -> None:
+    """Preferences must express concepts, not cycle implementation details.
+
+    The footer used to combine a three-step paper-tone cycle with a ZH/EN
+    toggle, so neither control named the choice it would make. Theme is now a
+    two-option light/dark setting, and languages come from one registry that a
+    later locale can extend without changing the layout.
+    """
+    repo = _REPO_ROOT
+    layout = repo / "web" / "src" / "components" / "layout" / "ConsoleLayout.tsx"
+    languages = repo / "web" / "src" / "i18n" / "languages.ts"
+    theme = repo / "web" / "src" / "lib" / "theme.ts"
+    if not layout.exists() or not languages.exists() or not theme.exists():
+        pytest.skip("web/ frontend is not present in this checkout")
+
+    source = layout.read_text(encoding="utf-8")
+    assert "type PaperTone" not in source
+    assert "cyclePaperTone" not in source
+    assert "onSetTheme('light')" in source and "onSetTheme('dark')" in source
+    assert "LANGUAGE_OPTIONS.map" in source
+    assert "DropdownMenuRadioGroup" in source
+
+    registry = languages.read_text(encoding="utf-8")
+    assert "export const LANGUAGE_OPTIONS" in registry
+    assert "matchPrefixes" in registry
+    assert "export function matchLanguageTag" in registry
+
+    theme_source = theme.read_text(encoding="utf-8")
+    assert "export type Theme = 'light' | 'dark'" in theme_source
+    assert "prefers-color-scheme: dark" in theme_source
+
+
 def test_a_failed_config_load_does_not_claim_zero_providers() -> None:
     """``(runtime?.providers ?? []).length`` renders "(0)" on a load failure.
 
@@ -1356,7 +1416,7 @@ def test_an_undeclared_configuration_reports_the_generic_default() -> None:
     from ubt.api.runtime_config import describe_runtime_config
     from ubt.core.config import UBTConfig
 
-    active = describe_runtime_config(UBTConfig.from_env(draft_model="undeclared-model"))["active"]
+    active = describe_runtime_config(UBTConfig(draft_model="undeclared-model"))["active"]
     assert active["matched_pattern"] is None
     assert active["declared_capability"] == []
     # The safe defaults are still reported, so the panel can show what will be
@@ -1410,30 +1470,33 @@ def test_can_translate_is_the_servers_own_verdict() -> None:
 
     HOSTED = "https://api.example.com/v1"
 
-    keyless = describe_runtime_config(UBTConfig.from_env(base_url=HOSTED, draft_model="m"))[
-        "active"
-    ]
+    # Build directly from overrides: ``from_env`` deliberately layers the
+    # developer's ubt.toml, and its provider credential must not decide this
+    # contract test. The predicate under test is the server's, not the file's.
+    keyless = describe_runtime_config(
+        UBTConfig(base_url=HOSTED, draft_model="m", api_key=MOCK_API_KEY)
+    )["active"]
     assert keyless["can_translate"] is False
 
     # A model with no credential cannot translate …
     assert (
-        describe_runtime_config(
-            UBTConfig.from_env(base_url=HOSTED, draft_model="", api_key="sk-real")
-        )["active"]["can_translate"]
+        describe_runtime_config(UBTConfig(base_url=HOSTED, draft_model="", api_key="sk-real"))[
+            "active"
+        ]["can_translate"]
         is False
     )
     # … and the placeholder sentinel is not a credential either.
     assert (
-        describe_runtime_config(
-            UBTConfig.from_env(base_url=HOSTED, draft_model="m", api_key=MOCK_API_KEY)
-        )["active"]["can_translate"]
+        describe_runtime_config(UBTConfig(base_url=HOSTED, draft_model="m", api_key=MOCK_API_KEY))[
+            "active"
+        ]["can_translate"]
         is False
     )
     # Real key plus a model is the only combination that translates.
     assert (
-        describe_runtime_config(
-            UBTConfig.from_env(base_url=HOSTED, draft_model="m", api_key="sk-real")
-        )["active"]["can_translate"]
+        describe_runtime_config(UBTConfig(base_url=HOSTED, draft_model="m", api_key="sk-real"))[
+            "active"
+        ]["can_translate"]
         is True
     )
 
@@ -1585,7 +1648,7 @@ def test_every_rendered_capability_control_is_submitted() -> None:
 
 
 def test_the_doctor_panel_and_the_editor_share_one_grid_cell() -> None:
-    """The editor must replace the runtime panel, not push it out of the grid.
+    """The editor must replace the runtime panel, not duplicate it on screen.
 
     They were two independent grid children of a two-column grid, so opening the
     form made three boxes: the editor took the right cell of row 1 and the whole
@@ -1600,16 +1663,18 @@ def test_the_doctor_panel_and_the_editor_share_one_grid_cell() -> None:
         pytest.skip("web/ frontend is not present in this checkout")
 
     source = view.read_text(encoding="utf-8")
-    # One wrapper claims the right column explicitly...
-    assert "md:col-start-2" in source, (
-        "the panel and the editor must share a grid cell; as two siblings the "
-        "third box wraps into the left column"
-    )
+    # The panel and the editor share one tab slot: the editor replaces the
+    # panel, and the panel is hidden rather than unmounted while the form is
+    # open (the same tab slot is the layout contract now — the old two-column
+    # grid is gone, so there is no cell to claim with md:col-start-2).
+    assert 'value="models"' in source
+    assert "editingProvider !== undefined && 'hidden'" in source
+    assert "name={editingProvider}" in source
     # ...and the panel is hidden rather than unmounted while the form is open.
-    assert "editingProvider !== undefined ? 'hidden'" in source
-    # The row being edited is marked, or the list highlights only the *active*
-    # provider and gives no confirmation of what is open.
-    assert "editingProvider === p.name" in source
+    assert "editingProvider !== undefined && 'hidden'" in source
+    # The editor header carries the block being edited, so the list itself can
+    # stay a clean list rather than doubling as an edit indicator.
+    assert "name={editingProvider}" in source
 
 
 def test_the_credential_copy_matches_what_the_server_actually_does() -> None:
@@ -1826,7 +1891,7 @@ def test_the_wizard_lists_which_provider_is_the_file_default() -> None:
     if not view.exists():
         pytest.skip("web/ frontend is not present in this checkout")
     source = view.read_text(encoding="utf-8")
-    assert "p.is_default" in source
+    assert "provider.is_default" in source
     # And the switch affordance uses the copy that existed but was never wired.
     assert "activateProvider" in source
     assert "setDefaultProvider" in source
@@ -1989,8 +2054,8 @@ def test_the_panel_help_says_a_protocol_still_needs_a_model_id() -> None:
     source = view.read_text(encoding="utf-8")
     assert "builtinProvidersHelp" in source
     # And the two groups are rendered separately, not as one flat list.
-    assert "p.is_protocol" in source
-    assert "p.alias_of" in source
+    assert "provider.is_protocol" in source
+    assert "provider.alias_of" in source
 
 
 def test_the_terminal_stream_frame_carries_the_final_counters() -> None:
@@ -2052,8 +2117,12 @@ def test_the_panel_renders_failures_and_the_human_queue() -> None:
     assert "skippedBlocks > 0" in source
 
     # And the zero-fallback that produced "0/0 blocks" is gone from the log line.
+    # Progress is now rendered through localized, readable copy instead of raw
+    # backend counters such as "30/105 (+146)".
     assert "frame.completed_blocks ?? completedRef.current" in source
-    assert "frame.drafted_blocks ?? draftedRef.current" in source
+    assert "mission.activityProgress" in source
+    assert "mission.activityPreserved" in source
+    assert "const drafted = frame.drafted_blocks ?? draftedRef.current" not in source
     assert "${frame.completed_blocks ?? 0}/${frame.total_blocks ?? 0}" not in source
 
 
@@ -2114,8 +2183,8 @@ def test_the_review_page_has_one_name_in_each_locale() -> None:
 
     assert "质检后编台" not in text
     assert "审校后编台" not in text
-    # The replacement says what the page does.
-    assert "逐块审校台" in text
+    # The page keeps one four-character name everywhere in Chinese.
+    assert text.count("译文审校") >= 2
 
 
 # --------------------------------------------------------------------------- #

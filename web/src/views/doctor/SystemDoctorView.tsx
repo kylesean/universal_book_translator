@@ -1,21 +1,17 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  CheckCircle2,
-  RefreshCw,
   AlertTriangle,
-  XCircle,
-  MinusCircle,
+  Check,
+  Copy,
   Loader2,
   Pencil,
   Plus,
-  Copy,
-  Check,
+  RefreshCw,
+  Trash2,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
-import { InfoTip } from '@/components/ui/InfoTip'
-import { Donut } from '@/views/quality-gate/charts'
+
 import {
+  deleteProvider as apiDeleteProvider,
   getDoctor,
   getRuntimeConfig,
   getSystemBoundary,
@@ -25,53 +21,71 @@ import {
   type RuntimeConfig,
   type SystemInfo,
 } from '@/api/client'
-import { useI18n } from '@/i18n/useI18n'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/Alert'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { ButtonGroup } from '@/components/ui/button-group'
+import { Card, CardContent } from '@/components/ui/card'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useToast } from '@/components/ui/useToast'
 import { localizeDoctorCheck } from '@/i18n/doctorText'
 import { doctorCodesEn, doctorCodesZh } from '@/i18n/translations/doctorCodes'
-import { ProviderEditor } from './ProviderEditor'
+import { useI18n } from '@/i18n/useI18n'
+import { cn } from '@/lib/utils'
+import { Donut } from '@/views/quality-gate/charts'
 import { EgressSettingsCard } from './EgressSettingsCard'
+import { ProviderEditor } from './ProviderEditor'
 import { QESettingsCard } from './QESettingsCard'
+import {
+  DoctorMetric,
+  DoctorPanel,
+  DoctorStatusBadge,
+  DoctorStatusIcon,
+} from './components'
+import { toneForStatus } from './status'
 
-function CheckIcon({ status }: { status: string }) {
-  if (status === 'FAIL') return <XCircle className="h-4 w-4 text-[#b91c1c] shrink-0 mt-0.5" />
-  if (status === 'WARN') return <AlertTriangle className="h-4 w-4 text-[#b45309] shrink-0 mt-0.5" />
-  if (status === 'SKIP') return <MinusCircle className="h-4 w-4 text-[var(--ink-muted)] shrink-0 mt-0.5" />
-  return <CheckCircle2 className="h-4 w-4 text-[#15803d] shrink-0 mt-0.5" />
+type CheckFilter = 'issues' | 'all'
+
+function providerStatusTone(provider: RuntimeConfig['providers'][number]) {
+  if (!provider.available || provider.credential_issue) return 'warn' as const
+  return 'ok' as const
 }
 
-function statusBadgeVariant(status: string): 'success' | 'warning' | 'destructive' | 'outline' {
-  if (status === 'FAIL') return 'destructive'
-  if (status === 'WARN') return 'warning'
-  if (status === 'SKIP') return 'outline'
-  return 'success'
+function localizedStatus(
+  status: string,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  return t.doctor.checkStatuses[status] ?? status
 }
 
 export function SystemDoctorView() {
   const { t, language } = useI18n()
+  const toast = useToast()
   const [checks, setChecks] = useState<DoctorCheck[]>([])
   const [runtime, setRuntime] = useState<RuntimeConfig | null>(null)
   const [info, setInfo] = useState<SystemInfo | null>(null)
-  // The server's own forbidden-path list: on Windows it is C:\Windows and
-  // friends, not the Unix paths the panel used to hardcode. Null = unknown,
-  // which renders as the same quiet dash as every other unloaded fact.
   const [boundary, setBoundary] = useState<{ forbidden_prefixes: string[] } | null>(null)
-  // ``undefined`` = closed, ``null`` = creating a new block, a string = editing
-  // that one. A single ``string | null`` cannot express all three, and the
-  // difference between "closed" and "create" is the difference between a dead
-  // button and a working one.
   const [editingProvider, setEditingProvider] = useState<string | null | undefined>(undefined)
+  const [deletingProvider, setDeletingProvider] = useState<string | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [isPinging, setIsPinging] = useState(false)
-  // Which row is mid-switch, so the button disables instead of firing twice.
   const [defaultBusy, setDefaultBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [checkFilter, setCheckFilter] = useState<CheckFilter>('issues')
+  const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set())
+  const [highlightedRow, setHighlightedRow] = useState<string | null>(null)
+  const [copiedFix, setCopiedFix] = useState<string | null>(null)
   const editorRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (editingProvider !== undefined && editorRef.current) {
-      editorRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }
-  }, [editingProvider])
 
   const load = useCallback(async (probe: boolean) => {
     setLoading(true)
@@ -88,51 +102,62 @@ export function SystemDoctorView() {
       setBoundary(boundaryInfo)
       setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Doctor check failed')
+      setError(err instanceof Error ? err.message : t.doctor.refreshFailed)
     } finally {
       setLoading(false)
       setIsPinging(false)
     }
-  }, [])
+  }, [t.doctor.refreshFailed])
 
-  // Declared *after* `load`: it calls that binding, and a callback defined
-  // above it would close over the uninitialized const (a TDZ ReferenceError
-  // at first click that neither tsc nor oxlint reports).
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
+    void load(false)
+  }, [load])
+
+  useEffect(() => {
+    if (editingProvider !== undefined && editorRef.current) {
+      editorRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [editingProvider])
+
   const handleMakeDefault = useCallback(
     async (name: string) => {
       setDefaultBusy(name)
       setError(null)
       try {
         await setDefaultProvider(name)
-        // Re-read so `is_default` and the active provider both reflect the file.
         await load(false)
       } catch (err) {
-        setError(err instanceof Error ? err.message : `Failed to select ${name}`)
+        setError(err instanceof Error ? err.message : t.doctor.refreshFailed)
       } finally {
         setDefaultBusy(null)
       }
     },
-    [load],
+    [load, t.doctor.refreshFailed],
   )
 
-  useEffect(() => {
-    // Mount-time load; `load`'s setStates are the loading flag and the results,
-    // and every one of them runs after the awaited fetches.
-    // oxlint-disable-next-line react/set-state-in-effect
-    void load(false)
-  }, [load])
+  const handleDeleteProvider = useCallback(
+    async (name: string) => {
+      setDeleteBusy(true)
+      setDeleteError(null)
+      try {
+        await apiDeleteProvider(name)
+        setDeletingProvider(null)
+        toast.push(t.doctor.providerDeleted, 'success')
+        await load(false)
+      } catch (err) {
+        setDeleteError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setDeleteBusy(false)
+      }
+    },
+    [load, t.doctor.providerDeleted, toast],
+  )
 
-  const handleTestPings = () => {
+  const handleRefresh = () => {
     setIsPinging(true)
     void load(true)
   }
-
-  // Long details (a 200-char ledger path) clamp to two lines; a verdict chip
-  // both jumps to its row and expands it, because a chip that scrolls to a
-  // clamped blob would only move the reader to the thing they still cannot read.
-  const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set())
-  const [highlightedRow, setHighlightedRow] = useState<string | null>(null)
-  const [copiedFix, setCopiedFix] = useState<string | null>(null)
 
   const toggleDetail = (rowId: string) => {
     setExpandedDetails((prev) => {
@@ -144,9 +169,12 @@ export function SystemDoctorView() {
   }
 
   const jumpToCheck = (rowId: string) => {
+    setCheckFilter('all')
     setExpandedDetails((prev) => new Set(prev).add(rowId))
-    document.getElementById(rowId)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    setHighlightedRow(rowId)
+    window.setTimeout(() => {
+      document.getElementById(rowId)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setHighlightedRow(rowId)
+    })
     window.setTimeout(() => {
       setHighlightedRow((cur) => (cur === rowId ? null : cur))
     }, 2000)
@@ -160,675 +188,758 @@ export function SystemDoctorView() {
         setCopiedFix((cur) => (cur === rowId ? null : cur))
       }, 1500)
     } catch {
-      // Clipboard can refuse (permissions, non-secure context); the command is
-      // still fully visible for a manual copy, so silence is fine here.
+      // The command remains selectable when the clipboard API is unavailable.
     }
   }
 
-  // The engine prints English; this panel is the same checklist. Each check
-  // carries a stable code plus the values interpolated into its English sentence,
-  // so the console renders its own copy. A code the catalogue does not know falls
-  // back to the engine's English text — never a raw key.
   const codeTables = language === 'zh' ? doctorCodesZh : doctorCodesEn
   const localized = checks.map((check) => ({
     check,
     text: localizeDoctorCheck(check, codeTables),
   }))
-  // Ordered by the engine's group codes, so the sections keep the CLI's order
-  // rather than the order they happen to arrive in.
-  const groups = Array.from(new Set(localized.map(({ check }) => check.group_code)))
-  // Global row index per check: the verdict chips jump by row id, and group
-  // filtering must not renumber them.
-  const indexed = localized.map((item, index) => ({ item, index }))
-  // The verdict the page's first question deserves: how many probes pass and
-  // where the exceptions live. Anything unknown counts as not-passing rather
-  // than silently flattering the ratio.
-  const okCount = localized.filter(({ check }) => check.status === 'OK').length
+  const indexed = localized.map((item, index) => ({ item, index, rowId: `dr-${index}` }))
   const problems = indexed.filter(({ item }) => item.check.status !== 'OK')
-  const hasFail = localized.some(({ check }) => check.status === 'FAIL')
+  const okCount = checks.length - problems.length
+  const hasFail = checks.some((check) => check.status === 'FAIL')
+  const visible = checkFilter === 'issues' ? problems : indexed
+  const groups = Array.from(new Set(visible.map(({ item }) => item.check.group_code)))
+  const declaredProviders = (runtime?.providers ?? []).filter((provider) => provider.declared)
+  const active = runtime?.active ?? null
+  const canTranslate = Boolean(active?.can_translate)
+  const statusLabel = (status: string) => localizedStatus(status, t)
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-7 space-y-5 sm:space-y-7 max-w-5xl mx-auto w-full">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--paper-border)] pb-4">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-[var(--ink-primary)]">
+    <div className="mx-auto w-full max-w-6xl flex-1 space-y-5 px-4 py-6 sm:px-7">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="space-y-1.5">
+          <h1 className="text-2xl font-semibold tracking-[-0.03em] text-foreground">
             {t.doctor.title}
           </h1>
-          <p className="text-xs text-[var(--ink-secondary)] mt-1">{t.doctor.subtitle}</p>
+          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            {t.doctor.subtitle}
+          </p>
         </div>
-
         <Button
-          onClick={handleTestPings}
-          variant="secondary"
+          onClick={handleRefresh}
+          variant="outline"
           size="sm"
           disabled={isPinging || loading}
-          className="self-start sm:self-auto min-h-[38px] sm:min-h-0"
+          className="self-start bg-card sm:self-auto"
         >
-          <RefreshCw className={`h-3 w-3 mr-1.5 ${isPinging || loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={cn('size-3.5', (isPinging || loading) && 'animate-spin')} />
           {t.doctor.pingAll}
         </Button>
-      </div>
+      </header>
 
-      {error && (
-        <div className="p-3 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] text-xs text-[var(--ink-secondary)] flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-[#b45309] shrink-0" />
-          {error}
-        </div>
-      )}
+      {error ? (
+        <Alert variant="warning">
+          <AlertTriangle />
+          <AlertTitle>{t.doctor.refreshFailed}</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
 
-      {/* Verdict first. Fifteen same-sized 正常 badges made the page's only
-          question — is anything wrong? — answerable only by scanning to the
-          bottom. The ring answers it at a glance; each chip jumps to (and
-          expands) its row. */}
-      {checks.length > 0 && (
-        <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs px-4 py-3.5 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-          <Donut
-            value={okCount / checks.length}
-            tone={hasFail ? 'fail' : problems.length > 0 ? 'warn' : 'pass'}
-            center={`${okCount}/${checks.length}`}
-            caption={t.doctor.verdictCaption}
-          />
-          <div className="min-w-0 flex-1">
-            <div className="type-value font-bold text-[var(--ink-primary)]">
-              {problems.length === 0
-                ? t.doctor.verdictAllOk
-                : t.doctor.verdictNeedsAttention.replace('{n}', String(problems.length))}
-            </div>
-            <div className="flex flex-wrap gap-1.5 mt-1.5">
-              {problems.map(({ item, index }) => (
-                <button
-                  key={`chip-${index}`}
-                  type="button"
-                  onClick={() => jumpToCheck(`dr-${index}`)}
-                  className={`type-help inline-flex items-center gap-1 px-1.5 py-0.5 rounded border cursor-pointer ${
-                    item.check.status === 'FAIL'
-                      ? 'border-[#b91c1c]/30 bg-[#b91c1c]/5 text-[#b91c1c]'
-                      : 'border-[#b45309]/30 bg-[#b45309]/5 text-[#b45309]'
-                  }`}
-                >
-                  <span>{t.doctor.checkStatuses[item.check.status] ?? item.check.status}</span>
-                  <span className="font-semibold">{item.text.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Diagnostics & Providers 2-Col Split */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Left: Diagnostics */}
-        <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
-          <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-            {t.doctor.engineDiagnostics}
-          </div>
-          <div className="divide-y divide-[var(--paper-border)]">
-            {loading && checks.length === 0 ? (
-              <div className="p-6 text-center text-[var(--ink-muted)]">
-                <Loader2 className="h-4 w-4 animate-spin mx-auto" />
-              </div>
+      <Card className="overflow-hidden">
+        <CardContent className="p-0">
+          <div className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:p-6">
+            {checks.length > 0 ? (
+              <Donut
+                value={checks.length > 0 ? okCount / checks.length : 0}
+                tone={hasFail ? 'fail' : problems.length > 0 ? 'warn' : 'pass'}
+                center={`${okCount}/${checks.length}`}
+                caption={t.doctor.verdictCaption}
+              />
             ) : (
-              groups.map((groupCode) => (
-                <div key={groupCode}>
-                  <div className="px-3.5 pt-3 pb-1 text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)]">
-                    {localized.find(({ check }) => check.group_code === groupCode)?.text.group ??
-                      groupCode}
-                  </div>
-                  {indexed
-                    .filter(({ item }) => item.check.group_code === groupCode)
-                    .map(({ item, index }) => {
-                      const rowId = `dr-${index}`
-                      // A 200-character ledger path wrapped across four lines
-                      // turned one probe into a log entry; clamp and let the
-                      // reader (or a verdict chip) ask for the whole thing.
-                      const detailLong = item.text.detail.length > 88
-                      const expanded = expandedDetails.has(rowId)
-                      return (
-                      <div
-                        key={rowId}
-                        id={rowId}
-                        className={`px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs transition-colors ${
-                          highlightedRow === rowId ? 'bg-[#b45309]/10' : ''
-                        }`}
-                      >
-                        <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                          <CheckIcon status={item.check.status} />
-                          <div className="min-w-0 flex-1">
-                            <div className="font-semibold text-[var(--ink-primary)] break-words">
-                              {item.text.name}
-                            </div>
-                            <div
-                              className={`text-xs text-[var(--ink-secondary)] font-mono mt-0.5 break-words ${
-                                detailLong && !expanded ? 'line-clamp-2' : ''
-                              }`}
-                            >
-                              {item.text.detail}
-                            </div>
-                            {detailLong && (
-                              <button
-                                type="button"
-                                onClick={() => toggleDetail(rowId)}
-                                className="type-help underline underline-offset-2 text-[var(--ink-muted)] hover:text-[var(--ink-primary)] cursor-pointer"
-                              >
-                                {expanded ? t.doctor.collapseDetail : t.doctor.expandDetail}
-                              </button>
+              <div className="grid size-[76px] shrink-0 place-items-center rounded-full border-[7px] border-border text-sm text-muted-foreground">
+                {loading ? <Loader2 className="size-4 animate-spin" /> : '—'}
+              </div>
+            )}
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-base font-semibold tracking-[-0.02em]">
+                  {checks.length === 0
+                    ? t.doctor.emptyChecksTitle
+                    : hasFail
+                      ? t.doctor.overviewBlocked
+                      : problems.length > 0
+                        ? t.doctor.overviewNeedsAttention.replace('{n}', String(problems.length))
+                        : t.doctor.overviewReady}
+                </h2>
+                {active ? (
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      canTranslate
+                        ? 'border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                        : 'border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                    )}
+                  >
+                    {canTranslate ? t.doctor.runtimeRunnable : t.doctor.runtimeRehearsal}
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {active
+                  ? t.doctor.overviewSummary
+                      .replace('{model}', active.draft_model || t.doctor.notConfigured)
+                      .replace('{ok}', String(okCount))
+                      .replace('{total}', String(checks.length))
+                  : checks.length === 0
+                    ? t.doctor.emptyChecksBody
+                    : t.doctor.runtimeConfigUnavailable}
+              </p>
+              {problems.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {problems.map(({ item, rowId }) => (
+                    <button
+                      key={rowId}
+                      type="button"
+                      onClick={() => jumpToCheck(rowId)}
+                      className={cn(
+                        'inline-flex min-h-7 items-center gap-1.5 rounded-md border px-2 py-0.5 text-left text-xs transition-colors hover:bg-muted/50',
+                        item.check.status === 'FAIL'
+                          ? 'border-destructive/25 bg-destructive/5 text-destructive'
+                          : 'border-amber-600/25 bg-amber-500/5 text-amber-700 dark:text-amber-400'
+                      )}
+                    >
+                      <span className="font-medium">{statusLabel(item.check.status)}</span>
+                      <span className="truncate">{item.text.name}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Tabs defaultValue="diagnostics" className="space-y-4">
+        <TabsList className="h-auto w-full justify-start gap-1 bg-transparent p-0 sm:w-auto">
+          <TabsTrigger
+            value="diagnostics"
+            className="h-8 rounded-md px-3 data-[state=active]:bg-card data-[state=active]:shadow-card"
+          >
+            {t.doctor.tabDiagnostics}
+          </TabsTrigger>
+          <TabsTrigger
+            value="models"
+            className="h-8 rounded-md px-3 data-[state=active]:bg-card data-[state=active]:shadow-card"
+          >
+            {t.doctor.tabModels}
+          </TabsTrigger>
+          <TabsTrigger
+            value="security"
+            className="h-8 rounded-md px-3 data-[state=active]:bg-card data-[state=active]:shadow-card"
+          >
+            {t.doctor.tabSecurity}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="diagnostics" className="mt-0 space-y-4">
+          <DoctorPanel
+            title={t.doctor.diagnosticsTitle}
+            description={t.doctor.diagnosticsHelp}
+            action={
+              <ButtonGroup className="w-full sm:w-auto">
+                <Button
+                  type="button"
+                  variant={checkFilter === 'issues' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setCheckFilter('issues')}
+                  className="flex-1 sm:flex-none"
+                >
+                  {t.doctor.issuesOnly}
+                  <Badge variant="outline" className="h-4 min-w-4 px-1 text-[10px]">
+                    {problems.length}
+                  </Badge>
+                </Button>
+                <Button
+                  type="button"
+                  variant={checkFilter === 'all' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setCheckFilter('all')}
+                  className="flex-1 sm:flex-none"
+                >
+                  {t.doctor.allChecks}
+                  <Badge variant="outline" className="h-4 min-w-4 px-1 text-[10px]">
+                    {checks.length}
+                  </Badge>
+                </Button>
+              </ButtonGroup>
+            }
+          >
+            {loading && checks.length === 0 ? (
+              <div className="flex items-center justify-center gap-2 px-4 py-12 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                {t.doctor.loadingChecks}
+              </div>
+            ) : visible.length === 0 ? (
+              <Empty className="border-0 py-10">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <Check />
+                  </EmptyMedia>
+                  <EmptyTitle>{t.doctor.overviewReady}</EmptyTitle>
+                  <EmptyDescription>
+                    {checks.length === 0 ? t.doctor.emptyChecksBody : t.doctor.diagnosticsHelp}
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              groups.map((groupCode) => {
+                const rows = visible.filter(({ item }) => item.check.group_code === groupCode)
+                return (
+                  <section key={groupCode} aria-labelledby={`group-${groupCode}`}>
+                    <h3
+                      id={`group-${groupCode}`}
+                      className="border-b border-border/60 bg-muted/20 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground"
+                    >
+                      {rows[0]?.item.text.group ?? groupCode}
+                    </h3>
+                    <div className="divide-y divide-border/70">
+                      {rows.map(({ item, rowId }) => {
+                        const detailLong = item.text.detail.length > 100
+                        const expanded = expandedDetails.has(rowId)
+                        const tone = toneForStatus(item.check.status)
+                        return (
+                          <div
+                            key={rowId}
+                            id={rowId}
+                            className={cn(
+                              'px-4 py-3 transition-colors',
+                              highlightedRow === rowId && 'bg-amber-500/10'
                             )}
-                            {item.text.fix && (
-                              <div className="mt-1.5 flex items-start gap-1.5">
-                                <span className="type-help text-[#b45309] shrink-0 pt-[3px]">
-                                  {t.doctor.fixLabel}
-                                </span>
-                                <code className="type-help font-mono text-[#b45309] bg-[#b45309]/5 border border-[#b45309]/20 rounded px-1.5 py-0.5 break-all min-w-0 flex-1">
-                                  {item.text.fix}
-                                </code>
-                                <button
-                                  type="button"
-                                  onClick={() => void copyFix(rowId, item.text.fix ?? '')}
-                                  title={copiedFix === rowId ? t.doctor.fixCopied : t.doctor.fixLabel}
-                                  aria-label={copiedFix === rowId ? t.doctor.fixCopied : t.doctor.fixLabel}
-                                  className="shrink-0 p-1 rounded text-[var(--ink-muted)] hover:text-[var(--ink-primary)] hover:bg-[var(--paper-subsurface)] cursor-pointer"
-                                >
-                                  {copiedFix === rowId ? (
-                                    <Check size={12} className="text-[#15803d]" />
-                                  ) : (
-                                    <Copy size={12} />
-                                  )}
-                                </button>
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex min-w-0 flex-1 items-start gap-2.5">
+                                <DoctorStatusIcon
+                                  status={item.check.status}
+                                  className="mt-0.5"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                    <h4 className="text-sm font-medium text-foreground">
+                                      {item.text.name}
+                                    </h4>
+                                    <DoctorStatusBadge
+                                      status={item.check.status}
+                                      label={statusLabel(item.check.status)}
+                                      className="h-5 px-1.5 py-0 text-[10px]"
+                                    />
+                                  </div>
+                                  <p
+                                    className={cn(
+                                      'mt-1 break-words font-mono text-[11px] leading-relaxed text-muted-foreground',
+                                      detailLong && !expanded && 'line-clamp-2'
+                                    )}
+                                  >
+                                    {item.text.detail}
+                                  </p>
+                                  {detailLong ? (
+                                    <Button
+                                      type="button"
+                                      variant="link"
+                                      size="sm"
+                                      onClick={() => toggleDetail(rowId)}
+                                      className="mt-0.5 h-auto px-0 text-[11px] text-muted-foreground"
+                                    >
+                                      {expanded ? t.doctor.collapseDetail : t.doctor.expandDetail}
+                                    </Button>
+                                  ) : null}
+                                  {item.text.fix ? (
+                                    <div className="mt-2 flex flex-wrap items-start gap-2 rounded-md border border-border/70 bg-muted/25 px-2.5 py-2">
+                                      <code className="min-w-0 flex-1 break-all font-mono text-[11px] leading-relaxed text-foreground">
+                                        {item.text.fix}
+                                      </code>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => void copyFix(rowId, item.text.fix ?? '')}
+                                        className="h-7 shrink-0 px-2 text-[11px]"
+                                      >
+                                        {copiedFix === rowId ? (
+                                          <Check className="text-emerald-700 dark:text-emerald-400" />
+                                        ) : (
+                                          <Copy />
+                                        )}
+                                        {copiedFix === rowId
+                                          ? t.doctor.fixCopied
+                                          : t.doctor.fixLabel}
+                                      </Button>
+                                    </div>
+                                  ) : null}
+                                </div>
                               </div>
-                            )}
+                              {tone === 'ok' && item.check.status === 'OK' ? (
+                                <span className="hidden text-[11px] text-muted-foreground sm:block">
+                                  {statusLabel(item.check.status)}
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
-                        </div>
+                        )
+                      })}
+                    </div>
+                  </section>
+                )
+              })
+            )}
+          </DoctorPanel>
+        </TabsContent>
+
+        <TabsContent value="models" className="mt-0">
+          {editingProvider !== undefined ? (
+            <div ref={editorRef}>
+              <ProviderEditor
+                name={editingProvider}
+                canWriteCredential={runtime ? (runtime.can_write_credential ?? false) : null}
+                onCancel={() => setEditingProvider(undefined)}
+                onSaved={() => void load(false)}
+              />
+            </div>
+          ) : null}
+
+          <div className={cn('space-y-4', editingProvider !== undefined && 'hidden')}>
+            <DoctorPanel
+              title={t.doctor.runtimeCardTitle}
+              description={t.doctor.runtimeCardHelp}
+              action={
+                active ? (
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      canTranslate
+                        ? 'border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                        : 'border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                    )}
+                  >
+                    {canTranslate ? t.doctor.runtimeRunnable : t.doctor.runtimeRehearsal}
+                  </Badge>
+                ) : undefined
+              }
+            >
+              {active ? (
+                <div className="space-y-4 p-4">
+                  <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                    <DoctorMetric
+                      label={t.doctor.providerLabel}
+                      value={active.provider || '—'}
+                      mono
+                    />
+                    <DoctorMetric
+                      label={t.doctor.draftModel}
+                      value={active.draft_model || t.doctor.notConfigured}
+                      tone={active.draft_model ? undefined : 'warn'}
+                      mono
+                    />
+                    <DoctorMetric
+                      label={t.doctor.repairModel}
+                      value={active.repair_model || t.doctor.notConfigured}
+                      mono
+                    />
+                    <DoctorMetric
+                      label={t.doctor.endpoint}
+                      value={active.base_url || '—'}
+                      mono
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
+                    <span className="text-[11px] font-medium text-muted-foreground">
+                      {t.doctor.capabilityTitle}
+                    </span>
+                    {(
+                      [
+                        ['supports_system_prompt', t.doctor.capabilitySystem],
+                        ['supports_vision', t.doctor.capabilityVision],
+                      ] as const
+                    ).map(([field, label]) => {
+                      const declared = (active.declared_capability ?? []).includes(field)
+                      const value = active[field]
+                      return (
                         <Badge
-                          variant={statusBadgeVariant(item.check.status)}
-                          dot
-                          className="text-xs shrink-0"
+                          key={field}
+                          variant="outline"
+                          title={declared ? undefined : t.doctor.capabilityUndeclared}
+                          className={cn(
+                            'font-normal',
+                            declared
+                              ? value
+                                ? 'border-emerald-600/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                                : 'text-muted-foreground line-through'
+                              : 'border-dashed text-muted-foreground'
+                          )}
                         >
-                          {t.doctor.checkStatuses[item.check.status] ?? item.check.status}
+                          {label}
                         </Badge>
-                      </div>
                       )
                     })}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Right: what the engine will actually call.
-
-            This panel used to render `/model-profiles` under the heading
-            "model routing and latency matrix". That endpoint returned the
-            engine's hard-coded capability *presets* — fourteen name patterns
-            like `o1`, `o3`, `claude` — none of which was a configured model, and
-            the payload contained no latency at all. On this machine the operator
-            runs `local-gemma4` / `gemma4-e4b`, which matched none of the
-            fourteen, so the screen showed fourteen irrelevant rows and hid the
-            one configuration that was live.
-
-            That table is gone. Capability is now declared per provider block, so
-            this panel shows the live configuration and lets the operator edit
-            the block it comes from.
-
-            The panel and the editor share ONE grid cell (``col-start-2``), and
-            the editor replaces the panel while it is open. They used to be two
-            separate grid children, which put three boxes into a two-column grid:
-            the editor took the right cell of row 1 and the whole runtime panel
-            wrapped into row 2 at x=368 — under the diagnostics, in the *left*
-            column, showing "local-gemma4 is active" while the operator edited
-            index-translate. Same data, twice on screen, one copy in the wrong
-            place. */}
-        <div ref={editorRef} className="md:col-start-2 md:row-start-1 md:sticky md:top-6 md:self-start">
-          {editingProvider !== undefined ? (
-            <ProviderEditor
-              name={editingProvider}
-              // ``undefined`` → null: the configuration could not be read, which
-              // the form reports as unknown rather than as a refusal.
-              canWriteCredential={
-                runtime ? (runtime.can_write_credential ?? false) : null
-              }
-              onCancel={() => setEditingProvider(undefined)}
-              onSaved={() => void load(false)}
-            />
-          ) : null}
-
-          <div
-            className={`rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs ${
-              // ``hidden``, not ``display:none`` via a conditional: the editor
-              // sits above it in the same cell, and unmounting the panel would
-              // throw away its scroll position and re-fetch nothing. Keeping it
-              // mounted but hidden is also what makes the "restart required"
-              // warning reappear unchanged when the form closes.
-              editingProvider !== undefined ? 'hidden' : ''
-            }`}
-          >
-            <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] type-group">
-              {t.doctor.runtimeConfig}
-            </div>
-
-          {/* First run: no provider declared means a submit would silently run as
-              a zero-token rehearsal. Saying so here — before the wizard is ever
-              opened — is the difference between a working first session and a
-              mock deliverable the operator did not ask for. */}
-          {runtime && (runtime.providers ?? []).filter((p) => p.declared).length === 0 ? (
-            <div className="p-3.5 border-b border-[var(--paper-border)] bg-[#b45309]/10">
-              <div className="type-value font-semibold text-[#b45309] mb-1">
-                {t.doctor.firstRunTitle}
-              </div>
-              <p className="type-help text-[var(--ink-secondary)] leading-relaxed mb-2">
-                {t.doctor.firstRunBody}
-              </p>
-              <Button size="sm" onClick={() => setEditingProvider(null)}>
-                {t.doctor.firstRunCta}
-              </Button>
-            </div>
-          ) : null}
-
-          {/* A deployment-bound field edited in the file is not in force. Reporting
-              it is the difference between a control that works and one that
-              silently does nothing until the next restart. */}
-          {(runtime?.frozen_fields_changed ?? []).length > 0 ? (
-            <div className="px-3.5 py-2 border-b border-[var(--paper-border)] bg-[#b45309]/10 type-help text-[#b45309]">
-              {t.doctor.frozenFieldsWarning.replace(
-                '{fields}',
-                (runtime?.frozen_fields_changed ?? []).join(', '),
-              )}
-            </div>
-          ) : null}
-
-          {/* Active configuration: the part the old screen never showed. */}
-          {runtime ? (
-            <div className="p-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)]">
-              <div className="type-group mb-2">{t.doctor.activeNow}</div>
-              <dl className="space-y-1.5 type-value font-mono">
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-0.5 sm:gap-3">
-                  <dt className="text-[var(--ink-secondary)] shrink-0">{t.doctor.providerLabel}</dt>
-                  <dd className="text-[var(--ink-primary)] font-semibold truncate sm:text-right">
-                    {runtime.active.provider || '—'}
-                  </dd>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-0.5 sm:gap-3">
-                  <dt className="text-[var(--ink-secondary)] shrink-0">{t.doctor.draftModel}</dt>
-                  <dd className="text-[var(--ink-primary)] font-semibold truncate sm:text-right">
-                    {runtime.active.draft_model || t.doctor.notConfigured}
-                  </dd>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-0.5 sm:gap-3">
-                  <dt className="text-[var(--ink-secondary)] shrink-0">{t.doctor.repairModel}</dt>
-                  <dd className="text-[var(--ink-primary)] truncate sm:text-right">
-                    {runtime.active.repair_model || t.doctor.notConfigured}
-                  </dd>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-0.5 sm:gap-3">
-                  <dt className="text-[var(--ink-secondary)] shrink-0">{t.doctor.endpoint}</dt>
-                  <dd className="text-[var(--ink-primary)] truncate sm:text-right" title={runtime.active.base_url}>
-                    {runtime.active.base_url || '—'}
-                  </dd>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-0.5 sm:gap-3">
-                  <dt className="text-[var(--ink-secondary)] shrink-0">{t.doctor.capabilityProfile}</dt>
-                  <dd
-                    className={`truncate sm:text-right ${
-                      runtime.active.matched_pattern
-                        ? 'text-[var(--ink-primary)]'
-                        : 'text-[#b45309] font-semibold'
-                    }`}
-                  >
-                    {runtime.active.matched_pattern ?? t.doctor.noProfileMatch}
-                  </dd>
-                </div>
-              </dl>
-
-              {/* Which flags the block states, and which are the safe default.
-                  A screen that showed all four as plain booleans would present
-                  an assumption as if it were a measurement of the endpoint. */}
-              <div className="mt-2 pt-2 border-t border-[var(--paper-border)]">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <span className="type-label text-[var(--ink-muted)]">
-                    {t.doctor.capabilityTitle}
-                  </span>
-                  <InfoTip label={t.doctor.capabilityHelp}>{t.doctor.capabilityHelp}</InfoTip>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {(
-                    // Only the two the operator can actually declare. The
-                      // temperature and reasoning flags are learned by the engine
-                      // and have no form control, so showing them here would
-                      // present an engine assumption as a configuration choice.
-                    [
-                      ['supports_system_prompt', t.doctor.capabilitySystem],
-                      ['supports_vision', t.doctor.capabilityVision],
-                    ] as const
-                  ).map(([field, label]) => {
-                    const declared = (runtime.active.declared_capability ?? []).includes(field)
-                    const value = runtime.active[field]
-                    return (
-                      <span
-                        key={field}
-                        className={`type-help font-mono px-1.5 py-0.5 rounded border ${
-                          declared
-                            ? value
-                              ? 'border-[#15803d]/25 bg-[#15803d]/10 text-[#15803d]'
-                              : 'border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-secondary)] line-through'
-                            : 'border-dashed border-[var(--paper-border)] text-[var(--ink-muted)]'
-                        }`}
-                        title={declared ? undefined : t.doctor.capabilityUndeclared}
-                      >
-                        {label}
+                    {(active.declared_capability ?? []).length === 0 && active.draft_model ? (
+                      <span className="text-[11px] text-muted-foreground">
+                        {t.doctor.noProfileMatchHelp}
                       </span>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 text-sm text-muted-foreground">
+                  {t.doctor.runtimeConfigUnavailable}
+                </div>
+              )}
+            </DoctorPanel>
+
+            {runtime && declaredProviders.length === 0 ? (
+              <Alert variant="warning">
+                <AlertTriangle />
+                <AlertTitle>{t.doctor.firstRunTitle}</AlertTitle>
+                <AlertDescription className="flex flex-col items-start gap-3 pt-2">
+                  <span>{t.doctor.firstRunBody}</span>
+                  <Button size="sm" onClick={() => setEditingProvider(null)}>
+                    <Plus />
+                    {t.doctor.firstRunCta}
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {(runtime?.frozen_fields_changed ?? []).length > 0 ? (
+              <Alert variant="warning">
+                <AlertTriangle />
+                <AlertDescription>
+                  {t.doctor.frozenFieldsWarning.replace(
+                    '{fields}',
+                    (runtime?.frozen_fields_changed ?? []).join(', '),
+                  )}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            <DoctorPanel
+              title={t.doctor.providerListTitle}
+              description={t.doctor.providerListHelp}
+              action={
+                <Button size="sm" variant="outline" onClick={() => setEditingProvider(null)}>
+                  <Plus />
+                  {t.doctor.addProvider}
+                </Button>
+              }
+            >
+              {declaredProviders.length === 0 ? (
+                <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  {t.doctor.firstRunBody}
+                </div>
+              ) : (
+                <div className="divide-y divide-border/70">
+                  {declaredProviders.map((provider) => {
+                    const tone = providerStatusTone(provider)
+                    const readiness = provider.credential_issue
+                      ? provider.credential_issue === 'unresolved_variable'
+                        ? t.doctor.providerUnresolved
+                        : t.doctor.providerNoCredential
+                      : provider.available
+                        ? t.doctor.providerReady
+                        : t.doctor.refreshFailed
+                    return (
+                      <div key={provider.name} className="space-y-3 px-4 py-3.5">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <h3 className="font-mono text-sm font-semibold text-foreground">
+                                {provider.name}
+                              </h3>
+                              {provider.active ? (
+                                <Badge variant="outline" className="h-5 px-1.5 py-0 text-[10px]">
+                                  {t.doctor.activeProviderLabel}
+                                </Badge>
+                              ) : provider.is_default ? (
+                                <Badge variant="secondary" className="h-5 px-1.5 py-0 text-[10px]">
+                                  {t.doctor.defaultProviderLabel}
+                                </Badge>
+                              ) : null}
+                              {provider.is_free ? (
+                                <Badge variant="outline" className="h-5 px-1.5 py-0 text-[10px]">
+                                  {t.doctor.freeLabel}
+                                </Badge>
+                              ) : null}
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                              <span className="inline-flex items-center gap-1">
+                                <DoctorStatusIcon
+                                  status={tone === 'ok' ? 'OK' : 'WARN'}
+                                  className="size-3.5"
+                                />
+                                {readiness}
+                              </span>
+                              <span className="truncate font-mono">
+                                {provider.draft_model || t.doctor.notConfigured}
+                              </span>
+                              <span className="truncate font-mono">
+                                {provider.api_mode || '—'}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1">
+                            {!provider.active && !provider.is_default ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => void handleMakeDefault(provider.name)}
+                                disabled={defaultBusy === provider.name}
+                                className="h-8 px-2 text-xs"
+                              >
+                                {t.doctor.activateProvider}
+                              </Button>
+                            ) : null}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setEditingProvider(provider.name)}
+                              className="h-8 px-2 text-xs"
+                            >
+                              <Pencil />
+                              {t.doctor.editProvider}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setDeleteError(null)
+                                setDeletingProvider(provider.name)
+                              }}
+                              className="h-8 px-2 text-xs text-muted-foreground hover:text-destructive"
+                            >
+                              <Trash2 />
+                              {t.doctor.deleteProvider}
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 gap-2 rounded-md bg-muted/20 px-3 py-2 text-[11px] sm:grid-cols-2">
+                          <div className="min-w-0">
+                            <span className="text-muted-foreground">{t.doctor.providerModels}</span>
+                            <span className="ml-2 truncate font-mono">
+                              {provider.draft_model || '—'}
+                              {provider.repair_model && provider.repair_model !== provider.draft_model
+                                ? ` / ${provider.repair_model}`
+                                : ''}
+                            </span>
+                          </div>
+                          <div className="min-w-0 sm:text-right">
+                            <span className="text-muted-foreground">{t.doctor.providerEndpoint}</span>
+                            <span
+                              className="ml-2 inline-block max-w-full truncate align-bottom font-mono"
+                              title={provider.base_url ?? undefined}
+                            >
+                              {provider.base_url || '—'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     )
                   })}
                 </div>
-                {(runtime.active.declared_capability ?? []).length === 0 &&
-                  runtime.active.draft_model && (
-                    <p className="mt-1.5 type-help text-[var(--ink-muted)] leading-relaxed">
-                      {t.doctor.noProfileMatchHelp}
-                    </p>
-                  )}
+              )}
+              <div className="border-t border-border/70 px-4 py-2.5 text-[11px] leading-relaxed text-muted-foreground">
+                {t.doctor.providerConfigHint}
               </div>
-            </div>
-          ) : (
-            <div className="p-4 type-help text-[var(--ink-muted)]">
-              {t.doctor.runtimeConfigUnavailable}
-            </div>
-          )}
+            </DoctorPanel>
 
-          {/* Declared providers, credentials filtered server-side, each row
-              editable through the form above. */}
-          <div className="px-3.5 py-2.5 border-b border-[var(--paper-border)]">
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <span className="type-group">{t.doctor.declaredProviders}</span>
-              {/* The create affordance. Without it a fresh install has zero
-                  declared providers, so the list renders zero rows and there is
-                  no way to add the first one from the console at all. */}
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setEditingProvider(null)}
-                className="!h-7 sm:!h-6 px-2 sm:!px-1.5 type-help"
+            <Accordion type="single" collapsible>
+              <AccordionItem
+                value="built-in-connections"
+                className="rounded-xl border border-border/80 bg-card shadow-card"
               >
-                <Plus size={12} className="sm:w-[11px] sm:h-[11px]" /> {t.doctor.addProvider}
-              </Button>
-            </div>
-            {(runtime?.providers ?? []).filter((p) => p.declared).length === 0 ? (
-              <p className="type-help text-[var(--ink-muted)] leading-relaxed">
-                {t.doctor.firstRunBody}
-              </p>
-            ) : null}
-            {/* Only what the operator declared. The API also returns shipped
-                wire protocols and bare aliases (`chat`, `claude`, `responses`);
-                rendering all three put seven aliases above the six real
-                entries. Aliases are folded away below. */}
-            <div className="space-y-1.5 sm:space-y-1">
-              {(runtime?.providers ?? [])
-                .filter((p) => p.declared)
-                .map((p) => (
-                  <div
-                    key={p.name}
-                    className={`flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2 rounded-[4px] px-2.5 py-2 sm:px-2 sm:py-1 type-value font-mono ${
-                      editingProvider === p.name
-                        ? // The row the form above is editing. Without this the
-                          // list highlighted only the *active* provider, so
-                          // editing index-translate left local-gemma4 green and
-                          // the operator had no confirmation of what was open.
-                          'bg-[var(--paper-subsurface)] border border-dashed border-[var(--ink-muted)]'
-                        : p.active
-                          ? 'bg-[#15803d]/10 border border-[#15803d]/25'
-                          : 'border border-[var(--paper-border)] sm:border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between sm:justify-start gap-2 min-w-0">
-                      <span
-                        className={`truncate ${
-                          editingProvider === p.name
-                            ? 'font-semibold text-[var(--ink-primary)]'
-                            : p.active
-                              ? 'font-semibold text-[#15803d]'
-                              : 'text-[var(--ink-secondary)]'
-                        }`}
-                      >
-                        {p.name}
+                <AccordionTrigger className="px-4 py-3 hover:no-underline">
+                  <span className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span>
+                      {t.doctor.builtinDetails}{' '}
+                      <span className="font-normal tabular-nums text-muted-foreground">
+                        (
+                        {runtime
+                          ? (runtime.providers ?? []).filter((provider) => !provider.declared)
+                              .length
+                          : t.doctor.loadFailed}
+                        )
                       </span>
-                      <span className="type-help text-[var(--ink-muted)] truncate sm:hidden">
-                        {p.draft_model || p.api_mode || '—'}
-                      </span>
-                    </div>
-                    <span className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {/* Why this row cannot make a call, when it cannot. The
-                            block is still listed — it is declared, so the operator
-                            should see it — but silently, as it used to be, is how
-                            an unset ${VAR} stayed invisible. The variable name is
-                            not in this payload: it is shown in the form, which is
-                            where the fix happens. */}
-                        {p.credential_issue === 'unresolved_variable' ? (
-                          <span className="type-help text-[#b45309]">
-                            {t.doctor.credentialUnresolved}
-                          </span>
-                        ) : p.credential_issue === 'missing' ? (
-                          <span className="type-help text-[#b45309]">
-                            {t.doctor.credentialMissing}
-                          </span>
-                        ) : null}
-                        {p.is_free && (
-                          <span className="type-help text-[var(--ink-muted)]">
-                            {t.doctor.freeLabel}
-                          </span>
-                        )}
-                        {/* Which block the *file* names as default. Distinct from
-                            "active": UBT_PROVIDER or --provider outranks it, so an
-                            operator whose shell exported a provider had no way to
-                            see what the file would pick without it. */}
-                        {p.is_default ? (
-                          <span className="type-help font-semibold text-[var(--ink-primary)]">
-                            {t.doctor.defaultProviderLabel}
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => void handleMakeDefault(p.name)}
-                            disabled={defaultBusy === p.name}
-                            aria-label={`${t.doctor.activateProvider} ${p.name}`}
-                            className="type-help text-[var(--ink-muted)] hover:text-[var(--ink-primary)] disabled:opacity-50 py-2 sm:py-0 px-1 min-h-[40px] sm:min-h-0 flex items-center cursor-pointer"
-                          >
-                            {t.doctor.activateProvider}
-                          </button>
-                        )}
-                        <span className="hidden sm:inline type-help text-[var(--ink-muted)] truncate max-w-[9rem]">
-                          {p.draft_model || p.api_mode || '—'}
-                        </span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setEditingProvider(p.name)}
-                        aria-label={`${t.doctor.editProvider} ${p.name}`}
-                        className="p-2 sm:p-0.5 rounded text-[var(--ink-muted)] hover:text-[var(--ink-primary)] hover:bg-[var(--paper-subsurface)] shrink-0 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 flex items-center justify-center cursor-pointer"
-                      >
-                        <Pencil size={13} className="sm:w-[11px] sm:h-[11px]" />
-                      </button>
                     </span>
-                  </div>
-                ))}
-            </div>
-
-            {/* Built-in protocols and aliases, collapsed: they are usable names,
-                not configurations. */}
-            <details className="mt-2">
-              <summary className="cursor-pointer type-help font-mono text-[var(--ink-muted)] hover:text-[var(--ink-primary)] select-none">
-                {t.doctor.builtinProviders} (
-                {/* ``runtime === null`` means the configuration could not be read,
-                    which is NOT the same as "there are none". The old code
-                    coalesced to ``[]`` and rendered "(0)" — the panel asserting a
-                    fact it did not have, which is the same failure the "latency
-                    matrix" heading had. */}
-                {runtime
-                  ? (runtime.providers ?? []).filter((p) => !p.declared).length
-                  : t.doctor.loadFailed})
-              </summary>
-              {/* Two kinds of entry, rendered as two groups. They used to be one
-                  flat list where both were labelled "alias": ``openai-chat`` is a
-                  wire *protocol* — the name a block should carry — while ``chat``
-                  and ``claude`` merely resolve to one. Labelling a protocol an
-                  alias, and printing ``anthropic-messages`` next to itself, told
-                  the operator nothing about which name to write in a block. */}
-              <div className="mt-1 space-y-0.5">
-                {(runtime?.providers ?? [])
-                  .filter((p) => !p.declared && p.is_protocol)
-                  .map((p) => (
-                    <div
-                      key={p.name}
-                      className="flex items-center justify-between gap-2 px-2 type-help font-mono text-[var(--ink-muted)]"
+                    <Badge
+                      variant="outline"
+                      className="font-normal text-muted-foreground"
                     >
-                      <span className="truncate">{p.name}</span>
-                      <span className="shrink-0">{t.doctor.protocolLabel}</span>
+                      {t.doctor.builtinHelp}
+                    </Badge>
+                  </span>
+                </AccordionTrigger>
+                <AccordionContent className="space-y-3 border-t border-border/70 px-4 py-3">
+                <div className="space-y-1">
+                  {(runtime?.providers ?? [])
+                    .filter((provider) => !provider.declared && provider.is_protocol)
+                    .map((provider) => (
+                      <div
+                        key={provider.name}
+                        className="flex items-center justify-between gap-3 text-xs"
+                      >
+                        <span className="font-mono">{provider.name}</span>
+                        <span className="text-muted-foreground">{t.doctor.protocolName}</span>
+                      </div>
+                    ))}
+                </div>
+                {(runtime?.providers ?? []).some(
+                  (provider) => !provider.declared && provider.is_alias,
+                ) ? (
+                  <div className="border-t border-border/60 pt-2">
+                    <div className="mb-1 text-[11px] font-medium text-muted-foreground">
+                      {t.doctor.aliasResolution}
                     </div>
-                  ))}
-                {(runtime?.providers ?? []).filter((p) => !p.declared && p.is_alias).length >
-                0 ? (
-                  <div className="pt-1 px-2 type-help text-[var(--ink-muted)]">
-                    {t.doctor.aliasGroupLabel}
+                    {(runtime?.providers ?? [])
+                      .filter((provider) => !provider.declared && provider.is_alias)
+                      .map((provider) => (
+                        <div
+                          key={provider.name}
+                          className="flex items-center justify-between gap-3 py-0.5 text-xs"
+                        >
+                          <span className="font-mono">{provider.name}</span>
+                          <span className="font-mono text-muted-foreground">
+                            → {provider.alias_of ?? t.doctor.aliasLabel}
+                          </span>
+                        </div>
+                      ))}
                   </div>
                 ) : null}
-                {(runtime?.providers ?? [])
-                  .filter((p) => !p.declared && p.is_alias)
-                  .map((p) => (
-                    <div
-                      key={p.name}
-                      className="flex items-center justify-between gap-2 px-2 type-help font-mono text-[var(--ink-muted)]"
-                    >
-                      <span className="truncate">{p.name}</span>
-                      {/* The mapping itself: ``claude → anthropic-messages``. */}
-                      <span className="shrink-0">
-                        {p.alias_of ? `\u2192 ${p.alias_of}` : t.doctor.aliasLabel}
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  {t.doctor.builtinProvidersHelp}
+                </p>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="security" className="mt-0 space-y-4">
+          <DoctorPanel
+            title={t.doctor.securityCardTitle}
+            description={t.doctor.securityCardHelp}
+          >
+            <div className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-2">
+              <QESettingsCard providerNames={declaredProviders.map((provider) => provider.name)} />
+              <EgressSettingsCard />
+            </div>
+          </DoctorPanel>
+
+          <DoctorPanel
+            title={t.doctor.securityBoundary}
+            description={t.doctor.boundaryCardHelp}
+          >
+            {info ? (
+              <>
+                <div className="divide-y divide-border/70">
+                  <div className="flex flex-col gap-1.5 px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+                    <span className="text-muted-foreground">{t.doctor.listenInterface}</span>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate font-mono" title={info.host}>
+                        {info.host}
+                        {info.port ? `:${info.port}` : ''}
                       </span>
-                    </div>
-                  ))}
-              </div>
-              {/* A protocol name is usable on its own, but carries no model id —
-                  which is the actual prerequisite a newcomer trips over. */}
-              <p className="mt-1.5 px-2 type-help text-[var(--ink-muted)] leading-relaxed">
-                {t.doctor.builtinProvidersHelp}
-              </p>
-            </details>
-            <p className="mt-2 type-help text-[var(--ink-muted)] leading-relaxed">
-              {t.doctor.providerConfigHint}
-            </p>
-          </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Quality estimation, full width: the provider panel above is about what
-          the engine calls, this one is about whether the result is measured.
-          Kept out of the two-column grid because it is a form with a warning
-          paragraph, and squeezing it into a half-width cell is what made the
-          previous "QE not measured" label unreadable. */}
-      <QESettingsCard
-        providerNames={(runtime?.providers ?? []).filter((p) => p.declared).map((p) => p.name)}
-      />
-
-      {/* Page egress, full width: the privacy gate every egress-dependent
-          control names. Sits beside the security boundary panel below, because
-          it *is* one — but unlike that panel it is operator-settable here. */}
-      {/* The two boundaries, paired: the egress gate (operator-settable) and
-          the deployment boundary (read-only). The probe list above already
-          carries the storage facts — ledger dir, disk, WAL — so this panel
-          keeps only what is a security decision, in the same row language. */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
-        <EgressSettingsCard />
-
-        <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
-          <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] type-group">
-            {t.doctor.securityBoundary}
-          </div>
-          {info ? (
-            <div className="divide-y divide-[var(--paper-border)]">
-              <div className="px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs">
-                <span className="type-value text-[var(--ink-secondary)] shrink-0">
-                  {t.doctor.listenInterface}
-                </span>
-                <span className="flex items-center gap-1.5 min-w-0">
-                  <span className="type-value font-mono truncate" title={info.host}>
-                    {info.host}
-                  </span>
-                  <Badge variant={info.is_loopback ? 'success' : 'warning'} className="text-xs shrink-0">
-                    {info.is_loopback ? t.doctor.loopbackOnly : t.doctor.exposed}
-                  </Badge>
-                </span>
-              </div>
-
-              <div className="px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs">
-                <span className="type-value text-[var(--ink-secondary)] shrink-0">
-                  {t.doctor.authGate}
-                </span>
-                <Badge
-                  variant={info.auth_enabled ? 'success' : 'warning'}
-                  className="text-xs shrink-0"
-                >
-                  {info.auth_enabled ? t.doctor.enabled : t.doctor.disabled}
-                </Badge>
-              </div>
-
-              <div className="px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs">
-                <span className="flex items-center gap-1 shrink-0">
-                  <span className="type-value text-[var(--ink-secondary)]">{t.doctor.jobMode}</span>
-                  <InfoTip label={t.doctor.jobMode}>{t.doctor.jobModeHelp}</InfoTip>
-                </span>
-                <span className="type-value font-mono text-[var(--ink-primary)]">
-                  {info.job_mode}
-                </span>
-              </div>
-
-              <div className="px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-start justify-between gap-1.5 sm:gap-3 text-xs">
-                <span className="type-value text-[var(--ink-secondary)] shrink-0">
-                  {t.doctor.allowedRoots}
-                </span>
-                <span className="flex flex-wrap gap-1 justify-start sm:justify-end min-w-0">
-                  {info.allowed_bases.length === 0 ? (
-                    <span className="type-help text-[var(--ink-muted)]">—</span>
-                  ) : (
-                    info.allowed_bases.map((base) => (
-                      <span
-                        key={base}
-                        title={base}
-                        className="type-help font-mono px-1.5 py-0.5 rounded border border-[var(--paper-border)] bg-[var(--paper-subsurface)] max-w-[15rem] truncate"
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          'shrink-0',
+                          info.is_loopback
+                            ? 'border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                            : 'border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                        )}
                       >
-                        {base}
+                        {info.is_loopback ? t.doctor.loopbackOnly : t.doctor.exposed}
+                      </Badge>
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 px-4 py-3 text-xs">
+                    <span className="text-muted-foreground">{t.doctor.authGate}</span>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        info.auth_enabled
+                          ? 'border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                          : 'border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                      )}
+                    >
+                      {info.auth_enabled ? t.doctor.enabled : t.doctor.disabled}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 px-4 py-3 text-xs">
+                    <span className="text-muted-foreground">{t.doctor.jobMode}</span>
+                    <span className="font-mono">{info.job_mode}</span>
+                  </div>
+                  <div className="flex flex-col gap-2 px-4 py-3 text-xs sm:flex-row sm:items-start sm:justify-between">
+                    <span className="shrink-0 text-muted-foreground">
+                      {t.doctor.allowedRoots}
+                    </span>
+                    <span className="flex min-w-0 flex-wrap gap-1 sm:justify-end">
+                      {info.allowed_bases.length === 0 ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        info.allowed_bases.map((base) => (
+                          <span
+                            key={base}
+                            title={base}
+                            className="max-w-[18rem] truncate rounded border border-border bg-muted/30 px-1.5 py-0.5 font-mono text-[11px]"
+                          >
+                            {base}
+                          </span>
+                        ))
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-2 px-4 py-3 text-xs sm:flex-row sm:items-start sm:justify-between">
+                    <span className="shrink-0 text-muted-foreground">
+                      {t.doctor.forbiddenPaths}
+                    </span>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span
+                        className="truncate font-mono text-[11px]"
+                        title={boundary?.forbidden_prefixes.join(', ')}
+                      >
+                        {boundary ? boundary.forbidden_prefixes.join(', ') : '—'}
                       </span>
-                    ))
-                  )}
-                </span>
+                      <Badge variant="outline" className="shrink-0 text-[10px]">
+                        {t.doctor.securityForbiddenBadge}
+                      </Badge>
+                    </span>
+                  </div>
+                </div>
+                {!info.is_loopback ? (
+                  <div className="border-t border-border/70 bg-amber-500/10 px-4 py-2.5 text-[11px] text-amber-700 dark:text-amber-400">
+                    {t.doctor.exposedWarning}
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="px-4 py-8 text-sm text-muted-foreground">
+                {t.doctor.runtimeConfigUnavailable}
               </div>
+            )}
+          </DoctorPanel>
+        </TabsContent>
+      </Tabs>
 
-              <div className="px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs">
-                <span className="type-value text-[var(--ink-secondary)] shrink-0">
-                  {t.doctor.forbiddenPaths}
-                </span>
-                <span className="flex items-center gap-1.5 min-w-0">
-                  <span
-                    className="type-help font-mono truncate"
-                    title={boundary?.forbidden_prefixes.join('  ')}
-                  >
-                    {boundary
-                      ? boundary.forbidden_prefixes.join(', ')
-                      : '—'}
-                  </span>
-                  <Badge variant="outline" className="text-xs shrink-0">
-                    {t.doctor.securityForbiddenBadge}
-                  </Badge>
-                </span>
-              </div>
-            </div>
-          ) : (
-            <div className="p-4 type-help text-[var(--ink-muted)]">—</div>
-          )}
-          {info && !info.is_loopback && (
-            <div className="px-3.5 py-2 border-t border-[var(--paper-border)] bg-[#b45309]/10 type-help text-[#b45309]">
-              {t.doctor.exposedWarning}
-            </div>
-          )}
-        </div>
-      </div>
+      <ConfirmDialog
+        open={deletingProvider !== null}
+        title={t.doctor.deleteProviderTitle}
+        body={
+          <>
+            {t.doctor.deleteProviderBody.replace('{name}', deletingProvider ?? '')}
+            {deleteError ? <span className="mt-2 block text-destructive">{deleteError}</span> : null}
+          </>
+        }
+        confirmLabel={t.doctor.deleteProviderConfirm}
+        cancelLabel={t.doctor.cancel}
+        danger
+        onConfirm={() => deletingProvider && void handleDeleteProvider(deletingProvider)}
+        onCancel={() => {
+          if (deleteBusy) return
+          setDeletingProvider(null)
+          setDeleteError(null)
+        }}
+      />
     </div>
   )
 }

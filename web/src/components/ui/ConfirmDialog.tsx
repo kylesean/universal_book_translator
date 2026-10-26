@@ -1,6 +1,19 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { cn } from '@/lib/utils'
+import { useI18n } from '@/i18n/useI18n'
 
 interface ConfirmDialogProps {
   open: boolean
@@ -26,14 +39,6 @@ interface ConfirmDialogProps {
   typeToConfirmMismatch?: string
 }
 
-/**
- * In-app replacement for ``window.confirm``.
- *
- * The native dialog is unstyled, untranslatable beyond its buttons, blocks the
- * event loop, and cannot carry the console's tone. This one traps focus on the
- * confirm button, closes on Escape and on backdrop click, and is announced as a
- * modal dialog.
- */
 export function ConfirmDialog({
   open,
   title,
@@ -47,83 +52,39 @@ export function ConfirmDialog({
   typeToConfirmLabel,
   typeToConfirmMismatch,
 }: ConfirmDialogProps) {
-  const confirmRef = useRef<HTMLButtonElement>(null)
-  const dialogRef = useRef<HTMLDivElement>(null)
+  const { t } = useI18n()
   const [typed, setTyped] = useState('')
   const needsPhrase = Boolean(typeToConfirm)
   const phraseOk = !needsPhrase || typed.trim() === typeToConfirm
 
-  useEffect(() => {
-    if (!open) return
-    // With a phrase required, focus the field (where the operator must act)
-    // rather than the button, which would make Enter confirm immediately.
-    if (!needsPhrase) confirmRef.current?.focus()
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onCancel()
-        return
-      }
-      // Focus trap: Tab cycles inside the dialog. The module comment has
-      // always claimed this; without it, Tab walks into the console behind
-      // the overlay and a keyboard user can trigger background actions while
-      // a danger confirmation is open.
-      if (event.key === 'Tab') {
-        const root = dialogRef.current
-        if (!root) return
-        const focusables = Array.from(
-          root.querySelectorAll<HTMLElement>(
-            'button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])'
-          )
-        ).filter((el) => !(el as HTMLButtonElement).disabled && el.offsetParent !== null)
-        if (focusables.length === 0) return
-        const first = focusables[0]
-        const last = focusables[focusables.length - 1]
-        const active = document.activeElement as HTMLElement | null
-        if (event.shiftKey) {
-          if (active === first || !root.contains(active)) {
-            event.preventDefault()
-            last.focus()
-          }
-        } else if (active === last || !root.contains(active)) {
-          event.preventDefault()
-          first.focus()
-        }
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [open, onCancel, needsPhrase])
-
-  if (!open) return null
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-4 sm:p-6"
-      onClick={onCancel}
+    <AlertDialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          setTyped('')
+          onCancel()
+        }
+      }}
     >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className="w-full max-w-md sm:max-w-lg rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] p-5 shadow-[0_8px_32px_rgba(0,0,0,0.14)]"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="mb-3 flex items-start gap-2.5">
-          <AlertTriangle
-            className={`h-4 w-4 mt-0.5 shrink-0 ${danger ? 'text-[#b91c1c]' : 'text-[#b45309]'}`}
-          />
-          <h2 className="text-sm font-semibold text-[var(--ink-primary)]">{title}</h2>
-        </div>
-        <div className="mb-5 text-xs leading-relaxed text-[var(--ink-secondary)] break-words">
-          {body}
-        </div>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle className="flex items-start gap-2.5">
+            <AlertTriangle
+              className={cn(
+                'mt-0.5 size-4 shrink-0',
+                danger ? 'text-destructive' : 'text-amber-700 dark:text-amber-400'
+              )}
+            />
+            <span>{title}</span>
+          </AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="break-words text-sm">{body}</div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
         {needsPhrase && (
-          <div className="mb-4 space-y-2">
-            <label
-              htmlFor="confirm-phrase"
-              className="block text-xs leading-relaxed text-[var(--ink-secondary)]"
-            >
+          <div className="space-y-2">
+            <Label htmlFor="confirm-phrase" className="block text-xs leading-relaxed text-muted-foreground">
               {typeToConfirmLabel ? (
                 (() => {
                   const parts = typeToConfirmLabel.split('{phrase}')
@@ -131,7 +92,7 @@ export function ConfirmDialog({
                     return (
                       <span className="block space-y-1.5">
                         <span>{parts[0].trim()}</span>
-                        <code className="block break-all rounded border border-[var(--paper-border)] bg-[var(--paper-subsurface)] px-2 py-1 font-mono text-xs font-semibold text-[var(--ink-primary)] select-all">
+                        <code className="block break-all rounded border border-border bg-muted/40 px-2 py-1 font-mono text-xs font-semibold text-foreground select-all">
                           {typeToConfirm}
                         </code>
                         {parts[1].trim() && <span>{parts[1].trim()}</span>}
@@ -146,14 +107,14 @@ export function ConfirmDialog({
                 })()
               ) : (
                 <span className="block space-y-1.5">
-                  <span>Type to confirm:</span>
-                  <code className="block break-all rounded border border-[var(--paper-border)] bg-[var(--paper-subsurface)] px-2 py-1 font-mono text-xs font-semibold text-[var(--ink-primary)] select-all">
+                  <span>{t.common.typeToConfirm}</span>
+                  <code className="block break-all rounded border border-border bg-muted/40 px-2 py-1 font-mono text-xs font-semibold text-foreground select-all">
                     {typeToConfirm}
                   </code>
                 </span>
               )}
-            </label>
-            <input
+            </Label>
+            <Input
               id="confirm-phrase"
               autoFocus
               value={typed}
@@ -163,30 +124,33 @@ export function ConfirmDialog({
               }}
               spellCheck={false}
               autoComplete="off"
-              className="w-full rounded border border-[var(--paper-border)] bg-[var(--paper-subsurface)] px-2.5 py-1.5 font-mono text-xs text-[var(--ink-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--ink-primary)]"
+              className="font-mono text-xs"
             />
             {!phraseOk && typed.length > 0 && (
-              <p className="mt-1 text-xs text-[#b91c1c] break-words">
-                {typeToConfirmMismatch ?? 'That does not match.'}
+              <p className="text-xs text-destructive break-words">
+                {typeToConfirmMismatch ?? t.common.doesNotMatch}
               </p>
             )}
           </div>
         )}
-        <div className="flex justify-end gap-2">
-          <Button onClick={onCancel} variant="secondary" size="sm">
+        <AlertDialogFooter>
+          <AlertDialogCancel className="h-8 px-3 text-xs">
             {cancelLabel}
-          </Button>
-          <Button
-            ref={confirmRef}
+          </AlertDialogCancel>
+          <AlertDialogAction
             onClick={onConfirm}
             disabled={!phraseOk}
-            variant={danger ? 'danger' : 'primary'}
-            size="sm"
+            className={cn(
+              'h-8 px-3 text-xs shadow-xs',
+              danger
+                ? 'border border-destructive/80 bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                : 'border border-primary/90 bg-primary text-primary-foreground hover:bg-primary/90'
+            )}
           >
             {confirmLabel}
-          </Button>
-        </div>
-      </div>
-    </div>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }

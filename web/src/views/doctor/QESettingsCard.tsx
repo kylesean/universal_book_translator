@@ -1,30 +1,42 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Loader2, Pencil, X } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
-import { InfoTip } from '@/components/ui/InfoTip'
-import { getQeSettings, saveQeSettings, type QESettings, type QESettingsRequest } from '@/api/client'
+
+import {
+  getQeSettings,
+  saveQeSettings,
+  type QESettings,
+  type QESettingsRequest,
+} from '@/api/client'
+import { Alert, AlertDescription } from '@/components/ui/Alert'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { useI18n } from '@/i18n/useI18n'
+import { cn } from '@/lib/utils'
+import { DoctorField, DoctorMetric } from './components'
+import { InfoTip } from '@/components/ui/InfoTip'
 
 interface QESettingsCardProps {
   /** Provider names a judge may point at, for the select. */
   providerNames: string[]
 }
 
+const INHERIT = '__inherit__'
+
 /**
  * The quality-estimation gate: what scores a run, and the only form that says so.
  *
- * Every finished job used to report "QE not measured (heuristic engine)" and
- * stop there. The remedy lived in `ubt.toml` — `qe_engine = "tiered"` **and**
- * `qe_judge_enabled = true` **and** a judge model — with no control anywhere in
- * the console, so the sentence named a fix the reader could not perform on the
- * screen they were on.
- *
- * **One control, two keys.** The pipeline selects the LLM judge on
- * `qe_judge_enabled` alone; `qe_engine = "tiered"` without it only produces a
- * warning and identical behaviour to the default. Exposing both as checkboxes
- * would let an operator save the documented-but-useless combination, so the
- * selector writes the pair together: "tiered" means both keys on, "heuristic"
- * means both off.
+ * ``qe_engine`` and ``qe_judge_enabled`` are written together. ``tiered`` with
+ * the judge off scores nothing, so exposing them as independent switches would
+ * let the console create the exact state this card exists to explain.
  */
 export function QESettingsCard({ providerNames }: QESettingsCardProps) {
   const { t } = useI18n()
@@ -34,9 +46,6 @@ export function QESettingsCard({ providerNames }: QESettingsCardProps) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
-
-  // Draft state. Numbers are held as strings so a half-typed "0." is not
-  // coerced to 0 and saved behind the operator's back.
   const [tiered, setTiered] = useState(false)
   const [judgeProvider, setJudgeProvider] = useState('')
   const [judgeModel, setJudgeModel] = useState('')
@@ -47,14 +56,11 @@ export function QESettingsCard({ providerNames }: QESettingsCardProps) {
   const adopt = useCallback((next: QESettings) => {
     setSettings(next)
     setLoadFailed(false)
-    // The select shows the *effective* choice, not the raw label: a hand-edited
-    // `tiered` with the judge off scores nothing, and rendering it as "tiered"
-    // would repeat the exact confusion this card exists to remove.
+    // The effective choice, not the raw engine label: a hand-edited "tiered"
+    // with the judge off does not score anything.
     setTiered(Boolean(next.judge_enabled))
     setJudgeProvider(next.judge_provider ?? '')
-    // The raw setting, not the resolved id: seeding from `judge_model` would
-    // write an inherited `repair_model` back as an explicit pin on a save that
-    // only changed the threshold.
+    // The raw setting: seeding the resolved model would pin an inherited value.
     setJudgeModel(next.judge_model_explicit ?? '')
     setThreshold(String(next.threshold ?? 0.75))
     setPassSample(String(next.judge_pass_sample ?? 0))
@@ -97,9 +103,6 @@ export function QESettingsCard({ providerNames }: QESettingsCardProps) {
     setSaving(true)
     setError(null)
     try {
-      // Both keys travel together — see the component docstring. `null` clears
-      // an optional key, which is how "inherit from the provider block" is
-      // expressed; an empty string would name a model that does not exist.
       const body: QESettingsRequest = {
         qe_engine: tiered ? 'tiered' : 'heuristic',
         qe_judge_enabled: tiered,
@@ -109,8 +112,7 @@ export function QESettingsCard({ providerNames }: QESettingsCardProps) {
         qe_judge_pass_sample: sampleValue,
         qe_judge_sentences: sentences,
       }
-      const next = await saveQeSettings(body)
-      adopt(next)
+      adopt(await saveQeSettings(body))
       setSaved(true)
       setEditing(false)
     } catch (err) {
@@ -126,262 +128,270 @@ export function QESettingsCard({ providerNames }: QESettingsCardProps) {
       (settings.judge_enabled && settings.engine !== 'tiered'))
 
   return (
-    <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
-      <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between gap-3">
-        <div className="min-w-0 flex items-center gap-1.5">
-          <span className="type-group">{t.doctor.qeTitle}</span>
-          <InfoTip label={t.doctor.qeTitle}>{t.doctor.qeHelp}</InfoTip>
+    <section className="min-w-0 overflow-hidden rounded-xl border border-border/80 bg-card">
+      <header className="flex items-start justify-between gap-3 border-b border-border/70 px-4 py-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <h2 className="text-sm font-semibold">{t.doctor.qeTitle}</h2>
+            <InfoTip label={t.doctor.qeTitle}>{t.doctor.qeHelp}</InfoTip>
+          </div>
+          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+            {t.doctor.qeMetricLabel}
+          </p>
         </div>
-        {!editing && settings ? (
-          <Button size="sm" variant="ghost" onClick={startEditing} className="!h-7 px-2 type-help">
-            <Pencil size={12} /> {t.doctor.qeEdit}
-          </Button>
-        ) : null}
         {editing ? (
-          <button
-            type="button"
+          <Button
+            size="icon"
+            variant="ghost"
             onClick={() => setEditing(false)}
             aria-label={t.doctor.qeCancel}
-            className="p-2 sm:p-1 rounded text-[var(--ink-muted)] hover:text-[var(--ink-primary)] hover:bg-[var(--paper-border)] shrink-0"
+            className="size-8 shrink-0"
           >
-            <X size={16} className="sm:w-3.5 sm:h-3.5" />
-          </button>
+            <X />
+          </Button>
         ) : null}
-      </div>
+      </header>
 
       {loadFailed ? (
-        <div className="p-4 type-help text-[var(--ink-muted)]">{t.doctor.qeLoadFailed}</div>
+        <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+          {t.doctor.qeLoadFailed}
+        </div>
       ) : !settings ? (
-        <div className="p-6 text-center text-[var(--ink-muted)]">
-          <Loader2 className="h-4 w-4 animate-spin mx-auto" />
+        <div className="flex items-center justify-center px-4 py-10 text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
         </div>
       ) : editing ? (
-        <div className="p-3.5 space-y-3">
-          <label className="block">
-            <span className="type-label text-[var(--ink-secondary)]">{t.doctor.qeEngine}</span>
-            <select
+        <div className="space-y-4 p-4">
+          <DoctorField label={t.doctor.qeEngine} hint={t.doctor.qeEngineHelp}>
+            <Select
               value={tiered ? 'tiered' : 'heuristic'}
-              onChange={(event) => {
-                const next = event.target.value === 'tiered'
+              onValueChange={(value) => {
+                const next = value === 'tiered'
                 setTiered(next)
-                // Turning the judge on with a 0 sample would judge only blocks
-                // the deterministic checks call ambiguous — on a clean book
-                // that is nothing, so the report still says "not measured".
-                // 0.15 is the setup guide's documented starting point, and the
-                // field shows the change before it is saved.
+                // A zero pass sample only scores deterministically ambiguous
+                // blocks, so a clean book can still report "not measured".
                 if (next && Number(passSample) === 0) setPassSample('0.15')
               }}
-              className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value"
             >
-              <option value="heuristic">{t.doctor.qeEngineHeuristic}</option>
-              <option value="tiered">{t.doctor.qeEngineTiered}</option>
-            </select>
-            <span className="block mt-0.5 type-help text-[var(--ink-muted)] leading-relaxed">
-              {t.doctor.qeEngineHelp}
-            </span>
-          </label>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="heuristic">{t.doctor.qeEngineHeuristic}</SelectItem>
+                <SelectItem value="tiered">{t.doctor.qeEngineTiered}</SelectItem>
+              </SelectContent>
+            </Select>
+          </DoctorField>
 
-          {/* The judge's own block, when it is not the translator's. Optional on
-              purpose: an existing single-endpoint config keeps working, and the
-              judge then bills through the translation provider. */}
-          <label className="block">
-            <span className="type-label text-[var(--ink-secondary)]">
-              {t.doctor.qeJudgeProvider}
-            </span>
-            <select
-              value={judgeProvider}
-              onChange={(event) => setJudgeProvider(event.target.value)}
-              className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value font-mono"
-            >
-              <option value="">{t.doctor.qeJudgeProviderInherit}</option>
-              {/* The current value may be a shipped protocol (`openai-chat`) that
-                  the declared list does not contain. Without its own option the
-                  select renders blank and the next save would silently clear a
-                  working judge endpoint. */}
-              {judgeProvider && !providerNames.includes(judgeProvider) ? (
-                <option value={judgeProvider}>{judgeProvider}</option>
-              ) : null}
-              {providerNames.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <DoctorField label={t.doctor.qeJudgeProvider}>
+              <Select
+                value={judgeProvider || INHERIT}
+                onValueChange={(value) => setJudgeProvider(value === INHERIT ? '' : value)}
+              >
+                <SelectTrigger className="font-mono">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={INHERIT}>{t.doctor.qeJudgeProviderInherit}</SelectItem>
+                  {/* Keep a name that resolves outside the declared list; without
+                      it a save would silently clear a working judge endpoint. */}
+                  {judgeProvider && !providerNames.includes(judgeProvider) ? (
+                    <SelectItem value={judgeProvider} className="font-mono">
+                      {judgeProvider}
+                    </SelectItem>
+                  ) : null}
+                  {providerNames.map((name) => (
+                    <SelectItem key={name} value={name} className="font-mono">
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </DoctorField>
+            <DoctorField label={t.doctor.qeJudgeModel}>
+              <Input
+                value={judgeModel}
+                placeholder={t.doctor.qeJudgeModelInherit}
+                onChange={(event) => setJudgeModel(event.target.value)}
+                className="font-mono"
+              />
+            </DoctorField>
+          </div>
 
-          <label className="block">
-            <span className="type-label text-[var(--ink-secondary)]">{t.doctor.qeJudgeModel}</span>
-            <input
-              type="text"
-              value={judgeModel}
-              placeholder={t.doctor.qeJudgeModelInherit}
-              onChange={(event) => setJudgeModel(event.target.value)}
-              className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value font-mono"
-            />
-          </label>
-
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="flex items-center gap-1">
-                <span className="type-label text-[var(--ink-secondary)]">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <DoctorField
+              label={
+                <span className="flex items-center gap-1">
                   {t.doctor.qeThreshold}
+                  <InfoTip label={t.doctor.qeThreshold}>{t.doctor.qeThresholdHelp}</InfoTip>
                 </span>
-                <InfoTip label={t.doctor.qeThreshold}>{t.doctor.qeThresholdHelp}</InfoTip>
-              </span>
-              <input
+              }
+            >
+              <Input
                 type="number"
                 min={0}
                 max={1}
                 step={0.05}
                 value={threshold}
                 onChange={(event) => setThreshold(event.target.value)}
-                className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value font-mono"
+                className="font-mono"
               />
-            </label>
-            <label className="block">
-              <span className="flex items-center gap-1">
-                <span className="type-label text-[var(--ink-secondary)]">
+            </DoctorField>
+            <DoctorField
+              label={
+                <span className="flex items-center gap-1">
                   {t.doctor.qePassSample}
+                  <InfoTip label={t.doctor.qePassSample}>{t.doctor.qePassSampleHelp}</InfoTip>
                 </span>
-                <InfoTip label={t.doctor.qePassSample}>{t.doctor.qePassSampleHelp}</InfoTip>
-              </span>
-              <input
+              }
+            >
+              <Input
                 type="number"
                 min={0}
                 max={1}
                 step={0.05}
                 value={passSample}
                 onChange={(event) => setPassSample(event.target.value)}
-                className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value font-mono"
+                className="font-mono"
               />
-            </label>
+            </DoctorField>
           </div>
 
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={sentences}
-              onChange={(event) => setSentences(event.target.checked)}
-              className="mt-0.5 shrink-0"
-            />
-            <span className="min-w-0">
-              <span className="type-value">{t.doctor.qeSentences}</span>
-              <span className="block type-help text-[var(--ink-muted)] leading-relaxed">
+          <div className="flex items-start justify-between gap-4 rounded-lg border border-border/70 p-3">
+            <div className="min-w-0">
+              <div className="text-xs font-medium">{t.doctor.qeSentences}</div>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                 {t.doctor.qeSentencesHelp}
-              </span>
-            </span>
-          </label>
+              </p>
+            </div>
+            <Switch checked={sentences} onCheckedChange={setSentences} />
+          </div>
 
-          {error ? <p className="type-help text-[#b91c1c]">{error}</p> : null}
+          {error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
 
-          <div className="flex items-center gap-2 pt-1">
+          <div className="flex justify-end gap-2">
             <Button
-              size="sm"
-              onClick={() => void handleSave()}
+              variant="ghost"
+              onClick={() => setEditing(false)}
               disabled={saving}
-              className="min-h-[40px] sm:min-h-0 px-3"
+              className="px-3"
             >
+              {t.doctor.qeCancel}
+            </Button>
+            <Button onClick={() => void handleSave()} disabled={saving} className="px-4">
               {saving ? (
                 <>
-                  <Loader2 size={12} className="animate-spin" /> {t.doctor.qeSaving}
+                  <Loader2 className="animate-spin" />
+                  {t.doctor.qeSaving}
                 </>
               ) : (
                 t.doctor.qeSave
               )}
             </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setEditing(false)}
-              disabled={saving}
-              className="min-h-[40px] sm:min-h-0 px-3"
-            >
-              {t.doctor.qeCancel}
-            </Button>
           </div>
         </div>
       ) : (
-        <div className="p-3.5 space-y-2">
-          {/* The headline fact: a run with the heuristic engine has no average
-              score, and 0.0 in the report is a placeholder rather than a bad
-              result. */}
-          <div
-            className={`type-value font-semibold ${
-              settings.measurable ? 'text-[#15803d]' : 'text-[#b45309]'
-            }`}
-          >
-            {settings.measurable ? t.doctor.qeMeasured : t.doctor.qeNotMeasured}
+        <div className="space-y-3 p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge
+              variant="outline"
+              className={cn(
+                settings.measurable
+                  ? 'border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                  : 'border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+              )}
+            >
+              {settings.measurable ? t.doctor.qeMetricMeasured : t.doctor.qeMetricNotMeasured}
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              {settings.measurable ? t.doctor.qeMeasured : t.doctor.qeNotMeasured}
+            </span>
           </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <DoctorMetric
+              label={t.doctor.qeMetricLabel}
+              value={
+                settings.judge_enabled ? t.doctor.qeMetricMeasured : t.doctor.qeMetricNotMeasured
+              }
+              tone={settings.measurable ? 'ok' : 'warn'}
+            />
+            <DoctorMetric
+              label={t.doctor.thresholdMetric}
+              value={Number(settings.threshold ?? 0).toFixed(2)}
+              mono
+            />
+            <DoctorMetric
+              label={t.doctor.sampleMetric}
+              value={`${Math.round(Number(settings.judge_pass_sample ?? 0) * 100)}%`}
+              mono
+            />
+          </div>
+          <div className="space-y-1.5 text-xs">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">{t.doctor.qeJudge}</span>
+              <span className="truncate font-mono">
+                {settings.judge_enabled ? t.doctor.qeJudgeOn : t.doctor.qeJudgeOff}
+                {settings.judge_model ? ` · ${settings.judge_model}` : ''}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">{t.doctor.qeJudgeProvider}</span>
+              <span className="truncate font-mono">
+                {settings.judge_provider ?? t.doctor.qeJudgeProviderInherit}
+              </span>
+            </div>
+          </div>
+
           {!settings.measurable ? (
-            <p className="type-help text-[var(--ink-secondary)] leading-relaxed max-w-xl">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               {t.doctor.qeNotMeasuredHelp}
             </p>
           ) : null}
-
-          <dl className="space-y-1.5 type-value font-mono pt-1">
-            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-0.5 sm:gap-3">
-              <dt className="text-[var(--ink-secondary)] shrink-0">{t.doctor.qeEngine}</dt>
-              <dd className="text-[var(--ink-primary)] font-semibold truncate sm:text-right">
-                {settings.judge_enabled ? t.doctor.qeEngineTiered : t.doctor.qeEngineHeuristic}
-              </dd>
-            </div>
-            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-0.5 sm:gap-3">
-              <dt className="text-[var(--ink-secondary)] shrink-0">{t.doctor.qeJudge}</dt>
-              <dd className="text-[var(--ink-primary)] truncate sm:text-right">
-                {settings.judge_enabled ? t.doctor.qeJudgeOn : t.doctor.qeJudgeOff}
-                {settings.judge_model ? ` · ${settings.judge_model}` : ''}
-              </dd>
-            </div>
-            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-0.5 sm:gap-3">
-              <dt className="text-[var(--ink-secondary)] shrink-0">{t.doctor.qeJudgeProvider}</dt>
-              <dd className="text-[var(--ink-primary)] truncate sm:text-right">
-                {settings.judge_provider ?? t.doctor.qeJudgeProviderInherit}
-              </dd>
-            </div>
-            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-0.5 sm:gap-3">
-              <dt className="text-[var(--ink-secondary)] shrink-0">{t.doctor.qeThreshold}</dt>
-              <dd className="text-[var(--ink-primary)] sm:text-right">
-                {Number(settings.threshold ?? 0).toFixed(2)}
-              </dd>
-            </div>
-            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-0.5 sm:gap-3">
-              <dt className="text-[var(--ink-secondary)] shrink-0">{t.doctor.qePassSample}</dt>
-              <dd className="text-[var(--ink-primary)] sm:text-right">
-                {Math.round(Number(settings.judge_pass_sample ?? 0) * 100)}%
-              </dd>
-            </div>
-          </dl>
-
-          {/* A hand-edited file can hold the state this card refuses to produce.
-              Naming it beats silently showing the label as if it worked. */}
           {inconsistent ? (
-            <p className="type-help text-[#b45309] leading-relaxed">{t.doctor.qeInconsistent}</p>
+            <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+              {t.doctor.qeInconsistent}
+            </p>
           ) : null}
-
-          {/* The judge is on but samples nothing: a book whose every block
-              passes still has no average score. This is the one setting that
-              makes "measured" false while every switch reads on. */}
           {settings.measurable && Number(settings.judge_pass_sample ?? 0) === 0 ? (
-            <p className="type-help text-[#b45309] leading-relaxed">{t.doctor.qePassSampleZero}</p>
+            <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+              {t.doctor.qePassSampleZero}
+            </p>
           ) : null}
-
           {(settings.env_overrides ?? []).length > 0 ? (
-            <p className="type-help text-[#b45309] leading-relaxed">
-              {t.doctor.qeEnvOverride.replace('{vars}', (settings.env_overrides ?? []).join(', '))}
+            <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+              {t.doctor.qeEnvOverride.replace(
+                '{vars}',
+                (settings.env_overrides ?? []).join(', '),
+              )}
             </p>
           ) : null}
-
           {saved ? (
-            <p className="type-help text-[#15803d] flex items-center gap-1">
-              <Check size={12} /> {t.doctor.qeSaved}
+            <p className="flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
+              <Check className="size-3.5" />
+              {t.doctor.qeSaved}
             </p>
           ) : null}
-
-          <p className="type-help text-[var(--ink-muted)] leading-relaxed">
-            {t.doctor.qeConfigSource}
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              {t.doctor.qeConfigSource}
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={startEditing}
+              className="h-8 px-2.5 text-xs"
+            >
+              <Pencil />
+              {t.doctor.qeEdit}
+            </Button>
+          </div>
         </div>
       )}
-    </div>
+    </section>
   )
 }

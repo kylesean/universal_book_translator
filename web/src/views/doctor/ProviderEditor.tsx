@@ -1,19 +1,41 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, Loader2, X } from 'lucide-react'
+import { Check, ChevronLeft, Loader2 } from 'lucide-react'
+
 import { getProvider, saveProvider, type ProviderDetail } from '@/api/client'
-import { Button } from '@/components/ui/Button'
-import { InfoTip } from '@/components/ui/InfoTip'
+import { Alert, AlertDescription } from '@/components/ui/Alert'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Separator } from '@/components/ui/separator'
+import { Switch } from '@/components/ui/switch'
 import { useI18n } from '@/i18n/useI18n'
+import { cn } from '@/lib/utils'
+import { DoctorField, DoctorPanel } from './components'
 
 interface ProviderEditorProps {
   /** The provider block being edited; ``null`` starts a new one. */
   name: string | null
-  /** Whether this deployment may accept a credential over HTTP.
-
-  ``null`` means the console could not read the deployment configuration, which is
-  NOT a refusal: claiming "this server is reachable beyond loopback" when the
-  panel merely failed to load would be a false statement about the deployment.
-  */
+  /**
+   * Whether this deployment may accept a credential over HTTP.
+   *
+   * ``null`` means the console could not read the deployment configuration, which
+   * is NOT a refusal: claiming "this server is reachable beyond loopback" when the
+   * panel merely failed to load would be a false statement about the deployment.
+   */
   canWriteCredential: boolean | null
   /** Called after a successful save so the parent can refresh its view. */
   onSaved: () => void
@@ -21,37 +43,30 @@ interface ProviderEditorProps {
 }
 
 /**
- * The capability fields this form edits — and the reason there are only two.
+ * The capability fields this form edits, and why there are only two.
  *
  * A capability earns a control only when the engine cannot discover it:
- *
- * - ``supports_system_prompt`` — a rejected system role is a 400 no self-heal
- *   rule can fix, because the fix (merge the system text into the user turn) is a
- *   decision, not a dropped parameter. The job fails outright, so it is asked
- *   plainly.
- * - ``supports_vision`` — a model that cannot read images fails every visual
- *   repair attempt, per block. Declaring it avoids a repeated cost.
- *
- * ``supports_temperature`` and ``supports_reasoning_effort`` have no control here
- * on purpose. A rejected one is dropped by the 400 self-heal and then remembered
- * per model (measured: four blocks take five requests, and the parameter never
- * reappears), so a control could only ever save that single round-trip — while
- * asking an operator to answer a question the engine answers itself. The flags
- * remain in ``ModelProfile`` and remain settable in a provider block; they are
- * simply not a form field. See ``ubt/core/config.py`` for the full reasoning.
+ * ``supports_system_prompt`` (a rejected system role is a merge decision) and
+ * ``supports_vision`` (a text-only model fails every visual repair). Temperature
+ * and reasoning support are recovered by the 400 self-heal and remembered per
+ * model, so asking the operator would only save a single round trip.
  */
 const CAPABILITY_FIELDS = [
   { field: 'supports_system_prompt', labelKey: 'capabilitySystem', noteKey: 'capabilitySystemNote' },
 ] as const
 
-/** The system-prompt control renders as a two-way choice with these labels. */
-type FlagField = 'supports_system_prompt' | 'supports_vision'
+type FlagField =
+  | 'supports_system_prompt'
+  | 'supports_vision'
+  | 'supports_reasoning_effort'
 
 /** Every capability field the form can submit. */
-const SUBMITTED_FLAGS = ['supports_system_prompt', 'supports_vision'] as const satisfies
-  readonly FlagField[]
+const SUBMITTED_FLAGS = [
+  'supports_system_prompt',
+  'supports_vision',
+  'supports_reasoning_effort',
+] as const satisfies readonly FlagField[]
 
-/** Which text fields the form edits, and how each is labelled. */
 const TEXT_FIELDS = [
   { field: 'base_url', labelKey: 'baseUrl', placeholder: 'https://api.example.com/v1' },
   { field: 'draft_model', labelKey: 'draftModel', placeholder: 'model-id' },
@@ -60,25 +75,27 @@ const TEXT_FIELDS = [
 
 type TextField = (typeof TEXT_FIELDS)[number]['field']
 
+const REASONING_FIELDS = [
+  'draft_reasoning_effort',
+  'repair_reasoning_effort',
+  'reasoning_dialect',
+] as const
+
+type ReasoningField = (typeof REASONING_FIELDS)[number]
+
 const API_MODES = ['openai-chat', 'openai-responses', 'anthropic-messages', 'gemini-native']
+const REASONING_EFFORTS = ['none', 'low', 'medium', 'high'] as const
+const REASONING_DIALECTS = ['nested', 'flat'] as const
+const UNDECLARED = '__undeclared__'
 
 /**
  * Edit one `[providers.<name>]` block: endpoint, protocol, models, capability.
  *
- * Credentials are deliberately absent from this form and from the API it calls.
- * A block's key may be a literal secret or a `${VAR}` reference, and this server
- * is routinely started on loopback with no API key at all — an endpoint that
- * could write one would turn any local process into a credential-writer. The
- * form therefore reports whether a credential exists (`credential set` /
- * `no credential`) and says where to change it, rather than offering a field
- * that would have to be disabled.
- *
- * The capability checkboxes are tri-state in the file but a checkbox is not, so
- * an untouched box submits nothing and the key is left exactly as it was. That
- * distinction matters: `supports_temperature = false` is a claim that the
- * endpoint rejects the parameter, while an absent key means "not declared, use
- * the safe default". Rendering both as an unchecked box would silently convert
- * one into the other on every save.
+ * Credentials are deliberately absent from the API's read path. A block's key
+ * may be a literal secret or a ``${VAR}`` reference; this form reports whether
+ * one resolves and only offers a write field where the server explicitly allows
+ * it. The capability controls are tri-state in the file, so "not declared"
+ * remains a distinct choice rather than being coerced to ``false``.
  */
 export function ProviderEditor({
   name: initialName,
@@ -89,33 +106,27 @@ export function ProviderEditor({
   const { t } = useI18n()
   const [name, setName] = useState(initialName ?? '')
   const [detail, setDetail] = useState<ProviderDetail | null>(null)
-  // Create mode ends as soon as the block exists. Declared after ``detail``: it
-  // reads that state, and reading it before the declaration throws a temporal
-  // dead-zone ReferenceError that the error boundary surfaces as a blank screen.
+  // Declared after ``detail``: reading it before the state exists would throw a
+  // temporal dead-zone ReferenceError.
   const isCreate = initialName === null && detail === null
-  // Edit mode before the first load lands: the fields stay readable (they are
-  // empty) but must not accept typing the landing seed would silently revert.
   const loadingDetail = !isCreate && detail === null
   const [credential, setCredential] = useState('')
   const [text, setText] = useState<Partial<Record<TextField, string>>>({})
   const [flags, setFlags] = useState<Partial<Record<FlagField, boolean | undefined>>>({})
   const [apiMode, setApiMode] = useState('')
+  const [reasoning, setReasoning] = useState<Record<ReasoningField, string>>({
+    draft_reasoning_effort: '',
+    repair_reasoning_effort: '',
+    reasoning_dialect: '',
+  })
   const [isFree, setIsFree] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
-
-  // The name whose block the current form state was seeded from. Seeding once
-  // per name: after a successful create the stored block is already the
-  // baseline (``setDetail(stored)`` in the save handler), and refetching on
-  // the ``isCreate`` flip would overwrite whatever was typed during the round
-  // trip; a name change is the only thing that legitimately reloads.
+  const [dirty, setDirty] = useState(false)
   const loadedNameRef = useRef<string | null>(null)
 
   useEffect(() => {
-    // A new block starts from the state's initial values (empty), so there is
-    // nothing to load and nothing to set — returning here rather than calling
-    // setState keeps the effect free of a synchronous state write.
     if (isCreate) return
     if (loadedNameRef.current === name && detail !== null) return
     let cancelled = false
@@ -129,8 +140,6 @@ export function ProviderEditor({
           draft_model: loaded.draft_model ?? '',
           repair_model: loaded.repair_model ?? '',
         })
-        // Seed each flag from the file, keeping "absent" distinguishable: an
-        // undefined entry means the key is not in the block at all.
         const seeded: Partial<Record<FlagField, boolean>> = {}
         for (const field of SUBMITTED_FLAGS) {
           const value = loaded[field]
@@ -138,19 +147,28 @@ export function ProviderEditor({
         }
         setFlags(seeded)
         setApiMode(loaded.api_mode ?? '')
+        setReasoning({
+          draft_reasoning_effort: loaded.draft_reasoning_effort ?? '',
+          repair_reasoning_effort: loaded.repair_reasoning_effort ?? '',
+          reasoning_dialect: loaded.reasoning_dialect ?? '',
+        })
         setIsFree(loaded.is_free ?? false)
+        setDirty(false)
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load provider')
+        if (!cancelled) setError(err instanceof Error ? err.message : t.doctor.loadFailed)
       })
     return () => {
       cancelled = true
     }
-  // ``detail`` re-runs the effect after the seed lands; the guard above
-  // turns that into a no-op.
-  }, [name, isCreate, detail])
+  }, [detail, isCreate, name, t.doctor.loadFailed])
 
-  const nameIsValid = /^[A-Za-z0-9_-]{1,64}$/.test(name)
+  const nameIsValid = /^[A-Za-z0-9_.-]{1,64}$/.test(name)
+
+  const markDirty = () => {
+    setSaved(false)
+    setDirty(true)
+  }
 
   const handleSave = useCallback(async () => {
     if (!nameIsValid) {
@@ -160,12 +178,9 @@ export function ProviderEditor({
     setIsSaving(true)
     setError(null)
     try {
-      // Only what the operator touched: an omitted key is left untouched in the
-      // file, so saving one field cannot rewrite the rest of the block.
+      // Submit only what changed. An omitted field stays exactly as it is in the
+      // file, which is what keeps editing one value from rewriting the block.
       const changes: Record<string, unknown> = {}
-      // A credential is submitted only when the operator typed one. An empty box
-      // means "keep what is configured", never "clear it" — a form that wiped the
-      // key on every save would break the provider it was editing.
       if (credential.trim()) changes.api_key = credential.trim()
       for (const { field } of TEXT_FIELDS) {
         const value = text[field]
@@ -173,338 +188,434 @@ export function ProviderEditor({
           changes[field] = value.trim()
         }
       }
-      // Every rendered capability control, in one list. ``supports_vision`` is a
-      // checkbox rather than a select, and walking only the select group once made
-      // it render, toggle and then never reach the request.
       for (const field of SUBMITTED_FLAGS) {
         const value = flags[field]
         const stored = detail?.[field]
         const storedIsSet = typeof stored === 'boolean'
         if (value === undefined && storedIsSet) {
-          // Explicit ``null`` clears the key: back to "not declared", which is
-          // not the same as declaring ``false``.
+          // Explicit null returns the key to "not declared", which is distinct
+          // from declaring that the endpoint does not support it.
           changes[field] = null
         } else if (value !== undefined && value !== stored) {
           changes[field] = value
         }
       }
       if (apiMode && apiMode !== (detail?.api_mode ?? '')) changes.api_mode = apiMode
+      for (const field of REASONING_FIELDS) {
+        const value = reasoning[field]
+        if (value !== (detail?.[field] ?? '')) {
+          changes[field] = value === '' ? null : value
+        }
+      }
       if (isFree !== (detail?.is_free ?? false)) changes.is_free = isFree
       if (Object.keys(changes).length === 0 && !isCreate) {
         onSaved()
         return
       }
-      // A block nothing points at still runs as a rehearsal: `provider` stays
-      // unset, `draft_model` comes out empty, and the wizard announces mock
-      // output. On create, "the block I just made" is unambiguously what the
-      // operator wants to run, so it becomes the file default in the same save —
-      // one action instead of "create, then discover you also have to select it".
+      // A new block that nothing points at is still a rehearsal. Creating one
+      // therefore makes it the default in the same deliberate action.
       if (isCreate) changes.make_default = true
       const stored = await saveProvider(name, changes)
-      // Adopt the stored block as the new baseline. Without this the form stays
-      // in "create" mode after a successful create: it keeps offering "Create",
-      // keeps showing "no credential" for the credential it just wrote, and a
-      // second click would overwrite what the first one made.
       setDetail(stored)
       setCredential('')
       setSaved(true)
+      setDirty(false)
       onSaved()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed')
+      setError(err instanceof Error ? err.message : t.doctor.qeSaveFailed)
     } finally {
       setIsSaving(false)
     }
-  }, [apiMode, credential, detail, flags, isCreate, isFree, name, nameIsValid, onSaved, t, text])
+  }, [
+    apiMode,
+    credential,
+    detail,
+    flags,
+    isCreate,
+    isFree,
+    name,
+    nameIsValid,
+    onSaved,
+    reasoning,
+    t.doctor.newProviderNameInvalid,
+    t.doctor.qeSaveFailed,
+    text,
+  ])
+
+  const credentialState = (() => {
+    if (detail?.credential_issue === 'unresolved_variable') {
+      return {
+        label: t.doctor.credentialUnresolvedVar.replace(
+          '{vars}',
+          (detail.unresolved_vars ?? []).join(', '),
+        ),
+        ok: false,
+      }
+    }
+    if (detail?.has_credential) return { label: t.doctor.credentialConfigured, ok: true }
+    if (detail?.authenticates) return { label: t.doctor.credentialEnvSupplied, ok: true }
+    if (detail?.credential_issue === null) {
+      return { label: t.doctor.credentialLocalEndpoint, ok: true }
+    }
+    return { label: t.doctor.credentialMissing, ok: false }
+  })()
 
   return (
-    <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="type-group">
-            {isCreate ? t.doctor.addProvider : t.doctor.editingProvider}
-          </div>
-          <div className="type-value font-mono font-semibold truncate">{name || '—'}</div>
-        </div>
-        <button
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={onCancel}
-          aria-label={t.doctor.cancel}
-          className="p-2 sm:p-1 rounded text-[var(--ink-muted)] hover:text-[var(--ink-primary)] hover:bg-[var(--paper-border)] shrink-0 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 flex items-center justify-center cursor-pointer"
+          className="-ml-2 self-start text-muted-foreground"
         >
-          <X size={16} className="sm:w-3.5 sm:h-3.5" />
-        </button>
+          <ChevronLeft />
+          {t.doctor.cancel}
+        </Button>
+        {dirty ? (
+          <Badge variant="outline" className="self-start font-normal text-muted-foreground sm:self-auto">
+            {t.doctor.formUnsaved}
+          </Badge>
+        ) : null}
       </div>
 
-      <div className="p-3.5 space-y-3">
-        {/* A new block needs a name: it becomes the [providers.<name>] key. */}
-        {isCreate ? (
-          <label className="block">
-            <span className="type-label text-[var(--ink-secondary)]">
-              {t.doctor.newProviderName}
-            </span>
-            <input
-              type="text"
-              value={name}
-              placeholder="my-endpoint"
-              onChange={(event) => setName(event.target.value)}
-              className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value font-mono"
-            />
-            <span
-              className={`block mt-0.5 type-help ${name && !nameIsValid ? 'text-[#b91c1c]' : 'text-[var(--ink-muted)]'}`}
+      <DoctorPanel
+        title={isCreate ? t.doctor.addProvider : `${t.doctor.editingProvider} · ${name}`}
+        description={isCreate ? t.doctor.formCreateHint : t.doctor.formEditHint}
+        action={
+          <div className="flex items-center gap-2">
+            <Badge
+              variant="outline"
+              className={cn(
+                credentialState.ok
+                  ? 'border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                  : 'border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+              )}
             >
-              {name && !nameIsValid
-                ? t.doctor.newProviderNameInvalid
-                : t.doctor.newProviderNameHint}
-            </span>
-          </label>
-        ) : null}
-
-        {/* Credential status: the state the *loader* will see, not merely whether
-            the key exists in the file. A block carrying an unset ``${VAR}``
-            reports "unresolved variable" and names it, because "credential set"
-            there was a promise the next job could not keep. */}
-        <div className="flex items-center gap-2 type-help">
-          <span
-            className={
-              detail?.has_credential || detail?.authenticates || detail?.credential_issue === null
-                ? 'text-[#15803d]'
-                : 'text-[#b45309]'
-            }
-          >
-            ●{' '}
-            {detail?.credential_issue === 'unresolved_variable'
-              ? t.doctor.credentialUnresolvedVar.replace(
-                  '{vars}',
-                  (detail?.unresolved_vars ?? []).join(', '),
-                )
-              : detail?.has_credential
-                ? t.doctor.credentialConfigured
-                : detail?.authenticates
-                  ? t.doctor.credentialEnvSupplied
-                  : detail?.credential_issue === null
-                    ? // No issue and no credential: a loopback endpoint, which
-                      // accepts an empty bearer. Saying "no credential" here was
-                      // the false alarm that sent operators to fix a working
-                      // local model.
-                      t.doctor.credentialLocalEndpoint
-                    : t.doctor.credentialMissing}
-          </span>
-          <InfoTip label={t.doctor.providerConfigHint}>{t.doctor.providerConfigHint}</InfoTip>
-        </div>
-
-        {/* The trap the form used to walk into: it said "saved, effective on the
-            next job" while ``UBT_LLM_API_KEY`` outranked the block it had just
-            written. A save that cannot take effect has to say so. */}
-        {detail?.credential_shadowed_by_env ? (
-          <p className="type-help text-[#b45309] leading-relaxed">
-            {t.doctor.credentialShadowedByEnv}
-          </p>
-        ) : null}
-
-        {/* The credential field is offered only where the deployment permits it.
-            Rendering it disabled with a reason beats rendering it enabled and
-            failing on submit: the operator learns the rule from the form rather
-            than from a 400 after typing a secret. */}
-        {canWriteCredential ? (
-          <label className="block">
-            <span className="type-label text-[var(--ink-secondary)]">
-              {t.doctor.credentialField}
-            </span>
-            <input
-              type="password"
-              value={credential}
-              placeholder={detail?.has_credential ? '********' : t.doctor.credentialPlaceholder}
-              autoComplete="off"
-              disabled={loadingDetail}
-              onChange={(event) => setCredential(event.target.value)}
-              className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value font-mono"
-            />
-            {detail?.has_credential ? (
-              <span className="block mt-0.5 type-help text-[var(--ink-muted)]">
-                {t.doctor.credentialKeepHint}
-              </span>
-            ) : null}
-          </label>
+              {credentialState.label}
+            </Badge>
+          </div>
+        }
+      >
+        {loadingDetail ? (
+          <div className="flex items-center justify-center gap-2 px-4 py-16 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            {t.doctor.loadingChecks}
+          </div>
         ) : (
-          <p className="type-help text-[#b45309] leading-relaxed">
-            {canWriteCredential === null
-              ? t.doctor.credentialUnknownHint
-              : t.doctor.credentialBlockedHint}
-          </p>
-        )}
-
-        {TEXT_FIELDS.map(({ field, labelKey, placeholder }) => (
-          <label key={field} className="block">
-            <span className="type-label text-[var(--ink-secondary)]">{t.doctor[labelKey]}</span>
-            <input
-              type="text"
-              value={text[field] ?? ''}
-              placeholder={placeholder}
-              disabled={loadingDetail}
-              onChange={(event) =>
-                setText((prev) => ({ ...prev, [field]: event.target.value }))
-              }
-              className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value font-mono"
-            />
-          </label>
-        ))}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label className="block">
-            <span className="type-label text-[var(--ink-secondary)]">{t.doctor.apiMode}</span>
-            <select
-              value={apiMode}
-              disabled={loadingDetail}
-              onChange={(event) => setApiMode(event.target.value)}
-              className="mt-1 w-full rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-2 py-1 type-value font-mono"
-            >
-              <option value="">—</option>
-              {API_MODES.map((mode) => (
-                <option key={mode} value={mode}>
-                  {mode}
-                </option>
-              ))}
-            </select>
-          </label>
-          {/* No extraction control. ``auto`` is not one strategy among four — it
-              IS "try the XML tag, then strip the conversational wrapper", so it
-              already contains ``xml_tag`` and ``cp``. The other two are actively
-              worse: ``raw`` skips cleaning (a chatty endpoint's "Here is the
-              translation:" and its ``` fence ship into the book) and
-              ``xml_tag`` returns *empty* for any reply without a tag, which is
-              every reply under the minimal and hybrid prompt strategies.
-
-              Presented as four unexplained choices, an operator had no way to
-              pick correctly. The default is what they want; the field stays
-              settable in ubt.toml / UBT_EXTRACTION_STRATEGY for the rare endpoint
-              that needs otherwise, and this row says so plainly. */}
-          <div className="block">
-            <span className="flex items-center gap-1">
-              <span className="type-label text-[var(--ink-secondary)]">
-                {t.doctor.extractionStrategy}
-              </span>
-              <InfoTip label={t.doctor.extractionStrategy}>
-                {t.doctor.extractionStrategyHelp}
-              </InfoTip>
-            </span>
-            <p className="mt-1 type-help text-[var(--ink-secondary)] leading-relaxed">
-              {t.doctor.extractionAutoNote}
-            </p>
-          </div>
-        </div>
-
-        <div className="pt-1 border-t border-[var(--paper-border)]">
-          <div className="flex items-center gap-1.5 mt-2">
-            <span className="type-group">{t.doctor.capabilityTitle}</span>
-            <InfoTip label={t.doctor.capabilityHelp}>{t.doctor.capabilityHelp}</InfoTip>
-          </div>
-
-          {/* Collapsed, because it is a remedy rather than a choice: the engine
-              already assumes a separate system turn is accepted, and that is
-              right for essentially every endpoint. This switch exists for the
-              one failure mode where it is not — the provider answers the request
-              with a 400 complaining about the `system` role — and the operator
-              has to tell the engine to fold the instruction into the user turn
-              instead. Rendering it as an equal peer of "accepts images" invited
-              the reader to make a decision they had no basis for.
-
-              Note the engine cannot detect this: a rejected system role is a
-              merge decision, not a capability probe, so the job fails rather than
-              degrading — which is why the switch has to stay reachable. */}
-          <details className="mt-2">
-            <summary className="cursor-pointer type-help text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] select-none">
-              {t.doctor.capabilityTroubleshootToggle}
-            </summary>
-            {CAPABILITY_FIELDS.map(({ field, labelKey, noteKey }) => (
-              <div key={field} className="mt-2">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="type-value">{t.doctor[labelKey]}</span>
-                  <select
-                    value={flags[field] === undefined ? '' : String(flags[field])}
+          <div className="space-y-6 p-4 sm:p-5">
+            {isCreate ? (
+              <section className="space-y-2">
+                <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  {t.doctor.newProviderName}
+                </h3>
+                <DoctorField
+                  label={t.doctor.newProviderName}
+                  hint={
+                    name && !nameIsValid
+                      ? t.doctor.newProviderNameInvalid
+                      : t.doctor.newProviderNameHint
+                  }
+                >
+                  <Input
+                    value={name}
+                    placeholder="my-endpoint"
+                    className="font-mono"
+                    aria-invalid={Boolean(name && !nameIsValid)}
                     onChange={(event) => {
-                      const raw = event.target.value
-                      setFlags((prev) => {
-                        const next = { ...prev }
-                        if (raw === '') delete next[field]
-                        else next[field] = raw === 'true'
-                        return next
-                      })
+                      setName(event.target.value)
+                      markDirty()
                     }}
-                    className="shrink-0 rounded-[4px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-1.5 py-0.5 type-help"
-                  >
-                    <option value="">{t.doctor.capabilityUndeclared}</option>
-                    <option value="true">{t.doctor.capabilitySystemAccepted}</option>
-                    <option value="false">{t.doctor.capabilitySystemMerged}</option>
-                  </select>
-                </div>
-                <p className="type-help text-[var(--ink-muted)] mt-0.5 leading-relaxed">
-                  {t.doctor[noteKey]}
+                  />
+                </DoctorField>
+              </section>
+            ) : null}
+
+            <section className="space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold">{t.doctor.credentialsSection}</h3>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                  {t.doctor.providerConfigHint}
                 </p>
               </div>
-            ))}
-          </details>
+              {detail?.credential_shadowed_by_env ? (
+                <Alert variant="warning">
+                  <AlertDescription>{t.doctor.credentialShadowedByEnv}</AlertDescription>
+                </Alert>
+              ) : null}
+              {canWriteCredential ? (
+                <DoctorField
+                  label={t.doctor.credentialField}
+                  hint={detail?.has_credential ? t.doctor.credentialKeepHint : undefined}
+                >
+                  <Input
+                    type="password"
+                    value={credential}
+                    placeholder={detail?.has_credential ? '********' : t.doctor.credentialPlaceholder}
+                    autoComplete="off"
+                    className="font-mono"
+                    onChange={(event) => {
+                      setCredential(event.target.value)
+                      markDirty()
+                    }}
+                  />
+                </DoctorField>
+              ) : (
+                <Alert variant="warning">
+                  <AlertDescription>
+                    {canWriteCredential === null
+                      ? t.doctor.credentialUnknownHint
+                      : t.doctor.credentialBlockedHint}
+                  </AlertDescription>
+                </Alert>
+              )}
+            </section>
 
-          {/* Vision: a plain checkbox. Off is the safe default and costs only a
-              degraded repair, never a failed job. */}
-          <label className="flex items-start gap-2 cursor-pointer mt-2.5">
-            <input
-              type="checkbox"
-              checked={flags.supports_vision ?? false}
-              onChange={(event) =>
-                setFlags((prev) => ({ ...prev, supports_vision: event.target.checked }))
-              }
-              className="mt-0.5 shrink-0"
-            />
-            <span className="min-w-0">
-              <span className="type-value">{t.doctor.capabilityVision}</span>
-              <span className="block type-help text-[var(--ink-muted)]">
-                {t.doctor.capabilityVisionNote}
-              </span>
-            </span>
-          </label>
+            <Separator />
 
-          {/* No temperature / reasoning-effort controls, deliberately.
+            <section className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold">{t.doctor.connectionSection}</h3>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                  {t.doctor.modelFormHelp}
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {TEXT_FIELDS.map(({ field, labelKey, placeholder }) => (
+                  <DoctorField
+                    key={field}
+                    label={t.doctor[labelKey]}
+                    className={field === 'base_url' ? 'md:col-span-2' : undefined}
+                  >
+                    <Input
+                      value={text[field] ?? ''}
+                      placeholder={placeholder}
+                      className="font-mono"
+                      onChange={(event) => {
+                        setText((prev) => ({ ...prev, [field]: event.target.value }))
+                        markDirty()
+                      }}
+                    />
+                  </DoctorField>
+                ))}
+                <DoctorField label={t.doctor.apiMode}>
+                  <Select
+                    value={apiMode || UNDECLARED}
+                    onValueChange={(value) => {
+                      setApiMode(value === UNDECLARED ? '' : value)
+                      markDirty()
+                    }}
+                  >
+                    <SelectTrigger className="font-mono">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={UNDECLARED}>—</SelectItem>
+                      {API_MODES.map((mode) => (
+                        <SelectItem key={mode} value={mode} className="font-mono">
+                          {mode}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </DoctorField>
+              </div>
+              <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5">
+                <div className="text-xs font-medium">{t.doctor.extractionStrategy}</div>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  {t.doctor.extractionAutoNote}
+                </p>
+              </div>
+            </section>
 
-              Both are recovered by the 400 self-heal and then remembered per
-              model, so the engine already knows what this form would ask. The
-              control that existed here only ever saved one round-trip, and it made
-              an operator answer a question the engine answers itself.
+            <Separator />
 
-              The engine keeps ``ModelProfile.supports_temperature`` and
-              ``supports_reasoning_effort``: they decide whether a parameter is
-              *sent*, and without them a rejected parameter would be re-sent on
-              every block. The flags are still settable in a provider block for the
-              operator who wants to skip that first 400 — they are simply no longer
-              a form field. */}
-        </div>
+            <section className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold">{t.doctor.behaviorSection}</h3>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                  {t.doctor.reasoningHelp}
+                </p>
+              </div>
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-border/70 p-3.5">
+                <div className="min-w-0">
+                  <Label htmlFor="reasoning-supported" className="text-xs font-medium">
+                    {t.doctor.reasoningAccepts}
+                  </Label>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {t.doctor.reasoningAcceptsNote}
+                  </p>
+                </div>
+                <Switch
+                  id="reasoning-supported"
+                  checked={flags.supports_reasoning_effort ?? false}
+                  onCheckedChange={(checked) => {
+                    setFlags((prev) => ({ ...prev, supports_reasoning_effort: checked }))
+                    markDirty()
+                  }}
+                />
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                {(
+                  [
+                    {
+                      field: 'draft_reasoning_effort' as const,
+                      labelKey: 'reasoningDraftEffort',
+                      options: REASONING_EFFORTS,
+                    },
+                    {
+                      field: 'repair_reasoning_effort' as const,
+                      labelKey: 'reasoningRepairEffort',
+                      options: REASONING_EFFORTS,
+                    },
+                    {
+                      field: 'reasoning_dialect' as const,
+                      labelKey: 'reasoningDialect',
+                      options: REASONING_DIALECTS,
+                    },
+                  ] as const
+                ).map(({ field, labelKey, options }) => (
+                  <DoctorField key={field} label={t.doctor[labelKey]}>
+                    <Select
+                      value={reasoning[field] || UNDECLARED}
+                      onValueChange={(value) => {
+                        setReasoning((prev) => ({
+                          ...prev,
+                          [field]: value === UNDECLARED ? '' : value,
+                        }))
+                        markDirty()
+                      }}
+                    >
+                      <SelectTrigger className="font-mono">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={UNDECLARED}>{t.doctor.capabilityUndeclared}</SelectItem>
+                        {options.map((option) => (
+                          <SelectItem key={option} value={option} className="font-mono">
+                            {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </DoctorField>
+                ))}
+              </div>
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-border/70 p-3.5">
+                <div>
+                  <Label htmlFor="provider-free" className="text-xs font-medium">
+                    {t.doctor.isFree}
+                  </Label>
+                  <p className="mt-1 text-xs text-muted-foreground">{t.doctor.freeLabel}</p>
+                </div>
+                <Switch
+                  id="provider-free"
+                  checked={isFree}
+                  onCheckedChange={(checked) => {
+                    setIsFree(checked)
+                    markDirty()
+                  }}
+                />
+              </div>
+            </section>
 
-        <label className="flex items-center gap-2 cursor-pointer pt-1 border-t border-[var(--paper-border)]">
-          <input
-            type="checkbox"
-            checked={isFree}
-            onChange={(event) => setIsFree(event.target.checked)}
-            className="shrink-0"
-          />
-          <span className="type-value">{t.doctor.isFree}</span>
-        </label>
+            <Accordion type="single" collapsible>
+              <AccordionItem value="advanced" className="rounded-lg border border-border/70 px-3.5">
+                <AccordionTrigger className="py-3 text-xs font-semibold hover:no-underline">
+                  {t.doctor.advancedSection}
+                </AccordionTrigger>
+                <AccordionContent className="space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <Label htmlFor="provider-vision" className="text-xs font-medium">
+                        {t.doctor.capabilityVision}
+                      </Label>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {t.doctor.capabilityVisionNote}
+                      </p>
+                    </div>
+                    <Switch
+                      id="provider-vision"
+                      checked={flags.supports_vision ?? false}
+                      onCheckedChange={(checked) => {
+                        setFlags((prev) => ({ ...prev, supports_vision: checked }))
+                        markDirty()
+                      }}
+                    />
+                  </div>
 
-        {error ? <p className="type-help text-[#b91c1c]">{error}</p> : null}
-        {saved && !error ? (
-          <p className="type-help text-[#15803d] flex items-center gap-1">
-            <Check size={12} /> {t.doctor.savedHint}
-          </p>
-        ) : null}
+                  <Separator />
 
-        <div className="flex items-center gap-2 pt-1">
+                  <div className="space-y-1 text-xs font-medium">
+                    {t.doctor.capabilityTroubleshootToggle}
+                  </div>
+                  {CAPABILITY_FIELDS.map(({ field, labelKey, noteKey }) => (
+                    <DoctorField key={field} label={t.doctor[labelKey]} hint={t.doctor[noteKey]}>
+                      <Select
+                        value={
+                          flags[field] === undefined ? UNDECLARED : String(flags[field])
+                        }
+                        onValueChange={(value) => {
+                          setFlags((prev) => {
+                            const next = { ...prev }
+                            if (value === UNDECLARED) delete next[field]
+                            else next[field] = value === 'true'
+                            return next
+                          })
+                          markDirty()
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={UNDECLARED}>
+                            {t.doctor.capabilityUndeclared}
+                          </SelectItem>
+                          <SelectItem value="true">{t.doctor.capabilitySystemAccepted}</SelectItem>
+                          <SelectItem value="false">{t.doctor.capabilitySystemMerged}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </DoctorField>
+                  ))}
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+
+            {error ? (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            ) : null}
+            {saved && !error ? (
+              <p className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400">
+                <Check className="size-3.5" />
+                {t.doctor.savedHint}
+              </p>
+            ) : null}
+          </div>
+        )}
+        <div className="flex flex-col-reverse gap-2 border-t border-border/70 bg-muted/15 px-4 py-3 sm:flex-row sm:justify-end">
           <Button
-            size="sm"
+            type="button"
+            variant="ghost"
+            onClick={onCancel}
+            disabled={isSaving}
+            className="sm:px-4"
+          >
+            {t.doctor.cancel}
+          </Button>
+          <Button
+            type="button"
             onClick={() => void handleSave()}
-            disabled={isSaving || (!isCreate && !detail) || !nameIsValid}
-            className="min-h-[40px] sm:min-h-0 px-3"
+            disabled={isSaving || loadingDetail || !nameIsValid}
+            className="sm:px-5"
           >
             {isSaving ? (
               <>
-                <Loader2 size={12} className="animate-spin" /> {t.doctor.saving}
+                <Loader2 className="animate-spin" />
+                {t.doctor.saving}
               </>
             ) : isCreate ? (
               t.doctor.createProvider
@@ -512,17 +623,8 @@ export function ProviderEditor({
               t.doctor.save
             )}
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={onCancel}
-            disabled={isSaving}
-            className="min-h-[40px] sm:min-h-0 px-3"
-          >
-            {t.doctor.cancel}
-          </Button>
         </div>
-      </div>
+      </DoctorPanel>
     </div>
   )
 }

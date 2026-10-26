@@ -213,7 +213,15 @@ export interface paths {
          */
         put: operations["put_provider_system_providers__name__put"];
         post?: never;
-        delete?: never;
+        /**
+         * Delete Provider Route
+         * @description Remove one declared ``[providers.<name>]`` block.
+         *
+         *     Same posture as ``PUT``: the middleware gate runs twice on purpose, and
+         *     a block still named by ``[defaults]`` is refused with the referencing
+         *     field so the UI can tell the operator what to clear first.
+         */
+        delete: operations["delete_provider_route_system_providers__name__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -876,6 +884,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/assets/glossary/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enable Glossary
+         * @description Enable the shared glossary without requiring a hand-edited config.
+         */
+        post: operations["enable_glossary_assets_glossary_enable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/assets/glossary/conflicts": {
         parameters: {
             query?: never;
@@ -975,6 +1003,23 @@ export interface paths {
         put?: never;
         /** Evict Translation Memory */
         post: operations["evict_translation_memory_assets_tm_evict_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assets/tm/evict-matching": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Evict Matching Translation Memory */
+        post: operations["evict_matching_translation_memory_assets_tm_evict_matching_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1356,6 +1401,11 @@ export interface components {
              */
             provider?: string | null;
             /**
+             * Repair Provider
+             * @description Provider block for the repair tier to quote against (defaults to the primary provider). A name, validated like `provider`.
+             */
+            repair_provider?: string | null;
+            /**
              * Ocr Mode
              * @description OCR engine the job will use (affects the vision line)
              */
@@ -1504,6 +1554,8 @@ export interface components {
             stage?: ("extract" | "segment" | "tm" | "translate" | "qe" | "repair" | "render" | "verify" | "package") | null;
             /** Message */
             message?: string | null;
+            /** Event Type */
+            event_type?: string | null;
             /** Output File */
             output_file?: string | null;
             /** Report File */
@@ -1573,6 +1625,11 @@ export interface components {
              * @description Provider block to run this job against (must be declared in ubt.toml or be a built-in wire protocol). Endpoint and credentials still come from that block.
              */
             provider?: string | null;
+            /**
+             * Repair Provider
+             * @description Provider block for the repair tier (defaults to the primary provider). A name, validated like `provider`: the named block supplies the repair endpoint and credential.
+             */
+            repair_provider?: string | null;
             /**
              * Draft Model
              * @description Override draft model tier
@@ -1768,6 +1825,11 @@ export interface components {
             failed_blocks: number;
             /** Needs Human Blocks */
             needs_human_blocks: number;
+            /**
+             * Blocked Human Blocks
+             * @default 0
+             */
+            blocked_human_blocks: number;
             /** Progress Percent */
             progress_percent: number;
             /** Estimated Cost Usd */
@@ -2510,6 +2572,24 @@ export interface components {
             wal_status?: string | null;
         };
         /**
+         * TMBulkEvictRequest
+         * @description Delete the exact filtered scope shown in the confirmation dialog.
+         */
+        TMBulkEvictRequest: {
+            /** Expected Total */
+            expected_total: number;
+            /** Src Lang */
+            src_lang?: string | null;
+            /** Tgt Lang */
+            tgt_lang?: string | null;
+            /** Query */
+            query?: string | null;
+            /** Provenance */
+            provenance?: ("machine" | "human_pe") | null;
+            /** Usage */
+            usage?: ("never" | "used") | null;
+        };
+        /**
          * TMEntryItem
          * @description One translation-memory row as the console lists it.
          */
@@ -2530,6 +2610,10 @@ export interface components {
             domain: string;
             /** Use Count */
             use_count: number;
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
         };
         /**
          * TMImportRequest
@@ -2572,6 +2656,16 @@ export interface components {
         TMListResponse: {
             /** Total */
             total: number;
+            /** Offset */
+            offset: number;
+            /** Limit */
+            limit: number;
+            /** Machine Count */
+            machine_count: number;
+            /** Human Count */
+            human_count: number;
+            /** Never Used Count */
+            never_used_count: number;
             /** Entries */
             entries: components["schemas"]["TMEntryItem"][];
         };
@@ -2580,11 +2674,8 @@ export interface components {
          * @description Translation-memory rows to evict, by id.
          */
         TMevictRequest: {
-            /**
-             * Ids
-             * @description TM entry ids to delete
-             */
-            ids?: number[];
+            /** Ids */
+            ids: number[];
         };
         /**
          * TermPropagationRequest
@@ -3008,6 +3099,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_provider_route_system_providers__name__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -4159,6 +4287,39 @@ export interface operations {
             };
         };
     };
+    enable_glossary_assets_glossary_enable_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlossaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_glossary_conflicts_assets_glossary_conflicts_get: {
         parameters: {
             query?: never;
@@ -4273,6 +4434,10 @@ export interface operations {
                 offset?: number;
                 src_lang?: string | null;
                 tgt_lang?: string | null;
+                query?: string | null;
+                provenance?: string | null;
+                usage?: string | null;
+                sort?: string;
             };
             header?: {
                 "x-api-key"?: string | null;
@@ -4318,6 +4483,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["TMevictRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    evict_matching_translation_memory_assets_tm_evict_matching_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TMBulkEvictRequest"];
             };
         };
         responses: {

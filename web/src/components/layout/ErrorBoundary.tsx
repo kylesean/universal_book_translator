@@ -1,6 +1,6 @@
 import React from 'react'
 import { AlertTriangle, RotateCcw } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 import { en } from '@/i18n/translations/en'
 import { zh } from '@/i18n/translations/zh'
 
@@ -62,17 +62,19 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     const text = this.dictionary()
 
     return (
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="max-w-md space-y-3 text-center">
-          <AlertTriangle className="h-8 w-8 mx-auto text-[#b45309]" />
-          <h2 className="text-sm font-semibold text-[var(--ink-primary)]">
+      <div className="flex flex-1 items-center justify-center p-8">
+        <div className="max-w-md space-y-3 rounded-xl border border-border/80 bg-card p-7 text-center shadow-card">
+          <span className="mx-auto flex size-10 items-center justify-center rounded-xl border border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400">
+            <AlertTriangle className="size-5" />
+          </span>
+          <h2 className="text-sm font-semibold text-foreground">
             {text.title}
           </h2>
-          <p className="text-xs text-[var(--ink-secondary)] leading-relaxed break-words">
+          <p className="break-words text-sm leading-relaxed text-muted-foreground">
             {this.state.error.message}
           </p>
           <Button onClick={this.reset} variant="secondary" size="sm" className="mx-auto">
-            <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+            <RotateCcw className="mr-1.5 size-3.5" />
             {text.retry}
           </Button>
         </div>

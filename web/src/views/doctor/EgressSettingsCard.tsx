@@ -1,24 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2 } from 'lucide-react'
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Loader2, ShieldCheck, ShieldOff } from 'lucide-react'
+
 import { getEgressConfig, saveEgressConfig } from '@/api/client'
+import { Badge } from '@/components/ui/badge'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { useI18n } from '@/i18n/useI18n'
+import { cn } from '@/lib/utils'
 
 /**
- * The page-egress gate (``UBTConfig.allow_page_upload``), with a console toggle.
+ * The page-egress gate, with a runtime toggle.
  *
- * The gate is fail-closed by design: the rendered pages of an unpublished
- * manuscript are the sensitive half of the payload, so shipping them must be
- * an explicit act. Until now that act lived only in a server environment
- * variable no console reader could perform, which made every egress-dependent
- * control name a fix the reader could not reach — the exact dead end the QE
- * card existed to remove.
- *
- * **The toggle is a runtime override, and says so.** ``ubt.toml`` has no key
- * for this field, so the choice holds for this service run and reverts at
- * restart; the permanent path stays the documented ``UBT_ALLOW_PAGE_UPLOAD``
- * environment variable. Turning it ON confirms first — it is the one click on
- * this card that sends data off the machine.
+ * This switch sends rendered page images off the machine, so enabling it is
+ * confirmed first. The runtime-only scope and its fallback to the server
+ * setting are stated beside the switch rather than in a second status badge.
  */
 export function EgressSettingsCard() {
   const { t } = useI18n()
@@ -31,15 +27,12 @@ export function EgressSettingsCard() {
     try {
       setCurrent((await getEgressConfig()).allow_page_upload)
     } catch {
-      // Unknown is rendered as "unknown", never as either verdict — a failed
-      // read must not display a privacy state the server did not report.
+      // Unknown must not render as either privacy verdict.
       setCurrent(null)
     }
   }, [])
 
   useEffect(() => {
-    // Fetch-on-mount: the gate's state lives on the server, so syncing with it
-    // is what this effect is for.
     // oxlint-disable-next-line react/set-state-in-effect
     void load()
   }, [load])
@@ -58,54 +51,60 @@ export function EgressSettingsCard() {
   }
 
   return (
-    <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs">
-      <div className="px-4 py-2.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between gap-3">
-        <span className="type-group">{t.doctor.egressTitle}</span>
-        {current !== null && (
-          <span
-            className={`type-help font-mono ${current ? 'text-[#15803d]' : 'text-[var(--ink-muted)]'}`}
-          >
-            {current ? t.doctor.egressStateOn : t.doctor.egressStateOff}
-          </span>
-        )}
-      </div>
+    <section className="min-w-0 overflow-hidden rounded-xl border border-border/80 bg-card">
+      <header className="border-b border-border/70 px-4 py-3">
+        <h2 className="text-sm font-semibold">{t.doctor.egressTitle}</h2>
+        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+          {t.doctor.egressCardHelp}
+        </p>
+      </header>
 
       {current === null ? (
-        <div className="p-6 text-center text-[var(--ink-muted)]">
-          <Loader2 className="h-4 w-4 animate-spin mx-auto" />
+        <div className="flex items-center justify-center px-4 py-10 text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
         </div>
       ) : (
-        <div className="p-3.5 space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <span className="type-value font-semibold text-[var(--ink-primary)]">
-              {t.doctor.egressLabel}
-            </span>
-            <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={current}
-                disabled={busy}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    setConfirmOpen(true)
-                  } else {
-                    void setEgress(false)
-                  }
-                }}
-                className="h-3.5 w-3.5 rounded border-[var(--paper-border)] accent-[var(--ink-primary)] cursor-pointer disabled:cursor-wait"
-              />
-              <span className="type-value">
-                {current ? t.doctor.egressToggleOn : t.doctor.egressToggleOff}
-              </span>
-            </label>
+        <div className="space-y-3 p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Label htmlFor="allow-page-upload" className="text-sm font-medium">
+                  {t.doctor.egressLabel}
+                </Label>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    current
+                      ? 'border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                      : 'border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                  )}
+                >
+                  {current ? (
+                    <ShieldOff className="mr-1 size-3.5" />
+                  ) : (
+                    <ShieldCheck className="mr-1 size-3.5" />
+                  )}
+                  {current ? t.doctor.egressStateOn : t.doctor.egressStateOff}
+                </Badge>
+              </div>
+              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                {current ? t.doctor.egressDescOn : t.doctor.egressDescOff}
+              </p>
+            </div>
+            <Switch
+              id="allow-page-upload"
+              checked={current}
+              disabled={busy}
+              onCheckedChange={(checked) => {
+                if (checked) setConfirmOpen(true)
+                else void setEgress(false)
+              }}
+            />
           </div>
-          <p className="type-help text-[var(--ink-secondary)] leading-relaxed">
-            {current ? t.doctor.egressDescOn : t.doctor.egressDescOff}
-          </p>
-          <p className="type-help text-[var(--ink-muted)] leading-relaxed">
+          <p className="border-t border-border/60 pt-3 text-[11px] leading-relaxed text-muted-foreground">
             {t.doctor.egressRuntimeNote}
           </p>
-          {error && <p className="type-help text-[#b91c1c]">{error}</p>}
+          {error ? <p className="text-xs text-destructive">{error}</p> : null}
         </div>
       )}
 
@@ -118,6 +117,6 @@ export function EgressSettingsCard() {
         onConfirm={() => void setEgress(true)}
         onCancel={() => setConfirmOpen(false)}
       />
-    </div>
+    </section>
   )
 }

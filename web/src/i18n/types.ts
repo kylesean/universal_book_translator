@@ -2,7 +2,9 @@ export type Language = 'en' | 'zh'
 
 export interface TranslationDictionary {
   common: {
+    yes: string
     compilerConsole: string
+    consoleSubtitle: string
     disconnected: string
     cancel: string
     confirm: string
@@ -14,66 +16,16 @@ export interface TranslationDictionary {
     failed: string
     warning: string
     online: string
+    serviceConnected: string
+    serviceUnavailable: string
     idle: string
     dismiss: string
-    paperToneCotton: string
-    paperToneDowling: string
-    paperToneObsidian: string
-    paperToneSwitchTo: string
-    switchLanguage: string
-    modeReader: string
-    modeStudio: string
-    switchToReader: string
-    switchToStudio: string
-  }
-  reader: {
-    title: string
-    subtitle: string
-    dropzoneTitle: string
-    dropzoneSubtitle: string
-    selectFile: string
-    orEnterPath: string
-    targetLanguage: string
-    stylePreset: string
-    styleLiterary: string
-    styleLiteraryDesc: string
-    styleAcademic: string
-    styleAcademicDesc: string
-    styleTechnical: string
-    styleTechnicalDesc: string
-    startTranslation: string
-    translating: string
-    translatingDesc: string
-    stepParse: string
-    stepTranslate: string
-    stepRender: string
-    stepReady: string
-    recentBooks: string
-    noBooksYet: string
-    readAndExport: string
-    backToShelf: string
-    exportDeliverable: string
-    exporting: string
-    bilingualMode: string
-    targetOnlyMode: string
-    sourceOnlyMode: string
-    editParagraph: string
-    saveEdit: string
-    cancelEdit: string
-    quickEditHint: string
-    readyTag: string
-    changeFile: string
-    clearFile: string
-    refreshList: string
-    loadingBooks: string
-    processingLaunch: string
-    targetShort: string
-    progressShort: string
-    loadingSegments: string
-    noSegmentsParsed: string
-    illustrationNotice: string
-    waitingTranslation: string
-    defaultPrimary: string
+    close: string
+    typeToConfirm: string
+    doesNotMatch: string
+    themeLight: string
+    themeDark: string
+    interfaceLanguage: string
   }
   nav: {
     operatorControl: string
@@ -84,8 +36,28 @@ export interface TranslationDictionary {
     systemDoctor: string
     workbenches: string
     reviewWorkbench: string
+    currentJob: string
+    searchCommands: string
     toggleNavigation: string
     closeNavigation: string
+  }
+  palette: {
+    title: string
+    placeholder: string
+    noMatch: string
+    navigate: string
+    execute: string
+    footerBrand: string
+    categoryPreferences: string
+    cmdNewJobDesc: string
+    cmdMissionControlDesc: string
+    cmdReviewDesc: string
+    cmdQualityDesc: string
+    cmdAssetsDesc: string
+    cmdDoctorDesc: string
+    cmdLightThemeDesc: string
+    cmdDarkThemeDesc: string
+    cmdLanguageDesc: string
   }
   wizard: {
     title: string
@@ -101,6 +73,11 @@ export interface TranslationDictionary {
     provider: string
     providerHelp: string
     providerDefault: string
+    repairProvider: string
+    repairProviderHelp: string
+    repairProviderDefault: string
+    providerUnavailable: string
+    providerUnavailableHelp: string
     targetLang: string
     presets: string
     presetHighFidelity: string
@@ -113,15 +90,12 @@ export interface TranslationDictionary {
     presetFastDesc: string
     presetPreview: string
     presetPreviewDesc: string
-    /** Badge on a preset card: the engine parameters that tell it apart. */
-    presetBadgeRich: string
-    presetBadgeAdaptive: string
-    presetBadgeVectorMath: string
-    presetBadgeFormulaImage: string
-    presetBadgeShortChain: string
-    /** Warning badge on the one preset that pays for VLM formula transcription. */
-    presetSlowBadge: string
-    walLedger: string
+    /** User-facing character of each quality tier; never an engine name. */
+    presetBadgeBest: string
+    presetBadgeBalanced: string
+    presetBadgeMath: string
+    presetBadgeProof: string
+    presetBadgeFast: string
     notPriced: string
     formatUnknown: string
     budgetCeiling: string
@@ -185,6 +159,9 @@ export interface TranslationDictionary {
     sourceChars: string
     chapters: string
     mathDensity: string
+    mathDensityLow: string
+    mathDensityMedium: string
+    mathDensityHigh: string
     /** Distinguishes the text-level density from the layout-level formula count. */
     mathDensityTextOnly: string
     mathDensityWithObjects: string
@@ -192,7 +169,6 @@ export interface TranslationDictionary {
     confidence: string
     probeWarnings: string
     pagesUnit: string
-    pipelineProfileTag: string
     scorecardTitle: string
     scorecardSub: string
     tokenPrefixTag: string
@@ -206,7 +182,6 @@ export interface TranslationDictionary {
     listSeparator: string
     advancedOptionsTitle: string
     advancedOptionsSubtitle: string
-    advancedOptionsTag: string
     domainProfile: string
     domainProfileHelp: string
     domainAuto: string
@@ -235,6 +210,10 @@ export interface TranslationDictionary {
     groupContent: string
     groupScope: string
     groupExec: string
+    advancedDeliveryHelp: string
+    advancedContentHelp: string
+    advancedScopeHelp: string
+    advancedExecHelp: string
     ocrMode: string
     ocrModeHelp: string
     ocrModeEgressWarning: string
@@ -316,7 +295,9 @@ export interface TranslationDictionary {
     jobMissingDesc: string
     backToQueue: string
     noActiveJobDesc: string
-    pipelineGraph: string
+    phaseParse: string
+    phaseTranslate: string
+    phaseDeliver: string
     stageExtract: string
     stageSegment: string
     stageTm: string
@@ -326,18 +307,28 @@ export interface TranslationDictionary {
     stageRender: string
     stageVerify: string
     stagePackage: string
-    liveStream: string
+    logStreamConnected: string
+    logStreamConnecting: string
+    logStreamReconnecting: string
+    logAwaitingFirstEvent: string
+    logLastEventAt: string
+    /** Compact progress line under an activity event, e.g. "12 of 40 blocks". */
+    activityProgress: string
+    /** Activity suffix for blocks intentionally kept as source. */
+    activityPreserved: string
     cancelCompile: string
     inspectGate: string
     openWorkbench: string
     progress: string
     completedPages: string
     skippedBlocks: string
+    preservedBlocks: string
     failedBlocks: string
     needsHumanBlocks: string
     qeNotMeasuredHeuristic: string
     queuePosition: string
     totalSpend: string
+    costFreeLocal: string
     executionState: string
     blocksRemaining: string
     stateCertified: string
@@ -356,14 +347,15 @@ export interface TranslationDictionary {
     stageStateRender: string
     stageStateVerify: string
     stageStatePackage: string
-    engineActiveHeartbeat: string
     logAborted: string
+    cancelledDetail: string
+    cancelledShort: string
     logResumed: string
     logDeleted: string
-    sseStream: string
     bufferedLines: string
     waitingStream: string
     logUnavailableTerminal: string
+    logUnavailableTitle: string
     queueTitle: string
     queueEmpty: string
     colJob: string
@@ -378,18 +370,26 @@ export interface TranslationDictionary {
     noMatch: string
     resumeCompile: string
     failureReason: string
+    failureDetail: string
+    failureShort: string
+    failureConfig: string
+    failureIntegrity: string
+    failureProvider: string
+    failureDocument: string
+    failureGeneric: string
+    technicalDetail: string
+    failureProviderUnreachable: string
     rowRehearsal: string
     resuming: string
     downloadPrimary: string
     oneClickExport: string
+    exportPrimaryHint: string
+    exportPrimaryBadge: string
     exportFormats: string
     exportPreparing: string
     exportSuccess: string
     noDeliverables: string
     deleteJob: string
-    deleteConfirm: string
-    deleteTypePrompt: string
-    deleteTypeMismatch: string
     jobIdLabel: string
     collapseLogs: string
     expandLogs: string
@@ -399,7 +399,7 @@ export interface TranslationDictionary {
     jobStatuses: Record<string, string>
     //: Pipeline stage names, from the engine's stage identifiers.
     stageNames: Record<string, string>
-    stageLine: string
+    pipelineContext: string
     qeHeuristicHint: string
     avgQe: string
     //: Download is blocked while a job has un-re-rendered edits; the console
@@ -418,6 +418,67 @@ export interface TranslationDictionary {
     reparseFailed: string
     reparseTypePrompt: string
     reparseTypeMismatch: string
+    searchJobsPlaceholder: string
+    expandQueueTooltip: string
+    collapseQueueTooltip: string
+    expandQueue: string
+    collapseQueue: string
+    queueNoMatch: string
+    inspectLatestRun: string
+    copyLogs: string
+    copy: string
+    copiedLogsSuccess: string
+    deliverablesReady: string
+    backgroundProcessing: string
+    allBlocksVerified: string
+    waitingForExtraction: string
+    avgCostPerBlock: string
+    runsCount: string
+    filterAll: string
+    filterActive: string
+    filterCompleted: string
+    filterFailed: string
+    pipelineAllPass: string
+    pipelineHalted: string
+    stageStatusError: string
+    stageStatusCancelled: string
+    liveLogTitle: string
+    ledgerArchive: string
+    terminalReadyForDownload: string
+    jobActions: string
+    openJob: string
+    deleteJobTitle: string
+    deleteJobBody: string
+    liveStatus: string
+    resumeFailed: string
+    deleteFailed: string
+    jobDeleted: string
+    tabLogs: string
+    tabDeliverables: string
+    backToJobList: string
+    copyJobId: string
+    jobIdCopied: string
+    logLevelAll: string
+    logLevelInfo: string
+    logLevelWarn: string
+    logLevelError: string
+    activityEvents: {
+      job_started: string
+      preprocessing_done: string
+      bible_extracted: string
+      draft_batch_completed: string
+      mtqe_evaluated: string
+      repair_started: string
+      repair_progress: string
+      repair_batch_completed: string
+      render_started: string
+      triage_completed: string
+      ctext_completed: string
+      chapter_completed: string
+      mode_advised: string
+      export_completed: string
+      pipeline_failed: string
+    }
   }
   quality: {
     title: string
@@ -433,7 +494,6 @@ export interface TranslationDictionary {
     blockedDesc: string
     warningDesc: string
     costNotPriced: string
-    fidelityScore: string
     pillar1Title: string
     pillar1Desc: string
     pillar2Title: string
@@ -444,8 +504,6 @@ export interface TranslationDictionary {
     pillar4Desc: string
     pillar5Title: string
     pillar5Desc: string
-    deliverablesTitle: string
-    deliverablesSubtitle: string
     targetPdf: string
     epub: string
     contractJson: string
@@ -487,15 +545,10 @@ export interface TranslationDictionary {
     qeNotMeasuredWhyJudge: string
     qeNotMeasuredHow: string
     qeMeasuredOn: string
-    pillarsTitle: string
+    checksTitle: string
     pillarStatusPass: string
     pillarStatusWarn: string
     pillarStatusFail: string
-    axisMath: string
-    axisTerminology: string
-    axisVisual: string
-    axisCompleteness: string
-    axisDelivered: string
     termDriftTitle: string
     colTerm: string
     colExpected: string
@@ -503,8 +556,8 @@ export interface TranslationDictionary {
     colDriftRate: string
     noDrift: string
     visualFindingsTitle: string
+    sampledPages: string
     noVisualFindings: string
-    noDeliverables: string
     pageAlt: string
     flaggedPages: string
     auditDraftModel: string
@@ -522,124 +575,150 @@ export interface TranslationDictionary {
     metricMaskedBlocks: string
     metricCorruptBlocks: string
     metricFormulaBlocks: string
-    //: View density toggle: 简明 for readers, 专业 for operators.
-    modeLabel: string
-    modeSimple: string
-    modePro: string
-    switchToPro: string
-    //: 简明 verdict card — one sentence per outcome, no engine jargon.
-    simpleReadyTitle: string
-    simpleReadyBody: string
-    simpleWarningTitle: string
-    simpleWarningBody: string
-    simpleBlockedTitle: string
-    simpleBlockedBody: string
-    //: Short check labels, shared by the verdict chips and the card titles.
+    //: Short check labels, shared by the verdict summary and checklist.
     chipMath: string
     chipTerm: string
     chipLayout: string
     chipComplete: string
     chipCost: string
-    //: One-line QE state for readers; the full explanation sits in the InfoTip.
-    qeSimpleNote: string
-    previewTranslation: string
-    //: 简明 per-check sentences. Placeholders interpolate report numbers.
-    simpleMathLine: string
-    simpleTermLine: string
-    simpleVisualCleanLine: string
-    simpleVisualFindingsLine: string
-    simpleVisualSkippedLine: string
-    simpleVisualMissingLine: string
-    simpleCompleteLine: string
-    simpleCompleteFailLine: string
-    simpleCostLine: string
-    simpleCostUnpricedLine: string
-    //: Honest pro-mode summary when some visual tiers ran and others did not.
+    mathSummary: string
+    termSummary: string
+    coverageSummary: string
+    //: Honest summary when some visual tiers ran and others did not.
     visualPartialRan: string
-    radarUnmeasuredLabel: string
-    radarUnmeasuredNote: string
-    //: Deliverable groups — who each file is for, not what format it is.
-    delivGroupReading: string
-    delivGroupReadingDesc: string
-    delivGroupL10n: string
-    delivGroupL10nDesc: string
-    delivGroupAudit: string
-    delivGroupAuditDesc: string
-    //: One plain-language line per deliverable key.
-    descPrimary: string
-    descSecondary: string
-    descEpub: string
-    descHtml: string
-    descXliff: string
-    descContract: string
-    descQualityReport: string
-    descVisualReport: string
-    descMetrics: string
+    primaryProductMissing: string
+    viewAllFiles: string
+    deliverySummaryDesc: string
+    primaryArtifact: string
+    primaryArtifactDesc: string
+    technicalReportHint: string
     previewAction: string
     downloadAction: string
     previewLoading: string
     previewDownloadInstead: string
-    previewRawJson: string
     previewClose: string
-    previewSegmentsTotal: string
-    //: Digest labels for the JSON sidecar previews.
-    delivCostLabel: string
-    delivPagesScanned: string
-    delivOverlapPairs: string
-    delivTruncations: string
-    delivTypeIssues: string
     delivRecall: string
     refreshBtn: string
+    backToJob: string
+    copyJobId: string
+    jobIdCopied: string
+    metricRenderedBlocks: string
+    metricSkippedBlocks: string
+    metricFailClosedBlocks: string
+    metricPreservedBlocks: string
   }
   assets: {
-    colSource: string
-    colTarget: string
-    colProvenance: string
-    colAction: string
     title: string
     subtitle: string
     tabGlossary: string
     tabTm: string
-    tabBible: string
+    glossaryDescription: string
+    tmDescription: string
     sourceTerm: string
+    sourceTermPlaceholder: string
     targetTerm: string
+    targetTermPlaceholder: string
     submitTerm: string
-    activeTerms: string
-    tmTitle: string
-    tmDesc: string
-    tmLoadMore: string
-    tmLoadingMore: string
+    searchTerms: string
+    searchTm: string
+    tmFilterProvenance: string
+    tmFilterUsage: string
+    tmFilterAll: string
+    tmSort: string
+    tmSortNewest: string
+    tmSortOldest: string
+    tmSortMostUsed: string
+    tmUsageNever: string
+    tmUsageUsed: string
+    tmResultRange: string
+    tmResults: string
+    tmSummary: string
+    tmNeverUsedSummary: string
+    tmClearFilters: string
+    tmSelectPage: string
+    tmSelectEntry: string
+    tmSelected: string
+    tmSelectAllFiltered: string
+    tmAllFilteredSelected: string
+    tmClearSelection: string
+    tmDeleteSelected: string
+    tmDeleteSelectedTitle: string
+    tmDeleteSelectedBody: string
+    tmDeleteScopeTitle: string
+    tmDeleteScopeBody: string
+    tmDeleteScopeConfirm: string
+    tmDeleteSelectedConfirm: string
+    tmDeletedSelected: string
+    tmScopeChanged: string
+    tmReuseCount: string
+    tmNeverReused: string
+    tmUpdatedAt: string
+    tmPagePrev: string
+    tmPageNext: string
+    tmPageOf: string
+    tmRowsPerPage: string
+    tmFilterNoResults: string
+    tmFilterNoResultsDescription: string
+    glossaryEntries: string
+    matchingTerms: string
+    matchingEntries: string
+    tmShownOfTotal: string
+    colSource: string
+    colTarget: string
+    colProvenance: string
+    colAction: string
+    provenanceHuman: string
+    provenanceMachine: string
+    termActions: string
+    tmRowActions: string
+    tmInspectEntry: string
+    tmInspectTitle: string
+    tmInspectDescription: string
+    deleteTermAction: string
+    deleteTmAction: string
     conflictsTitle: string
-    conflictTargets: string
-    noConflicts: string
     importTitle: string
+    importTmDescription: string
     importContent: string
-    importLangs: string
+    importContentPlaceholder: string
+    importFormat: string
+    importSourceLang: string
+    importTargetLang: string
+    tmChooseFile: string
     importBtn: string
     importing: string
     importDone: string
-    fuzzyThreshold: string
-    fuzzyThresholdHelp: string
-    bibleOverviewTitle: string
-    bibleOverviewDesc: string
-    bibleStructureTitle: string
-    bibleStructureDesc: string
-    bibleSourceSeeds: string
-    bibleSourceGlossary: string
-    bibleSourceChapters: string
-    bibleSourceMined: string
-    bibleWorkflowTitle: string
-    bibleWorkflowDesc: string
-    bibleStep1: string
-    bibleStep2: string
-    bibleStep3: string
-    //: The bible workflow's step badges and the empty-glossary row.
-    stepBadge: string
+    importAction: string
+    actionFailed: string
+    loadGlossaryFailed: string
+    loadTmFailed: string
+    importGlossaryFailed: string
+    importTmFailed: string
+    saveTermFailed: string
+    deleteTermFailed: string
+    deleteTmFailed: string
+    enableGlossaryFailed: string
+    termSaved: string
+    termDeleted: string
+    tmDeleted: string
+    glossaryEnabled: string
+    noMatchingTerms: string
+    noMatchingTermsDescription: string
+    noMatchingTm: string
+    noMatchingTmDescription: string
     noTerms: string
+    noTermsDescription: string
+    noTm: string
+    noTmDescription: string
+    glossaryNotConfiguredTitle: string
     glossaryNotConfigured: string
+    enableGlossary: string
+    enablingGlossary: string
     glossaryImportTitle: string
     glossaryImportHint: string
-    glossaryImportBtn: string
+    glossaryChooseFile: string
+    glossaryReplaceFile: string
+    glossaryFileFormats: string
     glossaryImportDone: string
     deleteTermTitle: string
     deleteTermBody: string
@@ -649,6 +728,9 @@ export interface TranslationDictionary {
   doctor: {
     title: string
     subtitle: string
+    tabDiagnostics: string
+    tabModels: string
+    tabSecurity: string
     auth: {
       title: string
       subtitle: string
@@ -690,6 +772,12 @@ export interface TranslationDictionary {
     credentialEnvSupplied: string
     editProvider: string
     editingProvider: string
+    deleteProvider: string
+    deleteProviderTitle: string
+    deleteProviderBody: string
+    deleteProviderConfirm: string
+    deleteProviderReferenced: string
+    providerDeleted: string
     cancel: string
     save: string
     saving: string
@@ -729,6 +817,61 @@ export interface TranslationDictionary {
     qeSaved: string
     qeCancel: string
     qeLoadFailed: string
+    overviewTitle: string
+    overviewReady: string
+    overviewNeedsAttention: string
+    overviewBlocked: string
+    overviewSummary: string
+    diagnosticsTitle: string
+    diagnosticsHelp: string
+    issuesOnly: string
+    allChecks: string
+    checkCount: string
+    issueCount: string
+    runtimeCardTitle: string
+    runtimeCardHelp: string
+    runtimeRunnable: string
+    runtimeRehearsal: string
+    providerListTitle: string
+    providerListHelp: string
+    providerNoCredential: string
+    providerUnresolved: string
+    providerReady: string
+    providerActions: string
+    providerModels: string
+    providerEndpoint: string
+    builtinDetails: string
+    builtinHelp: string
+    protocolName: string
+    aliasResolution: string
+    modelFormTitle: string
+    modelFormHelp: string
+    credentialsSection: string
+    connectionSection: string
+    behaviorSection: string
+    advancedSection: string
+    formUnsaved: string
+    formCloseLabel: string
+    formCreateHint: string
+    formEditHint: string
+    qeMetricLabel: string
+    qeMetricMeasured: string
+    qeMetricNotMeasured: string
+    thresholdMetric: string
+    sampleMetric: string
+    securityCardTitle: string
+    securityCardHelp: string
+    egressCardHelp: string
+    boundaryCardHelp: string
+    emptyChecksTitle: string
+    emptyChecksBody: string
+    refreshFailed: string
+    loadingChecks: string
+    selectedProviderTitle: string
+    statusOK: string
+    statusWARN: string
+    statusFAIL: string
+    statusSKIP: string
     /** Page-egress card: a runtime toggle for UBTConfig.allow_page_upload. */
     egressTitle: string
     egressStateOn: string
@@ -756,6 +899,13 @@ export interface TranslationDictionary {
     capabilityTroubleshootToggle: string
     baseUrl: string
     apiMode: string
+    reasoningTitle: string
+    reasoningHelp: string
+    reasoningAccepts: string
+    reasoningAcceptsNote: string
+    reasoningDraftEffort: string
+    reasoningRepairEffort: string
+    reasoningDialect: string
     apiTimeout: string
     extractionStrategy: string
     extractionStrategyHelp: string
@@ -811,10 +961,59 @@ export interface TranslationDictionary {
   review: {
     title: string
     modeSegments: string
+    modeSegmentsDesc: string
+    segmentCount: string
+    segmentIndex: string
+    segmentPosition: string
     modeFlow: string
-    modeVisual: string
+    modeFlowDesc: string
+    viewLabel: string
+    scopeLabel: string
+    scopeToReview: string
+    scopeEverything: string
+    blockPosition: string
+    layoutPreview: string
+    layoutPreviewHint: string
+    blockTechnicalId: string
     sourceSegment: string
     targetSegment: string
+    sourcePreview: string
+    targetPreview: string
+    previewMode: string
+    editMode: string
+    issueQueue: string
+    issueQueueHint: string
+    findingsTitle: string
+    findingsHint: string
+    findingMeaning: string
+    evidenceTitle: string
+    evidenceHint: string
+    rawEvidence: string
+    rawEvidenceHint: string
+    noFindings: string
+    previousSegment: string
+    nextSegment: string
+    unsavedShort: string
+    savedShort: string
+    saveAction: string
+    saveAndNext: string
+    previewUnavailable: string
+    openEvidence: string
+    closeEvidence: string
+    showEvidence: string
+    hideEvidence: string
+    flagHumanReview: string
+    flagCritical: string
+    flagOmission: string
+    flagNumeric: string
+    flagTerminology: string
+    flagFormula: string
+    flagStructure: string
+    flagRepetition: string
+    flagFabrication: string
+    flagEcho: string
+    flagRender: string
+    flagGeneric: string
     saveFeedback: string
     failedDraftNotice: string
     quarantinedNotice: string
@@ -862,6 +1061,7 @@ export interface TranslationDictionary {
     clearFilter: string
     filterByIssueKind: string
     diffBlend: string
+    diffBlendHint: string
     inspectorTitle: string
     inspectorQe: string
     inspectorTmHit: string
@@ -894,22 +1094,9 @@ export interface TranslationDictionary {
     //: Shown when the ledger is held by another writer (HTTP 409), so the
     //: operator knows to stop the run or retry rather than assume the save lost.
     saveConflict: string
-    oneClickExport: string
-    exportFormats: string
-    exportPreparing: string
-    exportRerendering: string
-    exportSuccess: string
-    exportFailed: string
-    exportBlockedTitle: string
-    exportBlockedBody: string
-    exportBlockedConfirm: string
-    exportBlockedCancel: string
-    exportPrimaryBadge: string
-    exportQuickHelp: string
     editShortcutHint: string
     collapseInspector: string
     expandInspector: string
-    exportSavingDrafts: string
   }
   errorBoundary: {
     title: string

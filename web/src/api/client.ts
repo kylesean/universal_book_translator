@@ -44,6 +44,18 @@ export interface TmEntry {
   provenance: string
   domain: string | null
   use_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface TmPage {
+  total: number
+  offset: number
+  limit: number
+  machine_count: number
+  human_count: number
+  never_used_count: number
+  entries: TmEntry[]
 }
 
 export interface DoctorCheck {
@@ -98,6 +110,8 @@ export interface ProgressStreamFrame {
   status?: string
   stage?: PipelineStage | null
   message?: string | null
+  /** Machine-readable engine event; the console localizes this, never `message`. */
+  event_type?: string | null
   progress_percent?: number
   total_blocks?: number
   /** Blocks drafted but not yet finalized. Shown as live translation work,
@@ -574,6 +588,14 @@ export async function getGlossary(): Promise<GlossaryListing> {
   return { terms: data.terms ?? [], configured: true, reason: null }
 }
 
+/** Create and activate the managed glossary when none is configured yet. */
+export async function enableGlossary(): Promise<GlossaryTerm[]> {
+  const res = await apiFetch(`${BASE_URL}/assets/glossary/enable`, { method: 'POST' })
+  if (!res.ok) throw await apiError(res, 'Failed to enable glossary')
+  const data = await res.json()
+  return data.terms ?? []
+}
+
 export async function upsertGlossaryTerm(source: string, target: string): Promise<GlossaryTerm[]> {
   const res = await apiFetch(`${BASE_URL}/assets/glossary`, {
     method: 'POST',
@@ -631,16 +653,32 @@ export async function listTm(params: {
   offset?: number
   src_lang?: string
   tgt_lang?: string
-} = {}): Promise<{ total: number; entries: TmEntry[] }> {
+  query?: string
+  provenance?: 'machine' | 'human_pe'
+  usage?: 'never' | 'used'
+  sort?: 'newest' | 'oldest' | 'most_used'
+} = {}): Promise<TmPage> {
   const query = new URLSearchParams()
   if (params.limit !== undefined) query.set('limit', String(params.limit))
   if (params.offset !== undefined) query.set('offset', String(params.offset))
   if (params.src_lang) query.set('src_lang', params.src_lang)
   if (params.tgt_lang) query.set('tgt_lang', params.tgt_lang)
+  if (params.query) query.set('query', params.query)
+  if (params.provenance) query.set('provenance', params.provenance)
+  if (params.usage) query.set('usage', params.usage)
+  if (params.sort) query.set('sort', params.sort)
   const res = await apiFetch(`${BASE_URL}/assets/tm?${query.toString()}`)
   if (!res.ok) throw await apiError(res, "Failed to load translation memory")
   const data = await res.json()
-  return { total: data.total ?? 0, entries: data.entries ?? [] }
+  return {
+    total: data.total ?? 0,
+    offset: data.offset ?? 0,
+    limit: data.limit ?? 50,
+    machine_count: data.machine_count ?? 0,
+    human_count: data.human_count ?? 0,
+    never_used_count: data.never_used_count ?? 0,
+    entries: data.entries ?? [],
+  }
 }
 
 export async function evictTm(ids: number[]): Promise<number> {
@@ -650,6 +688,25 @@ export async function evictTm(ids: number[]): Promise<number> {
     body: JSON.stringify({ ids }),
   })
   if (!res.ok) throw await apiError(res, "Failed to evict TM entries")
+  const data = await res.json()
+  return data.removed ?? 0
+}
+
+/** Delete the exact filtered scope that was shown in the confirmation dialog. */
+export async function evictMatchingTm(params: {
+  expected_total: number
+  query?: string
+  provenance?: 'machine' | 'human_pe'
+  usage?: 'never' | 'used'
+  src_lang?: string
+  tgt_lang?: string
+}): Promise<number> {
+  const res = await apiFetch(`${BASE_URL}/assets/tm/evict-matching`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to evict filtered TM entries')
   const data = await res.json()
   return data.removed ?? 0
 }
@@ -929,6 +986,21 @@ export async function saveProvider(
   })
   if (!res.ok) throw await apiError(res, `Failed to save provider ${name}`)
   return res.json()
+}
+
+/**
+ * Remove one declared `[providers.<name>]` block.
+ *
+ * A block still named by `[defaults]` (provider / repair_provider /
+ * qe_judge_provider) is refused server-side with the referencing field, so the
+ * UI can tell the operator what to clear first rather than orphaning a
+ * reference that fails every future job.
+ */
+export async function deleteProvider(name: string): Promise<void> {
+  const res = await apiFetch(`${BASE_URL}/system/providers/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw await apiError(res, `Failed to delete provider ${name}`)
 }
 
 /**

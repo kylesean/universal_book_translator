@@ -141,7 +141,7 @@ export function InfoTip({ children, label, className }: InfoTipProps) {
         onMouseEnter={openPanel}
         onMouseLeave={close}
         className={clsx(
-          'inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-[var(--ink-muted)] hover:text-[var(--ink-primary)] focus:text-[var(--ink-primary)] focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ink-primary)] transition-colors cursor-help',
+          'inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground focus:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-colors cursor-help',
           className,
         )}
       >
@@ -166,7 +166,7 @@ export function InfoTip({ children, label, className }: InfoTipProps) {
             // click-through means the control underneath stays operable and the
             // panel dismisses on the next pointerdown (the outside-click
             // handler ignores it by design), so the overlap costs nothing.
-            className="pointer-events-none z-50 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] p-2 text-[11px] font-normal normal-case tracking-normal leading-relaxed text-[var(--ink-secondary)] shadow-[0_2px_10px_rgba(0,0,0,0.10)]"
+            className="pointer-events-none z-50 rounded-md border border-border bg-card p-2 text-xs font-normal normal-case tracking-normal leading-relaxed text-muted-foreground shadow-[0_2px_10px_rgba(0,0,0,0.10)]"
           >
             {children}
           </span>,

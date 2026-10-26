@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { KeyRound, Loader2, ShieldAlert } from 'lucide-react'
 import { checkHealth, getStoredApiKey, signIn } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
+import { Button } from '@/components/ui/button'
 
 interface AuthGateProps {
   children: React.ReactNode
@@ -86,34 +87,39 @@ export function AuthGate({ children }: AuthGateProps) {
 
   if (state === 'checking') {
     return (
-      <div className="flex h-screen items-center justify-center bg-[color:var(--paper-bg)]">
-        <Loader2 className="h-6 w-6 animate-spin text-[color:var(--ink-muted)]" />
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="flex items-center gap-3 rounded-xl border border-border/80 bg-card px-4 py-3 text-sm text-muted-foreground shadow-card">
+          <Loader2 className="size-4 animate-spin" />
+          {t.doctor.auth.checking}
+        </div>
       </div>
     )
   }
 
   if (state === 'signed-out') {
     return (
-      <div className="flex h-screen items-center justify-center bg-[color:var(--paper-bg)] p-6">
+      <div className="flex h-screen items-center justify-center bg-background p-6">
         <form
           onSubmit={submit}
-          className="w-full max-w-md rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] p-8 shadow-2xs"
+          className="w-full max-w-md rounded-2xl border border-border/80 bg-card p-8 shadow-floating"
         >
-          <div className="mb-4 flex items-center gap-3">
-            <ShieldAlert className="h-6 w-6 text-[var(--ink-amber)]" />
-            <h1 className="text-lg font-semibold tracking-tight text-[var(--ink-primary)]">
+          <div className="mb-5 flex items-center gap-3">
+            <span className="flex size-10 items-center justify-center rounded-xl border border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400">
+              <ShieldAlert className="size-5" />
+            </span>
+            <h1 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
               {t.doctor.auth.title}
             </h1>
           </div>
-          <p className="mb-6 text-sm text-[var(--ink-secondary)]">{t.doctor.auth.subtitle}</p>
+          <p className="mb-6 text-sm text-muted-foreground">{t.doctor.auth.subtitle}</p>
           <label
             htmlFor="ubt-api-key"
-            className="mb-1 block text-xs font-medium uppercase tracking-wide text-[var(--ink-muted)]"
+            className="mb-1.5 block font-mono text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground"
           >
             {t.doctor.auth.keyLabel}
           </label>
-          <div className="mb-4 flex items-center gap-2 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-bg)] px-3">
-            <KeyRound className="h-4 w-4 shrink-0 text-[color:var(--ink-muted)]" />
+          <div className="mb-4 flex items-center gap-2 rounded-lg border border-input bg-background px-3 shadow-2xs transition-colors focus-within:border-ring/50 focus-within:ring-2 focus-within:ring-ring/15">
+            <KeyRound className="size-4 shrink-0 text-muted-foreground" />
             <input
               id="ubt-api-key"
               type="password"
@@ -122,18 +128,18 @@ export function AuthGate({ children }: AuthGateProps) {
               value={key}
               onChange={(event) => setKey(event.target.value)}
               placeholder={t.doctor.auth.keyPlaceholder}
-              className="w-full bg-transparent py-2 text-sm text-[var(--ink-primary)] outline-none"
+              className="w-full bg-transparent py-2.5 text-sm text-foreground outline-none"
             />
           </div>
-          {failed && <p className="mb-4 text-sm text-[var(--ink-rose)]">{t.doctor.auth.failed}</p>}
-          <button
+          {failed && <p className="mb-4 text-sm text-destructive">{t.doctor.auth.failed}</p>}
+          <Button
             type="submit"
+            className="w-full"
             disabled={busy || !key.trim()}
-            className="flex w-full items-center justify-center gap-2 rounded-[5px] bg-[var(--btn-bg)] px-4 py-2 text-sm font-semibold text-[var(--btn-fg)] transition-colors hover:bg-[var(--btn-hover)] disabled:opacity-50"
           >
-            {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+            {busy && <Loader2 className="size-4 animate-spin" />}
             {busy ? t.doctor.auth.checking : t.doctor.auth.signIn}
-          </button>
+          </Button>
         </form>
       </div>
     )

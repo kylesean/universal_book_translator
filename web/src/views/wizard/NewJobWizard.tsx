@@ -10,13 +10,28 @@ import {
   Sliders,
   Globe,
   ChevronDown,
-  ChevronRight,
   X,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/Alert'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { InfoTip } from '@/components/ui/InfoTip'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { cn } from '@/lib/utils'
 import {
   assessJob,
   getRuntimeConfig,
@@ -134,6 +149,59 @@ function numericFieldInvalid(raw: string, min: number): boolean {
   return !Number.isFinite(value) || value < min
 }
 
+interface ChoiceSelectProps {
+  id: string
+  value: string
+  onValueChange: (value: string) => void
+  options: ReadonlyArray<{ value: string; label: string }>
+  placeholder?: string
+  disabled?: boolean
+}
+
+/** A thin composition of the official shadcn Select primitives. */
+function ChoiceSelect({
+  id,
+  value,
+  onValueChange,
+  options,
+  placeholder,
+  disabled,
+}: ChoiceSelectProps) {
+  return (
+    <Select value={value} onValueChange={onValueChange} disabled={disabled}>
+      <SelectTrigger id={id}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+function FieldLabel({
+  htmlFor,
+  children,
+  className,
+}: {
+  htmlFor?: string
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <Label
+      htmlFor={htmlFor}
+      className={cn('text-sm font-medium leading-none text-foreground', className)}
+    >
+      {children}
+    </Label>
+  )
+}
+
 export function NewJobWizard() {
   const { t } = useI18n()
   const navigate = useNavigate()
@@ -145,7 +213,7 @@ export function NewJobWizard() {
 
   const [targetLang, setTargetLang] = useState('zh')
   const [sourceLang, setSourceLang] = useState('en')
-  const [preset, setPreset] = useState<'high_fidelity' | 'standard' | 'vector_math' | 'preview' | 'fast' | null>(null)
+  const [preset, setPreset] = useState<'high_fidelity' | 'standard' | 'vector_math' | 'preview' | 'fast' | null>('standard')
   const [budgetUsd, setBudgetUsd] = useState<number | null>(null)
   // The raw field text is separate from ``budgetUsd``: while the user is
   // mid-typing ("" or "0.") the numeric value is not yet usable, but the input
@@ -212,6 +280,9 @@ export function NewJobWizard() {
   // whatever the operator configured as active" — a real default, not a sentinel
   // the server has to interpret.
   const [provider, setProvider] = useState('')
+  // The repair tier can run on a different block entirely — its own endpoint,
+  // protocol and credential. Empty follows the primary provider.
+  const [repairProvider, setRepairProvider] = useState('')
   // The operator can proceed knowingly, but only after seeing the banner. A hard
   // block would be wrong (a rehearsal is a legitimate feature); a silent one is
   // what produced a mock deliverable nobody asked for.
@@ -309,6 +380,7 @@ export function NewJobWizard() {
           // dropdown above selected another — and a cloud OCR choice added a
           // vision line the quote never saw.
           provider: provider || null,
+          repair_provider: repairProvider || null,
           ocr_mode: ocrMode === 'auto' ? null : ocrMode,
           visual_judge_enabled: visualJudge === 'auto' ? null : visualJudge === 'on',
           // An invalid value prices as unset — the field-level guard stops the
@@ -331,6 +403,7 @@ export function NewJobWizard() {
           activeTarget,
           activeSource,
           provider,
+          repairProvider,
           ocrMode,
           visualJudge,
           concurrency.trim(),
@@ -339,12 +412,12 @@ export function NewJobWizard() {
         // Auto-feed recommendations when a new document is assessed
         if (lastAssessedFileRef.current !== path.trim()) {
           lastAssessedFileRef.current = path.trim()
-          if (res.document?.file_name && !fileName) {
-            setFileName(res.document.file_name)
+          if (res.document?.file_name) {
+            setFileName((prev) => prev || res.document?.file_name || '')
           }
-          if (res.document?.file_size_bytes && !fileSize) {
+          if (res.document?.file_size_bytes) {
             const sz = res.document.file_size_bytes
-            setFileSize(sz > 1024 * 1024 ? `${(sz / (1024 * 1024)).toFixed(1)} MB` : `${(sz / 1024).toFixed(0)} KB`)
+            setFileSize((prev) => prev || (sz > 1024 * 1024 ? `${(sz / (1024 * 1024)).toFixed(1)} MB` : `${(sz / 1024).toFixed(0)} KB`))
           }
           if (!hasUserSelectedPresetRef.current && res.route?.recommended_preset) {
             const recP = res.route.recommended_preset.toLowerCase() as any
@@ -406,7 +479,7 @@ export function NewJobWizard() {
         }
       }
     },
-    [preset, pageRange, targetLang, sourceLang, provider, ocrMode, visualJudge, concurrency]
+    [preset, pageRange, targetLang, sourceLang, provider, repairProvider, ocrMode, visualJudge, concurrency]
   )
 
   // The live fingerprint and the latest callback, read at completion time.
@@ -417,6 +490,7 @@ export function NewJobWizard() {
     targetLang,
     sourceLang,
     provider,
+    repairProvider,
     ocrMode,
     visualJudge,
     concurrency.trim(),
@@ -611,6 +685,7 @@ export function NewJobWizard() {
     // A provider *name*, validated server-side against the declared blocks.
     // Endpoint and credentials still come from that block.
     provider: provider || null,
+    repair_provider: repairProvider || null,
     preset: preset,
     dual_mode: dualMode === 'auto' ? null : dualMode,
     // null = "align to the source layout"; the engine rejects anything but 1/2.
@@ -731,81 +806,92 @@ export function NewJobWizard() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [filePath, isSubmitting])
 
-  // The badge names the engine parameters that actually tell one preset apart
-  // from another (ubt/core/presets.py): the PDF parser and the prompt depth.
-  // It deliberately does NOT name a model (a preset never picks one — the
-  // router does) and does NOT claim a quality "gate" (a preset never changes
-  // one; presets.py says so in its header). It also does not claim formula
-  // vectorisation outside vector_math: ``auto`` formula enrichment crops
-  // the source region, so high_fidelity and standard render identical math.
+  // Presets are user-facing quality tiers. Keep implementation choices
+  // (parser, prompt depth, engine names) out of the console.
   const presetOptions = [
     {
       id: 'high_fidelity' as const,
       name: t.wizard.presetHighFidelity,
       desc: t.wizard.presetHighFidelityDesc,
-      badge: t.wizard.presetBadgeRich,
+      badge: t.wizard.presetBadgeBest,
       detail: t.wizard.presetHFDetail,
     },
     {
       id: 'standard' as const,
       name: t.wizard.presetStandard,
       desc: t.wizard.presetStandardDesc,
-      badge: t.wizard.presetBadgeAdaptive,
+      badge: t.wizard.presetBadgeBalanced,
       detail: t.wizard.presetStandardDetail,
     },
     {
       id: 'vector_math' as const,
       name: t.wizard.presetVectorMath,
       desc: t.wizard.presetVectorMathDesc,
-      badge: t.wizard.presetBadgeVectorMath,
+      badge: t.wizard.presetBadgeMath,
       detail: t.wizard.presetVectorDetail,
-      // The only preset that pays for VLM transcription; flagged so the cost
-      // jump is visible before submission rather than after.
-      slow: true,
     },
     {
       id: 'preview' as const,
       name: t.wizard.presetPreview,
       desc: t.wizard.presetPreviewDesc,
-      badge: t.wizard.presetBadgeFormulaImage,
+      badge: t.wizard.presetBadgeProof,
       detail: t.wizard.presetPreviewDetail,
     },
     {
       id: 'fast' as const,
       name: t.wizard.presetFast,
       desc: t.wizard.presetFastDesc,
-      badge: t.wizard.presetBadgeShortChain,
+      badge: t.wizard.presetBadgeFast,
       detail: t.wizard.presetFastDetail,
     },
   ]
 
-  // 工作台页（双栏：表单 + 报告）限宽 1500px，比全站阅读页（max-w-5xl/6xl）
-  // 宽：宽屏上的多余空间应该喂给表单列与报告列，而不是留成两侧空白；字段的
-  // 行宽仍由列宽（约 840px）自然约束。
+  const mathDensityLabel = (density?: string | null) => {
+    switch (density?.toLowerCase()) {
+      case 'high':
+        return t.wizard.mathDensityHigh
+      case 'medium':
+        return t.wizard.mathDensityMedium
+      case 'low':
+        return t.wizard.mathDensityLow
+      default:
+        return density?.toUpperCase() ?? '—'
+    }
+  }
+
   return (
-    <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-7 space-y-5 sm:space-y-7 max-w-[1500px] mx-auto w-full pb-24 lg:pb-7">
+    <div
+      className={cn(
+        'mx-auto w-full max-w-[1500px] flex-1 space-y-6 overflow-y-auto px-4 py-6 sm:px-7 lg:pb-8',
+        filePath.trim() ? 'pb-24' : 'pb-6'
+      )}
+    >
       {/* View Title */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 border-b border-[var(--paper-border)] pb-4">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-[var(--ink-primary)]">
-            {t.wizard.title}
-          </h1>
-          <p className="text-xs text-[var(--ink-secondary)] mt-1">
-            {t.wizard.subtitle}
-          </p>
-        </div>
-        <div className="text-xs font-mono text-[var(--ink-muted)]">
-          {t.wizard.walLedger}: <span className="text-[#15803d] font-semibold">{t.common.online}</span>
-        </div>
+      <div className="border-b border-border/80 pb-5">
+        <h1 className="text-2xl font-semibold tracking-[-0.025em] text-foreground">
+          {t.wizard.title}
+        </h1>
+        <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          {t.wizard.subtitle}
+        </p>
       </div>
 
       {/* Main 2-Column Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12 lg:gap-7">
         {/* Left Column: Input, Preset, Budget */}
         <div className="lg:col-span-7 space-y-6">
-          {/* File Dropzone */}
-          <div>
-            <div className="type-step">{t.wizard.stepFile}</div>
+          {/* Step 1: File Dropzone */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="flex items-center justify-center size-5 rounded-full bg-primary text-primary-foreground text-xs font-bold">1</span>
+                <h2 className="text-sm font-semibold tracking-tight text-foreground">
+                  {t.wizard.stepFile.replace(/^[①②③123]\s*[·•]?\s*/, '')}
+                </h2>
+              </div>
+              <span className="text-xs text-muted-foreground">PDF · EPUB · DOCX · MD · TXT</span>
+            </div>
+
             <input
               type="file"
               ref={fileInputRef}
@@ -814,73 +900,122 @@ export function NewJobWizard() {
               aria-label={t.wizard.uploadAria}
               className="hidden"
             />
-            {/* A div with onClick is unreachable by keyboard, and the real
-                <input type="file"> above is `hidden` (hence unfocusable), so a
-                keyboard-only operator could not attach a document at all — the
-                wizard's very first required step. `role="button"` + tabIndex +
-                Enter/Space make the dropzone a control, without changing how
-                drag-and-drop behaves for a mouse. */}
-            <div
-              role="button"
-              tabIndex={0}
-              aria-label={t.wizard.uploadAria}
-              onDragOver={(e) => {
-                e.preventDefault()
-                setIsDragOver(true)
-              }}
-              onDragLeave={() => setIsDragOver(false)}
-              onDrop={handleFileDrop}
-              onClick={() => {
-                // Guarded like the drop path: re-opening the picker mid-upload
-                // races two staged files (name from the last pick, path from
-                // the last upload to finish).
-                if (!isUploading) fileInputRef.current?.click()
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
+
+            {/* If a file has been selected, show active file banner, else dropzone */}
+            {fileName || (filePath && filePath.trim()) ? (
+              <div className="rounded-xl border border-border bg-card p-4 transition-all shadow-xs">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="size-10 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
+                      <FileText className="size-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-foreground truncate">
+                        {fileName || filePath.split('/').pop()}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2">
+                        {fileSize && <span>{fileSize}</span>}
+                        {assessment?.document?.format_ext && (
+                          <Badge variant="secondary" className="text-xs uppercase font-mono px-1.5 py-0">
+                            {assessment.document.format_ext.replace('.', '')}
+                          </Badge>
+                        )}
+                        <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                          {isAssessing ? t.wizard.reassessing : t.common.ready}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isUploading}
+                    >
+                      {isUploading ? (
+                        <Loader2 className="size-3.5 animate-spin mr-1.5" />
+                      ) : (
+                        <UploadCloud className="size-3.5 mr-1.5" />
+                      )}
+                      <span>{t.wizard.orBrowse}</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
+                        setFilePath('')
+                        setFileName('')
+                        setFileSize('')
+                        setAssessment(null)
+                      }}
+                      className="size-8 text-muted-foreground hover:text-foreground"
+                      title="Clear file"
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div
+                role="button"
+                tabIndex={0}
+                aria-label={t.wizard.uploadAria}
+                onDragOver={(e) => {
                   e.preventDefault()
+                  setIsDragOver(true)
+                }}
+                onDragLeave={() => setIsDragOver(false)}
+                onDrop={handleFileDrop}
+                onClick={() => {
                   if (!isUploading) fileInputRef.current?.click()
-                }
-              }}
-              className={`rounded-lg border-2 border-dashed p-5 sm:p-7 transition-all cursor-pointer text-center ${
-                isDragOver
-                  ? 'border-[var(--ink-primary)] bg-[var(--paper-subsurface)]'
-                  : 'border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] bg-[var(--paper-surface)] hover:bg-[var(--paper-subsurface)]'
-              }`}
-            >
-              <div className="h-10 w-10 mx-auto rounded-full bg-[var(--paper-subsurface)] border border-[var(--paper-border)] flex items-center justify-center text-[var(--ink-secondary)] mb-2.5 shadow-2xs">
-                {isUploading ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <UploadCloud className="h-5 w-5" />
-                )}
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    if (!isUploading) fileInputRef.current?.click()
+                  }
+                }}
+                className={`relative flex flex-col items-center justify-center p-8 rounded-xl border-2 border-dashed transition-all cursor-pointer text-center group ${
+                  isDragOver
+                    ? 'border-primary bg-primary/[0.04]'
+                    : 'border-border/80 hover:border-primary/50 bg-card hover:bg-muted/20'
+                }`}
+              >
+                <div className="size-11 rounded-full bg-muted border border-border flex items-center justify-center text-muted-foreground mb-3 shadow-2xs group-hover:scale-105 group-hover:text-foreground transition-all">
+                  {isUploading ? (
+                    <Loader2 className="size-5 animate-spin text-primary" />
+                  ) : (
+                    <UploadCloud className="size-5" />
+                  )}
+                </div>
+                <div className="text-sm font-semibold text-foreground">
+                  {isUploading
+                    ? t.wizard.uploading
+                    : isDragOver
+                      ? t.wizard.dropzoneActive
+                      : t.wizard.dropzoneTitle}
+                </div>
+                <div className="mt-3">
+                  <Button variant="outline" size="sm" className="pointer-events-none shadow-2xs">
+                    {t.wizard.orBrowse}
+                  </Button>
+                </div>
               </div>
-              <div className="text-xs font-semibold text-[var(--ink-primary)]">
-                {isUploading
-                  ? t.wizard.uploading
-                  : isDragOver
-                    ? t.wizard.dropzoneActive
-                    : t.wizard.dropzoneTitle}
-              </div>
-              <div className="text-xs text-[var(--ink-secondary)] mt-1">
-                {t.wizard.dropzoneSubtitle}
-              </div>
-              <div className="mt-3">
-                <span className="inline-block py-2 px-3 rounded text-xs font-mono text-[var(--ink-primary)] underline decoration-[var(--paper-border-hover)] hover:text-black font-medium">
-                  {t.wizard.orBrowse}
-                </span>
-              </div>
-            </div>
+            )}
 
             {/* Manual Path Fallback */}
-            <div className="mt-2.5 flex gap-2">
-              <input
+            <div className="flex gap-2 items-center">
+              <Input
                 type="text"
                 value={filePath}
                 onChange={(e) => setFilePath(e.target.value)}
                 placeholder={t.wizard.manualPathPlaceholder}
                 aria-label={t.wizard.manualPathPlaceholder}
-                className="flex-1 min-w-0 h-9 sm:h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-3 text-xs text-[var(--ink-primary)] focus:border-[var(--ink-primary)] focus:outline-none font-mono placeholder:text-[var(--ink-muted)] shadow-2xs"
+                className="flex-1 min-w-0"
               />
               <Button
                 onClick={() => {
@@ -890,761 +1025,740 @@ export function NewJobWizard() {
                   void runAssess(filePath, { silent: false })
                 }}
                 disabled={!filePath.trim() || isAssessing}
-                variant="secondary"
+                variant="outline"
                 size="icon"
-                className="shrink-0 h-9 sm:h-8 w-9 sm:w-8"
+                className="shrink-0 size-9"
                 aria-label={t.wizard.assessBtn}
                 title={t.wizard.assessBtn}
               >
                 {isAssessing ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--ink-primary)]" />
+                  <Loader2 className="size-3.5 animate-spin text-primary" />
                 ) : (
-                  <RefreshCw className="h-3.5 w-3.5 text-[var(--ink-secondary)]" />
+                  <RefreshCw className="size-3.5 text-muted-foreground" />
                 )}
               </Button>
             </div>
 
             {assessError && (
-              <div className="mt-2.5 p-2.5 rounded-[5px] bg-[#b91c1c]/10 border border-[#b91c1c]/25 text-[#b91c1c] text-xs flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 shrink-0" />
-                <span>{assessError}</span>
+              <Alert variant="destructive">
+                <AlertTriangle className="size-4" />
+                <AlertDescription>{assessError}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+
+          {/* Step 2: Presets List */}
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="flex items-center justify-center size-5 rounded-full bg-primary text-primary-foreground text-xs font-bold">2</span>
+                <h2 className="text-sm font-semibold tracking-tight text-foreground">
+                  {t.wizard.stepQuality.replace(/^[①②③123]\s*[·•]?\s*/, '')}
+                </h2>
+              </div>
+            </div>
+
+            <RadioGroup
+              value={preset ?? undefined}
+              onValueChange={(value) => {
+                hasUserSelectedPresetRef.current = true
+                setPreset(value as typeof preset)
+              }}
+              className="overflow-hidden rounded-xl border border-border bg-card"
+            >
+              {presetOptions.map((p, index) => {
+                const isSelected = preset === p.id
+                const isRecommended =
+                  assessment?.route?.recommended_preset?.toLowerCase() === p.id
+                return (
+                  <label
+                    key={p.id}
+                    htmlFor={`preset-${p.id}`}
+                    className={cn(
+                      'relative flex h-24 cursor-pointer items-start gap-3 px-4 py-3.5 transition-colors',
+                      index < presetOptions.length - 1 && 'border-b border-border/70',
+                      isSelected
+                        ? 'bg-primary/[0.045]'
+                        : 'hover:bg-muted/35'
+                    )}
+                  >
+                    <RadioGroupItem
+                      id={`preset-${p.id}`}
+                      value={p.id}
+                      className="mt-0.5 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-foreground">{p.name}</span>
+                        <Badge variant="secondary" className="font-normal">
+                          {p.badge}
+                        </Badge>
+                        {isRecommended && (
+                          <Badge
+                            variant="outline"
+                            className="border-emerald-600/25 bg-emerald-500/10 font-normal text-emerald-700 dark:text-emerald-400"
+                          >
+                            {t.wizard.engineRecommended}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                        {p.desc}
+                      </p>
+                    </div>
+                    <InfoTip label={p.name}>{p.detail}</InfoTip>
+                  </label>
+                )
+              })}
+            </RadioGroup>
+          </div>
+
+          {/* Provider and languages */}
+          <Collapsible open={basicsOpen} onOpenChange={setBasicsOpen}>
+            <div className="rounded-xl border border-border bg-card px-4 shadow-xs">
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="group flex w-full items-center justify-between py-3.5 text-left"
+                >
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <Globe className="size-4 text-muted-foreground" />
+                    <span className="text-sm font-semibold text-foreground">{t.wizard.basicsTitle}</span>
+                    <Badge variant="outline" className="font-normal">
+                      {LANGUAGES.find((lang) => lang.code === sourceLang)?.label.split(' (')[0]}
+                      {' → '}
+                      {LANGUAGES.find((lang) => lang.code === targetLang)?.label.split(' (')[0]}
+                    </Badge>
+                  </div>
+                  <ChevronDown
+                    className={cn(
+                      'size-4 text-muted-foreground transition-transform',
+                      basicsOpen && 'rotate-180'
+                    )}
+                  />
+                </button>
+              </CollapsibleTrigger>
+
+              <CollapsibleContent className="space-y-4 border-t border-border py-4">
+                {declaredProviders.length > 0 ? (
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <FieldLabel htmlFor="wizard-provider">{t.wizard.provider}</FieldLabel>
+                      <InfoTip label={t.wizard.providerHelp}>{t.wizard.providerHelp}</InfoTip>
+                    </div>
+                    <ChoiceSelect
+                      id="wizard-provider"
+                      value={provider || '__default__'}
+                      onValueChange={(value) =>
+                        setProvider(value === '__default__' ? '' : value)
+                      }
+                      options={[
+                        {
+                          value: '__default__',
+                          label: runtime?.active.provider
+                            ? `${t.wizard.providerDefault} (${runtime.active.provider})`
+                            : t.wizard.providerDefault,
+                        },
+                        ...declaredProviders.map((p) => ({
+                          value: p.name,
+                          label: p.name + (p.draft_model ? ` — ${p.draft_model}` : ''),
+                        })),
+                      ]}
+                    />
+                    {selectedProviderDetail ? (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {selectedProviderDetail.base_url ?? '—'}
+                        {selectedProviderDetail.api_mode
+                          ? ` · ${selectedProviderDetail.api_mode}`
+                          : ''}
+                        {selectedProviderDetail.draft_model
+                          ? ` · ${selectedProviderDetail.draft_model}`
+                          : ''}
+                      </p>
+                    ) : null}
+                    {runtime !== null && !runtime.active.can_translate ? (
+                      <p className="mt-1.5 text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+                        {t.wizard.providerUnavailable} {t.wizard.providerUnavailableHelp}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {declaredProviders.length > 0 ? (
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <FieldLabel htmlFor="wizard-repair-provider">
+                        {t.wizard.repairProvider}
+                      </FieldLabel>
+                      <InfoTip label={t.wizard.repairProviderHelp}>
+                        {t.wizard.repairProviderHelp}
+                      </InfoTip>
+                    </div>
+                    <ChoiceSelect
+                      id="wizard-repair-provider"
+                      value={repairProvider || '__follow__'}
+                      onValueChange={(value) =>
+                        setRepairProvider(value === '__follow__' ? '' : value)
+                      }
+                      options={[
+                        { value: '__follow__', label: t.wizard.repairProviderDefault },
+                        ...declaredProviders.map((p) => ({
+                          value: p.name,
+                          label: p.name + (p.draft_model ? ` — ${p.draft_model}` : ''),
+                        })),
+                      ]}
+                    />
+                  </div>
+                ) : null}
+
+                {/* Language Pair */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel htmlFor="wizard-source-lang">
+                      {t.wizard.sourceLang}
+                    </FieldLabel>
+                    <ChoiceSelect
+                      id="wizard-source-lang"
+                      value={sourceLang}
+                      onValueChange={setSourceLang}
+                      options={LANGUAGES.map((lang) => ({
+                        value: lang.code,
+                        label: lang.label,
+                      }))}
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel htmlFor="wizard-target-lang">
+                      {t.wizard.targetLang}
+                    </FieldLabel>
+                    <ChoiceSelect
+                      id="wizard-target-lang"
+                      value={targetLang}
+                      onValueChange={setTargetLang}
+                      options={LANGUAGES.map((lang) => ({
+                        value: lang.code,
+                        label: lang.label,
+                      }))}
+                    />
+                  </div>
+                </div>
+              </CollapsibleContent>
+            </div>
+          </Collapsible>
+
+          {/* Step 3: Budget Setting */}
+          <div className="rounded-xl border border-border bg-card p-4 space-y-3.5 shadow-xs">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="flex items-center justify-center size-5 rounded-full bg-primary text-primary-foreground text-xs font-bold">3</span>
+                <h2 className="text-sm font-semibold tracking-tight text-foreground">
+                  {t.wizard.stepBudget.replace(/^[①②③123]\s*[·•]?\s*/, '')}
+                </h2>
+              </div>
+
+              <div className="flex items-center gap-2.5 shrink-0">
+                <Label htmlFor="unlimited-toggle" className="text-xs text-muted-foreground font-normal cursor-pointer select-none">
+                  {t.wizard.budgetUnlimitedToggle}
+                </Label>
+                <Switch
+                  id="unlimited-toggle"
+                  checked={budgetUsd === null}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      setBudgetUsd(null)
+                      setBudgetInput('')
+                    } else {
+                      const seeded = 10
+                      setBudgetInput(String(seeded))
+                      setBudgetUsd(seeded)
+                    }
+                  }}
+                />
+              </div>
+            </div>
+
+            {budgetUsd === null ? (
+              quoteCost !== null && quoteCost > 0 && (
+                <div className="flex justify-end pt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const v = Math.ceil(quoteCost * 1.5 * 100) / 100
+                      setBudgetInput(v.toFixed(2))
+                      setBudgetUsd(v)
+                    }}
+                    className="text-xs font-mono h-7"
+                  >
+                    {t.wizard.budgetSuggest.replace(
+                      '{usd}',
+                      (Math.ceil(quoteCost * 1.5 * 100) / 100).toFixed(2)
+                    )}
+                  </Button>
+                </div>
+              )
+            ) : (
+              <div className="space-y-2 pt-1">
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-mono text-muted-foreground">
+                    $
+                  </span>
+                  <Input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={budgetInput}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      setBudgetInput(raw)
+                      const parsed = parseFloat(raw)
+                      setBudgetUsd(Number.isFinite(parsed) && parsed > 0 ? parsed : null)
+                    }}
+                    placeholder={t.wizard.budgetPlaceholder}
+                    className={`pl-7 ${budgetInvalid ? 'border-destructive focus-visible:ring-destructive' : ''}`}
+                  />
+                </div>
+                {budgetInvalid ? (
+                  <p className="text-xs text-destructive">{t.wizard.budgetInvalid}</p>
+                ) : assessment?.cost.total_cost_usd != null && assessment.cost.total_cost_usd > budgetUsd ? (
+                  <p className="text-xs text-amber-600 dark:text-amber-500">
+                    {t.wizard.budgetExceedsQuote} (${assessment.cost.total_cost_usd.toFixed(2)})
+                  </p>
+                ) : null}
               </div>
             )}
           </div>
 
-            {/* Presets List */}
-            <div>
-              <div className="type-step mb-2 flex items-center justify-between">
-                <span>{t.wizard.stepQuality}</span>
-                <span className="text-[10px] font-mono text-[var(--ink-muted)] font-normal uppercase tracking-wider">
-                  {t.wizard.pipelineProfileTag}
-                </span>
-              </div>
-              <div className="space-y-2.5">
-                {presetOptions.map((p) => {
-                  const isSelected = preset === p.id
-                  const isRecommended =
-                    assessment?.route?.recommended_preset?.toLowerCase() === p.id
-                  return (
-                    <div
-                      key={p.id}
-                      onClick={() => {
-                        hasUserSelectedPresetRef.current = true
-                        setPreset(p.id)
-                      }}
-                      className={`card-tactile relative p-3.5 rounded-xl border cursor-pointer transition-all ${
-                        isSelected
-                          ? 'border-[var(--ink-primary)] bg-[var(--paper-surface)] shadow-[var(--shadow-card)] ring-1 ring-black/10 dark:ring-white/15'
-                          : 'border-[var(--paper-border)] bg-[var(--paper-subsurface)] hover:bg-[var(--paper-surface)] hover:border-[var(--paper-border-hover)]'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2 flex-wrap min-w-0">
-                          {/* Radio Dot indicator */}
-                          <div
-                            className={`h-3.5 w-3.5 rounded-full border flex items-center justify-center shrink-0 transition-all ${
-                              isSelected
-                                ? 'border-[var(--ink-primary)] bg-[var(--ink-primary)]'
-                                : 'border-[var(--paper-border-hover)] bg-[var(--paper-surface)]'
-                            }`}
-                          >
-                            {isSelected && <div className="h-1.5 w-1.5 rounded-full bg-[var(--paper-bg)]" />}
-                          </div>
-
-                          <span
-                            className={`type-value ${
-                              isSelected ? 'font-bold text-[var(--ink-primary)]' : 'font-medium text-[var(--ink-primary)]'
-                            }`}
-                          >
-                            {p.name}
-                          </span>
-
-                          {/* Concise Technical Pill Badge */}
-                          <span className="inline-flex items-center font-mono text-[10px] font-semibold text-[var(--ink-secondary)] bg-[var(--paper-surface)] px-1.5 py-0.5 rounded border border-[var(--paper-border)] uppercase tracking-tight">
-                            {p.badge}
-                          </span>
-
-                          <InfoTip label={p.name}>{p.detail}</InfoTip>
-                        </div>
-
-                        {/* Status badges */}
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {isRecommended && (
-                            <span className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold text-[#15803d] bg-[#15803d]/10 px-2 py-0.5 rounded-full border border-[#15803d]/20">
-                              <span className="h-1.5 w-1.5 rounded-full bg-[#15803d]" />
-                              {t.wizard.engineRecommended}
-                            </span>
-                          )}
-                          {p.slow && (
-                            <span className="inline-flex items-center font-mono text-[10px] font-semibold text-[#b45309] bg-[#b45309]/10 px-2 py-0.5 rounded-full border border-[#b45309]/20">
-                              {t.wizard.presetSlowBadge}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="type-help mt-1.5 pl-5 leading-relaxed text-[var(--ink-secondary)]">
-                        {p.desc}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* 提供商与语言：默认值已经足够好（默认提供商、en→zh 覆盖大多数
-                场景），折叠掉；摘要徽章让收起态仍有信息量。语言对影响报价的
-                输出膨胀率，所以它包含在自动体检的指纹里——展开改动会触发重报。 */}
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={() => setBasicsOpen(!basicsOpen)}
-                className="w-full flex items-center justify-between py-1 text-left type-value font-semibold text-[var(--ink-primary)] hover:text-black transition-colors focus:outline-none group cursor-pointer"
-              >
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Globe className="h-3.5 w-3.5 text-[var(--ink-secondary)] group-hover:text-[var(--ink-primary)]" />
-                  <span>{t.wizard.basicsTitle}</span>
-                  <Badge variant="outline" className="text-xs font-mono font-normal py-0 px-1.5 normal-case tracking-normal">
-                    {(provider || t.wizard.providerDefault) + ` · ` + sourceLang + `→` + targetLang}
-                  </Badge>
-                </div>
-                {basicsOpen ? (
-                  <ChevronDown className="h-4 w-4 text-[var(--ink-muted)] group-hover:text-[var(--ink-primary)] transition-transform" />
-                ) : (
-                  <ChevronRight className="h-4 w-4 text-[var(--ink-muted)] group-hover:text-[var(--ink-primary)] transition-transform" />
-                )}
-              </button>
-              {basicsOpen && (
-                <div className="space-y-4 pt-3 mt-2 border-t border-dashed border-[var(--paper-border)]">
-            {/* Provider: which declared block does the work. A job may name one;
-                the server validates it against the operator's ubt.toml. Hidden
-                when nothing is declared, because then there is nothing to choose
-                and the first-run banner already says what to do. */}
-            {declaredProviders.length > 0 ? (
-              <div>
-                <div className="flex items-center gap-1 mb-1">
-                  <label htmlFor="wizard-provider" className="type-label">{t.wizard.provider}</label>
-                  <InfoTip label={t.wizard.providerHelp}>{t.wizard.providerHelp}</InfoTip>
-                </div>
-                <select
-                  id="wizard-provider"
-                  value={provider}
-                  onChange={(e) => setProvider(e.target.value)}
-                  className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
+          {/* Optional controls, grouped so the default path stays quiet. */}
+          <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
+            <div className="rounded-xl border border-border bg-card px-4 shadow-xs">
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="group flex w-full items-center justify-between py-3.5 text-left"
                 >
-                  <option value="">
-                    {runtime?.active.provider
-                      ? `${t.wizard.providerDefault} (${runtime.active.provider})`
-                      : t.wizard.providerDefault}
-                  </option>
-                  {declaredProviders.map((p) => (
-                    <option key={p.name} value={p.name}>
-                      {p.name}
-                      {p.draft_model ? ` — ${p.draft_model}` : ''}
-                    </option>
-                  ))}
-                </select>
-                {selectedProviderDetail ? (
-                  <p className="type-help text-[var(--ink-muted)] mt-1">
-                    {selectedProviderDetail.base_url ?? '—'}
-                    {selectedProviderDetail.api_mode
-                      ? ` · ${selectedProviderDetail.api_mode}`
-                      : ''}
-                    {selectedProviderDetail.draft_model
-                      ? ` · ${selectedProviderDetail.draft_model}`
-                      : ''}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-
-            {/* Language Pair */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="wizard-source-lang" className="type-label block mb-1">
-                  {t.wizard.sourceLang}
-                </label>
-                <select
-                  id="wizard-source-lang"
-                  value={sourceLang}
-                  onChange={(e) => setSourceLang(e.target.value)}
-                  className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
-                >
-                  {LANGUAGES.map((lang) => (
-                    <option key={lang.code} value={lang.code}>
-                      {lang.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="wizard-target-lang" className="type-label block mb-1">
-                  {t.wizard.targetLang}
-                </label>
-                <select
-                  id="wizard-target-lang"
-                  value={targetLang}
-                  onChange={(e) => setTargetLang(e.target.value)}
-                  className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
-                >
-                  {LANGUAGES.map((lang) => (
-                    <option key={lang.code} value={lang.code}>
-                      {lang.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-                </div>
-              )}
-            </div>
-
-            {/* Budget Cap.
-                A slider could not express this: its range was 0-50 USD, so a
-                cloud run on a large book was uncappable, and 0 meant "no cap"
-                rather than "zero" — the exact opposite of what a user sliding
-                to the left intends. An explicit switch plus a numeric field
-                removes both traps, and keeps the default (no cap) visible
-                instead of hidden at one end of a track. */}
-            <div className="pt-2">
-              <div className="type-step">{t.wizard.stepBudget}</div>
-              <div className="flex items-center justify-between text-xs mb-1.5">
-                <span className="type-label">{t.wizard.budgetCeiling}</span>
-                <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={budgetUsd === null}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        // "No cap": clear both the numeric value and the text.
-                        setBudgetUsd(null)
-                        setBudgetInput('')
-                        return
-                      }
-                      // Turning the cap on seeds a value so the field is never
-                      // enabled-but-empty, which would submit budget_usd=0 and
-                      // be rejected by the API's gt=0 bound.
-                      const seeded = 10
-                      setBudgetInput(String(seeded))
-                      setBudgetUsd(seeded)
-                    }}
-                    className="h-3.5 w-3.5 rounded border-[var(--paper-border)] accent-[var(--ink-primary)] cursor-pointer"
-                  />
-                  <span className="text-xs text-[var(--ink-secondary)]">
-                    {t.wizard.budgetUnlimitedToggle}
-                  </span>
-                </label>
-              </div>
-
-              {budgetUsd === null ? (
-                <div className="flex items-center justify-between gap-2">
-                  <p className="type-help">{t.wizard.budgetUnlimited}</p>
-                  {/* 报价已知且 > 0 时给一键安全上限：不强迫，但把
-                      「随手设个上限」的成本降到一次点击。 */}
-                  {quoteCost !== null && quoteCost > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const v = Math.ceil(quoteCost * 1.5 * 100) / 100
-                        setBudgetInput(v.toFixed(2))
-                        setBudgetUsd(v)
-                      }}
-                      className="shrink-0 text-[11px] font-mono text-[var(--ink-secondary)] underline decoration-[var(--paper-border-hover)] hover:text-[var(--ink-primary)]"
-                    >
-                      {t.wizard.budgetSuggest.replace(
-                        '{usd}',
-                        (Math.ceil(quoteCost * 1.5 * 100) / 100).toFixed(2)
-                      )}
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div>
-                  <div className="relative">
-                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-mono text-[var(--ink-muted)]">
-                      $
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <Sliders className="size-4 text-muted-foreground" />
+                    <span className="text-sm font-semibold text-foreground">
+                      {t.wizard.advancedOptionsTitle}
                     </span>
-                    <input
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      value={budgetInput}
-                      onChange={(e) => {
-                        const raw = e.target.value
-                        setBudgetInput(raw)
-                        const parsed = parseFloat(raw)
-                        // The API rejects budget_usd <= 0 (Field(gt=0)), so an
-                        // empty or non-positive entry must not reach it.
-                        setBudgetUsd(Number.isFinite(parsed) && parsed > 0 ? parsed : null)
-                      }}
-                      placeholder={t.wizard.budgetPlaceholder}
-                      className={`w-full h-8 rounded-[5px] border bg-[var(--paper-surface)] pl-6 pr-2.5 text-xs font-mono text-[var(--ink-primary)] focus:outline-none shadow-2xs ${
-                        budgetInvalid
-                          ? 'border-[#b91c1c] focus:border-[#b91c1c]'
-                          : 'border-[var(--paper-border)] focus:border-[var(--ink-primary)]'
-                      }`}
-                    />
-                  </div>
-                  {budgetInvalid ? (
-                    <p className="type-help mt-1 text-[#b91c1c]">{t.wizard.budgetInvalid}</p>
-                  ) : assessment?.cost.total_cost_usd != null &&
-                    assessment.cost.total_cost_usd > budgetUsd ? (
-                    <p className="type-help mt-1 text-[#b45309]">
-                      {t.wizard.budgetExceedsQuote} (${assessment.cost.total_cost_usd.toFixed(2)})
-                    </p>
-                  ) : (
-                    <p className="type-help mt-1">{t.wizard.budgetHelp}</p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Advanced Compiler & Layout Options Drawer */}
-            <div className="pt-3 border-t border-[var(--paper-border)]">
-              <button
-                type="button"
-                onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
-                className="w-full flex items-center justify-between py-1 text-left type-value font-semibold text-[var(--ink-primary)] hover:text-black transition-colors focus:outline-none group cursor-pointer"
-              >
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Sliders className="h-3.5 w-3.5 text-[var(--ink-secondary)] group-hover:text-[var(--ink-primary)]" />
-                  <span>{t.wizard.advancedOptionsTitle}</span>
-                  <Badge variant="outline" className="text-xs font-mono font-normal uppercase tracking-wider py-0 px-1.5">
-                    {t.wizard.advancedOptionsTag}
-                  </Badge>
-                  {(advancedNumericInvalid || glossaryError) && (
-                    <span className="inline-flex items-center gap-1 font-mono text-[10px] font-medium text-[#b45309] bg-[#b45309]/10 px-1.5 py-0.5 rounded border border-[#b45309]/20">
-                      <AlertTriangle className="h-3 w-3" />
-                      {t.wizard.advancedErrorTag}
+                    <span className="text-xs text-muted-foreground">
+                      {t.wizard.advancedOptionsSubtitle}
                     </span>
-                  )}
-                </div>
-                {isAdvancedOpen ? (
-                  <ChevronDown className="h-4 w-4 text-[var(--ink-muted)] group-hover:text-[var(--ink-primary)] transition-transform" />
-                ) : (
-                  <ChevronRight className="h-4 w-4 text-[var(--ink-muted)] group-hover:text-[var(--ink-primary)] transition-transform" />
-                )}
-              </button>
-              <p className="type-help mt-0.5 mb-2">{t.wizard.advancedOptionsSubtitle}</p>
-
-              {isAdvancedOpen && (
-                <div className="space-y-4 pt-3 pb-1 border-t border-dashed border-[var(--paper-border)] mt-2">
-                  {/* Four groups, one line per control. The label names the
-                      thing, the InfoTip carries the depth, and visible prose is
-                      reserved for consequences the operator must act on (a
-                      refused upload, a closed egress gate). Defaults are sound;
-                      nothing here is required. */}
-                  <div className="type-group -mb-1">{t.wizard.groupDelivery}</div>
-
-                  {/* Delivery shape pairs with its companion artifact; layout
-                      and page furniture pair as the second row. */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
-                    <div>
-                      <div className="flex items-center gap-1 mb-1">
-                        <label htmlFor="wizard-dual-mode" className="type-label">{t.wizard.dualMode}</label>
-                        <InfoTip label={t.wizard.dualMode}>{t.wizard.dualModeHelp}</InfoTip>
-                      </div>
-                      <select
-                        id="wizard-dual-mode"
-                        value={dualMode}
-                        onChange={(e) => {
-                          hasUserSelectedDualModeRef.current = true
-                          setDualMode(e.target.value as any)
-                        }}
-                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
-                      >
-                        <option value="auto">{t.wizard.dualModeAuto}</option>
-                        <option value="dual">{t.wizard.dualModeDual}</option>
-                        <option value="mono">{t.wizard.dualModeMono}</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center gap-1 mb-1">
-                        <label htmlFor="wizard-emit-both" className="type-label">{t.wizard.emitBoth}</label>
-                        <InfoTip label={t.wizard.emitBoth}>{emitBothHelpText}</InfoTip>
-                      </div>
-                      <select
-                        id="wizard-emit-both"
-                        value={emitBoth}
-                        onChange={(e) => setEmitBoth(e.target.value as any)}
-                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
-                      >
-                        <option value="auto">{t.wizard.emitBothAuto}</option>
-                        <option value="on">{t.wizard.emitBothOn}</option>
-                        <option value="off">{t.wizard.emitBothOff}</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
-                    <div>
-                      <div className="flex items-center gap-1 mb-1">
-                        <label htmlFor="wizard-layout-columns" className="type-label">{t.wizard.layoutColumns}</label>
-                        <InfoTip label={t.wizard.layoutColumns}>
-                          {t.wizard.layoutColumnsHelp}
-                        </InfoTip>
-                      </div>
-                      <select
-                        id="wizard-layout-columns"
-                        value={layoutColumns}
-                        onChange={(e) => setLayoutColumns(e.target.value as any)}
-                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
-                      >
-                        <option value="auto">{t.wizard.layoutColumnsAuto}</option>
-                        <option value="1">{t.wizard.layoutColumnsOne}</option>
-                        <option value="2">{t.wizard.layoutColumnsTwo}</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center gap-1 mb-1">
-                        <label htmlFor="wizard-translate-chrome" className="type-label">{t.wizard.translateChrome}</label>
-                        <InfoTip label={t.wizard.translateChrome}>
-                          {t.wizard.translateChromeHelp}
-                        </InfoTip>
-                      </div>
-                      <select
-                        id="wizard-translate-chrome"
-                        value={translateChrome}
-                        onChange={(e) => setTranslateChrome(e.target.value as any)}
-                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
-                      >
-                        <option value="auto">{t.wizard.translateChromeAuto}</option>
-                        <option value="on">{t.wizard.translateChromeOn}</option>
-                        <option value="off">{t.wizard.translateChromeOff}</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="type-group -mb-1 pt-1">{t.wizard.groupContent}</div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
-                    <div>
-                      <div className="flex items-center gap-1 mb-1">
-                        <label htmlFor="wizard-domain-profile" className="type-label">{t.wizard.domainProfile}</label>
-                        <InfoTip label={t.wizard.domainProfile}>{t.wizard.domainProfileHelp}</InfoTip>
-                      </div>
-                      <select
-                        id="wizard-domain-profile"
-                        value={domainProfile}
-                        onChange={(e) => {
-                          hasUserSelectedDomainRef.current = true
-                          setDomainProfile(e.target.value)
-                        }}
-                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
-                      >
-                        <option value="auto">{t.wizard.domainAuto}</option>
-                        <option value="general">{t.wizard.domainGeneral}</option>
-                        <option value="textbook">{t.wizard.domainTextbook}</option>
-                        <option value="paper">{t.wizard.domainPaper}</option>
-                        <option value="fiction">{t.wizard.domainFiction}</option>
-                        <option value="humanities">{t.wizard.domainHumanities}</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center gap-1 mb-1">
-                        <label htmlFor="wizard-domain-hint" className="type-label">{t.wizard.domainHint}</label>
-                        <InfoTip label={t.wizard.domainHint}>{t.wizard.domainHintHelp}</InfoTip>
-                      </div>
-                      <input
-                        id="wizard-domain-hint"
-                        type="text"
-                        value={domainHint}
-                        onChange={(e) => setDomainHint(e.target.value)}
-                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
-                    <div>
-                      <div className="flex items-center gap-1 mb-1">
-                        <label htmlFor="wizard-ocr-mode" className="type-label">{t.wizard.ocrMode}</label>
-                        <InfoTip label={t.wizard.ocrMode}>{t.wizard.ocrModeHelp}</InfoTip>
-                      </div>
-                      <select
-                        id="wizard-ocr-mode"
-                        value={ocrMode}
-                        onChange={(e) => setOcrMode(e.target.value as any)}
-                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs"
-                      >
-                        <option value="auto">{t.wizard.ocrModeAuto}</option>
-                        <option value="rapidocr">{t.wizard.ocrModeRapidocr}</option>
-                        <option value="sidecar">{t.wizard.ocrModeSidecar}</option>
-                        <option value="cloud">{t.wizard.ocrModeCloud}</option>
-                        <option value="vlm">{t.wizard.ocrModeVlm}</option>
-                        <option value="off">{t.wizard.ocrModeOff}</option>
-                      </select>
-                      {/* Dynamic, not static: only shown when the choice has a
-                          consequence the operator must know before submitting. */}
-                      {ocrNeedsEgress && (
-                        <p className="type-help mt-1 text-[#b45309]">
-                          {t.wizard.ocrModeEgressWarning}
-                        </p>
-                      )}
-                      {ocrNeedsEgress && pageEgressClosed && (
-                        <button
-                          type="button"
-                          onClick={openEgressConfirm}
-                          className="type-help mt-1 underline underline-offset-2 text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] cursor-pointer"
-                        >
-                          {t.wizard.egressEnableBtn}
-                        </button>
-                      )}
-                    </div>
-
-                    {/* A staged upload, not a typed path: browsers do not
-                        expose filesystem paths, and a server-side location was
-                        never something the operator could know. The standing
-                        glossary in /assets always applies; this adds one file
-                        for this book. */}
-                    <div>
-                      <div className="flex items-center gap-1 mb-1">
-                        <label className="type-label">{t.wizard.glossaryPath}</label>
-                        <InfoTip label={t.wizard.glossaryPath}>{t.wizard.glossaryPathHelp}</InfoTip>
-                      </div>
-                      <input
-                        ref={glossaryFileRef}
-                        type="file"
-                        accept=".csv,.tsv,.json"
-                        className="hidden"
-                        aria-label={t.wizard.glossaryPath}
-                        onChange={handleGlossaryInputChange}
-                      />
-                      {glossaryFile ? (
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className="type-value inline-flex items-center gap-1.5 h-8 min-w-0 px-2.5 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] text-xs"
-                            title={glossaryFile.name}
-                          >
-                            <FileText className="h-3.5 w-3.5 text-[var(--ink-muted)] shrink-0" />
-                            <span className="truncate">{glossaryFile.name}</span>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setGlossaryFile(null)}
-                            aria-label={t.wizard.glossaryRemove}
-                            title={t.wizard.glossaryRemove}
-                            className="h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-muted)] hover:text-[var(--ink-primary)] hover:border-[var(--ink-secondary)] transition-colors cursor-pointer"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={glossaryUploading}
-                          onClick={() => glossaryFileRef.current?.click()}
-                          className="type-value inline-flex items-center gap-1.5 h-8 px-2.5 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] hover:border-[var(--ink-secondary)] transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
-                        >
-                          {glossaryUploading ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <UploadCloud className="h-3.5 w-3.5" />
-                          )}
-                          {t.wizard.glossaryUploadBtn}
-                        </button>
-                      )}
-                      {glossaryError && (
-                        <p className="type-help mt-1 text-[#b91c1c]">{glossaryError}</p>
-                      )}
-                      <Link
-                        to="/assets"
-                        className="type-help mt-1.5 inline-block text-[var(--ink-secondary)] underline underline-offset-2 hover:text-[var(--ink-primary)]"
-                      >
-                        {t.wizard.glossaryManageLink}
-                      </Link>
-                    </div>
-                  </div>
-
-                  <div className="type-group -mb-1 pt-1">{t.wizard.groupScope}</div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-1">
-                          <label htmlFor="wizard-page-range" className="type-label">{t.wizard.pageFilter}</label>
-                          <InfoTip label={t.wizard.pageFilter}>
-                            {t.wizard.pageFilterHelp}
-                          </InfoTip>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setPageRange('1-5')}
-                          className="type-help underline hover:text-[var(--ink-primary)] cursor-pointer"
-                        >
-                          {t.wizard.sliceSampleQuickBtn}
-                        </button>
-                      </div>
-                      <input
-                        id="wizard-page-range"
-                        type="text"
-                        value={pageRange}
-                        onChange={(e) => setPageRange(e.target.value)}
-                        placeholder={t.wizard.pageFilterPlaceholder}
-                        aria-label={t.wizard.pageFilter}
-                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
-                      />
-                    </div>
-
-                    <div>
-                      <div className="flex items-center gap-1 mb-1">
-                        <label className="type-label">{t.wizard.chapterWindow}</label>
-                        <InfoTip label={t.wizard.chapterWindow}>
-                          {t.wizard.chapterWindowHelp}
-                        </InfoTip>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2.5">
-                        <input
-                          type="number"
-                          min={1}
-                          value={chapterStart}
-                          onChange={(e) => setChapterStart(e.target.value)}
-                          placeholder={t.wizard.chapterStart}
-                          aria-label={t.wizard.chapterStart}
-                          className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
-                        />
-                        <input
-                          type="number"
-                          min={1}
-                          value={chapterCount}
-                          onChange={(e) => setChapterCount(e.target.value)}
-                          placeholder={t.wizard.chapterCount}
-                          aria-label={t.wizard.chapterCount}
-                          className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
-                        />
-                      </div>
-                      {(chapterStartInvalid || chapterCountInvalid) && (
-                        <p className="type-help mt-1 text-[#b91c1c]">{t.wizard.fieldMinOne}</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Rehearsal: one checkbox row; the explanation lives in the
-                      InfoTip and the honest warning only appears when it runs. */}
-                  <div className="pt-1">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        id="wizard-dry-run"
-                        checked={dryRun}
-                        onChange={(e) => setDryRun(e.target.checked)}
-                        className="h-3.5 w-3.5 rounded border-[var(--paper-border)] accent-[var(--ink-primary)] cursor-pointer"
-                      />
-                      <label htmlFor="wizard-dry-run" className="type-label cursor-pointer">
-                        {t.wizard.rehearsalLabel}
-                      </label>
-                      <InfoTip label={t.wizard.rehearsalLabel}>{t.wizard.rehearsalHelp}</InfoTip>
-                    </div>
-                    {dryRun && (
-                      <div className="mt-2 rounded-[5px] border border-[#b45309]/30 bg-[#b45309]/5 p-2 type-help text-[#b45309]">
-                        {t.wizard.rehearsalActiveWarning}
-                      </div>
+                    {(advancedNumericInvalid || glossaryError) && (
+                      <Badge variant="destructive" className="gap-1">
+                        <AlertTriangle className="size-3" />
+                        {t.wizard.advancedErrorTag}
+                      </Badge>
                     )}
                   </div>
+                  <ChevronDown
+                    className={cn(
+                      'size-4 text-muted-foreground transition-transform',
+                      isAdvancedOpen && 'rotate-180'
+                    )}
+                  />
+                </button>
+              </CollapsibleTrigger>
 
-                  <div className="type-group -mb-1 pt-1">{t.wizard.groupExec}</div>
+              <CollapsibleContent className="border-t border-border py-4">
+                <Tabs defaultValue="delivery">
+                  <TabsList className="grid h-auto w-full grid-cols-2 gap-1 p-1 sm:grid-cols-4">
+                    <TabsTrigger value="delivery">{t.wizard.groupDelivery}</TabsTrigger>
+                    <TabsTrigger value="content">{t.wizard.groupContent}</TabsTrigger>
+                    <TabsTrigger value="scope">{t.wizard.groupScope}</TabsTrigger>
+                    <TabsTrigger value="run">{t.wizard.groupExec}</TabsTrigger>
+                  </TabsList>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
-                    <div>
-                      <div className="flex items-center gap-1 mb-1">
-                        <label className="type-label">{t.wizard.concurrency}</label>
-                        <InfoTip label={t.wizard.concurrency}>
-                          {t.wizard.concurrencyHelp}
-                        </InfoTip>
+                  <TabsContent value="delivery" className="space-y-4 pt-2">
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {t.wizard.advancedDeliveryHelp}
+                    </p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <FieldLabel htmlFor="wizard-dual-mode">{t.wizard.dualMode}</FieldLabel>
+                          <InfoTip label={t.wizard.dualMode}>{t.wizard.dualModeHelp}</InfoTip>
+                        </div>
+                        <ChoiceSelect
+                          id="wizard-dual-mode"
+                          value={dualMode}
+                          onValueChange={(value) => {
+                            hasUserSelectedDualModeRef.current = true
+                            setDualMode(value as typeof dualMode)
+                          }}
+                          options={[
+                            { value: 'auto', label: t.wizard.dualModeAuto },
+                            { value: 'dual', label: t.wizard.dualModeDual },
+                            { value: 'mono', label: t.wizard.dualModeMono },
+                          ]}
+                        />
                       </div>
-                      <input
-                        type="number"
-                        min={1}
-                        value={concurrency}
-                        onChange={(e) => setConcurrency(e.target.value)}
-                        placeholder={t.wizard.concurrencyAuto}
-                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 font-mono focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs placeholder:text-[var(--ink-muted)]"
-                      />
-                      {concurrencyInvalid && (
-                        <p className="type-help mt-1 text-[#b91c1c]">{t.wizard.fieldMinOne}</p>
-                      )}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <FieldLabel htmlFor="wizard-emit-both">{t.wizard.emitBoth}</FieldLabel>
+                          <InfoTip label={t.wizard.emitBoth}>{emitBothHelpText}</InfoTip>
+                        </div>
+                        <ChoiceSelect
+                          id="wizard-emit-both"
+                          value={emitBoth}
+                          onValueChange={(value) => setEmitBoth(value as typeof emitBoth)}
+                          options={[
+                            { value: 'auto', label: t.wizard.emitBothAuto },
+                            { value: 'on', label: t.wizard.emitBothOn },
+                            { value: 'off', label: t.wizard.emitBothOff },
+                          ]}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <FieldLabel htmlFor="wizard-layout-columns">{t.wizard.layoutColumns}</FieldLabel>
+                          <InfoTip label={t.wizard.layoutColumns}>{t.wizard.layoutColumnsHelp}</InfoTip>
+                        </div>
+                        <ChoiceSelect
+                          id="wizard-layout-columns"
+                          value={layoutColumns}
+                          onValueChange={(value) =>
+                            setLayoutColumns(value as typeof layoutColumns)
+                          }
+                          options={[
+                            { value: 'auto', label: t.wizard.layoutColumnsAuto },
+                            { value: '1', label: t.wizard.layoutColumnsOne },
+                            { value: '2', label: t.wizard.layoutColumnsTwo },
+                          ]}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <FieldLabel htmlFor="wizard-translate-chrome">{t.wizard.translateChrome}</FieldLabel>
+                          <InfoTip label={t.wizard.translateChrome}>{t.wizard.translateChromeHelp}</InfoTip>
+                        </div>
+                        <ChoiceSelect
+                          id="wizard-translate-chrome"
+                          value={translateChrome}
+                          onValueChange={(value) =>
+                            setTranslateChrome(value as typeof translateChrome)
+                          }
+                          options={[
+                            { value: 'auto', label: t.wizard.translateChromeAuto },
+                            { value: 'on', label: t.wizard.translateChromeOn },
+                            { value: 'off', label: t.wizard.translateChromeOff },
+                          ]}
+                        />
+                      </div>
                     </div>
+                  </TabsContent>
 
-                    <div>
-                      <div className="flex items-center gap-1 mb-1">
-                        <label htmlFor="wizard-visual-judge" className="type-label">{t.wizard.visualJudge}</label>
-                        <InfoTip label={t.wizard.visualJudge}>
-                          {t.wizard.visualJudgeHelp}
-                        </InfoTip>
+                  <TabsContent value="content" className="space-y-4 pt-2">
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {t.wizard.advancedContentHelp}
+                    </p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <FieldLabel htmlFor="wizard-domain-profile">{t.wizard.domainProfile}</FieldLabel>
+                          <InfoTip label={t.wizard.domainProfile}>{t.wizard.domainProfileHelp}</InfoTip>
+                        </div>
+                        <ChoiceSelect
+                          id="wizard-domain-profile"
+                          value={domainProfile}
+                          onValueChange={(value) => {
+                            hasUserSelectedDomainRef.current = true
+                            setDomainProfile(value)
+                          }}
+                          options={[
+                            { value: 'auto', label: t.wizard.domainAuto },
+                            { value: 'general', label: t.wizard.domainGeneral },
+                            { value: 'textbook', label: t.wizard.domainTextbook },
+                            { value: 'paper', label: t.wizard.domainPaper },
+                            { value: 'fiction', label: t.wizard.domainFiction },
+                            { value: 'humanities', label: t.wizard.domainHumanities },
+                          ]}
+                        />
                       </div>
-                      <select
-                        id="wizard-visual-judge"
-                        value={visualJudge}
-                        onChange={(e) => setVisualJudge(e.target.value as any)}
-                        disabled={pageEgressClosed}
-                        className="type-value w-full h-8 rounded-[5px] border border-[var(--paper-border)] bg-[var(--paper-surface)] px-2.5 focus:border-[var(--ink-primary)] focus:outline-none shadow-2xs disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        <option value="auto">{t.wizard.toggleAuto}</option>
-                        <option value="on">{t.wizard.toggleOn}</option>
-                        <option value="off">{t.wizard.toggleOff}</option>
-                      </select>
-                      {/* Stated, not guessed: with egress closed the judge
-                          skips every page and bills nothing, so offering the
-                          switch would promise a gate the run cannot perform. */}
-                      {pageEgressClosed && (
-                        <>
-                          <p className="type-help mt-1 text-[var(--ink-muted)]">
-                            {t.wizard.visualJudgeBlocked}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <FieldLabel htmlFor="wizard-domain-hint">{t.wizard.domainHint}</FieldLabel>
+                          <InfoTip label={t.wizard.domainHint}>{t.wizard.domainHintHelp}</InfoTip>
+                        </div>
+                        <Input
+                          id="wizard-domain-hint"
+                          value={domainHint}
+                          onChange={(event) => setDomainHint(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <FieldLabel htmlFor="wizard-ocr-mode">{t.wizard.ocrMode}</FieldLabel>
+                          <InfoTip label={t.wizard.ocrMode}>{t.wizard.ocrModeHelp}</InfoTip>
+                        </div>
+                        <ChoiceSelect
+                          id="wizard-ocr-mode"
+                          value={ocrMode}
+                          onValueChange={(value) => setOcrMode(value as typeof ocrMode)}
+                          options={[
+                            { value: 'auto', label: t.wizard.ocrModeAuto },
+                            { value: 'rapidocr', label: t.wizard.ocrModeRapidocr },
+                            { value: 'sidecar', label: t.wizard.ocrModeSidecar },
+                            { value: 'cloud', label: t.wizard.ocrModeCloud },
+                            { value: 'vlm', label: t.wizard.ocrModeVlm },
+                            { value: 'off', label: t.wizard.ocrModeOff },
+                          ]}
+                        />
+                        {ocrNeedsEgress && (
+                          <p className="text-xs text-amber-700 dark:text-amber-400">
+                            {t.wizard.ocrModeEgressWarning}
                           </p>
-                          <button
+                        )}
+                        {ocrNeedsEgress && pageEgressClosed && (
+                          <Button
                             type="button"
+                            variant="link"
+                            size="sm"
                             onClick={openEgressConfirm}
-                            className="type-help mt-1 underline underline-offset-2 text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] cursor-pointer"
+                            className="h-auto text-xs"
                           >
                             {t.wizard.egressEnableBtn}
-                          </button>
-                        </>
-                      )}
+                          </Button>
+                        )}
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <FieldLabel>{t.wizard.glossaryPath}</FieldLabel>
+                          <InfoTip label={t.wizard.glossaryPath}>{t.wizard.glossaryPathHelp}</InfoTip>
+                        </div>
+                        <input
+                          ref={glossaryFileRef}
+                          type="file"
+                          accept=".csv,.tsv,.json"
+                          className="hidden"
+                          aria-label={t.wizard.glossaryPath}
+                          onChange={handleGlossaryInputChange}
+                        />
+                        {glossaryFile ? (
+                          <div className="flex items-center gap-2">
+                            <div className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-border bg-muted/35 px-3 text-xs">
+                              <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                              <span className="truncate">{glossaryFile.name}</span>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              onClick={() => setGlossaryFile(null)}
+                              aria-label={t.wizard.glossaryRemove}
+                            >
+                              <X />
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-3">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={glossaryUploading}
+                              onClick={() => glossaryFileRef.current?.click()}
+                            >
+                              {glossaryUploading ? (
+                                <Loader2 className="animate-spin" />
+                              ) : (
+                                <UploadCloud />
+                              )}
+                              {t.wizard.glossaryUploadBtn}
+                            </Button>
+                            <Link
+                              to="/assets"
+                              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                            >
+                              {t.wizard.glossaryManageLink}
+                            </Link>
+                          </div>
+                        )}
+                        {glossaryError && (
+                          <p className="text-xs text-destructive">{glossaryError}</p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+                  </TabsContent>
 
-        {/* Right Column: Pre-flight Assessment Radar */}
-        <div className="lg:col-span-5 lg:sticky lg:top-6 rounded-2xl border border-[var(--paper-border)] bg-[var(--paper-surface)] flex flex-col justify-between overflow-hidden shadow-[var(--shadow-card)]">
-          <div className="p-5 sm:p-6 space-y-5">
-            <div className="flex items-center justify-between border-b border-[var(--paper-border)] pb-3.5">
+                  <TabsContent value="scope" className="space-y-4 pt-2">
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {t.wizard.advancedScopeHelp}
+                    </p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <FieldLabel htmlFor="wizard-page-range">{t.wizard.pageFilter}</FieldLabel>
+                            <InfoTip label={t.wizard.pageFilter}>{t.wizard.pageFilterHelp}</InfoTip>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="link"
+                            size="sm"
+                            onClick={() => setPageRange('1-5')}
+                            className="h-auto text-xs"
+                          >
+                            {t.wizard.sliceSampleQuickBtn}
+                          </Button>
+                        </div>
+                        <Input
+                          id="wizard-page-range"
+                          value={pageRange}
+                          onChange={(event) => setPageRange(event.target.value)}
+                          placeholder={t.wizard.pageFilterPlaceholder}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <FieldLabel>{t.wizard.chapterWindow}</FieldLabel>
+                          <InfoTip label={t.wizard.chapterWindow}>{t.wizard.chapterWindowHelp}</InfoTip>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            type="number"
+                            min={1}
+                            value={chapterStart}
+                            onChange={(event) => setChapterStart(event.target.value)}
+                            placeholder={t.wizard.chapterStart}
+                            aria-label={t.wizard.chapterStart}
+                          />
+                          <Input
+                            type="number"
+                            min={1}
+                            value={chapterCount}
+                            onChange={(event) => setChapterCount(event.target.value)}
+                            placeholder={t.wizard.chapterCount}
+                            aria-label={t.wizard.chapterCount}
+                          />
+                        </div>
+                        {(chapterStartInvalid || chapterCountInvalid) && (
+                          <p className="text-xs text-destructive">{t.wizard.fieldMinOne}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                      <div className="flex items-center gap-1.5">
+                        <FieldLabel htmlFor="wizard-dry-run" className="cursor-pointer">
+                          {t.wizard.rehearsalLabel}
+                        </FieldLabel>
+                        <InfoTip label={t.wizard.rehearsalLabel}>{t.wizard.rehearsalHelp}</InfoTip>
+                      </div>
+                      <Switch id="wizard-dry-run" checked={dryRun} onCheckedChange={setDryRun} />
+                    </div>
+                    {dryRun && (
+                      <Alert variant="warning">
+                        <AlertTriangle className="size-4" />
+                        <AlertDescription>{t.wizard.rehearsalActiveWarning}</AlertDescription>
+                      </Alert>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="run" className="space-y-4 pt-2">
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {t.wizard.advancedExecHelp}
+                    </p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <FieldLabel>{t.wizard.concurrency}</FieldLabel>
+                          <InfoTip label={t.wizard.concurrency}>{t.wizard.concurrencyHelp}</InfoTip>
+                        </div>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={concurrency}
+                          onChange={(event) => setConcurrency(event.target.value)}
+                          placeholder={t.wizard.concurrencyAuto}
+                        />
+                        {concurrencyInvalid && (
+                          <p className="text-xs text-destructive">{t.wizard.fieldMinOne}</p>
+                        )}
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <FieldLabel htmlFor="wizard-visual-judge">{t.wizard.visualJudge}</FieldLabel>
+                          <InfoTip label={t.wizard.visualJudge}>{t.wizard.visualJudgeHelp}</InfoTip>
+                        </div>
+                        <ChoiceSelect
+                          id="wizard-visual-judge"
+                          value={visualJudge}
+                          onValueChange={(value) => setVisualJudge(value as typeof visualJudge)}
+                          disabled={pageEgressClosed}
+                          options={[
+                            { value: 'auto', label: t.wizard.toggleAuto },
+                            { value: 'on', label: t.wizard.toggleOn },
+                            { value: 'off', label: t.wizard.toggleOff },
+                          ]}
+                        />
+                        {pageEgressClosed && (
+                          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
+                            <span className="text-muted-foreground">
+                              {t.wizard.visualJudgeBlocked}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="sm"
+                              onClick={openEgressConfirm}
+                              className="h-auto shrink-0 text-xs"
+                            >
+                              {t.wizard.egressEnableBtn}
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </TabsContent>
+                </Tabs>
+              </CollapsibleContent>
+            </div>
+          </Collapsible>
+        </div>
+
+        {/* Right Column: Pre-flight assessment */}
+        <Card className="lg:col-span-5 lg:sticky lg:top-6 flex flex-col justify-between overflow-hidden shadow-xs">
+          <CardHeader className="p-5 border-b border-border pb-4 space-y-2">
+            <div className="flex flex-row items-center justify-between">
               <div>
-                <h3 className="type-value font-bold text-[var(--ink-primary)] tracking-tight flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-xs" />
+                <CardTitle className="text-base font-bold text-foreground tracking-tight flex items-center gap-2">
+                  <span className="size-2 rounded-full bg-emerald-500 shadow-xs" />
                   <span>{t.wizard.preflightTitle}</span>
-                </h3>
-                <p className="type-help mt-0.5">{t.wizard.preflightSubtitle}</p>
+                </CardTitle>
               </div>
               {isReassessing ? (
-                <Badge variant="outline" className="animate-pulse text-xs font-mono">
-                  <Loader2 className="h-3 w-3 animate-spin mr-1 inline" />
+                <Badge variant="outline" className="animate-pulse text-xs font-mono gap-1">
+                  <Loader2 className="size-3 animate-spin inline" />
                   {t.wizard.reassessing}
                 </Badge>
               ) : assessStale && assessment ? (
-                <Badge variant="warning" className="text-xs">
+                <Badge
+                  variant="outline"
+                  className="border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                >
                   {t.wizard.assessStale}
                 </Badge>
               ) : assessment ? (
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <Badge
                     variant="outline"
                     className={`text-xs font-mono font-semibold ${
                       assessment.cost.billable_blocks_is_exact
-                        ? 'text-[#15803d] border-[#15803d]/30 bg-[#15803d]/5'
-                        : 'text-[#b45309] border-[#b45309]/30 bg-[#b45309]/5'
+                        ? 'text-emerald-700 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/5'
+                        : 'text-amber-700 dark:text-amber-400 border-amber-500/30 bg-amber-500/5'
                     }`}
                   >
                     {assessment.cost.billable_blocks_is_exact
                       ? t.wizard.estimateExact
                       : t.wizard.estimateApproximate}
                   </Badge>
-                  <Badge variant="success" dot>
+                  <Badge
+                    variant="outline"
+                    className="border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                  >
+                    <span className="mr-1.5 size-1.5 rounded-full bg-emerald-500" />
                     {t.common.ready}
                   </Badge>
                 </div>
@@ -1652,54 +1766,27 @@ export function NewJobWizard() {
                 <Badge variant="outline">{t.common.idle}</Badge>
               )}
             </div>
+            {assessment && typeof assessment.meta?.provider === 'string' && assessment.meta.provider !== '' && (
+              <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <span className="text-xs font-mono text-muted-foreground/80">
+                  {t.wizard.quoteProviderNote.replace('{provider}', assessment.meta.provider)}
+                </span>
+              </div>
+            )}
+          </CardHeader>
 
+          <CardContent className="p-5 space-y-4">
             {assessment ? (
               <div className="space-y-4">
-                {typeof assessment.meta?.provider === 'string' &&
-                  assessment.meta.provider !== '' && (
-                    <div className="type-help text-[var(--ink-muted)] font-mono text-[11px] bg-[var(--paper-subsurface)] px-2.5 py-1 rounded-md border border-[var(--paper-border)]">
-                      {t.wizard.quoteProviderNote.replace(
-                        '{provider}',
-                        assessment.meta.provider
-                      )}
-                    </div>
-                  )}
-
-                {/* Book File Header Card */}
-                {(fileName || assessment.document?.file_name) && (
-                  <div className="p-3 rounded-xl bg-[var(--paper-subsurface)] border border-[var(--paper-border)] flex items-center justify-between">
-                    <div className="flex items-center gap-2.5 truncate">
-                      <FileText className="h-4 w-4 text-[var(--ink-secondary)] shrink-0" />
-                      <div className="truncate">
-                        <div className="text-xs font-bold text-[var(--ink-primary)] truncate font-mono">
-                          {fileName || assessment.document.file_name}
-                        </div>
-                        <div className="text-[11px] text-[var(--ink-muted)] font-mono">
-                          {fileSize ||
-                            (assessment.document.file_size_bytes
-                              ? assessment.document.file_size_bytes > 1024 * 1024
-                                ? `${(assessment.document.file_size_bytes / (1024 * 1024)).toFixed(1)} MB`
-                                : `${(assessment.document.file_size_bytes / 1024).toFixed(0)} KB`
-                              : '')}
-                        </div>
-                      </div>
-                    </div>
-                    <Badge variant="outline" className="uppercase shrink-0 text-xs font-mono font-bold">
-                      {assessment.document.format_ext.replace('.', '').toUpperCase() ||
-                        t.wizard.formatUnknown}
-                    </Badge>
-                  </div>
-                )}
-
-                {/* Linear-grade Hero Scoreboard (Top Impact Metrics) */}
-                <div className="grid grid-cols-2 gap-2.5">
-                  {/* Source Chars & Scale (sourceChars must be first in metrics section) */}
-                  <div className="p-3 rounded-xl border border-[var(--paper-border)] bg-[var(--paper-subsurface)] space-y-1">
-                    <div className="type-help text-[11px] text-[var(--ink-secondary)]">{t.wizard.sourceChars}</div>
-                    <div className="font-mono text-xl font-extrabold tracking-tight text-[var(--ink-primary)] tabular-nums">
+                {/* High Impact Metrics */}
+                <div className="grid grid-cols-2 gap-3">
+                  {/* Source Chars & Scale */}
+                  <div className="p-3.5 rounded-xl border border-border bg-card space-y-1">
+                    <div className="text-xs font-medium text-muted-foreground">{t.wizard.sourceChars}</div>
+                    <div className="font-mono text-xl font-bold tracking-tight text-foreground tabular-nums">
                       {assessment.document.source_chars.toLocaleString()}
                     </div>
-                    <div className="text-[10px] text-[var(--ink-muted)] font-mono truncate">
+                    <div className="text-xs text-muted-foreground truncate font-mono">
                       {assessment.document.selected_pages != null
                         ? `${assessment.document.selected_pages} / ${assessment.document.pages} ${t.wizard.pagesUnit}`
                         : `${assessment.document.pages} ${t.wizard.pagesUnit}`} · {assessment.document.chapters} {t.wizard.chapters}
@@ -1707,286 +1794,162 @@ export function NewJobWizard() {
                   </div>
 
                   {/* Estimated Cost */}
-                  <div className="p-3 rounded-xl border border-[var(--paper-border)] bg-[var(--paper-subsurface)] space-y-1">
-                    <div className="type-help text-[11px] text-[var(--ink-secondary)]">{t.wizard.estCost}</div>
-                    <div className="font-mono text-xl font-extrabold tracking-tight tabular-nums">
+                  <div className="p-3.5 rounded-xl border border-border bg-card space-y-1">
+                    <div className="text-xs font-medium text-muted-foreground">{t.wizard.estCost}</div>
+                    <div className="font-mono text-xl font-bold tracking-tight tabular-nums">
                       {assessment.cost.total_cost_usd === null ||
                       assessment.cost.total_cost_usd === undefined ? (
-                        <span className="text-[var(--ink-muted)] text-sm">{t.wizard.notPriced}</span>
+                        <span className="text-muted-foreground text-sm">{t.wizard.notPriced}</span>
                       ) : assessment.cost.total_cost_usd === 0 ? (
-                        <span className="text-[#15803d]">
-                          $0.00 <span className="text-[10px] font-sans font-normal text-[var(--ink-secondary)]">({t.wizard.localFreeLabel})</span>
+                        <span className="text-emerald-600 dark:text-emerald-400">
+                          $0.00 <span className="text-xs font-sans font-normal text-muted-foreground">({t.wizard.localFreeLabel})</span>
                         </span>
                       ) : (
-                        <span className="text-[#b45309]">
+                        <span className="text-amber-600 dark:text-amber-500">
                           ${assessment.cost.total_cost_usd.toFixed(2)}
                         </span>
                       )}
                     </div>
-                    <div className="text-[10px] text-[var(--ink-muted)] font-mono truncate">
+                    <div className="text-xs text-muted-foreground truncate font-mono">
                       {t.wizard.estTime}: {formatDuration(assessment.runtime.est_seconds_low)} – {formatDuration(assessment.runtime.est_seconds_high)}
                     </div>
                   </div>
                 </div>
 
-                {/* Total Tokens Card */}
-                <div className="p-3 rounded-xl border border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between">
-                  <div>
-                    <div className="type-help text-[11px] text-[var(--ink-secondary)] flex items-center gap-1">
-                      <span>{t.wizard.estTokens}</span>
-                      <InfoTip label={t.wizard.estTokens}>
-                        {t.wizard.tokensEstimateNote}
-                        <div className="mt-1.5 pt-1.5 border-t border-[var(--paper-border)] text-[10px] font-mono leading-relaxed">
-                          {t.wizard.tokensSource}{' '}
-                          {assessment.document.estimated_tokens.toLocaleString()} ·{' '}
-                          {t.wizard.tokensPrompt}{' '}
-                          {Math.max(
-                            0,
-                            assessment.cost.prompt_tokens - assessment.document.estimated_tokens
-                          ).toLocaleString()} ·{' '}
-                          {t.wizard.tokensCompletion}{' '}
-                          {assessment.cost.completion_tokens.toLocaleString()}
-                        </div>
-                      </InfoTip>
-                    </div>
-                    <div className="text-[10px] text-[var(--ink-muted)] mt-0.5">
-                      {t.wizard.tokensSource} {assessment.document.estimated_tokens.toLocaleString()}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-mono text-lg font-extrabold text-[var(--ink-primary)] tabular-nums">
-                      {(assessment.cost.prompt_tokens + assessment.cost.completion_tokens).toLocaleString()}
-                    </div>
-                    <div className="text-[10px] text-[var(--ink-muted)] font-mono">
-                      +{(assessment.cost.prompt_tokens - assessment.document.estimated_tokens).toLocaleString()} {t.wizard.tokenPrefixTag}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Structured Health Scorecard (Diagnostic Breakdown) */}
-                <div className="p-3.5 rounded-xl border border-[var(--paper-border)] bg-[var(--paper-surface)] space-y-3">
-                  <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[var(--ink-muted)] flex items-center justify-between pb-1 border-b border-[var(--paper-border)]">
+                {/* Blueprint Specs */}
+                <div className="p-4 rounded-xl border border-border bg-muted/20 space-y-3">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground pb-2 border-b border-border flex items-center justify-between">
                     <span>{t.wizard.scorecardTitle}</span>
-                    <span>{t.wizard.scorecardSub}</span>
-                  </div>
-
-                  {/* Page Count Row */}
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="type-help text-[var(--ink-secondary)]">{t.wizard.pageCount}</span>
-                    <span className="font-mono font-bold text-[var(--ink-primary)]">
-                      {assessment.document.selected_pages != null ? (
-                        <>
-                          {assessment.document.selected_pages}
-                          <span className="text-[var(--ink-muted)] font-normal">
-                            {' '}
-                            / {assessment.document.pages} ({t.wizard.sliceTestingTag})
-                          </span>
-                        </>
-                      ) : (
-                        assessment.document.pages
-                      )}
-                      <span className="text-[var(--ink-muted)] font-normal">
-                        {' '}
-                        · {assessment.document.chapters} {t.wizard.chapters}
-                      </span>
+                    <span className="text-primary font-medium">
+                      {routeBadge(assessment.route.recommended_dual_mode, assessment.route.recommended_preset, t)}
                     </span>
                   </div>
 
-                  {/* Math Density with Micro Meter */}
-                  <div className="space-y-1.5 pt-2 border-t border-[var(--paper-border)]">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="type-help text-[var(--ink-secondary)] flex items-center gap-1">
-                        <span>{t.wizard.mathDensity}</span>
+                  <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                    <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-card border border-border">
+                      <span className="text-muted-foreground text-xs">{t.wizard.estTokens}</span>
+                      <span className="font-semibold text-foreground">
+                        {(assessment.cost.prompt_tokens + assessment.cost.completion_tokens).toLocaleString()}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-card border border-border">
+                      <div className="flex items-center gap-1">
+                        <span className="text-muted-foreground text-xs">{t.wizard.mathDensity}</span>
                         <InfoTip label={t.wizard.mathDensity}>
                           {assessment.document.has_formulas
                             ? t.wizard.mathDensityWithObjects
                             : t.wizard.mathDensityTextOnly}
                         </InfoTip>
-                      </span>
+                      </div>
                       <span
-                        className={`font-mono font-bold ${
+                        className={`font-semibold ${
                           assessment.document.math_density === 'high'
-                            ? 'text-[#b45309]'
-                            : assessment.document.math_density === 'low'
-                              ? 'text-[#15803d]'
-                              : 'text-[var(--ink-secondary)]'
+                            ? 'text-amber-600 dark:text-amber-500'
+                            : 'text-primary'
                         }`}
                       >
-                        {assessment.document.math_density}
+                        {mathDensityLabel(assessment.document.math_density)}
                       </span>
                     </div>
-                    {/* Micro gauge bar */}
-                    <div className="h-1.5 w-full bg-[var(--paper-subsurface)] rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-300 ${
-                          assessment.document.math_density === 'high'
-                            ? 'w-4/5 bg-[#b45309]'
-                            : assessment.document.math_density === 'low'
-                              ? 'w-1/4 bg-[#15803d]'
-                              : 'w-1/2 bg-[var(--ink-secondary)]'
-                        }`}
-                      />
-                    </div>
-                  </div>
 
-                  {/* Scanned Ratio with Micro Meter */}
-                  <div className="space-y-1.5 pt-2 border-t border-[var(--paper-border)]">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="type-help text-[var(--ink-secondary)]">{t.wizard.scannedRatio}</span>
-                      <span
-                        className={`font-mono font-bold ${
-                          (assessment.document.scan_page_share ?? 0) > 0.2
-                            ? 'text-[#b45309]'
-                            : 'text-[#15803d]'
-                        }`}
-                      >
-                        {assessment.document.scan_page_share !== null &&
-                        assessment.document.scan_page_share !== undefined
+                    <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-card border border-border">
+                      <span className="text-muted-foreground text-xs">{t.wizard.scannedRatio}</span>
+                      <span className="font-semibold text-foreground">
+                        {assessment.document.scan_page_share != null
                           ? `${(assessment.document.scan_page_share * 100).toFixed(0)}%`
                           : assessment.document.is_scanned
-                            ? 'yes'
-                            : 'no'}
+                            ? '100%'
+                            : '0%'}
                       </span>
                     </div>
-                    <div className="h-1.5 w-full bg-[var(--paper-subsurface)] rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-300 ${
-                          (assessment.document.scan_page_share ?? 0) > 0.2
-                            ? 'bg-[#b45309]'
-                            : 'bg-[#15803d]'
-                        }`}
-                        style={{
-                          width: `${Math.min(
-                            100,
-                            assessment.document.scan_page_share !== null &&
-                              assessment.document.scan_page_share !== undefined
-                              ? assessment.document.scan_page_share * 100
-                              : assessment.document.is_scanned
-                                ? 100
-                                : 0
-                          )}%`,
-                        }}
-                      />
+
+                    <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-card border border-border">
+                      <span className="text-muted-foreground text-xs">{t.wizard.confidence}</span>
+                      <span className="font-semibold text-primary">
+                        {(assessment.route.confidence * 100).toFixed(0)}%
+                      </span>
                     </div>
-                  </div>
-
-                  {/* Estimated Runtime Row */}
-                  <div className="pt-2 border-t border-[var(--paper-border)] flex items-center justify-between text-xs">
-                    <span className="type-help text-[var(--ink-secondary)] flex items-center gap-1">
-                      <span>{t.wizard.estTime}</span>
-                      <InfoTip label={t.wizard.estTime}>
-                        <span className="block space-y-1">
-                          <span className="block">{t.wizard.estTimeHeuristicNote}</span>
-                          {assessment.runtime.basis && (
-                            <span className="block text-[var(--ink-muted)]">
-                              {assessment.runtime.basis}
-                            </span>
-                          )}
-                        </span>
-                      </InfoTip>
-                    </span>
-                    <span className="font-mono font-bold text-[var(--ink-primary)]">
-                      {formatDuration(assessment.runtime.est_seconds_low)} –{' '}
-                      {formatDuration(assessment.runtime.est_seconds_high)}
-                      <span className="text-[var(--ink-muted)] font-normal text-[11px]">
-                        {' '}
-                        ({t.wizard.heuristicTag})
-                      </span>
-                    </span>
-                  </div>
-
-                  {/* Recommendation Row */}
-                  <div className="pt-2 border-t border-[var(--paper-border)] flex items-center justify-between text-xs">
-                    <span className="type-help text-[var(--ink-secondary)]">{t.wizard.recommendation}</span>
-                    <span className="font-mono text-[#15803d] text-xs font-bold text-right">
-                      {routeBadge(
-                        assessment.route.recommended_dual_mode,
-                        assessment.route.recommended_preset,
-                        t,
-                      )}
-                      <span className="text-[var(--ink-muted)] font-normal">
-                        {' '}
-                        ({t.wizard.confidence} {(assessment.route.confidence * 100).toFixed(0)}%)
-                      </span>
-                    </span>
                   </div>
                 </div>
 
+                {/* Pre-flight Warnings */}
                 {assessment.warnings.length > 0 && (
-                  <div className="rounded-xl border border-[#b45309]/30 bg-[#b45309]/5 p-3 space-y-1.5">
-                    <div className="text-xs font-mono uppercase tracking-wider text-[#b45309] font-bold">
-                      {t.wizard.probeWarnings} ({assessment.warnings.length})
+                  <Alert variant="warning" className="space-y-2">
+                    <div className="flex items-center gap-1.5 font-semibold text-xs text-amber-700 dark:text-amber-400">
+                      <AlertTriangle className="size-4 shrink-0" />
+                      <span>{t.wizard.probeWarnings} ({assessment.warnings.length})</span>
                     </div>
-                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pl-5">
                       {assessment.warnings.map((warning) => (
-                        <div key={warning.code} className="text-xs text-[var(--ink-secondary)]">
-                          <span className="font-mono text-[var(--ink-muted)] font-semibold">{warning.code}</span>{' '}
-                          · {warningText(warning, t)}
+                        <div key={warning.code} className="text-xs text-muted-foreground leading-relaxed">
+                          {warningText(warning, t)}
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </Alert>
                 )}
               </div>
             ) : (
-              <div className="py-16 text-center text-[var(--ink-muted)] text-xs space-y-2">
-                <p className="max-w-xs mx-auto leading-relaxed">
+              <div className="py-20 flex flex-col items-center justify-center text-center">
+                <div className="size-12 rounded-full bg-muted flex items-center justify-center text-muted-foreground mb-3">
+                  <FileText className="size-6" />
+                </div>
+                <div className="text-sm font-semibold text-foreground">{t.wizard.preflightTitle}</div>
+                <p className="text-xs text-muted-foreground max-w-xs mt-1.5 leading-relaxed">
                   {t.wizard.waitingFile}
                 </p>
               </div>
             )}
-          </div>
+          </CardContent>
 
-          {/* Rehearsal banner: the server downgrades a keyless submit to a
-              zero-token rehearsal, which delivers mock output. Saying it here —
-              with a link to the configuration form — is the difference between a
-              labelled feature and a silent substitution. */}
+          {/* Rehearsal banner */}
           {rehearsalOnly ? (
-            <div className="mx-4 mb-3 p-3 rounded-[5px] bg-[#b45309]/10 border border-[#b45309]/25">
-              <div className="type-value font-semibold text-[#b45309] mb-1">
-                {t.wizard.rehearsalBannerTitle}
-              </div>
-              <p className="type-help text-[var(--ink-secondary)] leading-relaxed mb-2">
-                {t.wizard.rehearsalBannerBody}
-              </p>
-              <div className="flex items-center gap-2">
-                <Button size="sm" onClick={() => navigate('/system')}>
-                  {t.wizard.rehearsalBannerCta}
-                </Button>
-                {!rehearsalAcknowledged ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setRehearsalAcknowledged(true)}
-                  >
-                    {t.wizard.rehearsalBannerAck}
+            <div className="mx-5 mb-4">
+              <Alert variant="warning" className="space-y-2">
+                <AlertTitle className="text-amber-700 dark:text-amber-400 font-semibold text-xs">
+                  {t.wizard.rehearsalBannerTitle}
+                </AlertTitle>
+                <AlertDescription className="text-xs leading-relaxed">
+                  {t.wizard.rehearsalBannerBody}
+                </AlertDescription>
+                <div className="flex items-center gap-2 pt-1">
+                  <Button size="sm" onClick={() => navigate('/system')}>
+                    {t.wizard.rehearsalBannerCta}
                   </Button>
-                ) : null}
-              </div>
+                  {!rehearsalAcknowledged ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setRehearsalAcknowledged(true)}
+                    >
+                      {t.wizard.rehearsalBannerAck}
+                    </Button>
+                  ) : null}
+                </div>
+              </Alert>
             </div>
           ) : null}
 
           {/* Action Footer */}
-          <div className="p-4 border-t border-[var(--paper-border)] bg-[var(--paper-subsurface)]">
+          <CardFooter className="p-5 border-t border-border bg-muted/20 flex flex-col items-stretch space-y-3">
             {submitError && (
-              <div className="mb-3 p-2 rounded-[5px] bg-[#b91c1c]/10 border border-[#b91c1c]/25 text-[#b91c1c] text-xs">
-                {submitError}
-              </div>
+              <Alert variant="destructive">
+                <AlertTriangle className="size-4" />
+                <AlertDescription>{submitError}</AlertDescription>
+              </Alert>
             )}
-            {/* The submit matched an existing job, so nothing new started. Say
-                that plainly and offer the way in — navigating straight to the
-                job page would present an old run as this click's result. */}
             {reusedJobId && (
-              <div className="mb-3 p-2 rounded-[5px] bg-[#b45309]/10 border border-[#b45309]/25 text-[#b45309] text-xs flex items-start justify-between gap-2">
-                <span>{t.wizard.submitReusedNote}</span>
+              <Alert className="flex items-start justify-between gap-2">
+                <AlertDescription>{t.wizard.submitReusedNote}</AlertDescription>
                 <button
                   type="button"
                   onClick={() => navigate(`/jobs/${reusedJobId}`)}
-                  className="shrink-0 underline hover:no-underline font-semibold cursor-pointer"
+                  className="shrink-0 underline hover:no-underline font-semibold text-xs font-mono text-primary cursor-pointer"
                 >
                   {reusedJobId}
                 </button>
-              </div>
+              </Alert>
             )}
             <Button
               onClick={requestSubmit}
@@ -1997,27 +1960,27 @@ export function NewJobWizard() {
                 budgetInvalid ||
                 advancedNumericInvalid
               }
-              variant="primary"
-              className="w-full h-10 text-xs font-bold tracking-tight shadow-sm"
-              shortcut="⌘⏎"
+              variant="default"
+              size="lg"
+              className="w-full h-11 text-sm font-semibold shadow-xs"
             >
               {isSubmitting ? (
                 <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  <Loader2 className="size-4 mr-2 animate-spin" />
                   {t.wizard.compiling}
                 </>
               ) : (
                 <>
                   <span>{t.wizard.startCompile}</span>
-                  <ArrowRight className="h-4 w-4 ml-1.5" />
+                  <ArrowRight className="size-4 ml-2" />
                 </>
               )}
             </Button>
-          </div>
-        </div>
+          </CardFooter>
+        </Card>
       </div>
 
-      {/* 提交护栏：无有效报价（或报价已过期）时确认一次。 */}
+      {/* Submit guard dialog */}
       <ConfirmDialog
         open={quoteRiskOpen}
         title={t.wizard.quoteRiskTitle}
@@ -2043,16 +2006,14 @@ export function NewJobWizard() {
         onCancel={() => setQuoteRiskOpen(false)}
       />
 
-      {/* Enabling page egress ships rendered manuscript pages off this machine,
-          so the action carries its scope in the dialog: what it unlocks, what
-          it costs in privacy, and that it reverts at restart. */}
+      {/* Page egress dialog */}
       <ConfirmDialog
         open={egressConfirmOpen}
         title={t.wizard.egressConfirmTitle}
         body={
           <span className="block space-y-1.5">
             <span className="block">{t.wizard.egressConfirmBody}</span>
-            {egressError && <span className="block text-[#b91c1c]">{egressError}</span>}
+            {egressError && <span className="block text-destructive">{egressError}</span>}
           </span>
         }
         confirmLabel={t.wizard.egressConfirmOn}
@@ -2061,31 +2022,34 @@ export function NewJobWizard() {
         onCancel={() => setEgressConfirmOpen(false)}
       />
 
-      {/* Mobile Submit Error Alert (Phase 2) */}
+      {/* Mobile Submit Error Alert */}
       {submitError && (
-        <div className="lg:hidden fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] left-0 md:left-64 right-0 mx-3 p-2.5 rounded-[5px] bg-[#b91c1c] text-white text-xs z-30 shadow-md flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 shrink-0 text-white" />
-          <span className="truncate flex-1">{submitError}</span>
+        <div className="lg:hidden fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] left-0 md:left-64 right-0 mx-3 z-30 shadow-md">
+          <Alert variant="destructive">
+            <AlertTriangle className="size-4 shrink-0" />
+            <AlertDescription className="truncate">{submitError}</AlertDescription>
+          </Alert>
         </div>
       )}
 
-      {/* Mobile Sticky Bottom Action Bar (Phase 2) */}
-      <div className="lg:hidden fixed bottom-0 left-0 md:left-64 right-0 p-3 bg-[var(--paper-surface)] border-t border-[var(--paper-border)] shadow-lg z-30 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] flex items-center justify-between gap-3">
+      {/* Mobile sticky action appears only once there is something to submit. */}
+      {filePath.trim() ? (
+      <div className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-3 border-t border-border bg-card p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] shadow-lg lg:hidden">
         <div className="min-w-0 flex-1">
-          <div className="text-xs font-semibold text-[var(--ink-primary)] truncate font-mono">
+          <div className="text-xs font-semibold text-foreground truncate">
             {fileName || (filePath ? filePath.split('/').pop() : t.wizard.waitingFile)}
           </div>
-          <div className="text-xs font-mono text-[var(--ink-secondary)] flex items-center gap-2">
+          <div className="text-xs font-mono text-muted-foreground flex items-center gap-2">
             {assessment?.cost.total_cost_usd !== null && assessment?.cost.total_cost_usd !== undefined ? (
-              <span className="text-[#b45309] font-bold">
+              <span className="text-amber-600 dark:text-amber-500 font-bold">
                 ${assessment.cost.total_cost_usd.toFixed(2)}
               </span>
             ) : assessment ? (
-              <span className="text-[#15803d] font-semibold">{t.common.ready}</span>
+              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{t.common.ready}</span>
             ) : null}
             {isAssessing && (
-              <span className="text-[var(--ink-muted)] flex items-center gap-1">
-                <Loader2 className="h-3 w-3 animate-spin" />
+              <span className="text-muted-foreground flex items-center gap-1">
+                <Loader2 className="size-3 animate-spin" />
                 {t.wizard.compiling}
               </span>
             )}
@@ -2100,22 +2064,23 @@ export function NewJobWizard() {
             budgetInvalid ||
             advancedNumericInvalid
           }
-          variant="primary"
-          className="h-10 px-4 text-xs font-bold tracking-tight shadow-sm shrink-0"
+          variant="default"
+          className="h-10 px-4 text-xs font-semibold shadow-xs shrink-0"
         >
           {isSubmitting ? (
             <>
-              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              <Loader2 className="size-4 mr-1.5 animate-spin" />
               {t.wizard.compiling}
             </>
           ) : (
             <>
               <span>{t.wizard.startCompile}</span>
-              <ArrowRight className="h-4 w-4 ml-1" />
+              <ArrowRight className="size-4 ml-1" />
             </>
           )}
         </Button>
       </div>
+      ) : null}
     </div>
   )
 }

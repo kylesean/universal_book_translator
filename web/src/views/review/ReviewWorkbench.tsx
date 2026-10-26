@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useVirtualizer, type VirtualItem } from '@tanstack/react-virtual'
 import {
   SplitSquareVertical,
   Save,
   Eye,
+  EyeOff,
   Loader2,
   AlertTriangle,
   ChevronUp,
@@ -14,19 +15,50 @@ import {
   Wand2,
   RefreshCw,
   Sparkles,
-  Download,
+  Filter,
+  Edit3,
+  X,
+  ArrowLeft,
+  Info,
+  ListFilter,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { useToast } from '@/components/ui/useToast'
+import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from '@/components/ui/resizable'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import { Switch } from '@/components/ui/switch'
+import { useIsMobile } from '@/hooks/use-mobile'
 import {
   ApiError,
   listSegments,
   listIssues,
   listDeliverables,
-  deliverableDownloadUrl,
-  triggerBrowserDownload,
   editSegment,
   reExportJob,
   getBlockTerms,
@@ -36,13 +68,25 @@ import {
   type Segment,
   type IssuesReport,
   type TermViolation,
-  type DeliverableItem,
-  type DeliverableListing,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
-import { deliverableName } from '@/views/quality-gate/artifactMeta'
 
 type Filter = 'issues' | 'all' | 'needs_human' | string
+type Scope = 'issues' | 'all'
+
+function scopeLabel(t: ReturnType<typeof useI18n>['t'], scope: Scope): string {
+  return scope === 'issues' ? t.review.scopeToReview : t.review.scopeEverything
+}
+
+function segmentLocation(t: ReturnType<typeof useI18n>['t'], segment: Segment): string {
+  const parts: string[] = []
+  if (segment.page !== null) {
+    parts.push(t.review.pageLabel.replace('{n}', String(segment.page)))
+  }
+  parts.push(blockTypeLabel(t, segment.block_type))
+  parts.push(t.review.blockPosition.replace('{n}', String(segment.spine_index + 1)))
+  return parts.join(' · ')
+}
 
 //: Fallback label for an issue kind the dictionary does not name yet. The
 //: backend can add a kind before the console learns its translation; showing
@@ -61,6 +105,61 @@ const blockStatusLabel = (t: ReturnType<typeof useI18n>['t'], status: string): s
 //: MQM triage tier, or an em dash when the block was never triaged.
 const mqmSeverityLabel = (t: ReturnType<typeof useI18n>['t'], severity: string | null): string =>
   severity ? (t.review.mqmSeverities[severity] ?? severity) : '—'
+
+// Markdown, GFM and KaTeX are only needed once a segment is visible. Loading
+// that renderer with the workbench would put the whole parser and its fonts in
+// the route chunk even when the operator only opens the evidence panel.
+const RichText = React.lazy(() =>
+  import('@/components/content/RichText').then((module) => ({
+    default: module.RichText,
+  }))
+)
+
+function RichTextFallback() {
+  return (
+    <div className="space-y-2 py-1" aria-busy="true">
+      <div className="h-4 w-[92%] animate-pulse rounded bg-muted" />
+      <div className="h-4 w-[78%] animate-pulse rounded bg-muted" />
+      <div className="h-4 w-[64%] animate-pulse rounded bg-muted" />
+    </div>
+  )
+}
+
+function findingLabel(t: ReturnType<typeof useI18n>['t'], kind: string): string {
+  const labels: Record<string, string> = {
+    review: t.review.flagHumanReview,
+    critical: t.review.flagCritical,
+    omission: t.review.flagOmission,
+    numeric: t.review.flagNumeric,
+    terminology: t.review.flagTerminology,
+    formula: t.review.flagFormula,
+    structure: t.review.flagStructure,
+    repetition: t.review.flagRepetition,
+    fabrication: t.review.flagFabrication,
+    echo: t.review.flagEcho,
+    render: t.review.flagRender,
+  }
+  return labels[kind] ?? t.review.flagGeneric
+}
+
+function findingKindForFlag(flag: string): string {
+  const value = flag.toLowerCase()
+  if (value.includes('needs_human_review')) return 'review'
+  if (value.includes('mqm_critical_blocked')) return 'critical'
+  if (value.includes('omission') || value.includes('empty target') || value.includes('table dropped')) {
+    return 'omission'
+  }
+  if (value.includes('numeric')) return 'numeric'
+  if (value.includes('glossary') || value.includes('consistency:')) return 'terminology'
+  if (value.includes('formula') || value.includes('math') || value.includes('latex')) return 'formula'
+  if (value.includes('repetition') || value.includes('loop hallucination')) return 'repetition'
+  if (value.includes('fabrication') || value.includes('added reference') || value.includes('prompt')) {
+    return 'fabrication'
+  }
+  if (value.includes('render_skip')) return 'render'
+  if (value.includes('echo')) return 'echo'
+  return 'structure'
+}
 
 /**
  * Uncommitted review edits, mirrored to `sessionStorage`.
@@ -114,35 +213,15 @@ function writeDrafts(jobId: string | null, drafts: Record<string, string>): void
 //: fault past the cut was invisible to the F8 fault walk).
 const PAGE_LIMIT = 200
 
-const getFormatBadge = (filename?: string): string => {
-  if (!filename) return 'FILE'
-  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
-  switch (ext) {
-    case 'pdf': return 'PDF'
-    case 'epub': return 'EPUB'
-    case 'docx': return 'DOCX'
-    case 'md':
-    case 'markdown': return 'MD'
-    case 'html':
-    case 'htm': return 'HTML'
-    case 'xliff': return 'XLIFF'
-    default: return ext.toUpperCase() || 'FILE'
-  }
-}
-
-const formatBytes = (bytes?: number): string => {
-  if (!bytes || bytes <= 0 || isNaN(bytes)) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
-}
-
 export function ReviewWorkbench() {
   const { t } = useI18n()
+  const navigate = useNavigate()
   const { jobId: routeJobId } = useParams<{ jobId: string }>()
+  const [searchParams] = useSearchParams()
   const jobId = routeJobId ?? null
-  const [viewMode, setViewMode] = useState<'segments' | 'reading_flow' | 'visual_witness'>('segments')
-  const [mobileInspectorExpanded, setMobileInspectorExpanded] = useState(false)
+  const [viewMode, setViewMode] = useState<'segments' | 'reading_flow'>(
+    searchParams.get('view') === 'flow' ? 'reading_flow' : 'segments'
+  )
   const [filter, setFilter] = useState<Filter>('issues')
 
   const [segments, setSegments] = useState<Segment[]>([])
@@ -150,7 +229,6 @@ export function ReviewWorkbench() {
   const [issues, setIssues] = useState<IssuesReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
-  const toast = useToast()
   const [error, setError] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, string>>(() => readDrafts(jobId))
   const [editing, setEditing] = useState<Record<string, boolean>>({})
@@ -159,20 +237,15 @@ export function ReviewWorkbench() {
   const [reExportNotice, setReExportNotice] = useState<string | null>(null)
   const [reExporting, setReExporting] = useState(false)
   const [reExportPending, setReExportPending] = useState(false)
-  const [deliverables, setDeliverables] = useState<DeliverableItem[]>([])
-  const [deliveryVerdict, setDeliveryVerdict] = useState<DeliverableListing['deliveryVerdict']>(null)
-  const [exporting, setExporting] = useState(false)
-  const [exportStatusText, setExportStatusText] = useState<string | null>(null)
-  const [exportMenuOpen, setExportMenuOpen] = useState(false)
-  const [pendingBlockedExport, setPendingBlockedExport] = useState<string | null>(null)
-  const exportContainerRef = useRef<HTMLDivElement>(null)
   const [issueCursor, setIssueCursor] = useState(0)
-  const [openPreviews, setOpenPreviews] = useState<Record<number, boolean>>({})
+  const [previewPage, setPreviewPage] = useState<number | null>(null)
   const [previewBust, setPreviewBust] = useState(0)
   const [termNotice, setTermNotice] = useState<Record<string, string>>({})
   const [diffBlend, setDiffBlend] = useState(false)
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
   const [inspectorOpen, setInspectorOpen] = useState(false)
+  const [desktopEvidenceOpen, setDesktopEvidenceOpen] = useState(true)
+  const isMobile = useIsMobile()
 
   const scrollRef = useRef<HTMLDivElement>(null)
   // Guards `load` against a stale response clobbering a newer filter's result:
@@ -205,8 +278,6 @@ export function ReviewWorkbench() {
       setSaved({})
       setIssueCursor(0)
       if (listing) {
-        setDeliverables(listing.items)
-        setDeliveryVerdict(listing.deliveryVerdict)
         setReExportPending(listing.stale)
       }
     } catch (err) {
@@ -216,47 +287,6 @@ export function ReviewWorkbench() {
       if (seq === loadSeqRef.current) setLoading(false)
     }
   }, [jobId, filter, t])
-
-  // Close export dropdown on outside click
-  useEffect(() => {
-    if (!exportMenuOpen) return
-    const handleClickOutside = (e: MouseEvent) => {
-      if (exportContainerRef.current && !exportContainerRef.current.contains(e.target as Node)) {
-        setExportMenuOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [exportMenuOpen])
-
-  // Filter reading-facing books / documents from internal inspection JSONs
-  const readingDeliverables = useMemo(() => {
-    return deliverables.filter((d) => {
-      const ext = d.filename.split('.').pop()?.toLowerCase() ?? ''
-      return (
-        d.key === 'primary' ||
-        d.key === 'secondary' ||
-        d.key === 'epub' ||
-        d.key === 'html' ||
-        d.key === 'xliff' ||
-        ext === 'pdf' ||
-        ext === 'epub' ||
-        ext === 'docx' ||
-        ext === 'md' ||
-        ext === 'html' ||
-        ext === 'xliff'
-      )
-    })
-  }, [deliverables])
-
-  const primaryDeliverable = useMemo(() => {
-    return (
-      readingDeliverables.find((d) => d.key === 'primary') ??
-      readingDeliverables[0] ??
-      deliverables[0] ??
-      null
-    )
-  }, [readingDeliverables, deliverables])
 
   // Append the next window. The backend returns ``total`` with every page, so
   // the "load more" button can state how much is left instead of guessing.
@@ -312,8 +342,6 @@ export function ReviewWorkbench() {
 
   // Snapshots of measured item heights to survive tab switches and eliminate layout shift
   const flowMeasurementsCacheRef = useRef<VirtualItem[]>([])
-  const segmentMeasurementsCacheRef = useRef<VirtualItem[]>([])
-
   const getSegmentKey = useCallback(
     (index: number) => segments[index]?.block_id ?? index,
     [segments]
@@ -341,39 +369,18 @@ export function ReviewWorkbench() {
     [segments, drafts]
   )
 
-  const estimateSegmentSize = useCallback(
-    (index: number) => {
-      const seg = segments[index]
-      if (!seg) return 210
-      const sourceLen = seg.source_text?.length ?? 0
-      const draftText = drafts[seg.block_id] ?? seg.delivered_text ?? ''
-      const targetLen = draftText.length
-      const sourceLines = Math.ceil(sourceLen / 38)
-      const targetLines = Math.ceil(targetLen / 30)
-      const maxLines = Math.max(1, Math.max(sourceLines, targetLines))
-      // Header (34px) + action footer (38px) + padding (32px) + bottom pb-4 (16px) = 120px
-      const base = 120 + maxLines * 24
-      const previewExtra = seg.page !== null && openPreviews[seg.page] ? 380 : 0
-      const failExtra = seg.repair_failed ? 36 : 0
-      const termExtra = seg.issues.includes('terminology') ? 60 : 0
-      return Math.min(1000, Math.max(160, base + previewExtra + failExtra + termExtra))
+  // The list is a master-detail workspace: one focused segment at a time. It
+  // is still paged at PAGE_LIMIT, but rendering every visible row as a virtual
+  // card made selecting a row move the target editor and left the page looking
+  // like a stack of unrelated documents. Keep the list bounded by the backend
+  // page size and use native document flow here.
+  const virtualizer = {
+    scrollToIndex: (index: number) => {
+      document
+        .getElementById(`review-segment-${index}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     },
-    [segments, drafts, openPreviews]
-  )
-
-  // Virtualize the segment list with dynamic size measurement and key-based cache
-  // oxlint-disable-next-line react/incompatible-library
-  const virtualizer = useVirtualizer({
-    count: segments.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: estimateSegmentSize,
-    getItemKey: getSegmentKey,
-    initialMeasurementsCache: segmentMeasurementsCacheRef.current,
-    onChange: (instance) => {
-      segmentMeasurementsCacheRef.current = instance.takeSnapshot()
-    },
-    overscan: 6,
-  })
+  }
 
   const flowScrollRef = useRef<HTMLDivElement>(null)
   // Virtualize Reading Flow with dynamic height measurement and persistent cache snapshot
@@ -390,28 +397,6 @@ export function ReviewWorkbench() {
     overscan: 6,
   })
 
-  // The visual-witness view stacks one two-up page comparison per page. Without
-  // virtualization a 400-page book mounts 800 <img> nodes and fires as many
-  // rasterization requests at once — exactly the OOM the PRD forbids (PRD §9.1:
-  // "never render unbounded DOM"). Windowed the same way as the segment grid.
-  const previewPages = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          segments.map((segment) => segment.page).filter((page): page is number => page !== null)
-        )
-      ),
-    [segments]
-  )
-  const witnessScrollRef = useRef<HTMLDivElement>(null)
-  // oxlint-disable-next-line react/incompatible-library
-  const witnessVirtualizer = useVirtualizer({
-    count: previewPages.length,
-    getScrollElement: () => witnessScrollRef.current,
-    estimateSize: () => 760,
-    overscan: 2,
-  })
-
   const issueIndices = useMemo(
     () =>
       segments
@@ -426,27 +411,82 @@ export function ReviewWorkbench() {
     [segments]
   )
 
+  // Start on the first fault so the reviewer immediately sees the sentence
+  // that needs attention instead of an unexplained blank inspector.
+  useEffect(() => {
+    if (segments.length === 0 || selectedBlockId) return
+    // oxlint-disable-next-line react/set-state-in-effect
+    setSelectedBlockId(segments[issueIndices[0] ?? 0]?.block_id ?? null)
+  }, [segments, issueIndices, selectedBlockId])
+
+  const selectedIndex = selectedBlockId
+    ? segments.findIndex((segment) => segment.block_id === selectedBlockId)
+    : -1
+
+  // Opening a segment from a narrow-screen issue queue surfaces the same
+  // evidence that is always visible beside the editor on desktop.
+  const selectSegment = (index: number) => {
+    const segment = segments[index]
+    if (!segment) return
+    setSelectedBlockId(segment.block_id)
+    setIssueCursor(Math.max(0, issueIndices.indexOf(index)))
+  }
+
+  const selectAndReveal = (index: number) => {
+    selectSegment(index)
+    if (isMobile) setInspectorOpen(true)
+  }
+
+  const moveSegment = (delta: number): number => {
+    if (segments.length === 0) return -1
+    const current = selectedIndex >= 0 ? selectedIndex : delta > 0 ? -1 : 1
+    const next = Math.min(segments.length - 1, Math.max(0, current + delta))
+    selectSegment(next)
+    return next
+  }
+
+  const scrollToSelected = (index = selectedIndex) => {
+    if (index < 0) return
+    if (viewMode === 'reading_flow') {
+      flowVirtualizer.scrollToIndex(index, { align: 'center' })
+    } else if (viewMode === 'segments') {
+      virtualizer.scrollToIndex(index)
+    }
+  }
+
   const jumpToIssue = (delta: number) => {
     if (issueIndices.length === 0) return
     const next = (issueCursor + delta + issueIndices.length) % issueIndices.length
     setIssueCursor(next)
-    virtualizer.scrollToIndex(issueIndices[next], { align: 'center' })
+    setSelectedBlockId(segments[issueIndices[next]]?.block_id ?? null)
+    virtualizer.scrollToIndex(issueIndices[next])
   }
 
-  // F8 / Shift+F8 walk the fault list (PRD §5.1). Escape closes the inspector.
+  // F8 / Shift+F8 walk the fault list (PRD §5.1). J / K navigate segments. Escape closes the inspector.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      const active = document.activeElement
+      const isInput = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')
+
       if (e.key === 'Escape' && inspectorOpen) {
-        const active = document.activeElement
-        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
-          return
-        }
+        if (isInput) return
         setInspectorOpen(false)
         return
       }
-      if (e.key !== 'F8') return
-      e.preventDefault()
-      jumpToIssue(e.shiftKey ? -1 : 1)
+      if (e.key === 'F8') {
+        e.preventDefault()
+        jumpToIssue(e.shiftKey ? -1 : 1)
+        return
+      }
+      if (!isInput && !e.metaKey && !e.ctrlKey && !e.altKey && segments.length > 0) {
+        if (e.key === 'j') {
+          e.preventDefault()
+          moveSegment(1)
+        } else if (e.key === 'k') {
+          e.preventDefault()
+          moveSegment(-1)
+        }
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -469,8 +509,8 @@ export function ReviewWorkbench() {
         delete next[segment.block_id]
         return next
       })
-      // The edit changed the ledger text: any open page preview is now stale.
-      if (segment.page !== null && openPreviews[segment.page]) {
+      // The edit changed the ledger text: an open page preview is now stale.
+      if (segment.page !== null && previewPage === segment.page) {
         setPreviewBust(Date.now())
       }
       // The ledger text changed, but the *delivered file* was rendered before
@@ -519,117 +559,9 @@ export function ReviewWorkbench() {
     }
   }
 
-  const issueWorkbenchDownload = async (key: string, force = false) => {
-    if (!jobId || exporting) return
-    setExporting(true)
-    setExportMenuOpen(false)
-    setExportStatusText(t.review.exportPreparing)
-    try {
-      // 1. Flush any uncommitted in-memory edits to the ledger before exporting
-      const unsavedEntries = Object.entries(drafts).filter(([blockId, text]) => {
-        const seg = segments.find((s) => s.block_id === blockId)
-        return seg && text !== seg.delivered_text
-      })
-      let reExportNeeded = reExportPending
-      if (unsavedEntries.length > 0) {
-        setExportStatusText(t.review.exportSavingDrafts)
-        for (const [blockId, draftText] of unsavedEntries) {
-          try {
-            const res = await editSegment(jobId, blockId, draftText)
-            if (res.segment) {
-              const updated = res.segment
-              setSegments((prev) => prev.map((s) => (s.block_id === updated.block_id ? updated : s)))
-            }
-            setSaved((prev) => ({ ...prev, [blockId]: true }))
-            setEditing((prev) => ({ ...prev, [blockId]: false }))
-            setDrafts((prev) => {
-              const next = { ...prev }
-              delete next[blockId]
-              return next
-            })
-          } catch (err) {
-            console.error('Failed to auto-save draft for block', blockId, err)
-          }
-        }
-        reExportNeeded = true
-      }
-
-      // 2. Fetch fresh deliverable listing to check freshness and gate status
-      let currentItems = deliverables
-      let listing: DeliverableListing | null = null
-      try {
-        listing = await listDeliverables(jobId)
-        setDeliverables(listing.items)
-        setDeliveryVerdict(listing.deliveryVerdict)
-        currentItems = listing.items
-        if (listing.stale) {
-          reExportNeeded = true
-        }
-      } catch {
-        // Fall back to currentItems if listDeliverables fails
-      }
-
-      // 3. Re-export if needed due to edits, pending changes, or stale deliverables
-      if (reExportNeeded) {
-        setExportStatusText(t.review.exportRerendering)
-        toast.push(t.review.exportRerendering, 'info')
-        await reExportJob(jobId)
-        setReExportPending(false)
-        const refreshed = await listDeliverables(jobId).catch(() => null)
-        if (refreshed) {
-          setDeliverables(refreshed.items)
-          setDeliveryVerdict(refreshed.deliveryVerdict)
-          currentItems = refreshed.items
-          if (refreshed.deliveryVerdict === 'blocked' && !force) {
-            setPendingBlockedExport(key)
-            return
-          }
-        }
-      } else if (listing && listing.deliveryVerdict === 'blocked' && !force) {
-        setPendingBlockedExport(key)
-        return
-      }
-
-      // 4. If current items are empty, try fetching one last time
-      if (currentItems.length === 0) {
-        const refreshed = await listDeliverables(jobId).catch(() => null)
-        if (refreshed) {
-          setDeliverables(refreshed.items)
-          setDeliveryVerdict(refreshed.deliveryVerdict)
-          currentItems = refreshed.items
-        }
-      }
-
-      // 5. Trigger download
-      const target = currentItems.find((d) => d.key === key) ?? currentItems[0]
-      if (target) {
-        const url = deliverableDownloadUrl(jobId, target.key, { force })
-        triggerBrowserDownload(url, target.filename)
-        toast.push(t.review.exportSuccess, 'success')
-      } else {
-        toast.push(t.mission.noDeliverables, 'error')
-      }
-    } catch (err) {
-      toast.push(err instanceof Error ? err.message : t.review.exportFailed, 'error')
-    } finally {
-      setExporting(false)
-      setExportStatusText(null)
-    }
-  }
-
-  const handleOneClickExport = async (key?: string) => {
-    if (!jobId || exporting) return
-    const targetKey = key ?? primaryDeliverable?.key ?? 'primary'
-    if (deliveryVerdict === 'blocked') {
-      setPendingBlockedExport(targetKey)
-      return
-    }
-    await issueWorkbenchDownload(targetKey, false)
-  }
-
-  const togglePreview = (page: number | null) => {
+  const openLayoutPreview = (page: number | null) => {
     if (page === null) return
-    setOpenPreviews((prev) => ({ ...prev, [page]: !prev[page] }))
+    setPreviewPage(page)
   }
 
   const handleTermReplaced = (blockId: string, page: number | null, replacements: number) => {
@@ -637,7 +569,7 @@ export function ReviewWorkbench() {
       ...prev,
       [blockId]: t.review.cascadeDone.replace('{n}', String(replacements)),
     }))
-    if (page !== null && openPreviews[page]) {
+    if (page !== null && previewPage === page) {
       setPreviewBust(Date.now())
     }
     // Refresh only the first page and splice it in front of the paged-in tail:
@@ -666,11 +598,11 @@ export function ReviewWorkbench() {
 
   if (!jobId) {
     return (
-      <div className="flex-1 flex items-center justify-center p-8 text-center text-[var(--ink-muted)]">
+      <div className="flex-1 flex items-center justify-center p-8 text-center text-muted-foreground">
         <div className="max-w-sm space-y-2">
-          <SplitSquareVertical className="h-8 w-8 mx-auto text-[var(--paper-border-hover)]" />
-          <h2 className="text-sm font-semibold text-[var(--ink-primary)]">{t.quality.noJobTitle}</h2>
-          <p className="text-xs text-[var(--ink-secondary)] leading-relaxed">{t.quality.noJobDesc}</p>
+          <SplitSquareVertical className="h-8 w-8 mx-auto text-muted-foreground/40" />
+          <h2 className="text-sm font-semibold text-foreground">{t.quality.noJobTitle}</h2>
+          <p className="text-xs text-muted-foreground leading-relaxed">{t.quality.noJobDesc}</p>
         </div>
       </div>
     )
@@ -684,304 +616,414 @@ export function ReviewWorkbench() {
     ? (segments.find((segment) => segment.block_id === selectedBlockId) ?? null)
     : null
 
+  const scope: Scope =
+    filter === 'all' ? 'all' : filter === 'needs_human' ? 'issues' : filter === 'issues' ? 'issues' : 'issues'
   const hasMore = segments.length < segmentTotal
 
-  const renderPreview = (page: number) => (
-    <div className="mt-3 rounded-[6px] border border-[var(--paper-border)] bg-[var(--paper-subsurface)] overflow-hidden">
-      <div className="h-8 px-3 flex items-center justify-between text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] border-b border-[var(--paper-border)]">
-        <span>
-          {t.review.previewPage} · P{page}
-        </span>
-        <button
-          type="button"
-          onClick={() => setPreviewBust(Date.now())}
-          title={t.review.rerenderHint}
-          className="min-h-[28px] md:min-h-0 flex items-center gap-1.5 px-2 py-1 md:py-0.5 rounded text-xs text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] font-mono transition-colors cursor-pointer hover:bg-[var(--paper-surface)]"
-        >
-          <RefreshCw className="h-3.5 w-3.5 md:h-3 md:w-3" />
-          <span>{t.review.rerenderPage}</span>
-        </button>
+  const saveAndContinue = async (segment: Segment) => {
+    await handleSave(segment)
+    setEditing((prev) => ({ ...prev, [segment.block_id]: false }))
+    const next = moveSegment(1)
+    requestAnimationFrame(() => scrollToSelected(next))
+  }
+
+  const evidencePanel = inspectorSegment ? (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="border-b border-border/70 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Info className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold text-foreground">{t.review.evidenceTitle}</h2>
+        </div>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          {t.review.evidenceHint}
+        </p>
       </div>
-      <img
-        src={pagePreviewUrl(jobId, page, { dpi: 110, cacheBust: previewBust })}
-        alt={t.review.targetCanvasAlt.replace('{n}', String(page))}
-        className="w-full max-h-[560px] object-contain bg-white"
-        onError={(e) => {
-          const target = e.currentTarget
-          target.style.display = 'none'
-          const sibling = target.nextElementSibling as HTMLElement | null
-          if (sibling) sibling.style.display = 'flex'
-        }}
-      />
-      <div className="hidden items-center gap-2 p-4 text-xs text-[var(--ink-secondary)]">
-        <ImageOff className="h-4 w-4 shrink-0" />
-        {t.review.previewFailed}
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <div className="mb-5 rounded-lg border border-border/80 bg-muted/25 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 text-xs font-semibold text-foreground">
+              {segmentLocation(t, inspectorSegment)}
+            </div>
+            <Badge
+              variant="outline"
+              className={cn(
+                'shrink-0 font-normal',
+                inspectorSegment.mqm_severity === 'critical' &&
+                  'border-rose-600/25 bg-rose-500/10 text-rose-700 dark:text-rose-400'
+              )}
+            >
+              {mqmSeverityLabel(t, inspectorSegment.mqm_severity)}
+            </Badge>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <span>{blockTypeLabel(t, inspectorSegment.block_type)}</span>
+            {inspectorSegment.page !== null && (
+              <>
+                <span>·</span>
+                <span>{t.review.pageLabel.replace('{n}', String(inspectorSegment.page))}</span>
+              </>
+            )}
+          </div>
+        </div>
+        <div className="mb-5">
+          <div className="mb-2 text-xs font-medium text-muted-foreground">
+            {t.review.findingsTitle}
+          </div>
+          {inspectorSegment.error_flags.length > 0 || inspectorSegment.issues.length > 0 ? (
+            <div className="space-y-1.5">
+              {(inspectorSegment.issues.length > 0
+                ? inspectorSegment.issues
+                : inspectorSegment.error_flags.map(findingKindForFlag)
+              ).map((kind) => (
+                <div key={kind} className="flex items-start gap-2.5 rounded-md bg-muted/40 px-3 py-2.5">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium text-foreground">
+                      {issueLabel(t, kind)}
+                    </div>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                      {findingLabel(t, kind)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {t.review.noFindings}
+            </p>
+          )}
+        </div>
+        <dl className="mb-5 grid grid-cols-2 gap-2">
+          {[
+            [t.review.inspectorQe, inspectorSegment.mtqe_score === null ? '—' : `${Math.round(inspectorSegment.mtqe_score * 100)}%`],
+            [t.review.inspectorRepairs, String(inspectorSegment.repair_rounds)],
+            [t.review.inspectorTmHit, inspectorSegment.tm_hit ? t.common.yes : '—'],
+          ].map(([label, value], index) => (
+            <div
+              key={label}
+              className={cn(
+                'rounded-lg border border-border/70 bg-card px-3 py-2.5',
+                index === 0 && 'col-span-2'
+              )}
+            >
+              <dt className="text-[11px] text-muted-foreground">{label}</dt>
+              <dd className="mt-1 font-mono text-sm font-medium text-foreground">{value}</dd>
+            </div>
+          ))}
+        </dl>
+        {inspectorSegment.glossary_hits.length > 0 && (
+          <div className="mb-4">
+            <div className="mb-2 text-xs font-medium text-muted-foreground">
+              {t.review.inspectorGlossary}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {inspectorSegment.glossary_hits.map((term) => (
+                <Badge key={term} variant="outline" className="font-mono text-xs">
+                  {term}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+          <Accordion type="single" collapsible className="rounded-lg border border-border/80 px-3">
+          <AccordionItem value="raw" className="border-b-0">
+            <AccordionTrigger className="py-3 text-xs hover:no-underline">
+              {t.review.rawEvidence}
+            </AccordionTrigger>
+            <AccordionContent className="space-y-3 pb-3">
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {t.review.rawEvidenceHint}
+              </p>
+              {inspectorSegment.error_flags.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-foreground">{t.review.errorFlags}</div>
+                  {inspectorSegment.error_flags.map((flag) => (
+                    <div key={flag} className="break-all rounded-md bg-muted/50 p-2 font-mono text-xs text-muted-foreground">
+                      {flag}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {Object.keys(inspectorSegment.provenance).length > 0 && (
+                <div>
+                  <div className="mb-1.5 text-xs font-medium text-foreground">
+                    {t.review.inspectorProvenance}
+                  </div>
+                  <pre className="max-h-52 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/50 p-2 font-mono text-xs text-muted-foreground">
+                    {JSON.stringify(inspectorSegment.provenance, null, 2)}
+                  </pre>
+                </div>
+              )}
+              <div>
+                <div className="mb-1.5 text-xs font-medium text-foreground">
+                  {t.review.blockTechnicalId}
+                </div>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 rounded-md bg-muted/50 px-2.5 py-2 text-left font-mono text-xs text-muted-foreground transition-colors hover:text-foreground"
+                  title={t.mission.copy}
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(inspectorSegment.block_id)
+                  }}
+                >
+                  <span className="break-all">{inspectorSegment.block_id}</span>
+                  <span className="shrink-0 text-[11px]">{t.mission.copy}</span>
+                </button>
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
       </div>
     </div>
-  )
+  ) : null
 
   return (
-    <div className="flex-1 flex min-h-0 overflow-hidden bg-[var(--paper-bg)] text-[var(--ink-primary)]">
+    <div className="flex-1 flex min-h-0 overflow-hidden bg-background text-foreground">
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      {/* Precision Ribbon */}
-      <div className="min-h-11 px-3 md:px-6 py-2 border-b border-[var(--paper-border)] bg-[var(--paper-surface)] flex flex-wrap items-center justify-between gap-2 shrink-0 shadow-2xs">
-        <div className="flex items-center gap-2 md:gap-3 flex-wrap">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-[var(--ink-primary)]">
-            <SplitSquareVertical className="h-4 w-4 text-[#15803d]" />
+      {/* Precision Top Toolbar: Single-line fixed height 56px (h-14) */}
+      <div className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/80 bg-card px-4 py-2 shadow-2xs md:px-5">
+        {/* Left: Workbench Title + Count + Issue Navigation */}
+        <div className="flex min-w-0 flex-[1_1_18rem] flex-wrap items-center gap-3">
+          {jobId && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => navigate(`/jobs/${jobId}`)}
+              className="-ml-2 size-8 shrink-0"
+              title={t.quality.backToJob}
+              aria-label={t.quality.backToJob}
+            >
+              <ArrowLeft />
+            </Button>
+          )}
+          <div className="flex min-w-0 items-center gap-2 whitespace-nowrap text-sm font-semibold tracking-[-0.01em] text-foreground">
+            <SplitSquareVertical className="size-4 text-primary" />
             <span>{t.review.title}</span>
           </div>
-          <div className="h-3 w-px bg-[var(--paper-border)] hidden sm:block" />
-          <div className="flex items-center gap-1.5 md:gap-2 text-xs font-mono flex-wrap">
-            {ribbonCounts.length === 0 ? (
-              <span className="text-[#15803d] flex items-center gap-1 font-medium">
-                <CheckCircle2 className="h-3.5 w-3.5" /> {t.review.noIssues}
-              </span>
-            ) : (
-              ribbonCounts.map(([kind, value]) => {
-                const isActive = filter === kind
-                return (
-                  <button
-                    key={kind}
-                    type="button"
-                    onClick={() => setFilter(isActive ? 'issues' : kind)}
-                    className={`min-h-[30px] md:min-h-0 px-2 py-1 md:py-0.5 rounded border transition-colors cursor-pointer text-xs font-mono flex items-center gap-1 ${
-                      isActive
-                        ? 'border-[#b45309] bg-[#b45309]/20 text-[#b45309] font-bold shadow-xs'
-                        : 'border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-[var(--ink-secondary)] hover:border-[var(--paper-border-hover)] hover:text-[var(--ink-primary)]'
-                    }`}
-                    title={isActive ? t.review.clearFilter : `${t.review.filterByIssueKind}: ${issueLabel(t, kind)}`}
-                  >
-                    <span>{issueLabel(t, kind)}</span>
-                    <span className="opacity-80 font-bold">{value}</span>
-                    {isActive && <span className="ml-0.5 text-[10px] opacity-70">✕</span>}
-                  </button>
-                )
-              })
-            )}
-            {(issues?.status.needs_human ?? 0) > 0 && (
-              <button
-                type="button"
-                onClick={() => setFilter(filter === 'needs_human' ? 'issues' : 'needs_human')}
-                className={`min-h-[30px] md:min-h-0 px-2 py-1 md:py-0.5 rounded border transition-colors cursor-pointer text-xs font-mono flex items-center gap-1 ${
-                  filter === 'needs_human'
-                    ? 'border-[#b45309] bg-[#b45309]/20 text-[#b45309] font-bold shadow-xs'
-                    : 'border-[#b45309]/40 bg-[#b45309]/10 text-[#b45309] hover:bg-[#b45309]/20'
-                }`}
-              >
-                {blockStatusLabel(t, 'needs_human')} {issues?.status.needs_human}
-              </button>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => jumpToIssue(-1)}
-              title={t.review.prevIssue}
-              className="p-1.5 md:p-1 min-h-[30px] min-w-[30px] md:min-h-0 md:min-w-0 flex items-center justify-center rounded hover:bg-[var(--paper-subsurface)] text-[var(--ink-muted)] cursor-pointer"
-            >
-              <ChevronUp className="h-4 w-4 md:h-3.5 md:w-3.5" />
-            </button>
-            <button
-              onClick={() => jumpToIssue(1)}
-              title={t.review.nextIssue}
-              className="p-1.5 md:p-1 min-h-[30px] min-w-[30px] md:min-h-0 md:min-w-0 flex items-center justify-center rounded hover:bg-[var(--paper-subsurface)] text-[var(--ink-muted)] cursor-pointer"
-            >
-              <ChevronDown className="h-4 w-4 md:h-3.5 md:w-3.5" />
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          {filter !== 'issues' && filter !== 'needs_human' && filter !== 'all' && (
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] bg-[#b45309]/15 border border-[#b45309]/40 text-[#b45309] text-xs font-mono">
-              <span className="font-semibold">{issueLabel(t, filter)}</span>
-              <button
-                type="button"
-                onClick={() => setFilter('issues')}
-                title={t.review.clearFilter}
-                className="hover:opacity-100 opacity-60 text-xs font-bold cursor-pointer p-0.5 min-h-[24px] min-w-[24px] flex items-center justify-center"
-              >
-                ✕
-              </button>
-            </div>
+          <Badge variant="secondary" className="font-mono text-xs font-normal shrink-0 whitespace-nowrap">
+            {t.review.segmentCount.replace('{count}', String(segmentTotal))}
+          </Badge>
+          {selectedIndex >= 0 && (
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {t.review.segmentPosition
+                .replace('{current}', String(selectedIndex + 1))
+                .replace('{total}', String(segments.length))}
+            </span>
           )}
-          <div className="flex bg-[var(--paper-subsurface)] p-0.5 rounded-lg border border-[var(--paper-border)] shadow-xs">
-            {(
-              [
-                ['issues', t.review.filterIssues],
-                ['needs_human', t.review.filterNeedsHuman],
-                ['all', t.review.filterAll],
-              ] as [Filter, string][]
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                onClick={() => setFilter(id)}
-                className={`btn-tactile min-h-[30px] md:min-h-0 px-2.5 py-1 text-xs rounded-md transition-all font-medium cursor-pointer ${
-                  filter === id
-                    ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-xs'
-                    : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex bg-[var(--paper-subsurface)] p-0.5 rounded-lg border border-[var(--paper-border)] shadow-xs">
-            <button
-              onClick={() => setViewMode('segments')}
-              className={`btn-tactile min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-md transition-all font-medium cursor-pointer ${
-                viewMode === 'segments'
-                  ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-xs'
-                  : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
-              }`}
-            >
-              {t.review.modeSegments}
-            </button>
-            <button
-              onClick={() => setViewMode('reading_flow')}
-              className={`btn-tactile min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-md transition-all font-medium cursor-pointer ${
-                viewMode === 'reading_flow'
-                  ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-xs'
-                  : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
-              }`}
-            >
-              {t.review.modeFlow}
-            </button>
-            <button
-              onClick={() => setViewMode('visual_witness')}
-              className={`btn-tactile min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-md transition-all font-medium cursor-pointer ${
-                viewMode === 'visual_witness'
-                  ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-xs'
-                  : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
-              }`}
-            >
-              {t.review.modeVisual}
-            </button>
-          </div>
-
-          {/* Explicit re-render: it rebuilds the whole delivered file, so it
-              runs once per review session rather than on every save. */}
-          <button
-            onClick={() => void handleReExport()}
-            disabled={reExporting || exporting}
-            className={`btn-tactile min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-lg border transition-all font-medium cursor-pointer disabled:cursor-wait ${
-              reExportPending
-                ? 'border-[#b45309]/40 bg-[#b45309]/10 text-[#b45309] font-semibold shadow-xs'
-                : 'border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] shadow-xs'
-            }`}
-            title={t.review.reExportHelp}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="hidden h-7 px-2 text-xs lg:inline-flex"
+            onClick={() => setDesktopEvidenceOpen((open) => !open)}
           >
-            {reExporting
-              ? t.review.reExporting
-              : reExportPending
-                ? t.review.reExportStale
-                : t.review.reExportAction}
-          </button>
-
-          {/* Prominent One-Click Export & Deliver Primary Action */}
-          <div ref={exportContainerRef} className="relative inline-flex items-center shadow-xs">
-            <Button
-              onClick={() => void handleOneClickExport()}
-              disabled={exporting}
-              variant="primary"
-              size="sm"
-              className={`h-9 sm:h-7 px-3 text-xs font-bold transition-all flex items-center gap-1.5 ${
-                readingDeliverables.length > 1 ? 'rounded-r-none pr-2 border-r border-white/20' : ''
-              }`}
-              title={t.review.exportQuickHelp}
+            {desktopEvidenceOpen ? <EyeOff /> : <Info />}
+            {desktopEvidenceOpen ? t.review.hideEvidence : t.review.showEvidence}
+          </Button>
+          <div className="h-4 w-px bg-border hidden sm:block" />
+          <div className="hidden items-center rounded-md border border-input bg-background/50 shadow-2xs sm:flex">
+            <button
+              type="button"
+              onClick={() => {
+                const next = moveSegment(-1)
+                requestAnimationFrame(() => scrollToSelected(next))
+              }}
+              title={t.review.prevIssue}
+              className="p-1.5 hover:bg-muted text-muted-foreground hover:text-foreground rounded-l-md transition-colors cursor-pointer"
             >
-              {exporting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Download className="h-3.5 w-3.5" />
-              )}
-              <span>{exporting && exportStatusText ? exportStatusText : t.review.oneClickExport}</span>
-              {primaryDeliverable && !exporting && (
-                <span className="hidden sm:inline-block text-[10px] font-mono opacity-80 uppercase px-1 py-0.5 bg-black/15 rounded">
-                  {getFormatBadge(primaryDeliverable.filename)}
-                </span>
-              )}
-            </Button>
-            {readingDeliverables.length > 1 && (
-              <button
-                type="button"
-                onClick={() => setExportMenuOpen((prev) => !prev)}
-                disabled={exporting}
-                title={t.review.exportFormats}
-                className="h-9 sm:h-7 px-1.5 text-xs bg-[var(--btn-bg)] text-[var(--btn-fg)] hover:bg-[var(--btn-hover)] rounded-r transition-all flex items-center justify-center cursor-pointer border-l border-white/20 disabled:opacity-60"
-              >
-                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${exportMenuOpen ? 'rotate-180' : ''}`} />
-              </button>
-            )}
-
-            {/* Format Dropdown Menu */}
-            {exportMenuOpen && (
-              <div
-                className="absolute right-0 top-full mt-1.5 w-64 bg-[var(--paper-surface)] border border-[var(--paper-border)] rounded-md shadow-lg py-1 z-50 text-xs"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="px-3 py-1.5 text-[11px] font-semibold text-[var(--ink-muted)] border-b border-[var(--paper-border)] uppercase tracking-wider">
-                  {t.review.exportFormats}
-                </div>
-                <div className="max-h-60 overflow-y-auto py-1">
-                  {readingDeliverables.map((item) => {
-                    const isPrimary = item.key === 'primary' || item === primaryDeliverable
-                    const badge = getFormatBadge(item.filename)
-                    return (
-                      <button
-                        key={item.key}
-                        type="button"
-                        onClick={() => void handleOneClickExport(item.key)}
-                        className="w-full px-3 py-2 text-left hover:bg-[var(--paper-subsurface)] flex items-center justify-between gap-2 transition-colors cursor-pointer"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-[var(--paper-border)] text-[var(--ink-primary)]">
-                              {badge}
-                            </span>
-                            <span className="font-medium text-[var(--ink-primary)] truncate">
-                              {deliverableName(item.key, item.label || item.filename, t)}
-                            </span>
-                          </div>
-                          <div className="text-[10px] text-[var(--ink-muted)] font-mono mt-0.5 truncate">
-                            {item.filename} · {formatBytes(item.size_bytes)}
-                          </div>
-                        </div>
-                        {isPrimary && (
-                          <span className="shrink-0 text-[10px] px-1 py-0.5 rounded bg-[#15803d]/15 text-[#15803d] font-semibold font-mono">
-                            {t.review.exportPrimaryBadge}
-                          </span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
+              <ChevronUp className="h-3.5 w-3.5" />
+            </button>
+            <div className="h-3 w-px bg-border" />
+            <button
+              type="button"
+              onClick={() => {
+                const next = moveSegment(1)
+                requestAnimationFrame(() => scrollToSelected(next))
+              }}
+              title={t.review.nextIssue}
+              className="p-1.5 hover:bg-muted text-muted-foreground hover:text-foreground rounded-r-md transition-colors cursor-pointer"
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
+
+        {/* Only two independent choices belong in persistent chrome:
+            the review scope and the reading view. Everything else is a
+            contextual action inside the selected segment. */}
+        <div className="flex min-w-0 flex-[2_1_34rem] flex-wrap items-center justify-start gap-2 sm:justify-end">
+          <p className="text-xs text-muted-foreground">{t.review.scopeLabel}</p>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs">
+                <ListFilter />
+                {scopeLabel(t, scope)}
+                <ChevronDown className="opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
+                {t.review.scopeLabel}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuRadioGroup
+                value={scope}
+                onValueChange={(value) => setFilter(value === 'all' ? 'all' : 'issues')}
+              >
+                <DropdownMenuRadioItem value="issues" className="text-xs">
+                  {t.review.scopeToReview}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="all" className="text-xs">
+                  {t.review.scopeEverything}
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="hidden h-8 gap-1.5 px-2.5 text-xs sm:inline-flex"
+              >
+                {viewMode === 'segments' ? t.review.modeSegments : t.review.modeFlow}
+                <ChevronDown className="opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
+                {t.review.viewLabel}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuRadioGroup
+                value={viewMode}
+                onValueChange={(value) => setViewMode(value as typeof viewMode)}
+              >
+                <DropdownMenuRadioItem value="segments" className="text-xs">
+                  <span>{t.review.modeSegments}</span>
+                  <span className="block text-[11px] font-normal text-muted-foreground">
+                    {t.review.modeSegmentsDesc}
+                  </span>
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="reading_flow" className="text-xs">
+                  <span>{t.review.modeFlow}</span>
+                  <span className="block text-[11px] font-normal text-muted-foreground">
+                    {t.review.modeFlowDesc}
+                  </span>
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Re-export indicator button if needed */}
+          {reExportPending && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleReExport()}
+              disabled={reExporting}
+              className="h-8 text-xs border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20"
+              title={t.review.reExportHelp}
+            >
+              {reExporting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5 mr-1" />
+              )}
+              {reExporting ? t.review.reExporting : t.review.reExportStale}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Issue Sub-Toolbar: Filter pills that never wrap or break the top header */}
+      <div className="h-10 px-4 md:px-6 border-b border-border bg-muted/20 flex items-center gap-2 overflow-x-auto shrink-0 text-xs">
+        <div className="flex items-center gap-1.5 text-muted-foreground shrink-0 font-medium">
+          <Filter className="h-3.5 w-3.5" />
+          <span>{t.review.filterByIssueKind}:</span>
+        </div>
+
+        {ribbonCounts.length === 0 ? (
+          <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium shrink-0">
+            <CheckCircle2 className="h-3.5 w-3.5" /> {t.review.noIssues}
+          </span>
+        ) : (
+          ribbonCounts.map(([kind, value]) => {
+            const isActive = filter === kind
+            return (
+              <button
+                key={kind}
+                type="button"
+                onClick={() => setFilter(isActive ? 'issues' : kind)}
+                className={cn(
+                  "h-6 px-2.5 rounded-full border transition-all text-xs flex items-center gap-1.5 shrink-0 cursor-pointer",
+                  isActive
+                    ? "bg-primary text-primary-foreground border-primary shadow-xs font-medium"
+                    : "bg-background border-border text-muted-foreground hover:text-foreground hover:bg-accent"
+                )}
+                title={isActive ? t.review.clearFilter : `${t.review.filterByIssueKind}: ${issueLabel(t, kind)}`}
+              >
+                <span>{issueLabel(t, kind)}</span>
+                <span className={cn(
+                  "text-xs font-mono px-1 rounded-full",
+                  isActive ? "bg-primary-foreground/20 text-primary-foreground font-bold" : "bg-muted text-foreground"
+                )}>
+                  {value}
+                </span>
+                {isActive && <X className="h-3 w-3 ml-0.5 opacity-80" />}
+              </button>
+            )
+          })
+        )}
+
+        {filter !== 'issues' && filter !== 'needs_human' && filter !== 'all' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setFilter('issues')}
+            className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground shrink-0"
+          >
+            <X className="h-3 w-3 mr-1" />
+            {t.review.clearFilter}
+          </Button>
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-card px-4 py-2 text-xs md:hidden">
+        <ListFilter className="size-3.5 text-muted-foreground" />
+        <span className="text-muted-foreground">{t.review.issueQueueHint}</span>
+        {inspectorSegment && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-7 px-2 text-xs"
+            onClick={() => setInspectorOpen(true)}
+          >
+            {t.review.openEvidence}
+          </Button>
+        )}
       </div>
 
       {reExportNotice && (
-        <div className="px-6 py-2 text-xs text-[var(--ink-secondary)] bg-[var(--paper-subsurface)] border-b border-[var(--paper-border)]">
+        <div className="px-6 py-2 text-xs text-muted-foreground bg-muted/40 border-b border-border">
           {reExportNotice}
         </div>
       )}
 
       {error && (
-        <div className="px-6 py-2 text-xs text-[var(--ink-secondary)] bg-[#b45309]/10 border-b border-[var(--paper-border)] flex items-center gap-2">
-          <AlertTriangle className="h-3.5 w-3.5 text-[#b45309] shrink-0" />
+        <div className="px-6 py-2 text-xs text-muted-foreground bg-amber-500/10 border-b border-border flex items-center gap-2">
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-700 dark:text-amber-400 shrink-0" />
           {error}
         </div>
       )}
 
       {viewMode === 'segments' ? (
         loading ? (
-          <div className="flex-1 flex items-center justify-center text-[var(--ink-muted)]">
+          <div className="flex-1 flex items-center justify-center text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin" />
           </div>
         ) : segments.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-3 p-8 text-xs text-[var(--ink-muted)]">
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 p-8 text-xs text-muted-foreground">
             <p>{t.review.noSegments}</p>
             {filter !== 'all' && (
               <Button
@@ -995,240 +1037,187 @@ export function ReviewWorkbench() {
           </div>
         ) : (
           <div ref={scrollRef} className="flex-1 overflow-y-auto">
-            <div
-              className="relative w-full max-w-5xl mx-auto py-6"
-              style={{ height: virtualizer.getTotalSize() }}
-            >
-              {virtualizer.getVirtualItems().map((virtualRow) => {
-                const seg = segments[virtualRow.index]
+            <div className="mx-auto w-full max-w-[1500px] px-4 py-5 md:px-6">
+              {segments.map((seg, index) => {
                 const draft = drafts[seg.block_id] ?? seg.delivered_text
                 const dirty = draft !== seg.delivered_text
-                // The engine's wrapper semantics live server-side (one owner);
-                // the segment arrives with the delivered text, the repair
-                // failure flag and its decoded reason already split apart.
-                const failed = {
-                  text: seg.delivered_text,
-                  reason: seg.repair_error,
-                  failed: seg.repair_failed,
-                }
-                const previewOpen = seg.page !== null && openPreviews[seg.page]
+                const isSelected = selectedBlockId === seg.block_id
+                const isEditing = editing[seg.block_id] === true
                 return (
-                  <div
+                  <article
                     key={seg.block_id}
-                    data-index={virtualRow.index}
-                    ref={virtualizer.measureElement}
-                    className="absolute top-0 left-0 w-full px-3 md:px-8"
-                    style={{ transform: `translateY(${virtualRow.start}px)` }}
+                    id={`review-segment-${index}`}
+                    className={cn(
+                      'relative mb-4 rounded-xl border bg-card px-4 py-4 transition-colors sm:px-5',
+                      isSelected
+                        ? 'border-primary/35 bg-primary/[0.025] shadow-sm ring-1 ring-primary/15'
+                        : 'border-border/70 hover:border-border'
+                    )}
+                    onClick={() => selectAndReveal(index)}
                   >
-                    <div className="pb-4">
-                      <div
-                        onClick={() => {
-                          setSelectedBlockId(seg.block_id)
-                          setInspectorOpen(true)
-                        }}
-                        className={`card-tactile reading-segment rounded-xl border transition-all shadow-[var(--shadow-card)] bg-[var(--paper-surface)] cursor-pointer ${
-                          selectedBlockId === seg.block_id
-                            ? 'border-[var(--ink-primary)] ring-1 ring-[var(--paper-border-hover)]'
-                            : seg.issues.length > 0
-                              ? 'border-[#b45309]/50 hover:border-[#b45309]'
-                              : 'border-[var(--paper-border)] hover:border-[var(--paper-border-hover)]'
-                        }`}
-                      >
-                        <div className="h-8.5 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between text-xs font-mono text-[var(--ink-muted)]">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[var(--ink-primary)] font-bold">
-                              {seg.block_id}
-                            </span>
-                            {seg.page !== null && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  togglePreview(seg.page)
-                                }}
-                                title={t.review.previewPage}
-                                className={`btn-tactile min-h-[28px] md:min-h-0 px-2 py-1 md:py-0.5 rounded text-xs font-semibold transition-colors cursor-pointer ${
-                                  previewOpen
-                                    ? 'bg-[var(--ink-primary)] text-[var(--paper-bg)]'
-                                    : 'bg-[var(--paper-border)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]'
-                                }`}
-                              >
-                                {t.review.pageLabel.replace('{n}', String(seg.page))}
-                              </button>
-                            )}
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--paper-border)] text-[var(--ink-secondary)] font-semibold">
-                              {blockTypeLabel(t, seg.block_type)}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {seg.issues.map((kind) => (
-                              <span
-                                key={kind}
-                                className="text-xs px-1.5 py-0.5 rounded bg-[#b45309]/15 text-[#b45309] font-semibold"
-                              >
-                                {issueLabel(t, kind)}
-                              </span>
-                            ))}
-                            {seg.mtqe_score !== null && (() => {
-                              const pct = Math.round(seg.mtqe_score * 100)
-                              const colorClass = pct >= 85
-                                ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
-                                : pct >= 70
-                                  ? 'text-sky-700 dark:text-sky-400 bg-sky-500/10 border-sky-500/20'
-                                  : pct >= 55
-                                    ? 'text-amber-700 dark:text-amber-400 bg-amber-500/10 border-amber-500/20'
-                                    : 'text-rose-700 dark:text-rose-400 bg-rose-500/10 border-rose-500/20'
-                              return (
-                                <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-full border ${colorClass}`}>
-                                  QE {pct}%
-                                </span>
-                              )
-                            })()}
-                            {seg.human_verified ? (
-                              <Badge variant="success" dot>
-                                {t.review.humanVerified}
-                              </Badge>
-                            ) : (
-                              <Badge
-                                variant={
-                                  seg.status === 'mtqe_passed'
-                                    ? 'success'
-                                    : seg.status === 'needs_human' || seg.issues.length > 0
-                                      ? 'warning'
-                                      : seg.status === 'blocked_human' || seg.status === 'failed'
-                                        ? 'destructive'
-                                        : 'outline'
-                                }
-                                dot
-                              >
-                                {blockStatusLabel(t, seg.status)}
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="text-xs font-medium text-foreground">
+                          {segmentLocation(t, seg)}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {seg.page !== null && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                            title={t.review.layoutPreviewHint}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              openLayoutPreview(seg.page)
+                            }}
+                          >
+                            <Eye />
+                            {t.review.layoutPreview}
+                          </Button>
+                        )}
+                        {seg.issues.slice(0, 2).map((kind) => (
+                          <Badge key={kind} variant="outline" className="font-normal">
+                            {issueLabel(t, kind)}
+                          </Badge>
+                        ))}
+                        {seg.issues.length > 2 && (
+                          <span className="text-xs text-muted-foreground">+{seg.issues.length - 2}</span>
+                        )}
+                        {seg.human_verified ? (
+                          <Badge variant="outline" className="border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                            {t.review.humanVerified}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="font-normal">
+                            {blockStatusLabel(t, seg.status)}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-[var(--paper-border)] text-xs">
-                          <div className="p-4 text-[var(--ink-secondary)] font-mono leading-relaxed select-text bg-[var(--paper-subsurface)]">
-                            <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] mb-1 font-semibold">
+                    {!isMobile && (
+                      <ResizablePanelGroup
+                        orientation="horizontal"
+                        className="min-h-40"
+                      >
+                        <ResizablePanel defaultSize="50%" minSize="30%">
+                          <div className="h-full bg-muted/20 p-4 sm:p-5">
+                            <div className="mb-2 text-xs font-medium text-muted-foreground">
                               {t.review.sourceSegment}
                             </div>
-                            {seg.source_text}
+                            <div className="font-serif text-[15px] leading-7 text-foreground">
+                              <React.Suspense fallback={<RichTextFallback />}>
+                                <RichText text={seg.source_text} source />
+                              </React.Suspense>
+                            </div>
                           </div>
-
-                          <div className="p-4 flex flex-col justify-between bg-[var(--paper-surface)]">
-                            <div>
-                              <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] mb-1.5 flex items-center justify-between font-semibold">
-                                <span>{t.review.targetSegment}</span>
-                                {saved[seg.block_id] && (
-                                  <span className="text-[#15803d] font-sans font-medium">
-                                    {t.review.saved}
-                                  </span>
-                                )}
-                                {/* A draft restored from a previous session is
-                                    indistinguishable from the saved text
-                                    otherwise: the reviewer would not know which
-                                    block they had left unfinished. */}
-                                {!saved[seg.block_id] &&
-                                  drafts[seg.block_id] !== undefined &&
-                                  drafts[seg.block_id] !== seg.delivered_text && (
-                                    <span className="text-[#b45309] font-sans font-medium">
-                                      {t.review.unsavedDraft}
-                                    </span>
-                                  )}
-                              </div>
-                              {editing[seg.block_id] ? (
-                                <AutoGrowTextarea
-                                  autoFocus
-                                  // Editing starts from the *translation*, not
-                                  // from the <mark> markup: saving what was on
-                                  // screen would have written the engine's
-                                  // wrapper back into the block as content.
-                                  value={
-                                    drafts[seg.block_id] !== undefined
-                                      ? draft
-                                      : failed.text
+                        </ResizablePanel>
+                        <ResizableHandle withHandle />
+                        <ResizablePanel defaultSize="50%" minSize="30%">
+                        <div className="flex h-full min-w-0 flex-col p-4 sm:p-5">
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <span className="text-xs font-medium text-muted-foreground">
+                              {t.review.targetSegment}
+                            </span>
+                            {dirty ? (
+                              <Badge variant="outline" className="border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400">
+                                {t.review.unsavedDraft}
+                              </Badge>
+                            ) : saved[seg.block_id] ? (
+                              <span className="text-xs text-emerald-700 dark:text-emerald-400">
+                                {t.review.saved}
+                              </span>
+                            ) : null}
+                          </div>
+                          {isEditing ? (
+                            <div className="flex flex-1 flex-col gap-3" onClick={(event) => event.stopPropagation()}>
+                              <AutoGrowTextarea
+                                autoFocus
+                                value={draft}
+                                onChange={(event) =>
+                                  setDrafts((prev) => ({ ...prev, [seg.block_id]: event.target.value }))
+                                }
+                                onKeyDown={(event) => {
+                                  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                                    event.preventDefault()
+                                    void saveAndContinue(seg)
+                                  } else if (event.key === 'Escape') {
+                                    event.preventDefault()
+                                    setDrafts((prev) => {
+                                      const next = { ...prev }
+                                      delete next[seg.block_id]
+                                      return next
+                                    })
+                                    setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
                                   }
-                                  onChange={(e) =>
-                                    setDrafts((prev) => ({
-                                      ...prev,
-                                      [seg.block_id]: e.target.value,
-                                    }))
-                                  }
-                                  onKeyDown={(e) => {
-                                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                                      e.preventDefault()
-                                      void handleSave(seg)
-                                      setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
-                                    } else if (e.key === 'Escape') {
-                                      e.preventDefault()
-                                      e.stopPropagation()
-                                      setDrafts((prev) => {
-                                        const next = { ...prev }
-                                        delete next[seg.block_id]
-                                        return next
-                                      })
-                                      setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
-                                    }
+                                }}
+                                className="w-full resize-none rounded-md border border-input bg-background p-3 font-sans text-[15px] leading-7 text-foreground shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                              />
+                              <div className="flex flex-wrap items-center justify-end gap-2">
+                                <span className="mr-auto text-xs text-muted-foreground">
+                                  {t.review.editShortcutHint}
+                                </span>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setDrafts((prev) => {
+                                      const next = { ...prev }
+                                      delete next[seg.block_id]
+                                      return next
+                                    })
+                                    setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
                                   }}
-                                  // No `rows`: the height is measured from the
-                                  // content, so one block's editor is never a
-                                  // three-line window onto its own paragraph.
-                                  className="w-full bg-transparent text-[var(--ink-primary)] text-xs resize-none focus:outline-none font-mono leading-relaxed placeholder:text-[var(--ink-muted)]"
-                                />
-                              ) : (
-                                // A fragment, not a bare element: the pane needs
-                                // two siblings (the translation and the failure
-                                // notice), and a ternary arms only one.
-                                <>
-                                  <div
-                                    onDoubleClick={() =>
-                                      setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
-                                    }
-                                    // Post-editing was reachable ONLY by double-click,
-                                    // and the Save button stays disabled until an edit
-                                    // is open — so a keyboard user could browse, filter
-                                    // and read the whole book but could not fix a single
-                                    // block. role+tabIndex+Enter make the pane a control;
-                                    // the double-click stays as a mouse shortcut.
-                                    role="button"
-                                    tabIndex={0}
-                                    onKeyDown={(event) => {
-                                      if (event.key === 'Enter') {
-                                        event.preventDefault()
-                                        setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
-                                      }
-                                    }}
-                                    aria-label={t.review.startEditing}
-                                    // The card's own onClick opens the inspector,
-                                    // which narrows this column from 446px to
-                                    // 286px at 1280px. A double-click fires a
-                                    // click first, so the element moved out from
-                                    // under the second click and the editor never
-                                    // opened (measured: 0 of 2 attempts at 1280
-                                    // and 1366, 2 of 2 at 1600). Opening the
-                                    // editor is this node's own gesture; it must
-                                    // not also reflow the card underneath it.
-                                    onClick={(event) => event.stopPropagation()}
-                                    title={t.review.editHint}
-                                    className="min-h-[3rem] text-[var(--ink-primary)] text-xs font-mono leading-relaxed whitespace-pre-wrap break-words cursor-text"
-                                  >
-                                    {failed.text || '—'}
-                                  </div>
-                                  {/* Why the repair failed, decoded and wrapped.
-                                      It used to sit inside the markup, where it
-                                      rendered as 828px of escaped JSON in a 446px
-                                      column. `break-words` + a bounded box keeps
-                                      a long reason inside the pane. */}
-                                  {failed.failed && (
-                                    <div className="mt-1.5 rounded border border-[#b45309]/30 bg-[#b45309]/5 px-2 py-1 text-[10px] font-mono text-[#b45309] break-words max-h-24 overflow-y-auto">
-                                      {t.review.failedDraftNotice}: {failed.reason}
-                                    </div>
+                                >
+                                  {t.review.cancelEdit}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  disabled={saving[seg.block_id] || !dirty}
+                                  onClick={() => void saveAndContinue(seg)}
+                                >
+                                  {saving[seg.block_id] ? (
+                                    <Loader2 className="animate-spin" />
+                                  ) : (
+                                    <Save />
                                   )}
-                                  {seg.quarantined && (
-                                    <div className="mt-1.5 rounded border border-[var(--paper-border)] bg-[var(--paper-subsurface)] px-2 py-1 text-[10px] font-mono text-[var(--ink-secondary)] break-words">
-                                      {t.review.quarantinedNotice}
-                                    </div>
-                                  )}
-                                </>
+                                  {t.review.saveAndNext}
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex flex-1 flex-col">
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                title={t.review.editHint}
+                                onClick={(event) => event.stopPropagation()}
+                                onDoubleClick={() =>
+                                  setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault()
+                                    setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
+                                  }
+                                }}
+                                className="flex-1 cursor-text rounded-md font-serif text-[15px] leading-7 text-foreground"
+                              >
+                                <React.Suspense fallback={<RichTextFallback />}>
+                                  <RichText text={seg.delivered_text} />
+                                </React.Suspense>
+                              </div>
+                              {seg.repair_failed && (
+                                <p className="mt-3 rounded-md bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+                                  {t.review.failedDraftNotice}: {seg.repair_error}
+                                </p>
+                              )}
+                              {seg.quarantined && (
+                                <p className="mt-3 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
+                                  {t.review.quarantinedNotice}
+                                </p>
                               )}
                               {seg.issues.includes('terminology') && (
                                 <TermPanel
@@ -1239,78 +1228,150 @@ export function ReviewWorkbench() {
                                   }
                                 />
                               )}
-                            </div>
-
-                            <div className="flex items-center justify-end gap-2 pt-2.5 border-t border-[var(--paper-border)] mt-3">
-                              {termNotice[seg.block_id] && (
-                                <span className="text-[#15803d] text-xs font-medium mr-auto">
-                                  {termNotice[seg.block_id]}
+                              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/70 pt-3">
+                                <span className="text-xs text-muted-foreground">
+                                  {termNotice[seg.block_id] ?? t.review.editHint}
                                 </span>
-                              )}
-                              {editing[seg.block_id] && (
                                 <Button
-                                  onClick={() => {
-                                    setDrafts((prev) => {
-                                      const next = { ...prev }
-                                      delete next[seg.block_id]
-                                      return next
-                                    })
-                                    setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
-                                  }}
-                                  variant="secondary"
+                                  variant="ghost"
                                   size="sm"
-                                  className="btn-tactile text-xs h-7 md:h-6 px-2.5"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
+                                  }}
                                 >
-                                  {t.review.cancelEdit}
+                                  <Edit3 />
+                                  {t.review.startEditing}
                                 </Button>
-                              )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        </ResizablePanel>
+                      </ResizablePanelGroup>
+                    )}
+                    {isMobile && (
+                    <div className="space-y-4">
+                      <div className="rounded-lg bg-muted/20 p-4">
+                        <div className="mb-2 text-xs font-medium text-muted-foreground">
+                          {t.review.sourceSegment}
+                        </div>
+                        <div className="font-serif text-[15px] leading-7 text-foreground">
+                          <React.Suspense fallback={<RichTextFallback />}>
+                            <RichText text={seg.source_text} source />
+                          </React.Suspense>
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-border/70 p-4">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <span className="text-xs font-medium text-muted-foreground">
+                            {t.review.targetSegment}
+                          </span>
+                          {dirty && (
+                            <Badge variant="outline" className="border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400">
+                              {t.review.unsavedShort}
+                            </Badge>
+                          )}
+                        </div>
+                        {isEditing ? (
+                          <div className="space-y-2">
+                            <AutoGrowTextarea
+                              autoFocus
+                              value={draft}
+                              onChange={(event) =>
+                                setDrafts((prev) => ({ ...prev, [seg.block_id]: event.target.value }))
+                              }
+                              onKeyDown={(event) => {
+                                if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                                  event.preventDefault()
+                                  void saveAndContinue(seg)
+                                }
+                              }}
+                              className="w-full resize-none rounded-md border border-input bg-background p-3 text-[15px] leading-7"
+                            />
+                            <div className="flex justify-end gap-2">
                               <Button
-                                onClick={() => handleSave(seg)}
-                                variant="primary"
+                                variant="outline"
                                 size="sm"
-                                disabled={!editing[seg.block_id] || !dirty || saving[seg.block_id]}
-                                className="btn-tactile text-xs h-7 md:h-6 px-2.5 font-bold"
+                                onClick={() => setEditing((prev) => ({ ...prev, [seg.block_id]: false }))}
                               >
-                                {saving[seg.block_id] ? (
-                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                ) : (
-                                  <Save className="h-3 w-3 mr-1" />
-                                )}
-                                {saving[seg.block_id] ? t.review.saving : t.review.saveFeedback}
+                                {t.review.cancelEdit}
+                              </Button>
+                              <Button size="sm" disabled={saving[seg.block_id] || !dirty} onClick={() => void saveAndContinue(seg)}>
+                                <Save />
+                                {t.review.saveAndNext}
                               </Button>
                             </div>
                           </div>
-                        </div>
+                        ) : (
+                          <>
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={(event) => event.stopPropagation()}
+                              onDoubleClick={() => setEditing((prev) => ({ ...prev, [seg.block_id]: true }))}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault()
+                                  setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
+                                }
+                              }}
+                              className="cursor-text font-serif text-[15px] leading-7 text-foreground"
+                            >
+                              <React.Suspense fallback={<RichTextFallback />}>
+                                <RichText text={seg.delivered_text} />
+                              </React.Suspense>
+                            </div>
+                            <div className="mt-3 flex justify-end border-t border-border/70 pt-3">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
+                                }}
+                              >
+                                <Edit3 />
+                                {t.review.startEditing}
+                              </Button>
+                            </div>
+                          </>
+                        )}
+                        {seg.issues.includes('terminology') && (
+                          <TermPanel
+                            jobId={jobId}
+                            segment={seg}
+                            onReplaced={(replacements) =>
+                              handleTermReplaced(seg.block_id, seg.page, replacements)
+                            }
+                          />
+                        )}
                       </div>
-
-                      {previewOpen && seg.page !== null && renderPreview(seg.page)}
                     </div>
-                  </div>
+                    )}
+
+                  </article>
                 )
               })}
+              {hasMore && (
+                <div className="flex justify-center py-6">
+                  <Button
+                    onClick={() => void loadMore()}
+                    variant="secondary"
+                    size="sm"
+                    disabled={loadingMore}
+                  >
+                    {loadingMore ? <Loader2 className="animate-spin" /> : <ChevronDown />}
+                    {t.review.loadMore} ({segmentTotal - segments.length})
+                  </Button>
+                </div>
+              )}
             </div>
-            {hasMore && (
-              <div className="flex justify-center pb-6">
-                <Button
-                  onClick={() => void loadMore()}
-                  variant="secondary"
-                  size="sm"
-                  disabled={loadingMore}
-                >
-                  {loadingMore ? (
-                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                  ) : (
-                    <ChevronDown className="h-3.5 w-3.5 mr-1.5" />
-                  )}
-                  {t.review.loadMore} ({segmentTotal - segments.length})
-                </Button>
-              </div>
-            )}
           </div>
         )
       ) : viewMode === 'reading_flow' ? (
         /* Reading Flow View: continuous natural layout with dual-column typography */
-        <div ref={flowScrollRef} className="flex-1 overflow-y-auto px-4 md:px-10 py-6 bg-[var(--paper-bg)]">
+        <div ref={flowScrollRef} className="flex-1 overflow-y-auto px-4 md:px-10 py-6 bg-background">
           <div
             className="relative w-full max-w-5xl mx-auto"
             style={{ height: flowVirtualizer.getTotalSize() }}
@@ -1334,27 +1395,38 @@ export function ReviewWorkbench() {
                         setSelectedBlockId(seg.block_id)
                         setInspectorOpen(true)
                       }}
-                      className={`reading-segment reading-spine-line card-tactile grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 p-4 rounded-xl transition-all cursor-pointer border ${
+                      className={cn(
+                        "reading-segment grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 p-5 rounded-xl transition-all cursor-pointer border shadow-xs",
                         isSelected
-                          ? 'bg-[var(--paper-surface)] shadow-[var(--shadow-card)] border-[var(--ink-primary)] ring-1 ring-[var(--paper-border-hover)]'
+                          ? "bg-card border-primary ring-2 ring-primary/20 shadow-sm"
                           : hasIssues
-                            ? 'bg-[#b45309]/5 hover:bg-[#b45309]/10 border-l-[3px] border-l-[#b45309] border-y-[var(--paper-border)] border-r-[var(--paper-border)]'
-                            : 'border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] hover:bg-[var(--paper-surface)] bg-[var(--paper-subsurface)]'
-                      }`}
+                            ? "bg-amber-500/[0.045] hover:bg-amber-500/[0.075] border-amber-500/45"
+                            : "border-border hover:border-border/80 hover:bg-card/80 bg-card"
+                      )}
                     >
                       {/* Left: Source text */}
-                      <div className="min-w-0 break-words [overflow-wrap:anywhere] text-xs md:text-sm font-mono leading-relaxed text-[var(--ink-secondary)] select-text md:pr-4 max-w-[65ch] [text-wrap:pretty]">
-                        <div className="text-[10px] font-mono uppercase text-[var(--ink-muted)] mb-1 flex items-center justify-between">
-                          <span>{seg.block_id} · P{seg.page ?? '—'}</span>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--paper-border)] text-[var(--ink-secondary)] font-semibold">
-                            {blockTypeLabel(t, seg.block_type)}
-                          </span>
+                      <div className="min-w-0 break-words [overflow-wrap:anywhere] text-sm font-sans leading-relaxed text-muted-foreground select-text md:pr-4 max-w-[65ch] [text-wrap:pretty]">
+                        <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
+                          <span>{segmentLocation(t, seg)}</span>
+                          {seg.page !== null && (
+                            <button
+                              type="button"
+                              className="rounded px-1.5 py-0.5 transition-colors hover:bg-muted hover:text-foreground"
+                              title={t.review.layoutPreviewHint}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                openLayoutPreview(seg.page)
+                              }}
+                            >
+                              {t.review.layoutPreview}
+                            </button>
+                          )}
                         </div>
                         <div className="whitespace-pre-wrap">{seg.source_text}</div>
                       </div>
 
                       {/* Right: Target translation */}
-                      <div className="min-w-0 break-words [overflow-wrap:anywhere] text-xs md:text-sm font-sans leading-relaxed text-[var(--ink-primary)] md:pl-2 max-w-[65ch] [text-wrap:pretty]">
+                      <div className="min-w-0 break-words [overflow-wrap:anywhere] text-sm font-sans leading-relaxed text-foreground md:pl-2 max-w-[65ch] [text-wrap:pretty]">
                         {isEditingThis ? (
                           <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
                             <AutoGrowTextarea
@@ -1377,13 +1449,13 @@ export function ReviewWorkbench() {
                                   setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
                                 }
                               }}
-                              className="w-full text-xs md:text-sm font-sans bg-[var(--paper-surface)] border border-[var(--paper-border)] p-2.5 rounded-lg focus:border-[var(--ink-primary)] focus:outline-none resize-none leading-relaxed text-[var(--ink-primary)] shadow-xs"
+                              className="w-full text-sm font-sans bg-background border border-input p-3 rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none leading-relaxed text-foreground shadow-xs"
                             />
                             <div className="flex items-center justify-between text-xs">
-                              <span className="text-[var(--ink-muted)] font-mono text-[10px]">{t.review.editShortcutHint}</span>
+                              <span className="text-muted-foreground text-xs">{t.review.editShortcutHint}</span>
                               <Button
                                 size="sm"
-                                className="btn-tactile text-xs h-7 px-2.5 font-bold"
+                                className="text-xs h-7 px-2.5 font-medium"
                                 onClick={() => {
                                   void handleSave(seg)
                                   setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
@@ -1410,9 +1482,13 @@ export function ReviewWorkbench() {
                                 setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
                               }
                             }}
-                            className="group relative cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-[var(--ink-primary)] rounded"
+                            className="group relative cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-primary rounded p-1 -m-1 hover:bg-muted/20 transition-colors"
                           >
-                            <p className="select-text whitespace-pre-wrap leading-relaxed">{draft}</p>
+                            <div className="select-text font-serif text-[15px] leading-7 text-foreground">
+                              <React.Suspense fallback={<RichTextFallback />}>
+                                <RichText text={draft} />
+                              </React.Suspense>
+                            </div>
                             <div className="mt-2 flex items-center gap-1.5 flex-wrap">
                               {seg.mtqe_score !== null && (() => {
                                 const pct = Math.round(seg.mtqe_score * 100)
@@ -1424,7 +1500,7 @@ export function ReviewWorkbench() {
                                       ? 'text-amber-700 dark:text-amber-400 bg-amber-500/10 border-amber-500/20'
                                       : 'text-rose-700 dark:text-rose-400 bg-rose-500/10 border-rose-500/20'
                                 return (
-                                  <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${colorClass}`}>
+                                  <span className={`text-xs font-mono font-bold px-1.5 py-0.5 rounded border ${colorClass}`}>
                                     QE {pct}%
                                   </span>
                                 )
@@ -1433,7 +1509,7 @@ export function ReviewWorkbench() {
                                 seg.issues.map((kind) => (
                                   <span
                                     key={kind}
-                                    className="text-[10px] px-1.5 py-0.5 rounded bg-[#b45309]/15 text-[#b45309] font-mono font-medium"
+                                    className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 font-mono font-medium"
                                   >
                                     {issueLabel(t, kind)}
                                   </span>
@@ -1465,249 +1541,135 @@ export function ReviewWorkbench() {
             </div>
           )}
         </div>
-      ) : (
-        /* Visual witness: source page vs the composed translation (PRD §5.1 mode B). */
-        <div ref={witnessScrollRef} className="flex-1 overflow-y-auto">
-          <div className="max-w-6xl mx-auto w-full px-3 md:px-8 py-4 md:py-6">
-            <div className="flex items-center justify-end">
-              <label className="flex items-center gap-1.5 text-xs text-[var(--ink-secondary)] cursor-pointer select-none py-1">
-                <input
-                  type="checkbox"
-                  checked={diffBlend}
-                  onChange={(e) => setDiffBlend(e.target.checked)}
-                />
-                {t.review.diffBlend}
-              </label>
-            </div>
-            {previewPages.length === 0 ? (
-              <div className="py-12 text-center text-xs text-[var(--ink-muted)]">
-                {t.review.noSegments}
-              </div>
-            ) : (
-              <div
-                className="relative w-full mt-4"
-                style={{ height: witnessVirtualizer.getTotalSize() }}
-              >
-                {witnessVirtualizer.getVirtualItems().map((virtualRow) => {
-                  const page = previewPages[virtualRow.index]
-                  return (
-                    <div
-                      key={page}
-                      data-index={virtualRow.index}
-                      ref={witnessVirtualizer.measureElement}
-                      className="absolute top-0 left-0 w-full pb-4"
-                      style={{ transform: `translateY(${virtualRow.start}px)` }}
-                    >
-                      <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-2xs overflow-hidden">
-                        <div className="h-8 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between text-xs font-mono text-[var(--ink-muted)]">
-                          <span className="flex items-center gap-1.5">
-                            <Eye className="h-3.5 w-3.5" /> {t.review.pageLabel.replace('{n}', String(page))}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setPreviewBust(Date.now())}
-                            title={t.review.rerenderHint}
-                            className="min-h-[28px] md:min-h-0 flex items-center gap-1.5 px-2 py-1 md:py-0.5 rounded text-xs text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] font-mono transition-colors cursor-pointer hover:bg-[var(--paper-surface)]"
-                          >
-                            <RefreshCw className="h-3.5 w-3.5 md:h-3 md:w-3" />
-                            <span>{t.review.rerenderPage}</span>
-                          </button>
-                        </div>
-                        {diffBlend ? (
-                          <div className="relative bg-white">
-                            <img
-                              src={sourcePageUrl(jobId, page, { dpi: 110 })}
-                              alt={t.review.sourceCanvasAlt.replace('{n}', String(page))}
-                              className="w-full max-h-[720px] object-contain"
-                              onError={(e) => {
-                                e.currentTarget.style.display = 'none'
-                              }}
-                            />
-                            <img
-                              src={pagePreviewUrl(jobId, page, { dpi: 110, cacheBust: previewBust })}
-                              alt={t.review.targetCanvasAlt.replace('{n}', String(page))}
-                              className="absolute inset-0 w-full h-full object-contain opacity-50 mix-blend-multiply"
-                              onError={(e) => {
-                                e.currentTarget.style.display = 'none'
-                              }}
-                            />
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-[var(--paper-border)]">
-                            <div className="bg-white">
-                              <div className="px-3 py-1.5 text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] border-b border-[var(--paper-border)]">
-                                {t.review.sourceCanvas}
-                              </div>
-                              <img
-                                src={sourcePageUrl(jobId, page, { dpi: 110 })}
-                                alt={t.review.sourceCanvasAlt.replace('{n}', String(page))}
-                                className="w-full max-h-[640px] object-contain"
-                                onError={(e) => {
-                                  e.currentTarget.style.display = 'none'
-                                }}
-                              />
-                            </div>
-                            <div className="bg-white">
-                              <div className="px-3 py-1.5 text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] border-b border-[var(--paper-border)]">
-                                {t.review.targetCanvas}
-                              </div>
-                              <img
-                                src={pagePreviewUrl(jobId, page, { dpi: 110, cacheBust: previewBust })}
-                                alt={t.review.targetCanvasAlt.replace('{n}', String(page))}
-                                className="w-full max-h-[640px] object-contain"
-                                onError={(e) => {
-                                  const target = e.currentTarget
-                                  target.style.display = 'none'
-                                  const sibling = target.nextElementSibling as HTMLElement | null
-                                  if (sibling) sibling.style.display = 'flex'
-                                }}
-                              />
-                              <div className="hidden items-center gap-2 p-4 text-xs text-[var(--ink-secondary)]">
-                                <ImageOff className="h-4 w-4 shrink-0" />
-                                {t.review.previewFailed}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      ) : null}
       </div>
-
-      {inspectorOpen && inspectorSegment && (
-        <>
-          {/* Mobile Overlay Backdrop (< md) */}
-          <div
-            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-xs md:hidden"
-            onClick={() => setInspectorOpen(false)}
-            aria-hidden="true"
-          />
-
-          {/* Inspector Panel: Fixed Bottom Sheet on Mobile (< md), Side-by-Side Column on Desktop (md+) */}
-          <aside className={`fixed inset-x-0 bottom-0 z-50 transition-all duration-200 ${mobileInspectorExpanded ? 'max-h-[85vh]' : 'max-h-[42vh]'} rounded-t-xl border-t border-[var(--paper-border)] shadow-2xl bg-[var(--paper-surface)] flex flex-col overflow-hidden overscroll-contain shrink-0 select-text pb-[env(safe-area-inset-bottom,0px)] md:static md:z-auto md:max-h-none md:h-full md:rounded-none md:border-t-0 md:w-80 md:border-l md:shadow-none md:pb-0`}>
-            {/* Grab Handle Indicator (Mobile Only) */}
-            <div
-              className="md:hidden flex justify-center pt-2 pb-1 shrink-0 cursor-pointer"
-              onClick={() => setMobileInspectorExpanded(!mobileInspectorExpanded)}
-              title={mobileInspectorExpanded ? t.review.collapseInspector : t.review.expandInspector}
-            >
-              <div className="w-10 h-1.5 rounded-full bg-[var(--paper-border)] hover:bg-[var(--ink-muted)] transition-colors" />
-            </div>
-
-            <div className="h-11 px-4 border-b border-[var(--paper-border)] flex items-center justify-between shrink-0">
-              <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-                {t.review.inspectorTitle}
-              </span>
-              <button
-                type="button"
-                onClick={() => setInspectorOpen(false)}
-                className="w-8 h-8 min-h-[32px] min-w-[32px] flex items-center justify-center rounded text-xs font-mono text-[var(--ink-muted)] hover:text-[var(--ink-primary)] hover:bg-[var(--paper-subsurface)] transition-colors cursor-pointer"
-                aria-label={t.common.dismiss}
-              >
-                ✕
-              </button>
-            </div>
-            <div className="p-4 space-y-3 text-xs overflow-y-auto flex-1">
+      <Sheet
+        open={previewPage !== null}
+        onOpenChange={(open) => {
+          if (!open) setPreviewPage(null)
+        }}
+      >
+        <SheetContent
+          side="right"
+          className="flex w-[min(96vw,72rem)] flex-col gap-0 p-0"
+        >
+          <SheetHeader className="shrink-0 border-b border-border/70 px-5 py-4 pr-12 text-left">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
-                  {inspectorSegment.block_id}
-                </div>
-                <div className="text-xs text-[var(--ink-secondary)] font-mono mt-0.5">
-                  {blockTypeLabel(t, inspectorSegment.block_type)} · P{inspectorSegment.page ?? '—'}
-                </div>
+                <SheetTitle className="text-base">
+                  {t.review.previewPage}
+                  {previewPage !== null && (
+                    <span className="ml-2 font-normal text-muted-foreground">
+                      {t.review.pageLabel.replace('{n}', String(previewPage))}
+                    </span>
+                  )}
+                </SheetTitle>
+                <SheetDescription className="mt-1 text-xs">
+                  {t.review.layoutPreviewHint}
+                </SheetDescription>
               </div>
-
-              <dl className="divide-y divide-[var(--paper-border)] text-xs font-mono">
-                <div className="py-1.5 flex justify-between">
-                  <dt className="text-[var(--ink-muted)]">{t.review.inspectorQe}</dt>
-                  <dd className="font-bold">
-                    {inspectorSegment.mtqe_score === null
-                      ? '—'
-                      : `${(inspectorSegment.mtqe_score * 100).toFixed(0)}%`}
-                  </dd>
-                </div>
-                <div className="py-1.5 flex justify-between">
-                  <dt className="text-[var(--ink-muted)]">{t.review.inspectorTmHit}</dt>
-                  <dd>{inspectorSegment.tm_hit ? '✓' : '—'}</dd>
-                </div>
-                <div className="py-1.5 flex justify-between">
-                  <dt className="text-[var(--ink-muted)]">{t.review.inspectorRepairs}</dt>
-                  <dd>{inspectorSegment.repair_rounds}</dd>
-                </div>
-                <div className="py-1.5 flex justify-between">
-                  <dt className="text-[var(--ink-muted)]">{t.review.inspectorSeverity}</dt>
-                  <dd>{mqmSeverityLabel(t, inspectorSegment.mqm_severity)}</dd>
-                </div>
-              </dl>
-
-              {inspectorSegment.glossary_hits.length > 0 && (
-                <div>
-                  <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold mb-1">
-                    {t.review.inspectorGlossary}
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {inspectorSegment.glossary_hits.map((term) => (
-                      <span
-                        key={term}
-                        className="px-1.5 py-0.5 rounded bg-[#15803d]/10 text-[#15803d] font-mono text-xs"
-                      >
-                        {term}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {inspectorSegment.error_flags.length > 0 && (
-                <div>
-                  <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold mb-1">
-                    {t.review.errorFlags}
-                  </div>
-                  <ul className="space-y-0.5">
-                    {inspectorSegment.error_flags.map((flag, index) => (
-                      <li key={index} className="text-xs font-mono text-[var(--ink-secondary)] break-all">
-                        {flag}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {Object.keys(inspectorSegment.provenance).length > 0 && (
-                <div>
-                  <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold mb-1">
-                    {t.review.inspectorProvenance}
-                  </div>
-                  <pre className="text-xs font-mono text-[var(--ink-secondary)] whitespace-pre-wrap break-all bg-[var(--paper-subsurface)] rounded p-2">
-                    {JSON.stringify(inspectorSegment.provenance, null, 1)}
-                  </pre>
-                </div>
+              {previewPage !== null && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPreviewBust(Date.now())}
+                  title={t.review.rerenderHint}
+                >
+                  <RefreshCw />
+                  {t.review.rerenderPage}
+                </Button>
               )}
             </div>
+          </SheetHeader>
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-muted/20 px-5 py-2.5">
+            <p className="text-xs text-muted-foreground">{t.review.diffBlendHint}</p>
+            <label className="flex shrink-0 items-center gap-2 text-xs text-foreground">
+              {t.review.diffBlend}
+              <Switch checked={diffBlend} onCheckedChange={setDiffBlend} />
+            </label>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto bg-muted/20 p-4 md:p-6">
+            {previewPage !== null &&
+              (diffBlend ? (
+                <div className="relative mx-auto max-w-5xl overflow-hidden rounded-lg border bg-white">
+                  <img
+                    src={sourcePageUrl(jobId, previewPage, { dpi: 110 })}
+                    alt={t.review.sourceCanvasAlt.replace('{n}', String(previewPage))}
+                    className="w-full object-contain"
+                  />
+                  <img
+                    src={pagePreviewUrl(jobId, previewPage, { dpi: 110, cacheBust: previewBust })}
+                    alt={t.review.targetCanvasAlt.replace('{n}', String(previewPage))}
+                    className="absolute inset-0 h-full w-full object-contain opacity-50 mix-blend-multiply"
+                  />
+                </div>
+              ) : (
+                <div className="mx-auto grid max-w-6xl gap-4 md:grid-cols-2">
+                  {[
+                    {
+                      title: t.review.sourceCanvas,
+                      src: sourcePageUrl(jobId, previewPage, { dpi: 110 }),
+                      alt: t.review.sourceCanvasAlt.replace('{n}', String(previewPage)),
+                    },
+                    {
+                      title: t.review.targetCanvas,
+                      src: pagePreviewUrl(jobId, previewPage, {
+                        dpi: 110,
+                        cacheBust: previewBust,
+                      }),
+                      alt: t.review.targetCanvasAlt.replace('{n}', String(previewPage)),
+                    },
+                  ].map((page) => (
+                    <figure
+                      key={page.title}
+                      className="overflow-hidden rounded-lg border bg-card"
+                    >
+                      <figcaption className="border-b border-border/70 px-3 py-2 text-xs font-medium text-muted-foreground">
+                        {page.title}
+                      </figcaption>
+                      <img
+                        src={page.src}
+                        alt={page.alt}
+                        className="w-full bg-white object-contain"
+                        onError={(event) => {
+                          event.currentTarget.style.display = 'none'
+                          const fallback = event.currentTarget.nextElementSibling
+                          if (fallback instanceof HTMLElement) fallback.hidden = false
+                        }}
+                      />
+                      <div
+                        hidden
+                        className="flex items-center gap-2 p-4 text-xs text-muted-foreground"
+                      >
+                        <ImageOff className="size-4 shrink-0" />
+                        {t.review.previewFailed}
+                      </div>
+                    </figure>
+                  ))}
+                </div>
+              ))}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {isMobile ? (
+        <Sheet open={inspectorOpen && inspectorSegment !== null} onOpenChange={setInspectorOpen}>
+          <SheetContent side="right" className="w-[min(92vw,24rem)] p-0">
+            <SheetHeader className="sr-only">
+              <SheetTitle>{t.review.evidenceTitle}</SheetTitle>
+              <SheetDescription>{t.review.evidenceHint}</SheetDescription>
+            </SheetHeader>
+            {evidencePanel}
+          </SheetContent>
+        </Sheet>
+      ) : (
+        inspectorSegment && desktopEvidenceOpen && (
+          <aside className="hidden h-full w-80 shrink-0 border-l border-border/70 bg-card md:block">
+            {evidencePanel}
           </aside>
-        </>
+        )
       )}
 
-      <ConfirmDialog
-        open={pendingBlockedExport !== null}
-        title={t.review.exportBlockedTitle}
-        body={t.review.exportBlockedBody}
-        confirmLabel={t.review.exportBlockedConfirm}
-        cancelLabel={t.review.exportBlockedCancel}
-        danger
-        onConfirm={() => {
-          const key = pendingBlockedExport ?? 'primary'
-          setPendingBlockedExport(null)
-          void issueWorkbenchDownload(key, true)
-        }}
-        onCancel={() => setPendingBlockedExport(null)}
-      />
     </div>
   )
 }
@@ -1863,7 +1825,7 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
   if (violations === null || violations.length === 0) return null
 
   return (
-    <div className="mt-3 rounded-[6px] border border-[#b45309]/40 bg-[#b45309]/5 divide-y divide-[#b45309]/20">
+    <div className="mt-3 divide-y divide-amber-600/20 rounded-lg border border-amber-600/35 bg-amber-500/5">
       {violations.map((violation) => {
         const key = `${violation.surface}:${violation.expected}`
         const currentScope = getScope(violation)
@@ -1880,20 +1842,20 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
         return (
           <div key={key} className="px-2.5 py-2 flex flex-col gap-2 text-xs">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-[var(--ink-muted)]">{t.review.recommendedTerm}</span>
-              <span className="line-through text-[#b45309] font-mono">{violation.surface}</span>
-              <span className="text-[var(--ink-muted)]">→</span>
-              <span className="font-semibold text-[#15803d] font-mono">{violation.expected}</span>
+              <span className="font-mono text-muted-foreground">{t.review.recommendedTerm}</span>
+              <span className="line-through text-amber-700 dark:text-amber-400 font-mono">{violation.surface}</span>
+              <span className="text-muted-foreground">→</span>
+              <span className="font-semibold text-emerald-700 dark:text-emerald-400 font-mono">{violation.expected}</span>
 
               {violation.cascade_all > 1 && (
-                <div className="flex items-center gap-0.5 bg-[var(--paper-subsurface)] p-0.5 rounded border border-[var(--paper-border)] ml-auto">
+                <div className="flex items-center gap-0.5 bg-muted/40 p-0.5 rounded border border-border ml-auto">
                   <button
                     type="button"
                     onClick={() => setScopeFor(violation, 'block')}
-                    className={`px-1.5 py-0.5 rounded text-[10.5px] transition-colors cursor-pointer ${
+                    className={`px-1.5 py-0.5 rounded text-xs transition-colors cursor-pointer ${
                       currentScope === 'block'
-                        ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-xs'
-                        : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
+                        ? 'bg-card text-foreground font-bold shadow-xs'
+                        : 'text-muted-foreground hover:text-foreground'
                     }`}
                     title={t.review.scopeBlock}
                   >
@@ -1903,10 +1865,10 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
                     <button
                       type="button"
                       onClick={() => setScopeFor(violation, 'subsequent')}
-                      className={`px-1.5 py-0.5 rounded text-[10.5px] transition-colors cursor-pointer ${
+                      className={`px-1.5 py-0.5 rounded text-xs transition-colors cursor-pointer ${
                         currentScope === 'subsequent'
-                          ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-xs'
-                          : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
+                          ? 'bg-card text-foreground font-bold shadow-xs'
+                          : 'text-muted-foreground hover:text-foreground'
                       }`}
                       title={t.review.scopeSubsequent}
                     >
@@ -1916,10 +1878,10 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
                   <button
                     type="button"
                     onClick={() => setScopeFor(violation, 'all')}
-                    className={`px-1.5 py-0.5 rounded text-[10.5px] transition-colors cursor-pointer ${
+                    className={`px-1.5 py-0.5 rounded text-xs transition-colors cursor-pointer ${
                       currentScope === 'all'
-                        ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-xs'
-                        : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
+                        ? 'bg-card text-foreground font-bold shadow-xs'
+                        : 'text-muted-foreground hover:text-foreground'
                     }`}
                     title={t.review.scopeAll}
                   >
@@ -1930,7 +1892,7 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
 
               <Button
                 onClick={() => handleTriggerReplace(violation)}
-                variant="primary"
+                variant="default"
                 size="sm"
                 disabled={busy}
                 className={`text-xs min-h-[28px] md:min-h-0 h-7 md:h-6 px-2.5 font-bold ${violation.cascade_all <= 1 ? 'ml-auto' : ''}`}
@@ -1949,47 +1911,47 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
             </div>
 
             {isConfirming && (
-              <div className="w-full mt-1 p-2.5 rounded-[4px] bg-[#b45309]/10 border border-[#b45309]/30 space-y-2 animate-in fade-in duration-150">
+              <div className="w-full mt-1 p-2.5 rounded-md bg-amber-500/10 border border-amber-600/25 space-y-2 animate-in fade-in duration-150">
                 <div className="flex items-center justify-between">
-                  <span className="font-semibold text-[var(--ink-primary)] text-xs">
+                  <span className="font-semibold text-foreground text-xs">
                     {currentScope === 'all'
                       ? t.review.cascadeConfirmTitle
                       : `${t.review.scopeSubsequent} · ${t.review.cascadeConfirmTitle}`}
                   </span>
-                  <span className="text-[10.5px] font-mono px-1.5 py-0.5 rounded bg-[#b45309]/20 text-[#b45309] font-bold">
+                  <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 font-bold">
                     {t.review.scopeCount.replace('{n}', String(targetCount))}
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2 p-1.5 rounded bg-[var(--paper-surface)] border border-[var(--paper-border)] font-mono text-xs">
-                  <span className="line-through text-[#b45309] font-medium bg-[#b45309]/10 px-1.5 py-0.5 rounded">
+                <div className="flex items-center gap-2 p-1.5 rounded bg-card border border-border font-mono text-xs">
+                  <span className="line-through text-amber-700 dark:text-amber-400 font-medium bg-amber-500/10 px-1.5 py-0.5 rounded">
                     {violation.surface}
                   </span>
-                  <span className="text-[var(--ink-muted)]">➔</span>
-                  <span className="text-[#15803d] font-bold bg-[#15803d]/10 px-1.5 py-0.5 rounded">
+                  <span className="text-muted-foreground">➔</span>
+                  <span className="text-emerald-700 dark:text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded">
                     {violation.expected}
                   </span>
                 </div>
 
-                <div className="text-[var(--ink-secondary)] text-[10.5px] leading-relaxed">
+                <div className="text-muted-foreground text-xs leading-relaxed">
                   {t.review.cascadeConfirmDesc
                     .replace('{n}', String(targetCount))
                     .replace('{surface}', violation.surface)
                     .replace('{expected}', violation.expected)}
                 </div>
 
-                <div className="flex items-center gap-1.5 text-[var(--ink-secondary)] text-[11px] pt-0.5">
+                <div className="flex items-center gap-1.5 text-muted-foreground text-xs pt-0.5">
                   <Sparkles className="h-3 w-3 text-amber-500 shrink-0" />
                   <span>{t.review.cascadeTmSync}</span>
                 </div>
 
-                <div className="flex items-center gap-2 pt-1 border-t border-[#b45309]/20">
+                <div className="flex items-center gap-2 pt-1 border-t border-amber-600/20">
                   <Button
                     onClick={() => executeReplace(violation, currentScope)}
-                    variant="primary"
+                    variant="default"
                     size="sm"
                     disabled={busy}
-                    className="text-xs min-h-[28px] md:min-h-0 h-7 md:h-6 px-2.5 bg-[#b45309] hover:bg-[#92400e] text-white font-bold"
+                    className="h-7 min-h-[28px] bg-amber-600 px-2.5 text-xs font-bold text-white hover:bg-amber-700 md:h-6 md:min-h-0"
                   >
                     {busy ? (
                       <Loader2 className="h-3 w-3 animate-spin mr-1" />
@@ -2013,7 +1975,7 @@ function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
           </div>
         )
       })}
-      {error && <div className="px-2.5 py-1.5 text-xs text-[#b45309]">{error}</div>}
+      {error && <div className="px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">{error}</div>}
     </div>
   )
 }

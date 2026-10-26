@@ -8,7 +8,7 @@ import { ToastContext, type Toast, type ToastVariant } from './useToast'
  *
  * The console previously reported every failure through ``window.alert``: a
  * blocking, unstyled native dialog that cannot be read by a screen reader as
- * part of the page and does not match the console's paper theme. Toasts render
+ * part of the page and does not match the console's active theme. Toasts render
  * in the app, carry ``role="status"`` / ``role="alert"`` so assistive tech
  * announces them, and never block the pipeline view.
  */
@@ -40,32 +40,32 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     error: <AlertTriangle className="h-3.5 w-3.5 shrink-0" />,
   }
   const tones: Record<ToastVariant, string> = {
-    info: 'text-[var(--ink-secondary)] border-[var(--paper-border)]',
-    success: 'text-[#15803d] border-[#15803d]/30',
-    error: 'text-[#b91c1c] border-[#b91c1c]/30',
+    info: 'text-muted-foreground border-border/80',
+    success: 'text-emerald-700 dark:text-emerald-400 border-emerald-600/25',
+    error: 'text-destructive border-destructive/25',
   }
 
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-2">
+      <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2">
         {toasts.map((toast) => (
           <div
             key={toast.id}
             role={toast.variant === 'error' ? 'alert' : 'status'}
-            className={`pointer-events-auto flex items-start gap-2 rounded-[5px] border bg-[var(--paper-surface)] px-3 py-2.5 text-xs shadow-[0_4px_16px_rgba(0,0,0,0.08)] ${tones[toast.variant]}`}
+            className={`pointer-events-auto flex items-start gap-2.5 rounded-xl border bg-card px-3.5 py-3 text-sm shadow-floating ${tones[toast.variant]}`}
           >
             <span className="mt-0.5">{icons[toast.variant]}</span>
-            <span className="flex-1 leading-relaxed text-[var(--ink-primary)] break-words">
+            <span className="flex-1 leading-relaxed text-foreground break-words">
               {toast.message}
             </span>
             <button
               type="button"
               onClick={() => dismiss(toast.id)}
               aria-label={t.common.dismiss}
-              className="text-[var(--ink-muted)] hover:text-[var(--ink-primary)] transition-colors"
+              className="text-muted-foreground hover:text-foreground transition-colors"
             >
-              <X className="h-3 w-3" />
+              <X className="size-3.5" />
             </button>
           </div>
         ))}
