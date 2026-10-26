@@ -61,6 +61,19 @@ export interface TranslationDictionary {
     saveEdit: string
     cancelEdit: string
     quickEditHint: string
+    readyTag: string
+    changeFile: string
+    clearFile: string
+    refreshList: string
+    loadingBooks: string
+    processingLaunch: string
+    targetShort: string
+    progressShort: string
+    loadingSegments: string
+    noSegmentsParsed: string
+    illustrationNotice: string
+    waitingTranslation: string
+    defaultPrimary: string
   }
   nav: {
     operatorControl: string
@@ -178,6 +191,11 @@ export interface TranslationDictionary {
     estTime: string
     confidence: string
     probeWarnings: string
+    pagesUnit: string
+    pipelineProfileTag: string
+    scorecardTitle: string
+    scorecardSub: string
+    tokenPrefixTag: string
     /** Pre-flight warning copy keyed by the engine's stable warning code. */
     warningCodes: Record<string, string>
     warningRemedyRescan: string

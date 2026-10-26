@@ -950,8 +950,11 @@ export function MissionControl() {
               </Badge>
             )}
             {currentJobId && isLiveStreaming && (
-              <span className="text-xs font-mono text-[#15803d] flex items-center gap-1.5 font-medium">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#15803d] animate-pulse" />
+              <span className="text-xs font-mono text-[#15803d] flex items-center gap-1.5 font-medium px-2 py-0.5 rounded-full bg-[#15803d]/10 border border-[#15803d]/20">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                </span>
                 {t.mission.sseStream}
               </span>
             )}
@@ -972,7 +975,7 @@ export function MissionControl() {
                 variant="primary"
                 size="sm"
                 disabled={downloading}
-                className={`h-9 sm:h-7 px-2.5 text-xs font-bold ${
+                className={`btn-tactile h-9 sm:h-7 px-2.5 text-xs font-bold ${
                   readingDeliverables.length > 1 ? 'rounded-r-none pr-2 border-r border-white/20' : ''
                 }`}
                 title={t.review.exportQuickHelp}
@@ -984,7 +987,7 @@ export function MissionControl() {
                 )}
                 {t.mission.oneClickExport}
                 {primaryDeliverable && !downloading && (
-                  <span className="hidden sm:inline-block ml-1 text-[10px] font-mono opacity-80 uppercase px-1 py-0.2 bg-black/15 rounded">
+                  <span className="hidden sm:inline-block ml-1 text-[10px] font-mono opacity-80 uppercase px-1 py-0.5 bg-black/15 rounded">
                     {getFormatBadge(primaryDeliverable.filename)}
                   </span>
                 )}
@@ -995,7 +998,7 @@ export function MissionControl() {
                   onClick={() => setExportMenuOpen((prev) => !prev)}
                   disabled={downloading}
                   title={t.mission.exportFormats}
-                  className="h-9 sm:h-7 px-1.5 text-xs bg-[var(--btn-bg)] text-[var(--btn-fg)] hover:bg-[var(--btn-hover)] rounded-r transition-all flex items-center justify-center cursor-pointer border-l border-white/20 disabled:opacity-60"
+                  className="btn-tactile h-9 sm:h-7 px-1.5 text-xs bg-[var(--btn-bg)] text-[var(--btn-fg)] hover:bg-[var(--btn-hover)] rounded-r transition-all flex items-center justify-center cursor-pointer border-l border-white/20 disabled:opacity-60"
                 >
                   <ChevronDown className={`h-3.5 w-3.5 transition-transform ${exportMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
@@ -1004,7 +1007,7 @@ export function MissionControl() {
               {/* Format Dropdown Menu */}
               {exportMenuOpen && (
                 <div
-                  className="absolute left-0 top-full mt-1.5 w-64 bg-[var(--paper-surface)] border border-[var(--paper-border)] rounded-md shadow-lg py-1 z-50 text-xs"
+                  className="absolute left-0 top-full mt-1.5 w-64 bg-[var(--paper-surface)] border border-[var(--paper-border)] rounded-xl shadow-[var(--shadow-floating)] py-1.5 z-50 text-xs"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="px-3 py-1.5 text-[11px] font-semibold text-[var(--ink-muted)] border-b border-[var(--paper-border)] uppercase tracking-wider">
@@ -1035,7 +1038,7 @@ export function MissionControl() {
                             </div>
                           </div>
                           {isPrimary && (
-                            <span className="shrink-0 text-[10px] px-1 py-0.2 rounded bg-[#15803d]/15 text-[#15803d] font-semibold font-mono">
+                            <span className="shrink-0 text-[10px] px-1 py-0.5 rounded bg-[#15803d]/15 text-[#15803d] font-semibold font-mono">
                               {t.review.exportPrimaryBadge}
                             </span>
                           )}
@@ -1053,7 +1056,7 @@ export function MissionControl() {
             disabled={!currentJobId}
             variant="secondary"
             size="sm"
-            className="h-9 sm:h-7 px-2.5 text-xs"
+            className="btn-tactile h-9 sm:h-7 px-2.5 text-xs font-medium"
           >
             <ShieldCheck className="h-3.5 w-3.5 mr-1 text-[#15803d]" />
             {t.mission.inspectGate}
@@ -1064,14 +1067,14 @@ export function MissionControl() {
             disabled={!currentJobId}
             variant="secondary"
             size="sm"
-            className="h-9 sm:h-7 px-2.5 text-xs"
+            className="btn-tactile h-9 sm:h-7 px-2.5 text-xs font-medium"
           >
             <SplitSquareVertical className="h-3.5 w-3.5 mr-1 text-[var(--ink-secondary)]" />
             {t.mission.openWorkbench}
           </Button>
 
           {currentJobId && isFailed && (
-            <Button onClick={handleResume} variant="secondary" size="sm" disabled={resuming} className="h-9 sm:h-7 px-2.5 text-xs">
+            <Button onClick={handleResume} variant="secondary" size="sm" disabled={resuming} className="btn-tactile h-9 sm:h-7 px-2.5 text-xs font-medium">
               <RotateCcw className={`h-3 w-3 mr-1 ${resuming ? 'animate-spin' : ''}`} />
               {resuming ? t.mission.resuming : t.mission.resumeCompile}
             </Button>
@@ -1084,7 +1087,7 @@ export function MissionControl() {
               size="sm"
               disabled={reparsing}
               title={t.mission.reparseHint}
-              className="h-9 sm:h-7 px-2.5 text-xs"
+              className="btn-tactile h-9 sm:h-7 px-2.5 text-xs font-medium"
             >
               <RefreshCw className={`h-3 w-3 mr-1 ${reparsing ? 'animate-spin' : ''}`} />
               {reparsing ? t.mission.reparsing : t.mission.reparseAction}
@@ -1097,7 +1100,7 @@ export function MissionControl() {
               variant="danger"
               size="sm"
               disabled={cancelling}
-              className="h-9 sm:h-7 px-2.5 text-xs"
+              className="btn-tactile h-9 sm:h-7 px-2.5 text-xs font-medium"
             >
               <Square className="h-3 w-3 mr-1" />
               {cancelling ? t.mission.cancelling : t.mission.cancelCompile}
@@ -1122,8 +1125,8 @@ export function MissionControl() {
 
       {/* Global Job Queue (PRD §4.2.1) — read from the durable ledgers so a
           restarted console still lists finished runs. */}
-      <div className="rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shrink-0 shadow-2xs">
-        <div className="h-8 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between">
+      <div className="card-tactile rounded-xl border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shrink-0 shadow-[var(--shadow-card)]">
+        <div className="h-8.5 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between">
           <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">
             {t.mission.queueTitle}
           </span>
@@ -1145,13 +1148,13 @@ export function MissionControl() {
                         (label) => (
                           <th
                             key={label}
-                            className="py-2 px-3 font-semibold uppercase text-xs tracking-wider"
+                            className="py-2.5 px-3 font-semibold uppercase text-[11px] tracking-wider"
                           >
                             {label}
                           </th>
                         )
                       )}
-                      <th className="py-2 px-3" />
+                      <th className="py-2.5 px-3" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--paper-border)]">
@@ -1165,13 +1168,13 @@ export function MissionControl() {
                             : 'hover:bg-[var(--paper-subsurface)]'
                         }`}
                       >
-                        <td className="py-2 px-3 font-mono text-[var(--ink-primary)] truncate max-w-[10rem] lg:max-w-[14rem]" title={job.job_id}>
+                        <td className="py-2.5 px-3 font-mono text-[var(--ink-primary)] truncate max-w-[10rem] lg:max-w-[14rem]" title={job.job_id}>
                           {job.job_id}
                         </td>
-                        <td className="py-2 px-3 text-[var(--ink-secondary)] truncate max-w-[12rem]">
+                        <td className="py-2.5 px-3 text-[var(--ink-secondary)] truncate max-w-[12rem]">
                           {job.file_name}
                         </td>
-                        <td className="py-2 px-3">
+                        <td className="py-2.5 px-3">
                           <div className="flex items-center gap-1.5">
                             <Badge variant={statusVariant(job.status)} dot className="text-xs">
                               {jobStatusLabel(t, job.status)}
@@ -1191,7 +1194,7 @@ export function MissionControl() {
                             )}
                           </div>
                         </td>
-                        <td className="py-2 px-3 font-mono text-[var(--ink-primary)]">
+                        <td className="py-2.5 px-3 font-mono tabular-nums text-[var(--ink-primary)]">
                           {liveProgressPct(
                             Math.max(
                               job.completed_blocks +
@@ -1206,21 +1209,21 @@ export function MissionControl() {
                           ).toFixed(1)}
                           %
                         </td>
-                        <td className="py-2 px-3 font-mono text-[#b45309]">
+                        <td className="py-2.5 px-3 font-mono tabular-nums text-[#b45309]">
                           {job.estimated_cost_usd === null || job.estimated_cost_usd === undefined
                             ? '—'
                             : `$${job.estimated_cost_usd.toFixed(3)}`}
                         </td>
-                        <td className="py-2 px-3 font-mono text-xs text-[var(--ink-muted)]">
+                        <td className="py-2.5 px-3 font-mono tabular-nums text-xs text-[var(--ink-muted)]">
                           {formatTimestamp(job.updated_at)}
                         </td>
-                        <td className="py-2 px-3 text-right">
+                        <td className="py-2.5 px-3 text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             <Button
                               onClick={() => onSelectJob(job.job_id)}
                               variant="secondary"
                               size="sm"
-                              className="text-xs h-6 px-2"
+                              className="btn-tactile text-xs h-6 px-2"
                             >
                               {t.mission.selectJob}
                             </Button>
@@ -1228,7 +1231,7 @@ export function MissionControl() {
                               onClick={() => handleDeleteJob(job.job_id)}
                               variant="secondary"
                               size="sm"
-                              className="h-6 px-1.5 text-[#b91c1c] hover:bg-[#b91c1c]/10"
+                              className="btn-tactile h-6 px-1.5 text-[#b91c1c] hover:bg-[#b91c1c]/10"
                               title={t.mission.deleteJob}
                               aria-label={t.mission.deleteJob}
                             >
@@ -1281,7 +1284,7 @@ export function MissionControl() {
                         {formatTimestamp(job.updated_at)}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between text-xs font-mono">
+                    <div className="flex items-center justify-between text-xs font-mono tabular-nums">
                       <span className="text-[var(--ink-primary)] font-medium">
                         {t.mission.colProgress}:{' '}
                         {liveProgressPct(
@@ -1309,7 +1312,7 @@ export function MissionControl() {
                         onClick={() => onSelectJob(job.job_id)}
                         variant={job.job_id === currentJobId ? 'primary' : 'secondary'}
                         size="sm"
-                        className="flex-1 h-9 min-h-[38px] text-xs font-semibold"
+                        className="btn-tactile flex-1 h-9 min-h-[38px] text-xs font-semibold"
                       >
                         {t.mission.selectJob}
                       </Button>
@@ -1317,7 +1320,7 @@ export function MissionControl() {
                         onClick={() => handleDeleteJob(job.job_id)}
                         variant="secondary"
                         size="sm"
-                        className="h-9 min-h-[38px] px-3 text-[#b91c1c] hover:bg-[#b91c1c]/10 shrink-0"
+                        className="btn-tactile h-9 min-h-[38px] px-3 text-[#b91c1c] hover:bg-[#b91c1c]/10 shrink-0"
                         title={t.mission.deleteJob}
                         aria-label={t.mission.deleteJob}
                       >
@@ -1367,9 +1370,12 @@ export function MissionControl() {
       ) : (
         <>
       {/* Slim Pipeline Stepper */}
-      <div ref={detailSectionRef} className="p-3 sm:p-3.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shrink-0 shadow-2xs">
-        <div className="flex items-center justify-between text-xs font-mono uppercase text-[var(--ink-muted)] mb-2 px-1 font-semibold">
-          <span>{t.mission.pipelineGraph}</span>
+      <div ref={detailSectionRef} className="card-tactile p-3 sm:p-4 rounded-xl border border-[var(--paper-border)] bg-[var(--paper-surface)] shrink-0 shadow-[var(--shadow-card)]">
+        <div className="flex items-center justify-between text-xs font-mono uppercase text-[var(--ink-muted)] mb-2.5 px-1 font-semibold">
+          <span className="flex items-center gap-1.5">
+            <Activity className="h-3.5 w-3.5 text-[var(--ink-secondary)]" />
+            {t.mission.pipelineGraph}
+          </span>
           <span className="text-[var(--ink-primary)] font-bold">
             {t.mission.stageLine.replace(
               '{stage}',
@@ -1389,19 +1395,24 @@ export function MissionControl() {
               <div
                 key={stage.key}
                 ref={isCurrent ? activeStageRef : undefined}
-                className={`flex-1 shrink-0 min-w-[80px] md:min-w-0 py-2 md:py-1.5 px-1.5 md:px-1 text-center text-xs font-mono font-medium rounded-[4px] border transition-colors ${
+                className={`flex-1 shrink-0 min-w-[84px] md:min-w-0 py-2 md:py-1.5 px-1.5 md:px-1 text-center text-xs font-mono font-medium rounded-lg border transition-all ${
                   isCurrent
-                    ? 'border-[var(--ink-primary)] bg-[var(--paper-subsurface)] text-[var(--ink-primary)] font-bold shadow-2xs ring-1 ring-current'
+                    ? 'border-[var(--ink-primary)] bg-[var(--paper-subsurface)] text-[var(--ink-primary)] font-bold shadow-xs ring-1 ring-[var(--paper-border-hover)]'
                     : isDone
                       ? 'border-[#15803d]/30 bg-[#15803d]/5 text-[#15803d]'
                       : 'border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-muted)]'
                 }`}
               >
-                <div className="flex items-center justify-center gap-1">
-                  {isCurrent && !isCompleted && !isFailed && (
-                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--ink-primary)] animate-ping" />
-                  )}
-                  <span>{stage.label}</span>
+                <div className="flex items-center justify-center gap-1.5">
+                  {isCurrent && !isCompleted && !isFailed ? (
+                    <span className="relative flex h-1.5 w-1.5 shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--ink-primary)] opacity-75" />
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[var(--ink-primary)]" />
+                    </span>
+                  ) : isDone ? (
+                    <span className="h-1 w-1 rounded-full bg-[#15803d] shrink-0" />
+                  ) : null}
+                  <span className="truncate">{stage.label}</span>
                 </div>
               </div>
             )
@@ -1410,35 +1421,35 @@ export function MissionControl() {
       </div>
 
       {/* Metric Tiles (Hairline Dividers, Flat Container) */}
-      <div className="grid grid-cols-2 md:grid-cols-4 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] shrink-0 shadow-2xs overflow-hidden">
-        <div className="p-3 sm:p-4 border-r border-b md:border-b-0 border-[var(--paper-border)]">
+      <div className="card-tactile grid grid-cols-2 md:grid-cols-4 rounded-xl border border-[var(--paper-border)] bg-[var(--paper-surface)] shrink-0 shadow-[var(--shadow-card)] overflow-hidden">
+        <div className="p-3.5 sm:p-4 border-r border-b md:border-b-0 border-[var(--paper-border)]">
           <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.progress}</div>
-          <div className="text-xl font-bold font-mono text-[var(--ink-primary)] mt-0.5">
+          <div className="text-2xl font-bold font-mono tabular-nums text-[var(--ink-primary)] mt-1">
             {displayedProgressPct.toFixed(1)}%
           </div>
-          <div className="w-full bg-[var(--paper-subsurface)] h-1.5 rounded-full mt-2 overflow-hidden border border-[var(--paper-border)]">
+          <div className="w-full bg-[var(--paper-subsurface)] h-1.5 rounded-full mt-2.5 overflow-hidden border border-[var(--paper-border)]">
             <div
-              className="bg-[var(--ink-primary)] h-full transition-all duration-200"
+              className="bg-[var(--ink-primary)] h-full transition-all duration-300 rounded-full"
               style={{ width: `${Math.min(100, Math.max(0, displayedProgressPct))}%` }}
             />
           </div>
         </div>
 
-        <div className="p-3 sm:p-4 border-b md:border-b-0 md:border-r border-[var(--paper-border)]">
+        <div className="p-3.5 sm:p-4 border-b md:border-b-0 md:border-r border-[var(--paper-border)]">
           <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.completedPages}</div>
           {queuePosition !== null && (
-            <div className="text-xs font-mono text-[var(--ink-secondary)] mt-1">
+            <div className="text-xs font-mono tabular-nums text-[var(--ink-secondary)] mt-1">
               {t.mission.queuePosition}: <span className="font-bold">{queuePosition}</span>
             </div>
           )}
-          <div className="text-xl font-bold font-mono text-[var(--ink-primary)] mt-0.5">
-            {completedBlocks} <span className="text-xs text-[var(--ink-muted)] font-normal">/ {totalBlocks || '—'}</span>
+          <div className="text-2xl font-bold font-mono tabular-nums text-[var(--ink-primary)] mt-1">
+            {completedBlocks} <span className="text-xs text-[var(--ink-muted)] font-normal font-sans">/ {totalBlocks || '—'}</span>
           </div>
           {/* The denominator counts translatable blocks only; skipped ones are
               reported beside it so the panel does not look like it is describing
               a shorter book than the source. */}
           {skippedBlocks > 0 && (
-            <div className="text-xs font-mono text-[var(--ink-muted)] mt-0.5">
+            <div className="text-xs font-mono tabular-nums text-[var(--ink-muted)] mt-1">
               +{skippedBlocks} {t.mission.skippedBlocks}
             </div>
           )}
@@ -1446,7 +1457,7 @@ export function MissionControl() {
               job that ended with 15 blocks needing a person read as a clean
               100%. Shown next to the completed count, and red when non-zero. */}
           {(failedBlocks > 0 || needsHumanBlocks > 0) && (
-            <div className="text-xs font-mono mt-0.5 text-[#b45309]">
+            <div className="text-xs font-mono tabular-nums mt-1 text-[#b45309]">
               {failedBlocks > 0 && (
                 <span>
                   {failedBlocks} {t.mission.failedBlocks}
@@ -1460,7 +1471,7 @@ export function MissionControl() {
               )}
             </div>
           )}
-          <div className="text-xs text-[#15803d] font-mono mt-1.5 font-medium">
+          <div className="text-xs text-[#15803d] font-mono tabular-nums mt-1.5 font-medium">
             {qeMeasured ? (
               t.mission.avgQe.replace('{score}', avgQe.toFixed(3))
             ) : (
@@ -1471,29 +1482,30 @@ export function MissionControl() {
           </div>
         </div>
 
-        <div className="p-3 sm:p-4 border-r border-[var(--paper-border)]">
+        <div className="p-3.5 sm:p-4 border-r border-[var(--paper-border)]">
           <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.totalSpend}</div>
-          <div className="text-xl font-bold font-mono text-[#b45309] mt-0.5">
+          <div className="text-2xl font-bold font-mono tabular-nums text-[#b45309] mt-1">
             ${costUsd.toFixed(3)}
           </div>
-          <div className="text-xs text-[var(--ink-secondary)] font-mono mt-1.5">
+          <div className="text-xs text-[var(--ink-secondary)] font-mono tabular-nums mt-2">
             {totalBlocks - completedBlocks} {t.mission.blocksRemaining}
           </div>
         </div>
 
-        <div className="p-3 sm:p-4">
+        <div className="p-3.5 sm:p-4">
           <div className="text-xs font-mono uppercase tracking-wider text-[var(--ink-muted)] font-semibold">{t.mission.executionState}</div>
-          <div className="text-sm font-bold font-mono text-[var(--ink-primary)] mt-1">
+          <div className="text-sm font-bold font-mono text-[var(--ink-primary)] mt-1 flex items-center gap-1.5">
+            <span className={`h-2 w-2 rounded-full ${isCompleted ? 'bg-emerald-500' : isFailed ? 'bg-rose-500' : 'bg-sky-500 animate-pulse'}`} />
             {jobStatusLabel(t, statusStr)}
           </div>
-          <div className="text-xs text-[var(--ink-secondary)] mt-1.5 truncate" title={getExecutionSubtext()}>
+          <div className="text-xs text-[var(--ink-secondary)] mt-2 truncate" title={getExecutionSubtext()}>
             {getExecutionSubtext()}
           </div>
         </div>
       </div>
 
       {/* Real-time Compiler Log Output */}
-      <div className={`rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-2xs flex flex-col ${isLogCollapsed ? 'shrink-0' : 'flex-1 min-h-0'}`}>
+      <div className={`card-tactile rounded-xl border border-[var(--paper-border)] bg-[var(--paper-surface)] overflow-hidden shadow-[var(--shadow-card)] flex flex-col ${isLogCollapsed ? 'shrink-0' : 'flex-1 min-h-0'}`}>
         <div className="h-auto min-h-9 p-2 md:px-3 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex flex-wrap items-center justify-between gap-2 shrink-0">
           <div className="flex items-center gap-2 text-xs font-mono text-[var(--ink-secondary)]">
             <button
@@ -1511,8 +1523,11 @@ export function MissionControl() {
               )}
             </button>
             {isLiveStreaming && !isCompleted && !isFailed && (
-              <span className="inline-flex items-center gap-1.5 text-[11px] text-[#15803d] font-mono px-2 py-0.5 rounded bg-[#15803d]/10 ml-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#15803d] animate-pulse" />
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-[#15803d] font-mono px-2 py-0.5 rounded-full bg-[#15803d]/10 border border-[#15803d]/20 ml-2">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]" />
+                </span>
                 {t.mission.engineActiveHeartbeat}
               </span>
             )}
@@ -1532,7 +1547,7 @@ export function MissionControl() {
                   <button
                     key={level}
                     onClick={() => setLogLevel(level)}
-                    className={`px-1.5 py-0.5 text-xs font-mono rounded-[3px] transition-colors ${
+                    className={`btn-tactile px-1.5 py-0.5 text-xs font-mono rounded-[3px] transition-colors ${
                       logLevel === level
                         ? 'bg-[var(--btn-bg)] text-[var(--btn-fg)]'
                         : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'

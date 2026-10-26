@@ -61,6 +61,19 @@ export const zh: TranslationDictionary = {
     saveEdit: '保存',
     cancelEdit: '取消',
     quickEditHint: '',
+    readyTag: '就绪',
+    changeFile: '点击更换文件',
+    clearFile: '清除文件',
+    refreshList: '刷新列表',
+    loadingBooks: '正在加载书籍列表...',
+    processingLaunch: '正在处理并启动...',
+    targetShort: '目标',
+    progressShort: '进度',
+    loadingSegments: '正在加载书籍段落...',
+    noSegmentsParsed: '该任务正在解析或暂未提取到文本段落',
+    illustrationNotice: '原书插图 / 视觉图表',
+    waitingTranslation: '（等待翻译...）',
+    defaultPrimary: '默认完整版',
   },
   nav: {
     operatorControl: '核心控制',
@@ -175,6 +188,11 @@ export const zh: TranslationDictionary = {
     presetFastDetail: '引擎 PDFIUM 短链 · 极简提示词 · 公式保留源图 · 零重型环境依赖。',
     confidence: '路由置信度',
     probeWarnings: '体检告警',
+    pagesUnit: '页',
+    pipelineProfileTag: '引擎管线预设',
+    scorecardTitle: '文档特征与排版体检',
+    scorecardSub: 'STRUCTURAL SCORECARD',
+    tokenPrefixTag: '前缀',
     // 与引擎 ubt/core/assess.py 的 detail_zh 保持同一措辞；这里按稳定 code
     // 取用，未知 code 回退引擎原文。插值取自 warning.params。
     warningCodes: {

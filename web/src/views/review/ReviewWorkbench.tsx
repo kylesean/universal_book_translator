@@ -804,7 +804,7 @@ export function ReviewWorkbench() {
               </button>
             </div>
           )}
-          <div className="flex bg-[var(--paper-subsurface)] p-0.5 rounded-[4px] border border-[var(--paper-border)]">
+          <div className="flex bg-[var(--paper-subsurface)] p-0.5 rounded-lg border border-[var(--paper-border)] shadow-xs">
             {(
               [
                 ['issues', t.review.filterIssues],
@@ -815,9 +815,9 @@ export function ReviewWorkbench() {
               <button
                 key={id}
                 onClick={() => setFilter(id)}
-                className={`min-h-[30px] md:min-h-0 px-2.5 py-1 text-xs rounded-[3px] transition-colors font-medium cursor-pointer ${
+                className={`btn-tactile min-h-[30px] md:min-h-0 px-2.5 py-1 text-xs rounded-md transition-all font-medium cursor-pointer ${
                   filter === id
-                    ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-2xs'
+                    ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-xs'
                     : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
                 }`}
               >
@@ -826,12 +826,12 @@ export function ReviewWorkbench() {
             ))}
           </div>
 
-          <div className="flex bg-[var(--paper-subsurface)] p-0.5 rounded-[4px] border border-[var(--paper-border)]">
+          <div className="flex bg-[var(--paper-subsurface)] p-0.5 rounded-lg border border-[var(--paper-border)] shadow-xs">
             <button
               onClick={() => setViewMode('segments')}
-              className={`min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-[3px] transition-colors font-medium cursor-pointer ${
+              className={`btn-tactile min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-md transition-all font-medium cursor-pointer ${
                 viewMode === 'segments'
-                  ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-2xs'
+                  ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-xs'
                   : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
               }`}
             >
@@ -839,9 +839,9 @@ export function ReviewWorkbench() {
             </button>
             <button
               onClick={() => setViewMode('reading_flow')}
-              className={`min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-[3px] transition-colors font-medium cursor-pointer ${
+              className={`btn-tactile min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-md transition-all font-medium cursor-pointer ${
                 viewMode === 'reading_flow'
-                  ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-2xs'
+                  ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-xs'
                   : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
               }`}
             >
@@ -849,9 +849,9 @@ export function ReviewWorkbench() {
             </button>
             <button
               onClick={() => setViewMode('visual_witness')}
-              className={`min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-[3px] transition-colors font-medium cursor-pointer ${
+              className={`btn-tactile min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-md transition-all font-medium cursor-pointer ${
                 viewMode === 'visual_witness'
-                  ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-2xs'
+                  ? 'bg-[var(--paper-surface)] text-[var(--ink-primary)] font-bold shadow-xs'
                   : 'text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
               }`}
             >
@@ -864,10 +864,10 @@ export function ReviewWorkbench() {
           <button
             onClick={() => void handleReExport()}
             disabled={reExporting || exporting}
-            className={`min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-[4px] border transition-colors font-medium cursor-pointer disabled:cursor-wait ${
+            className={`btn-tactile min-h-[30px] md:min-h-0 px-3 py-1 text-xs rounded-lg border transition-all font-medium cursor-pointer disabled:cursor-wait ${
               reExportPending
-                ? 'border-[#b45309]/40 bg-[#b45309]/10 text-[#b45309] font-semibold'
-                : 'border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]'
+                ? 'border-[#b45309]/40 bg-[#b45309]/10 text-[#b45309] font-semibold shadow-xs'
+                : 'border-[var(--paper-border)] bg-[var(--paper-surface)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)] shadow-xs'
             }`}
             title={t.review.reExportHelp}
           >
@@ -897,7 +897,7 @@ export function ReviewWorkbench() {
               )}
               <span>{exporting && exportStatusText ? exportStatusText : t.review.oneClickExport}</span>
               {primaryDeliverable && !exporting && (
-                <span className="hidden sm:inline-block text-[10px] font-mono opacity-80 uppercase px-1 py-0.2 bg-black/15 rounded">
+                <span className="hidden sm:inline-block text-[10px] font-mono opacity-80 uppercase px-1 py-0.5 bg-black/15 rounded">
                   {getFormatBadge(primaryDeliverable.filename)}
                 </span>
               )}
@@ -948,7 +948,7 @@ export function ReviewWorkbench() {
                           </div>
                         </div>
                         {isPrimary && (
-                          <span className="shrink-0 text-[10px] px-1 py-0.2 rounded bg-[#15803d]/15 text-[#15803d] font-semibold font-mono">
+                          <span className="shrink-0 text-[10px] px-1 py-0.5 rounded bg-[#15803d]/15 text-[#15803d] font-semibold font-mono">
                             {t.review.exportPrimaryBadge}
                           </span>
                         )}
@@ -1026,15 +1026,15 @@ export function ReviewWorkbench() {
                           setSelectedBlockId(seg.block_id)
                           setInspectorOpen(true)
                         }}
-                        className={`rounded-lg border transition-colors shadow-2xs bg-[var(--paper-surface)] cursor-pointer ${
+                        className={`card-tactile reading-segment rounded-xl border transition-all shadow-[var(--shadow-card)] bg-[var(--paper-surface)] cursor-pointer ${
                           selectedBlockId === seg.block_id
-                            ? 'border-[var(--ink-primary)]'
+                            ? 'border-[var(--ink-primary)] ring-1 ring-[var(--paper-border-hover)]'
                             : seg.issues.length > 0
-                              ? 'border-[#b45309]/50'
-                              : 'border-[var(--paper-border)]'
+                              ? 'border-[#b45309]/50 hover:border-[#b45309]'
+                              : 'border-[var(--paper-border)] hover:border-[var(--paper-border-hover)]'
                         }`}
                       >
-                        <div className="h-8 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between text-xs font-mono text-[var(--ink-muted)]">
+                        <div className="h-8.5 px-3.5 border-b border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between text-xs font-mono text-[var(--ink-muted)]">
                           <div className="flex items-center gap-2">
                             <span className="text-[var(--ink-primary)] font-bold">
                               {seg.block_id}
@@ -1046,7 +1046,7 @@ export function ReviewWorkbench() {
                                   togglePreview(seg.page)
                                 }}
                                 title={t.review.previewPage}
-                                className={`min-h-[28px] md:min-h-0 px-2 py-1 md:py-0.5 rounded text-xs font-semibold transition-colors cursor-pointer ${
+                                className={`btn-tactile min-h-[28px] md:min-h-0 px-2 py-1 md:py-0.5 rounded text-xs font-semibold transition-colors cursor-pointer ${
                                   previewOpen
                                     ? 'bg-[var(--ink-primary)] text-[var(--paper-bg)]'
                                     : 'bg-[var(--paper-border)] text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]'
@@ -1055,7 +1055,7 @@ export function ReviewWorkbench() {
                                 {t.review.pageLabel.replace('{n}', String(seg.page))}
                               </button>
                             )}
-                            <span className="text-xs px-1.5 py-0.2 rounded bg-[var(--paper-border)] text-[var(--ink-secondary)] font-semibold">
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--paper-border)] text-[var(--ink-secondary)] font-semibold">
                               {blockTypeLabel(t, seg.block_type)}
                             </span>
                           </div>
@@ -1068,17 +1068,38 @@ export function ReviewWorkbench() {
                                 {issueLabel(t, kind)}
                               </span>
                             ))}
-                            {seg.mtqe_score !== null && (
-                              <span className="font-semibold text-[var(--ink-primary)]">
-                                QE {(seg.mtqe_score * 100).toFixed(0)}%
-                              </span>
-                            )}
+                            {seg.mtqe_score !== null && (() => {
+                              const pct = Math.round(seg.mtqe_score * 100)
+                              const colorClass = pct >= 85
+                                ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                                : pct >= 70
+                                  ? 'text-sky-700 dark:text-sky-400 bg-sky-500/10 border-sky-500/20'
+                                  : pct >= 55
+                                    ? 'text-amber-700 dark:text-amber-400 bg-amber-500/10 border-amber-500/20'
+                                    : 'text-rose-700 dark:text-rose-400 bg-rose-500/10 border-rose-500/20'
+                              return (
+                                <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-full border ${colorClass}`}>
+                                  QE {pct}%
+                                </span>
+                              )
+                            })()}
                             {seg.human_verified ? (
                               <Badge variant="success" dot>
                                 {t.review.humanVerified}
                               </Badge>
                             ) : (
-                              <Badge variant={seg.issues.length > 0 ? 'warning' : 'outline'} dot>
+                              <Badge
+                                variant={
+                                  seg.status === 'mtqe_passed'
+                                    ? 'success'
+                                    : seg.status === 'needs_human' || seg.issues.length > 0
+                                      ? 'warning'
+                                      : seg.status === 'blocked_human' || seg.status === 'failed'
+                                        ? 'destructive'
+                                        : 'outline'
+                                }
+                                dot
+                              >
                                 {blockStatusLabel(t, seg.status)}
                               </Badge>
                             )}
@@ -1238,7 +1259,7 @@ export function ReviewWorkbench() {
                                   }}
                                   variant="secondary"
                                   size="sm"
-                                  className="text-xs h-7 md:h-6 px-2.5"
+                                  className="btn-tactile text-xs h-7 md:h-6 px-2.5"
                                 >
                                   {t.review.cancelEdit}
                                 </Button>
@@ -1248,7 +1269,7 @@ export function ReviewWorkbench() {
                                 variant="primary"
                                 size="sm"
                                 disabled={!editing[seg.block_id] || !dirty || saving[seg.block_id]}
-                                className="text-xs h-7 md:h-6 px-2.5 font-bold"
+                                className="btn-tactile text-xs h-7 md:h-6 px-2.5 font-bold"
                               >
                                 {saving[seg.block_id] ? (
                                   <Loader2 className="h-3 w-3 mr-1 animate-spin" />
@@ -1308,93 +1329,120 @@ export function ReviewWorkbench() {
                   className="absolute top-0 left-0 w-full pb-4"
                   style={{ transform: `translateY(${virtualRow.start}px)` }}
                 >
-                  <div
-                    onClick={() => {
-                      setSelectedBlockId(seg.block_id)
-                      setInspectorOpen(true)
-                    }}
-                    className={`grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 p-4 rounded-lg transition-all cursor-pointer border ${
-                      isSelected
-                        ? 'bg-[var(--paper-surface)] shadow-md border-[var(--ink-primary)]'
-                        : hasIssues
-                          ? 'bg-[#b45309]/5 hover:bg-[#b45309]/10 border-l-2 border-[#b45309]'
-                          : 'border-transparent hover:border-[var(--paper-border)] hover:bg-[var(--paper-subsurface)]'
-                    }`}
-                  >
-                    {/* Left: Source text */}
-                    <div className="min-w-0 break-words [overflow-wrap:anywhere] text-xs md:text-sm font-mono leading-relaxed text-[var(--ink-secondary)] select-text">
-                      <div className="text-[10px] font-mono uppercase text-[var(--ink-muted)] mb-1">
-                        {seg.block_id} · P{seg.page ?? '—'}
+                    <div
+                      onClick={() => {
+                        setSelectedBlockId(seg.block_id)
+                        setInspectorOpen(true)
+                      }}
+                      className={`reading-segment reading-spine-line card-tactile grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 p-4 rounded-xl transition-all cursor-pointer border ${
+                        isSelected
+                          ? 'bg-[var(--paper-surface)] shadow-[var(--shadow-card)] border-[var(--ink-primary)] ring-1 ring-[var(--paper-border-hover)]'
+                          : hasIssues
+                            ? 'bg-[#b45309]/5 hover:bg-[#b45309]/10 border-l-[3px] border-l-[#b45309] border-y-[var(--paper-border)] border-r-[var(--paper-border)]'
+                            : 'border-[var(--paper-border)] hover:border-[var(--paper-border-hover)] hover:bg-[var(--paper-surface)] bg-[var(--paper-subsurface)]'
+                      }`}
+                    >
+                      {/* Left: Source text */}
+                      <div className="min-w-0 break-words [overflow-wrap:anywhere] text-xs md:text-sm font-mono leading-relaxed text-[var(--ink-secondary)] select-text md:pr-4 max-w-[65ch] [text-wrap:pretty]">
+                        <div className="text-[10px] font-mono uppercase text-[var(--ink-muted)] mb-1 flex items-center justify-between">
+                          <span>{seg.block_id} · P{seg.page ?? '—'}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--paper-border)] text-[var(--ink-secondary)] font-semibold">
+                            {blockTypeLabel(t, seg.block_type)}
+                          </span>
+                        </div>
+                        <div className="whitespace-pre-wrap">{seg.source_text}</div>
                       </div>
-                      {seg.source_text}
-                    </div>
 
-                    {/* Right: Target translation */}
-                    <div className="min-w-0 break-words [overflow-wrap:anywhere] text-xs md:text-sm font-sans leading-relaxed text-[var(--ink-primary)]">
-                      {isEditingThis ? (
-                        <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
-                          <AutoGrowTextarea
-                            autoFocus
-                            value={draft}
-                            onChange={(e) =>
-                              setDrafts((prev) => ({
-                                ...prev,
-                                [seg.block_id]: e.target.value,
-                              }))
-                            }
+                      {/* Right: Target translation */}
+                      <div className="min-w-0 break-words [overflow-wrap:anywhere] text-xs md:text-sm font-sans leading-relaxed text-[var(--ink-primary)] md:pl-2 max-w-[65ch] [text-wrap:pretty]">
+                        {isEditingThis ? (
+                          <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
+                            <AutoGrowTextarea
+                              autoFocus
+                              value={draft}
+                              onChange={(e) =>
+                                setDrafts((prev) => ({
+                                  ...prev,
+                                  [seg.block_id]: e.target.value,
+                                }))
+                              }
+                              onKeyDown={(e) => {
+                                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                  e.preventDefault()
+                                  void handleSave(seg)
+                                  setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
+                                } else if (e.key === 'Escape') {
+                                  e.preventDefault()
+                                  setDrafts((prev) => ({ ...prev, [seg.block_id]: seg.target_text }))
+                                  setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
+                                }
+                              }}
+                              className="w-full text-xs md:text-sm font-sans bg-[var(--paper-surface)] border border-[var(--paper-border)] p-2.5 rounded-lg focus:border-[var(--ink-primary)] focus:outline-none resize-none leading-relaxed text-[var(--ink-primary)] shadow-xs"
+                            />
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-[var(--ink-muted)] font-mono text-[10px]">{t.review.editShortcutHint}</span>
+                              <Button
+                                size="sm"
+                                className="btn-tactile text-xs h-7 px-2.5 font-bold"
+                                onClick={() => {
+                                  void handleSave(seg)
+                                  setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
+                                }}
+                                disabled={saving[seg.block_id]}
+                              >
+                                {saving[seg.block_id] ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}
+                                {t.common.confirm}
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation()
+                              setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
+                            }}
                             onKeyDown={(e) => {
-                              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                              if (e.key === 'Enter' || e.key === ' ') {
                                 e.preventDefault()
-                                void handleSave(seg)
-                                setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
-                              } else if (e.key === 'Escape') {
-                                e.preventDefault()
-                                setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
+                                e.stopPropagation()
+                                setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
                               }
                             }}
-                            className="w-full text-xs md:text-sm font-sans bg-[var(--paper-surface)] border border-[var(--paper-border)] p-2.5 rounded focus:border-[var(--ink-primary)] focus:outline-none resize-none leading-relaxed text-[var(--ink-primary)] shadow-2xs"
-                          />
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-[var(--ink-muted)] font-mono text-[10px]">{t.review.editShortcutHint}</span>
-                            <Button
-                              size="sm"
-                              className="text-xs h-7 px-2.5"
-                              onClick={() => {
-                                void handleSave(seg)
-                                setEditing((prev) => ({ ...prev, [seg.block_id]: false }))
-                              }}
-                              disabled={saving[seg.block_id]}
-                            >
-                              {saving[seg.block_id] ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}
-                              {t.common.confirm}
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div
-                          onDoubleClick={(e) => {
-                            e.stopPropagation()
-                            setEditing((prev) => ({ ...prev, [seg.block_id]: true }))
-                          }}
-                          className="group relative"
-                        >
-                          <p className="select-text whitespace-pre-wrap">{draft}</p>
-                          {hasIssues && (
-                            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                              {seg.issues.map((kind) => (
-                                <span
-                                  key={kind}
-                                  className="text-[10px] px-1 py-0.2 rounded bg-[#b45309]/15 text-[#b45309] font-mono font-medium"
-                                >
-                                  {issueLabel(t, kind)}
-                                </span>
-                              ))}
+                            className="group relative cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-[var(--ink-primary)] rounded"
+                          >
+                            <p className="select-text whitespace-pre-wrap leading-relaxed">{draft}</p>
+                            <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                              {seg.mtqe_score !== null && (() => {
+                                const pct = Math.round(seg.mtqe_score * 100)
+                                const colorClass = pct >= 85
+                                  ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                                  : pct >= 70
+                                    ? 'text-sky-700 dark:text-sky-400 bg-sky-500/10 border-sky-500/20'
+                                    : pct >= 55
+                                      ? 'text-amber-700 dark:text-amber-400 bg-amber-500/10 border-amber-500/20'
+                                      : 'text-rose-700 dark:text-rose-400 bg-rose-500/10 border-rose-500/20'
+                                return (
+                                  <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${colorClass}`}>
+                                    QE {pct}%
+                                  </span>
+                                )
+                              })()}
+                              {hasIssues &&
+                                seg.issues.map((kind) => (
+                                  <span
+                                    key={kind}
+                                    className="text-[10px] px-1.5 py-0.5 rounded bg-[#b45309]/15 text-[#b45309] font-mono font-medium"
+                                  >
+                                    {issueLabel(t, kind)}
+                                  </span>
+                                ))}
                             </div>
-                          )}
-                        </div>
-                      )}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
                 </div>
               )
             })}

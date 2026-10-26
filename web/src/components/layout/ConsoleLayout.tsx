@@ -106,8 +106,14 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
   useEffect(() => {
     if (paperTone === 'cotton') {
       document.documentElement.removeAttribute('data-paper-tone')
+      document.documentElement.classList.remove('dark')
     } else {
       document.documentElement.setAttribute('data-paper-tone', paperTone)
+      if (paperTone === 'obsidian') {
+        document.documentElement.classList.add('dark')
+      } else {
+        document.documentElement.classList.remove('dark')
+      }
     }
     try {
       localStorage.setItem('ubt_paper_tone', paperTone)

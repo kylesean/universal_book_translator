@@ -12,6 +12,7 @@ import {
   Check,
   ChevronDown,
   Image as ImageIcon,
+  X,
 } from 'lucide-react'
 import {
   listJobs,
@@ -21,12 +22,23 @@ import {
   uploadSourceDocument,
   submitJob,
   listDeliverables,
+  deliverableDownloadUrl,
+  triggerBrowserDownload,
   type JobSummary,
   type Segment,
   type DeliverableListing,
 } from '@/api/client'
+import { deliverableName } from '@/views/quality-gate/artifactMeta'
 import { useI18n } from '@/i18n/useI18n'
 import { useToast } from '@/components/ui/useToast'
+
+const formatBytes = (bytes?: number): string => {
+  if (!bytes || bytes <= 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
+}
 
 export function ReaderView({ initialJobId }: { initialJobId?: string }) {
   const { t, language } = useI18n()
@@ -43,6 +55,7 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
   const [targetLang, setTargetLang] = useState('zh-Hans')
   const [stylePreset, setStylePreset] = useState<'academic' | 'literary' | 'technical'>('academic')
   const [submitting, setSubmitting] = useState(false)
+  const [isDragOver, setIsDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   // Active Job Reading State
@@ -149,6 +162,7 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
   // Handle file select
   const handleFileDrop = (e: React.DragEvent) => {
     e.preventDefault()
+    setIsDragOver(false)
     if (e.dataTransfer.files?.[0]) {
       setFile(e.dataTransfer.files[0])
       setManualPath('')
@@ -158,7 +172,10 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
   // Handle start translation
   const handleStartTranslation = async () => {
     if (!file && !manualPath.trim()) {
-      showToast('请先选择或输入要翻译的文件', 'error')
+      showToast(
+        language === 'zh' ? '请先选择或输入要翻译的文件' : 'Please select or enter a document to translate',
+        'error'
+      )
       return
     }
 
@@ -167,7 +184,7 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
       let resolvedPath = manualPath.trim()
 
       if (file) {
-        showToast('正在上传源文件...', 'info')
+        showToast(language === 'zh' ? '正在上传源文件...' : 'Uploading source document...', 'info')
         const uploadRes = await uploadSourceDocument(file)
         resolvedPath = uploadRes.file_path
       }
@@ -178,7 +195,7 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
         technical: 'fast',
       }
 
-      showToast('正在启动翻译任务...', 'info')
+      showToast(language === 'zh' ? '正在启动翻译任务...' : 'Starting translation job...', 'info')
       const submitRes = await submitJob({
         input_path: resolvedPath,
         target_lang: targetLang,
@@ -189,13 +206,16 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
         dry_run: false,
       })
 
-      showToast('任务已启动，正在解析排版！', 'success')
+      showToast(
+        language === 'zh' ? '任务已启动，正在解析排版！' : 'Job started! Parsing and formatting...',
+        'success'
+      )
       setActiveJobId(submitRes.job_id)
       setActiveJobStatus('running')
       refreshJobs()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      showToast(`启动失败: ${msg}`, 'error')
+      showToast(language === 'zh' ? `启动失败: ${msg}` : `Launch failed: ${msg}`, 'error')
     } finally {
       setSubmitting(false)
     }
@@ -211,22 +231,32 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
         prev.map((s) => (s.block_id === blockId ? { ...s, target_text: draftText } : s))
       )
       setEditingBlockId(null)
-      showToast('修改已保存并同步', 'success')
+      showToast(language === 'zh' ? '修改已保存并同步' : 'Segment saved and synced', 'success')
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      showToast(`保存失败: ${msg}`, 'error')
+      showToast(language === 'zh' ? `保存失败: ${msg}` : `Failed to save: ${msg}`, 'error')
     } finally {
       setSavingEdit(false)
     }
   }
 
-  // Handle deliverable download
-  const handleDownload = (format?: string) => {
+  // Relevant reading deliverables
+  const readingDeliverables = (deliverables?.items ?? []).filter((d) =>
+    ['primary', 'epub', 'docx', 'html', 'markdown', 'pdf', 'text'].includes(d.key) ||
+    d.filename.endsWith('.pdf') ||
+    d.filename.endsWith('.epub') ||
+    d.filename.endsWith('.docx') ||
+    d.filename.endsWith('.md') ||
+    d.filename.endsWith('.html')
+  )
+
+  // Handle deliverable download via real backend download route
+  const handleDownload = (key?: string) => {
     if (!activeJobId) return
-    const url = format
-      ? `/api/v1/jobs/${activeJobId}/deliverable?format=${encodeURIComponent(format)}`
-      : `/api/v1/jobs/${activeJobId}/deliverable`
-    window.open(url, '_blank')
+    const targetKey = key ?? readingDeliverables[0]?.key ?? 'primary'
+    const item = readingDeliverables.find((d) => d.key === targetKey)
+    const url = deliverableDownloadUrl(activeJobId, targetKey)
+    triggerBrowserDownload(url, item?.filename)
     setExportMenuOpen(false)
   }
 
@@ -324,45 +354,58 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
 
               {exportMenuOpen && (
                 <div
-                  className="absolute right-0 mt-1 w-44 rounded-lg shadow-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] py-1 z-30 animate-in fade-in zoom-in-95 duration-100"
-                  onClick={() => setExportMenuOpen(false)}
+                  className="absolute right-0 mt-1.5 w-64 rounded-xl shadow-[var(--shadow-floating)] border border-[var(--paper-border)] bg-[var(--paper-surface)] py-1.5 z-30"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <button
-                    onClick={() => handleDownload()}
-                    className="w-full text-left px-3 py-2 text-xs text-[var(--ink-primary)] hover:bg-[var(--paper-subsurface)] font-medium flex items-center justify-between"
-                  >
-                    <span>默认完整版</span>
-                    <span className="text-[10px] text-[var(--ink-muted)] uppercase">推荐</span>
-                  </button>
-                  <div className="border-t border-[var(--paper-border)] my-1" />
-                  <button
-                    onClick={() => handleDownload('pdf')}
-                    className="w-full text-left px-3 py-1.5 text-xs text-[var(--ink-primary)] hover:bg-[var(--paper-subsurface)] flex items-center justify-between"
-                  >
-                    <span>PDF 排版电子书</span>
-                    <span className="text-[10px] text-[var(--ink-muted)] font-mono">.pdf</span>
-                  </button>
-                  <button
-                    onClick={() => handleDownload('epub')}
-                    className="w-full text-left px-3 py-1.5 text-xs text-[var(--ink-primary)] hover:bg-[var(--paper-subsurface)] flex items-center justify-between"
-                  >
-                    <span>EPUB 移动电子书</span>
-                    <span className="text-[10px] text-[var(--ink-muted)] font-mono">.epub</span>
-                  </button>
-                  <button
-                    onClick={() => handleDownload('docx')}
-                    className="w-full text-left px-3 py-1.5 text-xs text-[var(--ink-primary)] hover:bg-[var(--paper-subsurface)] flex items-center justify-between"
-                  >
-                    <span>Word 交付文档</span>
-                    <span className="text-[10px] text-[var(--ink-muted)] font-mono">.docx</span>
-                  </button>
-                  <button
-                    onClick={() => handleDownload('markdown')}
-                    className="w-full text-left px-3 py-1.5 text-xs text-[var(--ink-primary)] hover:bg-[var(--paper-subsurface)] flex items-center justify-between"
-                  >
-                    <span>纯文本 Markdown</span>
-                    <span className="text-[10px] text-[var(--ink-muted)] font-mono">.md</span>
-                  </button>
+                  <div className="px-3 py-1.5 text-[11px] font-semibold text-[var(--ink-muted)] border-b border-[var(--paper-border)] uppercase tracking-wider">
+                    {t.review.exportFormats}
+                  </div>
+                  <div className="max-h-60 overflow-y-auto py-1">
+                    {readingDeliverables.length > 0 ? (
+                      readingDeliverables.map((item, idx) => {
+                        const isPrimary = idx === 0 || item.key === 'primary'
+                        const badge = getFormatBadge(item.filename)
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => handleDownload(item.key)}
+                            className="btn-tactile w-full px-3 py-2 text-left hover:bg-[var(--paper-subsurface)] flex items-center justify-between gap-2 transition-colors cursor-pointer"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border ${badge.bg}`}>
+                                  {badge.tag}
+                                </span>
+                                <span className="font-medium text-xs text-[var(--ink-primary)] truncate">
+                                  {deliverableName(item.key, item.label || item.filename, t)}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-[var(--ink-muted)] font-mono mt-0.5 truncate">
+                                {item.filename} · {formatBytes(item.size_bytes)}
+                              </div>
+                            </div>
+                            {isPrimary && (
+                              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-[#15803d]/15 text-[#15803d] font-semibold font-mono">
+                                {t.review.exportPrimaryBadge}
+                              </span>
+                            )}
+                          </button>
+                        )
+                      })
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleDownload('primary')}
+                        className="btn-tactile w-full px-3 py-2 text-left hover:bg-[var(--paper-subsurface)] flex items-center justify-between gap-2 transition-colors cursor-pointer"
+                      >
+                        <span className="text-xs text-[var(--ink-primary)] font-medium">{t.reader.defaultPrimary}</span>
+                        <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-[#15803d]/15 text-[#15803d] font-semibold font-mono">
+                          {t.review.exportPrimaryBadge}
+                        </span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -388,7 +431,7 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
                 </span>
                 {activeJobProgress.total > 0 && (
                   <div className="text-[11px] text-[var(--ink-muted)] font-mono">
-                    {activeJobProgress.current} / {activeJobProgress.total} 段
+                    {activeJobProgress.current} / {activeJobProgress.total} {language === 'zh' ? '段' : 'segments'}
                   </div>
                 )}
               </div>
@@ -449,11 +492,11 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
           {loadingSegments && segments.length === 0 ? (
             <div className="py-20 text-center space-y-3">
               <div className="h-6 w-6 border-2 border-[var(--paper-border)] border-t-[var(--ink-primary)] rounded-full animate-spin mx-auto" />
-              <p className="text-xs text-[var(--ink-muted)]">正在加载书籍段落...</p>
+              <p className="text-xs text-[var(--ink-muted)]">{t.reader.loadingSegments}</p>
             </div>
           ) : segments.length === 0 ? (
             <div className="py-20 text-center rounded-xl border border-[var(--paper-border)] bg-[var(--paper-subsurface)]">
-              <p className="text-sm text-[var(--ink-secondary)]">该任务正在解析或暂未提取到文本段落</p>
+              <p className="text-sm text-[var(--ink-secondary)]">{t.reader.noSegmentsParsed}</p>
             </div>
           ) : (
             <div className="space-y-4 pb-36">
@@ -474,7 +517,7 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
                       className="my-3 py-3.5 px-4 rounded-xl border border-dashed border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-center gap-2.5 text-xs text-[var(--ink-muted)] select-none"
                     >
                       <ImageIcon className="h-4 w-4 text-[var(--ink-secondary)] shrink-0" />
-                      <span className="font-medium text-[var(--ink-secondary)]">原书插图 / 视觉图表</span>
+                      <span className="font-medium text-[var(--ink-secondary)]">{t.reader.illustrationNotice}</span>
                       {seg.page !== null && (
                         <span className="text-[10px] font-mono text-[var(--ink-muted)]">
                           · P{seg.page}
@@ -489,22 +532,22 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
                 return (
                   <div
                     key={seg.block_id}
-                    className={`rounded-xl border border-transparent hover:border-[var(--paper-border)] p-4 transition-all duration-150 ${
+                    className={`reading-segment rounded-xl p-4 transition-all duration-150 ${
                       isEditing
-                        ? 'bg-[var(--paper-surface)] shadow-md border-[var(--paper-border-hover)]'
+                        ? 'reading-segment-active bg-[var(--paper-surface)] shadow-[var(--shadow-card)] border border-[var(--paper-border-hover)]'
                         : isHeading
                           ? 'bg-[var(--paper-subsurface)] font-semibold'
-                          : 'hover:bg-[var(--paper-subsurface)]'
+                          : 'hover:bg-[var(--paper-subsurface)] border border-transparent hover:border-[var(--paper-border)]'
                     }`}
                   >
                     {bilingualView === 'bilingual' ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8 items-start">
+                      <div className="reading-spine-line grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-10 items-start">
                         {/* Source column */}
                         <div
-                          className={`min-w-0 break-words [overflow-wrap:anywhere] select-text ${
+                          className={`min-w-0 break-words [overflow-wrap:anywhere] select-text md:pr-6 ${
                             isHeading
                               ? 'text-base md:text-lg font-bold font-serif leading-snug text-[var(--ink-primary)] [text-wrap:balance]'
-                              : 'text-xs md:text-sm font-serif leading-relaxed text-[var(--ink-secondary)] opacity-90 [text-wrap:pretty]'
+                              : 'text-xs md:text-sm font-serif leading-relaxed text-[var(--ink-secondary)] opacity-90 [text-wrap:pretty] max-w-[65ch]'
                           }`}
                         >
                           {seg.source_text}
@@ -512,10 +555,10 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
 
                         {/* Target column */}
                         <div
-                          className={`min-w-0 break-words [overflow-wrap:anywhere] ${
+                          className={`min-w-0 break-words [overflow-wrap:anywhere] md:pl-6 ${
                             isHeading
                               ? 'text-base md:text-lg font-bold font-sans leading-snug text-[var(--ink-primary)] [text-wrap:balance]'
-                              : 'text-xs md:text-sm font-sans leading-relaxed text-[var(--ink-primary)] [text-wrap:pretty]'
+                              : 'text-xs md:text-sm font-sans leading-relaxed text-[var(--ink-primary)] [text-wrap:pretty] max-w-[65ch]'
                           }`}
                         >
                           {isEditing ? (
@@ -554,14 +597,23 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
                             </div>
                           ) : (
                             <div
+                              role="button"
+                              tabIndex={0}
                               onClick={() => {
                                 setEditingBlockId(seg.block_id)
                                 setDraftText(seg.target_text || '')
                               }}
-                              className="group relative cursor-pointer min-h-[24px]"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault()
+                                  setEditingBlockId(seg.block_id)
+                                  setDraftText(seg.target_text || '')
+                                }
+                              }}
+                              className="group relative cursor-pointer min-h-[24px] focus:outline-hidden focus:ring-1 focus:ring-[var(--ink-primary)] rounded"
                               title={t.reader.editParagraph}
                             >
-                              <div>{seg.target_text || <span className="italic text-[var(--ink-muted)]">（等待翻译...）</span>}</div>
+                              <div>{seg.target_text || <span className="italic text-[var(--ink-muted)]">{t.reader.waitingTranslation}</span>}</div>
                               <span className="hidden group-hover:inline-flex items-center gap-0.5 text-[10px] text-[var(--ink-muted)] mt-1 opacity-60">
                                 <Edit3 className="h-2.5 w-2.5" />
                                 <span>{t.reader.editParagraph}</span>
@@ -608,13 +660,22 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
                           </div>
                         ) : (
                           <div
+                            role="button"
+                            tabIndex={0}
                             onClick={() => {
                               setEditingBlockId(seg.block_id)
                               setDraftText(seg.target_text || '')
                             }}
-                            className="cursor-pointer"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setEditingBlockId(seg.block_id)
+                                setDraftText(seg.target_text || '')
+                              }
+                            }}
+                            className="cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-[var(--ink-primary)] rounded"
                           >
-                            {seg.target_text || <span className="italic text-[var(--ink-muted)]">（等待翻译...）</span>}
+                            {seg.target_text || <span className="italic text-[var(--ink-muted)]">{t.reader.waitingTranslation}</span>}
                           </div>
                         )}
                       </div>
@@ -633,6 +694,28 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
     )
   }
 
+  // Helper for format seal and spine accents
+  const getFormatBadge = (filename?: string) => {
+    const base = filename ? (filename.split(/[/\\]/).pop() ?? filename) : ''
+    const parts = base.split('.')
+    const ext = parts.length > 1 ? (parts.pop()?.toLowerCase() ?? '') : ''
+    switch (ext) {
+      case 'pdf':
+        return { tag: 'PDF', bg: 'bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/30', spine: 'bg-rose-500' }
+      case 'epub':
+        return { tag: 'EPUB', bg: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30', spine: 'bg-emerald-500' }
+      case 'docx':
+        return { tag: 'DOCX', bg: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30', spine: 'bg-blue-500' }
+      case 'md':
+      case 'markdown':
+        return { tag: 'MD', bg: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/30', spine: 'bg-indigo-500' }
+      case 'txt':
+        return { tag: 'TXT', bg: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30', spine: 'bg-amber-500' }
+      default:
+        return { tag: ext.toUpperCase() || 'DOC', bg: 'bg-[var(--paper-subsurface)] text-[var(--ink-secondary)] border-[var(--paper-border)]', spine: 'bg-[var(--ink-muted)]' }
+    }
+  }
+
   // --------------------------------------------------------------------------
   // RENDER: Reader Home / Bookshelf & Minimalist Upload
   // --------------------------------------------------------------------------
@@ -640,27 +723,40 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
     <div className="max-w-4xl mx-auto px-4 py-8 md:py-12 space-y-12">
       {/* Hero Header */}
       <div className="text-center space-y-2">
-        <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--ink-primary)] font-serif">
+        <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--ink-primary)] font-serif [text-wrap:balance]">
           {t.reader.title}
         </h1>
         {t.reader.subtitle ? (
-          <p className="text-xs md:text-sm text-[var(--ink-secondary)] max-w-xl mx-auto leading-relaxed">
+          <p className="text-xs md:text-sm text-[var(--ink-secondary)] max-w-xl mx-auto leading-relaxed [text-wrap:pretty]">
             {t.reader.subtitle}
           </p>
         ) : null}
       </div>
 
-      {/* Minimalist Upload & Settings Card */}
-      <div className="p-6 md:p-8 rounded-2xl border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-sm space-y-6">
-        {/* Dropzone */}
+      {/* The Vessel: Minimalist Upload & Settings Card */}
+      <div className="p-6 md:p-8 rounded-2xl border border-[var(--paper-border)] bg-[var(--paper-surface)] shadow-[var(--shadow-card)] space-y-6">
+        {/* Dropzone Container */}
         <div
-          onDragOver={(e) => e.preventDefault()}
+          onDragOver={(e) => {
+            e.preventDefault()
+            setIsDragOver(true)
+          }}
+          onDragEnter={(e) => {
+            e.preventDefault()
+            setIsDragOver(true)
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault()
+            setIsDragOver(false)
+          }}
           onDrop={handleFileDrop}
           onClick={() => fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-xl p-6 md:p-8 text-center transition-all cursor-pointer ${
-            file
-              ? 'border-emerald-500/50 bg-emerald-500/5'
-              : 'border-[var(--paper-border)] hover:border-[var(--ink-primary)] bg-[var(--paper-subsurface)] hover:bg-[var(--paper-surface)]'
+          className={`card-tactile relative overflow-hidden rounded-xl p-6 md:p-8 text-center cursor-pointer border transition-all ${
+            isDragOver
+              ? 'border-blue-500 bg-blue-500/10 scale-[1.005]'
+              : file
+                ? 'border-emerald-500/50 bg-emerald-500/5'
+                : 'border-[var(--paper-border)] hover:border-[var(--ink-primary)] bg-[var(--paper-subsurface)] hover:bg-[var(--paper-surface)]'
           }`}
         >
           <input
@@ -677,28 +773,64 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
           />
 
           {file ? (
-            <div className="space-y-2">
-              <div className="h-11 w-11 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
-                <FileText className="h-5 w-5" />
+            <div className="flex items-center justify-between p-3.5 rounded-xl bg-[var(--paper-surface)] border border-[var(--paper-border)] shadow-2xs group">
+              <div className="flex items-center gap-3.5 min-w-0">
+                <span className={`px-2.5 py-1 rounded-md text-xs font-mono font-bold tracking-wider uppercase border shrink-0 ${getFormatBadge(file.name).bg}`}>
+                  {getFormatBadge(file.name).tag}
+                </span>
+                <div className="min-w-0 text-left">
+                  <div className="font-semibold text-sm text-[var(--ink-primary)] truncate" title={file.name}>
+                    {file.name}
+                  </div>
+                  <div className="text-xs text-[var(--ink-muted)] font-mono flex items-center gap-2 mt-0.5">
+                    <span>{formatBytes(file.size)}</span>
+                    <span>·</span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-medium">{t.reader.readyTag}</span>
+                  </div>
+                </div>
               </div>
-              <div className="font-semibold text-sm text-[var(--ink-primary)]">{file.name}</div>
-              <div className="text-xs text-[var(--ink-muted)]">
-                {(file.size / (1024 * 1024)).toFixed(2)} MB · 点击可更换文件
+              <div className="flex items-center gap-2 shrink-0 pl-2">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    fileInputRef.current?.click()
+                  }}
+                  className="flex items-center gap-1.5 text-xs text-[var(--ink-muted)] hover:text-[var(--ink-primary)] font-medium p-1.5 rounded-md hover:bg-[var(--paper-subsurface)] transition-colors cursor-pointer"
+                  title={t.reader.changeFile}
+                >
+                  <FileText className="h-4 w-4" />
+                  <span className="hidden sm:inline">{t.reader.changeFile}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setFile(null)
+                  }}
+                  className="p-1.5 text-xs text-[var(--ink-muted)] hover:text-red-500 rounded-md hover:bg-[var(--paper-subsurface)] transition-colors cursor-pointer"
+                  title={t.reader.clearFile}
+                  aria-label={t.reader.clearFile}
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
             </div>
           ) : (
-            <div className="space-y-2">
-              <div className="h-10 w-10 rounded-full bg-[var(--paper-surface)] text-[var(--ink-secondary)] flex items-center justify-center mx-auto border border-[var(--paper-border)]">
+            <div className="space-y-3 py-2">
+              <div className="h-11 w-11 rounded-2xl bg-[var(--paper-surface)] text-[var(--ink-secondary)] flex items-center justify-center mx-auto border border-[var(--paper-border)] shadow-2xs">
                 <Upload className="h-5 w-5" />
               </div>
-              <div className="text-sm font-semibold text-[var(--ink-primary)]">
-                {t.reader.dropzoneTitle}
-              </div>
-              {t.reader.dropzoneSubtitle ? (
-                <div className="text-xs font-mono text-[var(--ink-muted)]">
-                  {t.reader.dropzoneSubtitle}
+              <div className="space-y-1">
+                <div className="text-sm font-semibold text-[var(--ink-primary)]">
+                  {t.reader.dropzoneTitle}
                 </div>
-              ) : null}
+                {t.reader.dropzoneSubtitle ? (
+                  <div className="text-xs font-mono text-[var(--ink-muted)]">
+                    {t.reader.dropzoneSubtitle}
+                  </div>
+                ) : null}
+              </div>
             </div>
           )}
         </div>
@@ -711,7 +843,7 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
               value={manualPath}
               onChange={(e) => setManualPath(e.target.value)}
               placeholder={t.reader.orEnterPath}
-              className="w-full text-xs px-3.5 py-2 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-bg)] text-[var(--ink-primary)] focus:outline-hidden focus:border-[var(--ink-primary)] font-mono"
+              className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-bg)] text-[var(--ink-primary)] focus:outline-hidden focus:border-[var(--ink-primary)] font-mono transition-colors"
             />
           </div>
         )}
@@ -726,7 +858,7 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
             <select
               value={targetLang}
               onChange={(e) => setTargetLang(e.target.value)}
-              className="w-full text-xs px-3 py-2 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-bg)] text-[var(--ink-primary)] focus:outline-hidden focus:border-[var(--ink-primary)] cursor-pointer"
+              className="w-full text-xs px-3 py-2.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-bg)] text-[var(--ink-primary)] focus:outline-hidden focus:border-[var(--ink-primary)] cursor-pointer transition-colors"
             >
               <option value="zh-Hans">简体中文 (zh-Hans)</option>
               <option value="en">English (en)</option>
@@ -746,7 +878,7 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
             <select
               value={stylePreset}
               onChange={(e) => setStylePreset(e.target.value as 'academic' | 'literary' | 'technical')}
-              className="w-full text-xs px-3 py-2 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-bg)] text-[var(--ink-primary)] focus:outline-hidden focus:border-[var(--ink-primary)] cursor-pointer"
+              className="w-full text-xs px-3 py-2.5 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-bg)] text-[var(--ink-primary)] focus:outline-hidden focus:border-[var(--ink-primary)] cursor-pointer transition-colors"
             >
               <option value="academic">{t.reader.styleAcademic}</option>
               <option value="literary">{t.reader.styleLiterary}</option>
@@ -759,12 +891,12 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
         <button
           disabled={submitting || (!file && !manualPath.trim())}
           onClick={handleStartTranslation}
-          className="w-full py-3 px-4 rounded-xl text-sm font-bold bg-[var(--ink-primary)] text-[var(--paper-bg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
+          className="btn-tactile w-full py-3 px-4 rounded-xl text-sm font-bold bg-[var(--ink-primary)] text-[var(--paper-bg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed shadow-[var(--shadow-card)] transition-all cursor-pointer flex items-center justify-center gap-2"
         >
           {submitting ? (
             <>
               <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-              <span>正在处理并启动...</span>
+              <span>{t.reader.processingLaunch}</span>
             </>
           ) : (
             <>
@@ -786,12 +918,12 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
             onClick={refreshJobs}
             className="text-xs text-[var(--ink-muted)] hover:text-[var(--ink-primary)] transition-colors cursor-pointer"
           >
-            刷新列表
+            {t.reader.refreshList}
           </button>
         </div>
 
         {loadingJobs && jobs.length === 0 ? (
-          <div className="py-12 text-center text-xs text-[var(--ink-muted)]">正在加载书籍列表...</div>
+          <div className="py-12 text-center text-xs text-[var(--ink-muted)]">{t.reader.loadingBooks}</div>
         ) : jobs.length === 0 ? (
           <div className="py-12 text-center rounded-xl border border-[var(--paper-border)] bg-[var(--paper-subsurface)] text-xs text-[var(--ink-muted)]">
             {t.reader.noBooksYet}
@@ -803,43 +935,71 @@ export function ReaderView({ initialJobId }: { initialJobId?: string }) {
               const fileName = rawName.replace(/^\d{8}-\d{6}-[a-f0-9]{8}-/, '')
               const isCompleted = job.status === 'completed'
               const isRunning = job.status === 'running' || job.status === 'pending'
+              const badge = getFormatBadge(job.file_name)
+              const pct = job.progress_percent ?? (isCompleted ? 100 : 0)
 
               return (
                 <div
                   key={job.job_id}
                   onClick={() => setActiveJobId(job.job_id)}
-                  className="p-4 rounded-xl border border-[var(--paper-border)] bg-[var(--paper-surface)] hover:border-[var(--paper-border-hover)] hover:shadow-sm transition-all cursor-pointer flex flex-col justify-between space-y-3 group"
+                  className="card-tactile relative overflow-hidden rounded-xl border border-[var(--paper-border)] bg-[var(--paper-surface)] p-4 cursor-pointer flex flex-col justify-between space-y-3.5 group"
                 >
-                  <div className="space-y-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="font-semibold text-xs md:text-sm text-[var(--ink-primary)] group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2">
+                  {/* Left Spine Color Band */}
+                  <div className={`absolute left-0 top-0 bottom-0 w-1 ${badge.spine}`} />
+
+                  <div className="space-y-1.5 pl-2">
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="font-semibold text-xs md:text-sm text-[var(--ink-primary)] group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2 leading-snug">
                         {fileName}
                       </div>
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${
-                          isCompleted
-                            ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                            : isRunning
-                              ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 animate-pulse'
-                              : 'bg-red-500/10 text-red-700 dark:text-red-400'
-                        }`}
-                      >
-                        {isCompleted ? '已完成' : isRunning ? '翻译中' : '失败'}
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase border ${badge.bg}`}>
+                          {badge.tag}
+                        </span>
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${
+                            isCompleted
+                              ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20'
+                              : isRunning
+                                ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 animate-breathe'
+                                : 'bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/20'
+                          }`}
+                        >
+                          {isCompleted ? t.common.completed : isRunning ? t.reader.translating : t.common.failed}
+                        </span>
+                      </div>
                     </div>
-                    <div className="text-[11px] text-[var(--ink-muted)]">
-                      目标: {job.target_lang ?? 'zh'} · 进度: {job.progress_percent ?? (isCompleted ? 100 : 0)}%
+                    <div className="text-[11px] text-[var(--ink-muted)] flex items-center gap-2">
+                      <span>{t.reader.targetShort}: <span className="font-mono text-[var(--ink-secondary)]">{job.target_lang ?? 'zh'}</span></span>
+                      <span>·</span>
+                      <span>{t.reader.progressShort}: <span className="font-mono text-[var(--ink-secondary)]">{pct}%</span></span>
                     </div>
                   </div>
 
-                  <div className="pt-2 border-t border-[var(--paper-border)] flex items-center justify-between text-xs font-medium text-[var(--ink-secondary)] group-hover:text-[var(--ink-primary)]">
-                    <span className="text-[10px] text-[var(--ink-muted)] font-mono truncate max-w-[150px]">
-                      {job.job_id}
-                    </span>
-                    <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
-                      <span>{t.reader.readAndExport}</span>
-                      <span>→</span>
-                    </span>
+                  {/* Micro Reading Progress Bar & Footer */}
+                  <div className="space-y-2 pl-2">
+                    <div className="h-1 w-full bg-[var(--paper-subsurface)] rounded-full overflow-hidden">
+                      <div
+                        className={`h-full transition-all duration-300 rounded-full ${
+                          isCompleted
+                            ? 'bg-emerald-500'
+                            : isRunning
+                              ? 'bg-amber-500'
+                              : 'bg-red-500'
+                        }`}
+                        style={{ width: `${Math.max(pct, isRunning ? 6 : 0)}%` }}
+                      />
+                    </div>
+
+                    <div className="pt-2 border-t border-[var(--paper-border)] flex items-center justify-between text-xs font-medium text-[var(--ink-secondary)] group-hover:text-[var(--ink-primary)]">
+                      <span className="text-[10px] text-[var(--ink-muted)] font-mono truncate max-w-[150px]">
+                        {job.job_id}
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 font-medium">
+                        <span>{t.reader.readAndExport}</span>
+                        <span className="group-hover:translate-x-0.5 transition-transform">➔</span>
+                      </span>
+                    </div>
                   </div>
                 </div>
               )

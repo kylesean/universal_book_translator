@@ -61,6 +61,19 @@ export const en: TranslationDictionary = {
     saveEdit: 'Save',
     cancelEdit: 'Cancel',
     quickEditHint: '',
+    readyTag: 'Ready',
+    changeFile: 'Change File',
+    clearFile: 'Clear File',
+    refreshList: 'Refresh',
+    loadingBooks: 'Loading book shelf...',
+    processingLaunch: 'Processing and starting...',
+    targetShort: 'Target',
+    progressShort: 'Progress',
+    loadingSegments: 'Loading book segments...',
+    noSegmentsParsed: 'Parsing in progress or no text segments extracted yet',
+    illustrationNotice: 'Original Illustration / Visual Figure',
+    waitingTranslation: '(Waiting for translation...)',
+    defaultPrimary: 'Default Primary Deliverable',
   },
   nav: {
     operatorControl: 'Control',
@@ -179,6 +192,11 @@ export const en: TranslationDictionary = {
     presetFastDetail: 'PDFIUM short chain · minimal prompts · formulas kept as source images · no heavy dependencies.',
     confidence: 'Route confidence',
     probeWarnings: 'Assessment warnings',
+    pagesUnit: 'pages',
+    pipelineProfileTag: 'Pipeline Profile',
+    scorecardTitle: 'Document Structure & Pre-flight',
+    scorecardSub: 'STRUCTURAL SCORECARD',
+    tokenPrefixTag: 'prefix',
     // Keyed by the engine's stable warning code (ubt/core/assess.py). The
     // console renders these instead of the engine's Chinese ``detail_zh``;
     // a code missing here falls back to that copy rather than showing a raw

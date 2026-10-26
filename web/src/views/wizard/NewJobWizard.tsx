@@ -914,8 +914,13 @@ export function NewJobWizard() {
 
             {/* Presets List */}
             <div>
-              <div className="type-step">{t.wizard.stepQuality}</div>
-              <div className="space-y-2">
+              <div className="type-step mb-2 flex items-center justify-between">
+                <span>{t.wizard.stepQuality}</span>
+                <span className="text-[10px] font-mono text-[var(--ink-muted)] font-normal uppercase tracking-wider">
+                  {t.wizard.pipelineProfileTag}
+                </span>
+              </div>
+              <div className="space-y-2.5">
                 {presetOptions.map((p) => {
                   const isSelected = preset === p.id
                   const isRecommended =
@@ -927,33 +932,60 @@ export function NewJobWizard() {
                         hasUserSelectedPresetRef.current = true
                         setPreset(p.id)
                       }}
-                      className={`p-3 rounded-[6px] border cursor-pointer transition-all ${
+                      className={`card-tactile relative p-3.5 rounded-xl border cursor-pointer transition-all ${
                         isSelected
-                          ? 'border-[var(--ink-primary)] bg-[var(--paper-surface)] shadow-xs'
+                          ? 'border-[var(--ink-primary)] bg-[var(--paper-surface)] shadow-[var(--shadow-card)] ring-1 ring-black/10 dark:ring-white/15'
                           : 'border-[var(--paper-border)] bg-[var(--paper-subsurface)] hover:bg-[var(--paper-surface)] hover:border-[var(--paper-border-hover)]'
                       }`}
                     >
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span
-                          className={`type-value ${
-                            isSelected ? 'font-semibold' : 'font-medium'
-                          }`}
-                        >
-                          {p.name}
-                        </span>
-                        <InfoTip label={p.name}>{p.detail}</InfoTip>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 flex-wrap min-w-0">
+                          {/* Radio Dot indicator */}
+                          <div
+                            className={`h-3.5 w-3.5 rounded-full border flex items-center justify-center shrink-0 transition-all ${
+                              isSelected
+                                ? 'border-[var(--ink-primary)] bg-[var(--ink-primary)]'
+                                : 'border-[var(--paper-border-hover)] bg-[var(--paper-surface)]'
+                            }`}
+                          >
+                            {isSelected && <div className="h-1.5 w-1.5 rounded-full bg-[var(--paper-bg)]" />}
+                          </div>
+
+                          <span
+                            className={`type-value ${
+                              isSelected ? 'font-bold text-[var(--ink-primary)]' : 'font-medium text-[var(--ink-primary)]'
+                            }`}
+                          >
+                            {p.name}
+                          </span>
+
+                          {/* Concise Technical Pill Badge */}
+                          <span className="inline-flex items-center font-mono text-[10px] font-semibold text-[var(--ink-secondary)] bg-[var(--paper-surface)] px-1.5 py-0.5 rounded border border-[var(--paper-border)] uppercase tracking-tight">
+                            {p.badge}
+                          </span>
+
+                          <InfoTip label={p.name}>{p.detail}</InfoTip>
+                        </div>
+
+                        {/* Status badges */}
+                        <div className="flex items-center gap-1.5 shrink-0">
                           {isRecommended && (
-                            <span className="inline-flex items-center font-mono text-[10px] font-medium text-[#15803d] bg-[#15803d]/10 px-1.5 py-0.5 rounded border border-[#15803d]/20">
+                            <span className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold text-[#15803d] bg-[#15803d]/10 px-2 py-0.5 rounded-full border border-[#15803d]/20">
+                              <span className="h-1.5 w-1.5 rounded-full bg-[#15803d]" />
                               {t.wizard.engineRecommended}
                             </span>
                           )}
                           {p.slow && (
-                            <span className="inline-flex items-center font-mono text-[10px] font-medium text-[#b45309] bg-[#b45309]/10 px-1.5 py-0.5 rounded border border-[#b45309]/20">
+                            <span className="inline-flex items-center font-mono text-[10px] font-semibold text-[#b45309] bg-[#b45309]/10 px-2 py-0.5 rounded-full border border-[#b45309]/20">
                               {t.wizard.presetSlowBadge}
                             </span>
                           )}
                         </div>
-                      <div className="type-help mt-1">{p.desc}</div>
+                      </div>
+
+                      <div className="type-help mt-1.5 pl-5 leading-relaxed text-[var(--ink-secondary)]">
+                        {p.desc}
+                      </div>
                     </div>
                   )
                 })}
@@ -1579,12 +1611,13 @@ export function NewJobWizard() {
           </div>
 
         {/* Right Column: Pre-flight Assessment Radar */}
-        <div className="lg:col-span-5 lg:sticky lg:top-6 rounded-lg border border-[var(--paper-border)] bg-[var(--paper-surface)] flex flex-col justify-between overflow-hidden shadow-[0_1px_4px_rgba(0,0,0,0.03)]">
-          <div className="p-5 space-y-5">
-            <div className="flex items-center justify-between border-b border-[var(--paper-border)] pb-3">
+        <div className="lg:col-span-5 lg:sticky lg:top-6 rounded-2xl border border-[var(--paper-border)] bg-[var(--paper-surface)] flex flex-col justify-between overflow-hidden shadow-[var(--shadow-card)]">
+          <div className="p-5 sm:p-6 space-y-5">
+            <div className="flex items-center justify-between border-b border-[var(--paper-border)] pb-3.5">
               <div>
-                <h3 className="type-value font-bold text-[var(--ink-primary)] tracking-tight">
-                  {t.wizard.preflightTitle}
+                <h3 className="type-value font-bold text-[var(--ink-primary)] tracking-tight flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-xs" />
+                  <span>{t.wizard.preflightTitle}</span>
                 </h3>
                 <p className="type-help mt-0.5">{t.wizard.preflightSubtitle}</p>
               </div>
@@ -1599,20 +1632,12 @@ export function NewJobWizard() {
                 </Badge>
               ) : assessment ? (
                 <div className="flex items-center gap-2 shrink-0">
-                  {/* One provenance badge for the whole panel, not one per row.
-                      Every scale figure below (chars, tokens, blocks, cost) comes
-                      from the same assess call, so they share one source. The
-                      silent re-assess on a preset change runs with deep=false,
-                      which turns an exact block count into a sampled estimate;
-                      marking each row separately said the same thing four times
-                      and still left the user wondering why the character count
-                      moved. */}
                   <Badge
                     variant="outline"
-                    className={`text-xs font-mono ${
+                    className={`text-xs font-mono font-semibold ${
                       assessment.cost.billable_blocks_is_exact
-                        ? 'text-[#15803d] border-[#15803d]/30'
-                        : 'text-[#b45309] border-[#b45309]/30'
+                        ? 'text-[#15803d] border-[#15803d]/30 bg-[#15803d]/5'
+                        : 'text-[#b45309] border-[#b45309]/30 bg-[#b45309]/5'
                     }`}
                   >
                     {assessment.cost.billable_blocks_is_exact
@@ -1630,29 +1655,26 @@ export function NewJobWizard() {
 
             {assessment ? (
               <div className="space-y-4">
-                {/* Which provider this quote was priced against. The dropdown
-                    selects one; the figure below used to come from whatever the
-                    operator's file named, so a user comparing blocks saw two
-                    identical totals and no way to tell which was priced. */}
                 {typeof assessment.meta?.provider === 'string' &&
                   assessment.meta.provider !== '' && (
-                    <p className="type-help text-[var(--ink-muted)] font-mono">
+                    <div className="type-help text-[var(--ink-muted)] font-mono text-[11px] bg-[var(--paper-subsurface)] px-2.5 py-1 rounded-md border border-[var(--paper-border)]">
                       {t.wizard.quoteProviderNote.replace(
                         '{provider}',
                         assessment.meta.provider
                       )}
-                    </p>
+                    </div>
                   )}
+
                 {/* Book File Header Card */}
                 {(fileName || assessment.document?.file_name) && (
-                  <div className="p-3 rounded-[5px] bg-[var(--paper-subsurface)] border border-[var(--paper-border)] flex items-center justify-between">
+                  <div className="p-3 rounded-xl bg-[var(--paper-subsurface)] border border-[var(--paper-border)] flex items-center justify-between">
                     <div className="flex items-center gap-2.5 truncate">
                       <FileText className="h-4 w-4 text-[var(--ink-secondary)] shrink-0" />
                       <div className="truncate">
-                        <div className="text-xs font-semibold text-[var(--ink-primary)] truncate font-mono">
+                        <div className="text-xs font-bold text-[var(--ink-primary)] truncate font-mono">
                           {fileName || assessment.document.file_name}
                         </div>
-                        <div className="text-xs text-[var(--ink-secondary)] font-mono">
+                        <div className="text-[11px] text-[var(--ink-muted)] font-mono">
                           {fileSize ||
                             (assessment.document.file_size_bytes
                               ? assessment.document.file_size_bytes > 1024 * 1024
@@ -1662,17 +1684,95 @@ export function NewJobWizard() {
                         </div>
                       </div>
                     </div>
-                    <Badge variant="outline" className="uppercase shrink-0 text-xs font-mono">
+                    <Badge variant="outline" className="uppercase shrink-0 text-xs font-mono font-bold">
                       {assessment.document.format_ext.replace('.', '').toUpperCase() ||
                         t.wizard.formatUnknown}
                     </Badge>
                   </div>
                 )}
 
-                {/* Metric Rows — real nested assess fields */}
-                <div className="divide-y divide-[var(--paper-border)]">
-                  <div className="py-2.5 flex items-center justify-between">
-                    <span className="type-help">{t.wizard.pageCount}</span>
+                {/* Linear-grade Hero Scoreboard (Top Impact Metrics) */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  {/* Source Chars & Scale (sourceChars must be first in metrics section) */}
+                  <div className="p-3 rounded-xl border border-[var(--paper-border)] bg-[var(--paper-subsurface)] space-y-1">
+                    <div className="type-help text-[11px] text-[var(--ink-secondary)]">{t.wizard.sourceChars}</div>
+                    <div className="font-mono text-xl font-extrabold tracking-tight text-[var(--ink-primary)] tabular-nums">
+                      {assessment.document.source_chars.toLocaleString()}
+                    </div>
+                    <div className="text-[10px] text-[var(--ink-muted)] font-mono truncate">
+                      {assessment.document.selected_pages != null
+                        ? `${assessment.document.selected_pages} / ${assessment.document.pages} ${t.wizard.pagesUnit}`
+                        : `${assessment.document.pages} ${t.wizard.pagesUnit}`} · {assessment.document.chapters} {t.wizard.chapters}
+                    </div>
+                  </div>
+
+                  {/* Estimated Cost */}
+                  <div className="p-3 rounded-xl border border-[var(--paper-border)] bg-[var(--paper-subsurface)] space-y-1">
+                    <div className="type-help text-[11px] text-[var(--ink-secondary)]">{t.wizard.estCost}</div>
+                    <div className="font-mono text-xl font-extrabold tracking-tight tabular-nums">
+                      {assessment.cost.total_cost_usd === null ||
+                      assessment.cost.total_cost_usd === undefined ? (
+                        <span className="text-[var(--ink-muted)] text-sm">{t.wizard.notPriced}</span>
+                      ) : assessment.cost.total_cost_usd === 0 ? (
+                        <span className="text-[#15803d]">
+                          $0.00 <span className="text-[10px] font-sans font-normal text-[var(--ink-secondary)]">({t.wizard.localFreeLabel})</span>
+                        </span>
+                      ) : (
+                        <span className="text-[#b45309]">
+                          ${assessment.cost.total_cost_usd.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-[var(--ink-muted)] font-mono truncate">
+                      {t.wizard.estTime}: {formatDuration(assessment.runtime.est_seconds_low)} – {formatDuration(assessment.runtime.est_seconds_high)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Total Tokens Card */}
+                <div className="p-3 rounded-xl border border-[var(--paper-border)] bg-[var(--paper-subsurface)] flex items-center justify-between">
+                  <div>
+                    <div className="type-help text-[11px] text-[var(--ink-secondary)] flex items-center gap-1">
+                      <span>{t.wizard.estTokens}</span>
+                      <InfoTip label={t.wizard.estTokens}>
+                        {t.wizard.tokensEstimateNote}
+                        <div className="mt-1.5 pt-1.5 border-t border-[var(--paper-border)] text-[10px] font-mono leading-relaxed">
+                          {t.wizard.tokensSource}{' '}
+                          {assessment.document.estimated_tokens.toLocaleString()} ·{' '}
+                          {t.wizard.tokensPrompt}{' '}
+                          {Math.max(
+                            0,
+                            assessment.cost.prompt_tokens - assessment.document.estimated_tokens
+                          ).toLocaleString()} ·{' '}
+                          {t.wizard.tokensCompletion}{' '}
+                          {assessment.cost.completion_tokens.toLocaleString()}
+                        </div>
+                      </InfoTip>
+                    </div>
+                    <div className="text-[10px] text-[var(--ink-muted)] mt-0.5">
+                      {t.wizard.tokensSource} {assessment.document.estimated_tokens.toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-mono text-lg font-extrabold text-[var(--ink-primary)] tabular-nums">
+                      {(assessment.cost.prompt_tokens + assessment.cost.completion_tokens).toLocaleString()}
+                    </div>
+                    <div className="text-[10px] text-[var(--ink-muted)] font-mono">
+                      +{(assessment.cost.prompt_tokens - assessment.document.estimated_tokens).toLocaleString()} {t.wizard.tokenPrefixTag}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Structured Health Scorecard (Diagnostic Breakdown) */}
+                <div className="p-3.5 rounded-xl border border-[var(--paper-border)] bg-[var(--paper-surface)] space-y-3">
+                  <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[var(--ink-muted)] flex items-center justify-between pb-1 border-b border-[var(--paper-border)]">
+                    <span>{t.wizard.scorecardTitle}</span>
+                    <span>{t.wizard.scorecardSub}</span>
+                  </div>
+
+                  {/* Page Count Row */}
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="type-help text-[var(--ink-secondary)]">{t.wizard.pageCount}</span>
                     <span className="font-mono font-bold text-[var(--ink-primary)]">
                       {assessment.document.selected_pages != null ? (
                         <>
@@ -1691,17 +1791,18 @@ export function NewJobWizard() {
                       </span>
                     </span>
                   </div>
-                  <div className="py-2.5 flex items-center justify-between">
-                    <span className="type-help">{t.wizard.sourceChars}</span>
-                    <span className="font-mono font-bold text-[var(--ink-primary)]">
-                      {assessment.document.source_chars.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="py-2.5 flex items-start justify-between gap-3">
-                    <span className="text-[var(--ink-secondary)] shrink-0">
-                      {t.wizard.mathDensity}
-                    </span>
-                    <span className="text-right">
+
+                  {/* Math Density with Micro Meter */}
+                  <div className="space-y-1.5 pt-2 border-t border-[var(--paper-border)]">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="type-help text-[var(--ink-secondary)] flex items-center gap-1">
+                        <span>{t.wizard.mathDensity}</span>
+                        <InfoTip label={t.wizard.mathDensity}>
+                          {assessment.document.has_formulas
+                            ? t.wizard.mathDensityWithObjects
+                            : t.wizard.mathDensityTextOnly}
+                        </InfoTip>
+                      </span>
                       <span
                         className={`font-mono font-bold ${
                           assessment.document.math_density === 'high'
@@ -1713,98 +1814,66 @@ export function NewJobWizard() {
                       >
                         {assessment.document.math_density}
                       </span>
-                      {/* "high" and "no formula objects" are both true and not a
-                          contradiction: the density comes from a text sample,
-                          while has_formulas comes from the per-page layout
-                          census. Saying which is which stops the pair reading
-                          as a bug. */}
-                      <span className="block text-xs font-normal text-[var(--ink-muted)] leading-relaxed">
-                        {assessment.document.has_formulas
-                          ? t.wizard.mathDensityWithObjects
-                          : t.wizard.mathDensityTextOnly}
+                    </div>
+                    {/* Micro gauge bar */}
+                    <div className="h-1.5 w-full bg-[var(--paper-subsurface)] rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          assessment.document.math_density === 'high'
+                            ? 'w-4/5 bg-[#b45309]'
+                            : assessment.document.math_density === 'low'
+                              ? 'w-1/4 bg-[#15803d]'
+                              : 'w-1/2 bg-[var(--ink-secondary)]'
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Scanned Ratio with Micro Meter */}
+                  <div className="space-y-1.5 pt-2 border-t border-[var(--paper-border)]">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="type-help text-[var(--ink-secondary)]">{t.wizard.scannedRatio}</span>
+                      <span
+                        className={`font-mono font-bold ${
+                          (assessment.document.scan_page_share ?? 0) > 0.2
+                            ? 'text-[#b45309]'
+                            : 'text-[#15803d]'
+                        }`}
+                      >
+                        {assessment.document.scan_page_share !== null &&
+                        assessment.document.scan_page_share !== undefined
+                          ? `${(assessment.document.scan_page_share * 100).toFixed(0)}%`
+                          : assessment.document.is_scanned
+                            ? 'yes'
+                            : 'no'}
                       </span>
-                    </span>
+                    </div>
+                    <div className="h-1.5 w-full bg-[var(--paper-subsurface)] rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          (assessment.document.scan_page_share ?? 0) > 0.2
+                            ? 'bg-[#b45309]'
+                            : 'bg-[#15803d]'
+                        }`}
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            assessment.document.scan_page_share !== null &&
+                              assessment.document.scan_page_share !== undefined
+                              ? assessment.document.scan_page_share * 100
+                              : assessment.document.is_scanned
+                                ? 100
+                                : 0
+                          )}%`,
+                        }}
+                      />
+                    </div>
                   </div>
-                  <div className="py-2.5 flex items-center justify-between">
-                    <span className="type-help">{t.wizard.scannedRatio}</span>
-                    <span
-                      className={`font-mono font-bold ${
-                        (assessment.document.scan_page_share ?? 0) > 0.2
-                          ? 'text-[#b45309]'
-                          : 'text-[#15803d]'
-                      }`}
-                    >
-                      {assessment.document.scan_page_share !== null &&
-                      assessment.document.scan_page_share !== undefined
-                        ? `${(assessment.document.scan_page_share * 100).toFixed(0)}%`
-                        : assessment.document.is_scanned
-                          ? 'yes'
-                          : 'no'}
-                    </span>
-                  </div>
-                  <div className="py-2.5 flex items-start justify-between gap-3">
-                    <span className="text-[var(--ink-secondary)] shrink-0 inline-flex items-center gap-1">
-                      {t.wizard.estTokens}
-                      <InfoTip label={t.wizard.estTokens}>
-                        {t.wizard.tokensEstimateNote}
-                      </InfoTip>
-                    </span>
-                    <span className="text-right">
-                      {/* The engine bills prompt = (per-call prefix × calls) +
-                          source and completion = source × pair fertility. The
-                          honest additive decomposition is therefore source +
-                          prefix-overhead + completion — three figures that SUM
-                          to the total. Showing the raw prompt beside its own
-                          source term read as three additive parts and
-                          over-summed by the source share (~28% on the
-                          reference document). The overhead is derived here as
-                          prompt_tokens − estimated_tokens, which the engine
-                          guarantees is exactly the prefix fan-out
-                          (estimate_draft_cost_from_totals: prompt = calls ×
-                          prefix + source, with the same source_tokens). */}
-                      <span className="font-mono font-bold text-[var(--ink-primary)]">
-                        {(assessment.cost.prompt_tokens + assessment.cost.completion_tokens).toLocaleString()}
-                      </span>
-                      <span className="block text-xs font-normal text-[var(--ink-muted)] leading-relaxed">
-                        {t.wizard.tokensSource}{' '}
-                        {assessment.document.estimated_tokens.toLocaleString()} ·{' '}
-                        {t.wizard.tokensPrompt}{' '}
-                        {Math.max(
-                          0,
-                          assessment.cost.prompt_tokens - assessment.document.estimated_tokens
-                        ).toLocaleString()} ·{' '}
-                        {t.wizard.tokensCompletion}{' '}
-                        {assessment.cost.completion_tokens.toLocaleString()}
-                      </span>
-                    </span>
-                  </div>
-                  <div className="py-2.5 flex items-center justify-between">
-                    <span className="type-help">{t.wizard.estCost}</span>
-                    <span className="font-mono font-bold">
-                      {assessment.cost.total_cost_usd === null ||
-                      assessment.cost.total_cost_usd === undefined ? (
-                        <span className="text-[var(--ink-muted)]">{t.wizard.notPriced}</span>
-                      ) : assessment.cost.total_cost_usd === 0 ? (
-                        <span className="text-[#15803d]">
-                          $0.00{' '}
-                          <span className="text-xs font-normal text-[var(--ink-secondary)]">
-                            ({t.wizard.localFreeLabel})
-                          </span>
-                        </span>
-                      ) : (
-                        <span className="text-[#b45309]">
-                          ${assessment.cost.total_cost_usd.toFixed(2)}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                  <div className="py-2.5 flex items-center justify-between">
-                    <span className="type-help inline-flex items-center gap-1">
-                      {t.wizard.estTime}
-                      {/* ``runtime.heuristic`` is always true — no per-stage
-                          timing is persisted anywhere — so carry the engine's
-                          own basis text rather than let a bare minute range
-                          read as a measurement. */}
+
+                  {/* Estimated Runtime Row */}
+                  <div className="pt-2 border-t border-[var(--paper-border)] flex items-center justify-between text-xs">
+                    <span className="type-help text-[var(--ink-secondary)] flex items-center gap-1">
+                      <span>{t.wizard.estTime}</span>
                       <InfoTip label={t.wizard.estTime}>
                         <span className="block space-y-1">
                           <span className="block">{t.wizard.estTimeHeuristicNote}</span>
@@ -1819,17 +1888,17 @@ export function NewJobWizard() {
                     <span className="font-mono font-bold text-[var(--ink-primary)]">
                       {formatDuration(assessment.runtime.est_seconds_low)} –{' '}
                       {formatDuration(assessment.runtime.est_seconds_high)}
-                      <span className="text-[var(--ink-muted)] font-normal">
+                      <span className="text-[var(--ink-muted)] font-normal text-[11px]">
                         {' '}
                         ({t.wizard.heuristicTag})
                       </span>
                     </span>
                   </div>
-                  <div className="py-2.5 flex items-start justify-between gap-3">
-                    <span className="text-[var(--ink-secondary)] shrink-0">
-                      {t.wizard.recommendation}
-                    </span>
-                    <span className="font-mono text-[#15803d] text-xs font-semibold text-right">
+
+                  {/* Recommendation Row */}
+                  <div className="pt-2 border-t border-[var(--paper-border)] flex items-center justify-between text-xs">
+                    <span className="type-help text-[var(--ink-secondary)]">{t.wizard.recommendation}</span>
+                    <span className="font-mono text-[#15803d] text-xs font-bold text-right">
                       {routeBadge(
                         assessment.route.recommended_dual_mode,
                         assessment.route.recommended_preset,
@@ -1844,14 +1913,14 @@ export function NewJobWizard() {
                 </div>
 
                 {assessment.warnings.length > 0 && (
-                  <div className="rounded-[5px] border border-[#b45309]/30 bg-[#b45309]/5 p-2.5 space-y-1">
-                    <div className="text-xs font-mono uppercase tracking-wider text-[#b45309] font-semibold">
+                  <div className="rounded-xl border border-[#b45309]/30 bg-[#b45309]/5 p-3 space-y-1.5">
+                    <div className="text-xs font-mono uppercase tracking-wider text-[#b45309] font-bold">
                       {t.wizard.probeWarnings} ({assessment.warnings.length})
                     </div>
                     <div className="space-y-1 max-h-40 overflow-y-auto">
                       {assessment.warnings.map((warning) => (
                         <div key={warning.code} className="text-xs text-[var(--ink-secondary)]">
-                          <span className="font-mono text-[var(--ink-muted)]">{warning.code}</span>{' '}
+                          <span className="font-mono text-[var(--ink-muted)] font-semibold">{warning.code}</span>{' '}
                           · {warningText(warning, t)}
                         </div>
                       ))}
