@@ -779,6 +779,83 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Delete Provider Route",
+        "description": "Remove one declared ``[providers.<name>]`` block.\n\nSame posture as ``PUT``: the middleware gate runs twice on purpose, and\na block still named by ``[defaults]`` is refused with the referencing\nfield so the UI can tell the operator what to clear first.",
+        "operationId": "delete_provider_route_system_providers__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Delete Provider Route System Providers  Name  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/system/providers/{name}/default": {
@@ -3552,6 +3629,72 @@
         }
       }
     },
+    "/assets/glossary/enable": {
+      "post": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Enable Glossary",
+        "description": "Enable the shared glossary without requiring a hand-edited config.",
+        "operationId": "enable_glossary_assets_glossary_enable_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GlossaryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/assets/glossary/conflicts": {
       "get": {
         "tags": [
@@ -3780,7 +3923,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "default": 200,
+              "default": 50,
               "title": "Limit"
             }
           },
@@ -3824,6 +3967,64 @@
                 }
               ],
               "title": "Tgt Lang"
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Query"
+            }
+          },
+          {
+            "name": "provenance",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provenance"
+            }
+          },
+          {
+            "name": "usage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Usage"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "newest",
+              "title": "Sort"
             }
           },
           {
@@ -3930,6 +4131,79 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/TMevictRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assets/tm/evict-matching": {
+      "post": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Evict Matching Translation Memory",
+        "operationId": "evict_matching_translation_memory_assets_tm_evict_matching_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TMBulkEvictRequest"
               }
             }
           }
@@ -4805,6 +5079,18 @@
             "title": "Provider",
             "description": "Provider block to quote against (must be declared in ubt.toml or be a built-in wire protocol). Endpoint and credentials still come from it."
           },
+          "repair_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Provider",
+            "description": "Provider block for the repair tier to quote against (defaults to the primary provider). A name, validated like `provider`."
+          },
           "ocr_mode": {
             "anyOf": [
               {
@@ -5085,6 +5371,17 @@
             ],
             "title": "Message"
           },
+          "event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Type"
+          },
           "output_file": {
             "anyOf": [
               {
@@ -5252,6 +5549,18 @@
             ],
             "title": "Provider",
             "description": "Provider block to run this job against (must be declared in ubt.toml or be a built-in wire protocol). Endpoint and credentials still come from that block."
+          },
+          "repair_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Provider",
+            "description": "Provider block for the repair tier (defaults to the primary provider). A name, validated like `provider`: the named block supplies the repair endpoint and credential."
           },
           "draft_model": {
             "anyOf": [
@@ -5690,6 +5999,11 @@
           "needs_human_blocks": {
             "type": "integer",
             "title": "Needs Human Blocks"
+          },
+          "blocked_human_blocks": {
+            "type": "integer",
+            "title": "Blocked Human Blocks",
+            "default": 0
           },
           "progress_percent": {
             "type": "number",
@@ -7202,6 +7516,85 @@
         "title": "SystemInfoResponse",
         "description": "The console's security-boundary panel: where this server is reachable and\nwhat it is allowed to touch."
       },
+      "TMBulkEvictRequest": {
+        "properties": {
+          "expected_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Total"
+          },
+          "src_lang": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Src Lang"
+          },
+          "tgt_lang": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tgt Lang"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "machine",
+                  "human_pe"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provenance"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "never",
+                  "used"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usage"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_total"
+        ],
+        "title": "TMBulkEvictRequest",
+        "description": "Delete the exact filtered scope shown in the confirmation dialog."
+      },
       "TMEntryItem": {
         "properties": {
           "id": {
@@ -7235,6 +7628,14 @@
           "use_count": {
             "type": "integer",
             "title": "Use Count"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
           }
         },
         "type": "object",
@@ -7246,7 +7647,9 @@
           "target_text",
           "provenance",
           "domain",
-          "use_count"
+          "use_count",
+          "created_at",
+          "updated_at"
         ],
         "title": "TMEntryItem",
         "description": "One translation-memory row as the console lists it."
@@ -7308,6 +7711,26 @@
             "type": "integer",
             "title": "Total"
           },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "machine_count": {
+            "type": "integer",
+            "title": "Machine Count"
+          },
+          "human_count": {
+            "type": "integer",
+            "title": "Human Count"
+          },
+          "never_used_count": {
+            "type": "integer",
+            "title": "Never Used Count"
+          },
           "entries": {
             "items": {
               "$ref": "#/components/schemas/TMEntryItem"
@@ -7319,6 +7742,11 @@
         "type": "object",
         "required": [
           "total",
+          "offset",
+          "limit",
+          "machine_count",
+          "human_count",
+          "never_used_count",
           "entries"
         ],
         "title": "TMListResponse",
@@ -7331,13 +7759,16 @@
               "type": "integer"
             },
             "type": "array",
-            "maxItems": 10000,
-            "title": "Ids",
-            "description": "TM entry ids to delete"
+            "maxItems": 1000,
+            "minItems": 1,
+            "title": "Ids"
           }
         },
         "additionalProperties": false,
         "type": "object",
+        "required": [
+          "ids"
+        ],
         "title": "TMevictRequest",
         "description": "Translation-memory rows to evict, by id."
       },

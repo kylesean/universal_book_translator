@@ -239,6 +239,9 @@ CLEARABLE_FIELDS: frozenset[str] = frozenset(
         "deployment_backend",
         "extraction_strategy",
         "fallback_models",
+        "draft_reasoning_effort",
+        "repair_reasoning_effort",
+        "reasoning_dialect",
     }
 )
 
@@ -248,10 +251,20 @@ CLEARABLE_FIELDS: frozenset[str] = frozenset(
 #: cannot run) and reveals only a boolean.
 READABLE_FIELDS: tuple[str, ...] = (*WRITABLE_FIELDS, "api_key")
 
-#: Provider names are TOML bare keys in the path ``[providers.<name>]``, so the
-#: charset is the one tomlkit can write unquoted. Restricting it also keeps a
-#: request from injecting a table separator or a comment into the document.
-_NAME_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+#: Provider names are the key in ``[providers.<name>]``. A dot is allowed
+#: because model ids carry one, and a dotted name is not a bare key: tomlkit
+#: quotes it, writing ``[providers."a.b"]``, which reads back as the literal
+#: name ``a.b``. An unquoted ``[providers.a.b]`` would instead create the nested
+#: tables ``a -> b``, so ``provider = "a.b"`` would resolve to nothing while the
+#: list showed a provider called ``a`` — the reason the writer, not the reader,
+#: has to do the quoting.
+#:
+#: The remaining charset is still refused deliberately. ``/`` is a URL path
+#: separator, and this name is the ``{name}`` of ``PUT /system/providers/{name}``
+#: (a percent-encoded ``%2F`` is decoded before routing), so a slash could never
+#: reach this function anyway. Quotes, ``#``, ``]`` and whitespace could close
+#: the key and inject a table separator or a comment into the document.
+_NAME_PATTERN = r"^[A-Za-z0-9_.-]{1,64}$"
 
 
 class ProviderEditError(UBTError):
@@ -277,7 +290,7 @@ def _validate_name(name: str) -> str:
 
     if not re.match(_NAME_PATTERN, name or ""):
         raise ProviderEditError(
-            f"invalid provider name {name!r}: expected 1-64 characters from [A-Za-z0-9_-]"
+            f"invalid provider name {name!r}: expected 1-64 characters from [A-Za-z0-9_.-]"
         )
     return name
 
@@ -544,6 +557,38 @@ def set_default_provider(name: str) -> dict[str, Any]:
     _write_default_provider(document, name)
     atomic_write_text(path, tomlkit.dumps(document))
     return {"provider": name}
+
+
+def delete_provider(name: str) -> None:
+    """Remove one declared ``[providers.<name>]`` block from the file.
+
+    A block that is still referenced is refused rather than silently orphaning
+    the reference: ``[defaults] provider`` / ``repair_provider`` /
+    ``qe_judge_provider`` pointing at a missing name raise
+    ``ProviderNotFoundError`` on every run until someone notices the file.
+    Clearing the reference first is one explicit step in the UI; the API answers
+    with the field that must be cleared so a direct caller can act on it too.
+    """
+    _validate_name(name)
+    path = _config_path()
+    document = _load_document(path)
+    providers = document.get("providers")
+    if not isinstance(providers, dict) or name not in providers:
+        raise ProviderEditError(f"{name!r} is not a declared provider; nothing to delete")
+    defaults = document.get("defaults")
+    referenced_by: list[str] = []
+    if isinstance(defaults, dict):
+        for field in ("provider", "repair_provider", "qe_judge_provider"):
+            if defaults.get(field) == name:
+                referenced_by.append(f"defaults.{field}")
+    if referenced_by:
+        raise ProviderEditError(
+            f"{name!r} is still referenced by {', '.join(referenced_by)}; "
+            "clear that reference first"
+        )
+    del providers[name]
+    atomic_write_text(path, tomlkit.dumps(document))
+    _tighten_permissions(path)
 
 
 def default_provider_name() -> str | None:

@@ -375,6 +375,29 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
             scope.source.invalidate()
         return ProviderDetailResponse(**detail)
 
+    @api_app.delete("/system/providers/{name}", tags=["System"])
+    async def delete_provider_route(
+        name: str,
+        x_api_key: str | None = Header(default=None),
+        ubt_session: str | None = Cookie(default=None),
+    ) -> dict[str, str]:
+        """Remove one declared ``[providers.<name>]`` block.
+
+        Same posture as ``PUT``: the middleware gate runs twice on purpose, and
+        a block still named by ``[defaults]`` is refused with the referencing
+        field so the UI can tell the operator what to clear first.
+        """
+        from ubt.api.provider_editor import ProviderEditError, delete_provider
+
+        verify_api_key(x_api_key, ubt_session, _config=app_config)
+        try:
+            await asyncio.to_thread(delete_provider, name)
+        except ProviderEditError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        if scope.source is not None:
+            scope.source.invalidate()
+        return {"deleted": name}
+
     @api_app.put(
         "/system/providers/{name}/default",
         tags=["System"],

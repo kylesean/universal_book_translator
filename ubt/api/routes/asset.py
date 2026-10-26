@@ -18,6 +18,7 @@ from ubt.api.assets import (
     TMImportError,
     add_glossary_term,
     detect_glossary_conflicts,
+    evict_matching_tm_entries,
     evict_tm_entries,
     import_glossary_entries,
     import_tm_entries,
@@ -27,11 +28,13 @@ from ubt.api.assets import (
     read_glossary_terms,
     remove_glossary_term,
 )
+from ubt.api.config_source import ensure_shared_glossary_file
 from ubt.api.models import (
     GlossaryConflictsResponse,
     GlossaryDeleteResponse,
     GlossaryResponse,
     GlossaryTermRequest,
+    TMBulkEvictRequest,
     TMevictRequest,
     TMImportRequest,
     TMListResponse,
@@ -40,6 +43,7 @@ from ubt.api.routes.shared import UNPROCESSABLE_ENTITY
 from ubt.api.scope import ApiScope
 from ubt.api.security import resolve_secure_path, verify_api_key
 from ubt.core.fs_perms import ensure_private_dir
+from ubt.core.memory.tm import TMEvictScopeChangedError
 from ubt.core.router import ModelProfile, get_default_registry
 
 
@@ -57,7 +61,10 @@ def register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
     _managed_dir = scope.managed_dir
 
     def _resolved_glossary_path() -> Path:
-        configured = app_config.glossary_path
+        # ``scope.config`` is the live ConfigSource view. The boot snapshot is
+        # deliberately stale after the console creates a glossary.
+        current = scope.config
+        configured = current.glossary_path
         if configured is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -66,7 +73,21 @@ def register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
                     "or pass --glossary."
                 ),
             )
-        return resolve_secure_path(configured, must_exist=True, config=app_config)
+        return resolve_secure_path(configured, must_exist=True, config=current)
+
+    def _enable_shared_glossary() -> Path:
+        """Create and activate the console-managed glossary, then reload config."""
+        before = scope.config
+        path = ensure_shared_glossary_file(before)
+        if scope.source is not None:
+            scope.source.invalidate()
+        current = scope.config
+        if current.glossary_path is None:
+            raise ValueError(
+                "The glossary was created but ubt.toml did not reload its glossary_path. "
+                "Check UBT_GLOSSARY_PATH and the server logs."
+            )
+        return resolve_secure_path(path, must_exist=True, config=current)
 
     def _tm_path() -> Path:
         return app_config.db_dir / "tm.sqlite"
@@ -119,6 +140,18 @@ def register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
             terms = await asyncio.to_thread(read_glossary_terms, path)
         except GlossaryFormatError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        return JSONResponse({"path": path.name, "terms": terms})
+
+    @api_app.post("/assets/glossary/enable", response_model=GlossaryResponse, tags=["Assets"])
+    async def enable_glossary() -> JSONResponse:
+        """Enable the shared glossary without requiring a hand-edited config."""
+        try:
+            path = await asyncio.to_thread(_enable_shared_glossary)
+            terms = await asyncio.to_thread(read_glossary_terms, path)
+        except GlossaryFormatError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         return JSONResponse({"path": path.name, "terms": terms})
 
     @api_app.post("/assets/glossary", response_model=GlossaryResponse, tags=["Assets"])
@@ -230,24 +263,63 @@ def register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
 
     @api_app.get("/assets/tm", response_model=TMListResponse, tags=["Assets"])
     async def get_translation_memory(
-        limit: int = 200,
+        limit: int = 50,
         offset: int = 0,
         src_lang: str | None = None,
         tgt_lang: str | None = None,
+        query: str | None = None,
+        provenance: str | None = None,
+        usage: str | None = None,
+        sort: str = "newest",
     ) -> JSONResponse:
-        data = await asyncio.to_thread(
-            list_tm_entries,
-            _tm_path(),
-            limit=min(max(limit, 1), 1000),
-            offset=max(offset, 0),
-            src_lang=src_lang,
-            tgt_lang=tgt_lang,
-        )
+        try:
+            data = await asyncio.to_thread(
+                list_tm_entries,
+                _tm_path(),
+                limit=min(max(limit, 1), 200),
+                offset=max(offset, 0),
+                src_lang=src_lang,
+                tgt_lang=tgt_lang,
+                query=query,
+                provenance=provenance,
+                usage=usage,
+                sort=sort,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         return JSONResponse(data)
 
     @api_app.post("/assets/tm/evict", tags=["Assets"])
     async def evict_translation_memory(req: TMevictRequest) -> JSONResponse:
         removed = await asyncio.to_thread(evict_tm_entries, _tm_path(), req.ids)
+        return JSONResponse({"removed": removed})
+
+    @api_app.post("/assets/tm/evict-matching", tags=["Assets"])
+    async def evict_matching_translation_memory(req: TMBulkEvictRequest) -> JSONResponse:
+        try:
+            removed = await asyncio.to_thread(
+                evict_matching_tm_entries,
+                _tm_path(),
+                expected_total=req.expected_total,
+                src_lang=req.src_lang,
+                tgt_lang=req.tgt_lang,
+                query=req.query,
+                provenance=req.provenance,
+                usage=req.usage,
+            )
+        except TMEvictScopeChangedError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "The filtered translation-memory scope changed after it was "
+                    f"previewed. Nothing was deleted. {exc}"
+                ),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
         return JSONResponse({"removed": removed})
 
     @api_app.post("/assets/tm/import", tags=["Assets"])

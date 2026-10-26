@@ -171,10 +171,15 @@ def test_invalid_values_are_rejected_before_they_reach_the_file(config_dir: Path
 
 
 def test_a_provider_name_cannot_escape_its_table(config_dir: Path) -> None:
-    """The name becomes a TOML key path, so it may not carry structure."""
+    """A name may not carry table structure, a path segment or an injection.
+
+    A dot is allowed and handled by quoting (see
+    :func:`test_a_dotted_provider_name_is_one_quoted_key`); the characters that
+    could still close the key or split the URL are not.
+    """
     from ubt.api.provider_editor import ProviderEditError, validate_edit
 
-    for name in ("../evil", "a.b", "x]", "", "name with space"):
+    for name in ("../evil", "a/b", "x]", "", "name with space", 'a"b'):
         with pytest.raises(ProviderEditError):
             validate_edit(name, {"is_free": True})
 
@@ -355,6 +360,106 @@ def test_a_new_provider_can_be_created(config_dir: Path) -> None:
     assert result["supports_reasoning_effort"] is True
     # A block created without a credential must say so rather than imply one.
     assert read_provider("fresh")["has_credential"] is False
+
+
+def test_reasoning_fields_round_trip_and_clear(config_dir: Path) -> None:
+    """The console reasoning controls must reach the file, and un-set cleanly.
+
+    A form select offers "undeclared" as an option, so its empty choice has to
+    map to a real removal — a field that could be set but never cleared would
+    wedge the block with a stale effort after the endpoint changed.
+    """
+    from ubt.api.provider_editor import read_provider, upsert_provider
+    from ubt.core.providers import load_provider_block
+
+    upsert_provider(
+        "demo",
+        {
+            "supports_reasoning_effort": True,
+            "draft_reasoning_effort": "none",
+            "repair_reasoning_effort": "high",
+            "reasoning_dialect": "nested",
+        },
+    )
+    block = load_provider_block("demo")
+    assert block["draft_reasoning_effort"] == "none"
+    assert block["repair_reasoning_effort"] == "high"
+    assert block["reasoning_dialect"] == "nested"
+    assert read_provider("demo")["draft_reasoning_effort"] == "none"
+
+    # An empty select submits null: the key leaves the block entirely.
+    upsert_provider("demo", {"draft_reasoning_effort": None, "reasoning_dialect": None})
+    block = load_provider_block("demo")
+    assert "draft_reasoning_effort" not in block
+    assert "reasoning_dialect" not in block
+    # The fields that were not named survive.
+    assert block["repair_reasoning_effort"] == "high"
+    assert block["supports_reasoning_effort"] is True
+
+
+def test_a_provider_block_can_be_deleted(config_dir: Path) -> None:
+    """Deletion removes exactly one block and leaves the rest of the file."""
+    from ubt.api.provider_editor import ProviderEditError, delete_provider
+    from ubt.core.providers import declared_provider_names
+
+    (config_dir / "ubt.toml").write_text(
+        _BASE_BLOCK + '\n[providers.second]\nbase_url = "http://127.0.0.1:9191/v1"\n',
+        encoding="utf-8",
+    )
+    delete_provider("second")
+    assert "second" not in declared_provider_names()
+    # The surviving block is untouched, credential reference included.
+    assert 'api_key = "${DEMO_KEY}"' in (config_dir / "ubt.toml").read_text(encoding="utf-8")
+
+    # Deleting something that is not there is a readable error, not a 500.
+    with pytest.raises(ProviderEditError, match="nothing to delete"):
+        delete_provider("second")
+
+
+def test_deleting_a_referenced_provider_is_refused(config_dir: Path) -> None:
+    """A block the file still names cannot be orphaned silently."""
+    from ubt.api.provider_editor import ProviderEditError, delete_provider
+
+    (config_dir / "ubt.toml").write_text(
+        _BASE_BLOCK + '\n[defaults]\nprovider = "demo"\n', encoding="utf-8"
+    )
+    with pytest.raises(ProviderEditError, match="defaults.provider"):
+        delete_provider("demo")
+    # The block survives the refused delete.
+    assert "demo" in (config_dir / "ubt.toml").read_text(encoding="utf-8")
+
+
+def test_a_dotted_provider_name_is_one_quoted_key(config_dir: Path) -> None:
+    """A dot belongs to the name, not to the TOML path.
+
+    ``[providers.a.b]`` would create two nested tables and ``provider = "a.b"``
+    would resolve to nothing, while the list showed a provider called ``a``. The
+    writer quotes the key instead, and every reader has to hand back exactly the
+    name the operator typed — including the default, which is what makes a
+    create from the console runnable without a second save.
+    """
+    from ubt.api.provider_editor import (
+        default_provider_name,
+        read_provider,
+        upsert_provider,
+    )
+    from ubt.core.providers import declared_provider_names, load_provider_block
+
+    name = "workbuddy-ai.deepseek-v4.1-flash"
+    upsert_provider(
+        name,
+        {"base_url": "http://127.0.0.1:2345/v1", "draft_model": "deepseek-v4.1-flash"},
+        make_default=True,
+    )
+
+    text = (config_dir / "ubt.toml").read_text(encoding="utf-8")
+    assert f'[providers."{name}"]' in text
+    # The dot did not split the block into nested tables.
+    assert "[providers.workbuddy-ai." not in text
+    assert name in declared_provider_names()
+    assert load_provider_block(name)["draft_model"] == "deepseek-v4.1-flash"
+    assert read_provider(name)["declared"] is True
+    assert default_provider_name() == name
 
 
 def test_the_saved_block_is_what_the_loader_reads_back(config_dir: Path) -> None:

@@ -11,6 +11,18 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Changed
 
+- **A provider name may carry a dot, because the model ids it is named after
+  do.** The console refused `workbuddy-ai.deepseek-v4.1-flash` by greying out
+  Create, so the only clue was a hint that did not say which character was
+  illegal. Dots are now accepted at both ends: the charset is
+  `[A-Za-z0-9_.-]` in `provider_editor.py` and in the form. A dotted name is not
+  a TOML bare key, so tomlkit quotes it — `[providers."a.b"]` — and the loader
+  reads back the literal name `a.b` instead of the nested tables `a → b` that an
+  unquoted `[providers.a.b]` would silently create. A slash is still refused,
+  along with quotes, `]`, `#` and whitespace: the name is the `{name}` of
+  `PUT /system/providers/{name}` and a `%2F` is decoded before routing, so a
+  slash could never reach the handler, while the rest could close the key.
+
 - **Three-platform reality check, and the two Windows breaks it found.** The
   backend's platform-critical layers were already sound — the single-writer
   job lock is a SQLite lease (the old ``msvcrt``/``fcntl`` file-offset lock was

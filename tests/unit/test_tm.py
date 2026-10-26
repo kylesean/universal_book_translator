@@ -31,6 +31,7 @@ from ubt.core.memory.tm import (
     PROMPT_VERSION,
     PROVENANCE_HUMAN_PE,
     PROVENANCE_MACHINE,
+    TMEvictScopeChangedError,
     TMHit,
     TMPendingEntry,
     TranslationMemory,
@@ -610,6 +611,69 @@ def test_scan_returns_every_row_in_id_order(tm: TranslationMemory) -> None:
     assert [entry.source_text for entry in rows] == ["One.", "Two."]
 
 
+def test_list_page_filters_counts_and_pages_inside_the_store(tm: TranslationMemory) -> None:
+    _store(tm, "Alpha one.", "\u7532\u4e00\u3002")
+    _store(tm, "Beta two.", "\u4e59\u4e8c\u3002", provenance=PROVENANCE_HUMAN_PE)
+    _store(tm, "Gamma three.", "\u4e19\u4e09\u3002")
+    tm.lookup_exact("en", "zh", "Alpha one.")
+
+    first = tm.list_page(limit=2, offset=0, sort="newest")
+    assert first.total == 3
+    assert first.machine_count == 2
+    assert first.human_count == 1
+    assert first.never_used_count == 2
+    assert len(first.entries) == 2
+
+    second = tm.list_page(limit=2, offset=2, sort="newest")
+    assert second.total == 3
+    assert len(second.entries) == 1
+    assert {e.id for e in first.entries}.isdisjoint({e.id for e in second.entries})
+
+    human = tm.list_page(provenance=PROVENANCE_HUMAN_PE)
+    assert human.total == 1
+    assert human.entries[0].source_text == "Beta two."
+
+    never = tm.list_page(usage="never")
+    assert never.total == 2
+    assert {e.source_text for e in never.entries} == {"Beta two.", "Gamma three."}
+
+    search = tm.list_page(query="alpha")
+    assert search.total == 1
+    assert search.entries[0].use_count == 1
+
+    most_used = tm.list_page(sort="most_used")
+    assert most_used.entries[0].source_text == "Alpha one."
+
+
+def test_list_page_rejects_unknown_filters(tm: TranslationMemory) -> None:
+    with pytest.raises(ValueError):
+        tm.list_page(provenance="invented")
+    with pytest.raises(ValueError):
+        tm.list_page(usage="sometimes")
+    with pytest.raises(ValueError):
+        tm.list_page(sort="random")
+
+
+def test_list_page_search_keeps_the_derived_count_clauses_valid(
+    tm: TranslationMemory,
+) -> None:
+    """A filtered count must remain one valid WHERE clause.
+
+    Search adds an OR-group to the shared filter. Appending an unqualified
+    ``provenance = ?`` after that group copied the field name into the count
+    query in a form SQLite reads as an alias, so the real 38k-row store answered
+    every TM page with HTTP 500 while the empty-store tests stayed green.
+    """
+    _store(tm, "markdown search sentence", "\u4e2d\u6587\u53e5\u5b50\u3002")
+
+    page = tm.list_page(query="markdown")
+
+    assert page.total == 1
+    assert page.machine_count == 1
+    assert page.human_count == 0
+    assert page.never_used_count == 1
+
+
 def test_evict_removes_rows_and_returns_the_count(tm: TranslationMemory) -> None:
     _store(tm, "One.", "\u4e00\u3002")
     _store(tm, "Two.", "\u4e8c\u3002")
@@ -622,6 +686,33 @@ def test_evict_removes_rows_and_returns_the_count(tm: TranslationMemory) -> None
 def test_evict_of_nothing_is_a_noop(tm: TranslationMemory) -> None:
     assert tm.evict_ids([]) == 0
     assert tm.evict_ids([999_999]) == 0
+
+
+def test_evict_matching_deletes_only_the_confirmed_filtered_scope(
+    tm: TranslationMemory,
+) -> None:
+    _store(tm, "Alpha one.", "甲一。")
+    _store(tm, "Alpha two.", "甲二。")
+    _store(tm, "Beta three.", "乙三。")
+    page = tm.list_page(query="Alpha")
+
+    assert (
+        tm.evict_matching(
+            expected_total=page.total,
+            query="Alpha",
+        )
+        == 2
+    )
+    assert [entry.source_text for entry in tm.scan()] == ["Beta three."]
+
+
+def test_evict_matching_refuses_a_scope_that_changed_after_preview(
+    tm: TranslationMemory,
+) -> None:
+    _store(tm, "Alpha one.", "甲一。")
+    with pytest.raises(TMEvictScopeChangedError):
+        tm.evict_matching(expected_total=2, query="Alpha")
+    assert tm.entry_count() == 1
 
 
 # --- per-pair generation across processes ---------------------------------- #

@@ -30,6 +30,7 @@ from ubt.core.memory.seed_glossary import load_external_glossary
 from ubt.core.memory.tm import (
     PROVENANCE_HUMAN_PE,
     PROVENANCE_MACHINE,
+    TMEvictScopeChangedError,
     TMPendingEntry,
     TranslationMemory,
     normalize_for_tm,
@@ -254,32 +255,51 @@ def remove_glossary_term(path: Path, source: str) -> bool:
 def list_tm_entries(
     tm_path: Path,
     *,
-    limit: int = 200,
+    limit: int = 50,
     offset: int = 0,
     src_lang: str | None = None,
     tgt_lang: str | None = None,
+    query: str | None = None,
+    provenance: str | None = None,
+    usage: str | None = None,
+    sort: str = "newest",
 ) -> dict[str, Any]:
-    """A page of the shared translation memory, newest ids last.
+    """A filtered page of the shared translation memory.
 
-    ``scan`` reads the whole store (the CLI ``ubt tm scan`` uses it the same
-    way); the console is a local tool, so slicing in memory is acceptable and
-    keeps the store's single read API.
+    The store owns paging and filtering. A console page must never materialize
+    a machine-wide memory with tens of thousands of rows just to display 50.
     """
     if not tm_path.exists():
-        return {"total": 0, "entries": []}
+        return {
+            "total": 0,
+            "offset": offset,
+            "limit": limit,
+            "machine_count": 0,
+            "human_count": 0,
+            "never_used_count": 0,
+            "entries": [],
+        }
     tm = TranslationMemory(tm_path)
     try:
-        entries = tm.scan()
+        page = tm.list_page(
+            limit=limit,
+            offset=offset,
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            query=query,
+            provenance=provenance,
+            usage=usage,
+            sort=sort,
+        )
     finally:
         tm.close()
-    if src_lang:
-        entries = [e for e in entries if e.src_lang == src_lang]
-    if tgt_lang:
-        entries = [e for e in entries if e.tgt_lang == tgt_lang]
-    total = len(entries)
-    window = entries[offset : offset + limit]
     return {
-        "total": total,
+        "total": page.total,
+        "offset": offset,
+        "limit": limit,
+        "machine_count": page.machine_count,
+        "human_count": page.human_count,
+        "never_used_count": page.never_used_count,
         "entries": [
             {
                 "id": e.id,
@@ -290,8 +310,10 @@ def list_tm_entries(
                 "provenance": e.provenance,
                 "domain": e.domain,
                 "use_count": e.use_count,
+                "created_at": e.created_at,
+                "updated_at": e.updated_at,
             }
-            for e in window
+            for e in page.entries
         ],
     }
 
@@ -303,6 +325,35 @@ def evict_tm_entries(tm_path: Path, ids: list[int]) -> int:
     tm = TranslationMemory(tm_path)
     try:
         return tm.evict_ids(ids)
+    finally:
+        tm.close()
+
+
+def evict_matching_tm_entries(
+    tm_path: Path,
+    *,
+    expected_total: int,
+    src_lang: str | None = None,
+    tgt_lang: str | None = None,
+    query: str | None = None,
+    provenance: str | None = None,
+    usage: str | None = None,
+) -> int:
+    """Delete a filtered TM scope after checking its confirmed size."""
+    if not tm_path.exists():
+        if expected_total != 0:
+            raise TMEvictScopeChangedError(f"selection changed: expected {expected_total}, found 0")
+        return 0
+    tm = TranslationMemory(tm_path)
+    try:
+        return tm.evict_matching(
+            expected_total=expected_total,
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            query=query,
+            provenance=provenance,
+            usage=usage,
+        )
     finally:
         tm.close()
 

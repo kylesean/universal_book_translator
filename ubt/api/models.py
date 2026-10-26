@@ -92,6 +92,14 @@ class JobSubmitRequest(BaseModel):
             "from that block."
         ),
     )
+    repair_provider: str | None = Field(
+        default=None,
+        description=(
+            "Provider block for the repair tier (defaults to the primary provider). "
+            "A name, validated like `provider`: the named block supplies the repair "
+            "endpoint and credential."
+        ),
+    )
     draft_model: str | None = Field(default=None, description="Override draft model tier")
     repair_model: str | None = Field(default=None, description="Override repair model tier")
     preset: Preset | None = Field(
@@ -265,6 +273,13 @@ class JobAssessRequest(BaseModel):
             "built-in wire protocol). Endpoint and credentials still come from it."
         ),
     )
+    repair_provider: str | None = Field(
+        default=None,
+        description=(
+            "Provider block for the repair tier to quote against (defaults to the "
+            "primary provider). A name, validated like `provider`."
+        ),
+    )
     ocr_mode: OcrMode | None = Field(
         default=None, description="OCR engine the job will use (affects the vision line)"
     )
@@ -422,6 +437,9 @@ class JobSummary(BaseModel):
     completed_blocks: int
     failed_blocks: int
     needs_human_blocks: int
+    #: Deliberately quarantined rather than lost. Counted as successful
+    #: progress, so the queue row's numerator must include it.
+    blocked_human_blocks: int = 0
     progress_percent: float
     estimated_cost_usd: float | None = None
     created_at: str | None = None
@@ -510,11 +528,20 @@ class TMevictRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # Bounded so one request cannot submit an unbounded delete set (the store
-    # deletes in batches, but the parsed list is held whole first).
-    ids: list[int] = Field(
-        default_factory=list, max_length=10_000, description="TM entry ids to delete"
-    )
+    ids: list[int] = Field(..., min_length=1, max_length=1_000)
+
+
+class TMBulkEvictRequest(BaseModel):
+    """Delete the exact filtered scope shown in the confirmation dialog."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expected_total: int = Field(..., ge=0)
+    src_lang: str | None = None
+    tgt_lang: str | None = None
+    query: str | None = None
+    provenance: Literal["machine", "human_pe"] | None = None
+    usage: Literal["never", "used"] | None = None
 
 
 class TMImportRequest(BaseModel):
@@ -732,6 +759,8 @@ class TMEntryItem(BaseModel):
     provenance: str
     domain: str
     use_count: int
+    created_at: str
+    updated_at: str
 
 
 class TMListResponse(BaseModel):
@@ -740,6 +769,11 @@ class TMListResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     total: int
+    offset: int
+    limit: int
+    machine_count: int
+    human_count: int
+    never_used_count: int
     entries: list[TMEntryItem]
 
 

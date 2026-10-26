@@ -7,6 +7,7 @@ helpers over explicit paths, pinned here plus a thin HTTP round-trip.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -294,6 +295,97 @@ def test_tm_import_endpoint_roundtrips_tmx_and_json(tmp_path: Path) -> None:
 
     listed = client.get("/assets/tm", headers=_AUTH).json()
     assert listed["total"] == 3
+    assert listed["limit"] == 50
+    assert listed["offset"] == 0
+    assert listed["machine_count"] == 3
+    assert listed["human_count"] == 0
+    assert listed["never_used_count"] == 3
+    assert "matching_ids" not in listed
+    assert listed["entries"][0]["updated_at"]
+
+    searched = client.get(
+        "/assets/tm",
+        params={"query": "Foo", "limit": 1},
+        headers=_AUTH,
+    ).json()
+    assert searched["total"] == 1
+    assert len(searched["entries"]) == 1
+    assert searched["entries"][0]["source_text"] == "Foo"
+
+    never_used = client.get(
+        "/assets/tm",
+        params={"usage": "never", "sort": "most_used"},
+        headers=_AUTH,
+    ).json()
+    assert never_used["total"] == 3
+
+    invalid = client.get(
+        "/assets/tm",
+        params={"provenance": "invented"},
+        headers=_AUTH,
+    )
+    assert invalid.status_code == 422
+
+
+def test_tm_evict_matching_uses_the_confirmed_filter_scope(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.db_dir.mkdir(parents=True, exist_ok=True)
+    client = TestClient(create_app(config))
+    rows = [
+        {"source_text": "Alpha one.", "target_text": "甲一。"},
+        {"source_text": "Alpha two.", "target_text": "甲二。"},
+        {"source_text": "Beta three.", "target_text": "乙三。"},
+    ]
+    imported = client.post(
+        "/assets/tm/import",
+        json={
+            "format": "json",
+            "content": json.dumps(rows),
+            "src_lang": "en",
+            "tgt_lang": "zh",
+        },
+        headers=_AUTH,
+    )
+    assert imported.status_code == 200
+
+    preview = client.get("/assets/tm", params={"query": "Alpha"}, headers=_AUTH).json()
+    assert preview["total"] == 2
+    removed = client.post(
+        "/assets/tm/evict-matching",
+        json={"expected_total": preview["total"], "query": "Alpha"},
+        headers=_AUTH,
+    )
+    assert removed.status_code == 200
+    assert removed.json() == {"removed": 2}
+    remaining = client.get("/assets/tm", headers=_AUTH).json()
+    assert remaining["total"] == 1
+    assert remaining["entries"][0]["source_text"] == "Beta three."
+
+
+def test_tm_evict_matching_rejects_a_stale_confirmation(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.db_dir.mkdir(parents=True, exist_ok=True)
+    client = TestClient(create_app(config))
+    imported = client.post(
+        "/assets/tm/import",
+        json={
+            "format": "json",
+            "content": '[{"source_text": "Alpha one.", "target_text": "甲一。"}]',
+            "src_lang": "en",
+            "tgt_lang": "zh",
+        },
+        headers=_AUTH,
+    )
+    assert imported.status_code == 200
+
+    stale = client.post(
+        "/assets/tm/evict-matching",
+        json={"expected_total": 2, "query": "Alpha"},
+        headers=_AUTH,
+    )
+    assert stale.status_code == 409
+    assert "Nothing was deleted" in stale.json()["detail"]
+    assert client.get("/assets/tm", headers=_AUTH).json()["total"] == 1
 
 
 def test_tm_import_endpoint_rejects_a_malformed_payload(tmp_path: Path) -> None:
@@ -404,3 +496,36 @@ def test_glossary_upload_endpoint_rejects_non_glossary_formats(tmp_path: Path) -
         headers=_AUTH,
     )
     assert res.status_code == 415
+
+
+def test_enable_glossary_creates_and_activates_the_managed_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unconfigured glossary must be fixable from the asset screen itself.
+
+    Previously the screen showed an Enable-shaped dead end: every write returned
+    409 until the operator hand-edited ``ubt.toml``. Enabling now creates the
+    managed file, records ``[defaults] glossary_path``, and the next route read
+    sees the live configuration rather than the boot snapshot.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "ubt.toml").write_text("[defaults]\n", encoding="utf-8")
+    client = TestClient(create_app(_config(tmp_path)))
+
+    assert client.get("/assets/glossary", headers=_AUTH).status_code == 409
+
+    enabled = client.post("/assets/glossary/enable", headers=_AUTH)
+    assert enabled.status_code == 200, enabled.text
+    body = enabled.json()
+    assert body["terms"] == []
+    managed = tmp_path / "db" / "glossary.csv"
+    assert managed.is_file()
+    assert f'glossary_path = "{managed}"' in (tmp_path / "ubt.toml").read_text(encoding="utf-8")
+
+    added = client.post(
+        "/assets/glossary",
+        json={"source": "Attention", "target": "注意力"},
+        headers=_AUTH,
+    )
+    assert added.status_code == 200, added.text
+    assert added.json()["terms"] == [{"source": "Attention", "target": "注意力"}]

@@ -33,9 +33,15 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import stat
 import threading
+import tomllib
+from pathlib import Path
 from typing import Any
 
+import tomlkit
+
+from ubt.core.atomic import atomic_write_text
 from ubt.core.config import UBTConfig
 from ubt.core.providers import find_config_file
 
@@ -74,6 +80,59 @@ DEPLOYMENT_FIELDS: frozenset[str] = frozenset(
         "allowed_dirs",
     }
 )
+
+#: The shared glossary is a first-class console asset. Its file lives under the
+#: deployment-bound ``db_dir`` and is enabled by a ``[defaults]`` key, so the
+#: console can create it without asking a product user to edit TOML by hand.
+SHARED_GLOSSARY_FILENAME = "glossary.csv"
+
+
+def shared_glossary_path(config: UBTConfig) -> Path:
+    """The console-managed glossary file for this deployment."""
+    return config.db_dir / SHARED_GLOSSARY_FILENAME
+
+
+def ensure_shared_glossary_file(config: UBTConfig) -> Path:
+    """Create the shared glossary and point ``[defaults]`` at it when unset.
+
+    An explicit ``glossary_path`` (file or ``UBT_GLOSSARY_PATH``) is never
+    replaced: the console enables the asset only when no glossary exists yet.
+    The managed file is a two-column headerless CSV, which the engine's own
+    loader already reads and every glossary editor can open.
+    """
+    configured = config.glossary_path
+    if configured is not None:
+        return configured
+
+    path = shared_glossary_path(config)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        atomic_write_text(path, "")
+    with contextlib.suppress(OSError):
+        path.chmod(0o600)
+
+    config_path = find_config_file() or (Path.cwd() / "ubt.toml")
+    if config_path.is_file():
+        try:
+            document = tomlkit.parse(config_path.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise ValueError(
+                f"configuration file at {config_path} is not valid TOML: {exc}"
+            ) from exc
+    else:
+        document = tomlkit.document()
+    defaults = document.get("defaults")
+    if defaults is None:
+        defaults = tomlkit.table()
+        document["defaults"] = defaults
+    defaults["glossary_path"] = tomlkit.item(str(path.resolve()))
+    atomic_write_text(config_path, tomlkit.dumps(document))
+    try:
+        if stat.S_IMODE(config_path.stat().st_mode) & (stat.S_IRWXG | stat.S_IRWXO):
+            config_path.chmod(0o600)
+    except OSError:
+        pass
+    return path
 
 
 def _file_signature() -> tuple[str | None, int, int]:

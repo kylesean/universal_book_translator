@@ -72,7 +72,7 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
     failed = int(snapshot.get("failed", 0) or 0)
     needs_human = int(snapshot.get("needs_human", 0) or 0)
     blocked_human = int(snapshot.get("blocked_human", 0) or 0)
-    processed = completed + failed + needs_human + blocked_human
+    successful = completed + needs_human + blocked_human
     # No ``source_path`` in the summary: the queue table only ever shows the
     # basename, and this route is unauthenticated by default. Echoing the
     # absolute path (home directory included) is the same leak ``public_report``
@@ -99,7 +99,8 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
         "completed_blocks": completed,
         "failed_blocks": failed,
         "needs_human_blocks": needs_human,
-        "progress_percent": live_progress_percent(processed, drafted + repair_pending, total),
+        "blocked_human_blocks": blocked_human,
+        "progress_percent": live_progress_percent(successful, drafted + repair_pending, total),
         "estimated_cost_usd": float(cost) if isinstance(cost, (int, float)) else None,
         "created_at": snapshot.get("created_at"),
         "updated_at": snapshot.get("updated_at"),
@@ -220,8 +221,11 @@ def summarize_queued_job(job: Any) -> dict[str, Any]:
         "completed_blocks": int(progress.get("completed_blocks", 0) or 0),
         "failed_blocks": int(progress.get("failed_blocks", 0) or 0),
         "needs_human_blocks": int(progress.get("needs_human_blocks", 0) or 0),
+        "blocked_human_blocks": int(progress.get("blocked_human_blocks", 0) or 0),
         "progress_percent": live_progress_percent(
-            int(progress.get("processed_blocks", 0) or 0),
+            int(progress.get("completed_blocks", 0) or 0)
+            + int(progress.get("needs_human_blocks", 0) or 0)
+            + int(progress.get("blocked_human_blocks", 0) or 0),
             int(progress.get("drafted_blocks", 0) or 0)
             + int(progress.get("repair_pending_blocks", 0) or 0),
             int(progress.get("total_blocks", 0) or 0),

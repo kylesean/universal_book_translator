@@ -276,6 +276,64 @@ class TMStoredEntry:
     provenance: str
     domain: str | None
     use_count: int
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class TMPage:
+    """A filtered page of the stored memory and counts for the active filter."""
+
+    entries: list[TMStoredEntry]
+    total: int
+    machine_count: int
+    human_count: int
+    never_used_count: int
+
+
+class TMEvictScopeChangedError(RuntimeError):
+    """A filtered delete was confirmed against a different result count."""
+
+
+def _tm_filter_clause(
+    *,
+    src_lang: str | None,
+    tgt_lang: str | None,
+    query: str | None,
+    provenance: str | None,
+    usage: str | None,
+) -> tuple[str, list[Any]]:
+    """Build the shared WHERE clause for TM listing and filtered eviction."""
+    if provenance not in (None, PROVENANCE_HUMAN_PE, PROVENANCE_MACHINE):
+        raise ValueError(f"unknown provenance: {provenance}")
+    if usage not in (None, "never", "used"):
+        raise ValueError(f"unknown usage: {usage}")
+
+    where: list[str] = []
+    params: list[Any] = []
+    if src_lang:
+        where.append("src_lang = ?")
+        params.append(src_lang)
+    if tgt_lang:
+        where.append("tgt_lang = ?")
+        params.append(tgt_lang)
+    if provenance:
+        where.append("provenance = ?")
+        params.append(provenance)
+    if usage == "never":
+        where.append("use_count = 0")
+    elif usage == "used":
+        where.append("use_count > 0")
+    needle = (query or "").strip()
+    if needle:
+        # Literal substring search is the contract. LIKE also handles queries
+        # shorter than a trigram, so the console never silently ignores a
+        # one- or two-character search.
+        where.append("(src_text LIKE ? ESCAPE '\\' OR tgt_text LIKE ? ESCAPE '\\')")
+        escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params.extend((f"%{escaped}%", f"%{escaped}%"))
+    clause = f" WHERE {' AND '.join(where)}" if where else ""
+    return clause, params
 
 
 def format_few_shot_reference(hit: TMHit, query_source: str) -> str:
@@ -963,6 +1021,95 @@ class TranslationMemory:
             for r in rows
         ]
 
+    def list_page(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        src_lang: str | None = None,
+        tgt_lang: str | None = None,
+        query: str | None = None,
+        provenance: str | None = None,
+        usage: str | None = None,
+        sort: str = "newest",
+    ) -> TMPage:
+        """Return a filtered page without reading the whole store into Python.
+
+        The console manages a machine-wide memory that can hold tens of
+        thousands of rows. Paging, search, counts and ordering all happen in
+        SQLite so the cost of opening the asset screen does not grow with the
+        store, and ``total`` always describes the active filter.
+        """
+        if sort not in ("newest", "oldest", "most_used"):
+            raise ValueError(f"unknown sort: {sort}")
+
+        clause, params = _tm_filter_clause(
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            query=query,
+            provenance=provenance,
+            usage=usage,
+        )
+        order = {
+            "newest": "updated_at DESC, id DESC",
+            "oldest": "updated_at ASC, id ASC",
+            "most_used": "use_count DESC, updated_at DESC, id DESC",
+        }[sort]
+        with self._lock, self._get_conn() as conn:
+            total_row = _read_one(
+                conn,
+                f"SELECT COUNT(*) FROM tm_entries{clause}",
+                params,
+            )
+            machine_row = _read_one(
+                conn,
+                f"SELECT COUNT(*) FROM tm_entries{clause}"
+                + (" AND " if clause else " WHERE ")
+                + "tm_entries.provenance = ?",
+                [*params, PROVENANCE_MACHINE],
+            )
+            human_row = _read_one(
+                conn,
+                f"SELECT COUNT(*) FROM tm_entries{clause}"
+                + (" AND " if clause else " WHERE ")
+                + "tm_entries.provenance = ?",
+                [*params, PROVENANCE_HUMAN_PE],
+            )
+            never_used_row = _read_one(
+                conn,
+                f"SELECT COUNT(*) FROM tm_entries{clause}"
+                + (" AND " if clause else " WHERE ")
+                + "tm_entries.use_count = 0",
+                params,
+            )
+            rows = conn.execute(
+                "SELECT id, src_lang, tgt_lang, src_text, tgt_text, provenance, "
+                "domain, use_count, created_at, updated_at "
+                f"FROM tm_entries{clause} ORDER BY {order} LIMIT ? OFFSET ?",
+                [*params, limit, offset],
+            ).fetchall()
+        return TMPage(
+            entries=[
+                TMStoredEntry(
+                    id=int(row[0]),
+                    src_lang=str(row[1]),
+                    tgt_lang=str(row[2]),
+                    source_text=str(row[3]),
+                    target_text=str(row[4]),
+                    provenance=str(row[5]),
+                    domain=None if row[6] is None else str(row[6]),
+                    use_count=int(row[7]),
+                    created_at=str(row[8] or ""),
+                    updated_at=str(row[9] or ""),
+                )
+                for row in rows
+            ],
+            total=int(total_row[0]) if total_row else 0,
+            machine_count=int(machine_row[0]) if machine_row else 0,
+            human_count=int(human_row[0]) if human_row else 0,
+            never_used_count=int(never_used_row[0]) if never_used_row else 0,
+        )
+
     def evict_ids(self, ids: list[int]) -> int:
         """Delete the given entry ids. Returns the number of rows removed.
 
@@ -991,6 +1138,73 @@ class TranslationMemory:
                 removed += cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
             if touched:
                 self._bump_generations(conn, touched)
+        for pair in touched:
+            self._invalidate_pool(*pair)
+        self._entry_count_cache.pop(None, None)
+        return removed
+
+    def evict_matching(
+        self,
+        *,
+        expected_total: int,
+        src_lang: str | None = None,
+        tgt_lang: str | None = None,
+        query: str | None = None,
+        provenance: str | None = None,
+        usage: str | None = None,
+    ) -> int:
+        """Delete the whole filtered set after an exact-count confirmation.
+
+        Materialising every matching id in the browser does not scale to a
+        machine-wide memory. The filter itself is the operation target instead,
+        and ``expected_total`` is the destructive-confirmation token: if a
+        writer changed the result set between preview and confirmation, the
+        whole operation is rolled back rather than deleting a different scope.
+        """
+        if expected_total < 0:
+            raise ValueError("expected_total must be non-negative")
+        clause, params = _tm_filter_clause(
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            query=query,
+            provenance=provenance,
+            usage=usage,
+        )
+
+        touched: set[tuple[str, str]] = set()
+        removed = 0
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                # Lock at the start so the count shown to the operator and the
+                # DELETE below observe the same database state.
+                conn.execute("BEGIN IMMEDIATE")
+                total_row = _read_one(
+                    conn,
+                    f"SELECT COUNT(*) FROM tm_entries{clause}",
+                    params,
+                )
+                current_total = int(total_row[0]) if total_row else 0
+                if current_total != expected_total:
+                    raise TMEvictScopeChangedError(
+                        f"selection changed: expected {expected_total}, found {current_total}"
+                    )
+                if current_total == 0:
+                    conn.commit()
+                    return 0
+                rows = conn.execute(
+                    f"SELECT DISTINCT src_lang, tgt_lang FROM tm_entries{clause}",
+                    params,
+                ).fetchall()
+                touched.update((str(row[0]), str(row[1])) for row in rows)
+                cursor = conn.execute(f"DELETE FROM tm_entries{clause}", params)
+                removed = cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+                if touched:
+                    self._bump_generations(conn, touched)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         for pair in touched:
             self._invalidate_pool(*pair)
         self._entry_count_cache.pop(None, None)
