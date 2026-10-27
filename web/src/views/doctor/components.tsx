@@ -128,7 +128,7 @@ export function DoctorMetric({
         className
       )}
     >
-      <div className="text-[11px] font-medium text-muted-foreground">{label}</div>
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
       <div
         title={typeof value === 'string' ? value : undefined}
         className={cn(

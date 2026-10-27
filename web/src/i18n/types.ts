@@ -821,7 +821,6 @@ export interface TranslationDictionary {
     overviewReady: string
     overviewNeedsAttention: string
     overviewBlocked: string
-    overviewSummary: string
     diagnosticsTitle: string
     diagnosticsHelp: string
     issuesOnly: string
@@ -854,14 +853,12 @@ export interface TranslationDictionary {
     formCloseLabel: string
     formCreateHint: string
     formEditHint: string
-    qeMetricLabel: string
     qeMetricMeasured: string
     qeMetricNotMeasured: string
     thresholdMetric: string
     sampleMetric: string
     securityCardTitle: string
     securityCardHelp: string
-    egressCardHelp: string
     boundaryCardHelp: string
     emptyChecksTitle: string
     emptyChecksBody: string
@@ -948,7 +945,6 @@ export interface TranslationDictionary {
     //: Diagnostic verdict shown as a badge on every check row. The engine's
     //: status codes ("OK" | "WARN" | "FAIL" | "SKIP") are stable, so they are
     //: the translation key.
-    verdictCaption: string
     verdictAllOk: string
     verdictNeedsAttention: string
     expandDetail: string

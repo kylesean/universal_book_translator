@@ -135,9 +135,6 @@ export function QESettingsCard({ providerNames }: QESettingsCardProps) {
             <h2 className="text-sm font-semibold">{t.doctor.qeTitle}</h2>
             <InfoTip label={t.doctor.qeTitle}>{t.doctor.qeHelp}</InfoTip>
           </div>
-          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-            {t.doctor.qeMetricLabel}
-          </p>
         </div>
         {editing ? (
           <Button
@@ -308,18 +305,8 @@ export function QESettingsCard({ providerNames }: QESettingsCardProps) {
             >
               {settings.measurable ? t.doctor.qeMetricMeasured : t.doctor.qeMetricNotMeasured}
             </Badge>
-            <span className="text-xs text-muted-foreground">
-              {settings.measurable ? t.doctor.qeMeasured : t.doctor.qeNotMeasured}
-            </span>
           </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <DoctorMetric
-              label={t.doctor.qeMetricLabel}
-              value={
-                settings.judge_enabled ? t.doctor.qeMetricMeasured : t.doctor.qeMetricNotMeasured
-              }
-              tone={settings.measurable ? 'ok' : 'warn'}
-            />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <DoctorMetric
               label={t.doctor.thresholdMetric}
               value={Number(settings.threshold ?? 0).toFixed(2)}
@@ -377,7 +364,7 @@ export function QESettingsCard({ providerNames }: QESettingsCardProps) {
             </p>
           ) : null}
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
-            <p className="text-[11px] leading-relaxed text-muted-foreground">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               {t.doctor.qeConfigSource}
             </p>
             <Button

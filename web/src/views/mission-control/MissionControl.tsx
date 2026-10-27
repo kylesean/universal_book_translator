@@ -19,6 +19,7 @@ import {
   Search,
   ArrowLeft,
   FileCheck,
+  Eye,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -66,6 +67,7 @@ import {
 import { useI18n } from '@/i18n/useI18n'
 import { useToast } from '@/components/ui/useToast'
 import { deliverableName } from '@/views/quality-gate/artifactMeta'
+import { PreviewDrawer } from '@/views/quality-gate/PreviewDrawer'
 
 const getFormatBadge = (filename?: string): string => {
   if (!filename) return 'FILE'
@@ -607,6 +609,7 @@ export function MissionControl() {
   }, [readingDeliverables, deliverables])
 
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [previewItem, setPreviewItem] = useState<DeliverableItem | null>(null)
   const [pendingReparse, setPendingReparse] = useState<string | null>(null)
   const [reparsing, setReparsing] = useState(false)
   const [streamGeneration, setStreamGeneration] = useState(0)
@@ -760,9 +763,14 @@ export function MissionControl() {
 
           const done = frame.completed_blocks ?? completedRef.current
           const total = frame.total_blocks ?? totalRef.current
-          const counters = tRef.current.mission.activityProgress
-            .replace('{done}', String(done))
-            .replace('{total}', String(total || '—'))
+          const drafted = (frame.drafted_blocks ?? draftedRef.current) || 0
+          // Lifecycle events carry no block counters yet; don't show 0/total.
+          const counters =
+            done > 0 || drafted > 0
+              ? tRef.current.mission.activityProgress
+                  .replace('{done}', String(done))
+                  .replace('{total}', String(total || '—'))
+              : ''
           const preserved =
             skippedRef.current > 0
               ? ` · ${tRef.current.mission.activityPreserved.replace(
@@ -772,10 +780,17 @@ export function MissionControl() {
               : ''
           const text = frame.error
             ? `ERROR: ${frame.error}`
-            : `${activityText(
-                frame.event_type,
-                jobStatusLabel(tRef.current, frame.status ?? 'running')
-              )} · ${counters}${preserved}${qePart ? ` · ${qePart}` : ''}`
+            : [
+                activityText(
+                  frame.event_type,
+                  jobStatusLabel(tRef.current, frame.status ?? 'running')
+                ),
+                counters,
+                preserved,
+                qePart,
+              ]
+                .filter(Boolean)
+                .join(' · ')
           appendLog([{ text, level, at: Date.now(), eventType: frame.event_type ?? undefined }])
 
           if (frame.status && ['completed', 'failed', 'cancelled'].includes(frame.status)) {
@@ -1260,11 +1275,12 @@ export function MissionControl() {
                     {readingDeliverables.map((item) => {
                       const isPrimary = item.key === 'primary' || item === primaryDeliverable
                       const badge = getFormatBadge(item.filename)
+                      const previewable = ['primary', 'secondary', 'html'].includes(item.key)
                       return (
                         <DropdownMenuItem
                           key={item.key}
                           onClick={() => void handleDownload(item.key)}
-                          className="flex items-center justify-between gap-2 cursor-pointer py-2"
+                          className="flex items-start justify-between gap-2 cursor-pointer py-2"
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5">
@@ -1279,11 +1295,29 @@ export function MissionControl() {
                               {item.filename} · {formatBytes(item.size_bytes)}
                             </div>
                           </div>
-                          {isPrimary && (
-                            <span className="shrink-0 text-xs px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-semibold font-mono">
-                              {t.mission.exportPrimaryBadge}
-                            </span>
-                          )}
+                          <div className="flex shrink-0 items-center gap-1">
+                            {previewable && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="size-7"
+                                title={t.quality.previewAction}
+                                aria-label={t.quality.previewAction}
+                                onClick={(event) => {
+                                  event.preventDefault()
+                                  event.stopPropagation()
+                                  setPreviewItem(item)
+                                }}
+                              >
+                                <Eye className="size-3.5" />
+                              </Button>
+                            )}
+                            {isPrimary && (
+                              <span className="text-xs px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-semibold font-mono">
+                                {t.mission.exportPrimaryBadge}
+                              </span>
+                            )}
+                          </div>
                         </DropdownMenuItem>
                       )
                     })}
@@ -1466,7 +1500,18 @@ export function MissionControl() {
               <div className="py-12 text-center text-sm text-muted-foreground">
                 {jobs.length === 0 ? t.mission.queueEmpty : t.mission.queueNoMatch}
               </div>
-            ) : (
+      ) : null}
+
+      {previewItem && (
+        <PreviewDrawer
+          key={`${previewItem.key}:${previewItem.filename}`}
+          jobId={currentJobId ?? ''}
+          item={previewItem}
+          onClose={() => setPreviewItem(null)}
+        />
+      )}
+
+      {statusMissing ? null : (
               <JobQueueTable
                 jobs={filteredJobs}
                 currentJobId={currentJobId}

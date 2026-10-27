@@ -52,13 +52,6 @@ export function EgressSettingsCard() {
 
   return (
     <section className="min-w-0 overflow-hidden rounded-xl border border-border/80 bg-card">
-      <header className="border-b border-border/70 px-4 py-3">
-        <h2 className="text-sm font-semibold">{t.doctor.egressTitle}</h2>
-        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-          {t.doctor.egressCardHelp}
-        </p>
-      </header>
-
       {current === null ? (
         <div className="flex items-center justify-center px-4 py-10 text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
@@ -101,7 +94,7 @@ export function EgressSettingsCard() {
               }}
             />
           </div>
-          <p className="border-t border-border/60 pt-3 text-[11px] leading-relaxed text-muted-foreground">
+          <p className="border-t border-border/60 pt-3 text-xs leading-relaxed text-muted-foreground">
             {t.doctor.egressRuntimeNote}
           </p>
           {error ? <p className="text-xs text-destructive">{error}</p> : null}

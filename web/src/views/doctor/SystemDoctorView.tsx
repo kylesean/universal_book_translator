@@ -34,13 +34,13 @@ import { ButtonGroup } from '@/components/ui/button-group'
 import { Card, CardContent } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
+import { InfoTip } from '@/components/ui/InfoTip'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/components/ui/useToast'
 import { localizeDoctorCheck } from '@/i18n/doctorText'
 import { doctorCodesEn, doctorCodesZh } from '@/i18n/translations/doctorCodes'
 import { useI18n } from '@/i18n/useI18n'
 import { cn } from '@/lib/utils'
-import { Donut } from '@/views/quality-gate/charts'
 import { EgressSettingsCard } from './EgressSettingsCard'
 import { ProviderEditor } from './ProviderEditor'
 import { QESettingsCard } from './QESettingsCard'
@@ -50,7 +50,6 @@ import {
   DoctorStatusBadge,
   DoctorStatusIcon,
 } from './components'
-import { toneForStatus } from './status'
 
 type CheckFilter = 'issues' | 'all'
 
@@ -199,10 +198,20 @@ export function SystemDoctorView() {
   }))
   const indexed = localized.map((item, index) => ({ item, index, rowId: `dr-${index}` }))
   const problems = indexed.filter(({ item }) => item.check.status !== 'OK')
-  const okCount = checks.length - problems.length
   const hasFail = checks.some((check) => check.status === 'FAIL')
   const visible = checkFilter === 'issues' ? problems : indexed
   const groups = Array.from(new Set(visible.map(({ item }) => item.check.group_code)))
+  const statusCounts = checks.reduce(
+    (counts, check) => {
+      counts[check.status] = (counts[check.status] ?? 0) + 1
+      return counts
+    },
+    {} as Record<string, number>,
+  )
+  const passing = (statusCounts.OK ?? 0)
+  const warnCount = statusCounts.WARN ?? 0
+  const failCount = statusCounts.FAIL ?? 0
+  const skipCount = statusCounts.SKIP ?? 0
   const declaredProviders = (runtime?.providers ?? []).filter((provider) => provider.declared)
   const active = runtime?.active ?? null
   const canTranslate = Boolean(active?.can_translate)
@@ -241,20 +250,8 @@ export function SystemDoctorView() {
 
       <Card className="overflow-hidden">
         <CardContent className="p-0">
-          <div className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:p-6">
-            {checks.length > 0 ? (
-              <Donut
-                value={checks.length > 0 ? okCount / checks.length : 0}
-                tone={hasFail ? 'fail' : problems.length > 0 ? 'warn' : 'pass'}
-                center={`${okCount}/${checks.length}`}
-                caption={t.doctor.verdictCaption}
-              />
-            ) : (
-              <div className="grid size-[76px] shrink-0 place-items-center rounded-full border-[7px] border-border text-sm text-muted-foreground">
-                {loading ? <Loader2 className="size-4 animate-spin" /> : '—'}
-              </div>
-            )}
-            <div className="min-w-0 flex-1 space-y-2">
+          <div className="p-5 sm:p-6">
+            <div className="min-w-0 space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-base font-semibold tracking-[-0.02em]">
                   {checks.length === 0
@@ -278,16 +275,49 @@ export function SystemDoctorView() {
                   </Badge>
                 ) : null}
               </div>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                {active
-                  ? t.doctor.overviewSummary
-                      .replace('{model}', active.draft_model || t.doctor.notConfigured)
-                      .replace('{ok}', String(okCount))
-                      .replace('{total}', String(checks.length))
-                  : checks.length === 0
-                    ? t.doctor.emptyChecksBody
-                    : t.doctor.runtimeConfigUnavailable}
-              </p>
+              {checks.length > 0 ? (
+                <div>
+                  <div
+                    aria-hidden
+                    className="flex h-2 overflow-hidden rounded-full bg-muted"
+                  >
+                    <div
+                      className="bg-emerald-500"
+                      style={{ flexGrow: passing }}
+                    />
+                    <div
+                      className="bg-amber-500"
+                      style={{ flexGrow: warnCount }}
+                    />
+                    <div
+                      className="bg-destructive"
+                      style={{ flexGrow: failCount }}
+                    />
+                    <div
+                      className="bg-muted-foreground/30"
+                      style={{ flexGrow: skipCount }}
+                    />
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    {(
+                      [
+                        ['OK', passing, 'text-emerald-700 dark:text-emerald-400'],
+                        ['WARN', warnCount, 'text-amber-700 dark:text-amber-400'],
+                        ['FAIL', failCount, 'text-destructive'],
+                        ['SKIP', skipCount, ''],
+                      ] as const
+                    )
+                      .filter(([, count]) => count > 0)
+                      .map(([status, count, tone]) => (
+                        <span key={status} className="inline-flex items-center gap-1.5">
+                          <span className={cn('size-1.5 rounded-full', tone)} />
+                          <span className="font-medium tabular-nums text-foreground">{count}</span>
+                          {statusLabel(status)}
+                        </span>
+                      ))}
+                  </div>
+                </div>
+              ) : null}
               {problems.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5 pt-0.5">
                   {problems.map(({ item, rowId }) => (
@@ -338,7 +368,6 @@ export function SystemDoctorView() {
         <TabsContent value="diagnostics" className="mt-0 space-y-4">
           <DoctorPanel
             title={t.doctor.diagnosticsTitle}
-            description={t.doctor.diagnosticsHelp}
             action={
               <ButtonGroup className="w-full sm:w-auto">
                 <Button
@@ -386,32 +415,35 @@ export function SystemDoctorView() {
                 </EmptyHeader>
               </Empty>
             ) : (
-              groups.map((groupCode) => {
-                const rows = visible.filter(({ item }) => item.check.group_code === groupCode)
-                return (
-                  <section key={groupCode} aria-labelledby={`group-${groupCode}`}>
-                    <h3
-                      id={`group-${groupCode}`}
-                      className="border-b border-border/60 bg-muted/20 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground"
+              <div className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-2">
+                {groups.map((groupCode) => {
+                  const rows = visible.filter(({ item }) => item.check.group_code === groupCode)
+                  return (
+                    <section
+                      key={groupCode}
+                      aria-labelledby={`group-${groupCode}`}
+                      className="min-w-0 overflow-hidden rounded-lg border border-border/70"
                     >
-                      {rows[0]?.item.text.group ?? groupCode}
-                    </h3>
-                    <div className="divide-y divide-border/70">
-                      {rows.map(({ item, rowId }) => {
-                        const detailLong = item.text.detail.length > 100
-                        const expanded = expandedDetails.has(rowId)
-                        const tone = toneForStatus(item.check.status)
-                        return (
-                          <div
-                            key={rowId}
-                            id={rowId}
-                            className={cn(
-                              'px-4 py-3 transition-colors',
-                              highlightedRow === rowId && 'bg-amber-500/10'
-                            )}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex min-w-0 flex-1 items-start gap-2.5">
+                      <h3
+                        id={`group-${groupCode}`}
+                        className="border-b border-border/60 bg-muted/20 px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground"
+                      >
+                        {rows[0]?.item.text.group ?? groupCode}
+                      </h3>
+                      <div className="divide-y divide-border/70">
+                        {rows.map(({ item, rowId }) => {
+                          const detailLong = item.text.detail.length > 100
+                          const expanded = expandedDetails.has(rowId)
+                          return (
+                            <div
+                              key={rowId}
+                              id={rowId}
+                              className={cn(
+                                'px-3 py-3 transition-colors',
+                                highlightedRow === rowId && 'bg-amber-500/10'
+                              )}
+                            >
+                              <div className="flex items-start gap-2.5">
                                 <DoctorStatusIcon
                                   status={item.check.status}
                                   className="mt-0.5"
@@ -421,15 +453,17 @@ export function SystemDoctorView() {
                                     <h4 className="text-sm font-medium text-foreground">
                                       {item.text.name}
                                     </h4>
-                                    <DoctorStatusBadge
-                                      status={item.check.status}
-                                      label={statusLabel(item.check.status)}
-                                      className="h-5 px-1.5 py-0 text-[10px]"
-                                    />
+                                    {item.check.status !== 'OK' ? (
+                                      <DoctorStatusBadge
+                                        status={item.check.status}
+                                        label={statusLabel(item.check.status)}
+                                        className="h-5 px-1.5 py-0 text-[10px]"
+                                      />
+                                    ) : null}
                                   </div>
                                   <p
                                     className={cn(
-                                      'mt-1 break-words font-mono text-[11px] leading-relaxed text-muted-foreground',
+                                      'mt-1 break-words font-mono text-xs leading-relaxed text-muted-foreground',
                                       detailLong && !expanded && 'line-clamp-2'
                                     )}
                                   >
@@ -441,14 +475,14 @@ export function SystemDoctorView() {
                                       variant="link"
                                       size="sm"
                                       onClick={() => toggleDetail(rowId)}
-                                      className="mt-0.5 h-auto px-0 text-[11px] text-muted-foreground"
+                                      className="mt-0.5 h-auto px-0 text-xs text-muted-foreground"
                                     >
                                       {expanded ? t.doctor.collapseDetail : t.doctor.expandDetail}
                                     </Button>
                                   ) : null}
                                   {item.text.fix ? (
                                     <div className="mt-2 flex flex-wrap items-start gap-2 rounded-md border border-border/70 bg-muted/25 px-2.5 py-2">
-                                      <code className="min-w-0 flex-1 break-all font-mono text-[11px] leading-relaxed text-foreground">
+                                      <code className="min-w-0 flex-1 break-all font-mono text-xs leading-relaxed text-foreground">
                                         {item.text.fix}
                                       </code>
                                       <Button
@@ -456,7 +490,7 @@ export function SystemDoctorView() {
                                         variant="ghost"
                                         size="sm"
                                         onClick={() => void copyFix(rowId, item.text.fix ?? '')}
-                                        className="h-7 shrink-0 px-2 text-[11px]"
+                                        className="h-7 shrink-0 px-2 text-xs"
                                       >
                                         {copiedFix === rowId ? (
                                           <Check className="text-emerald-700 dark:text-emerald-400" />
@@ -471,19 +505,14 @@ export function SystemDoctorView() {
                                   ) : null}
                                 </div>
                               </div>
-                              {tone === 'ok' && item.check.status === 'OK' ? (
-                                <span className="hidden text-[11px] text-muted-foreground sm:block">
-                                  {statusLabel(item.check.status)}
-                                </span>
-                              ) : null}
                             </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </section>
-                )
-              })
+                          )
+                        })}
+                      </div>
+                    </section>
+                  )
+                })}
+              </div>
             )}
           </DoctorPanel>
         </TabsContent>
@@ -545,8 +574,11 @@ export function SystemDoctorView() {
                     />
                   </div>
                   <div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
-                    <span className="text-[11px] font-medium text-muted-foreground">
+                    <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
                       {t.doctor.capabilityTitle}
+                      <InfoTip label={t.doctor.capabilityTitle}>
+                        {t.doctor.capabilityHelp}
+                      </InfoTip>
                     </span>
                     {(
                       [
@@ -574,11 +606,6 @@ export function SystemDoctorView() {
                         </Badge>
                       )
                     })}
-                    {(active.declared_capability ?? []).length === 0 && active.draft_model ? (
-                      <span className="text-[11px] text-muted-foreground">
-                        {t.doctor.noProfileMatchHelp}
-                      </span>
-                    ) : null}
                   </div>
                 </div>
               ) : (
@@ -616,7 +643,6 @@ export function SystemDoctorView() {
 
             <DoctorPanel
               title={t.doctor.providerListTitle}
-              description={t.doctor.providerListHelp}
               action={
                 <Button size="sm" variant="outline" onClick={() => setEditingProvider(null)}>
                   <Plus />
@@ -662,7 +688,7 @@ export function SystemDoctorView() {
                                 </Badge>
                               ) : null}
                             </div>
-                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                               <span className="inline-flex items-center gap-1">
                                 <DoctorStatusIcon
                                   status={tone === 'ok' ? 'OK' : 'WARN'}
@@ -670,8 +696,17 @@ export function SystemDoctorView() {
                                 />
                                 {readiness}
                               </span>
-                              <span className="truncate font-mono">
+                              <span
+                                className="truncate font-mono"
+                                title={provider.draft_model || undefined}
+                              >
                                 {provider.draft_model || t.doctor.notConfigured}
+                              </span>
+                              <span
+                                className="truncate font-mono"
+                                title={provider.base_url || undefined}
+                              >
+                                {provider.base_url || '—'}
                               </span>
                               <span className="truncate font-mono">
                                 {provider.api_mode || '—'}
@@ -713,34 +748,11 @@ export function SystemDoctorView() {
                             </Button>
                           </div>
                         </div>
-                        <div className="grid grid-cols-1 gap-2 rounded-md bg-muted/20 px-3 py-2 text-[11px] sm:grid-cols-2">
-                          <div className="min-w-0">
-                            <span className="text-muted-foreground">{t.doctor.providerModels}</span>
-                            <span className="ml-2 truncate font-mono">
-                              {provider.draft_model || '—'}
-                              {provider.repair_model && provider.repair_model !== provider.draft_model
-                                ? ` / ${provider.repair_model}`
-                                : ''}
-                            </span>
-                          </div>
-                          <div className="min-w-0 sm:text-right">
-                            <span className="text-muted-foreground">{t.doctor.providerEndpoint}</span>
-                            <span
-                              className="ml-2 inline-block max-w-full truncate align-bottom font-mono"
-                              title={provider.base_url ?? undefined}
-                            >
-                              {provider.base_url || '—'}
-                            </span>
-                          </div>
-                        </div>
                       </div>
                     )
                   })}
                 </div>
               )}
-              <div className="border-t border-border/70 px-4 py-2.5 text-[11px] leading-relaxed text-muted-foreground">
-                {t.doctor.providerConfigHint}
-              </div>
             </DoctorPanel>
 
             <Accordion type="single" collapsible>
@@ -787,7 +799,7 @@ export function SystemDoctorView() {
                   (provider) => !provider.declared && provider.is_alias,
                 ) ? (
                   <div className="border-t border-border/60 pt-2">
-                    <div className="mb-1 text-[11px] font-medium text-muted-foreground">
+                    <div className="mb-1 text-xs font-medium text-muted-foreground">
                       {t.doctor.aliasResolution}
                     </div>
                     {(runtime?.providers ?? [])
@@ -805,7 +817,7 @@ export function SystemDoctorView() {
                       ))}
                   </div>
                 ) : null}
-                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                <p className="text-xs leading-relaxed text-muted-foreground">
                   {t.doctor.builtinProvidersHelp}
                 </p>
                 </AccordionContent>
@@ -815,15 +827,10 @@ export function SystemDoctorView() {
         </TabsContent>
 
         <TabsContent value="security" className="mt-0 space-y-4">
-          <DoctorPanel
-            title={t.doctor.securityCardTitle}
-            description={t.doctor.securityCardHelp}
-          >
-            <div className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-2">
-              <QESettingsCard providerNames={declaredProviders.map((provider) => provider.name)} />
-              <EgressSettingsCard />
-            </div>
-          </DoctorPanel>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <QESettingsCard providerNames={declaredProviders.map((provider) => provider.name)} />
+            <EgressSettingsCard />
+          </div>
 
           <DoctorPanel
             title={t.doctor.securityBoundary}
@@ -881,7 +888,7 @@ export function SystemDoctorView() {
                           <span
                             key={base}
                             title={base}
-                            className="max-w-[18rem] truncate rounded border border-border bg-muted/30 px-1.5 py-0.5 font-mono text-[11px]"
+                            className="max-w-[18rem] truncate rounded border border-border bg-muted/30 px-1.5 py-0.5 font-mono text-xs"
                           >
                             {base}
                           </span>
@@ -895,19 +902,16 @@ export function SystemDoctorView() {
                     </span>
                     <span className="flex min-w-0 items-center gap-2">
                       <span
-                        className="truncate font-mono text-[11px]"
+                        className="truncate font-mono text-xs"
                         title={boundary?.forbidden_prefixes.join(', ')}
                       >
                         {boundary ? boundary.forbidden_prefixes.join(', ') : '—'}
                       </span>
-                      <Badge variant="outline" className="shrink-0 text-[10px]">
-                        {t.doctor.securityForbiddenBadge}
-                      </Badge>
                     </span>
                   </div>
                 </div>
                 {!info.is_loopback ? (
-                  <div className="border-t border-border/70 bg-amber-500/10 px-4 py-2.5 text-[11px] text-amber-700 dark:text-amber-400">
+                  <div className="border-t border-border/70 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-700 dark:text-amber-400">
                     {t.doctor.exposedWarning}
                   </div>
                 ) : null}
