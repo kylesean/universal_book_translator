@@ -25,8 +25,7 @@ the renderer can compile" are the same set by construction rather than by a
 hand-maintained mirror that drifts.
 
 The module lives in ``ubt.core`` (not the adapter) so the gate can read it
-without importing the adapter package; the adapter re-exports it for the
-historical import path.
+without importing the adapter package.
 """
 
 from __future__ import annotations

@@ -63,7 +63,8 @@ def _make_tokenizer(
     owns them.
 
     ``guard_forms`` are the approved target forms that contain a rule pattern
-    (see ``_approved_compound_spans``). Seeding them keeps a legitimate long
+    (the enforcer's own ``_compute_protected_compounds``). Seeding them keeps a
+    legitimate long
     form whole — without it, boosting the alias ``学习`` is exactly what makes
     jieba split the approved ``深度学习`` at that boundary.
     """

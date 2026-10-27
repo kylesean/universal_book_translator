@@ -100,8 +100,10 @@ def glossary_violation_flag(
     Returns ``None`` when the check cannot run (no glossary) or the target
     carries every expected rendering. Detection is delegated to the
     export-side validator so QE and export can never disagree about what a
-    violation is; building the validator once and passing it in keeps the
-    per-block cost a single pass over the sorted glossary.
+    violation is; building the validator once and passing it in means the
+    per-block cost is one drift detection over the block pair — the source
+    scan rides ``detect_term_drift``'s shared candidate index rather than a
+    per-term regex sweep.
     """
     if validator is None:
         return None
