@@ -19,7 +19,6 @@ import {
   Search,
   ArrowLeft,
   FileCheck,
-  Eye,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -67,8 +66,6 @@ import {
 import { useI18n } from '@/i18n/useI18n'
 import { useToast } from '@/components/ui/useToast'
 import { deliverableName } from '@/views/quality-gate/artifactMeta'
-import { PreviewDrawer } from '@/views/quality-gate/PreviewDrawer'
-
 const getFormatBadge = (filename?: string): string => {
   if (!filename) return 'FILE'
   const ext = filename.split('.').pop()?.toLowerCase() ?? ''
@@ -609,7 +606,6 @@ export function MissionControl() {
   }, [readingDeliverables, deliverables])
 
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
-  const [previewItem, setPreviewItem] = useState<DeliverableItem | null>(null)
   const [pendingReparse, setPendingReparse] = useState<string | null>(null)
   const [reparsing, setReparsing] = useState(false)
   const [streamGeneration, setStreamGeneration] = useState(0)
@@ -1275,7 +1271,6 @@ export function MissionControl() {
                     {readingDeliverables.map((item) => {
                       const isPrimary = item.key === 'primary' || item === primaryDeliverable
                       const badge = getFormatBadge(item.filename)
-                      const previewable = ['primary', 'secondary', 'html'].includes(item.key)
                       return (
                         <DropdownMenuItem
                           key={item.key}
@@ -1296,23 +1291,6 @@ export function MissionControl() {
                             </div>
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
-                            {previewable && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="size-7"
-                                title={t.quality.previewAction}
-                                aria-label={t.quality.previewAction}
-                                onPointerDown={(event) => event.stopPropagation()}
-                                onClick={(event) => {
-                                  event.preventDefault()
-                                  event.stopPropagation()
-                                  setPreviewItem(item)
-                                }}
-                              >
-                                <Eye className="size-3.5" />
-                              </Button>
-                            )}
                             {isPrimary && (
                               <span className="text-xs px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-semibold font-mono">
                                 {t.mission.exportPrimaryBadge}
@@ -1502,15 +1480,6 @@ export function MissionControl() {
                 {jobs.length === 0 ? t.mission.queueEmpty : t.mission.queueNoMatch}
               </div>
       ) : null}
-
-      {previewItem && (
-        <PreviewDrawer
-          key={`${previewItem.key}:${previewItem.filename}`}
-          jobId={currentJobId ?? ''}
-          item={previewItem}
-          onClose={() => setPreviewItem(null)}
-        />
-      )}
 
       {statusMissing ? null : (
               <JobQueueTable
