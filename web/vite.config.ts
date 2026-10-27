@@ -6,8 +6,16 @@ import { defineConfig } from 'vite'
 // browser navigation sends `Accept: text/html`; fetches from the console send
 // `*/*`. Let the SPA handle navigations and proxy only data requests, otherwise
 // opening a route directly in dev serves the backend's stale embedded bundle.
-function proxyBypass(req: { headers: { accept?: string } }) {
-  return req.headers.accept?.includes('text/html') ? '/index.html' : undefined
+function proxyBypass(req: {
+  headers: { accept?: string; 'sec-fetch-dest'?: string }
+}) {
+  // An iframe is a document navigation that should receive the actual
+  // deliverable, not the console shell. Without this the preview pane embeds
+  // the SPA, which looks exactly like the app rendering itself.
+  return req.headers.accept?.includes('text/html') &&
+    req.headers['sec-fetch-dest'] === 'document'
+    ? '/index.html'
+    : undefined
 }
 
 // https://vite.dev/config/

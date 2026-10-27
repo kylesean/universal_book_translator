@@ -34,7 +34,6 @@ export function PreviewDrawer({
   onClose: () => void
 }) {
   const { t } = useI18n()
-  const [loaded, setLoaded] = useState(false)
   const [failed, setFailed] = useState(false)
   const name = deliverableName(item.key, item.label, t)
   const download = () =>
@@ -90,17 +89,14 @@ export function PreviewDrawer({
             </div>
           ) : (
             <>
-              {!loaded && (
-                <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                  <LoaderCircle className="size-4 animate-spin" />
-                  {t.quality.previewLoading}
-                </div>
-              )}
+              <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <LoaderCircle className="size-4 animate-spin" />
+                {t.quality.previewLoading}
+              </div>
               <iframe
                 src={deliverableDownloadUrl(jobId, item.key, { inline: true })}
                 title={name}
                 className="size-full border-0"
-                onLoad={() => setLoaded(true)}
                 onError={() => setFailed(true)}
               />
             </>

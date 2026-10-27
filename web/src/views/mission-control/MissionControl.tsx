@@ -1279,7 +1279,7 @@ export function MissionControl() {
                       return (
                         <DropdownMenuItem
                           key={item.key}
-                          onClick={() => void handleDownload(item.key)}
+                          onSelect={() => void handleDownload(item.key)}
                           className="flex items-start justify-between gap-2 cursor-pointer py-2"
                         >
                           <div className="min-w-0 flex-1">
@@ -1303,6 +1303,7 @@ export function MissionControl() {
                                 className="size-7"
                                 title={t.quality.previewAction}
                                 aria-label={t.quality.previewAction}
+                                onPointerDown={(event) => event.stopPropagation()}
                                 onClick={(event) => {
                                   event.preventDefault()
                                   event.stopPropagation()
