@@ -420,12 +420,9 @@ export const zh: TranslationDictionary = {
     resuming: '续跑中…',
     downloadPrimary: '下载',
     oneClickExport: '导出',
-    deliverablesIntro:
-      '阅读成品用于交付或发布；审校与审计文件用于后期编辑、溯源和排查。通常只需下载阅读成品，报告要求或翻译工具需要时再打开其余文件。',
     readerProductsTitle: '阅读成品',
-    readerProductsDesc: '可直接交付、发布或阅读。',
     reviewFilesTitle: '审校与审计文件',
-    reviewFilesDesc: '供后期编辑、溯源和质量排查使用。',
+    openReview: '去审校',
     exportPrimaryHint: '下载最终交付文件',
     exportPrimaryBadge: '主成品',
     exportFormats: '导出格式',

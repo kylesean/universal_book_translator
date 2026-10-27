@@ -383,11 +383,9 @@ export interface TranslationDictionary {
     resuming: string
     downloadPrimary: string
     oneClickExport: string
-    deliverablesIntro: string
     readerProductsTitle: string
-    readerProductsDesc: string
     reviewFilesTitle: string
-    reviewFilesDesc: string
+    openReview: string
     exportPrimaryHint: string
     exportPrimaryBadge: string
     exportFormats: string

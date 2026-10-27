@@ -18,6 +18,7 @@ import {
   CheckCheck,
   Search,
   ArrowLeft,
+  ArrowUpRight,
   FileCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -1962,18 +1963,11 @@ export function MissionControl() {
                     </div>
                   ) : (
                     <div className="space-y-3 p-3.5">
-                      <p className="px-1 text-xs leading-relaxed text-muted-foreground">
-                        {t.mission.deliverablesIntro}
-                      </p>
-
                       <section className="overflow-hidden rounded-lg border border-border/70">
                         <div className="border-b border-border/70 bg-emerald-500/5 px-3 py-2">
                           <h3 className="text-xs font-semibold tracking-wide text-foreground">
                             {missionT.readerProductsTitle}
                           </h3>
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            {missionT.readerProductsDesc}
-                          </p>
                         </div>
                         <div className="divide-y divide-border/60">
                           {deliverables
@@ -1995,9 +1989,17 @@ export function MissionControl() {
                           <h3 className="text-xs font-semibold tracking-wide text-foreground">
                             {missionT.reviewFilesTitle}
                           </h3>
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            {missionT.reviewFilesDesc}
-                          </p>
+                          <Button
+                            asChild
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-xs"
+                          >
+                            <Link to={`/jobs/${currentJobId}/review`}>
+                              {missionT.openReview}
+                              <ArrowUpRight className="ml-1 size-3" />
+                            </Link>
+                          </Button>
                         </div>
                         <div className="divide-y divide-border/60">
                           {deliverables
