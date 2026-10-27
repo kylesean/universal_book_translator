@@ -20,6 +20,8 @@ The load-bearing facts pinned here:
 
 from __future__ import annotations
 
+import random
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -634,3 +636,150 @@ def test_an_untranslated_prose_term_is_still_drift() -> None:
         )[0].drifted
         is True
     )
+
+
+# --------------------------------------------------------------------------- #
+# the literal candidate index (Aho fast path) matches the enforcer exactly
+# --------------------------------------------------------------------------- #
+
+
+def _reference_source_scan(
+    source_text: str,
+    terms: Sequence[GlossaryTerm],
+    protected: list[tuple[int, int]],
+) -> list[tuple[str, tuple[tuple[int, int], ...]]]:
+    """The retired per-surface scan, kept as the equivalence oracle.
+
+    This is detect_term_drift's source-side loop exactly as it read before the
+    Aho candidate index: one find_term_occurrences call per surface, first
+    surface with hits wins. The index must reproduce it surface for surface —
+    a discrepancy is either a missed candidate (a false "drifted") or an extra
+    one (a false "carried"), and both flip real repair decisions.
+    """
+    from ubt.core.validators.glossary_enforcer import find_term_occurrences
+
+    results: list[tuple[str, tuple[tuple[int, int], ...]]] = []
+    for term in terms:
+        matched = ""
+        source_hits: tuple[tuple[int, int], ...] = ()
+        for surface in term.source_surfaces:
+            is_acronym = surface.isupper() and len(surface) <= 5
+            hits = find_term_occurrences(
+                source_text, surface, protected, case_insensitive=not is_acronym
+            )
+            if hits:
+                matched = surface
+                source_hits = tuple(hits)
+                break
+        results.append((matched, source_hits))
+    return results
+
+
+_UNICODE_EXOTICS = ("İstanbul", "Kelvin unit K stands", "ſtring", "µmeter μm", "ß sharp")
+
+_ASCII_WORDS = ("transformer", "Scaling", "Law", "BERT", "MIG", "mask", "head", "GPU")
+_CJK_WORDS = ("缩放", "掩码", "深度学习", "调度器")
+
+
+def _random_case(source: str, rng: random.Random) -> str:
+    return "".join(ch.upper() if rng.random() < 0.5 else ch.lower() for ch in source)
+
+
+class TestLiteralIndexMatchesTheEnforcer:
+    """Randomized equivalence: index.hits == find_term_occurrences, both flags.
+
+    The corpus deliberately includes the characters where CPython's simple case
+    fold diverges from ``str.lower()`` — ``İ`` folds to ``i`` in sre but expands
+    to two characters in ``str.lower()``, and the Kelvin sign ``K`` folds to
+    ``k`` — because a fold mismatch here silently drops candidates and flips
+    real blocks into repair.
+    """
+
+    def test_random_glossaries_and_texts(self) -> None:
+        from ubt.core.qe.term_drift import _LiteralSourceIndex
+        from ubt.core.validators.glossary_enforcer import (
+            extract_protected_spans,
+            find_term_occurrences,
+        )
+
+        rng = random.Random(20261028)
+        for round_no in range(120):
+            surfaces: list[str] = []
+            for _ in range(rng.randint(1, 6)):
+                kind = rng.random()
+                if kind < 0.35:
+                    surfaces.append(_random_case(rng.choice(_ASCII_WORDS), rng))
+                elif kind < 0.55:
+                    surfaces.append(rng.choice(_CJK_WORDS))
+                elif kind < 0.7:
+                    # Mixed-script term: the enforcer's own case handling is
+                    # the oracle, the index must not care.
+                    surfaces.append(rng.choice(_ASCII_WORDS) + rng.choice(_CJK_WORDS))
+                elif kind < 0.85:
+                    surfaces.append(_random_case("BE", rng) if rng.random() < 0.5 else "RL")
+                else:
+                    surfaces.append(rng.choice(_UNICODE_EXOTICS)[: rng.randint(2, 6)])
+            pieces: list[str] = []
+            for _ in range(rng.randint(0, 12)):
+                pick = rng.random()
+                if pick < 0.45 and surfaces:
+                    pieces.append(_random_case(rng.choice(surfaces), rng))
+                elif pick < 0.6:
+                    pieces.append(rng.choice(_UNICODE_EXOTICS))
+                elif pick < 0.8:
+                    pieces.append(rng.choice(_ASCII_WORDS + _CJK_WORDS))
+                elif pick < 0.9:
+                    pieces.append(rng.choice(("_", "-", "0", "7", " ", "\t", "\n")))
+                else:
+                    pieces.append(rng.choice(("<code>x</code>", "`span`", "http://u.io/a")))
+            text = rng.choice(("", " ")).join(pieces)
+            protected = extract_protected_spans(text)
+            terms = tuple(GlossaryTerm(source=s, expected=s + "译") for s in surfaces if s)
+            index = _LiteralSourceIndex.build(text, [s for t in terms for s in t.source_surfaces])
+            if index is None:  # ahocorasick wheel absent: the slow path is the only path
+                return
+            for term in terms:
+                for surface in term.source_surfaces:
+                    is_acronym = surface.isupper() and len(surface) <= 5
+                    for case_insensitive in (not is_acronym, True, False):
+                        assert index.hits(
+                            surface, case_insensitive=case_insensitive, protected=protected
+                        ) == find_term_occurrences(
+                            text, surface, protected, case_insensitive=case_insensitive
+                        ), (
+                            f"round {round_no}: {surface!r} "
+                            f"(case_insensitive={case_insensitive}) in {text!r}"
+                        )
+
+    def test_detect_source_scan_equals_the_reference(self) -> None:
+        """End to end: the production entry point's source scan is unchanged."""
+        from ubt.core.qe.term_drift import _coerce_terms
+        from ubt.core.validators.glossary_enforcer import extract_protected_spans
+
+        rng = random.Random(42)
+        for _ in range(40):
+            surfaces = [
+                _random_case(rng.choice(_ASCII_WORDS), rng) for _ in range(rng.randint(1, 5))
+            ]
+            surfaces += [rng.choice(_CJK_WORDS) for _ in range(rng.randint(0, 3))]
+            rng.shuffle(surfaces)
+            terms = tuple(
+                GlossaryTerm(
+                    source=s,
+                    expected=s + "译",
+                    aliases=(_random_case(s, rng),) if rng.random() < 0.3 else (),
+                )
+                for s in surfaces
+                if s
+            )
+            text = " ".join(
+                _random_case(rng.choice(surfaces + list(_UNICODE_EXOTICS)), rng)
+                for _ in range(rng.randint(0, 10))
+            )
+            protected = extract_protected_spans(text)
+            actual = [
+                (f.matched_surface, f.source_hits)
+                for f in detect_term_drift(" ".join([text]), " ", terms, source_protected=protected)
+            ]
+            expected = _reference_source_scan(text, _coerce_terms(terms), protected)
+            assert actual == expected
