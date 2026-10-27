@@ -199,8 +199,9 @@ def identifier_terms(source_text: str, document_text: str = "") -> set[str]:
     This form indexes ``document_text`` on every call, which is right for a
     one-off question. A caller that asks about many blocks of the same book must
     build the index once with :func:`document_vocabulary` and call
-    :func:`identifier_terms_in` — that is the difference between 143 ms and
-    0.08 ms per block (see :class:`DocumentVocabulary`).
+    :func:`identifier_terms_in` — that is the difference between ~111 ms and
+    0.02 ms per block (both measured 2026-10-28 at the scale above; see
+    :class:`DocumentVocabulary`).
     """
     vocabulary = document_vocabulary(document_text) if document_text else None
     return identifier_terms_in(source_text, vocabulary)

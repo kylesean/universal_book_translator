@@ -52,6 +52,7 @@ uv run ruff format --force-exclude
 uv run mypy --strict ubt tests
 uv run pytest -m fast -q -n auto --dist=loadscope --cov=ubt --cov-report=term:skip-covered --cov-fail-under=70
 uv run python scripts/dump_compiler_edges.py
+uv run python scripts/check_console_bundle.py
 
 # CI, additionally
 uv run ruff check
@@ -73,6 +74,14 @@ uv run pytest -m slow -q
   `core.engine <-> pipeline` cycle, no `ubt.render -> ubt.adapters` edge.
   `tests/unit/analyze/test_layering.py` pins the `ubt.analyze -> ubt.adapters`
   direction. See `ARCHITECTURE.md` for the graph.
+- **The console bundle is a committed build artifact.**
+  `scripts/check_console_bundle.py` rebuilds `web/` and fails if `ubt/api/static`
+  differs — the same check CI runs, which local `git diff` cannot see. Any change
+  under `web/` (sources, `package.json`, lockfile) must therefore ship with the
+  synced bundle: `pnpm --dir web build && python scripts/build_console_assets.py`.
+  If `pnpm install` fails locally (offline, unwritable store) the hook warns and
+  builds with the installed `node_modules`; CI's strict frozen-lockfile install
+  stays the backstop for lockfile divergence.
 - **CI repeats a gate that already passes.** It is never the first place a check
   runs. If CI goes red, fix it — do not widen the tolerance.
 
@@ -156,7 +165,12 @@ excluded from the sdist too. The documents that ship are the root-level files:
 
 `docs/guides/TESTING_STRATEGY.md` is the authority on how tests are written and
 run; `docs/guides/CI_AND_QUALITY_GATES.md` is the authority on where the gates
-execute. After a refactor that moves code those docs cite, run
+execute. A measurement quoted in a comment, docstring or changelog entry must
+carry its fingerprint — the fixture scale it was taken at and the date (or
+commit) it was taken on — so the next reader can tell which generation of
+measurement it is and re-run the same setup before "correcting" it; numbers
+whose fixture is no longer reconstructible are rewritten as orders of
+magnitude instead. After a refactor that moves code those docs cite, run
 `python scripts/check_doc_refs.py`: it reports only a referenced file that does
 not exist and a line number past the end of its file, and exits non-zero when it
 finds one. `docs/archive/` and `docs/reviews/` are excluded: those are dated
