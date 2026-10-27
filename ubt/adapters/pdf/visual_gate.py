@@ -799,11 +799,6 @@ def _cleanup_owned_tmp_dirs() -> None:
 atexit.register(_cleanup_owned_tmp_dirs)
 
 
-def cleanup_visual_gate_tmpdirs() -> None:
-    """Manually purge any self-owned temporary directories created by render_pages_to_png."""
-    _cleanup_owned_tmp_dirs()
-
-
 def render_pages_to_png(
     pdf_path: Path, pages: Sequence[int], dpi: int = DEFAULT_DPI, work_dir: Path | None = None
 ) -> dict[int, Path]:

@@ -349,37 +349,3 @@ def check_artifact(
             )
         )
     return ArtifactReport(total=len(checks), checks=tuple(checks))
-
-
-def _present_on_pages(
-    expected: str,
-    pages: list[frozenset[str]],
-    page_number: int,
-    whole_book: frozenset[str],
-) -> bool:
-    """Whether ``expected`` is placed, looking near its source page first.
-
-    The page window is what closes the false-pass: a lost paragraph shares its
-    glyphs with the rest of the book, but not with the two pages around its own
-    position. Falling back to the whole book would therefore report a genuinely
-    lost block as present — ``test_the_page_probe_catches_the_lost_paragraph``
-    pins that, and it is the reason this check does not simply search
-    everywhere.
-
-    **The cost of that strictness, measured.** A reflowed translation moves
-    blocks: on job ``web_mvnvgck2`` a 92-page paper renders as 73, and five
-    blocks whose source pages were 13/14 landed on pages 8-12. They scored
-    31-59% against their source window and 81-100% against the book, so the
-    check reports them missing while their text is demonstrably present. That
-    is a false failure, not a false pass: the verdict is conservative in the
-    safe direction, and the operator sees the block ids. Widening the window to
-    the whole book is not the fix — it would silently accept real losses.
-    """
-    if not pages:
-        return _present(expected, whole_book)
-    if 1 <= page_number <= len(pages):
-        for candidate in (page_number, page_number + 1, page_number - 1):
-            if 1 <= candidate <= len(pages) and _present(expected, pages[candidate - 1]):
-                return True
-        return False
-    return _present(expected, whole_book)

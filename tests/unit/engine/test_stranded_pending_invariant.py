@@ -57,9 +57,17 @@ def test_a_batch_fully_checkpointed_passes(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path, blocks)
     try:
         # Simulate the loop's writes: one drafted, one TM-passed.
-        ledger.save_checkpoint("b001", BlockStatus.DRAFTED, target_text="T1", job_id="job")
-        ledger.save_checkpoint(
-            "b002", BlockStatus.MTQE_PASSED, target_text="T2", mtqe_score=1.0, job_id="job"
+        ledger.save_checkpoints_batch(
+            [
+                {"block_id": "b001", "status": BlockStatus.DRAFTED, "target_text": "T1"},
+                {
+                    "block_id": "b002",
+                    "status": BlockStatus.MTQE_PASSED,
+                    "target_text": "T2",
+                    "mtqe_score": 1.0,
+                },
+            ],
+            job_id="job",
         )
         _assert_no_stranded_pending(ledger, "job", blocks)  # no raise
     finally:
@@ -73,7 +81,10 @@ def test_a_block_left_pending_fails_loud(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path, blocks)
     try:
         # Only the first block is checkpointed; b002 stays pending.
-        ledger.save_checkpoint("b001", BlockStatus.DRAFTED, target_text="T1", job_id="job")
+        ledger.save_checkpoints_batch(
+            [{"block_id": "b001", "status": BlockStatus.DRAFTED, "target_text": "T1"}],
+            job_id="job",
+        )
         with pytest.raises(Exception, match="left block 'b002' pending"):
             _assert_no_stranded_pending(ledger, "job", blocks)
     finally:
@@ -88,7 +99,10 @@ def test_blocks_from_other_jobs_do_not_count(tmp_path: Path) -> None:
         _assert_no_stranded_pending(ledger, "job", blocks[:0])  # empty batch: no-op
         # job's own blocks are checkpointed; the OTHER job's b001 stays
         # pending — the batch-id scoping must not count it against 'job'.
-        ledger.save_checkpoint("b001", BlockStatus.DRAFTED, target_text="T1", job_id="job")
+        ledger.save_checkpoints_batch(
+            [{"block_id": "b001", "status": BlockStatus.DRAFTED, "target_text": "T1"}],
+            job_id="job",
+        )
         other = SQLiteJobLedger(tmp_path / "job.sqlite")
         other.init_job_from_manifest(
             "other", BookManifest(doc_id="doc", title="t", source_path="s.pdf")

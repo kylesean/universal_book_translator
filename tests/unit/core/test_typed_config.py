@@ -183,29 +183,6 @@ def test_ubt_config_from_provider_config() -> None:
     assert cfg.is_free is True
 
 
-def test_ubt_config_from_config_file(tmp_path: Path) -> None:
-    """UBTConfig.from_config_file constructs UBTConfig from a file path."""
-    config_path = tmp_path / "ubt.toml"
-    config_path.write_text(
-        """
-        [defaults]
-        provider = "local"
-
-        [providers.local]
-        base_url = "http://127.0.0.1:8000/v1"
-        api_mode = "openai-chat"
-        draft_model = "local-llama"
-        api_timeout = 30.0
-        """,
-        encoding="utf-8",
-    )
-    cfg = UBTConfig.from_config_file(config_path)
-    assert cfg.provider == "local"
-    assert cfg.base_url == "http://127.0.0.1:8000/v1"
-    assert cfg.draft_model == "local-llama"
-    assert cfg.api_timeout == 30.0
-
-
 def test_provider_edit_model_validation() -> None:
     """ProviderEditModel strictly validates inputs and rejects invalid coercion."""
     # Boolean strictly required, strings like "yes" rejected

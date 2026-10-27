@@ -376,36 +376,6 @@ def test_the_whole_book_probe_misses_a_lost_paragraph() -> None:
     assert _present(lost, frozenset().union(*pages)) is True
 
 
-def test_the_page_probe_catches_the_lost_paragraph() -> None:
-    from ubt.adapters.pdf.artifact_text import _present_on_pages
-
-    lost = "这是一段完全丢失的中文段落内容用于检测误报"
-    pages = _page_probe_pages(lost, lost_page=20)
-    assert _present_on_pages(lost, pages, 20, frozenset().union(*pages)) is False
-
-
-def test_the_page_probe_finds_a_placed_paragraph() -> None:
-    from ubt.adapters.pdf.artifact_text import _present_on_pages
-
-    lost = "这是一段完全丢失的中文段落内容用于检测误报"
-    pages = _page_probe_pages(lost, lost_page=20)
-    pages[19] = frozenset(_tokenize(lost))
-    assert _present_on_pages(lost, pages, 20, frozenset().union(*pages)) is True
-
-
-def test_the_page_probe_follows_a_paragraph_to_its_neighbour() -> None:
-    """A reflowing layout moves text across page boundaries; that is not a loss."""
-    from ubt.adapters.pdf.artifact_text import _present_on_pages
-
-    text = "一段被重排到下一页的译文"
-    pages = [
-        frozenset(_tokenize("第一页")),
-        frozenset(_tokenize("第二页")),
-        frozenset(_tokenize(text)),
-    ]
-    assert _present_on_pages(text, pages, 2, frozenset().union(*pages)) is True
-
-
 def test_expected_strips_a_quarantine_wrapper_from_the_source_fallback() -> None:
     """A BLOCKED_HUMAN target is a wrapper around the source, not a translation.
 

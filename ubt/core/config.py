@@ -1453,37 +1453,6 @@ class UBTConfig(BaseSettings):
         return cfg
 
     @classmethod
-    def from_config_file(
-        cls,
-        path: Path | str | None = None,
-        *,
-        provider: str | None = None,
-        bootstrap: bool = False,
-        overrides: Mapping[str, Any] | None = None,
-        **extra_overrides: Any,
-    ) -> UBTConfig:
-        """Construct a UBTConfig by loading and parsing a configuration file via Pydantic."""
-        from ubt.core.providers import load_layer_config, read_config_file
-
-        file_cfg = read_config_file(path)
-        all_overrides = dict(overrides or {})
-        all_overrides.update(extra_overrides)
-        provider_name = (
-            provider
-            or all_overrides.get("provider")
-            or os.getenv("UBT_PROVIDER")
-            or file_cfg.defaults.provider
-        )
-        layer_cfg = load_layer_config(str(provider_name) if provider_name else None, path)
-        if provider_name is not None:
-            all_overrides["provider"] = str(provider_name)
-        return cls.from_provider_config(
-            layer_cfg,
-            bootstrap=bootstrap,
-            overrides=all_overrides,
-        )
-
-    @classmethod
     def from_env(
         cls,
         bootstrap: bool = False,

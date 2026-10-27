@@ -809,10 +809,6 @@ class LedgerJobsMixin(_LedgerHost):
                 "bottom_15_avg_qe": b15_avg,
             }
 
-    def get_total_blocks(self, job_id: str) -> int:
-        """Return total number of content blocks recorded for this job."""
-        return int(self.get_job_stats(job_id).get("total", 0) or 0)
-
     def get_job_snapshot(self, job_id: str) -> dict[str, Any] | None:
         """Return job_meta plus block stats, or None if the job is not in this ledger."""
         with self._get_conn() as conn:
@@ -1701,71 +1697,6 @@ class LedgerBlocksMixin(_LedgerHost):
             combined = " ".join(collected)
             return combined[:max_chars].strip() if len(combined) > max_chars else combined.strip()
 
-    def save_checkpoint(
-        self,
-        block_id: str,
-        status: BlockStatus,
-        target_text: str | None = None,
-        draft_text: str | None = None,
-        mtqe_score: float | None = None,
-        repair_rounds: int | None = None,
-        error_flags: list[str] | None = None,
-        *,
-        tm_hit: bool | None = None,
-        mqm_severity: str | None = None,
-        mqm_spans: list[dict[str, Any]] | None = None,
-        style: Any | None = None,
-        job_id: str | None = None,
-    ) -> bool:
-        """Atomically commit progress checkpoint for a single block."""
-        with self._get_conn() as conn:
-            conn.execute("BEGIN IMMEDIATE;")
-            scope = self._block_scope(conn, job_id)
-            updates: list[str] = [
-                "status = ?",
-                "updated_at = CURRENT_TIMESTAMP",
-            ]
-            params: list[Any] = [status.value]
-
-            if target_text is not None:
-                updates.append("target_text = ?")
-                params.append(target_text)
-            if draft_text is not None:
-                updates.append("draft_text = ?")
-                params.append(draft_text)
-            if mtqe_score is not None:
-                updates.append("mtqe_score = ?")
-                params.append(mtqe_score)
-            if repair_rounds is not None:
-                updates.append("repair_rounds = ?")
-                params.append(repair_rounds)
-            if error_flags is not None:
-                updates.append("error_flags_json = ?")
-                params.append(json.dumps(error_flags, ensure_ascii=False))
-            if tm_hit is not None:
-                updates.append("tm_hit = ?")
-                params.append(1 if tm_hit else 0)
-            if mqm_severity is not None:
-                updates.append("mqm_severity = ?")
-                params.append(mqm_severity)
-            if mqm_spans is not None:
-                updates.append("mqm_spans_json = ?")
-                params.append(json.dumps(mqm_spans, ensure_ascii=False))
-            if style is not None:
-                updates.append("style_json = ?")
-                params.append(_style_json(style))
-
-            where = "WHERE block_id = ?"
-            if scope is not None:
-                where += " AND job_id = ?"
-            cursor = conn.execute(
-                f"UPDATE blocks SET {', '.join(updates)} {where}",
-                [*params, block_id, *([scope] if scope is not None else [])],
-            )
-            conn.execute("COMMIT;")
-            self._mark_blocks_changed()
-            return cursor.rowcount > 0
-
     def save_checkpoints_batch(
         self,
         updates: list[dict[str, Any]],
@@ -1903,8 +1834,8 @@ class LedgerBlocksMixin(_LedgerHost):
         Resets translation state when a target needs re-derivation:
         when a target was produced under a gate that has since been tightened,
         re-rendering cannot fix it — the wrong text is already stored, and
-        :meth:`save_checkpoint` deliberately treats ``None`` as "leave alone so
-        the value can never be cleared. Re-queueing is the only way to make such
+        :meth:`save_checkpoints_batch` deliberately treats ``None`` as "leave
+        alone so the value can never be cleared. Re-queueing is the only way to make such
         a block re-derivable; the next run re-drafts it (and, because the TM
         writeback guard rejects the same content, cannot restore the previous text).
 
@@ -2307,48 +2238,6 @@ class LedgerBatchMixin(_LedgerHost):
     # payload and double-bill it, so ``completed`` resumes and the poll loop
     # re-fetches.
     RESUMABLE_BATCH_STATUSES: frozenset[str] = LIVE_BATCH_STATUSES | {"completed"}
-
-    def register_batch_job(
-        self,
-        batch_id: str,
-        job_id: str,
-        idempotency_key: str,
-        status: str = "submitted",
-    ) -> None:
-        """Persist a newly created Batch API job (survives restarts)."""
-        with self._get_conn() as conn:
-            conn.execute("BEGIN IMMEDIATE;")
-            conn.execute(
-                """
-                INSERT INTO batch_jobs (batch_id, job_id, idempotency_key, status)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(batch_id) DO UPDATE SET
-                    status = excluded.status,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (batch_id, job_id, idempotency_key, status),
-            )
-            conn.execute("COMMIT;")
-
-    def find_live_batch_by_idempotency_key(self, idempotency_key: str) -> str | None:
-        """Return the batch_id of an unfinished job with this key, or None.
-
-        The idempotency key is derived from the submitted block set, so a
-        restart that re-proposes the same batch resumes polling the original
-        provider job instead of paying for a duplicate submission.
-        """
-        placeholders = ",".join("?" * len(self.RESUMABLE_BATCH_STATUSES))
-        with self._get_conn() as conn:
-            row = conn.execute(
-                f"""
-                SELECT batch_id FROM batch_jobs
-                WHERE idempotency_key = ? AND status IN ({placeholders})
-                ORDER BY created_at ASC
-                LIMIT 1
-                """,
-                (idempotency_key, *sorted(self.RESUMABLE_BATCH_STATUSES)),
-            ).fetchone()
-            return str(row["batch_id"]) if row else None
 
     def find_live_batch_for_job(self, job_id: str, *, exclude_key: str) -> str | None:
         """Return the batch_id of another unfinished batch for ``job_id``.

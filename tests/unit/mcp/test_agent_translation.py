@@ -475,13 +475,17 @@ async def test_prepare_rejects_provider_job_and_completed_agent_job(tmp_path: Pa
     )
     db_path = tmp_path / "db" / f"{prepared.job_id}.sqlite"
     with SQLiteJobLedger(db_path) as ledger:
-        for block in ledger.get_all_blocks(prepared.job_id):
-            ledger.save_checkpoint(
-                block.id,
-                BlockStatus.MTQE_PASSED,
-                target_text="完成",
-                job_id=prepared.job_id,
-            )
+        ledger.save_checkpoints_batch(
+            [
+                {
+                    "block_id": block.id,
+                    "status": BlockStatus.MTQE_PASSED,
+                    "target_text": "完成",
+                }
+                for block in ledger.get_all_blocks(prepared.job_id)
+            ],
+            job_id=prepared.job_id,
+        )
         ledger.finalize_job(prepared.job_id, status="completed")
     with pytest.raises(Exception, match="already completed"):
         await service.prepare(AgentPrepareRequest(input_path=str(source), job_id=prepared.job_id))

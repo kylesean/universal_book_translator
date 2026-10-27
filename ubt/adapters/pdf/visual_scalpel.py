@@ -31,8 +31,7 @@ DEFAULT_SCALPEL_DPI: int = 150
 DEFAULT_BLEED_PT: float = 4.0
 
 #: Margin for a crop that becomes a *page* (a delivered asset the Typst renderer
-#: places). It must be zero-ish and is additionally clamped per side by
-#: :func:`delivered_crop_bleed`: the renderer rebuilds the page from the IR and
+#: places). It must be zero-ish: the renderer rebuilds the page from the IR and
 #: has no source canvas, so any source ink inside the PNG is drawn onto the
 #: reader's page as part of the picture. A display equation's bbox sits as close
 #: as 0.15pt to the next text line in the two-column layouts this project
@@ -292,19 +291,6 @@ def delivered_crop_insets(
             if x0 >= high_x:
                 insets["right"] = min(insets["right"], max(0.0, x0 - high_x - _CLEARANCE_EPS_PT))
     return insets
-
-
-def delivered_crop_bleed(
-    pdf_path: Path | str,
-    page_num: int,
-    bbox: BoundingBox | tuple[float, float, float, float],
-) -> float:
-    """The scalar form of :func:`delivered_crop_insets` — the tightest side.
-
-    A caller that can only apply one margin gets the safe one. Callers that can
-    crop should use :func:`delivered_crop_pil`, which applies each side.
-    """
-    return min(delivered_crop_insets(pdf_path, page_num, bbox).values())
 
 
 #: Blank pixel rows that separate a stray band from the block's own content.

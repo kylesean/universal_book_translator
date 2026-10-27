@@ -363,12 +363,10 @@ def test_append_chapter_roundtrips_block_fields(ledger: SQLiteJobLedger) -> None
     assert stored.status is BlockStatus.DRAFTED
 
 
-def test_append_chapter_updates_total_blocks_and_upserts(ledger: SQLiteJobLedger) -> None:
+def test_append_chapter_upserts_a_repeated_block_id(ledger: SQLiteJobLedger) -> None:
     _init(ledger)
     ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1", text="v1")]))
-    assert ledger.get_total_blocks("job") == 1
     ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1", text="v2")]))
-    assert ledger.get_total_blocks("job") == 1  # upsert, not duplicate
     assert ledger.get_block("ch1#1", job_id="job").source_text == "v2"  # type: ignore[union-attr]
 
 
@@ -448,51 +446,6 @@ def test_a_block_without_span_chars_round_trips_as_none(ledger: SQLiteJobLedger)
     assert stored.element.span.chars is None
 
 
-def test_save_checkpoint_records_state(ledger: SQLiteJobLedger) -> None:
-    _init(ledger)
-    ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1")]))
-    ok = ledger.save_checkpoint(
-        "ch1#1",
-        BlockStatus.DRAFTED,
-        target_text="t1",
-        draft_text="d1",
-        mtqe_score=0.5,
-        repair_rounds=1,
-        error_flags=["flag"],
-        tm_hit=True,
-        mqm_severity="minor",
-        mqm_spans=[{"span": [0, 1]}],
-        job_id="job",
-    )
-    assert ok is True
-    block = ledger.get_block("ch1#1", job_id="job")
-    assert block is not None
-    assert block.status is BlockStatus.DRAFTED
-    assert block.target_text == "t1"
-    assert block.draft_text == "d1"
-    assert block.mtqe_score == 0.5
-    assert block.repair_rounds == 1
-    assert block.error_flags == ["flag"]
-    assert block.tm_hit is True
-    assert block.mqm_severity == "minor"
-    assert block.mqm_spans == [{"span": [0, 1]}]
-
-
-def test_save_checkpoint_returns_false_for_an_unknown_block(ledger: SQLiteJobLedger) -> None:
-    _init(ledger)
-    assert ledger.save_checkpoint("ghost", BlockStatus.DRAFTED, job_id="job") is False
-
-
-def test_save_checkpoint_persists_style(ledger: SQLiteJobLedger) -> None:
-    _init(ledger)
-    ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1")]))
-    style = StyleMeta(target_runs=(InlineRun(text="重点", bold=True),))
-    assert ledger.save_checkpoint("ch1#1", BlockStatus.DRAFTED, style=style, job_id="job") is True
-    block = ledger.get_block("ch1#1", job_id="job")
-    assert block is not None and block.style is not None
-    assert block.style.target_runs == style.target_runs
-
-
 def test_save_checkpoints_batch_persists_style_and_preserves_when_omitted(
     ledger: SQLiteJobLedger,
 ) -> None:
@@ -523,7 +476,10 @@ def test_save_checkpoints_batch_counts_and_preserves_omitted_flags(
 ) -> None:
     _init(ledger)
     ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1"), _block("ch1#2", spine_index=1)]))
-    ledger.save_checkpoint("ch1#1", BlockStatus.DRAFTED, error_flags=["keep"], job_id="job")
+    ledger.save_checkpoints_batch(
+        [{"block_id": "ch1#1", "status": BlockStatus.DRAFTED, "error_flags": ["keep"]}],
+        job_id="job",
+    )
     updated = ledger.save_checkpoints_batch(
         [
             {"block_id": "ch1#1", "status": BlockStatus.DRAFTED, "target_text": "x1"},
@@ -543,7 +499,10 @@ def test_save_checkpoints_batch_explicit_empty_list_clears_flags(
 ) -> None:
     _init(ledger)
     ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1")]))
-    ledger.save_checkpoint("ch1#1", BlockStatus.DRAFTED, error_flags=["drop"], job_id="job")
+    ledger.save_checkpoints_batch(
+        [{"block_id": "ch1#1", "status": BlockStatus.DRAFTED, "error_flags": ["drop"]}],
+        job_id="job",
+    )
     ledger.save_checkpoints_batch(
         [{"block_id": "ch1#1", "status": BlockStatus.DRAFTED, "error_flags": []}], job_id="job"
     )
@@ -555,7 +514,10 @@ def test_save_checkpoints_batch_does_not_resurrect_a_terminal_row(
 ) -> None:
     _init(ledger)
     ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1")]))
-    ledger.save_checkpoint("ch1#1", BlockStatus.MTQE_PASSED, target_text="done", job_id="job")
+    ledger.save_checkpoints_batch(
+        [{"block_id": "ch1#1", "status": BlockStatus.MTQE_PASSED, "target_text": "done"}],
+        job_id="job",
+    )
     updated = ledger.save_checkpoints_batch(
         [{"block_id": "ch1#1", "status": BlockStatus.DRAFTED, "target_text": "resurrect"}],
         job_id="job",
@@ -569,7 +531,9 @@ def test_save_checkpoints_batch_can_override_a_terminal_row_when_asked(
 ) -> None:
     _init(ledger)
     ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1")]))
-    ledger.save_checkpoint("ch1#1", BlockStatus.FAILED, job_id="job")
+    ledger.save_checkpoints_batch(
+        [{"block_id": "ch1#1", "status": BlockStatus.FAILED}], job_id="job"
+    )
     updated = ledger.save_checkpoints_batch(
         [{"block_id": "ch1#1", "status": BlockStatus.REPAIR_PENDING}],
         job_id="job",
@@ -629,16 +593,20 @@ def test_fail_non_terminal_blocks_marks_and_flags(ledger: SQLiteJobLedger) -> No
 def test_reset_blocks_to_pending_clears_the_whole_verdict(ledger: SQLiteJobLedger) -> None:
     _init(ledger)
     ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1")]))
-    ledger.save_checkpoint(
-        "ch1#1",
-        BlockStatus.MTQE_PASSED,
-        target_text="t",
-        draft_text="d",
-        mtqe_score=0.9,
-        repair_rounds=2,
-        error_flags=["e"],
-        tm_hit=True,
-        mqm_severity="critical",
+    ledger.save_checkpoints_batch(
+        [
+            {
+                "block_id": "ch1#1",
+                "status": BlockStatus.MTQE_PASSED,
+                "target_text": "t",
+                "draft_text": "d",
+                "mtqe_score": 0.9,
+                "repair_rounds": 2,
+                "error_flags": ["e"],
+                "tm_hit": True,
+                "mqm_severity": "critical",
+            }
+        ],
         job_id="job",
     )
     assert ledger.reset_blocks_to_pending(["ch1#1"], job_id="job") == 1
@@ -676,22 +644,24 @@ def test_resume_requeues_transient_failures_but_keeps_triage_verdicts(
             ],
         ),
     )
-    ledger.save_checkpoint(
-        "ch1#transient",
-        BlockStatus.FAILED,
-        error_flags=["Drafting error: provider 503"],
-        job_id="job",
-    )
-    ledger.save_checkpoint(
-        "ch1#review",
-        BlockStatus.NEEDS_HUMAN,
-        error_flags=["Drafting error: provider 503", "needs_human_review"],
-        job_id="job",
-    )
-    ledger.save_checkpoint(
-        "ch1#blocked",
-        BlockStatus.NEEDS_HUMAN,
-        error_flags=["Drafting error: provider 503", "mqm_critical_blocked"],
+    ledger.save_checkpoints_batch(
+        [
+            {
+                "block_id": "ch1#transient",
+                "status": BlockStatus.FAILED,
+                "error_flags": ["Drafting error: provider 503"],
+            },
+            {
+                "block_id": "ch1#review",
+                "status": BlockStatus.NEEDS_HUMAN,
+                "error_flags": ["Drafting error: provider 503", "needs_human_review"],
+            },
+            {
+                "block_id": "ch1#blocked",
+                "status": BlockStatus.NEEDS_HUMAN,
+                "error_flags": ["Drafting error: provider 503", "mqm_critical_blocked"],
+            },
+        ],
         job_id="job",
     )
 
@@ -722,19 +692,22 @@ def test_resume_recovers_legacy_configuration_failures_only(
             ],
         ),
     )
-    ledger.save_checkpoint(
-        "ch1#route",
-        BlockStatus.FAILED,
-        error_flags=[
-            'Drafting unrecoverable: Model API error (404): {"error":'
-            '{"message":"no router for requested model"}}'
+    ledger.save_checkpoints_batch(
+        [
+            {
+                "block_id": "ch1#route",
+                "status": BlockStatus.FAILED,
+                "error_flags": [
+                    'Drafting unrecoverable: Model API error (404): {"error":'
+                    '{"message":"no router for requested model"}}'
+                ],
+            },
+            {
+                "block_id": "ch1#source",
+                "status": BlockStatus.FAILED,
+                "error_flags": ["Drafting unrecoverable: Model API error (422): malformed source"],
+            },
         ],
-        job_id="job",
-    )
-    ledger.save_checkpoint(
-        "ch1#source",
-        BlockStatus.FAILED,
-        error_flags=["Drafting unrecoverable: Model API error (422): malformed source"],
         job_id="job",
     )
 
@@ -783,7 +756,10 @@ def test_preceding_text_tail_prefers_target_over_source(ledger: SQLiteJobLedger)
             ],
         ),
     )
-    ledger.save_checkpoint("ch1#2", BlockStatus.MTQE_PASSED, target_text="T2", job_id="job")
+    ledger.save_checkpoints_batch(
+        [{"block_id": "ch1#2", "status": BlockStatus.MTQE_PASSED, "target_text": "T2"}],
+        job_id="job",
+    )
     context = ledger.get_preceding_text_tail("job", FlowID.MAIN_STORY, 3, max_chars=50)
     assert "T2" in context  # translated prose is what the model continues
     assert "s2" not in context
@@ -803,20 +779,22 @@ def test_following_text_head_stays_source_side(ledger: SQLiteJobLedger) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_batch_liveness_and_idempotency_lookup(ledger: SQLiteJobLedger) -> None:
-    ledger.register_batch_job("batch-1", "job", "key-1", status="submitted")
-    assert ledger.find_live_batch_by_idempotency_key("key-1") == "batch-1"
+def test_batch_liveness_transitions(ledger: SQLiteJobLedger) -> None:
+    ledger.reserve_batch_job("key-1", "job")
+    ledger.finalize_batch_job("key-1", "batch-1", status="submitted")
     assert ledger.is_batch_live("batch-1") is True
     ledger.update_batch_job_status("batch-1", "consumed")
-    assert ledger.find_live_batch_by_idempotency_key("key-1") is None
     assert ledger.is_batch_live("batch-1") is False
 
 
 def test_completed_but_unconsumed_batch_is_still_resumable(ledger: SQLiteJobLedger) -> None:
     # ``completed`` means the provider finished, not that results were reaped;
-    # re-creating here would re-bill the same payload.
-    ledger.register_batch_job("batch-1", "job", "key-1", status="completed")
-    assert ledger.find_live_batch_by_idempotency_key("key-1") == "batch-1"
+    # re-creating here would re-bill the same payload, so the restart lookup
+    # must still surface it (and the same-job query skips it via exclude_key).
+    ledger.reserve_batch_job("key-1", "job")
+    ledger.finalize_batch_job("key-1", "batch-1", status="completed")
+    assert ledger.find_live_batch_for_job("job", exclude_key="key-2") == "batch-1"
+    assert ledger.find_live_batch_for_job("job", exclude_key="key-1") is None
 
 
 def test_is_batch_live_is_true_for_a_missing_row(ledger: SQLiteJobLedger) -> None:
@@ -858,7 +836,8 @@ def test_finalize_batch_job_records_a_paid_batch_whose_sentinel_was_reclaimed(
     # the first worker's DELETE of the sentinel then makes its ``batch_id`` the
     # only evidence of a paid submission. Dropping it would leave the batch
     # uncancellable and invisible to find_live_batch_for_job.
-    ledger.register_batch_job("batch-a", "job", "key-1", status="submitted")
+    ledger.reserve_batch_job("key-0", "job")
+    ledger.finalize_batch_job("key-0", "batch-a", status="submitted")
     ledger.finalize_batch_job("key-1", "batch-b", status="submitted")
     with ledger._get_conn() as conn:
         rows = {
@@ -970,8 +949,16 @@ def test_get_job_stats_reports_whether_qe_measured_anything(ledger: SQLiteJobLed
     assert stats["qe_measured"] is False
     assert stats["avg_qe_score"] == 0.0
 
-    ledger.save_checkpoint(
-        "ch1#1", BlockStatus.MTQE_PASSED, target_text="T", mtqe_score=0.87, job_id="job"
+    ledger.save_checkpoints_batch(
+        [
+            {
+                "block_id": "ch1#1",
+                "status": BlockStatus.MTQE_PASSED,
+                "target_text": "T",
+                "mtqe_score": 0.87,
+            }
+        ],
+        job_id="job",
     )
     stats = ledger.get_job_stats("job")
     assert stats["qe_measured"] is True
