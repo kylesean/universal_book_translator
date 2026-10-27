@@ -11,7 +11,7 @@ costume (the diamond was linear, but the type said "is-a base" four times).
 
 import json
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -92,6 +92,48 @@ AGENT_SESSION_KEY = "agent_session"
 #: prepare. A repeated prepare with the same id and different inputs must not
 #: silently reuse the prior ledger.
 AGENT_REQUEST_FINGERPRINT_KEY = "agent_request_fingerprint"
+
+#: The two fields a **submitted** package no longer needs: its lease is spent,
+#: its blocks are checkpointed, and the idempotent-replay surface reads only
+#: ``state`` / ``lease_token_hash`` / ``submission_hash``. They are also the
+#: O(blocks) payload that made every claim and submit rewrite the whole
+#: session — the map grew by one package per claim and every write re-serialized
+#: all prior packages with their per-block payloads, an O(n²)-in-blocks term.
+#: Compaction drops exactly these two fields and keeps a ``block_count``
+#: scalar for the replay report; claimed and expired packages are untouched.
+_SUBMITTED_PACKAGE_DROP_FIELDS = ("block_ids", "expected_statuses")
+
+
+def _compact_submitted_packages(packages: dict[str, Any]) -> dict[str, Any]:
+    """Drop the spent payload from every submitted package, in place."""
+    for package_id, package in packages.items():
+        if not isinstance(package, dict) or package.get("state") != "submitted":
+            continue
+        if "block_ids" not in package and "expected_statuses" not in package:
+            continue  # already compacted
+        compacted = {
+            key: value
+            for key, value in package.items()
+            if key not in _SUBMITTED_PACKAGE_DROP_FIELDS
+        }
+        compacted["block_count"] = len(package.get("block_ids", []))
+        packages[package_id] = compacted
+    return packages
+
+
+def agent_package_accepted_blocks(package: Mapping[str, Any]) -> int:
+    """The replay report's block count for a stored package.
+
+    A claimed package still carries ``block_ids``; a compacted submitted one
+    carries the ``block_count`` scalar the compaction wrote when it dropped
+    the list. Both spellings answer the same question, so the replay report
+    cannot drift from what was actually accepted.
+    """
+    block_ids = package.get("block_ids")
+    if isinstance(block_ids, list):
+        return len(block_ids)
+    return int(package.get("block_count") or 0)
+
 
 #: Terminal ``job_meta.status`` values. A ``completed`` finalize must not
 #: overwrite any of these (the string mirror of the queue's terminal set).
@@ -1053,6 +1095,10 @@ class LedgerBlocksMixin(_LedgerHost):
                 **(package_state or {}),
             }
             packages[package_id] = package
+            # Every claim rewrites the whole session: compact the spent
+            # packages here too, or the map this commit serializes still
+            # carries every prior package's per-block payload.
+            _compact_submitted_packages(packages)
             session["packages"] = packages
             session["state"] = "awaiting_agent"
             session["updated_at"] = float(now)
@@ -1222,6 +1268,10 @@ class LedgerBlocksMixin(_LedgerHost):
             package["state"] = "submitted"
             package["submitted_at"] = float(now)
             packages[package_id] = package
+            # This package just became terminal, and every submit rewrites the
+            # whole map: drop the spent per-block payloads from it and from
+            # every previously submitted package in the same write.
+            _compact_submitted_packages(packages)
             session["packages"] = packages
             session["state"] = "awaiting_agent"
             session["updated_at"] = float(now)

@@ -19,6 +19,7 @@ from ubt.core.engine.agent_translation import (
     AgentTranslationService,
 )
 from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.engine.ledger_mixins import AGENT_SESSION_KEY
 from ubt.core.ir.models import BlockStatus
 
 pytestmark = pytest.mark.fast
@@ -531,3 +532,67 @@ def test_agent_session_survives_as_awaiting_agent_in_catalog(tmp_path: Path) -> 
     summary = summarize_job(tmp_path / "db" / f"{prepared.job_id}.sqlite")
     assert summary is not None
     assert summary["status"] == "awaiting_agent"
+
+
+@pytest.mark.asyncio
+async def test_submitted_packages_compact_and_replay_reports_their_count(
+    tmp_path: Path,
+) -> None:
+    """A submitted package keeps its identity, not its per-block payload.
+
+    Every claim and submit rewrites the whole ``agent_session`` metadata, so a
+    package that kept ``block_ids`` and ``expected_statuses`` made each write
+    re-serialize every prior package's blocks — O(n²) in blocks across a run.
+    Compaction drops exactly those two fields at submit time; everything the
+    replay surface reads (``state``, ``lease_token_hash``, ``submission_hash``)
+    stays, and ``block_count`` preserves the count the replay report shows.
+    A two-block package pins that count instead of stumbling on a 1-block
+    coincidence.
+    """
+    source = _write_book(tmp_path)
+    service = AgentTranslationService(config=_config(tmp_path))
+    prepared = await service.prepare(
+        AgentPrepareRequest(input_path=str(source), job_id="agent_compact", package_size=2)
+    )
+    job_id = prepared.job_id
+    accepted: list[int] = []
+    for _ in range(2):
+        claim = await service.claim(AgentClaimRequest(job_id=job_id))
+        assert claim.package is not None
+        request = AgentSubmitRequest(
+            job_id=job_id,
+            package_id=claim.package.package_id,
+            lease_token=claim.package.lease_token,
+            blocks=[
+                AgentBlockSubmission(
+                    block_id=block.block_id,
+                    translation=_translate(block.masked_source),
+                )
+                for block in claim.package.blocks
+            ],
+        )
+        result = await service.submit(request)
+        accepted.append(result.accepted_blocks)
+        # The replay must survive compaction: same request, same verdict.
+        replay = await service.submit(request)
+        assert replay.idempotent_replay is True
+        assert replay.accepted_blocks == result.accepted_blocks
+
+    assert accepted == [2, 2]
+    with SQLiteJobLedger(tmp_path / "db" / f"{job_id}.sqlite") as ledger:
+        session = ledger.get_job_metadata_value(job_id, AGENT_SESSION_KEY)
+        packages = session["packages"]
+        assert len(packages) == 2
+        for package in packages.values():
+            assert package["state"] == "submitted"
+            assert "block_ids" not in package, "the spent per-block payload must be gone"
+            assert "expected_statuses" not in package
+            assert package["block_count"] == 2
+            assert package["lease_token_hash"], "replay needs the stored token digest"
+            assert package["submission_hash"], "replay needs the stored submission digest"
+        # And the metadata the next claim rewrites is payload-free: the raw
+        # JSON carries no per-block list for any submitted package.
+        import json as _json
+
+        raw = _json.dumps(session, ensure_ascii=False)
+        assert "block_ids" not in raw

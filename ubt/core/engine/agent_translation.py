@@ -42,6 +42,7 @@ from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.ledger_mixins import (
     AGENT_REQUEST_FINGERPRINT_KEY,
     AGENT_SESSION_KEY,
+    agent_package_accepted_blocks,
 )
 from ubt.core.engine.repair_loop import RepairLoop
 from ubt.core.engine.services import RunServices
@@ -1138,7 +1139,7 @@ class AgentTranslationService:
                 return AgentSubmitResult(
                     job_id=request.job_id,
                     package_id=request.package_id,
-                    accepted_blocks=len(package.get("block_ids", [])),
+                    accepted_blocks=agent_package_accepted_blocks(package),
                     rejected_blocks=0,
                     pending_blocks=max(
                         0,
