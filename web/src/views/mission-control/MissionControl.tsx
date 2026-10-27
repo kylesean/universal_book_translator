@@ -211,6 +211,8 @@ function rememberLogs(jobId: string | null, entries: LogEntry[]): void {
 
 type QueueFilter = 'ALL' | 'ACTIVE' | 'COMPLETED' | 'FAILED'
 
+const READER_PRODUCT_KEYS = new Set(['primary', 'secondary', 'epub', 'html'])
+
 function LogFilters({
   t,
   search,
@@ -410,8 +412,57 @@ function JobQueueTable({
   )
 }
 
+function DeliverableRow({
+  item,
+  isPrimary,
+  downloadLabel,
+  onDownload,
+}: {
+  item: DeliverableItem
+  isPrimary: boolean
+  downloadLabel: string
+  onDownload: () => void
+}) {
+  const { t } = useI18n()
+
+  return (
+    <div className="flex items-center justify-between gap-3 p-3 transition-colors hover:bg-muted/25">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-xs font-bold text-foreground">
+          {getFormatBadge(item.filename)}
+        </span>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="truncate text-sm font-medium text-foreground">
+              {deliverableName(item.key, item.label || item.filename, t)}
+            </span>
+            {isPrimary && (
+              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                {t.mission.exportPrimaryBadge}
+              </span>
+            )}
+          </div>
+          <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+            {item.filename} · {formatBytes(item.size_bytes)}
+          </div>
+        </div>
+      </div>
+      <Button
+        onClick={onDownload}
+        variant={isPrimary ? 'default' : 'outline'}
+        size="sm"
+        className="h-8 shrink-0 px-3 text-xs"
+      >
+        <Download className="mr-1.5 size-3.5" />
+        <span>{downloadLabel}</span>
+      </Button>
+    </div>
+  )
+}
+
 export function MissionControl() {
   const { t } = useI18n()
+  const missionT = t.mission
   const toast = useToast()
   const navigate = useNavigate()
   const { jobId } = useParams<{ jobId: string }>()
@@ -604,6 +655,14 @@ export function MissionControl() {
       null
     )
   }, [readingDeliverables, deliverables])
+
+  // Product vs. working-file split mirrors how the operator chooses: the first
+  // group answers "which format do I publish?", the second answers "which tool
+  // do I hand this to?".
+  const readerKeys = useMemo(
+    () => new Set(deliverables.filter((item) => READER_PRODUCT_KEYS.has(item.key)).map((item) => item.key)),
+    [deliverables]
+  )
 
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [pendingReparse, setPendingReparse] = useState<string | null>(null)
@@ -1902,47 +1961,58 @@ export function MissionControl() {
                       {isCompleted ? t.mission.noDeliverables : t.mission.backgroundProcessing}
                     </div>
                   ) : (
-                    <div className="divide-y divide-border">
-                      {deliverables.map((item) => {
-                        const isPrimary = item.key === 'primary' || item === primaryDeliverable
-                        const badge = getFormatBadge(item.filename)
-                        return (
-                          <div
-                            key={item.key}
-                            className="p-3.5 flex items-center justify-between gap-3 hover:bg-muted/30 transition-colors"
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              <span className="font-mono text-xs font-bold px-2 py-1 rounded bg-muted text-foreground shrink-0">
-                                {badge}
-                              </span>
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm font-medium text-foreground truncate">
-                                    {deliverableName(item.key, item.label || item.filename, t)}
-                                  </span>
-                                  {isPrimary && (
-                                    <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-semibold font-mono">
-                                      {t.mission.exportPrimaryBadge}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-xs text-muted-foreground font-mono mt-0.5 truncate">
-                                  {item.filename} · {formatBytes(item.size_bytes)}
-                                </div>
-                              </div>
-                            </div>
-                            <Button
-                              onClick={() => void handleDownload(item.key)}
-                              variant={isPrimary ? 'default' : 'outline'}
-                              size="sm"
-                              className="h-8 px-3 text-xs shrink-0"
-                            >
-                              <Download className="size-3.5 mr-1.5" />
-                              <span>{t.mission.downloadPrimary}</span>
-                            </Button>
-                          </div>
-                        )
-                      })}
+                    <div className="space-y-3 p-3.5">
+                      <p className="px-1 text-xs leading-relaxed text-muted-foreground">
+                        {t.mission.deliverablesIntro}
+                      </p>
+
+                      <section className="overflow-hidden rounded-lg border border-border/70">
+                        <div className="border-b border-border/70 bg-emerald-500/5 px-3 py-2">
+                          <h3 className="text-xs font-semibold tracking-wide text-foreground">
+                            {missionT.readerProductsTitle}
+                          </h3>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {missionT.readerProductsDesc}
+                          </p>
+                        </div>
+                        <div className="divide-y divide-border/60">
+                          {deliverables
+                            .filter((item) => readerKeys.has(item.key))
+                            .map((item) => (
+                              <DeliverableRow
+                                key={item.key}
+                                item={item}
+                                isPrimary={item.key === primaryDeliverable?.key}
+                                downloadLabel={missionT.downloadPrimary}
+                                onDownload={() => void handleDownload(item.key)}
+                              />
+                            ))}
+                        </div>
+                      </section>
+
+                      <section className="overflow-hidden rounded-lg border border-border/70">
+                        <div className="border-b border-border/70 bg-muted/30 px-3 py-2">
+                          <h3 className="text-xs font-semibold tracking-wide text-foreground">
+                            {missionT.reviewFilesTitle}
+                          </h3>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {missionT.reviewFilesDesc}
+                          </p>
+                        </div>
+                        <div className="divide-y divide-border/60">
+                          {deliverables
+                            .filter((item) => !readerKeys.has(item.key))
+                            .map((item) => (
+                              <DeliverableRow
+                                key={item.key}
+                                item={item}
+                                isPrimary={false}
+                                downloadLabel={missionT.downloadPrimary}
+                                onDownload={() => void handleDownload(item.key)}
+                              />
+                            ))}
+                        </div>
+                      </section>
                     </div>
                   )}
                 </CardContent>

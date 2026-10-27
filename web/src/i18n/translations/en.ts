@@ -444,6 +444,12 @@ export const en: TranslationDictionary = {
     resuming: 'Resuming…',
     downloadPrimary: 'Download',
     oneClickExport: 'Export',
+    deliverablesIntro:
+      'Reader products are what you ship or publish. Review files are for post-editing and audit; usually only open them when a report or reviewer asks for them.',
+    readerProductsTitle: 'Reader products',
+    readerProductsDesc: 'Ship, publish, or read these directly.',
+    reviewFilesTitle: 'Review and audit files',
+    reviewFilesDesc: 'Post-editing, provenance, and quality checks.',
     exportPrimaryHint: 'Download the final deliverable',
     exportPrimaryBadge: 'primary',
     exportFormats: 'Formats',
