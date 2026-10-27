@@ -57,8 +57,6 @@ from ubt.core.qe.defect_taxonomy import (
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.qe.heuristic import glossary_violation_flag
 from ubt.core.router.router import (
-    BatchDraftRequest,
-    BatchTranslationError,
     ModelRouter,
     classify_provider_error,
 )
@@ -156,11 +154,7 @@ def resolve_draft_policy(
     is_academic = profile_name.lower() in ACADEMIC_PROFILES
     config_rolling = bool(config.enable_rolling_summary)
     rolling_enabled = not (
-        len(manifest.chapters) <= 1
-        or not config_rolling
-        or is_page_slice
-        or len(manifest.chapters) > 40
-        or is_academic
+        len(manifest.chapters) <= 1 or not config_rolling or is_page_slice or is_academic
     )
     batch_limit = max(all_blocks_count, 15) if is_fast_path else int(config.batch_limit)
     logger.info(
@@ -172,17 +166,6 @@ def resolve_draft_policy(
         is_fast_path,
     )
     return rolling_enabled, is_fast_path, batch_limit
-
-
-def segment_by_chapter(batch: list[IRBlock]) -> list[list[IRBlock]]:
-    """Split a claimed batch into contiguous chapter segments (pure)."""
-    segments: list[list[IRBlock]] = []
-    for b in batch:
-        if segments and extract_chapter_id(b.id) == extract_chapter_id(segments[-1][0].id):
-            segments[-1].append(b)
-        else:
-            segments.append([b])
-    return segments
 
 
 def chunk_by_section(
@@ -301,7 +284,6 @@ class DraftRuntime:
     active_fast_pass: FastPassFilter
     counters: dict[str, int]
     flusher: CheckpointBatchFlusher
-    batch_active: bool
     # Job-level fail-fast circuit. A non-retryable provider error
     # (401/402/400 — bad credential, no credit, malformed) recurs on every
     # block, so without a breaker a whole book's worth of blocks each burns the
@@ -328,12 +310,8 @@ class DraftPolicy:
     tm_context: str
     draft_max_retries: int
     draft_retry_base_delay: float
-    batch_min_blocks: int
-    batch_poll_interval: float
-    batch_poll_timeout: float
     rolling_enabled: bool
     fail_fast_threshold: int = 6
-    batch_delete_files: bool = True
     #: Kept equal to ``UBTConfig.macro_chunk_size``'s default so a DraftPolicy
     #: built without the config kwarg does not silently disagree with production.
     macro_chunk_size: int = 8
@@ -919,313 +897,6 @@ class _DraftProcessor:
                 }
                 await self.runtime.flusher.enqueue(fail_update)
 
-    async def finalize_cache_hits(
-        self, prepared: list[tuple[IRBlock, _DraftInputs]]
-    ) -> list[tuple[IRBlock, _DraftInputs]]:
-        """Finalize the translate-cache hits now; return the misses to submit.
-
-        The cache is content-addressed on the exact prompt, so a hit is a draft
-        this run would have generated identically. Finalizing it directly saves
-        the provider request entirely (content-addressed cache layer) -- for the Batch API
-        paths that is a request not submitted, not just a response reused.
-        """
-        if self.runtime.engine.cache is None:
-            return prepared
-        misses: list[tuple[IRBlock, _DraftInputs]] = []
-        for b, inp in prepared:
-            cached = await asyncio.to_thread(
-                self.runtime.engine.cached_draft,
-                inp.masked_source,
-                context=self.prompt_context(inp),
-            )
-            if cached is None:
-                misses.append((b, inp))
-                continue
-            await self.finalize_draft(b, cached, inp)
-            self.runtime.counters["translate_cache_hits"] = (
-                self.runtime.counters.get("translate_cache_hits", 0) + 1
-            )
-        return misses
-
-    async def try_batch_draft(
-        self,
-        blocks: list[IRBlock],
-        current_batch: list[IRBlock],
-    ) -> bool:
-        """Translate the whole claim batch through one Batch API job."""
-        prepared = await self.prepare_blocks(blocks, current_batch)
-        if not prepared:
-            return True
-        # A cache hit needs no batch request: finalize it and submit the rest.
-        prepared = await self.finalize_cache_hits(prepared)
-        if not prepared:
-            return True
-
-        async def _batch_status_callback(status: str, job_dict: dict[str, Any]) -> None:
-            if self.runtime.ctx is not None:
-                self.runtime.ctx.check_cancelled()
-            logger.info(
-                "Batch draft job %s poll status: %s (counts=%s)",
-                self.runtime.actual_job_id,
-                status,
-                job_dict.get("request_counts"),
-            )
-            if self.runtime.create_event_fn:
-                await self.runtime.create_event_fn(
-                    EventType.DRAFT_BATCH_COMPLETED,
-                    self.runtime.actual_job_id,
-                    self.runtime.ledger,
-                    message=f"Batch draft job status: {status}",
-                    active_block_id=prepared[0][0].id if prepared else None,
-                )
-
-        try:
-            batch_results = await self.runtime.router.draft_batch(
-                [
-                    BatchDraftRequest(
-                        custom_id=b.id,
-                        source_text=inp.masked_source,
-                        glossary_table=inp.glossary_table,
-                        neighbor_context=inp.neighbor_ctx,
-                        target_lang=self.policy.target_lang,
-                        source_lang=self.policy.source_lang,
-                        genre_profile=self.policy.profile_name,
-                        domain=self.policy.domain,
-                        rolling_summary=inp.macro_ctx,
-                        epoch_summary=inp.epoch_ctx,
-                        global_glossary=self.policy.global_glossary_table,
-                        few_shot_reference=inp.few_shot_reference,
-                        block_type=inp.block_type,
-                    )
-                    for b, inp in prepared
-                ],
-                poll_interval=self.policy.batch_poll_interval,
-                poll_timeout=self.policy.batch_poll_timeout,
-                ledger=self.runtime.ledger,
-                job_id=self.runtime.actual_job_id,
-                cleanup_files=self.policy.batch_delete_files,
-                status_callback=_batch_status_callback,
-            )
-        except (BudgetExceededError, JobInterruptedError, asyncio.CancelledError):
-            raise
-        except BatchTranslationError as exc:
-            logger.warning(
-                "Batch draft unavailable (%s); falling back to interactive for %d blocks",
-                exc,
-                len(prepared),
-            )
-            # If a batch had already been submitted, cancel it now that we are
-            # abandoning batch mode for these blocks — otherwise it keeps
-            # billing while we re-draft them interactively (duplicate charge).
-            if exc.batch_id:
-                await self.runtime.router.abandon_batch(
-                    exc.batch_id, ledger=self.runtime.ledger, job_id=self.runtime.actual_job_id
-                )
-            self.runtime.counters["batch_fallbacks"] += len(prepared)
-            return False
-
-        results_by_id = {r.custom_id: r for r in batch_results}
-        retriable: list[tuple[IRBlock, _DraftInputs]] = []
-        for b, inp in prepared:
-            r = results_by_id.get(b.id)
-            # A blank line is a missing line: the quality gate would otherwise
-            # score an empty target, and the macro path already treats "" as
-            # unusable, so the two batch shapes must not disagree here.
-            if r is None or r.error or not r.text or not r.text.strip():
-                retriable.append((b, inp))
-                continue
-            # Record the batch's own output under the same key the interactive
-            # path reads, so a re-run reuses it (content-addressed cache layer)
-            # — but only once the restore judged clean: a cached defective
-            # draft replays on every later run, and only repair could recover it.
-            clean = await self.finalize_draft(b, r.text, inp)
-            if clean and self.runtime.engine.cache is not None:
-                await asyncio.to_thread(
-                    self.runtime.engine.remember_draft,
-                    inp.masked_source,
-                    r.text,
-                    context=self.prompt_context(inp),
-                )
-            self.runtime.counters["batch_drafted"] += 1
-        if retriable:
-            self.runtime.counters["batch_fallbacks"] += len(retriable)
-            logger.info(
-                "Batch job returned %d unusable lines; redrafting interactively",
-                len(retriable),
-            )
-            results = await asyncio.gather(
-                *[self.draft_single_block(b, current_batch, inp) for b, inp in retriable],
-                return_exceptions=True,
-            )
-            for res in results:
-                if isinstance(
-                    res, (BudgetExceededError, JobInterruptedError, asyncio.CancelledError)
-                ):
-                    raise res
-                if isinstance(res, Exception):
-                    logger.warning("Interactive redraft failed for block: %s", res)
-        return True
-
-    async def run_whole_book_batch(
-        self,
-        blocks: list[IRBlock],
-        ctx: StageContext,
-        create_event_fn: Any = None,
-    ) -> bool:
-        """Translate all pending blocks across the whole book through one unified Batch API job.
-
-        Returns True if batch draft succeeded (with any per-line retries completed),
-        or False if batch submission failed / is unsupported and interactive fallback is needed.
-        """
-        ctx.check_cancelled()
-        segments = segment_by_chapter(blocks)
-        prepared: list[tuple[IRBlock, _DraftInputs]] = []
-
-        for segment in segments:
-            prepared.extend(await self.prepare_blocks(segment, segment))
-
-        if not prepared:
-            await self.runtime.flusher.flush_all()
-            return True
-        # A cache hit needs no batch request: finalize it and submit the rest.
-        prepared = await self.finalize_cache_hits(prepared)
-        if not prepared:
-            await self.runtime.flusher.flush_all()
-            return True
-
-        async def _batch_status_callback(status: str, job_dict: dict[str, Any]) -> None:
-            ctx.check_cancelled()
-            logger.info(
-                "Whole-book batch job %s poll status: %s (counts=%s)",
-                self.runtime.actual_job_id,
-                status,
-                job_dict.get("request_counts"),
-            )
-            if create_event_fn:
-                # create_event_fn is the budget enforcement point (it bills this
-                # run's spend and raises BudgetExceededError); the event it
-                # returns has no delivery channel of its own here.
-                await create_event_fn(
-                    EventType.DRAFT_BATCH_COMPLETED,
-                    self.runtime.actual_job_id,
-                    self.runtime.ledger,
-                    message=f"Whole-book batch job status: {status}",
-                    active_block_id=prepared[0][0].id if prepared else None,
-                )
-
-        try:
-            batch_results = await self.runtime.router.draft_batch(
-                [
-                    BatchDraftRequest(
-                        custom_id=b.id,
-                        source_text=inp.masked_source,
-                        glossary_table=inp.glossary_table,
-                        neighbor_context=inp.neighbor_ctx,
-                        target_lang=self.policy.target_lang,
-                        source_lang=self.policy.source_lang,
-                        genre_profile=self.policy.profile_name,
-                        domain=self.policy.domain,
-                        rolling_summary=inp.macro_ctx,
-                        epoch_summary=inp.epoch_ctx,
-                        global_glossary=self.policy.global_glossary_table,
-                        few_shot_reference=inp.few_shot_reference,
-                        block_type=inp.block_type,
-                    )
-                    for b, inp in prepared
-                ],
-                poll_interval=self.policy.batch_poll_interval,
-                poll_timeout=self.policy.batch_poll_timeout,
-                ledger=self.runtime.ledger,
-                job_id=self.runtime.actual_job_id,
-                cleanup_files=self.policy.batch_delete_files,
-                status_callback=_batch_status_callback,
-            )
-        except BatchTranslationError as exc:
-            logger.warning(
-                "Whole-book batch draft unavailable (%s); falling back to interactive for %d blocks",
-                exc,
-                len(prepared),
-            )
-            if exc.batch_id:
-                await self.runtime.router.abandon_batch(
-                    exc.batch_id, ledger=self.runtime.ledger, job_id=self.runtime.actual_job_id
-                )
-            self.runtime.counters["batch_fallbacks"] += len(prepared)
-            self.runtime.batch_active = False
-            return False
-        except (BudgetExceededError, JobInterruptedError):
-            # Neither is a batch-infrastructure hiccup, and both mean "stop
-            # spending". Falling through to the catch-all below would return
-            # False and re-draft every block interactively — past the cap the
-            # user just hit, or after the cancel that was supposed to end the
-            # run — while the batch itself is still live at the provider.
-            raise
-        except Exception as exc:
-            logger.warning(
-                "Whole-book batch draft encountered exception (%s); interactive fallback", exc
-            )
-            self.runtime.counters["batch_fallbacks"] += len(prepared)
-            self.runtime.batch_active = False
-            return False
-
-        results_by_id = {r.custom_id: r for r in batch_results}
-        retriable: list[tuple[IRBlock, _DraftInputs]] = []
-        for b, inp in prepared:
-            r = results_by_id.get(b.id)
-            # A blank line is a missing line: the quality gate would otherwise
-            # score an empty target, and the macro path already treats "" as
-            # unusable, so the two batch shapes must not disagree here.
-            if r is None or r.error or not r.text or not r.text.strip():
-                retriable.append((b, inp))
-                continue
-            # Record the batch's own output under the same key the interactive
-            # path reads, so a re-run reuses it (content-addressed cache layer)
-            # — but only once the restore judged clean: a cached defective
-            # draft replays on every later run, and only repair could recover it.
-            clean = await self.finalize_draft(b, r.text, inp)
-            if clean and self.runtime.engine.cache is not None:
-                await asyncio.to_thread(
-                    self.runtime.engine.remember_draft,
-                    inp.masked_source,
-                    r.text,
-                    context=self.prompt_context(inp),
-                )
-            self.runtime.counters["batch_drafted"] += 1
-
-        if retriable:
-            self.runtime.counters["batch_fallbacks"] += len(retriable)
-            logger.info(
-                "Whole-book batch job returned %d unusable lines; redrafting interactively",
-                len(retriable),
-            )
-            if self.policy.macro_chunk_size <= 1:
-                results = await asyncio.gather(
-                    *[self.draft_single_block(b, [b], inp) for b, inp in retriable],
-                    return_exceptions=True,
-                )
-            else:
-                chunks = [
-                    retriable[i : i + self.policy.macro_chunk_size]
-                    for i in range(0, len(retriable), self.policy.macro_chunk_size)
-                ]
-                results = await asyncio.gather(
-                    *[
-                        self.draft_macro_chunk_group(chunk, [b for b, _ in chunk])
-                        for chunk in chunks
-                    ],
-                    return_exceptions=True,
-                )
-            for res in results:
-                if isinstance(
-                    res, (BudgetExceededError, JobInterruptedError, asyncio.CancelledError)
-                ):
-                    raise res
-                if isinstance(res, Exception):
-                    logger.warning("Whole-book interactive fallback failed: %s", res)
-
-        await self.runtime.flusher.flush_all()
-        return True
-
     async def draft_macro_chunk_group(
         self,
         chunk: list[tuple[IRBlock, _DraftInputs]],
@@ -1380,17 +1051,6 @@ class _DraftProcessor:
         blocks: list[IRBlock],
         current_batch: list[IRBlock],
     ) -> None:
-        if self.runtime.batch_active and len(blocks) >= self.policy.batch_min_blocks:
-            try:
-                handled = await self.try_batch_draft(blocks, current_batch)
-            except (BudgetExceededError, JobInterruptedError, asyncio.CancelledError):
-                raise
-            except Exception as exc:  # defensive: batch must never kill the stage
-                logger.warning("Batch draft crashed (%s); interactive fallback", exc)
-                handled = False
-            if handled:
-                return
-
         prepared = await self.prepare_blocks(blocks, current_batch)
 
         if not prepared:
@@ -1593,7 +1253,7 @@ async def _build_draft_runtime(
         # calls for summaries the policy then refuses to inject.
         enabled=rolling_enabled,
         max_epochs=getattr(config, "memory_max_epochs", DEFAULT_MAX_EPOCHS),
-        sliding_window=getattr(config, "memory_sliding_window", False),
+        sliding_window=getattr(config, "memory_sliding_window", True),
     )
     global_glossary_table = build_global_glossary_table(
         glossary_dicts or [], config.glossary_max_global_entries
@@ -1641,15 +1301,8 @@ async def _build_draft_runtime(
             for block in await asyncio.to_thread(ledger.get_all_blocks, actual_job_id)
         )
         active_fast_pass.set_document_context(document_source)
-    batch_active = bool(config.batch_enabled) and (router.supports_batch_api)
-    batch_min_blocks = max(2, int(config.batch_min_blocks))
-    batch_poll_interval = max(0.5, float(config.batch_poll_interval))
-    batch_poll_timeout = max(1.0, float(config.batch_poll_timeout))
-    batch_delete_files = bool(config.batch_delete_files)
     counters = {
         "tm_exact_hits": 0,
-        "batch_drafted": 0,
-        "batch_fallbacks": 0,
         "translate_cache_hits": 0,
     }
 
@@ -1684,7 +1337,6 @@ async def _build_draft_runtime(
             active_fast_pass=active_fast_pass,
             counters=counters,
             flusher=flusher,
-            batch_active=batch_active,
             ctx=ctx,
             create_event_fn=create_event_fn,
         ),
@@ -1700,11 +1352,7 @@ async def _build_draft_runtime(
             tm_context=tm_context,
             draft_max_retries=draft_max_retries,
             draft_retry_base_delay=draft_retry_base_delay,
-            batch_min_blocks=batch_min_blocks,
-            batch_poll_interval=batch_poll_interval,
-            batch_poll_timeout=batch_poll_timeout,
             rolling_enabled=rolling_enabled,
-            batch_delete_files=batch_delete_files,
             macro_chunk_size=max(1, int(config.macro_chunk_size)),
         ),
     )
@@ -1741,7 +1389,6 @@ async def run_draft_stage(
     rolling_enabled = assembly.rolling_enabled
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
-    config = ctx.config
 
     # Resume recovery: re-queue blocks stranded in FAILED /
     # NEEDS_HUMAN by transient drafting/repair errors, so an API outage does
@@ -1759,111 +1406,6 @@ async def run_draft_stage(
         await asyncio.to_thread(_restore_memory_state, ledger, actual_job_id, memory_mgr)
 
     try:
-        # Whole-book offline Batch API mode.
-        offline_batch_requested = getattr(config, "offline_batch_enabled", False)
-        if offline_batch_requested and (router.supports_batch_api or bool(config.batch_enabled)):
-            logger.info(
-                "Whole-book offline batch mode active for job %s (chapter_id=%s)",
-                actual_job_id,
-                chapter_id,
-            )
-            all_pending_blocks: list[IRBlock] = []
-            cursor_spine_init: int | None = None
-            cursor_block_id_init: str | None = None
-            while True:
-                ctx.check_cancelled()
-                chunk = await asyncio.to_thread(
-                    ledger.fetch_pending_blocks,
-                    actual_job_id,
-                    limit=500,
-                    after_spine_index=cursor_spine_init,
-                    after_block_id=cursor_block_id_init,
-                    chapter_id=chapter_id,
-                )
-                if not chunk:
-                    break
-                all_pending_blocks.extend(chunk)
-                cursor_spine_init = chunk[-1].spine_index
-                cursor_block_id_init = chunk[-1].id
-
-            if all_pending_blocks:
-                stats_before = await asyncio.to_thread(ledger.get_job_stats, actual_job_id)
-                handled = await processor.run_whole_book_batch(
-                    all_pending_blocks,
-                    ctx,
-                    create_event_fn=create_event_fn,
-                )
-                await flusher.flush_all()
-                # The fail-fast circuit the interactive loop applies below: this
-                # path returns before reaching it, so a dead provider would burn
-                # every remaining block through the batch fallback instead of
-                # aborting the job the way the interactive path does.
-                if processor.runtime.fail_fast_consecutive >= processor.policy.fail_fast_threshold:
-                    raise ProviderUnreachableError(
-                        f"Whole-book offline batch aborted after "
-                        f"{processor.runtime.fail_fast_consecutive} consecutive "
-                        "non-retryable provider failures (fail-fast circuit). "
-                        f"Last error: {processor.runtime.last_fail_fast_reason}"
-                    )
-                if handled:
-                    remaining = await asyncio.to_thread(
-                        ledger.fetch_pending_blocks,
-                        actual_job_id,
-                        limit=1,
-                        chapter_id=chapter_id,
-                    )
-                    if not remaining:
-                        stats_after = await asyncio.to_thread(ledger.get_job_stats, actual_job_id)
-                        # FAILED is terminal, so "no pending blocks" alone read an
-                        # all-failed batch as a clean success. Require delivered
-                        # work (drafted / completed / flagged-for-review) before
-                        # logging success; an empty delta means every line failed.
-                        delivered = sum(
-                            stats_after[key] - stats_before[key]
-                            for key in (
-                                "drafted",
-                                "completed",
-                                "needs_human",
-                                "blocked_human",
-                            )
-                        )
-                        if delivered <= 0:
-                            raise UBTError(
-                                f"Whole-book offline batch drafted 0 of "
-                                f"{len(all_pending_blocks)} block(s) for {chapter_id}: "
-                                "the provider rejected every line "
-                                f"(failed={stats_after['failed']})"
-                            )
-                        logger.info(
-                            "Whole-book offline batch draft succeeded: %d block(s) drafted",
-                            delivered,
-                        )
-                        if memory_mgr.should_trigger_snapshot(all_pending_blocks[0]):
-                            try:
-                                await memory_mgr.generate_step_snapshot(
-                                    router.complete_raw, target_lang=target_lang
-                                )
-                            except Exception as exc:
-                                logger.warning(
-                                    "Hierarchical step snapshot generation failed: %s", exc
-                                )
-                            if rolling_enabled:
-                                await asyncio.to_thread(
-                                    _persist_memory_state,
-                                    ledger,
-                                    actual_job_id,
-                                    memory_mgr,
-                                )
-                        event = await create_event_fn(
-                            EventType.DRAFT_BATCH_COMPLETED,
-                            actual_job_id,
-                            ledger,
-                            message=f"Whole-book offline batch completed for {len(all_pending_blocks)} blocks",
-                            active_block_id=all_pending_blocks[-1].id,
-                        )
-                        yield event
-                        return
-
         cursor_spine: int | None = None
         cursor_block_id: str | None = None
         while True:
@@ -1991,18 +1533,10 @@ async def run_draft_stage(
                     )
             await asyncio.to_thread(_persist_memory_state, ledger, actual_job_id, memory_mgr)
         memory_mgr.discard_pending_blocks()
-        if (
-            counters["tm_exact_hits"]
-            or counters["batch_drafted"]
-            or counters["batch_fallbacks"]
-            or counters["translate_cache_hits"]
-        ):
+        if counters["tm_exact_hits"] or counters["translate_cache_hits"]:
             logger.info(
-                "Draft stage summary for %s: tm_exact_hits=%d batch_drafted=%d "
-                "batch_fallbacks=%d translate_cache_hits=%d",
+                "Draft stage summary for %s: tm_exact_hits=%d translate_cache_hits=%d",
                 actual_job_id,
                 counters["tm_exact_hits"],
-                counters["batch_drafted"],
-                counters["batch_fallbacks"],
                 counters["translate_cache_hits"],
             )

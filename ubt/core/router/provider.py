@@ -91,11 +91,6 @@ class BaseModelProvider(ABC):
         return text, None
 
     @property
-    def supports_batch_api(self) -> bool:
-        """Whether this provider can execute OpenAI-compatible batch jobs."""
-        return False
-
-    @property
     def chat_template_kwargs(self) -> dict[str, Any]:
         """Chat-template flags merged into every chat/completions payload."""
         return {}
@@ -121,26 +116,6 @@ class BaseModelProvider(ABC):
     ) -> str:
         """Vision completion over base64 PNGs (default: unsupported)."""
         raise NotImplementedError(f"{self.provider_name} does not support vision input")
-
-    async def create_batch_job(self, requests: list[dict[str, Any]]) -> str:
-        """Upload batch JSONL requests and create a batch job (returns its ID)."""
-        raise NotImplementedError(f"{self.provider_name} does not support the Batch API")
-
-    async def get_batch_job(self, batch_id: str) -> dict[str, Any]:
-        """Fetch batch job metadata (status and output/error file ids)."""
-        raise NotImplementedError(f"{self.provider_name} does not support the Batch API")
-
-    async def fetch_batch_results(self, batch_id: str) -> dict[str, dict[str, Any]]:
-        """Download batch output mapped by ``custom_id``."""
-        raise NotImplementedError(f"{self.provider_name} does not support the Batch API")
-
-    async def cleanup_batch_files(self, batch_id: str) -> None:
-        """Delete the Files-API objects a batch left on the provider."""
-        return None
-
-    async def cancel_batch_job(self, batch_id: str) -> None:
-        """Best-effort cancel of a still-running batch so it stops accruing cost."""
-        return None
 
 
 class MockModelProvider(BaseModelProvider):
@@ -526,48 +501,6 @@ class OpenAICompatibleProvider(BaseModelProvider):
             temperature=temperature,
             max_tokens=max_tokens,
         )
-
-    # ------------------------------------------------------------------
-    # Batch API (delegated to the transport for the selected protocol)
-    # ------------------------------------------------------------------
-    def _batch_transport(self) -> BaseTransport:
-        """The transport that owns the Batch API for this provider's protocol.
-
-        Every protocol has a batch implementation (OpenAI-compatible
-        /files+/batches, Anthropic Message Batches, Gemini
-        :batchGenerateContent), so a book run gets the provider's official
-        discount whichever protocol is selected.
-
-        Resolved through the same table as the interactive path
-        (:meth:`_transport_for`). It used to carry its own map keyed
-        ``"anthropic"`` / ``"gemini"`` -- names no ``ApiMode`` literal ever
-        holds -- so both keys were dead and every provider fell through to the
-        OpenAI chat transport. Selecting an Anthropic or Gemini preset with
-        ``batch_enabled`` then POSTed OpenAI's ``/files`` route at the other
-        vendor's host, 404'd, and silently fell back to full-price per-block
-        drafting: the batch discount was unreachable while the log carried one
-        warning line.
-        """
-        return self._transport_for(self._api_mode)
-
-    @property
-    def supports_batch_api(self) -> bool:
-        return self._batch_transport().supports_batch_api
-
-    async def create_batch_job(self, requests: list[dict[str, Any]]) -> str:
-        return await self._batch_transport().create_batch_job(requests)
-
-    async def get_batch_job(self, batch_id: str) -> dict[str, Any]:
-        return await self._batch_transport().get_batch_job(batch_id)
-
-    async def fetch_batch_results(self, batch_id: str) -> dict[str, dict[str, Any]]:
-        return await self._batch_transport().fetch_batch_results(batch_id)
-
-    async def cleanup_batch_files(self, batch_id: str) -> None:
-        await self._batch_transport().cleanup_batch_files(batch_id)
-
-    async def cancel_batch_job(self, batch_id: str) -> None:
-        await self._batch_transport().cancel_batch_job(batch_id)
 
 
 def create_model_provider(

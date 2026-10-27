@@ -188,10 +188,6 @@ export const en: TranslationDictionary = {
         'Could not measure the prompt prefix; fell back to the calibrated constant of 1000 tokens (prefix unmeasured).',
       PAGES_SLICE_QUOTED_WHOLE:
         'A --pages range is set, but this quote covers the whole document (not narrowed to those pages); the real draft volume will only be lower.',
-      BATCH_DISCOUNT_UNAVAILABLE:
-        'Batch API was requested, but the current api_mode is not openai-chat (batching only supports the chat/completions wire); the draft is quoted at interactive full price.',
-      BATCH_DISCOUNT_APPLIED:
-        'Cloud batch API mode is on (--offline-batch); draft token cost is quoted at the 50% offline discount.',
       OCR_MODEL_NOT_CONFIGURED:
         'OCR is enabled but no recognition model is configured, so cost is unknown. Complete the OCR setup in System check.',
       MODEL_UNPRICED:

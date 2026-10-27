@@ -214,7 +214,7 @@ class JobWorker:
             # Job-level mutual exclusion: if another worker has already
             # reclaimed this job (lease expiry) it owns the ledger now, so this
             # best-effort terminal write must not race its checkpoints.
-            lock = LedgerWriterLock(db_path, job.job_id)
+            lock = LedgerWriterLock(db_path, job.job_id, lease_seconds=self.lease_seconds)
             try:
                 lock.acquire()
             except LedgerWriterLockConflictError:
@@ -523,12 +523,20 @@ class JobWorker:
                     decrement_attempt=True,
                 )
             # Back off before the slot re-claims. The job is QUEUED again and
-            # ``_slot`` claims immediately, so without this the same worker
-            # grabs it, hits the same still-held lock, and spins: attempts are
-            # never consumed (decrement_attempt=True), so ``run_until_idle``
-            # never returns and the job is executed a second time the moment
-            # the lock frees.
-            await asyncio.sleep(self.poll_interval)
+            # ``_slot`` claims immediately. Instead of spinning every poll_interval (2s),
+            # read the conflicting lock's remaining lease time from lease_expires_at
+            # and back off until the lock expires, bounded between poll_interval and lease_seconds.
+            now = time.time()
+            remaining = 0.0
+            if exc.lease_expires_at is not None and exc.lease_expires_at > now:
+                remaining = exc.lease_expires_at - now
+            backoff = max(self.poll_interval, min(remaining + 0.5, self.lease_seconds))
+            logger.info(
+                "Job %s: writer lock conflict; backing off for %.1fs before retrying",
+                job.job_id,
+                backoff,
+            )
+            await asyncio.sleep(backoff)
             return False
         except Exception as exc:  # a job failure is terminal, not fatal
             self.failed_jobs += 1

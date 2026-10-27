@@ -174,10 +174,6 @@ export const zh: TranslationDictionary = {
       PREFIX_UNMEASURED: '无法实测 prompt 前缀 token，已回退历史校准常量 1000（前缀未测量）。',
       PAGES_SLICE_QUOTED_WHOLE:
         '已设置 --pages 页码范围，但本报价按整本文档估算（未压缩到所选页）；实际草稿量只会更低。',
-      BATCH_DISCOUNT_UNAVAILABLE:
-        '已请求批量 API，但当前 api_mode 不是 openai-chat（批处理仅支持 chat/completions 线路）；草稿按交互全价估算。',
-      BATCH_DISCOUNT_APPLIED:
-        '已启用云端批量 API 模式（--offline-batch），草稿 Token 成本按 50% 离线折扣计算。',
       OCR_MODEL_NOT_CONFIGURED:
         'OCR 已启用但未配置识别模型，费用将显示为未知。请在「系统」页补全 OCR 配置。',
       MODEL_UNPRICED:

@@ -129,6 +129,15 @@ def test_narrative_profiles_keep_the_rolling_summary() -> None:
         assert rolling is True, f"{profile} should keep rolling summaries"
 
 
+def test_long_form_books_over_40_chapters_keep_rolling_summary() -> None:
+    """Ultra-long narrative books (>40 chapters) keep rolling summary with sliding window."""
+    from ubt.core.config import UBTConfig
+
+    manifest = _manifest_with_chapters(100)
+    rolling, _, _ = _policy(manifest, "fiction", UBTConfig(enable_rolling_summary=True))
+    assert rolling is True, "books over 40 chapters should retain rolling summaries"
+
+
 def test_assess_pricing_uses_the_same_classification() -> None:
     # assess.py imports ACADEMIC_PROFILES rather than re-listing them; assert the
     # import is what the rollup gate actually consults, so the quote cannot drift.

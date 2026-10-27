@@ -165,9 +165,6 @@ class JobSubmitRequest(BaseModel):
     chapter_streaming_enabled: bool | None = Field(
         default=None, description="Translate chapter-by-chapter as discovery lands"
     )
-    offline_batch_enabled: bool | None = Field(
-        default=None, description="Route drafting through the provider's offline batch API"
-    )
     # Quality gates.
     visual_judge_enabled: bool | None = Field(
         default=None, description="Enable the VLM visual judge over rendered pages"

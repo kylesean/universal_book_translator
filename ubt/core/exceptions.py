@@ -86,6 +86,15 @@ class LedgerError(UBTError):
 class LedgerWriterLockConflictError(LedgerError):
     """Raised when an exclusive ledger writer lock cannot be acquired because another process holds it."""
 
+    @property
+    def lease_expires_at(self) -> float | None:
+        """The UNIX timestamp when the current holder's lease expires, if known."""
+        raw = self.details.get("lease_expires_at")
+        try:
+            return float(raw) if raw is not None else None
+        except (ValueError, TypeError):
+            return None
+
 
 class LedgerWriterLeaseLostError(LedgerError):
     """Raised when this process's writer lease was reclaimed by another writer.

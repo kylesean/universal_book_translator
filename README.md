@@ -6,8 +6,8 @@ pipeline, and re-typeset the result as a new document laid out by Typst.
 
 Consistency defenses: a mined book bible (terms and names) and a structural +
 quality gate run on every job. Hierarchical chapter memory runs only on the
-multi-chapter long route — a single-chapter document, any document over 40
-chapters, and academic profiles get no rolling summary. A PDF up to 50 pages is
+multi-chapter long route — a single-chapter document and academic profiles get
+no rolling summary; multi-chapter books retain sliding epoch memory across chapters. A PDF up to 50 pages is
 ingested as one chapter; a longer one is split into internal page chunks that
 the draft stage sees as multiple chapters. Deterministic glossary enforcement is
 short-document by default; the long route opts in with

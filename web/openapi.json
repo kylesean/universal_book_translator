@@ -5738,18 +5738,6 @@
             "title": "Chapter Streaming Enabled",
             "description": "Translate chapter-by-chapter as discovery lands"
           },
-          "offline_batch_enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Offline Batch Enabled",
-            "description": "Route drafting through the provider's offline batch API"
-          },
           "visual_judge_enabled": {
             "anyOf": [
               {

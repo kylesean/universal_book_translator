@@ -152,3 +152,37 @@ def test_the_queue_reclaims_a_requeued_row(tmp_path: Path) -> None:
     # The contrast: a terminal cancel is not reclaimable.
     queue.request_cancel("job-a")
     assert queue.claim("w3") is None
+
+
+async def test_worker_writer_lock_conflict_backs_off_using_lease_expiry(tmp_path: Path) -> None:
+    """When a writer lock conflict occurs, worker backs off until lease expiry instead of spinning."""
+    import time
+    import unittest.mock
+
+    from ubt.core.exceptions import LedgerWriterLockConflictError
+
+    worker = _worker(tmp_path)
+    job = _Job()
+    slept: list[float] = []
+
+    async def fake_sleep(duration: float) -> None:
+        slept.append(duration)
+
+    expiry = time.time() + 45.0
+    conflict = LedgerWriterLockConflictError(
+        "held", details={"job_id": job.job_id, "lease_expires_at": expiry}
+    )
+
+    async def throwing_event_source(*args: Any, **kwargs: Any) -> Any:
+        raise conflict
+        if False:
+            yield
+
+    worker._event_source = throwing_event_source  # type: ignore[method-assign]
+
+    with unittest.mock.patch("asyncio.sleep", side_effect=fake_sleep):
+        result = await worker.execute(job)  # type: ignore[arg-type]
+
+    assert result is False
+    # Heartbeat task also sleeps, so check that our conflict backoff (~45.5s) was called
+    assert any(40.0 <= s <= 46.0 for s in slept)

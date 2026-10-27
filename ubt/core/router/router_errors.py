@@ -57,12 +57,6 @@ class ProviderErrorAction:
 _FAIL_FAST_STATUS = frozenset({400, 401, 402, 403, 404, 422})
 # Transient errors worth a backoff retry.
 _RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
-# A completed batch's result file is one GET away. Ride out a short transport
-# blip rather than surfacing "batch is dead": the caller answers a batch failure
-# by cancelling the already-paid job and re-drafting every block interactively,
-# which bills the same work twice. Bounded, so a persistent outage still fails.
-_BATCH_RESULT_FETCH_GRACE_SECONDS = 5.0
-_BATCH_RESULT_FETCH_BACKOFF_SECONDS = 1.0
 # Upper bound on a single ``Retry-After`` pause. A header may carry a far-future
 # value (``86400`` = 24h, or an HTTP-date days out); honouring it verbatim makes
 # every block in every worker sleep the rest of the day with no log line, and
@@ -271,48 +265,3 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorAction:
     ):
         return ProviderErrorAction(False, reason="programming_defect")
     return ProviderErrorAction(True, reason="unexpected")
-
-
-class BatchTranslationError(RuntimeError):
-    """Raised when an OpenAI-compatible batch job cannot be completed.
-
-    Callers treat it as a signal to fall back to the interactive path; it is    never surfaced as a block failure on its own.
-
-    ``batch_id`` is set when the error escapes *after* a batch was already
-    submitted, so the caller that decides to abandon batch mode (and re-draft
-    the same blocks interactively) can cancel that still-running job instead of
-    paying twice. A pre-submission failure carries no id and must not cancel.
-    """
-
-    def __init__(self, *args: object, batch_id: str | None = None) -> None:
-        super().__init__(*args)
-        self.batch_id = batch_id
-
-
-@dataclass
-class BatchDraftRequest:
-    """One block to be translated through the Batch API in a single job."""
-
-    custom_id: str
-    source_text: str
-    glossary_table: str = ""
-    neighbor_context: str = ""
-    target_lang: str = "zh"
-    source_lang: str = "en"
-    genre_profile: str = "general"
-    rolling_summary: str = ""
-    global_glossary: str = ""
-    few_shot_reference: str = ""
-    epoch_summary: str = ""
-    temperature: float = 0.3
-    domain: str | None = None
-    block_type: str = ""
-
-
-@dataclass
-class BatchDraftResult:
-    """Outcome for one :class:`BatchDraftRequest` line."""
-
-    custom_id: str
-    text: str | None = None
-    error: str | None = None

@@ -7,19 +7,17 @@ name to a capability profile and executes against the provider.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import logging
 import os
 import random
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from contextlib import suppress
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Literal, overload
 
 if TYPE_CHECKING:
-    from ubt.core.engine.ledger import SQLiteJobLedger
+    pass
 
 from ubt.core.exceptions import BudgetExceededError, JobInterruptedError, ModelProviderError
 from ubt.core.ir.models import IRBlock
@@ -42,8 +40,6 @@ from ubt.core.router.provider import BaseModelProvider, OpenAICompatibleProvider
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket, NullRateLimiter
 from ubt.core.router.registry import ModelCapabilityRegistry, fallback_profile
 from ubt.core.router.router_errors import (  # noqa: F401 -- re-exported
-    _BATCH_RESULT_FETCH_BACKOFF_SECONDS,
-    _BATCH_RESULT_FETCH_GRACE_SECONDS,
     _CONTINUATION_TAIL_CHARS,
     _FAIL_FAST_STATUS,
     _LOCAL_FALLBACK_BASE_URL_DEFAULT,
@@ -57,9 +53,6 @@ from ubt.core.router.router_errors import (  # noqa: F401 -- re-exported
     _RETRYABLE_STATUS,
     _SELF_HOSTED_BACKENDS,
     _VISION_TOKENS_PER_PAGE_IMAGE,
-    BatchDraftRequest,
-    BatchDraftResult,
-    BatchTranslationError,
     ProviderErrorAction,
     _estimate_prompt_tokens,
     _is_chain_fail_fast,
@@ -378,11 +371,6 @@ class ModelRouter:
         if self.prompt_strategy_override is not None:
             profile = profile.model_copy(update={"prompt_strategy": self.prompt_strategy_override})
         return profile
-
-    @property
-    def supports_batch_api(self) -> bool:
-        """Whether the bound provider can execute OpenAI-compatible batch jobs."""
-        return bool(getattr(self.provider, "supports_batch_api", False))
 
     def build_draft_prompt(
         self,
@@ -1320,343 +1308,6 @@ class ModelRouter:
         )
         return TranslationOutputExtractor.extract_macro_blocks(raw_res)
 
-    async def _await_batch_read[T](
-        self,
-        batch_id: str,
-        call: Callable[[], Awaitable[T]],
-        *,
-        deadline: float,
-        interval: float,
-        what: str,
-    ) -> T:
-        """Await a read-only Batch API call, riding out retryable failures.
-
-        A transient 5xx on the status endpoint *or* on the result-file fetch
-        must not surface as a dead batch: the caller cancels the submitted job
-        and re-drafts every block interactively, paying for the same work twice.
-        Retry what the router's own taxonomy calls retryable until ``deadline``;
-        a terminal failure or a passed deadline raises ``BatchTranslationError``
-        carrying the batch id so the caller can abandon the job first.
-        """
-        loop = asyncio.get_running_loop()
-        while True:
-            try:
-                return await call()
-            except ModelProviderError as exc:
-                if not classify_provider_error(exc).retryable or loop.time() >= deadline:
-                    raise BatchTranslationError(
-                        f"Batch {what} failed: {exc}", batch_id=batch_id
-                    ) from exc
-                logger.warning(
-                    "Batch %s %s failed (%s); retrying inside the deadline",
-                    batch_id,
-                    what,
-                    exc,
-                )
-                await asyncio.sleep(interval)
-
-    async def draft_batch(
-        self,
-        requests: list[BatchDraftRequest],
-        *,
-        poll_interval: float = 30.0,
-        poll_timeout: float = 3600.0,
-        ledger: SQLiteJobLedger | None = None,
-        job_id: str | None = None,
-        cleanup_files: bool = True,
-        status_callback: Callable[[str, dict[str, Any]], Any] | None = None,
-    ) -> list[BatchDraftResult]:
-        """Translate a batch of blocks through the provider's Batch API.
-
-        Prompts are built with the exact same topology as :meth:`draft` so
-        batch and interactive outputs stay consistent. A *read* failure (the
-        status endpoint or the result-file fetch) that the router's own taxonomy
-        calls retryable is ridden out inside ``poll_timeout``; a non-retryable
-        transport failure, that timeout, or a non-completed terminal status
-        raises
-        :class:`BatchTranslationError` with the provider job attached, and
-        callers fall back to interactive drafting for the same blocks. A
-        :class:`BudgetExceededError` from ``status_callback`` cancels the batch
-        first: the cap governs spend, not just this loop.
-
-        when ``ledger`` is given, the job is persisted under an
-        idempotency key derived from the submitted custom_id set. A restart
-        that proposes the same batch again resumes polling the original
-        provider job instead of double-billing a duplicate submission.
-
-        Known cost, deliberately not fixed: submitting holds the whole book in
-        memory several times over at once -- the pending blocks, their prepared
-        draft inputs, ``jsonl_requests``, and the JSONL string the provider
-        upload joins out of it. Measured on 2,000 blocks of ~576 characters
-        (1.15 MB of text): an 11 MB payload and an 88 MB peak, because every
-        line repeats the system prefix. A 10,000-block book therefore costs
-        hundreds of MB. Streaming each line as it is built and dropping that
-        block's prepared input would fix it; it is not on the hot path for the
-        document sizes this mode targets today, so the copies stay.
-        """
-        if not requests:
-            return []
-        if not self.supports_batch_api:
-            raise BatchTranslationError("Provider does not support the Batch API")
-        profile = self._get_profile(self.draft_model)
-        effort = self.draft_reasoning_effort
-
-        jsonl_requests: list[dict[str, Any]] = []
-        for req in requests:
-            system_prompt, user_prompt = self.build_draft_prompt(
-                source_text=req.source_text,
-                glossary_table=req.glossary_table,
-                neighbor_context=req.neighbor_context,
-                target_lang=req.target_lang,
-                source_lang=req.source_lang,
-                genre_profile=req.genre_profile,
-                rolling_summary=req.rolling_summary,
-                global_glossary=req.global_glossary,
-                few_shot_reference=req.few_shot_reference,
-                epoch_summary=req.epoch_summary,
-                model=self.draft_model,
-                domain=req.domain,
-                block_type=req.block_type or None,
-            )
-            messages: list[dict[str, str]] = []
-            if system_prompt.strip():
-                if profile.supports_system_prompt:
-                    messages.append({"role": "system", "content": system_prompt})
-                else:
-                    user_prompt = f"{system_prompt.strip()}\n\n{user_prompt}"
-            messages.append({"role": "user", "content": user_prompt})
-
-            body: dict[str, Any] = {"model": self.draft_model, "messages": messages}
-            if profile.supports_temperature:
-                body["temperature"] = req.temperature
-            if profile.supports_reasoning_effort and effort:
-                body["reasoning_effort"] = effort
-            # Mirror the interactive path's output budget. A reasoning model's
-            # hidden tokens share this cap, so leaving it unset let a gateway
-            # default (observed: 1024) starve the visible answer. The Batch path
-            # has no continuation loop, making a too-small budget fatal.
-            src_tokens = _estimate_prompt_tokens(req.source_text)
-            body["max_tokens"] = (
-                self._reasoning_output_tokens(
-                    src_tokens,
-                    provider=self._provider_for(self.draft_model, is_repair=False),
-                )
-                if profile.supports_reasoning_effort
-                else max(1024, int(src_tokens * 2.0))
-            )
-
-            # Match the interactive path: a server relying on
-            # {"enable_thinking": false} must not start emitting thinking
-            # traces in batch mode only.
-            chat_template_kwargs = self.provider.chat_template_kwargs
-            if chat_template_kwargs:
-                body["chat_template_kwargs"] = chat_template_kwargs
-            jsonl_requests.append(
-                {
-                    "custom_id": req.custom_id,
-                    "method": "POST",
-                    "url": "/v1/chat/completions",
-                    "body": body,
-                }
-            )
-
-        batch_id: str | None = None
-        try:
-            # Idempotency over the exact submitted payload (model +
-            # custom_ids + fully built prompts), not just model+custom_id: a
-            # glossary/context change on restart must submit a fresh batch
-            # instead of resuming one built with superseded terminology.
-            idempotency_key = hashlib.sha1(
-                json.dumps(jsonl_requests, sort_keys=True, ensure_ascii=False).encode()
-            ).hexdigest()
-
-            if ledger is not None and job_id is not None:
-                # Synchronous SQLite: off the loop -- a WAL lock under
-                # ``busy_timeout`` would stall every concurrent job and SSE
-                # subscriber sharing it.
-                outcome, existing = await asyncio.to_thread(
-                    ledger.reserve_batch_job, idempotency_key, job_id
-                )
-                if outcome == "resume" and existing:
-                    logger.info(
-                        "Resuming live batch job %s (idempotency key %s…)",
-                        existing,
-                        idempotency_key[:12],
-                    )
-                    batch_id = existing
-                elif outcome == "pending":
-                    # A concurrent worker holds the create reservation for this
-                    # exact payload. Submitting anyway would double-bill the same
-                    # blocks, so bail and let the caller fall back to interactive
-                    # drafting rather than block on the other worker.
-                    raise BatchTranslationError(
-                        f"batch {idempotency_key[:12]}… is being submitted by another "
-                        "worker; skipping batch to avoid a duplicate submission"
-                    )
-            if batch_id is None:
-                # Own the create (fresh reservation, or adopted a stale one).
-                # A changed payload yields a new idempotency key, so a
-                # prior live batch for this job would otherwise keep billing and
-                # never be cancelled. Abandon it before creating the new one.
-                if ledger is not None and job_id is not None:
-                    superseded = await asyncio.to_thread(
-                        ledger.find_live_batch_for_job, job_id, exclude_key=idempotency_key
-                    )
-                    if superseded:
-                        logger.warning(
-                            "Abandoning superseded live batch %s for job %s", superseded, job_id
-                        )
-                        await self.abandon_batch(superseded, ledger=ledger, job_id=job_id)
-                if status_callback is not None:
-                    # The caller's cooperative interrupt (cancel check, budget
-                    # cap) must run *before* the book is submitted, not only
-                    # inside the poll loop after every block is already billed.
-                    res = status_callback("submitting", {"request_count": len(jsonl_requests)})
-                    if asyncio.iscoroutine(res):
-                        await res
-                batch_id = await self.provider.create_batch_job(jsonl_requests)
-                if ledger is not None and job_id is not None:
-                    await asyncio.to_thread(ledger.finalize_batch_job, idempotency_key, batch_id)
-            loop = asyncio.get_running_loop()
-            deadline = loop.time() + max(poll_timeout, 1.0)
-            interval = max(poll_interval, 0.5)
-            job: dict[str, Any] = {}
-            while True:
-                job = await self._await_batch_read(
-                    batch_id,
-                    lambda: self.provider.get_batch_job(batch_id),
-                    deadline=deadline,
-                    interval=interval,
-                    what="status poll",
-                )
-                status = str(job.get("status") or "")
-                if ledger is not None and job_id is not None:
-                    await asyncio.to_thread(
-                        ledger.update_batch_job_status, batch_id, status or "unknown"
-                    )
-                if status_callback is not None:
-                    # Not swallowed: the callback is the caller's cooperative
-                    # interrupt channel (cancel check, budget cap). Passing
-                    # exceptions on let a still-billing batch run past the cap.
-                    try:
-                        res = status_callback(status, job)
-                        if asyncio.iscoroutine(res):
-                            await res
-                    except (BudgetExceededError, JobInterruptedError):
-                        # The cap is a hard stop on spend and this batch *is*
-                        # spend: leaving it running makes the limit a
-                        # suggestion. The same holds for a cooperative cancel —
-                        # the caller re-raises without falling back, so without
-                        # this the batch keeps billing after the job is gone.
-                        # Cancel it here; the caller has no cancel point of its
-                        # own.
-                        await self.abandon_batch(batch_id, ledger=ledger, job_id=job_id)
-                        raise
-                if status in ("completed", "failed", "expired", "cancelled"):
-                    break
-                if loop.time() >= deadline:
-                    raise BatchTranslationError(
-                        f"Batch job {batch_id} timed out after {poll_timeout:.0f}s "
-                        f"(status={status!r})",
-                        batch_id=batch_id,
-                    )
-                await asyncio.sleep(interval)
-            if str(job.get("status")) != "completed":
-                raise BatchTranslationError(
-                    f"Batch job {batch_id} ended with status {str(job.get('status'))!r}",
-                    batch_id=batch_id,
-                )
-            raw_results = await self._await_batch_read(
-                batch_id,
-                lambda: self.provider.fetch_batch_results(batch_id),
-                deadline=loop.time() + _BATCH_RESULT_FETCH_GRACE_SECONDS,
-                interval=_BATCH_RESULT_FETCH_BACKOFF_SECONDS,
-                what="result fetch",
-            )
-        except (BudgetExceededError, JobInterruptedError, asyncio.CancelledError):
-            # The caller's own control-flow signals: re-raise untouched so it can
-            # cancel/abort instead of falling back to interactive drafting.
-            raise
-        except ModelProviderError as exc:
-            # Carry batch_id through the rewrap so the caller can still
-            # abandon_batch a job that was already created (otherwise it keeps
-            # billing while interactive drafting re-translates the same blocks).
-            raise BatchTranslationError(
-                f"Batch transport failure: {exc}",
-                batch_id=batch_id,
-            ) from exc
-        except Exception as exc:
-            # Any other post-submission failure must still carry the live batch
-            # id: without it the interactive fallback cannot cancel the batch and
-            # re-translates (and re-bills) the same blocks.
-            if batch_id is None:
-                raise
-            raise BatchTranslationError(
-                f"Batch job {batch_id} failed: {exc}",
-                batch_id=batch_id,
-            ) from exc
-
-        # Reap the Files-API objects now that the results are in hand: the
-        # input file is the whole batch's source text and the output file its
-        # translation, neither of which should outlive the job on the provider.
-        # Best-effort (cleanup_batch_files never raises), and outside the
-        # transport try/except so a failed delete never masquerades as a
-        # batch failure that would re-bill the blocks via interactive fallback.
-        if cleanup_files:
-            await self.provider.cleanup_batch_files(batch_id)
-        if ledger is not None and job_id is not None:
-            await asyncio.to_thread(ledger.update_batch_job_status, batch_id, "consumed")
-
-        results: list[BatchDraftResult] = []
-        for req in requests:
-            entry = raw_results.get(req.custom_id)
-            if entry is None:
-                results.append(
-                    BatchDraftResult(custom_id=req.custom_id, error="Missing from batch output")
-                )
-                continue
-            if entry.get("error") or entry.get("content") is None:
-                results.append(
-                    BatchDraftResult(
-                        custom_id=req.custom_id,
-                        error=str(entry.get("error") or "Empty batch response"),
-                    )
-                )
-                continue
-            text = TranslationOutputExtractor.extract(
-                str(entry["content"]),
-                strategy=profile.extraction_strategy,
-            )
-            results.append(BatchDraftResult(custom_id=req.custom_id, text=text))
-        return results
-
-    async def abandon_batch(
-        self, batch_id: str, ledger: SQLiteJobLedger | None = None, job_id: str | None = None
-    ) -> None:
-        """Cancel a still-running batch we are about to abandon to interactive.
-
-        Only a live batch is cancelled and marked ``cancelled``: a batch that
-        already finished — results harvested or not — is terminal, so cancelling
-        is a no-op at the provider and overwriting its status would drop the
-        resumable state of an already-paid run. The caller invokes this at the
-        decision point; cleanup must never raise over the fallback it annotates.
-        """
-        if (
-            ledger is not None
-            and job_id is not None
-            and not await asyncio.to_thread(ledger.is_batch_live, batch_id)
-        ):
-            return
-        try:
-            await self.provider.cancel_batch_job(batch_id)
-        except Exception as exc:  # never mask the fallback
-            logger.debug("Batch abandon cancel failed for %s: %s", batch_id, exc)
-        if ledger is not None and job_id is not None:
-            try:
-                await asyncio.to_thread(ledger.update_batch_job_status, batch_id, "cancelled")
-            except Exception as exc:  # bookkeeping only
-                logger.debug("Batch abandon status update failed for %s: %s", batch_id, exc)
-
     async def repair(
         self,
         block: IRBlock,
@@ -1775,13 +1426,8 @@ class ModelRouter:
 #: its consumers (the draft stage imports the batch types and the error
 #: classifier from here; the retry-cap test reads the cap constant).
 __all__ = [
-    "BatchDraftRequest",
-    "BatchDraftResult",
-    "BatchTranslationError",
     "ModelRouter",
     "ProviderErrorAction",
-    "_BATCH_RESULT_FETCH_BACKOFF_SECONDS",
-    "_BATCH_RESULT_FETCH_GRACE_SECONDS",
     "_CONTINUATION_TAIL_CHARS",
     "_FAIL_FAST_STATUS",
     "_LOCAL_FALLBACK_BASE_URL_DEFAULT",

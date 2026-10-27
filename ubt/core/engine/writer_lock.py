@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 #: How long a lease is valid before another process may reclaim it. Long enough
 #: to cover a normal run's lifetime between renewals, short enough that a crashed
 #: writer does not wedge the job for long.
-DEFAULT_LEASE_SECONDS = 300.0
+DEFAULT_LEASE_SECONDS = 60.0
 
 
 class LedgerWriterLock:
@@ -127,9 +127,17 @@ class LedgerWriterLock:
             )
             if cur.rowcount == 0:
                 holder = conn.execute(
-                    "SELECT owner_pid FROM job_locks WHERE job_id = ?", (self.job_id,)
+                    "SELECT owner_pid, lease_expires_at FROM job_locks WHERE job_id = ?",
+                    (self.job_id,),
                 ).fetchone()
-                holder_pid = int(holder["owner_pid"]) if holder else None
+                holder_pid = (
+                    int(holder["owner_pid"]) if holder and holder["owner_pid"] is not None else None
+                )
+                lease_expires_at = (
+                    float(holder["lease_expires_at"])
+                    if holder and holder["lease_expires_at"] is not None
+                    else None
+                )
                 raise LedgerWriterLockConflictError(
                     f"Job {self.job_id} is already being written by another process"
                     + (f" (pid {holder_pid})" if holder_pid else "")
@@ -137,7 +145,11 @@ class LedgerWriterLock:
                     "provider again for blocks the first is drafting and overwrite "
                     "its checkpoints. Wait for the running job, or pick a distinct "
                     "--job-id.",
-                    details={"job_id": self.job_id, "holder_pid": holder_pid},
+                    details={
+                        "job_id": self.job_id,
+                        "holder_pid": holder_pid,
+                        "lease_expires_at": lease_expires_at,
+                    },
                 )
             self._held = True
         except sqlite3.OperationalError as exc:

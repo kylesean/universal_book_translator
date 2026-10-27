@@ -2,9 +2,9 @@
 
 The mined book bible and the structural + QE quality gate run on every job. The
 hierarchical context memory below (L1 neighbours / L2 chapter snapshots / L3
-epoch summaries) only runs on the multi-chapter long route: a single-chapter
-document, anything over 40 chapters, and academic profiles get no rolling
-summary (``ubt.core.engine.stages.draft.resolve_draft_policy``). The export-time
+epoch summaries) runs on the multi-chapter long route: a single-chapter
+document and academic profiles get no rolling summary
+(``ubt.core.engine.stages.draft.resolve_draft_policy``); multi-chapter books retain sliding epoch memory. The export-time
 deterministic glossary enforcement is short-document only; see
 ``ubt.core.policy.adaptive_policy``, which keys it off ``route.mode == "short"``.
 """

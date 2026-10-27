@@ -42,7 +42,6 @@ export const doctorCodesZh: DoctorCodeTables = {
     sqlite_wal: '运行数据存储',
     page_images: '页面图像隐私',
     qe: '质量检查',
-    batch_api: '批量翻译',
     pdf_engine: 'PDF 解析',
     ocr_engine: '文字识别',
     render: 'PDF 排版',
@@ -96,8 +95,6 @@ export const doctorCodesZh: DoctorCodeTables = {
     // used unchanged, so English (which has no details table) is unaffected.
     'qe.tiered.via': '模型评分已开启；抽样比例 {sample}（使用 {provider}）',
     'qe.heuristic': '规则检查，不调用模型',
-    'batch_api.enabled': '已启用',
-    'batch_api.disabled': '已禁用',
     'pdf_engine.docling_ok': '高精度版面解析可用',
     'pdf_engine.docling_missing':
       '未安装高精度版面解析组件；需要该模式的任务会直接报错，而不是静默丢失表格、图与公式',
@@ -183,7 +180,6 @@ export const doctorCodesEn: DoctorCodeTables = {
     sqlite_wal: 'SQLite WAL Ledger',
     page_images: 'Page images',
     qe: 'QE',
-    batch_api: 'Batch API',
     pdf_engine: 'PDF engine',
     ocr_engine: 'OCR engine',
     render: 'Render',

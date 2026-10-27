@@ -575,14 +575,6 @@ def translate(
             show_default=False,
         ),
     ] = None,
-    offline_batch: Annotated[
-        bool | None,
-        typer.Option(
-            "--offline-batch/--no-offline-batch",
-            help="Draft entire book asynchronously using cloud Batch API (OpenAI/Anthropic 50% discount, high throughput)",
-            show_default=False,
-        ),
-    ] = None,
     pdf_engine: Annotated[
         PdfEngine | None,
         typer.Option(
@@ -720,7 +712,6 @@ def translate(
         "batch_limit": batch_limit,
         "macro_chunk_size": macro_chunk_size,
         "chapter_streaming_enabled": chapter_streaming,
-        "offline_batch_enabled": offline_batch,
         "dual_mode": dual_mode,
         "translate_chrome": translate_chrome,
         "preset": preset,

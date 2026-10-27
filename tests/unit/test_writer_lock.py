@@ -123,6 +123,8 @@ def test_second_writer_to_the_same_job_is_refused(tmp_path: Path) -> None:
         assert isinstance(error, LedgerError)
         assert error.details["job_id"] == "same-job"
         assert error.details["holder_pid"] == __import__("os").getpid()
+        assert error.lease_expires_at is not None
+        assert error.lease_expires_at > time.time()
         assert "same-job" in str(error)
         assert "(pid" in str(error)
     finally:

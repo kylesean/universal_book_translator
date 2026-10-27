@@ -46,7 +46,6 @@ from ubt.core.ports import (
     supported_suffixes,
 )
 from ubt.core.router.pricing import (
-    BATCH_API_DISCOUNT,
     price_is_known,
     resolve_model_prices,
 )
@@ -523,52 +522,13 @@ def _build_cost(
             )
         )
 
-    batch_requested = bool(
-        getattr(config, "offline_batch_enabled", False) or getattr(config, "batch_enabled", False)
-    )
-    api_mode = str(getattr(config, "api_mode", "openai-chat"))
-    # The discount is only real if the run can actually be batched. The engine
-    # gates it on ``router.supports_batch_api`` — true for openai-chat,
-    # anthropic-messages, and gemini-native — and falls back to *interactive full price*
-    # when a batch submission fails, so quoting it for an unsupported api_mode
-    # cut the draft line in half against a spend that never got the discount.
-    _batch_supported_modes = frozenset({"openai-chat", "anthropic-messages", "gemini-native"})
-    batch_discount = (
-        BATCH_API_DISCOUNT if batch_requested and api_mode in _batch_supported_modes else 1.0
-    )
-    if batch_requested and batch_discount >= 1.0:
-        warnings.append(
-            AssessmentWarning(
-                "BATCH_DISCOUNT_UNAVAILABLE",
-                "warn",
-                f"已请求批量 API，但当前 api_mode={api_mode} 不支持批处理（仅支持 "
-                "openai-chat, anthropic-messages, gemini-native）；草稿按交互全价估算。",
-                params={"api_mode": api_mode},
-            )
-        )
-    if batch_discount < 1.0:
-        warnings.append(
-            AssessmentWarning(
-                "BATCH_DISCOUNT_APPLIED",
-                "info",
-                "已启用云端批量 API 模式（--offline-batch），草稿 Token 成本按 50% 离线折扣计算。",
-            )
-        )
-
     macro_chunk_size = max(1, getattr(config, "macro_chunk_size", 1))
-    if batch_discount < 1.0 and macro_chunk_size > 1:
-        # ``run_whole_book_batch`` builds one request *per block* — macro
-        # chunking only applies to the interactive retry path — and every one of
-        # those requests carries the full prompt prefix. Dividing the call count
-        # by the chunk size here under-quoted the prefix by that factor.
-        macro_chunk_size = 1
     draft = estimate_draft_cost_from_totals(
         billable_blocks=billable_blocks,
         source_chars=source_chars,
         draft_model=config.draft_model,
         prefix_tokens=prefix,
         macro_chunk_size=macro_chunk_size,
-        batch_discount=batch_discount,
         base_url=config.base_url,
         source_lang=source_lang,
         target_lang=target_lang,

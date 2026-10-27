@@ -1698,11 +1698,6 @@ export interface components {
              */
             chapter_streaming_enabled?: boolean | null;
             /**
-             * Offline Batch Enabled
-             * @description Route drafting through the provider's offline batch API
-             */
-            offline_batch_enabled?: boolean | null;
-            /**
              * Visual Judge Enabled
              * @description Enable the VLM visual judge over rendered pages
              */

@@ -27,6 +27,11 @@ It takes `--corpus corpus` (default) and exits 0 on pass.
 - `dump_compiler_edges.py` — read-only static check of the core↔compiler import
   discipline: exit 1 on any module-level core→{segment, translate} edge or a
   `core.engine ↔ pipeline` cycle.
+- `build_console_assets.py` — builds the operator console (`web/`) and syncs the
+  bundle into `ubt/api/static`, the copy the wheel ships and FastAPI serves.
+- `check_console_bundle.py` — the local mirror of CI's bundle check: rebuilds the
+  console and exits 1 when `ubt/api/static` no longer matches the source. Runs as
+  the `console-bundle-fresh` pre-push hook.
 - `check_doc_refs.py` — read-only check of the `path:line` references in the
   (unversioned) `docs/` tree: exit 1 when a cited UBT file does not exist or a
   line number is past its file's end. Run it after a refactor that moves code

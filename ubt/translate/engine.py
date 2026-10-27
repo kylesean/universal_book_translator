@@ -2,7 +2,7 @@
 
 A translation unit is protected text, a draft, and the restored result. Every
 path that produces a draft -- the standalone reader pipeline and the draft
-stage's router/batch orchestration -- must do the same three things in the same
+stage's router orchestration -- must do the same three things in the same
 order:
 
     mask (protect spans) -> [generate] -> restore (verify) -> judge
@@ -104,9 +104,8 @@ class TranslationEngine:
     def cached_draft(self, masked_source: str, *, context: str = "") -> str | None:
         """The cached raw draft for this masked source + context, or ``None``.
 
-        For callers whose generate step is not a single coroutine of the masked
-        source -- the draft stage's Batch API path, which submits many units at
-        once -- so they can consult the cache before spending and record after.
+        For callers whose generate step is separated from caching,
+        so they can consult the cache before spending and record after.
         Fail-open: no store, or a corrupt entry, is a miss.
         """
         if self.cache is None:

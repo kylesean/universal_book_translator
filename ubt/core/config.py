@@ -918,16 +918,15 @@ class UBTConfig(BaseSettings):
 
     # -- Cross-chapter rolling summary (one bulk call per chapter transition) --
     enable_rolling_summary: bool = True
-
-    # -- Batch API (async draft workloads at ~50% discount, off by default) ----
-    # Only enable against endpoints implementing /v1/files + /v1/batches;
-    # the draft stage falls back to the interactive path automatically.
-    batch_enabled: bool = False
-    offline_batch_enabled: bool = Field(
-        default=False,
-        description="Draft entire book asynchronously using cloud Batch API (OpenAI/Anthropic 50% discount)",
+    memory_sliding_window: bool = Field(
+        default=True,
+        description="Enable sliding window on L3 compressed history so long-form books retain the most recent epochs within budget",
     )
-    batch_poll_interval: float = Field(default=30.0, gt=0)
+    memory_max_epochs: int = Field(
+        default=50,
+        gt=0,
+        description="Maximum number of L3 epoch summaries retained in memory",
+    )
 
     # -- Decoupled External Glossary & Domain ----------------------------------
     # Declared here and on ProviderConfig because ``[defaults]`` shares that
@@ -946,13 +945,6 @@ class UBTConfig(BaseSettings):
         default=None,
         description="Domain or subject field descriptor (e.g. 'semiconductor physics', 'biomedicine')",
     )
-    batch_poll_timeout: float = Field(default=3600.0, gt=0)
-    batch_min_blocks: int = Field(default=5, gt=0)
-    # Privacy: reap the Files-API objects a batch run leaves on the provider —
-    # the input file holds the whole batch's source text and the output file its
-    # translations. Delete is best-effort (a gateway without the endpoint just
-    # logs); turn this off only to keep those handles for manual re-download.
-    batch_delete_files: bool = True
 
     # -- Bilingual render-mode advisory -----------------------------------------
     # 'auto' lets the advisor decide; explicit modes only warn.
@@ -1186,8 +1178,6 @@ class UBTConfig(BaseSettings):
         # that clamps on its first refill.
         if self.rate_limit_tpm > self.rate_limit_max_tpm:
             self.rate_limit_max_tpm = self.rate_limit_tpm
-        if self.offline_batch_enabled and not self.batch_enabled:
-            object.__setattr__(self, "batch_enabled", True)
         # Repair mode with a zero budget plans drift repairs and then discards
         # every one (plan_consistency_tasks caps to max_repairs): the stage
         # returns before re-translating a block, so the setting reads "on"

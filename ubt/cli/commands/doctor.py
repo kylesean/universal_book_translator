@@ -65,7 +65,6 @@ CHECK_CODES: dict[str, tuple[str, ...]] = {
         "sqlite_wal",
         "page_images",
         "qe",
-        "batch_api",
         "pdf_engine",
         "ocr_engine",
         "render",
@@ -113,8 +112,6 @@ CHECK_CODES: dict[str, tuple[str, ...]] = {
         "page_images.allowed",
         "qe.tiered",
         "qe.heuristic",
-        "batch_api.enabled",
-        "batch_api.disabled",
         "pdf_engine.docling_ok",
         "pdf_engine.docling_missing",
         "pdf_engine.pdfium",
@@ -934,24 +931,6 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
             "zero-token rule scoring",
             code="qe",
             detail_code="qe.heuristic",
-        )
-
-    # -- optional tiers --------------------------------------------------------
-    if config.batch_enabled:
-        record(
-            "Batch API",
-            "WARN",
-            "enabled \u2014 endpoint must implement /v1/files + /v1/batches (not probed offline)",
-            code="batch_api",
-            detail_code="batch_api.enabled",
-        )
-    else:
-        record(
-            "Batch API",
-            "SKIP",
-            "disabled",
-            code="batch_api",
-            detail_code="batch_api.disabled",
         )
 
     # -- rendering ------------------------------------------------------------

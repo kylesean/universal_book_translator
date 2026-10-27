@@ -421,10 +421,6 @@ class BaseTransport(ABC):
     def chat_template_kwargs(self) -> dict[str, Any]:
         return dict(self._chat_template_kwargs)
 
-    @property
-    def supports_batch_api(self) -> bool:
-        return False
-
     def _auth_headers(self) -> dict[str, str]:
         # A loopback endpoint authenticates nothing: llama.cpp, Ollama and
         # llama-swap accept any bearer, and this project's own default config
@@ -710,18 +706,3 @@ class BaseTransport(ABC):
         max_tokens: int | None = None,
     ) -> str:
         raise NotImplementedError(f"{self.provider_name} does not support vision input")
-
-    async def create_batch_job(self, requests: list[dict[str, Any]]) -> str:
-        raise NotImplementedError(f"{self.provider_name} does not support the Batch API")
-
-    async def get_batch_job(self, batch_id: str) -> dict[str, Any]:
-        raise NotImplementedError(f"{self.provider_name} does not support the Batch API")
-
-    async def fetch_batch_results(self, batch_id: str) -> dict[str, dict[str, Any]]:
-        raise NotImplementedError(f"{self.provider_name} does not support the Batch API")
-
-    async def cleanup_batch_files(self, batch_id: str) -> None:
-        return None
-
-    async def cancel_batch_job(self, batch_id: str) -> None:
-        return None
