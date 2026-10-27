@@ -140,7 +140,10 @@ mcp = [
 pdf = [
     "docling>=2.136.0",
 ]
-# Classical detector OCR (CPU-capable, bundled ONNX models).
+# Classical detector OCR: the only measured-box in-process engine. An
+# LLM-VLM driver emits text without trustworthy coordinates, so anchoring
+# refuses it in recognition mode — a true scan needs this tier regardless of
+# what the VLM stack grows into.
 ocr = [
     "rapidocr>=3.9.0",
     "onnxruntime>=1.29.0",
