@@ -379,6 +379,10 @@ class TranslationMemory:
         self._busy_timeout_sec = float(busy_timeout_sec)
         self._lock = threading.Lock()
         self._conn: sqlite3.Connection | None = None
+        # One read-only handle per worker thread. WAL already lets readers run
+        # beside the single writer; without this, every lookup queued behind
+        # one ``threading.Lock`` and the fuzzy scan serialized them all.
+        self._read_local = threading.local()
         # (src_lang, tgt_lang) -> (normalized_sources, ids); lazily populated.
         self._pool_cache: dict[tuple[str, str], tuple[list[str], list[int]]] = {}
         self._entry_count_cache: dict[tuple[str, str] | None, int] = {}
@@ -415,6 +419,29 @@ class TranslationMemory:
             conn.execute("PRAGMA synchronous=NORMAL;")
             self._conn = conn
         return self._conn
+
+    def _get_read_conn(self) -> sqlite3.Connection:
+        """The calling thread's own read-only connection, outside the writer's lock.
+
+        Everything that only SELECTs goes through here: WAL lets each reader
+        snapshot beside the single writer, and per-thread handles keep the
+        hot path (two lookups per drafted block, the pool and generation
+        probes) off the ``threading.Lock`` the writer needs. The connection
+        lives in thread-local storage, so a ``to_thread`` worker keeps one
+        warm handle for its whole life. The store is created by ``_init_db``
+        in ``__init__``, so a read connection is always openable by the time
+        any lookup runs.
+        """
+        conn = getattr(self._read_local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(
+                f"file:{self.db_path.resolve()}?mode=ro",
+                uri=True,
+                timeout=self._busy_timeout_sec,
+            )
+            conn.execute(f"PRAGMA busy_timeout={int(self._busy_timeout_sec * 1000)};")
+            self._read_local.conn = conn
+        return conn
 
     def _init_db(self) -> None:
         with self._lock, self._get_conn() as conn:
@@ -581,7 +608,12 @@ class TranslationMemory:
         return int(row[0]) if row is not None else 0
 
     def close(self) -> None:
-        """Close the underlying connection."""
+        """Close the writer's connection.
+
+        The per-thread read connections live in thread-local storage and close
+        with their owning thread (or at garbage collection); a long-lived
+        server holds at most one per worker thread per store.
+        """
         with self._lock:
             if self._conn is not None:
                 try:
@@ -611,55 +643,59 @@ class TranslationMemory:
         if not normalized:
             return None
         key = _source_hash(normalized)
-        with self._lock, self._get_conn() as conn:
-            cursor = conn.execute(
-                """
-                SELECT id, src_text, tgt_text, provenance, context_hash, domain, runs_json
-                FROM tm_entries
-                WHERE src_lang = ? AND tgt_lang = ? AND src_hash = ?
-                """,
-                (src_lang, tgt_lang, key),
+        conn = self._get_read_conn()
+        cursor = conn.execute(
+            """
+            SELECT id, src_text, tgt_text, provenance, context_hash, domain, runs_json
+            FROM tm_entries
+            WHERE src_lang = ? AND tgt_lang = ? AND src_hash = ?
+            """,
+            (src_lang, tgt_lang, key),
+        )
+        rows = cursor.fetchall()
+        if not rows:
+            return None
+
+        valid_rows = [
+            row
+            for row in rows
+            if not self._row_rejected(str(row[3]), str(row[1]), str(row[2]))
+            and self._hit_allowed(
+                str(row[3]),
+                str(row[4] or ""),
+                row[5],
+                context_hash,
+                domain,
             )
-            rows = cursor.fetchall()
-            if not rows:
-                return None
+        ]
+        if not valid_rows:
+            return None
 
-            valid_rows = [
-                row
-                for row in rows
-                if not self._row_rejected(str(row[3]), str(row[1]), str(row[2]))
-                and self._hit_allowed(
-                    str(row[3]),
-                    str(row[4] or ""),
-                    row[5],
-                    context_hash,
-                    domain,
-                )
-            ]
-            if not valid_rows:
-                return None
+        def _candidate_rank(r: tuple[Any, ...]) -> tuple[int, int, int, int]:
+            # human_pe outranks context. A PE import carries no context
+            # hash, so ranking context first would let an exact-context
+            # machine row outrank the reviewed rendering, contradicting the
+            # writeback contract that human review is the highest-trust
+            # signal in the pipeline.
+            r_id = int(r[0])
+            prov = str(r[3])
+            r_ctx = str(r[4] or "")
+            r_domain = r[5]
+            is_human = 1 if prov == PROVENANCE_HUMAN_PE else 0
+            exact_ctx = (
+                1
+                if (context_hash and r_ctx == context_hash) or (not context_hash and not r_ctx)
+                else 0
+            )
+            same_domain = 1 if domain and r_domain == domain else 0
+            return (is_human, exact_ctx, same_domain, r_id)
 
-            def _candidate_rank(r: tuple[Any, ...]) -> tuple[int, int, int, int]:
-                # human_pe outranks context. A PE import carries no context
-                # hash, so ranking context first would let an exact-context
-                # machine row outrank the reviewed rendering, contradicting the
-                # writeback contract that human review is the highest-trust
-                # signal in the pipeline.
-                r_id = int(r[0])
-                prov = str(r[3])
-                r_ctx = str(r[4] or "")
-                r_domain = r[5]
-                is_human = 1 if prov == PROVENANCE_HUMAN_PE else 0
-                exact_ctx = (
-                    1
-                    if (context_hash and r_ctx == context_hash) or (not context_hash and not r_ctx)
-                    else 0
-                )
-                same_domain = 1 if domain and r_domain == domain else 0
-                return (is_human, exact_ctx, same_domain, r_id)
-
-            best_row = max(valid_rows, key=_candidate_rank)
-            hit_id = int(best_row[0])
+        best_row = max(valid_rows, key=_candidate_rank)
+        hit_id = int(best_row[0])
+        # The chosen hit's use count is audit metadata, not read state: it
+        # rides the writer's connection under the lock, so the read above
+        # never contends with a concurrent worker's identical lookup.
+        with self._lock, self._get_conn() as conn:
             self._bump_use_count(conn, hit_id)
 
         return TMHit(
@@ -731,19 +767,18 @@ class TranslationMemory:
             return None
         match_expr = " OR ".join(_fts_phrase(t) for t in terms)
         try:
-            with self._lock, self._get_conn() as conn:
-                rows = conn.execute(
-                    "SELECT rowid FROM tm_fts WHERE tm_fts MATCH ? "
-                    "AND src_lang = ? AND tgt_lang = ? ORDER BY rank LIMIT ?",
-                    (match_expr, src_lang, tgt_lang, self._prefilter_limit),
-                ).fetchall()
-                if not rows:
-                    return None
-                texts = conn.execute(
-                    f"SELECT id, src_text FROM tm_entries WHERE id IN "
-                    f"({','.join('?' * len(rows))})",
-                    [int(r[0]) for r in rows],
-                ).fetchall()
+            conn = self._get_read_conn()
+            rows = conn.execute(
+                "SELECT rowid FROM tm_fts WHERE tm_fts MATCH ? "
+                "AND src_lang = ? AND tgt_lang = ? ORDER BY rank LIMIT ?",
+                (match_expr, src_lang, tgt_lang, self._prefilter_limit),
+            ).fetchall()
+            if not rows:
+                return None
+            texts = conn.execute(
+                f"SELECT id, src_text FROM tm_entries WHERE id IN ({','.join('?' * len(rows))})",
+                [int(r[0]) for r in rows],
+            ).fetchall()
         except sqlite3.Error as exc:
             logger.warning("TM FTS prefilter failed, falling back to scan: %s", exc)
             return self._lookup_fuzzy_scan(
@@ -858,22 +893,28 @@ class TranslationMemory:
         context_hash: str,
         domain: str | None,
     ) -> TMHit | None:
-        """Fetch a fuzzy candidate only when the context gate passes."""
-        with self._lock, self._get_conn() as conn:
-            cursor = conn.execute(
-                "SELECT src_text, tgt_text, provenance, context_hash, domain "
-                "FROM tm_entries WHERE id = ?",
-                (entry_id,),
-            )
-            row = cursor.fetchone()
-            if row is None:
-                return None
-            provenance = str(row[2])
-            if self._row_rejected(str(row[2]), str(row[0]), str(row[1])):
-                return None
-            if not self._hit_allowed(provenance, str(row[3] or ""), row[4], context_hash, domain):
-                return None
-            self._bump_use_count(conn, entry_id)
+        """Fetch a fuzzy candidate only when the context gate passes.
+
+        The SELECT and the gate run on this thread's read connection; only the
+        use-count bump is a write, so that alone goes to the writer's
+        connection under the lock.
+        """
+        conn = self._get_read_conn()
+        cursor = conn.execute(
+            "SELECT src_text, tgt_text, provenance, context_hash, domain "
+            "FROM tm_entries WHERE id = ?",
+            (entry_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        provenance = str(row[2])
+        if self._row_rejected(str(row[2]), str(row[0]), str(row[1])):
+            return None
+        if not self._hit_allowed(provenance, str(row[3] or ""), row[4], context_hash, domain):
+            return None
+        with self._lock, self._get_conn() as writer:
+            self._bump_use_count(writer, entry_id)
         return TMHit(
             source_text=str(row[0]),
             target_text=str(row[1]),
@@ -884,23 +925,25 @@ class TranslationMemory:
     def _pool(self, src_lang: str, tgt_lang: str) -> tuple[list[str], list[int]]:
         """Lazily load and cache the normalized source pool for a language pair."""
         cache_key = (src_lang, tgt_lang)
-        with self._lock:
-            conn = self._get_conn()
-            generation = self._generation(conn, cache_key)
-            cached = self._pool_cache.get(cache_key)
-            if cached is not None and self._pool_gen.get(cache_key) == generation:
-                return cached
-            cursor = conn.execute(
-                "SELECT id, src_text FROM tm_entries WHERE src_lang = ? AND tgt_lang = ?",
-                (src_lang, tgt_lang),
-            )
-            rows = cursor.fetchall()
-            normalized_sources = [normalize_for_tm(str(r[1])) for r in rows]
-            ids = [int(r[0]) for r in rows]
-            pool = (normalized_sources, ids)
-            self._pool_cache[cache_key] = pool
-            self._pool_gen[cache_key] = generation
-            return pool
+        conn = self._get_read_conn()
+        generation = self._generation(conn, cache_key)
+        cached = self._pool_cache.get(cache_key)
+        if cached is not None and self._pool_gen.get(cache_key) == generation:
+            return cached
+        cursor = conn.execute(
+            "SELECT id, src_text FROM tm_entries WHERE src_lang = ? AND tgt_lang = ?",
+            (src_lang, tgt_lang),
+        )
+        rows = cursor.fetchall()
+        normalized_sources = [normalize_for_tm(str(r[1])) for r in rows]
+        ids = [int(r[0]) for r in rows]
+        pool = (normalized_sources, ids)
+        # Two threads can fill the same pair concurrently; both read the same
+        # generation, so either winner is the same view, and a fill that raced
+        # a writeback loses on the next lookup's generation re-check anyway.
+        self._pool_cache[cache_key] = pool
+        self._pool_gen[cache_key] = generation
+        return pool
 
     def _invalidate_pool(self, src_lang: str, tgt_lang: str) -> None:
         """Drop one language pair's cached views, in the writer's own process.
@@ -1002,11 +1045,14 @@ class TranslationMemory:
         grow and never be corrected is a liability, so auditing has to be part
         of the public surface rather than a hand-written SQL query.
         """
-        with self._lock, self._get_conn() as conn:
-            rows = conn.execute(
+        rows = (
+            self._get_read_conn()
+            .execute(
                 "SELECT id, src_lang, tgt_lang, src_text, tgt_text, provenance, "
                 "domain, use_count FROM tm_entries ORDER BY id"
-            ).fetchall()
+            )
+            .fetchall()
+        )
         return [
             TMStoredEntry(
                 id=int(r[0]),
@@ -1055,39 +1101,39 @@ class TranslationMemory:
             "oldest": "updated_at ASC, id ASC",
             "most_used": "use_count DESC, updated_at DESC, id DESC",
         }[sort]
-        with self._lock, self._get_conn() as conn:
-            total_row = _read_one(
-                conn,
-                f"SELECT COUNT(*) FROM tm_entries{clause}",
-                params,
-            )
-            machine_row = _read_one(
-                conn,
-                f"SELECT COUNT(*) FROM tm_entries{clause}"
-                + (" AND " if clause else " WHERE ")
-                + "tm_entries.provenance = ?",
-                [*params, PROVENANCE_MACHINE],
-            )
-            human_row = _read_one(
-                conn,
-                f"SELECT COUNT(*) FROM tm_entries{clause}"
-                + (" AND " if clause else " WHERE ")
-                + "tm_entries.provenance = ?",
-                [*params, PROVENANCE_HUMAN_PE],
-            )
-            never_used_row = _read_one(
-                conn,
-                f"SELECT COUNT(*) FROM tm_entries{clause}"
-                + (" AND " if clause else " WHERE ")
-                + "tm_entries.use_count = 0",
-                params,
-            )
-            rows = conn.execute(
-                "SELECT id, src_lang, tgt_lang, src_text, tgt_text, provenance, "
-                "domain, use_count, created_at, updated_at "
-                f"FROM tm_entries{clause} ORDER BY {order} LIMIT ? OFFSET ?",
-                [*params, limit, offset],
-            ).fetchall()
+        conn = self._get_read_conn()
+        total_row = _read_one(
+            conn,
+            f"SELECT COUNT(*) FROM tm_entries{clause}",
+            params,
+        )
+        machine_row = _read_one(
+            conn,
+            f"SELECT COUNT(*) FROM tm_entries{clause}"
+            + (" AND " if clause else " WHERE ")
+            + "tm_entries.provenance = ?",
+            [*params, PROVENANCE_MACHINE],
+        )
+        human_row = _read_one(
+            conn,
+            f"SELECT COUNT(*) FROM tm_entries{clause}"
+            + (" AND " if clause else " WHERE ")
+            + "tm_entries.provenance = ?",
+            [*params, PROVENANCE_HUMAN_PE],
+        )
+        never_used_row = _read_one(
+            conn,
+            f"SELECT COUNT(*) FROM tm_entries{clause}"
+            + (" AND " if clause else " WHERE ")
+            + "tm_entries.use_count = 0",
+            params,
+        )
+        rows = conn.execute(
+            "SELECT id, src_lang, tgt_lang, src_text, tgt_text, provenance, "
+            "domain, use_count, created_at, updated_at "
+            f"FROM tm_entries{clause} ORDER BY {order} LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        ).fetchall()
         return TMPage(
             entries=[
                 TMStoredEntry(
@@ -1212,31 +1258,30 @@ class TranslationMemory:
 
     def entry_count(self, src_lang: str | None = None, tgt_lang: str | None = None) -> int:
         """Number of stored TM entries, optionally filtered by language pair."""
-        with self._lock:
-            conn = self._get_conn()
-            pair = (src_lang, tgt_lang) if (src_lang and tgt_lang) else None
-            generation: int | None = None
-            query: str
-            params: Sequence[Any]
-            if pair is None:
-                # A count over every pair has no generation of its own, so it
-                # rides the database-wide signal and its whole-cache reset.
-                self._sync_data_version(conn)
-                query = "SELECT COUNT(*) FROM tm_entries"
-                params = ()
-            else:
-                generation = self._generation(conn, pair)
-                cached = self._entry_count_cache.get(pair)
-                if cached is not None and self._count_gen.get(pair) == generation:
-                    return cached
-                query = "SELECT COUNT(*) FROM tm_entries WHERE src_lang = ? AND tgt_lang = ?"
-                params = pair
-            row = _read_one(conn, query, params)
-            count = int(row[0]) if row else 0
-            self._entry_count_cache[pair] = count
-            if pair is not None and generation is not None:
-                self._count_gen[pair] = generation
-            return count
+        conn = self._get_read_conn()
+        pair = (src_lang, tgt_lang) if (src_lang and tgt_lang) else None
+        generation: int | None = None
+        query: str
+        params: Sequence[Any]
+        if pair is None:
+            # A count over every pair has no generation of its own, so it
+            # rides the database-wide signal and its whole-cache reset.
+            self._sync_data_version(conn)
+            query = "SELECT COUNT(*) FROM tm_entries"
+            params = ()
+        else:
+            generation = self._generation(conn, pair)
+            cached = self._entry_count_cache.get(pair)
+            if cached is not None and self._count_gen.get(pair) == generation:
+                return cached
+            query = "SELECT COUNT(*) FROM tm_entries WHERE src_lang = ? AND tgt_lang = ?"
+            params = pair
+        row = _read_one(conn, query, params)
+        count = int(row[0]) if row else 0
+        self._entry_count_cache[pair] = count
+        if pair is not None and generation is not None:
+            self._count_gen[pair] = generation
+        return count
 
     def get_use_count(self, src_lang: str, tgt_lang: str, source_text: str) -> int:
         """Return the maximum use_count for a normalized source in a language pair."""
@@ -1244,11 +1289,10 @@ class TranslationMemory:
         if not normalized:
             return 0
         key = _source_hash(normalized)
-        with self._lock, self._get_conn() as conn:
-            row = _read_one(
-                conn,
-                "SELECT MAX(use_count) FROM tm_entries "
-                "WHERE src_lang = ? AND tgt_lang = ? AND src_hash = ?",
-                (src_lang, tgt_lang, key),
-            )
+        row = _read_one(
+            self._get_read_conn(),
+            "SELECT MAX(use_count) FROM tm_entries "
+            "WHERE src_lang = ? AND tgt_lang = ? AND src_hash = ?",
+            (src_lang, tgt_lang, key),
+        )
         return int(row[0]) if row and row[0] is not None else 0

@@ -22,6 +22,7 @@ process invalidate another's cached pool, and the FTS5 prefilter path.
 from __future__ import annotations
 
 import random
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -771,3 +772,63 @@ def test_generation_starts_at_zero_and_increments(tm: TranslationMemory) -> None
         assert tm._generation(conn, ("en", "zh")) == 2
         # A different pair is untouched by the first pair's bumps.
         assert tm._generation(conn, ("en", "fr")) == 0
+
+
+def test_concurrent_lookups_overlap_a_writeback(tmp_path: Path) -> None:
+    """Per-thread read connections keep lookups off the writer's lock.
+
+    Eight threads issue exact + fuzzy lookups while the main thread writebacks
+    more entries; every lookup must answer from a consistent store and the
+    writeback must land completely. A regression that put reads back on the
+    single shared connection serializes here at best; one that shared the
+    writer's handle across threads races the pool cache at worst. The
+    lookups deliberately mix known hits (exact), gate-passing fuzzy hits that
+    exercise the use-count bump on the writer connection, and misses whose
+    pool fill races the writeback's generation bump.
+    """
+    db = tmp_path / "tm.sqlite"
+    memory = TranslationMemory(db)
+    try:
+        sources = [f"Concurrent source sentence number {i}." for i in range(64)]
+        for i, source in enumerate(sources):
+            _store(memory, source, f"第{i}句。")
+        later = [f"Late arrival sentence number {i}." for i in range(32)]
+
+        errors: list[BaseException] = []
+
+        def _read() -> None:
+            try:
+                for source in sources:
+                    hit = memory.lookup_exact("en", "zh", source)
+                    assert hit is not None
+                    assert hit.target_text.startswith("第")
+                    # Over the fuzzy threshold but not an identity candidate:
+                    # this reaches _fetch_hit_if_allowed and its writer-side
+                    # use-count bump.
+                    fuzzy = memory.lookup_fuzzy("en", "zh", source + " tail", 0.5)
+                    if fuzzy is not None:
+                        assert fuzzy.provenance == PROVENANCE_MACHINE
+            except BaseException as exc:  # noqa: BLE001 - surfaced via join
+                errors.append(exc)
+
+        threads = [threading.Thread(target=_read) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        stored = memory.writeback(
+            [
+                TMPendingEntry(
+                    src_lang="en",
+                    tgt_lang="zh",
+                    source_text=source,
+                    target_text=f"迟到的第{i}句。",
+                )
+                for i, source in enumerate(later)
+            ]
+        )
+        for thread in threads:
+            thread.join()
+        assert errors == []
+        assert stored == 32
+        assert memory.entry_count("en", "zh") == 96
+    finally:
+        memory.close()

@@ -91,3 +91,15 @@ repos:
         always_run: true
         stages: [pre-push]
 
+      # CI rebuilds the console bundle on a clean checkout and fails if
+      # ubt/api/static differs. Mirror that check locally so a push that
+      # touched web/ cannot pass the pre-push gates only to go red on CI.
+      # It always rebuilds (about a second) rather than guessing from mtimes.
+      - id: console-bundle-fresh
+        name: console bundle matches source (build + git diff)
+        entry: uv run python scripts/check_console_bundle.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
