@@ -654,7 +654,7 @@ export const zh: TranslationDictionary = {
     technicalReportHint: '完整文件与检查报告在任务详情中。',
     previewAction: '预览',
     downloadAction: '下载',
-    previewLoading: '预览加载中…',
+    previewLoading: '正在加载文档…',
     previewDownloadInstead: '预览失败？改为直接下载',
     previewClose: '关闭预览',
     delivRecall: '术语命中率',

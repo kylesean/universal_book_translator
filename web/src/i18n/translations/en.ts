@@ -682,7 +682,7 @@ export const en: TranslationDictionary = {
     technicalReportHint: 'All files and reports are in Job details.',
     previewAction: 'Preview',
     downloadAction: 'Download',
-    previewLoading: 'Loading preview…',
+    previewLoading: 'Loading document…',
     previewDownloadInstead: 'Preview failed? Download instead',
     previewClose: 'Close preview',
     delivRecall: 'Term recall',
