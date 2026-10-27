@@ -100,12 +100,6 @@ def _rapidocr_factory() -> VlmDriver:
     return RapidOcrDriver()
 
 
-def _deepseek_ocr_factory() -> VlmDriver:
-    from ubt.adapters.pdf.vlm.drivers.deepseek_driver import DeepSeekOcrDriver
-
-    return DeepSeekOcrDriver()
-
-
 def _sidecar_factory() -> VlmDriver:
     from ubt.adapters.pdf.vlm.drivers.sidecar_driver import SidecarOcrDriver
 
@@ -125,7 +119,6 @@ def _vlm_factory() -> VlmDriver:
 
 
 register_driver("rapidocr", _rapidocr_factory)
-register_driver("deepseek-ocr", _deepseek_ocr_factory)
 register_driver("sidecar", _sidecar_factory)
 register_driver("http", _sidecar_factory)
 register_driver("cloud", _cloud_factory)

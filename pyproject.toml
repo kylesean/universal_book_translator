@@ -157,20 +157,6 @@ academic = [
     "onnxruntime>=1.29.0",
     "numpy>=1.26.0",
 ]
-# Second witness: DeepSeek-OCR VLM (proofread grade, ~7 GB weights,
-# needs ~9 GB free VRAM — stop ollama residents first).
-#
-# No `ocr-vlm` extra: its driver (ubt/adapters/pdf/vlm/drivers/deepseek_driver.py)
-# imports torch and transformers, and an extra that pulled those would drag ~2 GB
-# of CUDA wheels into `uv sync --extra ocr-vlm` for a path most installs never
-# take. The previous extra listed addict/easydict/einops/matplotlib, none of
-# which is imported anywhere in ubt/ — installing it produced a driver that
-# died on first use. Install the stack yourself when you want this path:
-#
-#     pip install torch transformers huggingface_hub accelerate addict \
-#                 easydict einops matplotlib
-#
-# The driver raises a clear ModuleNotFoundError naming the missing package.
 # QE dependency note: Neural CometKiwi (CC-BY-NC-SA-4.0 non-commercial) has been
 # retired from default extras to ensure 100% commercial license compliance.
 # The default qe_engine is zero-dependency "heuristic", and LLM-as-a-judge
@@ -203,9 +189,6 @@ ignore = ["E501", "ASYNC240"]
 # FastAPI's dependency-injection idiom requires File(...)/Form(...) as
 # argument defaults; B008 is a false positive there.
 "deploy/docker/ocr-sidecar/server.py" = ["B008"]
-# Dynamic monkey-patching of third-party transformers cache without type stubs
-"ubt/adapters/pdf/vlm/drivers/deepseek_driver.py" = ["B010"]
-
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
@@ -258,21 +241,6 @@ module = [
     "onnxruntime.*",
 ]
 ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-# The OCR-VLM driver needs a narrow `type: ignore[no-untyped-call]` when
-# transformers IS installed (torch/transformers are installed manually for the
-# OCR-VLM path, not via an extra), but with transformers absent the
-# `ignore_missing_imports` override above makes AutoTokenizer `Any`, the
-# call becomes well-typed, and `warn_unused_ignores` turns that same ignore into
-# a hard error. The dev-only CI env therefore failed on the very ignore that
-# keeps a full local env clean, so unused-ignore reporting is disabled for this
-# one module instead of dropping the ignore (which would break local runs).
-module = [
-    "ubt.adapters.pdf.vlm.drivers.deepseek_driver",
-    "ubt.adapters.pdf.vlm.drivers.deepseek_worker",
-]
-warn_unused_ignores = false
 
 [tool.pytest.ini_options]
 minversion = "8.0"
