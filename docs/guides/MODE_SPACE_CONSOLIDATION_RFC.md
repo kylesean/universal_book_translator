@@ -29,6 +29,7 @@ qe_engine            ['heuristic', 'comet', 'cometkiwi', 'neural', 'subprocess',
 cover_mode           ['auto', 'always', 'never']                   ← 排版
 consistency_enforce  ['off', 'report', 'repair']                   ← 质量
 ocr_mode             ['auto', 'sidecar', 'cloud', 'vlm', 'rapidocr', 'off']  ← 摄取
+                      （2026-10-28 更新：现收敛为 ['auto', 'local', 'vlm', 'off']，见 guides/OCR_DRIVERS.md）
 api_mode / docling_device / job_mode                               ← 运维
 ```
 
@@ -653,6 +654,12 @@ job_id priority dry_run fresh start_chapter max_chapters
 
 曾写："显式设 `ocr_mode=cloud/vlm` 是用户授权出网的唯一动作"。据此推断把它降为
 环境变量会拿走用户的隐私同意权。
+
+> **2026-10-28 更新**：这一结论已在 OCR 模式统一重构中落地——今天的
+> `OcrMode = Literal["auto", "local", "vlm", "off"]`（`config.py:123`），
+> `cloud` 与 `vlm` 合并为 `vlm`、`sidecar`/`rapidocr`/`cloud` REST 合并为
+> `local`。隐私同意仍由 `allow_page_upload` 单独掌控，与模式选择解耦；
+> 见 [`OCR_DRIVERS.md`](OCR_DRIVERS.md)。
 
 #### 实测反驳
 

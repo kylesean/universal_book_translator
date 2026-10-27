@@ -1,4 +1,10 @@
-# PaddleOCR-VL as a high-fidelity OCR channel
+# PaddleOCR-VL as a region reader (table / formula crops)
+
+> **Scope** (2026-10-28): PaddleOCR-VL reads **crops**, not pages. It solves
+> table data-cell recovery and formula transcription — the two things Docling
+> does worst at the region level. Page-level OCR proofread (scanned or
+> weak-text pages) is Unlimited-OCR-2's job; see [`OCR_DRIVERS.md`](OCR_DRIVERS.md)
+> for that tier.
 
 Docling's formula and table recognition is the ceiling on delivery quality: every
 formula on a scientific paper degrades to a screenshot (measured: `formula_blocks:
@@ -38,7 +44,7 @@ for a clean page at 200 dpi once weights are loaded, against ~1.9 s/page for
 Docling on the same document. A 73-page paper is roughly 3 minutes of vision time
 on top of translation.
 
-## Why this is a service, not a Python dependency (originally)
+## Why this is a service, not a Python dependency
 
 > **Correction (2026-10-17):** the section below was wrong on one point. The
 > architecture *is* usable from `transformers` — but only from **v5+**

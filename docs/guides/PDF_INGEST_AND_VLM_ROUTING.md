@@ -21,7 +21,7 @@
 |---|---|---|---|
 | **A. 解析器路由** | `pdf_engine=auto`（默认） | 恒为 `docling`；探测只报告文档内容，不参与投票 | 用对工具：扫描/公式/多栏/矢量图需要 docling 的阅读顺序与结构化分类 |
 | **B. docling 公式 VLM（CodeFormulaV2）** | `formula_enrichment=auto/on` | 只有 `on` 会跑；`auto` 下不可读公式改裁源图（精确且瞬时） | 显示公式保真：公式成为可重排/可校验/闭环保护的“数学原子”，而非被翻译损坏 |
-| **C. 扫描页 VLM driver 层（自研）** | `UBT_VLM_SCAN_FALLBACK` + `ocr_mode` | 默认 `off` | 无文本层页的安全转写：几何不被幻觉、页面不外泄、成本不失控、驱动可替换 |
+| **C. 扫描页 VLM driver 层（自研）** | `UBT_VLM_SCAN_FALLBACK` + `ocr_mode` | 默认 `off` | 无文本层页的安全转写：几何不被幻觉、页面不外泄、成本不失控、驱动可替换（tier 语义见 [`OCR_DRIVERS.md`](OCR_DRIVERS.md)） |
 
 一句话：**docling 负责“有文本层时的结构化与公式保真”，自研 driver 层负责“没有文本层时如何安全地把文字读回来”。**
 
@@ -95,7 +95,7 @@ CLI `--pdf-engine`（`translate.py`）。预设也控制它：`high_fidelity`/`s
 
 ### 2.1 探测信号与阈值
 
-`inspect_pdf_route_plan`（`engine_selector.py:130-252`）抽样页（`PROBE_SAMPLE_FRACTIONS = (0.0, 0.25, 0.5, 0.75, 1.0)`，前/中/后防封面欺骗），命中**任一**即选 docling：
+`inspect_pdf_route_plan`（`engine_selector.py:103-259`）抽样页（`PROBE_SAMPLE_FRACTIONS = (0.0, 0.25, 0.5, 0.75, 0.92)`，前/中/后防封面欺骗，末页 0.92 避开参考文献页的人名缩写误判）。注意：**auto 恒选 docling**，探测只产出 assess 证据，不投票；这些信号用于评估报告：
 
 | 信号 | 判据 | 常量 |
 |---|---|---|
@@ -104,24 +104,24 @@ CLI `--pdf-engine`（`translate.py`）。预设也控制它：`high_fidelity`/`s
 | 多栏 | 行数 ≥ 6 且右栏边缘占比 > 0.25 | `PROBE_MIN_ROWS = 6`, `PROBE_COLUMN_SHARE = 0.25` |
 | 矢量图密集 | 过半抽样页路径操作数 ≥ 200 或含图像资源 | `PROFILE_VECTOR_PATH_OPS = 200` |
 
-- 判定为 `needs_docling = scanned or formulas or multicolumn or vector_diagrams`（`engine_selector.py:228-230`）。
-- **探测失败保守回退 docling**（不可读、缺 pypdfium2 等，`engine_selector.py:157-160,246-252`）。
-- 常量定义：`ubt/core/policy/layout_policy.py:243-263`。
+- 探测结果写入 `PDFRoutePlan`（`engine_selector.py:58-63`）供 assess 报告消费。
+- **探测失败保守回退 docling**（不可读、缺 pypdfium2 等，`engine_selector.py:243-259`）。
+- 常量定义：`ubt/core/policy/layout_policy.py:252-290`。
 
 ### 2.2 强制/覆盖
 
-- `UBT_PDF_ENGINE` / `--pdf-engine`：显式指定即完全覆盖探测（`engine_selector.py:18-19`）。
-- `pdf_engine="pdfium"` 被强制在公式密集/扫描文档上时**不静默**：会 `logger.warning` 提示预期降级（`factory.py:85-101`）。
-- `babeldoc` 已废弃并报错（`factory.py:75-79`）。
-- docling 未安装时回退：pypdfium2 几何抽取 → pdf_oxide 纯文本（`docling_adapter.py:315-370`）。
+- `UBT_PDF_ENGINE` / `--pdf-engine`：显式指定即完全覆盖探测（`factory.py:75-145`）。
+- `pdf_engine="pdfium"` 被强制在公式密集/扫描文档上时**不静默**：会 `logger.warning` 提示预期降级（`factory.py:88-145`）。
+- `babeldoc` 已废弃并报错（`factory.py:83-87`）。
+- docling 未安装时回退：pypdfium2 几何抽取 → pdf_oxide 纯文本（`docling_adapter.py:446-466`）。
 
 ---
 
 ## 3. 路径 B：docling 内置公式 VLM（CodeFormulaV2）
 
-**判定**：`resolve_formula_enrichment`（`ubt/adapters/pdf/docling_parser.py:133-165`）。
-**调用点**：`DoclingPDFAdapter._resolve_formula_enrichment`（`docling_adapter.py:396-402`）→ `extract_with_docling(..., enrich=...)`（`docling_parser.py:469-486`）。
-**管线开关**：`options.do_ocr = False`（恒定）、`options.do_formula_enrichment = enrich`（`docling_parser.py:485-486`）。
+**判定**：`resolve_formula_enrichment`（`ubt/adapters/pdf/docling_parser.py:170-228`）。
+**调用点**：`DoclingPDFAdapter._resolve_formula_enrichment`（`docling_adapter.py:497-502`）→ `extract_with_docling(..., enrich=...)`（`docling_parser.py:795-818`）。
+**管线开关**：`options.do_ocr = False`（恒定）、`options.do_formula_enrichment = enrich`（`docling_parser.py:818-819`）。
 
 > docling 侧唯一的**生成式 VLM** 就是 CodeFormulaV2（公式 → LaTeX）。
 > 版面模型 `docling-layout-heron`、表格模型 `docling-models`(TableFormer) 是判别式视觉模型，每页/表格用，不算 VLM。
@@ -208,11 +208,11 @@ VLM 是**生成式**的：它按自己的理解重写公式，一旦误读就交
 ## 4. 路径 C：扫描页 VLM driver 层（项目自研，非 docling 内置）
 
 **目录**：`ubt/adapters/pdf/vlm/`。
-**入口**：`vlm_fallback_missing_pages`（`docling_parser.py:1344`）← `DoclingPDFAdapter._vlm_fallback_missing_pages`（`docling_adapter.py:373-393`）。
+**入口**：`vlm_fallback_missing_pages`（`docling_parser.py:2036`）← `DoclingPDFAdapter._vlm_fallback_missing_pages`（`docling_adapter.py:471-492`）。
 
 ### 4.1 分级触发（`UBT_VLM_SCAN_FALLBACK`）
 
-`get_fallback_mode`（`vlm/transcribe.py:44-60`）；`vlm_fallback_missing_pages`（`docling_parser.py:1344-1420`）：
+`get_fallback_mode`（`vlm/transcribe.py:44-60`）；`vlm_fallback_missing_pages`（`docling_parser.py:2036-2371`）：
 
 | 档位 | 行为 |
 |---|---|
@@ -221,7 +221,7 @@ VLM 是**生成式**的：它按自己的理解重写公式，一旦误读就交
 | `weak` | 追加：公式碎片率 ≥ 0.10 或文本稀疏的页做 VLM proofread（`:1557-1568`） |
 | `all` | 追加：所有非 `editable_text` 页 proofread/recognition（`:1540-1554`） |
 
-- 整本无文本且兜底关闭 → `_reject_empty_book` **fail-closed 报错**，而不是导出一本空书（`docling_parser.py:1275-1293`）。
+- 整本无文本且兜底关闭 → `_reject_empty_book` **fail-closed 报错**，而不是导出一本空书（`docling_parser.py:1860-1934`）。
 
 ### 4.2 转写与锚定（几何安全的关键）
 
@@ -231,30 +231,30 @@ flowchart TD
     R --> Q{"该页有可用 pdfium 文本层?"}
     Q -->|"有 → proofread"| P["几何与文本用 pdfium<br/>driver 仅做一致性审计<br/>绝不用较弱证据改写 pdfium"]
     Q -->|"无 → recognition"| M{"driver measured_boxes ?"}
-    M -->|"是（rapidocr / sidecar / cloud REST）"| B["用 driver 的测量框作几何<br/>XY 顺序 = 阅读顺序"]
+    M -->|"是（measured-box: rapidocr / sidecar）"| B["用 driver 的测量框作几何<br/>XY 顺序 = 阅读顺序"]
     M -->|"否（LLM-VLM）"| X["fail-closed 报错<br/>（拒绝注入猜测块）"]
     P --> G["按垂直节奏把行分组成段"]
     B --> G
     G --> O["IRBlock"]
 ```
 
-- 锚定规则：`vlm/anchor.py:57`。**driver 只负责识别文字，几何由 anchoring 掌控**；
+- 锚定规则：`vlm/anchor.py:57-125`。**driver 只负责识别文字，几何由 anchoring 掌控**；
   pdfium 文本层先投票（proofread 模式），只有真无文本页才用**有测量框**的 driver；LLM-VLM 在此 fail-closed。
 - 段落分组：`vlm/transcribe.py:87-100`（否则一页密集扫描产生数百行块，LLM 阶段磨数小时）。
 - 可转写类型白名单：`_VLM_TEXTUAL_TYPES`（NARRATIVE/HEADING/DIALOGUE/LIST_ITEM），
-  不会删除它无法重建的 IMAGE/TABLE/FORMULA/CODE（`docling_parser.py:1300-1310`）。
-- 付费通道有熔断：`VLM_CIRCUIT_MIN_TRIES` / `VLM_CIRCUIT_FAIL_PCT`（`docling_parser.py:1295-1299`）。
+  不会删除它无法重建的 IMAGE/TABLE/FORMULA/CODE（`docling_parser.py:1919-1934`）。
+- 付费通道有熔断：`VLM_CIRCUIT_MIN_TRIES` / `VLM_CIRCUIT_FAIL_PCT`（`ubt/core/policy/layout_policy.py:412-413`，`docling_parser.py:2230`消费）。
 
 ### 4.3 driver 选择（隐私/成本优先）
 
-`probe_effective_driver`（`vlm/registry.py:135-283`），`ocr_mode ∈ {auto, sidecar, cloud, vlm, rapidocr, off}`（`config.py:371`）：
+`probe_effective_driver`（`vlm/registry.py:135-306`），`ocr_mode ∈ {auto, local, vlm, off}`（`config.py:123`）：
 
-- `auto` 顺序：**本地 sidecar → 本地 rapidocr → 云/vlm 最后**；
-- `allow_page_upload=false`（默认，`config.py:542`）**阻止**非本地 sidecar、`cloud`、`vlm`；
+- `auto` 顺序：**local（sidecar → in-process rapidocr）→ vlm（unlimited-ocr2 / 远程端点）最后**；
+- `allow_page_upload=false`（默认，`config.py:838`）**阻止**非本地 sidecar 和 `vlm` 远程端点；
 - 本地判定基于**解析后的主机**（`_endpoint_is_local`，`:16-37`），防 `127.0.0.1.attacker.example` 绕过；
-- 选到付费云引擎会 `logger.warning` 点名（`vlm/registry.py:263-276`），且 OCR token 记入运行 usage sink（`vlm/drivers/cloud_driver.py:31-46`）；
-- 驱动注册表：`rapidocr` / `deepseek-ocr` / `sidecar`(=`http`) / `cloud` / `vlm`（`registry.py:127-132`），
-  默认驱动由 `UBT_VLM_DRIVER` 决定（默认 `rapidocr`，`:83-84`）。
+- 自动链选到付费云引擎会 `logger.warning` 点名，且 OCR token 记入运行 usage sink（`vlm/drivers/cloud_driver.py:31-46`）；
+- 驱动注册表：`rapidocr` / `unlimited-ocr2` / `sidecar`(=`http`) / `cloud` / `vlm`（`registry.py:127-132`），
+  默认驱动由 `UBT_VLM_DRIVER` 决定（默认 `rapidocr`，`:83-84`）。详情与配置见 [`OCR_DRIVERS.md`](OCR_DRIVERS.md)。
 
 ---
 
@@ -285,10 +285,10 @@ flowchart TD
 | `pdf_engine` | `UBT_PDF_ENGINE` | `--pdf-engine` | `auto` | 解析器：`auto`（=docling，缺包时降级 pdfium）/`docling`（保真，缺包即拒绝）/`pdfium`（快车道） |
 | `docling_device` | `UBT_DOCLING_DEVICE` | — | `auto` | Docling 加速器：`auto`/`cpu`（不占显存）/`cuda` |
 | `formula_enrichment` | `UBT_FORMULA_ENRICHMENT` | — | `auto` | 公式 VLM：`auto`（裁源图，默认）/`on`（强制 VLM 转写）/`off`。引擎细节，由 preset 或环境变量设置 |
-| `ocr_mode` | `UBT_OCR_MODE` | `--ocr` | `auto` | 扫描 driver：`auto`/`sidecar`/`cloud`/`vlm`/`rapidocr`/`off` |
+| `ocr_mode` | `UBT_OCR_MODE` | `--ocr` | `auto` | 扫描 driver：`auto`/`local`/`vlm`/`off`（详细语义见 [`OCR_DRIVERS.md`](OCR_DRIVERS.md)） |
 | `allow_page_upload` | `UBT_ALLOW_PAGE_UPLOAD` | — | `false` | 是否允许页图出网 |
 | — | `UBT_VLM_SCAN_FALLBACK` | — | `off` | 扫描兜底档位：`off`/`missing`/`weak`/`all` |
-| — | `UBT_VLM_DRIVER` | — | `rapidocr` | 默认 driver 名 |
+| — | `UBT_VLM_DRIVER` | — | `rapidocr` | auto 模式的显式 driver 覆盖（一般不需要设） |
 | — | `UBT_ALLOW_HF_MIRROR` | — | 关 | 允许从 hf-mirror.com 下载模型 |
 
 ---
@@ -297,19 +297,19 @@ flowchart TD
 
 | 主题 | 位置 |
 |---|---|
-| 解析器路由/注册 | `ubt/adapters/factory.py:73-138` |
-| 首页启发式探测 | `ubt/adapters/pdf/engine_selector.py:130-259` |
+| 解析器路由/注册 | `ubt/adapters/factory.py:75-170` |
+| 首页启发式探测 | `ubt/adapters/pdf/engine_selector.py:103-259` |
 | 探测阈值常量 | `ubt/core/policy/layout_policy.py:243-263` |
-| docling 抽取/管线开关 | `ubt/adapters/pdf/docling_parser.py:663-671` |
-| 公式 VLM 判定 | `ubt/adapters/pdf/docling_parser.py:133-165` |
-| HF 环境/模型仓库 | `ubt/adapters/pdf/docling_parser.py:165-224` |
-| 公式 VLM 降级阶梯 | `ubt/adapters/pdf/docling_parser.py:615-640` |
-| 扫描兜底入口 | `ubt/adapters/pdf/docling_parser.py:1471-1520` |
-| 空书 fail-closed | `ubt/adapters/pdf/docling_parser.py:1402-1415` |
-| 扫描页适配器接线 | `ubt/adapters/pdf/docling_adapter.py:357-369,316-345` |
-| driver 注册/探测 | `ubt/adapters/pdf/vlm/registry.py:71-282` |
-| 转写/兜底档位 | `ubt/adapters/pdf/vlm/transcribe.py:25-68` |
-| 锚定（几何安全） | `ubt/adapters/pdf/vlm/anchor.py:1-11` |
-| 公式碎片/保护 | `ubt/core/validators/math_guard.py:1-23`、`ubt/core/cleaners/soup_math.py:1-16` |
-| GPU 探测 | `ubt/core/env.py:53-63` |
-| 配置字段/默认 | `ubt/core/config.py:321,363-373,501,765-769` |
+| docling 抽取/管线开关 | `ubt/adapters/pdf/docling_parser.py:795-819` |
+| 公式 VLM 判定 | `ubt/adapters/pdf/docling_parser.py:170-228` |
+| HF 环境/模型仓库 | `ubt/adapters/pdf/docling_parser.py:230-290` |
+| 公式 VLM 降级阶梯 | `ubt/adapters/pdf/docling_parser.py:992-1040` |
+| 扫描兜底入口 | `ubt/adapters/pdf/docling_parser.py:2036-2371` |
+| 空书 fail-closed | `ubt/adapters/pdf/docling_parser.py:1860-1934` |
+| 扫描页适配器接线 | `ubt/adapters/pdf/docling_adapter.py:392-411,331-361` |
+| driver 注册/探测 | `ubt/adapters/pdf/vlm/registry.py:71-306` |
+| 转写/兜底档位 | `ubt/adapters/pdf/vlm/transcribe.py:20-68` |
+| 锚定（几何安全） | `ubt/adapters/pdf/vlm/anchor.py:1-125` |
+| 公式碎片/保护 | `ubt/core/validators/math_guard.py:1-23`、`ubt/core/cleaners/soup_math.py:154` |
+| GPU 探测 | `ubt/core/env.py:56-63` |
+| 配置字段/默认 | `ubt/core/config.py:123,610-635,812-838` |

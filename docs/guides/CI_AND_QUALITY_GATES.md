@@ -31,6 +31,13 @@
 | pre-push | `mypy` | `uv run mypy --strict ubt tests` | ~5s |
 | pre-push | `pytest-fast` | `uv run pytest -m fast -q -n auto --dist=loadscope --cov=ubt --cov-fail-under=70` | ~43s |
 | pre-push | `layering-invariant` | `uv run python scripts/dump_compiler_edges.py` | 秒级 |
+| pre-push | `console-bundle-fresh` | `uv run python scripts/check_console_bundle.py` | ~5s |
+
+`console-bundle-fresh` 镜像 CI 的 “Web console bundle is up to date” 检查：重建
+`web/` 并比对 `ubt/api/static`，不一致即拦截推送（本地 `git diff` 看不到 CI 的
+重建结果，这个缺口曾让 a838e11 全绿推送后在 CI 变红）。`pnpm install` 在本机失败
+（离线/store 不可写）时降级为警告并用现有 `node_modules` 构建——环境问题是 CI 的
+严格职责，不该阻塞本地推送。
 
 只对**本次改动**的文件做 lint/format（自动修复后需重新 `git add`）；类型、快测与
 分层不变量在推送时**跑全仓**，避免"改的文件恰好干净就算过"。分层检查是全树性质

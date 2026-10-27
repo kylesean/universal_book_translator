@@ -702,5 +702,5 @@ flowchart TD
 | **长段落译文与图表碰撞、版心溢出** | 复杂多栏长篇学术论文重排后个别块过长 | 用 `--dual-mode mono` 复核是否为配对间距问题；仍溢出时用 `ubt assess` 查该块字号/长度，必要时缩小 `--macro-chunk-size` 或在质量报告里定位越界块。 |
 | **初译请求极慢，等待时间过长** | 默认逐块请求（`macro_chunk_size=1`），网络 RTT 放大 | 显式增加参数 `--macro-chunk-size 5` 或 `10`，开启宏块合并打包，立享 3~5 倍提速。 |
 | **测试中断后重跑，想要从零开始而不是断点续跑** | 系统默认自动加载 `.ubt/ledgers/<job_id>.sqlite` 续跑 | 在命令行末尾追加 `--fresh` 强行清空账本并从头解析；或更换新的 `--job-id <new_id>`。 |
-| **纯图片扫描版 PDF 报提取到 0 个块** | 错误强行指定了 `--ocr off` | 扫描件必须保持默认 `--ocr auto` 或显式指定 `--ocr sidecar` / `--ocr cloud`。 |
+| **纯图片扫描版 PDF 报提取到 0 个块** | 错误强行指定了 `--ocr off` | 扫描件必须保持默认 `--ocr auto` 或显式指定 `--ocr local`（measured-box 引擎，可转写真扫描页）；`--ocr vlm` 需先启用 `UBT_ALLOW_PAGE_UPLOAD=true` 且只能 proofread 已有文本层的页。详见 `docs/guides/OCR_DRIVERS.md`。 |
 | **提示 `budget exceeded` 中止** | 累计 Token 换算金额已触及 `--budget-usd` 上限 | 在命令中调大 `--budget-usd` 阈值，随后再次运行相同命令，系统将在保留已有账本进度基础上继续完工。 |
