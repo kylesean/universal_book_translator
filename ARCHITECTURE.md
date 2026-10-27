@@ -57,6 +57,25 @@ capability.
 - Both run as gates: a pre-push hook and a CI step
   (`.pre-commit-config.yaml`, `.github/workflows/ci.yml`).
 
+## Sanctioned duplication
+
+Four places in the tree carry *deliberate* near-duplicate code. They are
+listed so a reviewer knows which duplication is policy — each pair is kept in
+step by an explicit mechanism, and "deduplicate this" is not automatically a
+correct review finding:
+
+| Family | What repeats | What keeps it in step |
+| --- | --- | --- |
+| `ubt.core.router.transports` | request-shaping across the four wire protocols | `transports/base.py` owns the shared pieces (`raise_for_status`, retry-after parsing); the protocols own only what genuinely differs. Nothing may be copied back into a transport that base can own. |
+| `ubt.api.provider_editor` ↔ `ubt.core.config` | the provider-block field set | the editor validates exactly the fields config declares; a field added to one without the other is a review finding, not a lint rule. |
+| `ubt.core.router.prompts` builders | the parameter vocabulary and section-assembly shape across the seven prompt templates | each builder is a distinct prompt *product* the QE extractor and cache keys are matched against; merging them would couple prompt topologies that are deliberately free to diverge. |
+| `ubt.core.engine.stages.consistency` ↔ `triage` | the block-scan and repair-eligibility shapes | both consume the same ledger predicates; the shared predicates live in the ledger, the scans differ by design (whole-book report vs per-chapter routing). |
+
+Duplication outside these families is treated the usual way: the definition
+gate (`test_no_orphaned_definitions`) kills what nothing references, and a
+copy-paste that must stay in step in *both* directions belongs behind one
+owner before it drifts.
+
 ## The pipeline
 
 `ubt/core/engine/pipeline.py` owns the run's *resources* — the writer lock,
