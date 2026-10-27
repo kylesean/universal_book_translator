@@ -11,6 +11,50 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Changed
 
+- **TM reads leave the writer's lock.** Every lookup — two per drafted block —
+  took the process-wide `threading.Lock`, and the fuzzy path held it across the
+  full-pool rapidfuzz scan plus a per-candidate SELECT, so ten concurrent draft
+  tasks serialized behind one mutex although WAL lets readers run beside the
+  single writer. Only writes keep the lock now (writeback, evict, the
+  use-count bump a chosen hit triggers); reads SELECT on a per-thread
+  `mode=ro` connection from thread-local storage, mirroring the ledger's
+  `_get_read_conn` pattern. The pool/count caches' generation check is what
+  makes lock-free fills safe: two threads filling the same pair read the same
+  generation, and a fill that raced a writeback loses on the next lookup's
+  generation re-check. A concurrency regression hammers eight lookup threads
+  against a live writeback.
+
+- **The source-side drift scan indexes the block once, not once per term.**
+  `detect_term_drift` paid one `find_term_occurrences` regex pass per glossary
+  surface per block — O(G×L), measured 7.4–8.9 ms per validate at G=200, 1–4x
+  per block across the gate screen, heuristic QE and the repair re-checks
+  (~4–8 min of pure CPU per 30k-block book). The source side now builds one
+  Aho-Corasick candidate index (raw text + simple-folded text), measured
+  1.17 ms → 0.39 ms at G=200 / 1.3k chars. Soundness is two-layered: every
+  candidate is confirmed with the surface's own literal pattern before the
+  enforcer's boundary and protected-span rules (a fold that is too eager —
+  µ vs μ — costs a rejected candidate, never a false hit), and the fold
+  approximating sre's simple case fold is pinned by a property test against
+  the retired scan on a torture corpus (İ, Kelvin K, ſ, µ/μ, ß, ẞ, mixed
+  CJK/Latin). The property test caught two real bugs pre-merge: folded-form
+  matches leaking into the case-sensitive set (BE matching the verb be), and
+  fold-fixed surfaces losing their folded-scan candidates entirely. The
+  target side stays on the flexible-pattern matcher by design — its `[ \t]*`
+  boundary classes are not literal, so the review's "just Aho it" fix would
+  have been wrong there.
+
+- **Submitted Agent packages compact to identity-plus-count tombstones.**
+  Every claim and submit rewrote the whole `agent_session` metadata_json and
+  the package map never pruned: each claim appended a package carrying its
+  full `block_ids` list and per-block `expected_statuses` dict, so every
+  later write re-serialized all prior packages' payloads — O(n²) in blocks.
+  Compaction at both write points drops exactly those two fields from
+  `state == "submitted"` packages; the replay surface's fields (`state`,
+  `lease_token_hash`, `submission_hash`) survive verbatim and a
+  `block_count` scalar preserves the replay report's accepted count.
+  Claimed and expired packages are untouched. The rewrite's payload goes
+  from O(book) to O(packages).
+
 - **Batch drafting prepares its blocks concurrently.** All three draft paths
   (interactive, Batch API, whole-book) prepared each block's inputs in a
   sequential `await` loop before the batch's LLM `gather`: the TM exact + fuzzy
