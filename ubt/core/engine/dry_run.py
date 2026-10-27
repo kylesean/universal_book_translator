@@ -18,7 +18,7 @@ from ubt.core.qe.fast_pass import REHEARSAL_MARKER as _DRY_RUN_PREFIX
 from ubt.core.qe.heuristic import MockQERunner
 from ubt.core.router.prompts import draft_source_from_prompt
 from ubt.core.router.provider import MockModelProvider
-from ubt.core.router.rate_limiter import AdaptiveTokenBucket
+from ubt.core.router.rate_limiter import NullRateLimiter
 from ubt.core.router.registry import registry_from_config
 from ubt.core.router.router import ModelRouter
 
@@ -142,7 +142,13 @@ def create_dry_run_orchestrator(
     )
     router = ModelRouter(
         provider=DryRunModelProvider(),
-        rate_limiter=AdaptiveTokenBucket(initial_rpm=100_000, max_rpm=100_000),
+        # Null, not a hand-raised AdaptiveTokenBucket: a rehearsal has no
+        # credential to protect and no 429s to learn from. The previous
+        # ``AdaptiveTokenBucket(initial_rpm=100_000, max_rpm=100_000)`` left
+        # ``initial_tpm`` at the class default of 100k, so the TPM bucket
+        # still gated every echo call — a 400-block rehearsal measured 39.1 s
+        # against 0.88 s with the null limiter (~44x), all of it sleep.
+        rate_limiter=NullRateLimiter(),
         # The rehearsal must exercise the *configured* prompt strategy, or it
         # proves the plumbing of a run the operator never asked for: with
         # ``prompt_strategy=minimal`` a real run sends a different prompt shape
