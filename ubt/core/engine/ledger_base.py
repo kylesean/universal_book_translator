@@ -129,6 +129,12 @@ _SCHEMA_SQL = """
     CREATE INDEX IF NOT EXISTS idx_blocks_job_mtqe ON blocks(job_id, mtqe_score);
     CREATE INDEX IF NOT EXISTS idx_blocks_pending ON blocks(job_id, status, spine_index, block_id);
     CREATE INDEX IF NOT EXISTS idx_blocks_rollup ON blocks(job_id, skip_translate, mtqe_score, status);
+    -- Serves every unfiltered spine-ordered read (``get_all_blocks``,
+    -- ``fetch_repair_eligible_blocks``): the status-leading alternatives above
+    -- cannot, so both fell to a TEMP B-TREE sort over the whole job (EXPLAIN
+    -- verified). Fresh databases only — existing ledgers keep working without
+    -- it, per the no-in-place-migration rule.
+    CREATE INDEX IF NOT EXISTS idx_blocks_spine ON blocks(job_id, spine_index);
 """
 
 # Every column ``_row_to_block`` reads by name. Kept as a literal (not derived
