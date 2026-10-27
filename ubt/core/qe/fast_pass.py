@@ -1417,7 +1417,10 @@ class FastPassFilter:
         # equivalent keeps the gate sensitive to genuine truncation on both
         # scripts (the same translated text scored against an inflated
         # max_length_ratio side benefits symmetrically).
-        cjk_chars = sum(1 for ch in tgt_clean if re.match(f"[{CJK_SCRIPT_CLASS}]", ch))
+        # ``_CJK_SCRIPT_RE`` is the module-level compile of this class: the
+        # length gate runs per drafted block, so the count must not rebuild a
+        # pattern per character.
+        cjk_chars = len(_CJK_SCRIPT_RE.findall(tgt_clean))
         informative_tgt = len(tgt_clean) + cjk_chars * (_CJK_CHAR_WORD_EQUIVALENT - 1)
         length_ratio = informative_tgt / max(1, len(src_clean))
         # Short headings/phrases (e.g. "Introduction" -> "引言", ratio 0.17) in contractive
