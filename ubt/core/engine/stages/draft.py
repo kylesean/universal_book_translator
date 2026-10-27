@@ -661,6 +661,55 @@ class _DraftProcessor:
 
         return inputs
 
+    async def prepare_blocks(
+        self,
+        blocks: Sequence[IRBlock],
+        current_batch: list[IRBlock],
+    ) -> list[tuple[IRBlock, _DraftInputs]]:
+        """Prepare every translatable block of a batch, concurrently.
+
+        Per-block preparation is a chain of thread off-loads (the TM exact and
+        fuzzy lookups, and on a TM hit the FastPass screen and the whole-glossary
+        walk, plus the neighbor tails and the mask). Run in a sequential loop it
+        is pure serialized wall clock ahead of the batch's LLM gather, so it is
+        fanned out here instead: results keep spine order (``gather`` preserves
+        it) and the first failure in spine order is re-raised after the gather
+        settles, so the batch still fails the way the sequential loop did.
+
+        One deliberate ordering difference: a sibling prep that already reached
+        its TM-exact checkpoint enqueue completes even when another prep raises,
+        where the sequential loop never started the later blocks. Such a
+        checkpoint is a terminal-correct state (``MTQE_PASSED`` carrying the TM
+        target), so landing it early is progress a resume would have made anyway,
+        never a state the failure path has to undo.
+        """
+        todo: list[IRBlock] = []
+        for b in blocks:
+            if is_already_final(b):
+                continue
+            if is_static_skip(b):
+                await self.draft_single_block(b, current_batch)
+                continue
+            todo.append(b)
+        if not todo:
+            return []
+        outcomes = await asyncio.gather(
+            *(self.prepare_draft_inputs(b, current_batch) for b in todo),
+            return_exceptions=True,
+        )
+        prepared: list[tuple[IRBlock, _DraftInputs]] = []
+        first_error: BaseException | None = None
+        for b, outcome in zip(todo, outcomes, strict=True):
+            if isinstance(outcome, BaseException):
+                if first_error is None:
+                    first_error = outcome
+                continue
+            if outcome is not None:
+                prepared.append((b, outcome))
+        if first_error is not None:
+            raise first_error
+        return prepared
+
     async def finalize_draft(self, block: IRBlock, raw_text: str, inputs: _DraftInputs) -> bool:
         """Unmask, record in hierarchical memory, and checkpoint a draft.
 
@@ -904,16 +953,7 @@ class _DraftProcessor:
         current_batch: list[IRBlock],
     ) -> bool:
         """Translate the whole claim batch through one Batch API job."""
-        prepared: list[tuple[IRBlock, _DraftInputs]] = []
-        for b in blocks:
-            if is_already_final(b):
-                continue
-            if is_static_skip(b):
-                await self.draft_single_block(b, current_batch)
-                continue
-            inputs = await self.prepare_draft_inputs(b, current_batch)
-            if inputs is not None:
-                prepared.append((b, inputs))
+        prepared = await self.prepare_blocks(blocks, current_batch)
         if not prepared:
             return True
         # A cache hit needs no batch request: finalize it and submit the rest.
@@ -1042,15 +1082,7 @@ class _DraftProcessor:
         prepared: list[tuple[IRBlock, _DraftInputs]] = []
 
         for segment in segments:
-            for b in segment:
-                if is_already_final(b):
-                    continue
-                if is_static_skip(b):
-                    await self.draft_single_block(b, segment)
-                    continue
-                inputs = await self.prepare_draft_inputs(b, segment)
-                if inputs is not None:
-                    prepared.append((b, inputs))
+            prepared.extend(await self.prepare_blocks(segment, segment))
 
         if not prepared:
             await self.runtime.flusher.flush_all()
@@ -1359,16 +1391,7 @@ class _DraftProcessor:
             if handled:
                 return
 
-        prepared: list[tuple[IRBlock, _DraftInputs]] = []
-        for b in blocks:
-            if is_already_final(b):
-                continue
-            if is_static_skip(b):
-                await self.draft_single_block(b, current_batch)
-                continue
-            inputs = await self.prepare_draft_inputs(b, current_batch)
-            if inputs is not None:
-                prepared.append((b, inputs))
+        prepared = await self.prepare_blocks(blocks, current_batch)
 
         if not prepared:
             return
