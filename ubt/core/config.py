@@ -1430,28 +1430,6 @@ class UBTConfig(BaseSettings):
         return parse_page_ranges(self.pages)
 
     @classmethod
-    def from_provider_config(
-        cls,
-        provider_config: ProviderConfig,
-        *,
-        bootstrap: bool = False,
-        overrides: Mapping[str, Any] | None = None,
-        **extra_overrides: Any,
-    ) -> UBTConfig:
-        """Construct a UBTConfig instance from a typed ProviderConfig model."""
-        all_overrides = dict(overrides or {})
-        all_overrides.update(extra_overrides)
-        clean = {k: v for k, v in all_overrides.items() if v is not None}
-        from ubt.core.providers import merge_provider_under
-
-        clean = merge_provider_under(
-            clean, provider_config, env_supplied=_env_supplied_field_names()
-        )
-        cfg = cls(**clean)
-        if bootstrap:
-            cfg.bootstrap_runtime_environment()
-        return cfg
-
     @classmethod
     def from_env(
         cls,

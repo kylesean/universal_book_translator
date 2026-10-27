@@ -585,6 +585,7 @@ async def test_submitted_packages_compact_and_replay_reports_their_count(
     assert accepted == [2, 2]
     with SQLiteJobLedger(tmp_path / "db" / f"{job_id}.sqlite") as ledger:
         session = ledger.get_job_metadata_value(job_id, AGENT_SESSION_KEY)
+        assert isinstance(session, dict), "the agent session must survive compaction"
         packages = session["packages"]
         assert len(packages) == 2
         for package in packages.values():

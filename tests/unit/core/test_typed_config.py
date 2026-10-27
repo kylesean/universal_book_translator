@@ -12,7 +12,6 @@ from ubt.api.runtime_config import ExposedProviderFields, _safe_block
 from ubt.core.config import (
     DefaultsConfig,
     ProviderConfig,
-    UBTConfig,
     UBTConfigFile,
 )
 from ubt.core.providers import (
@@ -166,23 +165,6 @@ def test_load_layer_config(tmp_path: Path) -> None:
     assert layer.draft_reasoning_effort == "low"
 
 
-def test_ubt_config_from_provider_config() -> None:
-    """UBTConfig.from_provider_config creates a UBTConfig instance directly."""
-    p_cfg = ProviderConfig(
-        base_url="https://api.openai.com/v1",
-        api_mode="openai-chat",
-        draft_model="gpt-4o",
-        api_timeout=75.0,
-        is_free=True,
-    )
-    cfg = UBTConfig.from_provider_config(p_cfg, overrides={"draft_model": "override-model"})
-    assert cfg.base_url == "https://api.openai.com/v1"
-    assert cfg.api_mode == "openai-chat"
-    assert cfg.draft_model == "override-model"
-    assert cfg.api_timeout == 75.0
-    assert cfg.is_free is True
-
-
 def test_provider_edit_model_validation() -> None:
     """ProviderEditModel strictly validates inputs and rejects invalid coercion."""
     # Boolean strictly required, strings like "yes" rejected
@@ -270,20 +252,6 @@ def test_provider_config_strict_validation() -> None:
     # qe_engine invalid choice
     with pytest.raises(ValidationError):
         ProviderConfig(qe_engine="invalid-scorer")
-
-
-def test_ubt_config_from_provider_config_with_none_values() -> None:
-    """None values in ProviderConfig fields do not poison UBTConfig defaults."""
-    # When repair_model is None, UBTConfig should not fail with string validation error
-    p = ProviderConfig(repair_model=None, qe_engine=None)
-    cfg = UBTConfig.from_provider_config(p)
-    assert cfg.repair_model == cfg.draft_model
-    assert cfg.qe_engine in ("heuristic", "tiered")
-
-    # Empty provider config succeeds
-    empty_p = ProviderConfig()
-    cfg_empty = UBTConfig.from_provider_config(empty_p)
-    assert cfg_empty is not None
 
 
 def test_validate_block_rejects_invalid_values_in_toml(tmp_path: Path) -> None:
