@@ -118,7 +118,14 @@ def _vlm_factory() -> VlmDriver:
     return CloudOcrDriver(provider="vlm")
 
 
+def _unlimited_ocr2_factory() -> VlmDriver:
+    from ubt.adapters.pdf.vlm.drivers.unlimited_ocr2_driver import UnlimitedOcr2Driver
+
+    return UnlimitedOcr2Driver()
+
+
 register_driver("rapidocr", _rapidocr_factory)
+register_driver("unlimited-ocr2", _unlimited_ocr2_factory)
 register_driver("sidecar", _sidecar_factory)
 register_driver("http", _sidecar_factory)
 register_driver("cloud", _cloud_factory)
@@ -136,13 +143,13 @@ def probe_effective_driver(
 
     Modes:
     - 'off': Explicitly disabled.
-    - 'sidecar': Explicitly requires local/remote Docker sidecar.
-    - 'cloud': Explicitly requires cloud REST API.
-    - 'vlm': Explicitly requires Vision LLM.
-    - 'rapidocr': Explicitly requires local rapidocr package.
-    - 'auto': Probes sidecar -> local rapidocr -> cloud/vlm (cloud/vlm last:
-      page images must not leave the machine while a local engine can do the
-      job; UBT_ALLOW_PAGE_UPLOAD=false skips them entirely).
+    - 'local': A measured-box engine that runs on this machine (rapidocr
+      in-process, or a sidecar HTTP endpoint). Can transcribe a true scan.
+    - 'vlm': An OpenAI-compatible vision chat endpoint (or an in-process
+      VLM driver such as unlimited-ocr2). Text-only: proofread only.
+    - 'auto': local first, then VLM. A book page must not leave the machine
+      while a local engine can read it; UBT_ALLOW_PAGE_UPLOAD=false skips the
+      remote route entirely.
 
     ``allow_page_upload`` defaults to the banned answer on purpose: this is a
     probe of an egress route, and every caller that reached it without an
@@ -157,7 +164,24 @@ def probe_effective_driver(
     if clean_mode == "off":
         return None, None
 
-    if clean_mode in ("sidecar", "http"):
+    if clean_mode in ("local", "sidecar", "rapidocr", "http"):
+        # 'local' resolves to the best available in-process/sidecar engine:
+        # the explicit legacy names keep working so an existing config file
+        # does not silently change meaning. Egress is judged from the endpoint
+        # the sidecar will actually reach.
+        if clean_mode in ("sidecar", "http", "local"):
+            from ubt.adapters.pdf.vlm.drivers.sidecar_driver import SidecarOcrDriver
+
+            target_ep = _sidecar_endpoint(endpoint)
+            if not allow_page_upload and not _endpoint_is_local(target_ep):
+                raise ValueError(
+                    "ocr_mode='local' targets a non-local sidecar endpoint and ships "
+                    "rendered book pages there, but allow_page_upload=false "
+                    "(UBT_ALLOW_PAGE_UPLOAD) forbids page-image egress. Point "
+                    "UBT_OCR_ENDPOINT at localhost or re-enable uploads."
+                )
+            if SidecarOcrDriver.is_healthy(target_ep, api_key=api_key, timeout=0.3):
+                return "sidecar", SidecarOcrDriver(endpoint=target_ep, api_key=api_key)
         # The sidecar is normally a local process, but UBT_OCR_ENDPOINT may point
         # it at a remote host — which would ship page images off-machine while
         # allow_page_upload=false. Gate on the endpoint the driver will actually
@@ -172,30 +196,37 @@ def probe_effective_driver(
                 "forbids page-image egress. Point UBT_OCR_ENDPOINT at localhost or "
                 "re-enable uploads."
             )
-        from ubt.adapters.pdf.vlm.drivers.sidecar_driver import SidecarOcrDriver
+        # The sidecar was not reachable (or the mode explicitly named rapidocr):
+        # fall back to the in-process engine, which has the same measured-boxes
+        # property the anchoring layer requires.
+        from ubt.adapters.pdf.vlm.drivers.rapidocr_driver import RapidOcrDriver
 
-        return "sidecar", SidecarOcrDriver(endpoint=endpoint, api_key=api_key)
-
-    if clean_mode == "cloud":
-        if not allow_page_upload:
-            raise ValueError(
-                "ocr_mode='cloud' ships rendered book pages to a remote endpoint, "
-                "but allow_page_upload=false (UBT_ALLOW_PAGE_UPLOAD) forbids page-image "
-                "egress. Choose a local engine (sidecar/rapidocr) or re-enable uploads."
+        if not RapidOcrDriver.is_available():
+            if clean_mode == "rapidocr":
+                logger.warning(
+                    "OCR mode 'rapidocr' was requested, but rapidocr or its inference "
+                    "engine (onnxruntime) is not operational in this environment. "
+                    "Install them with: uv sync --all-extras (or uv pip install "
+                    "onnxruntime rapidocr)"
+                )
+                return None, None
+            logger.warning(
+                "OCR mode 'local' was requested, but neither the sidecar nor "
+                "in-process rapidocr is operational. Install rapidocr with: "
+                "uv sync --all-extras, or run the sidecar container."
             )
-        from ubt.adapters.pdf.vlm.drivers.cloud_driver import CloudOcrDriver
+            return None, None
+        return "rapidocr", get_driver("rapidocr")
 
-        return "cloud", CloudOcrDriver(
-            endpoint=endpoint, api_key=api_key, model=model, provider="cloud"
-        )
-
-    if clean_mode in ("vlm", "openai_vision"):
+    if clean_mode in ("vlm", "unlimited-ocr2", "openai_vision"):
         if not allow_page_upload:
             raise ValueError(
                 "ocr_mode='vlm' ships rendered book pages to a vision model, but "
                 "allow_page_upload=false (UBT_ALLOW_PAGE_UPLOAD) forbids page-image "
                 "egress. Choose a local engine (sidecar/rapidocr) or re-enable uploads."
             )
+        if clean_mode == "unlimited-ocr2":
+            return "unlimited-ocr2", get_driver("unlimited-ocr2")
         from ubt.adapters.pdf.vlm.drivers.cloud_driver import CloudOcrDriver
 
         return "vlm", CloudOcrDriver(

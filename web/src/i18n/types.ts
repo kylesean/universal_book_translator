@@ -218,9 +218,7 @@ export interface TranslationDictionary {
     ocrModeHelp: string
     ocrModeEgressWarning: string
     ocrModeAuto: string
-    ocrModeRapidocr: string
-    ocrModeSidecar: string
-    ocrModeCloud: string
+    ocrModeLocal: string
     ocrModeVlm: string
     ocrModeOff: string
     pageFilter: string

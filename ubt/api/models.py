@@ -185,9 +185,7 @@ class JobSubmitRequest(BaseModel):
     )
     # Formula pipeline.
     # OCR engine selection. ``ocr_endpoint`` / ``ocr_api_key`` stay operator-only.
-    ocr_mode: OcrMode | None = Field(
-        default=None, description="OCR engine (auto, sidecar, cloud, vlm, rapidocr, off)"
-    )
+    ocr_mode: OcrMode | None = Field(default=None, description="OCR engine (auto, local, vlm, off)")
     # Content selection.
     domain: str | None = Field(
         default=None, description="Domain descriptor used for glossary and chrome hints"

@@ -265,9 +265,7 @@ export const en: TranslationDictionary = {
     ocrModeEgressWarning:
       'This mode uploads whole page images to an external service. Page egress must be enabled first.',
     ocrModeAuto: 'System default',
-    ocrModeRapidocr: 'Local text recognition (free, offline)',
-    ocrModeSidecar: 'Local OCR service',
-    ocrModeCloud: 'Cloud OCR (billed per page, needs egress)',
+    ocrModeLocal: 'Local OCR (free, offline)',
     ocrModeVlm: 'Vision LLM (needs egress)',
     ocrModeOff: 'OCR off (skip unreadable pages)',
     pageFilter: 'Page range',

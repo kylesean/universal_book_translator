@@ -120,7 +120,7 @@ PromptStrategyName = Literal["auto", "minimal", "hybrid", "rich"]
 #: How to recover the translation from a raw completion. ``auto`` (the default)
 #: tries the XML tag first, then strips code fences and conversational lead-ins.
 ExtractionStrategyName = Literal["auto", "xml_tag", "raw", "cp"]
-OcrMode = Literal["auto", "sidecar", "cloud", "vlm", "rapidocr", "off"]
+OcrMode = Literal["auto", "local", "vlm", "off"]
 ExecMode = Literal["auto", "short", "long"]
 FormulaEnrichment = Literal["auto", "on", "off"]
 TocMode = Literal["auto", "on", "off"]
@@ -610,12 +610,10 @@ class UBTConfig(BaseSettings):
     docling_device: DoclingDevice = "auto"
 
     # -- Pluggable OCR Configuration -------------------------------------------
-    # 'auto' (default): Probes local Docker sidecar -> local rapidocr -> Cloud/VLM -> off
-    # 'sidecar': Local or remote Docker OCR sidecar container (HTTP)
-    # 'cloud': Public cloud OCR REST endpoint (Baidu, Tencent, Aliyun, Azure)
-    # 'vlm': Vision LLM (OpenAI-compatible /chat/completions with image_url)
-    # 'rapidocr': In-process local rapidocr-onnxruntime
-    # 'off': Explicitly disable OCR (scanned pages preserved as source)
+    # 'auto' (default): local measured-box engine first, then VLM.
+    # 'local': measured-box engine on this machine (rapidocr or sidecar HTTP).
+    # 'vlm': OpenAI-compatible vision endpoint (or in-process unlimited-ocr2).
+    # 'off': Explicitly disable OCR (scanned pages preserved as source).
     ocr_mode: OcrMode = "auto"
     ocr_endpoint: str = ""
     # Vision model for the OCR channel (env UBT_OCR_MODEL). Declared here so the
@@ -821,7 +819,7 @@ class UBTConfig(BaseSettings):
         Cost accounting needs this so a local ``base_url`` is not read as "the
         whole run is free": a local LLM with cloud OCR still spends real money.
         """
-        ocr_can_bill_cloud = self.ocr_mode in ("cloud", "vlm") or (
+        ocr_can_bill_cloud = self.ocr_mode == "vlm" or (
             self.ocr_mode == "auto" and self.allow_page_upload
         )
         if not ocr_can_bill_cloud:
@@ -1242,8 +1240,8 @@ class UBTConfig(BaseSettings):
 
         # The vision-LLM OCR route bills a model the operator must name: UBT
         # ships no vendor default, so an explicitly requested 'vlm' with no
-        # model is unbuildable. 'cloud' (a REST endpoint such as Baidu/Azure,
-        # which sends no model field) and 'auto' (the driver re-checks) pass.
+        # model is unbuildable. 'auto' and 'local' pass (the driver resolves
+        # at runtime, not at config parse).
         if self.ocr_mode == "vlm" and not self.ocr_model.strip():
             raise ValueError(
                 "ocr_mode='vlm' requires a model (UBT_OCR_MODEL): the vision OCR "

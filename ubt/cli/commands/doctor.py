@@ -125,8 +125,8 @@ CHECK_CODES: dict[str, tuple[str, ...]] = {
         "ocr_engine.sidecar",
         "ocr_engine.rapidocr",
         "ocr_engine.rapidocr_no_backend",
-        "ocr_engine.cloud_ok",
-        "ocr_engine.cloud_blocked",
+        "ocr_engine.vlm_ok",
+        "ocr_engine.vlm_blocked",
         "ocr_engine.none",
         "ocr_engine.off",
         "render.ok",
@@ -164,7 +164,7 @@ CHECK_CODES: dict[str, tuple[str, ...]] = {
         "pdf_engine.docling_missing",
         "pdf_engine.auto_missing",
         "ocr_engine.rapidocr_no_backend",
-        "ocr_engine.cloud_blocked",
+        "ocr_engine.vlm_blocked",
         "ocr_engine.none",
         "typst.missing",
         "cjk_fonts_render.missing",
@@ -875,20 +875,18 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
         )
     else:
         routes: list[str] = []
-        if config.ocr_mode in ("cloud", "vlm"):
+        if config.ocr_mode == "vlm":
             routes.append(
                 f"OCR {config.ocr_mode} pages -> {config.ocr_endpoint or config.base_url}"
             )
         elif config.ocr_mode == "auto":
-            routes.append("OCR auto: sidecar -> local rapidocr -> cloud last-resort")
+            routes.append("OCR auto: local first, then VLM")
         if config.visual_judge_enabled:
             routes.append(f"VLM page judge -> {config.visual_judge_model or config.repair_model}")
         routes.append("visual scalpel page crops -> repair model (when vision-capable)")
         record(
             "Page images",
-            "WARN"
-            if config.ocr_mode in ("cloud", "vlm", "auto") or config.visual_judge_enabled
-            else "OK",
+            "WARN" if config.ocr_mode in ("vlm", "auto") or config.visual_judge_enabled else "OK",
             "allowed; active routes: " + "; ".join(routes),
             fix="set UBT_ALLOW_PAGE_UPLOAD=false to keep pages local",
             code="page_images",
@@ -1072,25 +1070,25 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
                 detail_code="ocr_engine.rapidocr_no_backend",
                 fix_code="ocr_engine.rapidocr_no_backend",
             )
-        elif config.ocr_mode in ("cloud", "vlm"):
+        elif config.ocr_mode == "vlm":
             if config.allow_page_upload:
                 record(
                     "OCR engine",
                     "OK",
-                    f"cloud/vlm egress enabled ({config.ocr_mode})",
+                    "vlm egress enabled",
                     code="ocr_engine",
-                    detail_code="ocr_engine.cloud_ok",
+                    detail_code="ocr_engine.vlm_ok",
                     params={"mode": config.ocr_mode},
                 )
             else:
                 record(
                     "OCR engine",
                     "WARN",
-                    f"ocr_mode='{config.ocr_mode}' but allow_page_upload=False — scanned pages cannot egress",
+                    "ocr_mode='vlm' but allow_page_upload=False — scanned pages cannot egress",
                     fix="enable page upload or install local rapidocr/sidecar",
                     code="ocr_engine",
-                    detail_code="ocr_engine.cloud_blocked",
-                    fix_code="ocr_engine.cloud_blocked",
+                    detail_code="ocr_engine.vlm_blocked",
+                    fix_code="ocr_engine.vlm_blocked",
                     params={"mode": config.ocr_mode},
                 )
         else:

@@ -111,8 +111,8 @@ export const doctorCodesZh: DoctorCodeTables = {
     'ocr_engine.rapidocr': '本地 OCR 可用',
     'ocr_engine.rapidocr_no_backend':
       'OCR 组件不完整，扫描版 PDF 暂时无法识别',
-    'ocr_engine.cloud_ok': 'cloud/vlm 外发已启用（{mode}）',
-    'ocr_engine.cloud_blocked': 'ocr_mode=「{mode}」但 allow_page_upload=False — 扫描页无法外发',
+    'ocr_engine.vlm_ok': 'vlm 外发已启用',
+    'ocr_engine.vlm_blocked': 'ocr_mode="vlm" 但 allow_page_upload=False — 扫描页无法外发',
     'ocr_engine.none':
       '没有可用的本地 OCR；扫描版 PDF 将无法处理',
     'ocr_engine.off': 'OCR 已关闭',
@@ -153,7 +153,7 @@ export const doctorCodesZh: DoctorCodeTables = {
     'pdf_engine.docling_missing': '在服务端安装 PDF 高精度解析组件',
     'pdf_engine.auto_missing': '安装高精度解析组件，或切换为基础解析模式',
     'ocr_engine.rapidocr_no_backend': '在服务端补全 OCR 组件',
-    'ocr_engine.cloud_blocked': '开启页面外发，或配置本地 OCR',
+    'ocr_engine.vlm_blocked': '开启页面外发，或配置本地 OCR',
     'ocr_engine.none': '在服务端安装本地 OCR，或启动 OCR 服务',
     'typst.missing': '在服务端安装 PDF 排版组件，或改用文本输出格式',
     'cjk_fonts_render.missing': '在系统中安装中文字体',

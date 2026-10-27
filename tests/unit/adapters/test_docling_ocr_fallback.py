@@ -226,7 +226,7 @@ def test_a_block_spanning_a_page_break_covers_every_page_of_its_chain() -> None:
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("mode", ["cloud", "vlm"])
+@pytest.mark.parametrize("mode", ["vlm"])
 def test_an_explicit_remote_ocr_mode_cannot_bypass_the_upload_gate(mode: str) -> None:
     """Naming a remote route is not consent to use it.
 

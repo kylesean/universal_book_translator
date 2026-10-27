@@ -5097,10 +5097,8 @@
                 "type": "string",
                 "enum": [
                   "auto",
-                  "sidecar",
-                  "cloud",
+                  "local",
                   "vlm",
-                  "rapidocr",
                   "off"
                 ]
               },
@@ -5806,10 +5804,8 @@
                 "type": "string",
                 "enum": [
                   "auto",
-                  "sidecar",
-                  "cloud",
+                  "local",
                   "vlm",
-                  "rapidocr",
                   "off"
                 ]
               },
@@ -5818,7 +5814,7 @@
               }
             ],
             "title": "Ocr Mode",
-            "description": "OCR engine (auto, sidecar, cloud, vlm, rapidocr, off)"
+            "description": "OCR engine (auto, local, vlm, off)"
           },
           "domain": {
             "anyOf": [

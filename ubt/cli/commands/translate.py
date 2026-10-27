@@ -627,7 +627,7 @@ def translate(
         OcrMode | None,
         typer.Option(
             "--ocr",
-            help="Pluggable OCR mode: 'auto' (probe Docker sidecar -> local rapidocr -> Cloud/VLM last, egress gated by UBT_ALLOW_PAGE_UPLOAD), 'sidecar', 'cloud', 'vlm', 'rapidocr', or 'off'. Unset follows config/UBT_OCR_MODE",
+            help="Pluggable OCR mode: 'auto' (local first, then VLM), 'local' (measured-box engine on this machine), 'vlm' (vision LLM, needs UBT_ALLOW_PAGE_UPLOAD=true for remote endpoints), or 'off'. Unset follows config/UBT_OCR_MODE",
             show_default=False,
         ),
     ] = None,

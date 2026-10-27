@@ -1886,8 +1886,8 @@ def _reject_empty_book(
         mode_note = f" (ocr_mode='{ocr_mode}')" if ocr_mode else ""
         raise DocumentParseError(
             f"No content could be parsed from '{path.name}': every page lacks an "
-            f"extractable text layer{mode_note}. Enable OCR (--ocr rapidocr, "
-            "a Docker OCR sidecar, or --ocr cloud) or set UBT_VLM_SCAN_FALLBACK=missing."
+            f"extractable text layer{mode_note}. Enable OCR (--ocr local or "
+            "--ocr vlm) or set UBT_VLM_SCAN_FALLBACK=missing."
         )
     if missing_pages:
         page_list = ", ".join(str(p) for p in sorted(missing_pages)[:12])
@@ -1898,7 +1898,8 @@ def _reject_empty_book(
             f"Only part of '{path.name}' could be read: {len(missing_pages)}{of_total} "
             f"page(s) have no extractable text layer{mode_note} (pages {page_list}{more}). "
             "Refusing to deliver a book with those pages missing. Enable OCR "
-            "(--ocr rapidocr, a Docker OCR sidecar, or --ocr cloud) to transcribe "
+            "(--ocr local, a measured-box engine, or --ocr vlm for a remote "
+            "service) to transcribe "
             "them, or restrict the run to the pages that do have text with --pages."
         )
     return blocks
@@ -1927,7 +1928,7 @@ def _driver_can_transcribe_scans(driver: Any) -> bool:
     :func:`ubt.adapters.pdf.vlm.anchor.anchor_transcript` fails closed on such a
     transcript in recognition mode, so it can *proofread* a page that already
     has a text layer but cannot transcribe a true scan. A measured-box engine
-    (rapidocr, sidecar, cloud REST) can.
+    a measured-box engine can.
     """
     return bool(getattr(driver, "measured_boxes", True))
 
@@ -1940,12 +1941,10 @@ def _ocr_unavailable_hint(mode: str) -> str:
     """
     return (
         "To enable OCR for scanned pages:\n"
-        "  1. Local sidecar (recommended): "
+        "  1. Local measured-box engine (recommended): "
         "docker build -t ubt-ocr-sidecar deploy/docker/ocr-sidecar && "
         "docker run -d -p 8765:8765 ubt-ocr-sidecar:latest\n"
         "  2. Or install local rapidocr: pip install rapidocr-onnxruntime\n"
-        "  3. Or a measured-box cloud OCR endpoint: "
-        "--ocr cloud --ocr-endpoint <url> --ocr-api-key <key>\n"
         "Note: --ocr vlm (vision LLM) returns text without geometry, so it can "
         "proofread a page that already has a text layer but cannot transcribe a "
         "scanned page.\n"
@@ -2200,8 +2199,8 @@ def vlm_fallback_missing_pages(
         logger.warning(
             "OCR driver '%s' (mode='%s') returns text without measured boxes, so "
             "it cannot transcribe the %d page(s) with no text layer; those pages "
-            "will be left empty. Use a measured-box engine (rapidocr / sidecar / "
-            "--ocr cloud) to transcribe scans.",
+            "will be left empty. Use a measured-box engine (--ocr local) to "
+            "transcribe scans.",
             driver_type,
             effective_mode,
             len(missing),

@@ -236,9 +236,7 @@ export function NewJobWizard() {
   const [layoutColumns, setLayoutColumns] = useState<'auto' | '1' | '2'>('auto')
   const [translateChrome, setTranslateChrome] = useState<'auto' | 'on' | 'off'>('auto')
   // 'auto' submits as null so the operator's UBT_OCR_MODE still applies.
-  const [ocrMode, setOcrMode] = useState<
-    'auto' | 'rapidocr' | 'sidecar' | 'cloud' | 'vlm' | 'off'
-  >('auto')
+  const [ocrMode, setOcrMode] = useState<'auto' | 'local' | 'vlm' | 'off'>('auto')
   const [pageRange, setPageRange] = useState('')
   // Per-book glossary: a staged upload, never a typed server path. Browsers do
   // not expose filesystem paths, so the old input asked the operator to type a
@@ -627,7 +625,7 @@ export function NewJobWizard() {
    * privacy change. 'auto' can also reach the cloud, but only as a last
    * resort after local engines fail, and it warns in the log.
    */
-  const ocrNeedsEgress = ocrMode === 'cloud' || ocrMode === 'vlm'
+  const ocrNeedsEgress = ocrMode === 'vlm'
   /**
    * Page egress is closed on this deployment, so neither the visual judge nor a
    * cloud/vlm OCR mode can ship a page anywhere. The judge would skip every page
@@ -1499,9 +1497,7 @@ export function NewJobWizard() {
                           onValueChange={(value) => setOcrMode(value as typeof ocrMode)}
                           options={[
                             { value: 'auto', label: t.wizard.ocrModeAuto },
-                            { value: 'rapidocr', label: t.wizard.ocrModeRapidocr },
-                            { value: 'sidecar', label: t.wizard.ocrModeSidecar },
-                            { value: 'cloud', label: t.wizard.ocrModeCloud },
+                            { value: 'local', label: t.wizard.ocrModeLocal },
                             { value: 'vlm', label: t.wizard.ocrModeVlm },
                             { value: 'off', label: t.wizard.ocrModeOff },
                           ]}

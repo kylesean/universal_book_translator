@@ -106,7 +106,7 @@ class CloudOcrDriver:
                 "Vision OCR needs an explicit model: this channel no longer falls "
                 "back to a vendor default. Set UBT_OCR_MODEL (or ocr_model in the "
                 "run config) to the vision model whose tokens the run will bill; "
-                "choose a local engine (UBT_VLM_DRIVER=rapidocr) or set "
+                "choose a local engine (UBT_OCR_MODE=local) or set "
                 "UBT_OCR_MODE=off to skip OCR instead."
             )
 

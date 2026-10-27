@@ -124,10 +124,10 @@ def test_ocr_mode_reaches_the_quote(client: TestClient, tmp_path: Path) -> None:
     """
     doc = _document(tmp_path)
     response = client.post(
-        "/jobs/assess", json={"input_path": str(doc), "ocr_mode": "cloud"}, headers=_AUTH
+        "/jobs/assess", json={"input_path": str(doc), "ocr_mode": "local"}, headers=_AUTH
     )
     assert response.status_code == 200, response.text
-    assert response.json()["meta"]["ocr_mode"] == "cloud"
+    assert response.json()["meta"]["ocr_mode"] == "local"
 
 
 def test_concurrency_drives_the_runtime_estimate(client: TestClient, tmp_path: Path) -> None:

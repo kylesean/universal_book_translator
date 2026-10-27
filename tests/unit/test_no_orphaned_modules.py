@@ -55,7 +55,12 @@ _PRODUCTION_IMPORT_ROOTS = ("ubt", "scripts")
 #: Modules reached only through a string, never an import: subprocess entry
 #: points launched as ``python -m ...``. Each must name why it cannot be
 #: imported statically.
-_DYNAMIC_ENTRY_POINTS: frozenset[str] = frozenset({})
+_DYNAMIC_ENTRY_POINTS: frozenset[str] = frozenset(
+    {
+        # Launched as ``python -m ubt.adapters.pdf.vlm.drivers.unlimited_ocr2_worker``.
+        "ubt.adapters.pdf.vlm.drivers.unlimited_ocr2_worker",
+    }
+)
 
 #: Production orphans (no importer outside ``tests/``) that are deliberately
 #: retained. Every entry must say what keeps it, so the list cannot become a
