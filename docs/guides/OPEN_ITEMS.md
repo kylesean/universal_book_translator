@@ -1,9 +1,9 @@
-# 当前待办与未闭环结论
+# 历史快照：审查修复记录与旧 triage 清单
 
-本文件记录 `docs/` 里仍活动的待办，以及刚从待办转为已修复的结论（保留以便追溯）。
-当前审查报告见 `reviews/2026-10-20-round4-deep-review.md`
-与 `reviews/2026-10-20-round4-deep-review-verdict.md`（本地工作笔记，不进入 git）；
-那 50 条问题以报告为准，这里只保留不在其中的事项和历史遗留的 triage 清单。
+> **注意**：本文件是一次历史快照，记录的是当时发现的问题、修复方案和验证命令。
+> 文中引用的部分测试文件（如 `test_source_coverage.py`、`test_repair_no_span_overwrite.py`
+> 等）已被后续重构合并、重命名或删除；文中描述的行为以当前代码和 `ARCHITECTURE.md` 为准。
+> 该文件仅作参考，不作为当前待办的依据。
 
 ## 1. 已修复：加密 PDF 在 translate 路径的报错不可行动（第三轮 U-10）
 

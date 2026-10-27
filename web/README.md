@@ -4,7 +4,7 @@ Frontend for **Universal Book Translator (UBT)**: a local-first Single Page Appl
 
 See also:
 - [`DESIGN.md`](DESIGN.md) for the visual design manifesto, light/dark palette, and anti-AI-slop guidelines.
-- [`../docs/UBT_OPERATOR_CONSOLE_PRD.md`](../docs/UBT_OPERATOR_CONSOLE_PRD.md) for the comprehensive product requirements.
+- [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the engine architecture the console drives.
 
 ---
 
@@ -43,7 +43,7 @@ composition stays in the view that owns it.
 
 1. Start the backend API server:
    ```bash
-   uv run ubt serve --port 8000
+   uv run ubt console --port 8000
    ```
 
 2. Start the Vite dev server:
@@ -69,7 +69,7 @@ The frontend is distributed as static assets embedded directly in the `ubt` Pyth
 python scripts/build_console_assets.py
 ```
 
-FastAPI automatically serves these assets at `/` when `ubt serve` or `ubt web` is invoked.
+FastAPI automatically serves these assets at `/` when `ubt console` or `ubt web` is invoked.
 
 ### Linting & Type Checking
 

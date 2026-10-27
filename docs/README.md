@@ -3,7 +3,7 @@
 `docs/` 只存在于工作副本中（`.gitignore` 的 `/docs/`），clone 不含这些笔记。
 本索引是它们的导航，并标出每份文档的性质：**活文档**描述当前系统（以代码为准），
 **设计记录**记录已落地的重构依据与实施日志，**提案/草案**描述尚未开工的方向，
-**当前待办**见 [`guides/OPEN_ITEMS.md`](guides/OPEN_ITEMS.md)。
+历史快照（含部分已被重构吸收的旧测试引用）见 [`guides/OPEN_ITEMS.md`](guides/OPEN_ITEMS.md)。
 
 ## 活文档（描述当前系统）
 
@@ -38,11 +38,11 @@
 | --- | --- |
 | [`guides/FICTION_PRESET_AND_LITERARY_OPTIMIZATION.md`](guides/FICTION_PRESET_AND_LITERARY_OPTIMIZATION.md) | 小说/文学 preset 与文学化优化建议（草案待评审） |
 
-## 当前待办
+## 历史快照
 
 | 文档 | 内容 |
 | --- | --- |
-| [`guides/OPEN_ITEMS.md`](guides/OPEN_ITEMS.md) | 活动待办与修复记录：U-10 加密 PDF 报错（2026-10-20 已修复，含回归测试）＋从第二轮审查迁移的 triage 清单 |
+| [`guides/OPEN_ITEMS.md`](guides/OPEN_ITEMS.md) | 历史快照：U-10 加密 PDF 报错（2026-10-20 已修复，含回归测试）＋从第二轮审查迁移的 triage 清单；部分测试已被重构合并或删除，以当前代码为准 |
 
 ## 当前评审记录
 
