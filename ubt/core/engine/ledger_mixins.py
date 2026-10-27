@@ -694,7 +694,8 @@ class LedgerJobsMixin(_LedgerHost):
                         SUM(CASE WHEN status = 'needs_human' THEN 1 ELSE 0 END) as needs_human,
                         SUM(CASE WHEN status = 'blocked_human' THEN 1 ELSE 0 END) as blocked_human,
                         AVG(CASE WHEN {QE_SCORED_SQL} AND COALESCE(skip_translate, 0) = 0
-                                 THEN mtqe_score ELSE NULL END) as avg_score
+                                 THEN mtqe_score ELSE NULL END) as avg_score,
+                        SUM(CASE WHEN {QE_SCORED_SQL} THEN 1 ELSE 0 END) as scored_count
                     FROM blocks
                     WHERE job_id = ?
                     """,  # noqa: S608 — policy constant, not user input
@@ -703,22 +704,30 @@ class LedgerJobsMixin(_LedgerHost):
                 row = cursor.fetchone()
                 b15_avg = 0.0
                 if row and row["avg_score"] is not None:
-                    scores_cursor = conn.execute(
-                        f"""
-                        SELECT mtqe_score FROM blocks
-                        WHERE job_id = ? AND {QE_SCORED_SQL}
-                        ORDER BY mtqe_score ASC
-                        """,  # noqa: S608 — policy constant, not user input
-                        (actual_id,),
-                    )
-                    scores = [
-                        r["mtqe_score"]
-                        for r in scores_cursor.fetchall()
-                        if r["mtqe_score"] is not None
-                    ]
-                    if scores:
-                        cutoff = max(1, int(len(scores) * 0.15))
-                        b15_avg = round(sum(scores[:cutoff]) / cutoff, 4)
+                    # The bottom-15% mean needs only the cutoff's rows, and
+                    # ``idx_blocks_job_mtqe`` already serves the score ordering:
+                    # AVG over a LIMIT subquery reads ``cutoff`` index entries
+                    # where the previous full fetchall materialized every scored
+                    # row into Python. This query runs once per progress event
+                    # (the docstring's 666 on a 20k-block run) and from the
+                    # console's per-job catalog snapshot, so the full scan was
+                    # the ledger's one O(n²) aggregate.
+                    scored = int(row["scored_count"] or 0)
+                    if scored:
+                        cutoff = max(1, int(scored * 0.15))
+                        b15_row = conn.execute(
+                            f"""
+                            SELECT AVG(bottom.mtqe_score) FROM (
+                                SELECT mtqe_score FROM blocks
+                                WHERE job_id = ? AND {QE_SCORED_SQL}
+                                ORDER BY mtqe_score ASC
+                                LIMIT ?
+                            ) AS bottom
+                            """,  # noqa: S608 — policy constant, not user input
+                            (actual_id, cutoff),
+                        ).fetchone()
+                        if b15_row is not None and b15_row[0] is not None:
+                            b15_avg = round(b15_row[0], 4)
             finally:
                 # Always end the read snapshot, including on a query error: a
                 # connection left "within a transaction" pins the WAL and poisons
