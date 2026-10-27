@@ -11,6 +11,38 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Changed
 
+- **Batch drafting prepares its blocks concurrently.** All three draft paths
+  (interactive, Batch API, whole-book) prepared each block's inputs in a
+  sequential `await` loop before the batch's LLM `gather`: the TM exact + fuzzy
+  lookups, the chunk glossary table, the neighbor tails, the mask, and on a TM
+  hit the FastPass screen plus the whole-glossary walk — measured ~2.4 ms of
+  pure serialized wall clock per block (72 s per 30k-block book) on a fresh
+  run, and the delivery vehicle for the fuzzy-TM scan's cost on a populated
+  one. `DraftProcessor.prepare_blocks` now fans the per-block preps out with
+  `asyncio.gather` (results keep spine order; the first failure in spine order
+  is re-raised after the gather settles, so a batch fails the way the
+  sequential loop did). One documented ordering difference: a sibling prep
+  that already reached its TM-exact checkpoint enqueue completes even when
+  another prep raises — that checkpoint is a terminal-correct
+  `MTQE_PASSED`-with-TM-target state a resume would have produced anyway, so
+  landing it early is progress, never something the failure path must undo.
+
+- **The length gate counts CJK characters with the module-level compiled
+  pattern.** `validate_structural_invariants` rebuilt
+  `re.match(f"[{CJK_SCRIPT_CLASS}]", ch)`'s pattern string once per character
+  of every scored target — measured 0.571 ms per 2.5 KB target against 0.033 ms
+  for `findall` over the existing `_CJK_SCRIPT_RE` (17x), about 65% of the
+  whole length-gate evaluate on the hottest per-block path. Same class, same
+  count; the pattern is simply no longer rebuilt per character.
+
+- **Spine-ordered full-block reads get a serving index.** `get_all_blocks` and
+  `fetch_repair_eligible_blocks` both `ORDER BY spine_index` with no
+  status-leading filter any existing index can serve — `EXPLAIN` on a real
+  ledger showed `USE TEMP B-TREE FOR ORDER BY` for each. The baseline schema
+  gains `idx_blocks_spine (job_id, spine_index)`; fresh databases carry it and
+  existing ledgers keep working without it, per the no-in-place-migration
+  rule.
+
 - **A provider name may carry a dot, because the model ids it is named after
   do.** The console refused `workbuddy-ai.deepseek-v4.1-flash` by greying out
   Create, so the only clue was a hint that did not say which character was
@@ -247,6 +279,30 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
   notes in `pyproject.toml` are corrected.
 
 ### Fixed
+
+- **A rehearsal actually runs at "no rate limit" now.** `create_dry_run_orchestrator`'s
+  docstring promised *no rate limit* but built the limiter itself:
+  `AdaptiveTokenBucket(initial_rpm=100_000, max_rpm=100_000)` raised the RPM side
+  and left `initial_tpm` at the class default of 100 000, so every echo call was
+  still gated by the TPM bucket — a batch of 30 blocks waited out the refill at
+  ~5 s apiece. Measured on a 400-block synthetic book: 39.1 s → 0.88 s with the
+  null limiter (~44x), 1 200 blocks: 129.5 s → 2.49 s; profiling attributed 38 of
+  the 40 seconds to `epoll` waits, ~2 s to actual CPU. The MCP Agent path had
+  already wired `NullRateLimiter` (`agent_translation.py`); the CLI, API and
+  worker rehearsal paths — all 20 `create_dry_run_orchestrator` callers — go
+  through this one constructor and now match it.
+
+- **The bottom-15% QE average no longer materializes every scored row per
+  progress event.** `get_job_stats` computed the bottom-15% mean by fetching
+  *all* scored rows into Python and slicing — an O(scored) fetch issued once per
+  progress event (the docstring's own count: 666 on a 20k-block run) and once
+  per job from the console's catalog snapshot (`get_job_snapshot` →
+  `get_job_stats`), which made it the ledger's one O(n²) aggregate. The mean is
+  now `AVG` over a `LIMIT cutoff` subquery: `idx_blocks_job_mtqe` already serves
+  the score ordering, so SQLite reads only the cutoff's index entries and Python
+  materializes none. The cutoff arithmetic (`max(1, int(n * 0.15))`) and the
+  row set (`QE_SCORED_SQL`, whose `mtqe_score IS NOT NULL` term makes the old
+  post-fetch None filter a no-op) are unchanged, so the value is identical.
 
 - **The console shell is never cached, so a rebuild is visible on the next
   load.** The SPA's `index.html` was served with no `Cache-Control` at all, so
