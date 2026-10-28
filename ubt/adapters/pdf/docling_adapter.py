@@ -352,6 +352,8 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         # Whether a recovered table of contents is placed (and where) is a
         # delivery decision, so it travels with the render strategy.
         self._renderer.toc_mode = runtime_config.toc_mode
+        self._renderer.enable_layout_auto_heal = runtime_config.enable_layout_auto_heal
+        self._renderer.layout_auto_heal_max_passes = runtime_config.layout_auto_heal_max_passes
         # The analyze cache (content-addressed cache layer): the Docling layout+formula pass
         # is a pure function of the file, page range, enrichment policy and
         # parser code, so a resumed or re-run job reuses the extraction.

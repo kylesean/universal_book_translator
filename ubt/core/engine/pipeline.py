@@ -1035,6 +1035,8 @@ class PipelineOrchestrator:
                 allow_page_upload=self.config.allow_page_upload,
                 cache_dir=str(self.config.cache_dir) if self.config.cache_enabled else "",
                 docling_isolate_process=self.config.docling_isolate_process,
+                enable_layout_auto_heal=self.config.enable_layout_auto_heal,
+                layout_auto_heal_max_passes=self.config.layout_auto_heal_max_passes,
             ),
         )
 

@@ -471,6 +471,8 @@ class TypstConfig(BaseModel):
     font_family: str | None = None
     translate_chrome: bool = False
     toc_mode: TocMode = "auto"
+    enable_layout_auto_heal: bool = True
+    layout_auto_heal_max_passes: int = 2
 
 
 class QualityConfig(BaseModel):
@@ -1244,6 +1246,12 @@ class UBTConfig(BaseSettings):
         default="error",
         description=("Layout spill policy ('error', 'warn', 'appendix', 'source_kept_warn')."),
     )
+
+    # Adaptive layout auto-healing pass during Typst export: iteratively remediates
+    # physical margin spills and gutter overruns by adjusting table scaling and
+    # breaking long display formulas across lines.
+    enable_layout_auto_heal: bool = True
+    layout_auto_heal_max_passes: int = 2
 
     # -- Table rendering strategy for PDF ----------------------------------------
     # The publication renderer rebuilds every table from the IR, so a table is

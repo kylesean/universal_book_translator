@@ -90,6 +90,9 @@ class AdapterRuntimeConfig:
     cache_dir: str = ""
     #: Whether Docling conversions run in an isolated worker process.
     docling_isolate_process: bool = True
+    #: Enable adaptive layout auto-healing pass during Typst publication render.
+    enable_layout_auto_heal: bool = True
+    layout_auto_heal_max_passes: int = 2
 
 
 def apply_runtime_config(adapter: Any, runtime_config: AdapterRuntimeConfig) -> None:

@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ubt.adapters.pdf.typst_compile import typst_version
 from ubt.core.content.nodes import ReconstructionRecord
@@ -47,8 +47,12 @@ class DoclingRenderStrategy:
         self,
         *,
         font_family: str | None = None,
+        enable_layout_auto_heal: bool = True,
+        layout_auto_heal_max_passes: int = 2,
     ) -> None:
         self.font_family = font_family
+        self.enable_layout_auto_heal = enable_layout_auto_heal
+        self.layout_auto_heal_max_passes = layout_auto_heal_max_passes
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: Set from the resolved config by the adapter (``apply_config``).
         self.toc_mode = "auto"
@@ -160,6 +164,50 @@ class DoclingRenderStrategy:
                 f"publish render failed to compile: {stderr.strip() or 'unknown Typst error'} "
                 f"(generated source kept at {typ_path})"
             )
+
+        # Adaptive layout auto-healing pass: checks for physical margin spills or
+        # gutter overruns and iteratively remediates through smart formula breaking and table scaling.
+        if getattr(self, "enable_layout_auto_heal", True) and output_path.exists():
+            from ubt.render.typst.auto_healing import LayoutAutoHealer
+            from ubt.render.typst.layout_diagnostics import PageLayoutSpec
+
+            if is_academic:
+                layout_spec = (
+                    PageLayoutSpec.academic_dual()
+                    if columns > 1
+                    else PageLayoutSpec.academic_single()
+                )
+            else:
+                layout_spec = PageLayoutSpec.book()
+
+            def _renderer_builder(**overrides: Any) -> TypstDocumentRenderer:
+                return TypstDocumentRenderer(
+                    assets_root=assets_root,
+                    bilingual=bilingual,
+                    math_gate=math_probe.check,
+                    math_gate_many=math_probe.check_many,
+                    font_stack=self._font_stack_for(target_lang),
+                    layout_template="academic" if is_academic else "book",
+                    columns=columns,
+                    paper_title=manifest.title if is_academic else "",
+                    abstract=manifest.metadata.get("abstract", "") if is_academic else "",
+                    toc_mode=getattr(self, "toc_mode", "auto"),
+                    **overrides,
+                )
+
+            max_p = getattr(self, "layout_auto_heal_max_passes", 2)
+            healer = LayoutAutoHealer(spec=layout_spec, max_passes=max_p)
+            healed_passed, heal_report = healer.run_healing_loop(
+                output_path=output_path,
+                build_dir=build_dir,
+                blocks=blocks,
+                target_lang=target_lang,
+                renderer_builder_fn=_renderer_builder,
+                compile_fn=lambda t, o: typst_compile(str(t), str(o), target_lang=target_lang),
+            )
+            if heal_report.healed:
+                manifest.metadata["auto_healing"] = heal_report.to_dict()
+
         # The generated markup's meaning depends on compiler behavior, so every
         # delivered PDF's quality report carries the exact compiler version.
         record_toolchain_versions(manifest)

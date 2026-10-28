@@ -701,6 +701,7 @@ def render_table(
     content_width_pt: float | None = None,
     scale_out: list[float] | None = None,
     allow_landscape: bool = False,
+    table_scale_factor: float = 1.0,
 ) -> str:
     """Render a Markdown table as a Typst ``#table`` with a three-line frame.
 
@@ -996,7 +997,11 @@ def render_table(
         else (share_available - inset_budget) / (total_run_em * TABLE_BASE_PT)
     )
     required_scale = max(required_scale, 0.0)
-    table_scale = max(required_scale, _TABLE_MIN_TEXT_SCALE) if required_scale < 1.0 else 1.0
+    effective_scale = required_scale * table_scale_factor
+    min_scale = _TABLE_MIN_TEXT_SCALE * min(1.0, table_scale_factor)
+    table_scale = (
+        max(effective_scale, min_scale) if effective_scale < 1.0 else (1.0 * table_scale_factor)
+    )
     widths = _alloc(table_scale)
 
     # (The scale-based ``too_wide`` / ``full_page`` / ``shrink`` trio that used to
@@ -1128,7 +1133,7 @@ def render_table(
     # ``_TABLE_TEXT_SCALE`` remains the *comfortable* tabular size for a table
     # that fits at full size; a table that had to shrink uses the computed
     # factor, and never a value above it.
-    emitted_scale = min(table_scale, float(_TABLE_TEXT_SCALE))
+    emitted_scale = min(table_scale, float(_TABLE_TEXT_SCALE) * table_scale_factor)
     if scale_out is not None:
         scale_out.append(emitted_scale)
     if full_page:
@@ -1523,6 +1528,7 @@ class TypstDocumentRenderer:
             )
         else:
             indent_rule = ")"
+        par_spacing = getattr(self, "par_spacing_em", 0.9)
         return "\n".join(
             [
                 TypstDocumentRenderer._PAGE_SETUP,
@@ -1530,7 +1536,7 @@ class TypstDocumentRenderer:
                 # Leading comes from the same convention owner, not a literal
                 # here: this line and ``Theme.leading_em`` disagreed (0.78 vs
                 # 0.85), so a maintainer tuning the theme tuned nothing.
-                f"#set par(justify: true, leading: {convention.leading_em:g}em, spacing: 0.9em,"
+                f"#set par(justify: true, leading: {convention.leading_em:g}em, spacing: {par_spacing:g}em,"
                 + indent_rule,
                 "#show heading.where(level: 1): it => [",
                 "  #v(0.6em)",
@@ -1561,6 +1567,10 @@ class TypstDocumentRenderer:
         abstract: str = "",
         toc_mode: str = "auto",
         allow_landscape_tables: bool = True,
+        table_scale_factor: float = 1.0,
+        formula_scale: float = 1.0,
+        break_long_formulas: bool = False,
+        par_spacing_em: float = 0.9,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
@@ -1570,6 +1580,10 @@ class TypstDocumentRenderer:
         self.paper_title = paper_title
         self.abstract = abstract
         self.allow_landscape_tables = allow_landscape_tables
+        self.table_scale_factor = float(table_scale_factor)
+        self.formula_scale = float(formula_scale)
+        self.break_long_formulas = bool(break_long_formulas)
+        self.par_spacing_em = float(par_spacing_em)
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: ``auto`` is none for a paper (by convention) and one for a book that
         #: carries TOC rows; see :func:`resolve_toc_mode`.
@@ -1927,6 +1941,7 @@ class TypstDocumentRenderer:
                     content_width_pt=table_width,
                     scale_out=table_scale,
                     allow_landscape=allow_landscape,
+                    table_scale_factor=getattr(self, "table_scale_factor", 1.0),
                 )
                 fell_back = False
                 if not markup:
@@ -2008,7 +2023,17 @@ class TypstDocumentRenderer:
                 ):
                     converted = None
                 if converted:
-                    body.append(f"$ {converted} $")
+                    if getattr(self, "break_long_formulas", False):
+                        from ubt.render.typst.auto_healing import fold_multiline_math
+
+                        max_chars = 40 if self.columns > 1 else 65
+                        converted = fold_multiline_math(converted, max_chars=max_chars)
+
+                    f_scale = getattr(self, "formula_scale", 1.0)
+                    if f_scale < 1.0:
+                        body.append(f"#text(size: {10.5 * f_scale:.2f}pt)[$ {converted} $]")
+                    else:
+                        body.append(f"$ {converted} $")
                     self.stats.formulas += 1
                     self.stats.blocks_rendered += 1
                     if from_target:
