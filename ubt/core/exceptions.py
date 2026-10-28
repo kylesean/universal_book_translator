@@ -56,6 +56,34 @@ class IntegrityViolationError(UBTError):
     """Raised when translation bible consistency or HTML delta validation detects severe corruption."""
 
 
+class InvalidBlockStatusTransitionError(UBTError, ValueError):
+    """Raised when an IRBlock lifecycle transition violates the state machine rules."""
+
+    def __init__(
+        self,
+        from_status: str,
+        to_status: str,
+        block_id: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        msg = f"Invalid block status transition: '{from_status}' -> '{to_status}'"
+        if block_id:
+            msg += f" for block {block_id!r}"
+        if reason:
+            msg += f" ({reason})"
+        super().__init__(
+            msg,
+            details={
+                "from_status": from_status,
+                "to_status": to_status,
+                "block_id": block_id,
+            },
+        )
+        self.from_status = from_status
+        self.to_status = to_status
+        self.block_id = block_id
+
+
 class JobInterruptedError(UBTError):
     """Raised when job is actively cancelled or interrupted."""
 

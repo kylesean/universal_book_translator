@@ -267,6 +267,7 @@ def apply_human_edit(
             ],
             clear_verdict_for=[block_id],
             job_id=job_id,
+            allow_terminal_override=True,
         )
 
         tm_written = 0
@@ -469,6 +470,7 @@ def apply_term_propagation(
             ],
             clear_verdict_for=[block.id for block, _, _ in plans],
             job_id=job_id,
+            allow_terminal_override=True,
         )
 
         tm_written = 0

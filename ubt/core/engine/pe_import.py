@@ -280,7 +280,9 @@ def import_pe_revisions(
         # One transaction: the human text and the cleared machine verdict must
         # land together, or a crash between them leaves a human-fixed block
         # still reporting its superseded "critical" severity to auditors.
-        ledger.save_checkpoints_batch(updates, clear_verdict_for=revised_ids)
+        ledger.save_checkpoints_batch(
+            updates, clear_verdict_for=revised_ids, allow_terminal_override=True
+        )
 
     tm_written = 0
     if tm_entries and tm is not None:

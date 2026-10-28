@@ -1704,6 +1704,7 @@ class LedgerBlocksMixin(_LedgerHost):
         clear_verdict_for: list[str] | None = None,
         job_id: str | None = None,
         allow_terminal_override: bool = False,
+        strict: bool = False,
     ) -> int:
         """Atomically update multiple blocks in a single transactional write.
 
@@ -1760,14 +1761,26 @@ class LedgerBlocksMixin(_LedgerHost):
                 # parsed survives a later text rewrite.
                 style = item.get("style")
 
-                status_val = status.value if isinstance(status, BlockStatus) else str(status)
+                try:
+                    enum_status = (
+                        status if isinstance(status, BlockStatus) else BlockStatus(str(status))
+                    )
+                except ValueError as exc:
+                    from ubt.core.exceptions import InvalidBlockStatusTransitionError
 
-                # A *non-terminal* write must not resurrect a row
-                # already in a terminal state. A terminal -> terminal re-save (PE
-                # import, export) is legitimate and must still apply. The triage
-                # stage's paid escalated repair is the one caller that must write
-                # a non-terminal ``REPAIR_PENDING`` over a terminal ``FAILED``
-                # row, so it opts in via ``allow_terminal_override``.
+                    raise InvalidBlockStatusTransitionError(
+                        "unknown",
+                        str(status),
+                        block_id=block_id,
+                        reason=f"Unknown target block status: {status!r}",
+                    ) from exc
+
+                status_val = enum_status.value
+
+                # A *non-terminal* write must not resurrect a row already in a terminal state.
+                # Terminal -> terminal re-save (PE import, export) is legitimate and applies.
+                # The triage stage's paid escalated repair and consistency bible repair are
+                # callers that write over a terminal row, so they opt in via allow_terminal_override.
                 terminal_values = sorted(s.value for s in TERMINAL_STATUSES)
                 query = """
                     UPDATE blocks
@@ -1803,14 +1816,37 @@ class LedgerBlocksMixin(_LedgerHost):
                     _style_json(style),
                     block_id,
                 ]
-                if status_val not in terminal_values and not allow_terminal_override:
-                    terminal_placeholders = ",".join("?" * len(terminal_values))
-                    query += f" AND status NOT IN ({terminal_placeholders})"
-                    params.extend(terminal_values)
+                if not allow_terminal_override:
+                    from ubt.core.ir.state_machine import get_allowed_predecessors
+
+                    allowed_preds = get_allowed_predecessors().get(enum_status)
+                    if allowed_preds is not None:
+                        pred_values = sorted(s.value for s in allowed_preds)
+                        if status_val not in terminal_values:
+                            pred_values = [v for v in pred_values if v not in terminal_values]
+                        if pred_values:
+                            pred_placeholders = ",".join("?" * len(pred_values))
+                            query += f" AND status IN ({pred_placeholders})"
+                            params.extend(pred_values)
+                        else:
+                            query += " AND 1=0"
                 if scope is not None:
                     query += " AND job_id = ?"
                     params.append(scope)
                 cursor.execute(query, params)
+                if strict and cursor.rowcount == 0:
+                    from ubt.core.exceptions import InvalidBlockStatusTransitionError
+
+                    row = conn.execute(
+                        "SELECT status FROM blocks WHERE block_id = ?", (block_id,)
+                    ).fetchone()
+                    current = str(row["status"]) if row else "missing"
+                    raise InvalidBlockStatusTransitionError(
+                        current,
+                        status_val,
+                        block_id=block_id,
+                        reason="Predecessor condition not met in ledger state machine",
+                    )
                 updated += cursor.rowcount
             if clear_verdict_for:
                 placeholders = ",".join("?" * len(clear_verdict_for))

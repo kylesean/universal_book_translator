@@ -14,6 +14,12 @@ from ubt.core.ir.models import (
     StyleMeta,
 )
 from ubt.core.ir.serializer import compute_file_sha256
+from ubt.core.ir.state_machine import (
+    can_transition,
+    get_allowed_predecessors,
+    get_valid_transitions,
+    validate_status_transition,
+)
 
 __all__ = [
     "BlockProvenance",
@@ -28,6 +34,10 @@ __all__ = [
     "Section",
     "StyleMeta",
     "build_section_tree",
+    "can_transition",
     "compute_file_sha256",
+    "get_allowed_predecessors",
+    "get_valid_transitions",
     "section_texts",
+    "validate_status_transition",
 ]

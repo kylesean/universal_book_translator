@@ -449,6 +449,26 @@ class IRBlock(BaseModel):
         """Returns True if the block has reached a terminal status."""
         return self.status in TERMINAL_STATUSES
 
+    def transition_to(
+        self,
+        new_status: BlockStatus | str,
+        *,
+        allow_override: bool = False,
+    ) -> None:
+        """Transition the block's lifecycle status according to the state machine rules.
+
+        Raises:
+            InvalidBlockStatusTransitionError: If the transition is not permitted.
+        """
+        from ubt.core.ir.state_machine import validate_status_transition
+
+        validate_status_transition(
+            self.status, new_status, block_id=self.id, allow_override=allow_override
+        )
+        self.status = (
+            new_status if isinstance(new_status, BlockStatus) else BlockStatus(str(new_status))
+        )
+
     # ------------------------------------------------------------------ #
     # Structural writes rebuild the element (still one source)
     # ------------------------------------------------------------------ #
@@ -484,6 +504,16 @@ class IRBlock(BaseModel):
             return super().model_copy(deep=deep)
 
         remaining_update = dict(update)
+        if "status" in remaining_update:
+            target_status = remaining_update["status"]
+            allow_override = remaining_update.pop(
+                "allow_terminal_override", False
+            ) or remaining_update.pop("allow_override", False)
+            from ubt.core.ir.state_machine import validate_status_transition
+
+            validate_status_transition(
+                self.status, target_status, block_id=self.id, allow_override=allow_override
+            )
         element = remaining_update.pop("element", self.element)
         element_changes: dict[str, Any] = {}
 
