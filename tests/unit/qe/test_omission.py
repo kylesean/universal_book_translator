@@ -513,3 +513,46 @@ def test_a_domain_acronym_without_an_expansion_is_still_demanded() -> None:
         "FFN 块会消耗参数。该路径逐位置变换。基准测试覆盖了该路径。",
     )
     assert not dropped.passed
+
+
+def test_cross_domain_acronyms_pass_when_translated_into_chinese() -> None:
+    """Universal cross-domain acronyms (hardware, AI, biology) legitimately expand into Chinese."""
+    gate = OmissionGate(target_lang="zh")
+    decision = gate.evaluate(
+        "The CPU and GPU architectures accelerate LLM inference and deep learning.",
+        "中央处理器和图形处理器架构加速了大语言模型推理与深度学习。",
+    )
+    assert decision.passed, decision.reason
+    assert decision.metrics.proper_noun_recall == 1.0
+
+
+def test_plural_acronym_matches_singular_expansion() -> None:
+    """Plural acronyms like CPUs and GPUs match their singular canonical expansions."""
+    gate = OmissionGate(target_lang="zh")
+    decision = gate.evaluate(
+        "Modern data centers deploy clusters of CPUs, GPUs, and TPUs.",
+        "现代数据中心部署了处理器、显卡与张量处理器集群。",
+    )
+    assert decision.passed, decision.reason
+    assert decision.metrics.proper_noun_recall == 1.0
+
+
+def test_biological_terms_translated_into_chinese_pass() -> None:
+    """Biological and medical terms like DNA, RNA, and CRISPR expand into Chinese correctly."""
+    gate = OmissionGate(target_lang="zh")
+    decision = gate.evaluate(
+        "The study applies CRISPR techniques to edit both DNA and RNA sequences.",
+        "该研究应用基因编辑技术来编辑脱氧核糖核酸和核糖核酸序列。",
+    )
+    assert decision.passed, decision.reason
+    assert decision.metrics.proper_noun_recall == 1.0
+
+
+def test_compound_glued_ext4_term_decomposition() -> None:
+    """Alphanumeric glued terms like ext4formatted decompose and verify properly."""
+    gate = OmissionGate(target_lang="zh")
+    decision = gate.evaluate(
+        "The worker mounts an ext4formatted partition for fast scratch I/O.",
+        "工作节点挂载了一个ext4格式化分区以进行快速临时输入输出。",
+    )
+    assert decision.passed, decision.reason

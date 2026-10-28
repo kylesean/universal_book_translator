@@ -43,6 +43,10 @@ from typing import Any
 
 from ubt.core.qe.term_shape import count_sentences as count_sentences
 from ubt.core.qe.term_shape import is_identifier_shaped
+from ubt.core.qe.translatable_terms import (
+    find_translatable_surfaces,
+    match_compound_term,
+)
 from ubt.core.validators.consistency import (
     canonicalize_numeric_token,
     denoted_numeric_values,
@@ -261,50 +265,31 @@ def _math_term_variants(term: str) -> list[str]:
     return vars
 
 
-# Deliberate runtime allowlist (introduced in 60c7060 after corpus tuning):
-# identifier terms a correct translation may legitimately render other than
-# verbatim, mapped to the target surfaces that verify the translation.
-# Extend only with corpus-attested cases — every entry here exempts an
-# omission in the production gate.
-_KNOWN_TRANSLATABLE_TERMS: dict[str, tuple[str, ...]] = {
-    "microvm": ("微虚拟机", "虚拟机", "microvm"),
-    "microvms": ("微虚拟机", "虚拟机", "microvms"),
-    "ext4formatted": ("ext4", "格式化", "ext4 formatted"),
-    # Universally-expanded acronyms a competent translation renders into the
-    # target language instead of keeping (same class as the miner's stop list —
-    # 'US', 'UK' — rather than the author-attested pairs it mines). arXiv
-    # 2101.03961 b0110/b0133: 'the common NLP approach' -> '自然语言处理领域一种
-    # 常见的方法' is complete, and quarantining it for a missing literal 'NLP'
-    # held two correct blocks in the human queue. Keep this list to acronyms
-    # whose expansion is unambiguous across domains.
-    "nlp": ("自然语言处理", "自然语言"),
-    "ml": ("机器学习",),
-    "ai": ("人工智能",),
-}
-
-
 def _match_term_surfaces(term: str, target: str, source: str = "") -> list[str] | None:
     """Concrete target surfaces verifying an identifier term, or None.
 
     Acceptance ladder (first hit wins, all case-sensitive): exact whole-token
-    -> plural/singular variant -> LaTeX math variants -> source-attested digit gluing ->
-    source-attested space merge -> camel-decomposition parts (every
-    identifier-shaped part must verify; when no part is shaped, at least one
-    part must — so a fully dropped 'DataLoader' still fails while a
-    transliterated 'whereQ0'/'withCfin' passes via its surviving parts).
-    Returns matched surfaces so chrF residue scores what was actually
-    verified, not the noisy source token.
+    -> plural/singular variant -> universal acronyms/translatable terms -> compound decomposition
+    -> LaTeX math variants -> source-attested digit gluing -> source-attested space merge
+    -> camel-decomposition parts.
     """
     esc = re.escape(term)
     if re.search(rf"{_STRICT_LB}{esc}{_STRICT_RB}", target):
         return [term]
-    term_lower = term.lower()
-    if term_lower in _KNOWN_TRANSLATABLE_TERMS:
-        for cand in _KNOWN_TRANSLATABLE_TERMS[term_lower]:
+
+    # Universal cross-domain acronyms & translatable terms (e.g. NLP -> 自然语言处理, CPU -> 处理器)
+    known_surfaces = find_translatable_surfaces(term)
+    if known_surfaces:
+        for cand in known_surfaces:
             if cand in target or re.search(
                 rf"{_STRICT_LB}{re.escape(cand)}{_STRICT_RB}", target, re.IGNORECASE
             ):
                 return [cand]
+
+    # Compound glued forms (e.g. ext4formatted, microVMs)
+    compound_hits = match_compound_term(term, target)
+    if compound_hits:
+        return compound_hits
     variants: list[str] = []
     sing = singular_variant(term)
     if sing is not None:
