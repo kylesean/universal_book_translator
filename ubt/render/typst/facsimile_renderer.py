@@ -16,6 +16,7 @@ from pathlib import Path
 
 from ubt.core.exceptions import DocumentParseError
 from ubt.render.typst.escape import typst_escape
+from ubt.render.typst.page_locked_renderer import PageLockedPageSpec, PageLockedReflowRenderer
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,8 @@ class FacsimilePageSpec:
     leading_em: float
     tracking_em: float = 0.0
     placements: list[FacsimileBlockPlacement] = None  # type: ignore[assignment]
+    tier: str = "L1"  # "L1" (canvas) or "L2" (page-locked reflow)
+    l2_spec: PageLockedPageSpec | None = None
 
     def __post_init__(self) -> None:
         if self.placements is None:
@@ -84,7 +87,12 @@ class FacsimileRenderer:
             "",
         ]
 
+        l2_renderer = PageLockedReflowRenderer(font_stack=self.font_stack)
         for p in pages:
+            if p.tier == "L2" and p.l2_spec is not None:
+                lines.append(l2_renderer.build_page_markup(p.l2_spec, target_lang=target_lang))
+                continue
+
             lines.append(
                 f"#page(width: {p.page_w}pt, height: {p.page_h}pt, margin: 0pt, "
                 f'background: image("{bg_pdf_filename}", page: {p.page_no}, width: 100%, height: 100%))['

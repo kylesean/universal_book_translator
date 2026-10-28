@@ -623,11 +623,18 @@ def translate(
             help="Enable Track A 1:1 facsimile delivery channel (in-place visual canvas isomorphism with stripped vector background)",
         ),
     ] = False,
+    page_locked: Annotated[
+        bool,
+        typer.Option(
+            "--page-locked/--no-page-locked",
+            help="Enable Tier L2 1:1 page-locked style-cloned reflow delivery channel (1:1 page-count conservation with cloned geometry)",
+        ),
+    ] = False,
     delivery_mode: Annotated[
         str | None,
         typer.Option(
             "--delivery-mode",
-            help="PDF delivery mode: 'reflow' for responsive flow, or 'facsimile' for 1:1 in-place visual canvas isomorphism",
+            help="PDF delivery mode: 'reflow' for responsive flow, 'facsimile' for 1:1 in-place canvas isomorphism, or 'page_locked' for 1:1 style-cloned reflow",
             show_default=False,
         ),
     ] = None,
@@ -740,7 +747,9 @@ def translate(
         "macro_chunk_size": macro_chunk_size,
         "chapter_streaming_enabled": chapter_streaming,
         "dual_mode": dual_mode,
-        "delivery_mode": "facsimile" if facsimile else (delivery_mode or "reflow"),
+        "delivery_mode": "page_locked"
+        if page_locked
+        else ("facsimile" if facsimile else (delivery_mode or "reflow")),
         "translate_chrome": translate_chrome,
         "preset": preset,
         "pdf_engine": pdf_engine,

@@ -80,8 +80,8 @@ QeEngine = Literal["heuristic", "tiered"]
 #: source is impossible (it changes the page count). ``auto`` lets the advisor
 #: pick from the document's structure.
 DualMode = Literal["mono", "dual", "auto"]
-#: Document delivery channel: 'reflow' (responsive Typst reflow) or 'facsimile' (1:1 visual canvas isomorphism).
-DeliveryMode = Literal["reflow", "facsimile"]
+#: Document delivery channel: 'reflow' (responsive Typst reflow), 'facsimile' (1:1 visual canvas isomorphism), or 'page_locked' (1:1 style-cloned reflow).
+DeliveryMode = Literal["reflow", "facsimile", "page_locked"]
 
 #: What the export stage does when a block's text cannot be placed (a layout
 #: spill). ``error`` fails the delivery contract; the other three downgrade it

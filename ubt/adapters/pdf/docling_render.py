@@ -263,6 +263,12 @@ class DoclingRenderStrategy:
             FacsimilePageSpec,
             FacsimileRenderer,
         )
+        from ubt.render.typst.page_locked_renderer import (
+            PageLockedPageSpec,
+            PageLockedReflowRenderer,
+            extract_page_geometry,
+            solve_page_lock,
+        )
 
         source_path = Path(
             str(
@@ -282,15 +288,19 @@ class DoclingRenderStrategy:
         build_dir = output_path.parent / f".build_{output_path.stem}_facsimile"
         build_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Background vector text stripping
+        # 1. Background vector text stripping (for L1 Canvas pages)
+        is_pure_page_locked = self.delivery_mode == "page_locked"
         bg_stripped = build_dir / "bg_stripped.pdf"
-        try:
-            strip_text_streams(source_path, bg_stripped)
-        except Exception as exc:
-            logger.warning(
-                "Failed to strip background text streams: %s; falling back to reflow", exc
-            )
-            return await self._render_publish(manifest, blocks, target_lang, output_path, bilingual)
+        if not is_pure_page_locked:
+            try:
+                strip_text_streams(source_path, bg_stripped)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to strip background text streams: %s; falling back to reflow", exc
+                )
+                return await self._render_publish(
+                    manifest, blocks, target_lang, output_path, bilingual
+                )
 
         with pikepdf.open(source_path) as src_doc:
             total_pages = len(src_doc.pages)
@@ -332,12 +342,14 @@ class DoclingRenderStrategy:
                     target_content = b.source_text
 
                 is_hdr = b.block_type == BlockType.HEADING
-                color = (
-                    b.style.text_color_hex
-                    if (b.style and b.style.text_color_hex)
-                    else ("#0078ae" if is_hdr else "#000000")
+                style_color = (
+                    getattr(b.style, "color_hex", None) or getattr(b.style, "text_color_hex", None)
+                    if b.style
+                    else None
                 )
-                weight = "bold" if is_hdr or (b.style and b.style.is_bold) else "regular"
+                color = style_color if style_color else ("#0078ae" if is_hdr else "#000000")
+                is_bold = getattr(b.style, "is_bold", False) if b.style else False
+                weight = "bold" if is_hdr or is_bold else "regular"
 
                 records.append(
                     {
@@ -415,29 +427,78 @@ class DoclingRenderStrategy:
                     bottleneck_seg_ids=[],
                 )
 
-            pages_spec.append(
-                FacsimilePageSpec(
-                    page_no=pno,
-                    page_w=round(pw, 2),
-                    page_h=round(ph, 2),
-                    uniform_size_pt=sol.uniform_size_pt,
-                    leading_em=sol.leading_em,
-                    tracking_em=sol.tracking_em,
-                    placements=placements,
-                )
+            use_l2 = (
+                is_pure_page_locked
+                or sol.delivery_tier == "L2"
+                or sol.source_overlap
+                or (not sol.fits and sol.uniform_size_pt <= 7.5)
             )
 
-        renderer = FacsimileRenderer(font_stack=self._font_stack_for(target_lang))
-        renderer.render_document(
-            pages_spec,
-            bg_stripped,
-            output_path,
-            build_dir,
-            target_lang=target_lang,
-        )
+            if use_l2:
+                geom = extract_page_geometry(pw, ph, page_blocks)
+                l2_size, l2_leading, l2_spacing, l2_tracking = solve_page_lock(
+                    geom, page_blocks, target_lang=target_lang
+                )
+                l2_page = PageLockedPageSpec(
+                    page_no=pno,
+                    geometry=geom,
+                    uniform_size_pt=l2_size,
+                    leading_em=l2_leading,
+                    par_spacing_em=l2_spacing,
+                    tracking_em=l2_tracking,
+                    blocks=page_blocks,
+                )
+                pages_spec.append(
+                    FacsimilePageSpec(
+                        page_no=pno,
+                        page_w=round(pw, 2),
+                        page_h=round(ph, 2),
+                        uniform_size_pt=l2_size,
+                        leading_em=l2_leading,
+                        tracking_em=l2_tracking,
+                        placements=placements,
+                        tier="L2",
+                        l2_spec=l2_page,
+                    )
+                )
+            else:
+                pages_spec.append(
+                    FacsimilePageSpec(
+                        page_no=pno,
+                        page_w=round(pw, 2),
+                        page_h=round(ph, 2),
+                        uniform_size_pt=sol.uniform_size_pt,
+                        leading_em=sol.leading_em,
+                        tracking_em=sol.tracking_em,
+                        placements=placements,
+                        tier="L1",
+                    )
+                )
+
+        font_stack = self._font_stack_for(target_lang)
+
+        if is_pure_page_locked:
+            l2_renderer = PageLockedReflowRenderer(font_stack=font_stack)
+            l2_pages = [p.l2_spec for p in pages_spec if p.l2_spec is not None]
+            l2_renderer.render_document(
+                l2_pages,
+                output_path,
+                build_dir,
+                target_lang=target_lang,
+            )
+            manifest.metadata["delivery_mode"] = "page_locked"
+        else:
+            renderer = FacsimileRenderer(font_stack=font_stack)
+            renderer.render_document(
+                pages_spec,
+                bg_stripped,
+                output_path,
+                build_dir,
+                target_lang=target_lang,
+            )
+            manifest.metadata["delivery_mode"] = "facsimile"
 
         record_toolchain_versions(manifest)
-        manifest.metadata["delivery_mode"] = "facsimile"
         self.last_render_skips = []
         self.last_render_flags = []
         self.last_render_reconstructions = []
@@ -527,7 +588,7 @@ class DoclingRenderStrategy:
             # renderer cannot do (it changes the page count), so it now
             # pairs per block like the others.
             publish_bilingual = active_mode != "monolingual"
-            if self.delivery_mode == "facsimile":
+            if self.delivery_mode in ("facsimile", "page_locked"):
                 return await self._render_facsimile(
                     manifest, list(blocks), target_lang, out_path, publish_bilingual
                 )
