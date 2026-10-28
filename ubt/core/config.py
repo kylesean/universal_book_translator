@@ -414,6 +414,153 @@ class UBTEnvSettingsSource(EnvSettingsSource):
         return [(k, env, is_c) for k, env, is_c in info if env.upper().startswith("UBT_")]
 
 
+class RouterConfig(BaseModel):
+    """Sub-domain configuration for LLM routing, endpoints, rate limits, and model capabilities."""
+
+    model_config = ConfigDict(extra="ignore", validate_assignment=True)
+
+    api_key: SecretStr = Field(default_factory=_default_api_key)
+    base_url: str = _OPENAI_BASE_URL
+    api_mode: ApiMode = "openai-chat"
+    provider: str | None = None
+    repair_provider: str | None = None
+    qe_judge_provider: str | None = None
+    is_free: bool = False
+    cost_per_mtok: tuple[float, float] | None = None
+    supports_temperature: bool | None = None
+    supports_reasoning_effort: bool | None = None
+    supports_system_prompt: bool | None = None
+    supports_vision: bool | None = None
+    extraction_strategy: ExtractionStrategyName = "auto"
+    deployment_backend: str = ""
+    reasoning_dialect: str = "nested"
+    chat_template_kwargs: dict[str, Any] = Field(default_factory=dict)
+    extra_headers: dict[str, str] = Field(default_factory=dict)
+    api_timeout: float = Field(default=180.0, gt=0)
+    draft_model: str = ""
+    repair_model: str = ""
+    fallback_models: list[str] = Field(default_factory=list)
+    draft_reasoning_effort: str = "low"
+    repair_reasoning_effort: str = "high"
+    prompt_strategy: PromptStrategyName = "auto"
+    rate_limit_rpm: int = Field(default=60, gt=0)
+    rate_limit_tpm: int = Field(default=100_000, gt=0)
+    rate_limit_max_rpm: int = Field(default=240, gt=0)
+    rate_limit_max_tpm: int = Field(default=600_000, gt=0)
+    rate_limit_backoff_cooldown_sec: float = Field(default=3.0, ge=0.0)
+    draft_max_retries: int = Field(default=0, ge=0)
+    draft_retry_base_delay: float = Field(default=1.0, ge=0.0)
+    prompt_caching_enabled: bool = True
+
+
+class TypstConfig(BaseModel):
+    """Sub-domain configuration for document rendering, Typst typesetting, and page layouts."""
+
+    model_config = ConfigDict(extra="ignore", validate_assignment=True)
+
+    dual_mode: DualMode = "auto"
+    layout_columns: int | None = None
+    emit_both: bool = False
+    emit_xliff_companion: bool = True
+    emit_attestation_shadow: bool = True
+    emit_html_companion: bool = True
+    emit_epub_companion: bool = True
+    strict_contract: bool = False
+    spill_policy: SpillPolicy = "error"
+    table_render_mode: TableRenderMode = "auto"
+    font_family: str | None = None
+    translate_chrome: bool = False
+    toc_mode: TocMode = "auto"
+
+
+class QualityConfig(BaseModel):
+    """Sub-domain configuration for quality gates, MTQE, defect screening, and consistency."""
+
+    model_config = ConfigDict(extra="ignore", validate_assignment=True)
+
+    qe_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
+    max_repair_rounds: int = Field(default=2, ge=0)
+    bottom_percentile: float = Field(default=0.15, ge=0.0, le=1.0)
+    consistency_enforce: Literal["off", "report", "repair"] = "off"
+    consistency_max_repairs: int = Field(default=50, ge=0)
+    qe_engine: QeEngine = "heuristic"
+    qe_judge_enabled: bool = False
+    qe_judge_model: str | None = None
+    qe_judge_pass_sample: float = Field(default=0.0, ge=0.0, le=1.0)
+    qe_judge_base_url: str | None = None
+    qe_judge_api_key: SecretStr | None = None
+    qe_judge_api_mode: ApiMode | None = None
+    qe_judge_sentences: bool = True
+    visual_gate_enabled: bool = True
+    render_preflight_enabled: bool = True
+    visual_judge_enabled: bool = False
+    visual_judge_model: str | None = None
+    visual_sample_pages: int = Field(default=6, ge=0, le=50)
+    visual_max_vlm_pages: int = Field(default=3, ge=0, le=10)
+    visual_blocking_gate_enabled: bool = False
+    deterministic_glossary_long_route: bool = False
+    export_min_completion_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class EngineConfig(BaseModel):
+    """Sub-domain configuration for pipeline execution, storage, databases, and worker queues."""
+
+    model_config = ConfigDict(extra="ignore", validate_assignment=True)
+
+    service_api_key: SecretStr = Field(default_factory=lambda: SecretStr(""))
+    trusted_hosts: str = ""
+    trust_tenant_header: bool = False
+    strict_auth: bool = False
+    env: str = "development"
+    allowed_dirs: str = ""
+    pdf_engine: PdfEngine = "auto"
+    docling_device: DoclingDevice = "auto"
+    docling_isolate_process: bool = True
+    ocr_mode: OcrMode = "auto"
+    ocr_endpoint: str = ""
+    ocr_model: str = ""
+    ocr_api_key: SecretStr = Field(default_factory=lambda: SecretStr(""))
+    db_dir: Path = Field(default_factory=lambda: Path(".ubt/ledgers"))
+    cache_enabled: bool = True
+    cache_dir: Path = Field(default_factory=lambda: Path(".ubt/cache"))
+    job_mode: Literal["embedded", "queue"] = "embedded"
+    job_queue_path: Path | None = None
+    job_max_running: int = Field(default=8, gt=0)
+    job_tenant_max_running: int = Field(default=4, gt=0)
+    job_max_queued: int = Field(default=1000, gt=0)
+    upload_retention_days: float = Field(default=7.0, ge=0.0)
+    budget_usd: float | None = Field(default=None, gt=0)
+    allow_unpriced_budget: bool = False
+    local_endpoints: str = ""
+    prices_file: Path | None = None
+    allow_page_upload: bool = False
+    vlm_trust_remote_code: bool = False
+    max_concurrency: int = Field(default=10, gt=0)
+    batch_limit: int = Field(default=30, gt=0)
+    macro_chunk_size: int = Field(default=8, ge=1, le=30)
+    ledger_flush_interval: float = Field(default=0.25, gt=0.0)
+    ledger_flush_batch_size: int = Field(default=50, gt=0)
+    chapter_streaming_enabled: bool = False
+    chapter_streaming_queue_size: int = Field(default=2, gt=0)
+    step_chars: int = Field(default=3500, gt=0)
+    enable_rolling_summary: bool = True
+    memory_sliding_window: bool = True
+    memory_max_epochs: int = Field(default=50, gt=0)
+    glossary_path: Path | None = None
+    glossary_max_global_entries: int = Field(default=100, ge=0)
+    domain: str | None = None
+    document_mode: DocumentMode = "auto"
+    exec_mode: ExecMode = "auto"
+    short_max_pages: int = Field(default=30, gt=0)
+    formula_enrichment: FormulaEnrichment = "auto"
+    formula_crop_margin: float = Field(default=0.08, ge=0.0, le=0.5)
+    pages: str | None = None
+    fresh: bool = False
+    c_text_enabled: bool = False
+    tm_enabled: bool = True
+    tm_fuzzy_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+
+
 class UBTConfig(BaseSettings):
     """Configuration settings governing translation pipeline, models, and thresholds."""
 
@@ -429,6 +576,95 @@ class UBTConfig(BaseSettings):
         populate_by_name=True,
         validate_assignment=True,
     )
+
+    def __init__(
+        self,
+        *args: Any,
+        router: RouterConfig | None = None,
+        typst: TypstConfig | None = None,
+        quality: QualityConfig | None = None,
+        engine: EngineConfig | None = None,
+        **kwargs: Any,
+    ) -> None:
+        for sub_cfg in (router, typst, quality, engine):
+            if sub_cfg is not None:
+                for k in type(sub_cfg).model_fields:
+                    kwargs.setdefault(k, getattr(sub_cfg, k))
+        super().__init__(*args, **kwargs)
+
+    @property
+    def router(self) -> RouterConfig:
+        """Strongly typed sub-domain configuration for LLM routing and providers."""
+        return RouterConfig(
+            **{k: getattr(self, k) for k in RouterConfig.model_fields if hasattr(self, k)}
+        )
+
+    @property
+    def typst(self) -> TypstConfig:
+        """Strongly typed sub-domain configuration for PDF rendering and typesetter layout."""
+        return TypstConfig(
+            **{k: getattr(self, k) for k in TypstConfig.model_fields if hasattr(self, k)}
+        )
+
+    @property
+    def quality(self) -> QualityConfig:
+        """Strongly typed sub-domain configuration for quality evaluation and repair gates."""
+        return QualityConfig(
+            **{k: getattr(self, k) for k in QualityConfig.model_fields if hasattr(self, k)}
+        )
+
+    @property
+    def engine(self) -> EngineConfig:
+        """Strongly typed sub-domain configuration for core engine execution and storage."""
+        return EngineConfig(
+            **{k: getattr(self, k) for k in EngineConfig.model_fields if hasattr(self, k)}
+        )
+
+    def as_subdomains(self) -> tuple[RouterConfig, TypstConfig, QualityConfig, EngineConfig]:
+        """Unpack this configuration into its 4 decoupled typed domain sub-configs."""
+        return self.router, self.typst, self.quality, self.engine
+
+    @classmethod
+    def from_subdomains(
+        cls,
+        *,
+        router: RouterConfig | None = None,
+        typst: TypstConfig | None = None,
+        quality: QualityConfig | None = None,
+        engine: EngineConfig | None = None,
+        **extra_overrides: Any,
+    ) -> UBTConfig:
+        """Compose a unified UBTConfig directly from typed sub-domain configurations."""
+        return cls(
+            router=router,
+            typst=typst,
+            quality=quality,
+            engine=engine,
+            **extra_overrides,
+        )
+
+    def model_copy(
+        self, *, update: Mapping[str, Any] | None = None, deep: bool = False
+    ) -> UBTConfig:
+        """Create a copy of UBTConfig, supporting both top-level and sub-domain updates."""
+        if update:
+            upd = dict(update)
+            for sub_name, sub_cls in (
+                ("router", RouterConfig),
+                ("typst", TypstConfig),
+                ("quality", QualityConfig),
+                ("engine", EngineConfig),
+            ):
+                if sub_name in upd:
+                    sub_val = upd.pop(sub_name)
+                    if isinstance(sub_val, sub_cls):
+                        for k in type(sub_val).model_fields:
+                            upd.setdefault(k, getattr(sub_val, k))
+                    elif isinstance(sub_val, dict):
+                        for k, v in sub_val.items():
+                            upd.setdefault(k, v)
+            return super().model_copy(update=upd, deep=deep)
+        return super().model_copy(update=update, deep=deep)
 
     @classmethod
     def settings_customise_sources(
