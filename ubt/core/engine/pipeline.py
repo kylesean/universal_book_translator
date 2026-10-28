@@ -1034,6 +1034,7 @@ class PipelineOrchestrator:
                 font_family=self.config.font_family,
                 allow_page_upload=self.config.allow_page_upload,
                 cache_dir=str(self.config.cache_dir) if self.config.cache_enabled else "",
+                docling_isolate_process=self.config.docling_isolate_process,
             ),
         )
 

@@ -78,7 +78,13 @@ def docling_cache_key(
     """
     digest = hashlib.sha256()
     digest.update(f"v{DOCLING_CACHE_VERSION}|{pdf_sha256}|{page_range}|".encode())
-    digest.update(json.dumps(options.model_dump(mode="json"), sort_keys=True, default=str).encode())
+    if hasattr(options, "model_dump") and callable(options.model_dump):
+        dump = options.model_dump(mode="json")
+    elif hasattr(options, "__dict__"):
+        dump = options.__dict__
+    else:
+        dump = str(options)
+    digest.update(json.dumps(dump, sort_keys=True, default=str).encode())
     # Physics/table structure do not come from ``docling`` alone: the layout and
     # table models live in ``docling-ibm-models`` and the PDF reader in
     # ``docling-parse``, both pinned only by RANGE in docling's metadata

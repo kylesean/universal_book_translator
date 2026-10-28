@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING, Any
 from ubt.adapters.base import BasePDFEngineAdapter
 from ubt.adapters.pdf.docling_parser import (
     annotate_page_kinds,
+    cleanup_in_process_docling_converter,
+    default_docling_symbols,
     extract_with_docling,
     extract_with_oxide,
     resolve_formula_enrichment,
@@ -37,6 +39,10 @@ from ubt.adapters.pdf.docling_parser import (
     extract_manifest as parser_extract_manifest,
 )
 from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
+from ubt.adapters.pdf.docling_worker import (
+    close_docling_worker_pool,
+    is_docling_process_isolation_enabled,
+)
 from ubt.adapters.pdf.font_metrics import sanitize_font_family
 from ubt.adapters.pdf.page_chunking import compute_pdf_page_chunks, get_pdf_page_chunk_size
 from ubt.core.env import has_accelerator as _has_accelerator
@@ -56,25 +62,8 @@ def _docling_symbols() -> tuple[Any, Any, Any, Any, Any]:
     Importing ``docling`` pulls heavy native dependencies (torch/transformers);
     tests stub this hook instead of swapping ``sys.modules`` entries for the
     real packages, avoiding unsafe sys.modules manipulation of native dependencies.
-
-    ``CodeFormulaVlmOptions`` is returned so the parser can tune the formula
-    crop margin through Docling's own preset API (docling#4548) instead of
-    hardcoding it: the preset is what its documentation recommends.
     """
-    from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import (
-        CodeFormulaVlmOptions,
-        PdfPipelineOptions,
-    )
-    from docling.document_converter import DocumentConverter, PdfFormatOption
-
-    return (
-        InputFormat,
-        PdfPipelineOptions,
-        DocumentConverter,
-        PdfFormatOption,
-        CodeFormulaVlmOptions,
-    )
+    return default_docling_symbols()
 
 
 class _PDFRenderStackMixin:
@@ -317,6 +306,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         formula_crop_margin: float = 0.08,
         font_family: str | None = None,
         allow_page_upload: bool = False,
+        docling_isolate_process: bool | None = None,
     ) -> None:
         self._init_render_stack(font_family)
         self.ocr_mode = ocr_mode
@@ -327,6 +317,11 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         self.docling_device = docling_device
         self.formula_crop_margin = formula_crop_margin
         self.allow_page_upload = allow_page_upload
+        self.docling_isolate_process = (
+            is_docling_process_isolation_enabled()
+            if docling_isolate_process is None
+            else docling_isolate_process
+        )
 
     def apply_config(self, runtime_config: AdapterRuntimeConfig) -> None:
         """Take the OCR / formula / render knobs the pipeline resolved for this run.
@@ -351,6 +346,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         # The page-image egress gate comes from the resolved config, not a
         # second ``os.environ`` read in the parser.
         self.allow_page_upload = runtime_config.allow_page_upload
+        self.docling_isolate_process = runtime_config.docling_isolate_process
         # Setter mirrors the sanitized name onto the render strategy.
         self.font_family = runtime_config.font_family
         # Whether a recovered table of contents is placed (and where) is a
@@ -367,7 +363,8 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
 
     def close(self) -> None:
         """Release adapter-owned subprocesses / resources."""
-        pass
+        close_docling_worker_pool()
+        cleanup_in_process_docling_converter()
 
     @property
     def engine_name(self) -> str:
@@ -522,6 +519,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             enrich=self._resolve_formula_enrichment(path),
             device=self.docling_device,
             formula_crop_margin=self.formula_crop_margin,
+            isolate_process=self.docling_isolate_process,
         )
         # Docling glues a heading's section number to the wrong end
         # ("3.1 Guidance Space" -> "Guidance Space 3.1"); the page's own pdfium

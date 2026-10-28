@@ -88,6 +88,8 @@ class AdapterRuntimeConfig:
     #: Content-addressed step cache root (content-addressed cache layer). Empty disables it;
     #: the adapter builds a store from it for the render path's pixel witnesses.
     cache_dir: str = ""
+    #: Whether Docling conversions run in an isolated worker process.
+    docling_isolate_process: bool = True
 
 
 def apply_runtime_config(adapter: Any, runtime_config: AdapterRuntimeConfig) -> None:

@@ -82,8 +82,7 @@ from ubt.model.ast import RegionKind
 from ubt.model.span import CompositeSpan, PhysicalBox, Span, boxes_to_provenance
 
 if TYPE_CHECKING:
-    from docling.datamodel.pipeline_options import PdfPipelineOptions
-    from docling.document_converter import DocumentConverter
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -792,17 +791,56 @@ def _vram_hint() -> str:
     return "; largest holders: " + ", ".join(f"{label} ({mb} MiB)" for mb, label in top)
 
 
-def extract_with_docling(
+def default_docling_symbols() -> tuple[Any, Any, Any, Any, Any]:
+    """Import hook for Docling converter symbols."""
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import (
+        CodeFormulaVlmOptions,
+        PdfPipelineOptions,
+    )
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+
+    return (
+        InputFormat,
+        PdfPipelineOptions,
+        DocumentConverter,
+        PdfFormatOption,
+        CodeFormulaVlmOptions,
+    )
+
+
+_WARM_IN_PROCESS_CONVERTER: Any = None
+_WARM_IN_PROCESS_KEY: tuple[Any, ...] | None = None
+
+
+def cleanup_in_process_docling_converter() -> None:
+    """Explicitly clean up in-process cached Docling converter and free memory."""
+    global _WARM_IN_PROCESS_CONVERTER, _WARM_IN_PROCESS_KEY
+    if _WARM_IN_PROCESS_CONVERTER is not None:
+        _cleanup_docling_converter(_WARM_IN_PROCESS_CONVERTER)
+        _WARM_IN_PROCESS_CONVERTER = None
+        _WARM_IN_PROCESS_KEY = None
+
+
+def convert_docling_document(
     path: Path,
-    page_range: tuple[int, int] | None,
+    page_range: tuple[int, int] | None = None,
     *,
-    symbols: Callable[[], tuple[Any, Any, Any, Any, Any]],
     enrich: bool,
     device: str = "auto",
     formula_crop_margin: float = 0.08,
-) -> list[IRBlock]:
-    """Extract structured blocks using IBM Docling in strict reading order."""
+    file_sha256: str | None = None,
+    existing_converter: Any = None,
+    symbols: Callable[[], tuple[Any, Any, Any, Any, Any]] | None = None,
+) -> tuple[Any, Any, str]:
+    """Execute Docling document conversion with retry ladder and disk caching.
+
+    Returns:
+        (docling_document, converter, cache_key)
+    """
     configure_hf_environment(enrich=enrich)
+    if symbols is None:
+        symbols = default_docling_symbols
     (
         input_format,
         pipeline_options_cls,
@@ -810,22 +848,12 @@ def extract_with_docling(
         format_option_cls,
         code_formula_options_cls,
     ) = symbols()
-    # Docling is now imported: make its pypdfium2 access share PDFIUM_LOCK.
     _ensure_docling_pdfium_lock()
 
     options = pipeline_options_cls()
-    # Born-digital academic PDFs: OCR off (fast, no false positives);
     options.do_ocr = False
     options.do_formula_enrichment = enrich
     if enrich:
-        # Docling crops each formula with an ``expansion_factor`` margin before
-        # the VLM reads it, defaulting to 0.18 of the bbox on every side. On a
-        # tight academic layout that reaches into the equation number and the
-        # neighbouring prose line, so the model transcribes *that* text into the
-        # LaTeX. Docling's own guidance is to lower the margin (and stop
-        # repetition loops); both are first-class preset options (docling#4548).
-        # ``stop_on_repetition`` also trims the filler a too-tight crop can
-        # provoke, so a smaller margin does not trade one artifact for another.
         options.code_formula_options = code_formula_options_cls.from_preset(
             "codeformulav2",
             expansion_factor=formula_crop_margin,
@@ -833,32 +861,9 @@ def extract_with_docling(
         )
     options.generate_picture_images = True
     options.images_scale = 2.0
-    # Delivered figure/formula/code assets do NOT come from this scale: the
-    # conversion cache strips picture payloads on write, so on every cached
-    # re-ingest ``item.image`` is None and the asset is re-cut from the source
-    # page by the visual scalpel (``FIGURE_ASSET_DPI``, 300). Raising this scale
-    # instead was measured on the reference corpus: it multiplied the page
-    # rasters Docling retains across a conversion (``keep_images`` stays on
-    # whenever picture images are requested) from ~0.8 GB to ~4 GB peak RSS
-    # while changing no delivered pixel — the scalpel fallback dominated.
-    # Whether Docling's layout/table/formula models touch the GPU is a separate
-    # decision from whether Docling runs. ``auto`` (the default) leaves Docling's
-    # own probe in charge; ``cpu`` keeps it off the card so a local LLM sharing
-    # the GPU can still load its weights (see
-    # docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md §L4). The device is part of the
-    # conversion cache key below, so a CPU and a CUDA conversion never alias.
     device = (device or "auto").strip().lower()
-    # Decide the device BEFORE any converter is built. Without this the code
-    # below discovers the shortage the expensive way: it initialises Docling on
-    # cuda, hits OOM on the first allocation, tears the converter down, and
-    # re-runs the conversion on CPU -- paying twice and dropping whatever the
-    # first attempt had produced.
     device, vram_note = _docling_vram_verdict(device)
     if vram_note:
-        # Say explicitly that earlier "Accelerator device: 'cuda:0'" lines from
-        # Docling's own import-time probe do not apply: the converter is pinned
-        # to cpu below, so a reader scanning for the device would otherwise
-        # conclude the run used the GPU.
         logger.warning(
             "Docling device auto-selected 'cpu' (overrides Docling's own probe): %s", vram_note
         )
@@ -878,36 +883,39 @@ def extract_with_docling(
             path.name,
         )
 
-    def _make_converter(opt: PdfPipelineOptions) -> DocumentConverter:
+    if file_sha256 is None:
+        file_sha256 = compute_file_sha256_cached(path)
+
+    key = docling_cache_key(file_sha256, page_range, options)
+    cached = read_docling_document(key)
+    if cached is not None:
+        logger.info(
+            "Reusing the cached Docling conversion of '%s' instead of re-running it.",
+            path.name,
+        )
+        return cached, existing_converter, key
+
+    def _make_converter(opt: Any) -> Any:
         return cast(
-            "DocumentConverter",
+            "Any",
             converter_cls(
                 format_options={input_format.PDF: format_option_cls(pipeline_options=opt)}
             ),
         )
 
-    converter = _make_converter(options)
-    # Docling takes one inclusive (start, end) range; a page-ranged job
-    # pays only for those pages instead of converting and discarding the
-    # rest of the PDF.
+    converter = existing_converter or _make_converter(options)
     convert_kwargs: dict[str, Any] = {"page_range": page_range} if page_range is not None else {}
-    file_sha256 = compute_file_sha256_cached(path)
 
     def _convert() -> Any:
-        """Convert with the on-disk cache in front of it.
-
-        Read lazily through the closure so every retry of the ladder below —
-        which rebinds ``converter`` and mutates ``options`` — is keyed on the
-        configuration it is actually about to run with.
-        """
+        nonlocal key
         key = docling_cache_key(file_sha256, page_range, options)
-        cached = read_docling_document(key)
-        if cached is not None:
+        c = read_docling_document(key)
+        if c is not None:
             logger.info(
                 "Reusing the cached Docling conversion of '%s' instead of re-running it.",
                 path.name,
             )
-            return cached
+            return c
         document = converter.convert(path, **convert_kwargs).document
         write_docling_document(key, document)
         return document
@@ -916,25 +924,7 @@ def extract_with_docling(
         try:
             doc = _convert()
         except Exception as exc:
-            # configure_hf_environment set HF_HUB_OFFLINE process-wide; the online
-            # retry below pops it, so it must be restored once the ladder is done.
-            # Leaving it popped silently disabled offline mode for every in-flight
-            # job in a long-lived server.
-            # Known tradeoff: the pop spans the whole retry conversion, so a
-            # concurrently-running job sees the mutated env in that window.
-            # The mutation only happens on the rare offline-retry path, and
-            # serializing conversions behind a lock for it would stall every
-            # other job — accepted and documented rather than locked.
             offline_before = os.environ.get("HF_HUB_OFFLINE")
-            # The retry below may point HF at the third-party hf-mirror.com — but
-            # only with the operator's explicit opt-in (UBT_ALLOW_HF_MIRROR=1, the
-            # same posture as allow_page_upload in config.py): silently repointing
-            # model downloads at a host the operator never chose is an egress
-            # decision, not a performance default, so the default retry goes to
-            # huggingface.co. Whichever way HF_ENDPOINT ends up, it must not
-            # outlive the ladder: every later HF download in the process
-            # (including the DeepSeek worker's snapshot_download, which inherits
-            # subprocess_env()) would otherwise use it silently.
             endpoint_before = os.environ.get("HF_ENDPOINT")
             try:
                 retry_succeeded = False
@@ -981,14 +971,8 @@ def extract_with_docling(
                         retry_succeeded = True
                     except Exception as retry_exc:
                         exc = retry_exc
-                # A successful offline retry already produced the enriched
-                # document. Falling into the enrichment fallback below (keyed
-                # on the stale offline `exc`) discarded it and re-converted with
-                # the VLM disabled — untested because every offline-ladder case
-                # used enrich=False.
                 if retry_succeeded:
                     pass
-                # Graceful degradation: if formula enrichment caused failure/OOM, fallback to plain extraction
                 elif options.do_formula_enrichment:
                     logger.warning(
                         "Docling formula enrichment failed (%s); gracefully falling back to extraction without VLM (do_formula_enrichment=False)",
@@ -1038,9 +1022,19 @@ def extract_with_docling(
                     os.environ.pop("HF_ENDPOINT", None)
                 else:
                     os.environ["HF_ENDPOINT"] = endpoint_before
-    finally:
+    except Exception:
         _cleanup_docling_converter(converter)
+        raise
 
+    return doc, converter, key
+
+
+def map_docling_document_to_blocks(
+    doc: Any,
+    path: Path,
+    file_sha256: str,
+) -> list[IRBlock]:
+    """Map a parsed DoclingDocument to a list of IRBlocks."""
     assets_dir = docling_asset_dir(file_sha256)
 
     try:
@@ -1062,6 +1056,63 @@ def extract_with_docling(
         return map_export_dict(doc.export_to_dict())
 
     return map_iterated_items(items, doc, assets_dir, pdf_path=path)
+
+
+def extract_with_docling(
+    path: Path,
+    page_range: tuple[int, int] | None,
+    *,
+    symbols: Callable[[], tuple[Any, Any, Any, Any, Any]] | None = None,
+    enrich: bool,
+    device: str = "auto",
+    formula_crop_margin: float = 0.08,
+    isolate_process: bool = False,
+) -> list[IRBlock]:
+    """Extract structured blocks using IBM Docling in strict reading order."""
+    global _WARM_IN_PROCESS_CONVERTER, _WARM_IN_PROCESS_KEY
+
+    file_sha256 = compute_file_sha256_cached(path)
+
+    if isolate_process:
+        from ubt.adapters.pdf.docling_worker import get_docling_worker_pool
+
+        pool = get_docling_worker_pool()
+        try:
+            key = pool.convert(
+                path=path,
+                page_range=page_range,
+                enrich=enrich,
+                device=device,
+                formula_crop_margin=formula_crop_margin,
+                file_sha256=file_sha256,
+            )
+            cached_doc = read_docling_document(key)
+            if cached_doc is not None:
+                return map_docling_document_to_blocks(cached_doc, path, file_sha256)
+        except Exception as exc:
+            logger.warning(
+                "Docling isolated worker pool conversion failed (%s); falling back to in-process conversion.",
+                exc,
+            )
+
+    conv_key = (enrich, device, formula_crop_margin)
+    if _WARM_IN_PROCESS_CONVERTER is not None and conv_key != _WARM_IN_PROCESS_KEY:
+        cleanup_in_process_docling_converter()
+
+    doc, converter, _ = convert_docling_document(
+        path=path,
+        page_range=page_range,
+        enrich=enrich,
+        device=device,
+        formula_crop_margin=formula_crop_margin,
+        file_sha256=file_sha256,
+        existing_converter=_WARM_IN_PROCESS_CONVERTER,
+        symbols=symbols,
+    )
+    _WARM_IN_PROCESS_CONVERTER = converter
+    _WARM_IN_PROCESS_KEY = conv_key
+
+    return map_docling_document_to_blocks(doc, path, file_sha256)
 
 
 #: The ``DocItemLabel`` members this module compares against, and the string
@@ -2386,8 +2437,12 @@ __all__ = [
     "_crop_formula_asset",
     "_extract_document_index_blocks",
     "_extract_outline_only_blocks",
+    "cleanup_in_process_docling_converter",
+    "convert_docling_document",
+    "default_docling_symbols",
     "extract_with_docling",
     "extract_with_oxide",
+    "map_docling_document_to_blocks",
     "read_docling_document",
     "resolve_formula_enrichment",
     "restore_ordered_markers",

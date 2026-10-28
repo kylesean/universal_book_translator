@@ -609,6 +609,12 @@ class UBTConfig(BaseSettings):
     # docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md §L4.
     docling_device: DoclingDevice = "auto"
 
+    # -- Docling process isolation & worker pool ------------------------------
+    # When enabled (default True), Docling PDF conversions run in an isolated
+    # worker process to prevent PyTorch/C++ segfaults or OOM from taking down the
+    # main UBT orchestrator process, and to reuse warm model weights across chunks.
+    docling_isolate_process: bool = True
+
     # -- Pluggable OCR Configuration -------------------------------------------
     # 'auto' (default): local measured-box engine first, then VLM.
     # 'local': measured-box engine on this machine (rapidocr or sidecar HTTP).
