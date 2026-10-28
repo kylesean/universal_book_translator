@@ -18,6 +18,7 @@ from ubt.cli.commands.config_cmd import config_command
 from ubt.cli.commands.console import console_command
 from ubt.cli.commands.doctor import doctor_command
 from ubt.cli.commands.layout_audit import layout_audit_command
+from ubt.cli.commands.optimize_pdf_cmd import optimize_pdf_command
 from ubt.cli.commands.pareto_cmd import pareto_command
 from ubt.cli.commands.roundtrip_cmd import roundtrip_command
 from ubt.cli.commands.status import (
@@ -638,6 +639,7 @@ app.command(name="benchmark")(benchmark_command)
 app.command(name="pareto")(pareto_command)
 app.command(name="workbench")(workbench_command)
 app.command(name="roundtrip")(roundtrip_command)
+app.command(name="optimize-pdf")(optimize_pdf_command)
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 
@@ -659,6 +661,7 @@ __all__ = [
     "pareto_command",
     "workbench_command",
     "roundtrip_command",
+    "optimize_pdf_command",
     "version",
     "_build_config",
     "_resolve_db_dir",

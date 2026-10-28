@@ -357,6 +357,12 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         self._renderer.layout_auto_heal_max_passes = runtime_config.layout_auto_heal_max_passes
         self.delivery_mode = getattr(runtime_config, "delivery_mode", "reflow")
         self._renderer.delivery_mode = self.delivery_mode
+        self._renderer.enable_pdf_optimization = getattr(
+            runtime_config, "enable_pdf_optimization", True
+        )
+        self._renderer.pdf_optimize_profile = getattr(
+            runtime_config, "pdf_optimize_profile", "lossless"
+        )
         # The analyze cache (content-addressed cache layer): the Docling layout+formula pass
         # is a pure function of the file, page range, enrichment policy and
         # parser code, so a resumed or re-run job reuses the extraction.

@@ -94,6 +94,9 @@ class AdapterRuntimeConfig:
     enable_layout_auto_heal: bool = True
     layout_auto_heal_max_passes: int = 2
     delivery_mode: str = "reflow"
+    #: Enable PDF size miniaturization and lossless stream compression.
+    enable_pdf_optimization: bool = True
+    pdf_optimize_profile: str = "lossless"
 
 
 def apply_runtime_config(adapter: Any, runtime_config: AdapterRuntimeConfig) -> None:
@@ -578,3 +581,10 @@ def export_xliff(
         job_id=job_id,
     )
     return xml, len(segments)
+
+
+def optimize_pdf_deliverable(pdf_path: Path, profile: str = "lossless") -> Any:
+    """Miniaturize and compress a delivered PDF through the adapter optimizer."""
+    from ubt.adapters.pdf.pdf_optimizer import optimize_pdf_in_place
+
+    return optimize_pdf_in_place(pdf_path, profile=profile)

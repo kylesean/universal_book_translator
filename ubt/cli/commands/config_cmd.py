@@ -188,6 +188,25 @@ def validate_configuration(config: UBTConfig, domain: str | None = None) -> list
                 )
             )
 
+        if config.pdf_optimize_profile in ("lossless", "ebook", "screen"):
+            findings.append(
+                ValidationFinding(
+                    "typst",
+                    "pdf_optimize_profile",
+                    "OK",
+                    f"Valid PDF optimization profile: {config.pdf_optimize_profile}",
+                )
+            )
+        else:
+            findings.append(
+                ValidationFinding(
+                    "typst",
+                    "pdf_optimize_profile",
+                    "FAIL",
+                    f"Unknown PDF optimization profile: {config.pdf_optimize_profile}",
+                )
+            )
+
     # 3. Quality checks
     if domain is None or domain == "quality":
         if 0.0 <= config.qe_threshold <= 1.0:

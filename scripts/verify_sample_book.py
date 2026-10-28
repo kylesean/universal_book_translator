@@ -51,6 +51,8 @@ class VerificationResult:
     typst_markup_bytes: int = 0
     pdf_compiled: bool = False
     pdf_bytes: int = 0
+    pdf_optimized_bytes: int = 0
+    pdf_optimization_saved_percent: float = 0.0
     pdf_page_count: int = 0
     spill_count: int = 0
     contract_errors: int = 0
@@ -214,6 +216,18 @@ async def run_verification(
             except Exception:  # noqa: BLE001
                 pass
 
+            # 6. PDF Miniaturization & Lossless Compression
+            try:
+                from ubt.adapters.pdf.pdf_optimizer import optimize_pdf_in_place
+
+                opt_res = optimize_pdf_in_place(pdf_path, profile="lossless")
+                result.pdf_optimized_bytes = opt_res.optimized_size_bytes
+                result.pdf_optimization_saved_percent = opt_res.percentage_saved
+                if opt_res.status == "failed":
+                    result.errors.append(f"PDF optimization failed: {opt_res.error}")
+            except Exception as exc:  # noqa: BLE001
+                result.errors.append(f"PDF optimizer exception: {exc}")
+
     return result
 
 
@@ -247,6 +261,13 @@ def print_report(res: VerificationResult) -> None:
             if res.pdf_compiled
             else "[yellow]Skipped (no typst)[/]",
             "Valid PDF",
+        )
+        table.add_row(
+            "PDF Miniaturization",
+            f"{res.pdf_optimized_bytes:,} bytes (-{res.pdf_optimization_saved_percent}%)"
+            if res.pdf_optimized_bytes > 0
+            else "[yellow]Skipped[/]",
+            "Optimal size",
         )
         table.add_row(
             "Layout Spill Breaches",

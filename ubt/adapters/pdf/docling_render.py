@@ -50,11 +50,15 @@ class DoclingRenderStrategy:
         enable_layout_auto_heal: bool = True,
         layout_auto_heal_max_passes: int = 2,
         delivery_mode: str = "reflow",
+        enable_pdf_optimization: bool = True,
+        pdf_optimize_profile: str = "lossless",
     ) -> None:
         self.font_family = font_family
         self.enable_layout_auto_heal = enable_layout_auto_heal
         self.layout_auto_heal_max_passes = layout_auto_heal_max_passes
         self.delivery_mode = delivery_mode
+        self.enable_pdf_optimization = enable_pdf_optimization
+        self.pdf_optimize_profile = pdf_optimize_profile
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: Set from the resolved config by the adapter (``apply_config``).
         self.toc_mode = "auto"
@@ -241,6 +245,16 @@ class DoclingRenderStrategy:
         # every non-text node. Without this the contract's RECONSTRUCTED branch
         # and both ASSET_*_RECONSTRUCTION violation kinds were unreachable.
         self.last_render_reconstructions = list(renderer.table_reconstructions)
+
+        # Miniaturization & lossless stream compression pass
+        if getattr(self, "enable_pdf_optimization", True) and output_path.exists():
+            from ubt.adapters.pdf.pdf_optimizer import optimize_pdf_in_place
+
+            opt_prof = getattr(self, "pdf_optimize_profile", "lossless")
+            opt_res = optimize_pdf_in_place(output_path, profile=opt_prof)
+            if opt_res.status == "optimized":
+                manifest.metadata["pdf_optimization"] = opt_res.model_dump()
+
         return output_path
 
     async def _render_facsimile(
@@ -502,6 +516,16 @@ class DoclingRenderStrategy:
         self.last_render_skips = []
         self.last_render_flags = []
         self.last_render_reconstructions = []
+
+        # Miniaturization & lossless stream compression pass
+        if getattr(self, "enable_pdf_optimization", True) and output_path.exists():
+            from ubt.adapters.pdf.pdf_optimizer import optimize_pdf_in_place
+
+            opt_prof = getattr(self, "pdf_optimize_profile", "lossless")
+            opt_res = optimize_pdf_in_place(output_path, profile=opt_prof)
+            if opt_res.status == "optimized":
+                manifest.metadata["pdf_optimization"] = opt_res.model_dump()
+
         return output_path
 
     def _font_stack_for(self, target_lang: str) -> tuple[str, ...]:

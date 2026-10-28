@@ -1038,6 +1038,8 @@ class PipelineOrchestrator:
                 enable_layout_auto_heal=self.config.enable_layout_auto_heal,
                 layout_auto_heal_max_passes=self.config.layout_auto_heal_max_passes,
                 delivery_mode=self.config.delivery_mode,
+                enable_pdf_optimization=self.config.enable_pdf_optimization,
+                pdf_optimize_profile=self.config.pdf_optimize_profile,
             ),
         )
 

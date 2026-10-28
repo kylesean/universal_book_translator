@@ -476,6 +476,8 @@ class TypstConfig(BaseModel):
     enable_layout_auto_heal: bool = True
     layout_auto_heal_max_passes: int = 2
     delivery_mode: DeliveryMode = "reflow"
+    enable_pdf_optimization: bool = True
+    pdf_optimize_profile: Literal["lossless", "ebook", "screen"] = "lossless"
 
 
 class QualityConfig(BaseModel):
@@ -1256,6 +1258,8 @@ class UBTConfig(BaseSettings):
     enable_layout_auto_heal: bool = True
     layout_auto_heal_max_passes: int = 2
     delivery_mode: DeliveryMode = "reflow"
+    enable_pdf_optimization: bool = True
+    pdf_optimize_profile: Literal["lossless", "ebook", "screen"] = "lossless"
 
     # -- Table rendering strategy for PDF ----------------------------------------
     # The publication renderer rebuilds every table from the IR, so a table is

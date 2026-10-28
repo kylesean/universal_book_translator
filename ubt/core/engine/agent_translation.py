@@ -464,6 +464,8 @@ class AgentTranslationService:
                     font_family=config.font_family,
                     allow_page_upload=False,
                     cache_dir=str(config.cache_dir) if config.cache_enabled else "",
+                    enable_pdf_optimization=config.enable_pdf_optimization,
+                    pdf_optimize_profile=config.pdf_optimize_profile,
                 ),
             )
             manifest = await adapter.extract_manifest(input_path)

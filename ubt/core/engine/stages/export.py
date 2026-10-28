@@ -48,6 +48,7 @@ from ubt.core.ports import (
     get_last_render_flags,
     get_last_render_reconstructions,
     get_last_render_skips,
+    optimize_pdf_deliverable,
 )
 
 if TYPE_CHECKING:
@@ -1690,6 +1691,22 @@ async def run_export_stage(
         ctx, adapter, final_blocks, rendered_path, render
     )
 
+    # Miniaturization & stream optimization pass for final delivered PDF
+    if rendered_path.suffix.lower() == ".pdf" and getattr(
+        ctx.config, "enable_pdf_optimization", True
+    ):
+        opt_prof = getattr(ctx.config, "pdf_optimize_profile", "lossless")
+        opt_res = await asyncio.to_thread(optimize_pdf_deliverable, rendered_path, opt_prof)
+        if opt_res.status == "optimized":
+            if hasattr(manifest, "metadata") and isinstance(manifest.metadata, dict):
+                manifest.metadata["pdf_optimization"] = opt_res.model_dump()
+            await asyncio.to_thread(
+                ledger.set_job_metadata_value,
+                actual_job_id,
+                "pdf_optimization",
+                opt_res.model_dump(),
+            )
+
     # Dual output (BabelDOC no-dual/no-mono style): when the pipeline asked
     # for a complementary artifact, render it from the same translated
     # blocks (no extra LLM cost). PDF only — other adapters have no
@@ -1702,6 +1719,13 @@ async def run_export_stage(
     secondary_path = await _render_complementary_artifact(
         ctx, adapter, final_blocks, artifact, render
     )
+    if (
+        secondary_path is not None
+        and secondary_path.suffix.lower() == ".pdf"
+        and getattr(ctx.config, "enable_pdf_optimization", True)
+    ):
+        opt_prof = getattr(ctx.config, "pdf_optimize_profile", "lossless")
+        await asyncio.to_thread(optimize_pdf_deliverable, secondary_path, opt_prof)
 
     # Append translated table appendix and generate companion files when tables were translated
     table_mode = getattr(ctx.config, "table_render_mode", "auto")
