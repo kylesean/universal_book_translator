@@ -31,6 +31,11 @@ It takes `--corpus corpus` (default) and exits 0 on pass.
   Deterministic geometry scanner over rendered PDF artifacts to detect margin
   breaches, multi-column gutter overruns, table/formula clipping, and type collapse;
   emits 2D spatial terminal heatmaps, structured JSON, and actionable fix advice.
+- `run_corpus_benchmark.py` — multi-scenario automated corpus benchmark runner
+  and quality/cost/spill dashboard. Evaluates cases from `corpus/cases.json`
+  across delivery contract integrity, physical layout spills, MTQE scores, and
+  token/USD costs. Supports dry-run rehearsals, live model runs, and eval-only
+  evaluations with baseline drift tracking and HTML/Markdown/JSON exports.
 
 ## Utilities
 

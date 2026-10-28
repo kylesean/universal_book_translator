@@ -13,6 +13,7 @@ from rich.table import Table
 
 from ubt import __version__
 from ubt.cli.commands.assess import _assess_money, assess_cmd
+from ubt.cli.commands.benchmark_cmd import benchmark_command
 from ubt.cli.commands.config_cmd import config_command
 from ubt.cli.commands.console import console_command
 from ubt.cli.commands.doctor import doctor_command
@@ -591,6 +592,7 @@ app.command(name="worker")(worker_command)
 app.command(name="config")(config_command)
 app.command(name="verify")(verify_command)
 app.command(name="layout-audit")(layout_audit_command)
+app.command(name="benchmark")(benchmark_command)
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 
@@ -608,6 +610,7 @@ __all__ = [
     "config_command",
     "verify_command",
     "layout_audit_command",
+    "benchmark_command",
     "version",
     "_build_config",
     "_resolve_db_dir",
