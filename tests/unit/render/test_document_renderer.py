@@ -1824,3 +1824,44 @@ def test_renderer_with_decor_enabled(tmp_path: Path) -> None:
     assert "副本复制协议" in source
     # Drop cap on p3 with quote prefix
     assert '#ubt-dropcap("副", prefix: "“", lines: 2, fill: rgb("#1e3a8a"))' in source
+
+
+def test_renderer_with_notes_enabled(tmp_path: Path) -> None:
+    """Renderer with enable_notes=True inlines footnotes or emits endnote sections."""
+    from ubt.core.notes.models import NotePlacement, NotesConfig
+
+    blocks = [
+        _block(
+            BlockType.HEADING,
+            block_id="h1",
+            source="Chapter 1: Consistency",
+            target="第 1 章：强一致性",
+        ),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="p1",
+            source="Linearizability[^1] ensures atomic visibility.",
+            target="线性一致性[^1]保障原子可见性。",
+        ),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="fn1",
+            source="[^1]: Herlihy & Wing, 1990.",
+            target="[^1]: Herlihy 与 Wing 于 1990 年提出。",
+        ),
+    ]
+
+    # Test 1: Inlined footnote
+    renderer_fn = TypstDocumentRenderer(enable_notes=True)
+    source_fn, _ = renderer_fn.build_source(blocks, tmp_path / "build_fn")
+    assert "#footnote[Herlihy 与 Wing 于 1990 年提出。]" in source_fn
+    # Raw footnote block was consumed and not emitted as a standalone body paragraph
+    assert "线性一致性#footnote" in source_fn
+
+    # Test 2: Chapter endnote
+    cfg_end = NotesConfig(placement=NotePlacement.CHAPTER_ENDNOTE)
+    renderer_end = TypstDocumentRenderer(enable_notes=True, notes_config=cfg_end)
+    source_end, _ = renderer_end.build_source(blocks, tmp_path / "build_end")
+    assert "#link(<fn-ch1-1>)[#super[1]]" in source_end
+    assert "#heading(level: 2)[注释]" in source_end
+    assert "Herlihy 与 Wing 于 1990 年提出。" in source_end

@@ -1583,6 +1583,8 @@ class TypstDocumentRenderer:
         index: object | None = None,
         enable_decor: bool = False,
         decor_spec: object | None = None,
+        enable_notes: bool = False,
+        notes_config: object | None = None,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
@@ -1603,6 +1605,8 @@ class TypstDocumentRenderer:
         self.index = index
         self.enable_decor = bool(enable_decor)
         self.decor_spec = decor_spec
+        self.enable_notes = bool(enable_notes)
+        self.notes_config = notes_config
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: ``auto`` is none for a paper (by convention) and one for a book that
         #: carries TOC rows; see :func:`resolve_toc_mode`.
@@ -1774,6 +1778,26 @@ class TypstDocumentRenderer:
         """
         self.stats = ReflowStats()
         build_dir.mkdir(parents=True, exist_ok=True)
+
+        if getattr(self, "enable_notes", False):
+            from ubt.core.notes.extractor import extract_notes_topology
+            from ubt.core.notes.models import NotesConfig
+
+            self._notes_cfg = (
+                self.notes_config if isinstance(self.notes_config, NotesConfig) else NotesConfig()
+            )
+            self._notes_topology = extract_notes_topology(blocks, self._notes_cfg)
+            self._notes_def_ids = self._notes_topology.def_block_ids
+            self._notes_by_source = {}
+            for n in self._notes_topology.notes:
+                if n.source_block_id:
+                    self._notes_by_source.setdefault(n.source_block_id, []).append(n)
+            self._notes_by_chapter = {}
+            for n in self._notes_topology.notes:
+                self._notes_by_chapter.setdefault(n.chapter_index, []).append(n)
+            self._notes_emitted_chapters = set()
+            self._notes_current_chapter = 1
+
         self._prewarm_math_gate(blocks)
         from ubt.core.references.linker import build_citation_topology
 
@@ -1951,6 +1975,21 @@ class TypstDocumentRenderer:
                         if (ReferenceKind.HEADING, sec_key) in topology.key_to_anchor:
                             aid = topology.key_to_anchor[(ReferenceKind.HEADING, sec_key)]
                             anchor_suffix = f" <{aid}>"
+
+                if level == 1 and getattr(self, "enable_notes", False):
+                    from ubt.core.notes.manager import render_endnote_section_typst
+                    from ubt.core.notes.models import NotePlacement
+
+                    if (
+                        self._notes_cfg.placement == NotePlacement.CHAPTER_ENDNOTE
+                        and self._notes_current_chapter not in self._notes_emitted_chapters
+                        and i > 0
+                    ):
+                        prev_notes = self._notes_by_chapter.get(self._notes_current_chapter, [])
+                        if prev_notes:
+                            body.append(render_endnote_section_typst(prev_notes, self._notes_cfg))
+                            self._notes_emitted_chapters.add(self._notes_current_chapter)
+                        self._notes_current_chapter += 1
 
                 if getattr(self, "enable_decor", False) and level == 1:
                     from ubt.core.decor.header import render_chapter_header_typst
@@ -2224,6 +2263,10 @@ class TypstDocumentRenderer:
                 block_type in ("footnote", "BlockType.FOOTNOTE")
                 or str(getattr(block, "flow_id", None) or "") == "footnote"
             ):
+                if getattr(self, "enable_notes", False) and block.id in getattr(
+                    self, "_notes_def_ids", set()
+                ):
+                    continue
                 flush_figure()
                 text = _block_text(block)
                 if text:
@@ -2254,6 +2297,24 @@ class TypstDocumentRenderer:
                     continue
                 flush_figure()
             rendered_prose = self._prose(text, block_runs(block))
+            if getattr(self, "enable_notes", False):
+                from ubt.core.notes.manager import (
+                    inject_endnote_links_into_text,
+                    inject_typst_footnotes_into_text,
+                )
+                from ubt.core.notes.models import NotePlacement
+
+                notes_for_blk = self._notes_by_source.get(block.id, [])
+                if notes_for_blk:
+                    if self._notes_cfg.placement == NotePlacement.FOOTNOTE:
+                        rendered_prose = inject_typst_footnotes_into_text(
+                            rendered_prose, notes_for_blk
+                        )
+                    else:
+                        rendered_prose = inject_endnote_links_into_text(
+                            rendered_prose, notes_for_blk, self._notes_cfg.numbering_style
+                        )
+
             if chapter_needs_dropcap and getattr(self, "enable_decor", False):
                 from ubt.core.decor.dropcap import apply_dropcap_typst
                 from ubt.core.decor.models import DecorSpec
@@ -2268,6 +2329,21 @@ class TypstDocumentRenderer:
             self.stats.blocks_rendered += 1
 
         flush_figure()
+
+        if getattr(self, "enable_notes", False):
+            from ubt.core.notes.manager import render_endnote_section_typst
+            from ubt.core.notes.models import NotePlacement
+
+            if self._notes_cfg.placement == NotePlacement.CHAPTER_ENDNOTE:
+                if self._notes_current_chapter not in self._notes_emitted_chapters:
+                    last_notes = self._notes_by_chapter.get(self._notes_current_chapter, [])
+                    if last_notes:
+                        body.append(render_endnote_section_typst(last_notes, self._notes_cfg))
+                        self._notes_emitted_chapters.add(self._notes_current_chapter)
+            elif self._notes_cfg.placement == NotePlacement.BOOK_ENDNOTE:
+                all_notes = self._notes_topology.notes
+                if all_notes:
+                    body.append(render_endnote_section_typst(all_notes, self._notes_cfg))
 
         if getattr(self, "enable_index", False) or getattr(self, "index", None) is not None:
             from ubt.core.index.extractor import extract_index_from_blocks
