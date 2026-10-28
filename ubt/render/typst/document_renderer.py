@@ -1569,6 +1569,8 @@ class TypstDocumentRenderer:
         enable_kinsoku: bool = False,
         enable_colophon: bool = False,
         colophon: object | None = None,
+        enable_index: bool = False,
+        index: object | None = None,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
@@ -1585,6 +1587,8 @@ class TypstDocumentRenderer:
         self.enable_kinsoku = bool(enable_kinsoku)
         self.enable_colophon = bool(enable_colophon)
         self.colophon = colophon
+        self.enable_index = bool(enable_index)
+        self.index = index
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: ``auto`` is none for a paper (by convention) and one for a book that
         #: carries TOC rows; see :func:`resolve_toc_mode`.
@@ -2223,6 +2227,15 @@ class TypstDocumentRenderer:
             self.stats.blocks_rendered += 1
 
         flush_figure()
+
+        if getattr(self, "enable_index", False) or getattr(self, "index", None) is not None:
+            from ubt.core.index.extractor import extract_index_from_blocks
+            from ubt.core.index.generator import render_index_typst
+
+            idx = self.index or extract_index_from_blocks(blocks)
+            if getattr(idx, "entries", None):
+                body.append(render_index_typst(idx, columns=3))
+
         source = self.preamble(target_lang) + "\n\n" + "\n\n".join(body) + "\n"
         # Count the sentinels that reached the page. Escaped prose renders them
         # literally, so they are visible in the text layer; measuring the final

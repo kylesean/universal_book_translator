@@ -20,6 +20,7 @@ from ubt.cli.commands.console import console_command
 from ubt.cli.commands.coref_cmd import coref_app
 from ubt.cli.commands.doctor import doctor_command
 from ubt.cli.commands.glossary_cmd import glossary_app
+from ubt.cli.commands.index_cmd import index_app
 from ubt.cli.commands.kinsoku_cmd import kinsoku_app
 from ubt.cli.commands.layout_audit import layout_audit_command
 from ubt.cli.commands.optimize_pdf_cmd import optimize_pdf_command
@@ -658,6 +659,7 @@ app.add_typer(ref_app, name="ref")
 app.add_typer(kinsoku_app, name="kinsoku")
 app.add_typer(styler_app, name="styler")
 app.add_typer(colophon_app, name="colophon")
+app.add_typer(index_app, name="index")
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 

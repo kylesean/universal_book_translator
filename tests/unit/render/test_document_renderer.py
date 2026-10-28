@@ -1736,3 +1736,26 @@ def test_renderer_with_colophon_enabled(tmp_path: Path) -> None:
     source, _ = renderer.build_source([block], tmp_path / "build")
     assert "图书在版编目（CIP）数据" in source
     assert "分布式系统原理" in source
+
+
+def test_renderer_with_index_enabled(tmp_path: Path) -> None:
+    """Renderer with enable_index=True appends publication concordance index section."""
+    blocks = [
+        _block(
+            BlockType.HEADING,
+            block_id="h1",
+            source="Foundations",
+            target="基础理论",
+        ),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="p1",
+            source="We discuss Consensus Algorithm and Replication.",
+            target="我们讨论共识算法（Consensus Algorithm）以及复制技术。",
+        ),
+    ]
+    renderer = TypstDocumentRenderer(enable_index=True)
+    source, _ = renderer.build_source(blocks, tmp_path / "build")
+    assert "#heading(level: 1, numbering: none)[索引 (Index)]" in source
+    assert "#columns(3" in source
+    assert "*Consensus Algorithm* (共识算法)" in source
