@@ -1567,6 +1567,8 @@ class TypstDocumentRenderer:
         break_long_formulas: bool = False,
         par_spacing_em: float = 0.9,
         enable_kinsoku: bool = False,
+        enable_colophon: bool = False,
+        colophon: object | None = None,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
@@ -1581,6 +1583,8 @@ class TypstDocumentRenderer:
         self.break_long_formulas = bool(break_long_formulas)
         self.par_spacing_em = float(par_spacing_em)
         self.enable_kinsoku = bool(enable_kinsoku)
+        self.enable_colophon = bool(enable_colophon)
+        self.colophon = colophon
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: ``auto`` is none for a paper (by convention) and one for a book that
         #: carries TOC rows; see :func:`resolve_toc_mode`.
@@ -1757,6 +1761,17 @@ class TypstDocumentRenderer:
 
         self.citation_topology = build_citation_topology(blocks)
         body: list[str] = []
+
+        if getattr(self, "enable_colophon", False) or getattr(self, "colophon", None) is not None:
+            from ubt.core.colophon.generator import (
+                extract_colophon_from_blocks,
+                render_colophon_typst,
+            )
+
+            meta = self.colophon or extract_colophon_from_blocks(
+                blocks, default_title=self.paper_title
+            )
+            body.append(render_colophon_typst(meta))
 
         # Table of contents: the reader records ``toc_entry`` per row so the TOC
         # is not scattered into headings-without-body plus bare page numbers.

@@ -1722,3 +1722,17 @@ def test_prose_with_kinsoku_enabled(tmp_path: Path) -> None:
     source, _ = renderer.build_source([block], tmp_path / "build")
     assert f"构{WORD_JOINER}，" in source
     assert f"块{WORD_JOINER}。" in source
+
+
+def test_renderer_with_colophon_enabled(tmp_path: Path) -> None:
+    """Renderer with enable_colophon=True emits publication CIP colophon page."""
+    block = _block(
+        BlockType.HEADING,
+        block_id="h1",
+        source="Distributed Systems Principles",
+        target="分布式系统原理",
+    )
+    renderer = TypstDocumentRenderer(enable_colophon=True, paper_title="分布式系统原理")
+    source, _ = renderer.build_source([block], tmp_path / "build")
+    assert "图书在版编目（CIP）数据" in source
+    assert "分布式系统原理" in source

@@ -14,6 +14,7 @@ from rich.table import Table
 from ubt import __version__
 from ubt.cli.commands.assess import _assess_money, assess_cmd
 from ubt.cli.commands.benchmark_cmd import benchmark_command
+from ubt.cli.commands.colophon_cmd import colophon_app
 from ubt.cli.commands.config_cmd import config_command
 from ubt.cli.commands.console import console_command
 from ubt.cli.commands.coref_cmd import coref_app
@@ -656,6 +657,7 @@ app.add_typer(table_app, name="table")
 app.add_typer(ref_app, name="ref")
 app.add_typer(kinsoku_app, name="kinsoku")
 app.add_typer(styler_app, name="styler")
+app.add_typer(colophon_app, name="colophon")
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 
