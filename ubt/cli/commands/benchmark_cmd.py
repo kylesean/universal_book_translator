@@ -16,6 +16,8 @@ from rich.console import Console
 
 from ubt.core.benchmark.drift import compute_benchmark_drift
 from ubt.core.benchmark.models import BenchmarkDriftReport, BenchmarkMode, CorpusBenchmarkReport
+from ubt.core.benchmark.pareto import simulate_model_pareto
+from ubt.core.benchmark.pareto_reporters import render_pareto_terminal
 from ubt.core.benchmark.reporters import (
     render_html_dashboard,
     render_json_report,
@@ -107,6 +109,13 @@ def benchmark_command(
         typer.Option(
             "--json",
             help="Output machine-readable JSON to stdout",
+        ),
+    ] = False,
+    pareto: Annotated[
+        bool,
+        typer.Option(
+            "--pareto",
+            help="Also compute and display multi-model Pareto frontier analysis",
         ),
     ] = False,
 ) -> None:
@@ -202,6 +211,9 @@ def benchmark_command(
         print(render_json_report(report, drift=drift))
     else:
         render_terminal_dashboard(report, drift=drift, console=console)
+        if pareto:
+            pareto_report = simulate_model_pareto()
+            render_pareto_terminal(pareto_report, console=console)
 
     # Determine exit code
     success = report.overall_passed

@@ -17,6 +17,22 @@ from ubt.core.benchmark.models import (
     LayoutBenchmarkMetrics,
     QualityBenchmarkMetrics,
 )
+from ubt.core.benchmark.pareto import (
+    ModelPoint,
+    ParetoAnalysisReport,
+    ParetoFrontier,
+    RecommendationCategory,
+    build_pareto_from_benchmark_reports,
+    compute_pareto_frontier,
+    dominates,
+    simulate_model_pareto,
+)
+from ubt.core.benchmark.pareto_reporters import (
+    render_pareto_html_dashboard,
+    render_pareto_json,
+    render_pareto_markdown,
+    render_pareto_terminal,
+)
 from ubt.core.benchmark.reporters import (
     render_html_dashboard,
     render_json_report,
@@ -41,13 +57,25 @@ __all__ = [
     "CorpusBenchmarkReport",
     "CostBenchmarkMetrics",
     "LayoutBenchmarkMetrics",
+    "ModelPoint",
+    "ParetoAnalysisReport",
+    "ParetoFrontier",
     "QualityBenchmarkMetrics",
+    "RecommendationCategory",
+    "build_pareto_from_benchmark_reports",
     "compute_benchmark_drift",
+    "compute_pareto_frontier",
+    "dominates",
     "extract_cost_metrics",
     "extract_quality_metrics",
     "render_html_dashboard",
     "render_json_report",
     "render_markdown_report",
+    "render_pareto_html_dashboard",
+    "render_pareto_json",
+    "render_pareto_markdown",
+    "render_pareto_terminal",
     "render_terminal_dashboard",
     "select_layout_spec_for_case",
+    "simulate_model_pareto",
 ]
