@@ -1643,6 +1643,8 @@ class TypstDocumentRenderer:
         figure_config: object | None = None,
         enable_table_continuation: bool = False,
         table_continuation_config: object | None = None,
+        enable_epigraph: bool = False,
+        epigraph_config: object | None = None,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
@@ -1671,6 +1673,8 @@ class TypstDocumentRenderer:
         self.figure_config = figure_config
         self.enable_table_continuation = bool(enable_table_continuation)
         self.table_continuation_config = table_continuation_config
+        self.enable_epigraph = bool(enable_epigraph)
+        self.epigraph_config = epigraph_config
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: ``auto`` is none for a paper (by convention) and one for a book that
         #: carries TOC rows; see :func:`resolve_toc_mode`.
@@ -1873,6 +1877,19 @@ class TypstDocumentRenderer:
             )
             self._bm_manifest = detect_backmatter_manifest(blocks, self._bm_cfg)
             self._bm_appendix_switched = False
+
+        if getattr(self, "enable_epigraph", False):
+            from ubt.core.epigraph.detector import detect_chapter_epigraphs_and_abstracts
+            from ubt.core.epigraph.models import EpigraphConfig
+
+            self._epigraphs_by_id, self._abstracts_by_id = detect_chapter_epigraphs_and_abstracts(
+                list(blocks)
+            )
+            self._epigraph_cfg = (
+                self.epigraph_config
+                if isinstance(self.epigraph_config, EpigraphConfig)
+                else EpigraphConfig()
+            )
 
         self._prewarm_math_gate(blocks)
         from ubt.core.references.linker import build_citation_topology
@@ -2417,6 +2434,33 @@ class TypstDocumentRenderer:
                     flush_figure()
                     continue
                 flush_figure()
+
+            if getattr(self, "enable_epigraph", False):
+                if block.id in getattr(self, "_epigraphs_by_id", {}):
+                    epi = self._epigraphs_by_id[block.id]
+                    from ubt.core.epigraph.generator import render_epigraph_typst
+
+                    epi_markup = render_epigraph_typst(
+                        epi,
+                        config=self._epigraph_cfg,
+                        prose_renderer=lambda t, b=block: self._prose(t, block_runs(b)),
+                    )
+                    body.append(self._maybe_pair(block, epi_markup))
+                    self.stats.blocks_rendered += 1
+                    continue
+                if block.id in getattr(self, "_abstracts_by_id", {}):
+                    ab = self._abstracts_by_id[block.id]
+                    from ubt.core.epigraph.generator import render_abstract_typst
+
+                    ab_markup = render_abstract_typst(
+                        ab,
+                        config=self._epigraph_cfg,
+                        prose_renderer=lambda t, b=block: self._prose(t, block_runs(b)),
+                    )
+                    body.append(self._maybe_pair(block, ab_markup))
+                    self.stats.blocks_rendered += 1
+                    continue
+
             rendered_prose = self._prose(text, block_runs(block))
             if getattr(self, "enable_notes", False):
                 from ubt.core.notes.manager import (

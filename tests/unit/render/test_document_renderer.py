@@ -2035,3 +2035,62 @@ def test_renderer_with_table_continuation_enabled(tmp_path: Path) -> None:
     assert "table.footer(" in source
     assert "（续下页）" in source
     assert stats.tables == 1
+
+
+def test_renderer_with_epigraph_enabled(tmp_path: Path) -> None:
+    """Renderer with enable_epigraph=True renders epigraph and abstract without taking dropcap."""
+    from ubt.core.decor.models import DecorSpec, DropCapConfig
+    from ubt.core.epigraph.models import EpigraphConfig, EpigraphStyle
+
+    blocks = [
+        _block(
+            BlockType.HEADING,
+            block_id="h1",
+            source="Chapter 1: The Essence of Programming",
+            target="第 1 章：编程的本质",
+            level=1,
+        ),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="epi",
+            source="Programs must be written for people to read. —— Abelson & Sussman",
+            target="代码主要是为了让人类阅读而编写的。 —— 阿贝尔森与萨斯曼",
+        ),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="abs",
+            source="**Chapter Summary**: Overview of abstraction and functional state.",
+            target="**本章导读**：本章探讨抽象屏障与函数式编程状态机制。",
+        ),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="p1",
+            source="Computer science is a magical discipline.",
+            target="计算机科学是一门充满魔力的学科。",
+        ),
+    ]
+
+    epi_cfg = EpigraphConfig(style=EpigraphStyle.CLASSIC_RIGHT)
+    decor_cfg = DecorSpec(drop_cap=DropCapConfig(enabled=True, lines=3))
+
+    renderer = TypstDocumentRenderer(
+        enable_epigraph=True,
+        epigraph_config=epi_cfg,
+        enable_decor=True,
+        decor_spec=decor_cfg,
+    )
+    source, stats = renderer.build_source(blocks, tmp_path / "build_epi")
+
+    # Epigraph rendered in right-aligned block
+    assert "#align(right)[" in source
+    assert "代码主要是为了让人类阅读而编写的。" in source
+    assert "阿贝尔森与萨斯曼" in source
+
+    # Abstract rendered in shaded box
+    assert "fill: luma(248)" in source
+    assert "本章导读" in source
+    assert "抽象屏障与函数式编程" in source
+
+    # Drop cap applied to first actual narrative prose paragraph, not epigraph or abstract
+    assert '#ubt-dropcap("计", prefix: "", lines: 3' in source
+    assert stats.blocks_rendered >= 3
