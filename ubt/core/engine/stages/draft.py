@@ -609,6 +609,28 @@ class _DraftProcessor:
             fallback_next_text=fallback_next,
         )
 
+        # Resolve cross-chapter and inter-block coreference disambiguation hints
+        from ubt.core.memory.coreference import CoreferenceResolver
+
+        coref_resolver = CoreferenceResolver()
+        get_entities_fn = getattr(self.runtime.memory_mgr, "get_salient_entities", None)
+        salient_entities = get_entities_fn() if callable(get_entities_fn) else []
+        glossary_srcs = [
+            str(g.get("source", ""))
+            for g in getattr(self.policy, "glossary_dicts", [])
+            if g.get("source")
+        ]
+        coref_mentions = coref_resolver.resolve_mentions(
+            text=block.source_text,
+            neighbor_text=neighbor_ctx,
+            epoch_entities=salient_entities,
+            chapter_title=current_ch or "",
+            glossary_terms=glossary_srcs,
+        )
+        coref_hint = coref_resolver.format_coreference_prompt_hint(coref_mentions)
+        if coref_hint:
+            neighbor_ctx = f"{neighbor_ctx}\n\n{coref_hint}".strip() if neighbor_ctx else coref_hint
+
         # Off-loop: regex/parse-heavy masking would otherwise serialize the
         # single event loop across concurrent draft tasks and SSE fan-out. The
         # mask order (code -> math -> soup -> citation) lives in the engine, not

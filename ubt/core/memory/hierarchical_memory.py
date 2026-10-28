@@ -13,7 +13,7 @@ Provides three-tier context memory:
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -352,6 +352,28 @@ class HierarchicalMemoryManager:
 
         # 3. No past snapshot prior to this block
         return ""
+
+    def get_salient_entities(self, glossary_terms: Sequence[str] | None = None) -> list[Any]:
+        """Extract salient entities from closed L3 epochs and L2 snapshots for coreference binding."""
+        from ubt.core.memory.coreference import CoreferenceResolver
+
+        resolver = CoreferenceResolver()
+        combined_text_parts: list[str] = []
+        for e in self._epochs:
+            if e.summary_text:
+                combined_text_parts.append(e.summary_text)
+        for s in self._snapshots[-3:]:
+            if s.summary_text:
+                combined_text_parts.append(s.summary_text)
+
+        if not combined_text_parts:
+            return []
+
+        return resolver.extract_entities_from_text(
+            "\n".join(combined_text_parts),
+            source_location="sliding_epoch_memory",
+            glossary_terms=glossary_terms,
+        )
 
 
 __all__ = [

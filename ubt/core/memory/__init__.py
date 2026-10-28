@@ -22,12 +22,26 @@ from ubt.core.memory.cjk_matcher import (
     select_terms_for_chunk,
     term_appears_in_text,
 )
+from ubt.core.memory.coreference import (
+    CoreferenceMention,
+    CoreferencePronounType,
+    CoreferenceResolver,
+    EntityMention,
+    PronounAuditItem,
+    PronounAuditReport,
+)
 from ubt.core.memory.neighbor_window import NeighborContextBuilder
 
 __all__ = [
     "BibleEntry",
     "BookBible",
+    "CoreferenceMention",
+    "CoreferencePronounType",
+    "CoreferenceResolver",
+    "EntityMention",
     "NeighborContextBuilder",
+    "PronounAuditItem",
+    "PronounAuditReport",
     "clean_bible_entry",
     "contains_cjk",
     "count_term_in_text",

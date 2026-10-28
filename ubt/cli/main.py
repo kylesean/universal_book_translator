@@ -16,6 +16,7 @@ from ubt.cli.commands.assess import _assess_money, assess_cmd
 from ubt.cli.commands.benchmark_cmd import benchmark_command
 from ubt.cli.commands.config_cmd import config_command
 from ubt.cli.commands.console import console_command
+from ubt.cli.commands.coref_cmd import coref_app
 from ubt.cli.commands.doctor import doctor_command
 from ubt.cli.commands.glossary_cmd import glossary_app
 from ubt.cli.commands.layout_audit import layout_audit_command
@@ -644,6 +645,7 @@ app.command(name="roundtrip")(roundtrip_command)
 app.command(name="optimize-pdf")(optimize_pdf_command)
 app.add_typer(glossary_app, name="glossary")
 app.add_typer(route_app, name="route")
+app.add_typer(coref_app, name="coref")
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 
