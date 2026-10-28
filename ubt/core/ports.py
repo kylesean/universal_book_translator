@@ -39,10 +39,10 @@ if TYPE_CHECKING:
     # stage contracts without entering the runtime import graph. The layering
     # invariant forbids *module-level* edges only; a TYPE_CHECKING edge is not one.
     from ubt.adapters.pdf.artifact_text import ArtifactReport
-    from ubt.adapters.pdf.engine_selector import PDFRoutePlan
     from ubt.adapters.pdf.extraction_witness import PageVerdict
     from ubt.adapters.pdf.font_probe import FontStack
     from ubt.adapters.pdf.page_profiler import PageKind
+    from ubt.adapters.pdf.pdf_profiler import PDFDocumentProfile, PDFRoutePlan
     from ubt.adapters.pdf.visual_gate import VisualGateResult
     from ubt.segment.placeholders import MaskedSource, PlaceholderEngine
     from ubt.translate.engine import TranslationEngine
@@ -383,12 +383,12 @@ def classify_pdf_structure(input_path: Path) -> PdfStructureFacts:
     """
     import logging
 
-    from ubt.adapters.pdf.engine_selector import PROFILE_CACHE_DIR
     from ubt.adapters.pdf.page_profiler import (
         majority_flags,
         profile_pdf,
         structural_page_shares,
     )
+    from ubt.adapters.pdf.pdf_profiler import PROFILE_CACHE_DIR
 
     try:
         profiles = profile_pdf(input_path, cache_dir=PROFILE_CACHE_DIR)
@@ -428,17 +428,22 @@ def classify_pdf_structure(input_path: Path) -> PdfStructureFacts:
 # ---------------------------------------------------------------------------
 
 
-def inspect_pdf_route_plan(input_path: Path) -> PDFRoutePlan:
-    """Return the doc-wide PDFRoutePlan (primary_engine / has_* flags)."""
-    from ubt.adapters.pdf.engine_selector import inspect_pdf_route_plan as _plan
+def inspect_pdf_profile(input_path: Path) -> PDFDocumentProfile:
+    """Return the doc-wide PDFDocumentProfile (primary_engine / has_* flags)."""
+    from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile as _inspect
 
-    return _plan(input_path)
+    return _inspect(input_path)
+
+
+def inspect_pdf_route_plan(input_path: Path) -> PDFRoutePlan:
+    """Backward compatibility alias for inspect_pdf_profile."""
+    return inspect_pdf_profile(input_path)
 
 
 def profile_pdf_pages(input_path: Path) -> list[Any]:
     """Return the per-page profile list from the page profiler."""
-    from ubt.adapters.pdf.engine_selector import PROFILE_CACHE_DIR
     from ubt.adapters.pdf.page_profiler import profile_pdf as _profile
+    from ubt.adapters.pdf.pdf_profiler import PROFILE_CACHE_DIR
 
     return list(_profile(input_path, cache_dir=PROFILE_CACHE_DIR))
 

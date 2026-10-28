@@ -80,7 +80,7 @@ UBT_VLM_SCAN_FALLBACK=off   ─► 无文本页保留 0 块（整本无文本则
 **默认值**：`pdf_engine = "auto"`（`ubt/core/config.py:598`），语义是**恒选 docling**。
 CLI `--pdf-engine`（`translate.py`）。预设也控制它：`high_fidelity`/`standard` → `auto`，
 `preview`/`fast` → `pdfium`；显式 `--pdf-engine` 永远优先。
-**探测实现**：`ubt/adapters/pdf/engine_selector.py`（只产出内容信号，不投票选引擎）。
+**探测实现**：`ubt/adapters/pdf/pdf_profiler.py`（只产出内容信号，不投票选引擎）。
 
 > **当前语义（2026-10 之后）**：`auto` 无条件选 docling，因为没有 `docling` 时它会
 > **降级**到 pdfium 几何抽取并发 warning（`factory.py` 的 `importlib.util.find_spec`
@@ -95,7 +95,7 @@ CLI `--pdf-engine`（`translate.py`）。预设也控制它：`high_fidelity`/`s
 
 ### 2.1 探测信号与阈值
 
-`inspect_pdf_route_plan`（`engine_selector.py:103-259`）抽样页（`PROBE_SAMPLE_FRACTIONS = (0.0, 0.25, 0.5, 0.75, 0.92)`，前/中/后防封面欺骗，末页 0.92 避开参考文献页的人名缩写误判）。注意：**auto 恒选 docling**，探测只产出 assess 证据，不投票；这些信号用于评估报告：
+`inspect_pdf_profile`（`pdf_profiler.py:103-259`）抽样页（`PROBE_SAMPLE_FRACTIONS = (0.0, 0.25, 0.5, 0.75, 0.92)`，前/中/后防封面欺骗，末页 0.92 避开参考文献页的人名缩写误判）。注意：**auto 恒选 docling**，探测只产出 assess 证据，不投票；这些信号用于评估报告：
 
 | 信号 | 判据 | 常量 |
 |---|---|---|
@@ -104,8 +104,8 @@ CLI `--pdf-engine`（`translate.py`）。预设也控制它：`high_fidelity`/`s
 | 多栏 | 行数 ≥ 6 且右栏边缘占比 > 0.25 | `PROBE_MIN_ROWS = 6`, `PROBE_COLUMN_SHARE = 0.25` |
 | 矢量图密集 | 过半抽样页路径操作数 ≥ 200 或含图像资源 | `PROFILE_VECTOR_PATH_OPS = 200` |
 
-- 探测结果写入 `PDFRoutePlan`（`engine_selector.py:58-63`）供 assess 报告消费。
-- **探测失败保守回退 docling**（不可读、缺 pypdfium2 等，`engine_selector.py:243-259`）。
+- 探测结果写入 `PDFDocumentProfile`（`pdf_profiler.py:58-63`）供 assess 报告消费。
+- **探测失败保守回退 docling**（不可读、缺 pypdfium2 等，`pdf_profiler.py:243-259`）。
 - 常量定义：`ubt/core/policy/layout_policy.py:252-290`。
 
 ### 2.2 强制/覆盖
@@ -261,7 +261,7 @@ flowchart TD
 ## 5. 各路径解决的痛点（浓缩）
 
 **路径 A（路由）**：用对工具。扫描件需要视觉/OCR；多栏需要阅读顺序重建；
-公式碎片经 pdfium 会被切成幻影标题并污染翻译/QE/修复（`engine_selector.py:5-16`）。
+公式碎片经 pdfium 会被切成幻影标题并污染翻译/QE/修复（`pdf_profiler.py:5-16`）。
 
 **路径 B（公式 VLM）**：
 - 把显示公式从“碎裂文本”变成结构化 `FORMULA` + LaTeX，成为**不可翻译原子**；
@@ -298,7 +298,7 @@ flowchart TD
 | 主题 | 位置 |
 |---|---|
 | 解析器路由/注册 | `ubt/adapters/factory.py:75-170` |
-| 首页启发式探测 | `ubt/adapters/pdf/engine_selector.py:103-259` |
+| 首页启发式探测 | `ubt/adapters/pdf/pdf_profiler.py:103-259` |
 | 探测阈值常量 | `ubt/core/policy/layout_policy.py:243-263` |
 | docling 抽取/管线开关 | `ubt/adapters/pdf/docling_parser.py:795-819` |
 | 公式 VLM 判定 | `ubt/adapters/pdf/docling_parser.py:170-228` |

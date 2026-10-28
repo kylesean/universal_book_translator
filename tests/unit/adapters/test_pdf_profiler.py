@@ -1,16 +1,7 @@
-"""Contract tests for the PDF engine probe (``engine_selector``).
+"""Contract tests for the PDF document probe (``pdf_profiler``).
 
-The probe samples a handful of pages and routes a document to ``docling`` or
-``pdfium``. Its two failure shapes are asymmetric: routing a clean document to
-docling costs time and GPU memory, while routing a two-column or scanned
-document to pdfium silently interleaves columns (the delivery contract still
-reports PASS — it checks that text was not *lost*, not that it is *correct*).
-
-These tests pin the 2026-10-10 fixes:
-
-* a single reference page no longer vetoes the whole document (a bibliography is
-  dense with name initials that scored as formula debris);
-* a genuinely two-column document still routes to docling.
+The probe samples a handful of pages for layout diagnostics (scan, multicolumn,
+formula debris, vector diagrams) for assess and warnings.
 """
 
 from __future__ import annotations
@@ -19,7 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from ubt.adapters.pdf.engine_selector import inspect_pdf_route_plan
+from ubt.adapters.pdf.pdf_profiler import (
+    PROFILE_CACHE_DIR,
+    PDFDocumentProfile,
+    PDFRoutePlan,
+    inspect_pdf_profile,
+    inspect_pdf_route_plan,
+)
 from ubt.core.policy.layout_policy import PROBE_MIN_SIGNAL_PAGES, PROBE_SAMPLE_FRACTIONS
 
 pytestmark = pytest.mark.fast
@@ -140,5 +137,18 @@ def test_all_reference_pages_do_not_report_a_formula_signal(tmp_path: Path) -> N
     # future tweak cannot quietly reintroduce the 2026-10-10 false positive.
     pages = [[_REFERENCE, _REFERENCE, _REFERENCE, _REFERENCE] for _ in range(10)]
     pdf = write_text_pdf(tmp_path / "all_refs.pdf", pages)
-    plan = inspect_pdf_route_plan(pdf)
+    plan = inspect_pdf_profile(pdf)
     assert not plan.has_formulas
+    assert isinstance(plan, PDFDocumentProfile)
+
+
+def test_alias_and_cache_parity(tmp_path: Path) -> None:
+    """Verify PDFRoutePlan alias and inspect_pdf_route_plan point to profile."""
+    assert PDFRoutePlan is PDFDocumentProfile
+    assert inspect_pdf_route_plan is inspect_pdf_profile
+    assert PROFILE_CACHE_DIR.name == "profile_cache"
+
+    pdf = write_text_pdf(tmp_path / "alias_test.pdf", _prose_pages(5))
+    profile = inspect_pdf_profile(pdf)
+    alias_plan = inspect_pdf_route_plan(pdf)
+    assert profile == alias_plan

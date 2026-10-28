@@ -12,7 +12,7 @@ from ubt.adapters.html.adapter import HTMLAdapter
 from ubt.adapters.markdown.adapter import MarkdownAdapter
 from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
 from ubt.adapters.pdf.encryption import reject_encrypted_pdf
-from ubt.adapters.pdf.engine_selector import inspect_pdf_route_plan
+from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile
 from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
 from ubt.core.exceptions import OptionalDependencyError, UnsupportedDocumentFormatError
 
@@ -98,7 +98,7 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
             engine_key = "docling" if engine_key == "auto" else "pdfium"
         else:
             try:
-                plan = inspect_pdf_route_plan(path)
+                plan = inspect_pdf_profile(path)
             except Exception as exc:
                 logger.warning(
                     "Content probe failed on '%s' (%s); defaulting engine to 'pdfium'.",

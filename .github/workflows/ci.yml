@@ -181,8 +181,8 @@ jobs:
           assert importlib.util.find_spec("docling") is not None, (
               "docling is not installed — the pdf extra did not resolve"
           )
-          from ubt.adapters.pdf.engine_selector import inspect_pdf_route_plan
-          print("docling available; auto ->", inspect_pdf_route_plan.__name__)
+          from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile
+          print("docling available; auto ->", inspect_pdf_profile.__name__)
           PY
 
       - name: Install typst (checksum-pinned) and CJK fonts

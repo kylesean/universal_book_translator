@@ -159,7 +159,7 @@ IRBlock 序列
 | 首行缩进解析 | `ubt/adapters/pdf/docling_parser.py` |
 | 有序序号恢复 | `ubt/adapters/pdf/docling_parser.py` |
 | `StyleMeta` 字段 | `ubt/core/ir/models.py` |
-| 引擎路由 | `ubt/adapters/pdf/engine_selector.py` |
+| 布局诊断探针 | `ubt/adapters/pdf/pdf_profiler.py` |
 | 渲染保真度量 | `ubt/adapters/pdf/render_fidelity.py` |
 | 视觉门 | `ubt/adapters/pdf/visual_gate.py` |
 

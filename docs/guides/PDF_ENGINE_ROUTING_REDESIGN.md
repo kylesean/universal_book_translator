@@ -34,7 +34,7 @@
 > - 干净单栏 born-digital PDF **也**走 docling；
 > - 没有装 `pdf` extra 时 `auto` **直接失败**，不会静默降级到 pdfium；
 > - 想走快路必须显式 `--pdf-engine pdfium`（或 `preview`/`fast` 预设）。
-> 权威实现见 `ubt/adapters/pdf/engine_selector.py` 与 `ubt/adapters/factory.py`。
+> 权威实现见 `ubt/adapters/pdf/pdf_profiler.py` 与 `ubt/adapters/factory.py`。
 
 三层优先级：
 
@@ -233,7 +233,7 @@ docling          ← 就是 docling
 
 ### 2.1 病根一：可靠性天差地别的信号被一视同仁地 `or`
 
-`ubt/adapters/pdf/engine_selector.py:226`：
+`ubt/adapters/pdf/pdf_profiler.py:226`：
 
 ```python
 needs_docling = scanned_detected or has_formulas or has_multicolumn or has_vector_diagrams
@@ -439,7 +439,7 @@ def test_formula_debris_still_catches_real_debris() -> None:
 
 ### L2：修采样偏差
 
-**落点**：`ubt/core/policy/layout_policy.py:252` + `ubt/adapters/pdf/engine_selector.py:226`
+**落点**：`ubt/core/policy/layout_policy.py:252` + `ubt/adapters/pdf/pdf_profiler.py:226`
 
 两个独立的子问题，建议都修。
 
@@ -658,7 +658,7 @@ CLI --pdf-engine  >  预设 pdf_engine  >  config 默认 (pdfium)
 ```bash
 uv run python -c "
 from pathlib import Path
-from ubt.adapters.pdf.engine_selector import inspect_pdf_route_plan
+from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile as inspect_pdf_route_plan
 import glob
 for f in sorted(glob.glob('/home/kyle/Downloads/*.pdf')):
     pl = inspect_pdf_route_plan(Path(f))

@@ -1883,8 +1883,8 @@ def extract_with_oxide(path: Path) -> list[IRBlock]:
 def annotate_page_kinds(path: Path, blocks: list[IRBlock]) -> dict[int, str]:
     """Stamp ``provenance["page_kind"]`` per block; return the page→kind map."""
     try:
-        from ubt.adapters.pdf.engine_selector import PROFILE_CACHE_DIR
         from ubt.adapters.pdf.page_profiler import profile_pdf
+        from ubt.adapters.pdf.pdf_profiler import PROFILE_CACHE_DIR
 
         profiles = profile_pdf(path, cache_dir=PROFILE_CACHE_DIR)
     except Exception as exc:
@@ -2171,8 +2171,8 @@ def vlm_fallback_missing_pages(
 
         if mode == VlmFallbackMode.ALL:
             try:
-                from ubt.adapters.pdf.engine_selector import PROFILE_CACHE_DIR
                 from ubt.adapters.pdf.page_profiler import profile_pdf
+                from ubt.adapters.pdf.pdf_profiler import PROFILE_CACHE_DIR
 
                 for p in profile_pdf(path, cache_dir=PROFILE_CACHE_DIR):
                     if (

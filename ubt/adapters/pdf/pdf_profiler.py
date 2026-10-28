@@ -1,11 +1,13 @@
-"""Born-digital PDF probe signals — assessment input, not a routing decision.
+"""Born-digital PDF probe signals — diagnostic assessment input.
 
-Routing is frozen: ``auto`` resolves to Docling unconditionally (measured on
-the mamba paper — 19 figures and 16 tables whose cheap probe signals all read
-zero — the probe could not separate the documents Docling was needed for), and
-``pdfium`` is an explicit operator opt-in with a loud warning. What this
-module still owns are the *signals* a sampled pypdfium2 probe produces for
-the assess report and the pdfium warning text:
+UBT uses Docling as its lossless ingestion engine. Ingestion routing is not
+probabilistic: ``auto`` resolves to Docling unconditionally (measured on the
+mamba paper — 19 figures and 16 tables whose cheap probe signals all read zero
+— the probe cannot separate all documents where Docling is strictly needed),
+while ``pdfium`` is an explicit operator opt-in with a loud warning.
+
+What this module owns are the *diagnostic signals* a sampled pypdfium2 probe
+produces for the assess report (``ubt assess``) and the pdfium warning text:
 
 - extractable text volume — scanned / image-only PDFs must go to Docling
   (OCR / vision pipeline); pypdfium2 would extract nothing;
@@ -19,9 +21,8 @@ the assess report and the pdfium warning text:
   which then flow into translation + QE + repair and fail as untranslatable
   blocks. The cover page alone must NOT decide: sampling covers the front,
   middle and back of the document.
-
-``UBT_PDF_ENGINE`` still names the engine outright for callers that report
-the plan; the probe runs for every engine to fill the signal fields.
+- vector diagram density — technical content containing complex vector paths
+  or raster images requiring faithful layout preservation.
 """
 
 from __future__ import annotations
@@ -52,20 +53,23 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class PDFRoutePlan:
-    """Decoupled engine routing plan across document layout and page components."""
+class PDFDocumentProfile:
+    """Document-level layout and structural probe signals."""
 
-    primary_engine: str
-    has_scan: bool
-    has_vector_diagrams: bool
-    has_formulas: bool
-    has_multicolumn: bool
+    primary_engine: str = "docling"
+    has_scan: bool = False
+    has_vector_diagrams: bool = False
+    has_formulas: bool = False
+    has_multicolumn: bool = False
 
+
+# Backward compatibility alias
+PDFRoutePlan = PDFDocumentProfile
 
 # Where the *per-page* profile cache lives (:func:`profile_pdf` keys it by
 # profiler version + path + size + mtime). Under the shared cache root:
 # CWD-relative paths silently forked the cache per working directory. The engine
-# probe (:func:`inspect_pdf_route_plan`) samples a few pages and is not cached.
+# probe (:func:`inspect_pdf_profile`) samples a few pages and is not cached.
 PROFILE_CACHE_DIR = cache_root() / "profile_cache"
 
 
@@ -100,22 +104,19 @@ def _probe_page_vector_ops(page: Any) -> int:
 
 
 @pdfium_serialized
-def inspect_pdf_route_plan(
+def inspect_pdf_profile(
     pdf_path: Path,
-) -> PDFRoutePlan:
+) -> PDFDocumentProfile:
     """Sample pages for the assess signals (scan / formula / multicolumn / vector).
 
-    This is NOT a routing decision anymore: ``auto`` takes the lossless docling
-    engine unconditionally (see the long comment at the return — measured on the
-    reference corpus, every document carried structure the pdfium reader cannot
-    represent, and the cheap signals read zero exactly on vector-drawn
-    figures). The probe's consumers are the assess report, which shows the
-    operator what the document contains, and the explicit-``pdfium`` escape
-    hatch's warning in the adapter factory. Keeping the two statements apart is
-    deliberate: the sample is real evidence about the document, the engine
-    choice above it is a fixed policy with its reasoning attached.
+    This is NOT a dynamic routing selector: ``auto`` takes the lossless docling
+    engine unconditionally. The probe's consumers are the assess report, which
+    shows the operator what the document contains, and the explicit-``pdfium``
+    escape hatch's warning in the adapter factory. Keeping the two statements
+    apart is deliberate: the sample is real evidence about the document, the
+    engine choice above it is a fixed policy with its reasoning attached.
     """
-    default_docling = PDFRoutePlan(
+    default_docling = PDFDocumentProfile(
         primary_engine="docling",
         has_scan=False,
         has_vector_diagrams=False,
@@ -216,37 +217,7 @@ def inspect_pdf_route_plan(
                 logger.debug("PDF vector probe skipped on '%s': %s", pdf_path.name, exc)
             has_vector_diagrams = vector_flagged_pages * 2 >= len(page_indices)
 
-            # A PDF target is *rebuilt* from the IR, so a block the extractor
-            # cannot represent is content the reader loses. The pdfium path
-            # (``ubt/adapters/pdf/reader_pdf``) emits only headings, paragraphs, list
-            # items and code — no tables, no figures, no formulas. A source-layer
-            # canvas would have kept an unextracted table visible in the original
-            # language; a rebuilt document has no canvas, so the same omission is
-            # a hole in the delivered book.
-            #
-            # The probe cannot rule that out. Measured on the reference corpus
-            # every document carried structure, and one (``mamba``) had 19
-            # figures and 16 tables with *every* cheap signal reading zero — its
-            # figures are vector drawings, which ``resource_image_count`` does
-            # not see. Sampling five pages also misses structure spread thin
-            # (``llama2``: 90 structural blocks across 55 pages, 4 on a sampled
-            # page). A full-page scan costs 0.05–0.10s on a 75-page paper, but
-            # even that finds no signal for a vector-drawn figure.
-            #
-            # The cost argument for pdfium also expired: ingestion finishes
-            # before drafting starts (``ubt/core/engine/plan.py``), so there is
-            # no VRAM contention with the LLM, and docling's converter is
-            # cleaned up deterministically after each document. On a 75-page
-            # paper docling costs 4.2s against pdfium's 0.8s — under 1% of a run
-            # that then spends minutes translating 811 blocks.
-            #
-            # So ``auto`` takes the lossless engine — unconditionally. The
-            # sampled signals above are evidence ABOUT the document (the
-            # assess report shows them), not a vote on the engine. ``pdfium``
-            # remains a real opt-in (``--pdf-engine pdfium``, the
-            # ``preview``/``fast`` presets) for a document known to be prose
-            # only; the factory warns about what it would miss.
-            return PDFRoutePlan(
+            return PDFDocumentProfile(
                 primary_engine="docling",
                 has_scan=scanned_detected,
                 has_vector_diagrams=has_vector_diagrams,
@@ -262,3 +233,7 @@ def inspect_pdf_route_plan(
             exc,
         )
         return default_docling
+
+
+# Backward compatibility alias
+inspect_pdf_route_plan = inspect_pdf_profile

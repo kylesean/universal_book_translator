@@ -37,7 +37,7 @@ from ubt.core.engine.cost_estimate import (
 from ubt.core.policy.layout_policy import PROBE_MIN_CHARS
 from ubt.core.ports import (
     inspect_font_encoding_damage,
-    inspect_pdf_route_plan,
+    inspect_pdf_profile,
     page_kind_enum,
     probe_pdf_pages,
     profile_pdf_pages,
@@ -331,10 +331,10 @@ def _pdf_facts(
     out: dict[str, Any] = {}
 
     plan = _safe(
-        lambda: inspect_pdf_route_plan(path),
+        lambda: inspect_pdf_profile(path),
         warnings,
         "PDF_PLAN_UNAVAILABLE",
-        "PDF 路由计划探测失败，主引擎推荐缺位。",
+        "PDF 布局探针探测失败，主引擎推荐缺位。",
     )
     if plan is not None:
         out["primary_engine"] = plan.primary_engine

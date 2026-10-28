@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from pdf_builders import write_text_pdf, write_two_column_pdf
 
-from ubt.adapters.pdf.engine_selector import inspect_pdf_route_plan
+from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile as inspect_pdf_route_plan
 
 pytestmark = pytest.mark.fast
 

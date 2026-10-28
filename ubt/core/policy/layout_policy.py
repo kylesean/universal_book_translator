@@ -247,7 +247,7 @@ CJK_FONT_CANDIDATES = (
 )
 
 # ---------------------------------------------------------------------------
-# Engine probe (engine_selector.py — whole-book fast path routing)
+# PDF layout diagnostic probe (pdf_profiler.py — document-level sampling)
 # ---------------------------------------------------------------------------
 PROBE_MIN_CHARS = 32
 PROBE_COLUMN_EDGE_RATIO = 0.45

@@ -138,7 +138,7 @@ class PageKind(StrEnum):
     SCAN_IMAGE = "scan_image"
     # Short-doc品类 (HYPOTHESIS): poster = image-led single
     # design page; resume = dense single-column prose page. Both need
-    # vision-grade ingest to be represented at all (see engine_selector).
+    # vision-grade ingest to be represented at all (see pdf_profiler).
     POSTER_FIXED = "poster_fixed"
     RESUME_DENSE = "resume_dense"
 
