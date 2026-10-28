@@ -19,6 +19,7 @@ from ubt.cli.commands.console import console_command
 from ubt.cli.commands.doctor import doctor_command
 from ubt.cli.commands.layout_audit import layout_audit_command
 from ubt.cli.commands.pareto_cmd import pareto_command
+from ubt.cli.commands.roundtrip_cmd import roundtrip_command
 from ubt.cli.commands.status import (
     inspect_book,
     job_status,
@@ -636,6 +637,7 @@ app.command(name="layout-audit")(layout_audit_command)
 app.command(name="benchmark")(benchmark_command)
 app.command(name="pareto")(pareto_command)
 app.command(name="workbench")(workbench_command)
+app.command(name="roundtrip")(roundtrip_command)
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 
@@ -656,6 +658,7 @@ __all__ = [
     "benchmark_command",
     "pareto_command",
     "workbench_command",
+    "roundtrip_command",
     "version",
     "_build_config",
     "_resolve_db_dir",
