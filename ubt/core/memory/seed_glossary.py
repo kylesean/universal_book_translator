@@ -119,9 +119,23 @@ def load_external_glossary(file_path: Path | str) -> list[BibleEntry]:
                     if isinstance(item, dict):
                         src = item.get("source") or item.get("term") or item.get("src")
                         tgt = item.get("translation") or item.get("target") or item.get("tgt")
+                        scope = item.get("scope", "*")
+                        hints = item.get("context_hints") or item.get("hints") or []
+                        neg_hints = item.get("negative_hints") or []
+                        prio = int(item.get("priority", 0) or 0)
                         if src and tgt:
                             e = clean_bible_entry(
-                                source=str(src), translation=str(tgt), kind="term"
+                                source=str(src),
+                                translation=str(tgt),
+                                kind=str(item.get("kind", "term")),
+                                scope=str(scope),
+                                context_hints=[str(h) for h in hints]
+                                if isinstance(hints, list)
+                                else [str(hints)],
+                                negative_hints=[str(h) for h in neg_hints]
+                                if isinstance(neg_hints, list)
+                                else [str(neg_hints)],
+                                priority=prio,
                             )
                             if e:
                                 e.frequency = _SEED_FREQUENCY
@@ -137,6 +151,10 @@ def load_external_glossary(file_path: Path | str) -> list[BibleEntry]:
                 src_col = 0
                 tgt_col = 1
                 start_row = 0
+                scope_col: int | None = None
+                hints_col: int | None = None
+                prio_col: int | None = None
+
                 if any(h in ("source", "term", "src", "en") for h in header):
                     start_row = 1
                     for idx, h in enumerate(header):
@@ -144,11 +162,42 @@ def load_external_glossary(file_path: Path | str) -> list[BibleEntry]:
                             src_col = idx
                         elif h in ("translation", "target", "tgt", "zh", "cn"):
                             tgt_col = idx
+                        elif h in ("scope", "chapter", "domain"):
+                            scope_col = idx
+                        elif h in ("hints", "context", "context_hints"):
+                            hints_col = idx
+                        elif h in ("priority", "prio"):
+                            prio_col = idx
+
                 for row in rows[start_row:]:
                     if len(row) > max(src_col, tgt_col):
                         src, tgt = row[src_col].strip(), row[tgt_col].strip()
+                        scope_val = (
+                            row[scope_col].strip()
+                            if scope_col is not None and len(row) > scope_col
+                            else "*"
+                        )
+                        hints_val = (
+                            [x.strip() for x in row[hints_col].split("|") if x.strip()]
+                            if hints_col is not None and len(row) > hints_col
+                            else []
+                        )
+                        prio_val = (
+                            int(row[prio_col].strip())
+                            if prio_col is not None
+                            and len(row) > prio_col
+                            and row[prio_col].strip().isdigit()
+                            else 0
+                        )
                         if src and tgt:
-                            e = clean_bible_entry(source=src, translation=tgt, kind="term")
+                            e = clean_bible_entry(
+                                source=src,
+                                translation=tgt,
+                                kind="term",
+                                scope=scope_val,
+                                context_hints=hints_val,
+                                priority=prio_val,
+                            )
                             if e:
                                 e.frequency = _SEED_FREQUENCY
                                 entries.append(e)

@@ -1691,9 +1691,22 @@ class NumericConsistencyValidator(ContentValidator):
 class GlossaryConsistencyValidator(ContentValidator):
     """Verifies that terms appearing in original text are translated consistently."""
 
-    def __init__(self, glossary: list[dict[str, Any]]) -> None:
+    def __init__(self, glossary: list[dict[str, Any]], context: Any | None = None) -> None:
+        if context is not None:
+            from ubt.core.memory.scoped_glossary import ScopeContext, resolve_effective_glossary
+
+            ctx = (
+                context
+                if isinstance(context, ScopeContext)
+                else ScopeContext(**context)
+                if isinstance(context, dict)
+                else ScopeContext()
+            )
+            eff = resolve_effective_glossary(glossary, ctx)
+        else:
+            eff = glossary
         # Sort by source length descending to prevent sub-term false misses
-        self.glossary = sorted(glossary, key=lambda g: -len(str(g.get("source", ""))))
+        self.glossary = sorted(eff, key=lambda g: -len(str(g.get("source", ""))))
 
     def validate(self, original: str | None, translated: str | None) -> ValidationResult:
         # Deferred import, not top-level: ``ubt.core.qe``'s package __init__

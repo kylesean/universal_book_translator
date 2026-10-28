@@ -278,6 +278,7 @@ class DeterministicGlossaryEnforcer:
         target_lang: str = "zh",
         source_lang: str = "en",
         enforce_source_leak_replacement: bool = True,
+        context: Any | None = None,
     ) -> None:
         self.target_lang = target_lang.lower()
         self.source_lang = source_lang.lower()
@@ -288,7 +289,17 @@ class DeterministicGlossaryEnforcer:
         self._rules: dict[str, tuple[str, str, bool, bool]] = {}
         self._approved_target_forms: set[str] = set()
 
-        self._compile_glossary(glossary)
+        from ubt.core.memory.scoped_glossary import ScopeContext, resolve_effective_glossary
+
+        if isinstance(context, ScopeContext):
+            ctx = context
+        elif isinstance(context, dict):
+            ctx = ScopeContext(**context)
+        else:
+            ctx = ScopeContext()
+
+        effective_glossary = resolve_effective_glossary(glossary, ctx)
+        self._compile_glossary(effective_glossary)
         #: Approved target forms that *contain* a rule pattern as a proper
         #: substring (``深度学习`` contains the alias ``学习``). A rule match
         #: inside one of these is left alone: the longer approved form is the

@@ -16,7 +16,9 @@ model is the single schema and these ``dict`` parameters are its serialized
 form.
 """
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from ubt.core.memory.abbreviation_miner import format_abbreviations_markdown_table
 from ubt.core.memory.cjk_matcher import (
@@ -25,31 +27,27 @@ from ubt.core.memory.cjk_matcher import (
     term_appears_in_text,
 )
 
+if TYPE_CHECKING:
+    from ubt.core.memory.scoped_glossary import ScopeContext
+
 
 def build_global_glossary_table(
     glossary_dicts: list[dict[str, Any]],
     max_entries: int,
+    context: ScopeContext | None = None,
 ) -> str:
-    """Build the book-level decision sheet, capped to ``max_entries``.
+    """Build the book-level decision sheet, capped to ``max_entries``."""
+    if context is not None:
+        from ubt.core.memory.scoped_glossary import resolve_effective_glossary
 
-    The per-chunk table above is the retrieval path; this one is the part that
-    cannot be retrieved — a name the segment mentions only by an alias, a term
-    the editor decided against the obvious rendering. Sending *all* of it on
-    every block made the dictionary the dominant cost of a book run (600 rows is
-    roughly 20k characters riding along with every one of a few thousand blocks),
-    so it is truncated by rank and ``max_entries`` (0 disables the sheet and
-    leaves terminology to retrieval plus the export-time enforcer).
+        effective_dicts = resolve_effective_glossary(glossary_dicts, context)
+    else:
+        effective_dicts = glossary_dicts
 
-    Rank: proper names first (alias-only mentions defeat retrieval), then
-    attest frequency — which also puts a user-supplied glossary on top, since
-    ``load_external_glossary`` seeds those entries with a frequency no mined
-    term reaches. Source text breaks ties so the same run always sends the same
-    sheet (the TM context hash is derived from it).
-    """
-    if max_entries <= 0 or not glossary_dicts:
+    if max_entries <= 0 or not effective_dicts:
         return ""
     ranked = sorted(
-        (t for t in glossary_dicts if t.get("source")),
+        (t for t in effective_dicts if t.get("source")),
         key=lambda t: (
             0 if str(t.get("kind", "term")) in ("person", "place") else 1,
             -int(t.get("frequency", 0) or 0),
@@ -63,9 +61,17 @@ def build_chunk_glossary_table(
     glossary_dicts: list[dict[str, Any]],
     abbreviation_entries: list[dict[str, Any]],
     source_text: str,
+    context: ScopeContext | None = None,
 ) -> str:
     """Build the per-block glossary markdown table with local abbreviations."""
-    relevant_terms = select_terms_for_chunk(glossary_dicts, source_text)
+    if context is not None:
+        from ubt.core.memory.scoped_glossary import resolve_effective_glossary
+
+        effective_dicts = resolve_effective_glossary(glossary_dicts, context)
+    else:
+        effective_dicts = glossary_dicts
+
+    relevant_terms = select_terms_for_chunk(effective_dicts, source_text)
     table = format_terms_markdown_table(relevant_terms)
     local_abbrevs = [e for e in abbreviation_entries if term_appears_in_text(e, source_text)]
     abbrev_block = format_abbreviations_markdown_table(local_abbrevs)

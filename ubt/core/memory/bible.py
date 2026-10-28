@@ -28,6 +28,10 @@ class BibleEntry(BaseModel):
     inflected_variants: list[str] = Field(default_factory=list)
     kind: str = "term"  # person, place, term
     frequency: int = 0  # Global attest count driving top-N ranking
+    scope: str = "*"  # Target scope ('*', 'chapter:N', 'section:X', 'domain:D')
+    context_hints: list[str] = Field(default_factory=list)
+    negative_hints: list[str] = Field(default_factory=list)
+    priority: int = 0
 
 
 class BookBible(BaseModel):
@@ -94,6 +98,10 @@ def clean_bible_entry(
     translation: str,
     aliases: list[str] | None = None,
     kind: str = "term",
+    scope: str = "*",
+    context_hints: list[str] | None = None,
+    negative_hints: list[str] | None = None,
+    priority: int = 0,
 ) -> BibleEntry | None:
     """Clean extracted entry using 0-token deterministic guardrails."""
     src = source.strip()
@@ -125,7 +133,16 @@ def clean_bible_entry(
             if cleaned_a and cleaned_a.lower() != src.lower() and cleaned_a not in cleaned_aliases:
                 cleaned_aliases.append(cleaned_a)
 
-    return BibleEntry(source=src, translation=tr, aliases=cleaned_aliases, kind=kind)
+    return BibleEntry(
+        source=src,
+        translation=tr,
+        aliases=cleaned_aliases,
+        kind=kind,
+        scope=scope or "*",
+        context_hints=context_hints or [],
+        negative_hints=negative_hints or [],
+        priority=priority,
+    )
 
 
 def _concat_key(source: str) -> str:

@@ -363,18 +363,35 @@ def evict_matching_tm_entries(
 # --------------------------------------------------------------------------- #
 
 
-def detect_glossary_conflicts(terms: list[dict[str, str]]) -> list[dict[str, Any]]:
+def detect_glossary_conflicts(
+    terms: list[dict[str, str]], detailed: bool = False
+) -> list[dict[str, Any]]:
     """Sources configured with more than one distinct target rendering.
 
-    The loader preserves duplicate rows, so a CSV/list glossary can carry the
-    same source twice with different translations — the exact ambiguity the
-    engine would resolve by file order. The console surfaces it instead of
-    silently picking one.
+    When ``detailed`` is True, runs full hierarchical scope and disambiguation
+    arbitration via :func:`~ubt.core.memory.scoped_glossary.audit_glossary_conflicts`.
+    When False (default), returns the legacy list of ``{"source": ..., "targets": [...]}``.
     """
+    if detailed:
+        from ubt.core.memory.scoped_glossary import audit_glossary_conflicts
+
+        summary = audit_glossary_conflicts(terms)
+        return [
+            {
+                "source": item.source,
+                "targets": item.competing_targets,
+                "scopes": item.scopes,
+                "verdict": item.verdict.value,
+                "resolved_target": item.resolved_target,
+                "reason": item.reason,
+            }
+            for item in summary.conflicts
+        ]
+
     by_source: dict[str, list[str]] = {}
     for term in terms:
         source = term.get("source", "")
-        target = term.get("target", "")
+        target = term.get("target", "") or term.get("translation", "")
         if not source:
             continue
         targets = by_source.setdefault(source, [])
