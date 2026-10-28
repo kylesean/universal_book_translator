@@ -1566,6 +1566,7 @@ class TypstDocumentRenderer:
         formula_scale: float = 1.0,
         break_long_formulas: bool = False,
         par_spacing_em: float = 0.9,
+        enable_kinsoku: bool = False,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
@@ -1579,6 +1580,7 @@ class TypstDocumentRenderer:
         self.formula_scale = float(formula_scale)
         self.break_long_formulas = bool(break_long_formulas)
         self.par_spacing_em = float(par_spacing_em)
+        self.enable_kinsoku = bool(enable_kinsoku)
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: ``auto`` is none for a paper (by convention) and one for a book that
         #: carries TOC rows; see :func:`resolve_toc_mode`.
@@ -1625,6 +1627,14 @@ class TypstDocumentRenderer:
             from ubt.render.typst.container_repair import inject_soft_breaks
 
             text = inject_soft_breaks(text)
+        if getattr(self, "enable_kinsoku", False):
+            from ubt.core.cleaners.kinsoku import (
+                apply_kinsoku_word_joiners,
+                compress_cjk_punctuations,
+            )
+
+            text = compress_cjk_punctuations(text)
+            text = apply_kinsoku_word_joiners(text)
         rendered = render_prose(text, runs, is_math_ok=self._math_gate)
         topology = getattr(self, "citation_topology", None)
         if topology is not None:

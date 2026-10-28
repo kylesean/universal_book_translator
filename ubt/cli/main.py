@@ -19,6 +19,7 @@ from ubt.cli.commands.console import console_command
 from ubt.cli.commands.coref_cmd import coref_app
 from ubt.cli.commands.doctor import doctor_command
 from ubt.cli.commands.glossary_cmd import glossary_app
+from ubt.cli.commands.kinsoku_cmd import kinsoku_app
 from ubt.cli.commands.layout_audit import layout_audit_command
 from ubt.cli.commands.optimize_pdf_cmd import optimize_pdf_command
 from ubt.cli.commands.pareto_cmd import pareto_command
@@ -652,6 +653,7 @@ app.add_typer(coref_app, name="coref")
 app.add_typer(patch_app, name="patch")
 app.add_typer(table_app, name="table")
 app.add_typer(ref_app, name="ref")
+app.add_typer(kinsoku_app, name="kinsoku")
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 

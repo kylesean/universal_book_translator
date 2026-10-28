@@ -1706,3 +1706,19 @@ def test_typst_document_renderer_dense_table_landscape(tmp_path: Path) -> None:
     renderer_bilingual = TypstDocumentRenderer(columns=1, bilingual=True)
     source_bilingual, _ = renderer_bilingual.build_source([table_block], build_dir)
     assert "#page(flipped: true)[" not in source_bilingual
+
+
+def test_prose_with_kinsoku_enabled(tmp_path: Path) -> None:
+    """Renderer with enable_kinsoku=True injects Word Joiners around CJK punctuation."""
+    from ubt.core.cleaners.kinsoku import WORD_JOINER
+
+    block = _block(
+        BlockType.NARRATIVE,
+        block_id="p1",
+        source="System architecture and core modules.",
+        target="技术架构，核心模块。",
+    )
+    renderer = TypstDocumentRenderer(enable_kinsoku=True)
+    source, _ = renderer.build_source([block], tmp_path / "build")
+    assert f"构{WORD_JOINER}，" in source
+    assert f"块{WORD_JOINER}。" in source
