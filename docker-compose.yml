@@ -1,0 +1,48 @@
+services:
+  ubt:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: universal-book-translator:latest
+    container_name: ubt-app
+    restart: unless-stopped
+    ports:
+      - "${UBT_PORT:-8000}:8000"
+    environment:
+      # --- LLM Provider Credentials (uncomment and provide your key) ---
+      # - UBT_PROVIDER=openai
+      # - OPENAI_API_KEY=sk-...
+      # - ANTHROPIC_API_KEY=sk-ant-...
+      # - GEMINI_API_KEY=AIza...
+      # --- Network & Storage Binding ---
+      - UBT_HOST=0.0.0.0
+      - UBT_PORT=8000
+      - UBT_ALLOWED_DIRS=/data
+      - UBT_DB_DIR=/data/dbs
+      - UBT_OUTPUT_DIR=/data/output
+      - UBT_ALLOW_NO_AUTH=${UBT_ALLOW_NO_AUTH:-1}
+      - UBT_ALLOW_INSECURE_BIND=${UBT_ALLOW_INSECURE_BIND:-1}
+      # Set UBT_API_KEY to require authentication on public networks:
+      # - UBT_API_KEY=your-secure-token
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Optional dedicated OCR sidecar service for heavy in-process image OCR
+  ubt-ocr-sidecar:
+    profiles: ["ocr"]
+    build:
+      context: ./deploy/docker/ocr-sidecar
+      dockerfile: Dockerfile
+    image: ubt-ocr-sidecar:latest
+    container_name: ubt-ocr-sidecar
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      - UBT_OCR_SIDECAR_TOKEN=${UBT_OCR_SIDECAR_TOKEN:-local-dev-token}
