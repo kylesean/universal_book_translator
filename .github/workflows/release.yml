@@ -1,0 +1,214 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+        default: "v0.1.0"
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Sanity Gate & Test Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with:
+          enable-cache: true
+
+      - name: Install Python + dev dependencies
+        run: |
+          uv python install 3.12
+          uv sync --extra dev --locked
+
+      - name: Lint & Format Check
+        run: |
+          uv run ruff check
+          uv run ruff format --check
+
+      - name: Layering Invariant
+        run: uv run python scripts/dump_compiler_edges.py
+
+      - name: Install typst and CJK fonts
+        env:
+          TYPST_VERSION: "0.15.1"
+          TYPST_SHA256: "a6d077d0a95eed5a2eba715b2dae06be954f624ccbf85758a03f389ded33118c"
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          archive="typst-x86_64-unknown-linux-musl.tar.xz"
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/${archive}" \
+            -o "/tmp/${archive}"
+          echo "${TYPST_SHA256}  /tmp/${archive}" | sha256sum -c -
+          tar -xJf "/tmp/${archive}" -C /tmp
+          sudo install "/tmp/typst-x86_64-unknown-linux-musl/typst" /usr/local/bin/typst
+
+      - name: Fast Test Tier
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: >
+          uv run pytest -m fast -q -n auto --dist=loadscope
+          --cov=ubt --cov-report=term:skip-covered --cov-fail-under=70
+
+  build-dist:
+    name: Build & Verify Wheel/Sdist
+    needs: [gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+
+      - name: Install pnpm + Node
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
+        with:
+          version: 12
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with:
+          enable-cache: true
+
+      - name: Install Python
+        run: |
+          uv python install 3.12
+          uv sync --extra dev --locked
+
+      - name: Build Web Console Bundle
+        run: |
+          pnpm --dir web install --frozen-lockfile
+          uv run python scripts/build_console_assets.py
+
+      - name: Install typst and CJK fonts
+        env:
+          TYPST_VERSION: "0.15.1"
+          TYPST_SHA256: "a6d077d0a95eed5a2eba715b2dae06be954f624ccbf85758a03f389ded33118c"
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          archive="typst-x86_64-unknown-linux-musl.tar.xz"
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/${archive}" \
+            -o "/tmp/${archive}"
+          echo "${TYPST_SHA256}  /tmp/${archive}" | sha256sum -c -
+          tar -xJf "/tmp/${archive}" -C /tmp
+          sudo install "/tmp/typst-x86_64-unknown-linux-musl/typst" /usr/local/bin/typst
+
+      - name: Build Python Distribution (sdist & wheel)
+        run: uv build --out-dir dist
+
+      - name: Smoke-Test Installed Wheel & Sample Book Pipeline
+        run: |
+          # Create clean venv and install built wheel
+          uv venv /tmp/test-venv
+          source /tmp/test-venv/bin/activate
+          uv pip install dist/*.whl
+
+          # Verify entrypoints
+          ubt --help
+          ubt doctor
+
+          # Run end-to-end sample book verification
+          python scripts/verify_sample_book.py --strict
+
+      - name: Generate Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload Distribution Artifacts
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2b6fb7fb9151  # v4.4.3
+        with:
+          name: dist-packages
+          path: dist/*
+          if-no-files-found: error
+
+  build-docker:
+    name: Build Multi-Arch Docker Container
+    needs: [gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+
+      - name: Set up QEMU (multi-architecture emulation)
+        uses: docker/setup-qemu-action@49b3bc8e6bdd4480b82f6f5b219a11cac4b779f9  # v3.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349  # v3.7.1
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  # v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@369eb591f429131d7003c0783f4a1ea928ac0ca1  # v5.5.1
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and Push Multi-Arch Image (amd64, arm64)
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75  # v6.9.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  publish-github-release:
+    name: Publish GitHub Release
+    needs: [build-dist, build-docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+
+      - name: Download Distribution Artifacts
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: dist-packages
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191  # v2.0.8
+        with:
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false

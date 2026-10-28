@@ -36,6 +36,11 @@ It takes `--corpus corpus` (default) and exits 0 on pass.
   across delivery contract integrity, physical layout spills, MTQE scores, and
   token/USD costs. Supports dry-run rehearsals, live model runs, and eval-only
   evaluations with baseline drift tracking and HTML/Markdown/JSON exports.
+- `verify_sample_book.py` — end-to-end sample book pipeline verification and
+  deployment smoke check runner. Ingests reference sample monograph
+  (`examples/sample_book/deep_learning_primer.md`), validates multi-stage AST extraction
+  (headings, math formulas, code blocks, tables), exercises container fitting, compiles
+  Typst document to PDF, and confirms zero layout margin spills. Runs 100% offline.
 
 ## Utilities
 

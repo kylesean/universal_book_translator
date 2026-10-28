@@ -25,6 +25,30 @@ pip install '.[mcp]'                           # users who want the MCP server
 uv sync --extra dev                            # development
 ```
 
+### Docker Container (Out-of-the-Box)
+
+Run the pre-baked, multi-arch container with **Typst 0.15.1** and **Noto CJK fonts** pre-installed:
+
+```bash
+# Using Docker Compose
+docker compose up -d
+
+# Or via Docker CLI directly
+docker run -d -p 8000:8000 -v $(pwd)/data:/data universal-book-translator:latest
+```
+
+The Web Console and REST API will be available immediately at `http://localhost:8000`.
+See [`deploy/docker/README.md`](file:///home/kyle/Projects/python/universal_book_translator/deploy/docker/README.md) for complete container options.
+
+### Sample Book & Verification Runner
+
+To verify the complete ingestion, container fit, and Typst rendering pipeline offline without external API keys:
+
+```bash
+uv run python scripts/verify_sample_book.py
+```
+This runs against [`examples/sample_book/deep_learning_primer.md`](file:///home/kyle/Projects/python/universal_book_translator/examples/sample_book/deep_learning_primer.md) and compiles a validated PDF with zero margin spills.
+
 Extras: `pdf` (Docling), `ocr` / `academic` (RapidOCR + ONNX runtime), `mcp`
 (the MCP server). PDF output needs the `typst` compiler on
 `PATH` — a PDF job fails at the render stage without it. `ubt doctor` checks the

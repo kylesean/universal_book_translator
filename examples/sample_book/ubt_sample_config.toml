@@ -1,0 +1,32 @@
+# UBT Sample Book Translation Configuration
+# Use this configuration file as a template for your own projects.
+# Usage:
+#   ubt translate examples/sample_book/deep_learning_primer.md --config examples/sample_book/ubt_sample_config.toml
+
+[project]
+name = "deep-learning-primer"
+target_lang = "zh"
+source_lang = "en"
+
+[model]
+# LLM Provider selection: openai | anthropic | gemini | deepseek | ollama
+provider = "deepseek"
+model = "deepseek-chat"
+temperature = 0.2
+timeout_sec = 60
+
+[render]
+# Delivery mode: reflow | facsimile | page_locked
+delivery_mode = "reflow"
+# Enable layout auto-healing passes (P2-12)
+enable_layout_auto_heal = true
+layout_auto_heal_max_passes = 2
+# Typst page margins (pt)
+margin_top_pt = 36.0
+margin_bottom_pt = 36.0
+margin_left_pt = 36.0
+margin_right_pt = 36.0
+
+[glossary]
+# Predefined technical terminology constraints
+terms = { "Gradient Descent" = "梯度下降", "Backpropagation" = "反向传播", "Generalization Gap" = "泛化差距", "Layer Norm" = "层归一化", "Residual" = "残差" }
