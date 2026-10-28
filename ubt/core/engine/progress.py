@@ -58,6 +58,7 @@ _STAGE_BY_EVENT: dict[EventType, PipelineStage] = {
     EventType.REPAIR_BATCH_COMPLETED: "repair",
     EventType.RENDER_STARTED: "render",
     EventType.TRIAGE_COMPLETED: "verify",
+    EventType.COMPANIONS_EXPORTED: "package",
     EventType.EXPORT_COMPLETED: "package",
 }
 

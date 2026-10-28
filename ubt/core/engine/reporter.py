@@ -323,6 +323,8 @@ class QualityReport(BaseModel):
     #: absent) — an unavailable probe is not evidence of a missing font, and a
     #: report must not turn "unmeasured" into a verdict.
     font_delivery: dict[str, Any] | None = None
+    #: Companion deliverables audit results (XLIFF, HTML, EPUB, Attestation shadow).
+    companion_artifacts: list[dict[str, Any]] = Field(default_factory=list)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -377,6 +379,7 @@ def build_quality_report(
     delivery_contract: dict[str, Any] | None = None,
     mode_advisory: dict[str, Any] | None = None,
     font_delivery: dict[str, Any] | None = None,
+    companion_artifacts: list[dict[str, Any]] | None = None,
 ) -> QualityReport:
     """Analyze all ledger blocks for a job and construct a comprehensive QualityReport.
 
@@ -625,6 +628,7 @@ def build_quality_report(
         rehearsal=_is_rehearsal_run(ledger, job_id),
         delivery_contract=delivery_contract,
         font_delivery=font_delivery,
+        companion_artifacts=list(companion_artifacts or []),
     )
 
 

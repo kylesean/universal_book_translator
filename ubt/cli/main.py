@@ -248,6 +248,7 @@ def _event_label(event_type: EventType) -> str:
         EventType.CTEXT_COMPLETED: "Context pass done",
         EventType.CHAPTER_COMPLETED: "Chapter complete",
         EventType.MODE_ADVISED: "Output mode advised",
+        EventType.COMPANIONS_EXPORTED: "Companion artifacts exported",
         EventType.EXPORT_COMPLETED: "Document rendered",
         EventType.PIPELINE_FAILED: "Pipeline failed",
     }.get(event_type, event_type.value)

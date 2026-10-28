@@ -22,6 +22,7 @@ class EventType(StrEnum):
     CTEXT_COMPLETED = "ctext_completed"
     CHAPTER_COMPLETED = "chapter_completed"
     MODE_ADVISED = "mode_advised"
+    COMPANIONS_EXPORTED = "companions_exported"
     EXPORT_COMPLETED = "export_completed"
     PIPELINE_FAILED = "pipeline_failed"
 

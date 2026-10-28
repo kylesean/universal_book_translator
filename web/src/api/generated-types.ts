@@ -1237,6 +1237,10 @@ export interface components {
             stale: boolean;
             /** Delivery Verdict */
             delivery_verdict?: string | null;
+            /** Companion Artifacts */
+            companion_artifacts?: {
+                [key: string]: unknown;
+            }[] | null;
         };
         /**
          * EgressConfigRequest

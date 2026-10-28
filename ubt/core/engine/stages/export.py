@@ -7,6 +7,7 @@ import contextlib
 import html
 import json
 import logging
+import time
 from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -31,7 +32,13 @@ from ubt.core.exceptions import (
     UBTError,
 )
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock
-from ubt.core.job_options import RUN_REPORT_KINDS, resolve_target_output, sidecar_path
+from ubt.core.job_options import (
+    RUN_REPORT_KINDS,
+    CompanionArtifactResult,
+    CompanionExportSummary,
+    resolve_target_output,
+    sidecar_path,
+)
 from ubt.core.metrics.collect import collect_kpis, save_metrics_report
 from ubt.core.policy.bilingual_advisor import SECONDARY_SUFFIX
 from ubt.core.ports import (
@@ -1016,7 +1023,7 @@ def _write_table_appendix(
 
 def _write_xliff_companion(
     ctx: StageContext, rendered_path: Path, blocks: list[IRBlock]
-) -> Path | None:
+) -> CompanionArtifactResult:
     """Write a bilingual XLIFF beside the artifact for review (best-effort).
 
     Read-only by construction: it serializes the *delivered* blocks -- each
@@ -1026,7 +1033,12 @@ def _write_xliff_companion(
     failure is logged and skipped rather than allowed to sink the delivery.
     """
     if not ctx.config.emit_xliff_companion:
-        return None
+        return CompanionArtifactResult(
+            kind="xliff",
+            status="skipped",
+            reason="config.emit_xliff_companion is disabled",
+        )
+    t0 = time.perf_counter()
     try:
         from ubt.core.job_options import companion_path
         from ubt.core.ports import export_xliff
@@ -1038,21 +1050,41 @@ def _write_xliff_companion(
             original=Path(ctx.input_path).name,
             job_id=ctx.job_id,
         )
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
         if not res:
-            return None
+            return CompanionArtifactResult(
+                kind="xliff",
+                status="skipped",
+                duration_ms=duration_ms,
+                reason="no extractable text segments in delivered blocks",
+            )
         xml, segment_count = res
         path = companion_path(rendered_path, ".xliff")
         atomic_write_text(path, xml, encoding="utf-8")
+        size_bytes = path.stat().st_size if path.exists() else None
         logger.info(
-            "XLIFF companion for job %s: %s (%d segment(s))",
+            "XLIFF companion for job %s: %s (%d segment(s), %s bytes)",
             ctx.job_id,
             path.name,
             segment_count,
+            size_bytes,
         )
-        return path
+        return CompanionArtifactResult(
+            kind="xliff",
+            status="generated",
+            path=path,
+            size_bytes=size_bytes,
+            duration_ms=duration_ms,
+        )
     except Exception as exc:  # a companion must never sink the delivery
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
         logger.warning("XLIFF companion skipped for job %s: %s", ctx.job_id, exc, exc_info=True)
-        return None
+        return CompanionArtifactResult(
+            kind="xliff",
+            status="failed",
+            duration_ms=duration_ms,
+            error=str(exc),
+        )
 
 
 def _write_html_view(
@@ -1060,14 +1092,19 @@ def _write_html_view(
     rendered_path: Path,
     translations: dict[str, str],
     blocks: list[IRBlock],
-) -> Path | None:
+) -> CompanionArtifactResult:
     """Write a semantic HTML view of the delivery beside the artifact.
 
     A *view*, so it is read-only and best-effort: a failure is logged and
     skipped, never allowed to sink the delivery.
     """
     if not ctx.config.emit_html_companion:
-        return None
+        return CompanionArtifactResult(
+            kind="html",
+            status="skipped",
+            reason="config.emit_html_companion is disabled",
+        )
+    t0 = time.perf_counter()
     try:
         from ubt.core.job_options import companion_path
         from ubt.layout.theme import direction_for
@@ -1085,11 +1122,25 @@ def _write_html_view(
             # and without this the toolbar and paired rows were never emitted.
             bilingual=True,
         )
-        logger.info("HTML view for job %s: %s", ctx.job_id, path.name)
-        return path
+        size_bytes = path.stat().st_size if path.exists() else None
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        logger.info("HTML view for job %s: %s (%s bytes)", ctx.job_id, path.name, size_bytes)
+        return CompanionArtifactResult(
+            kind="html",
+            status="generated",
+            path=path,
+            size_bytes=size_bytes,
+            duration_ms=duration_ms,
+        )
     except Exception as exc:  # a view must never sink the delivery
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
         logger.warning("HTML view skipped for job %s: %s", ctx.job_id, exc, exc_info=True)
-        return None
+        return CompanionArtifactResult(
+            kind="html",
+            status="failed",
+            duration_ms=duration_ms,
+            error=str(exc),
+        )
 
 
 def _write_epub_view(
@@ -1097,10 +1148,15 @@ def _write_epub_view(
     rendered_path: Path,
     translations: dict[str, str],
     blocks: list[IRBlock],
-) -> Path | None:
+) -> CompanionArtifactResult:
     """Write an EPUB 3 view of the delivery beside the artifact."""
     if not ctx.config.emit_epub_companion:
-        return None
+        return CompanionArtifactResult(
+            kind="epub",
+            status="skipped",
+            reason="config.emit_epub_companion is disabled",
+        )
+    t0 = time.perf_counter()
     try:
         from ubt.core.job_options import companion_path
         from ubt.layout.theme import direction_for
@@ -1116,11 +1172,25 @@ def _write_epub_view(
             direction=direction_for(ctx.target_lang or "en").value,
             doc_id=str(getattr(ctx.manifest, "doc_id", "") or ""),
         )
-        logger.info("EPUB view for job %s: %s", ctx.job_id, path.name)
-        return path
+        size_bytes = path.stat().st_size if path.exists() else None
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        logger.info("EPUB view for job %s: %s (%s bytes)", ctx.job_id, path.name, size_bytes)
+        return CompanionArtifactResult(
+            kind="epub",
+            status="generated",
+            path=path,
+            size_bytes=size_bytes,
+            duration_ms=duration_ms,
+        )
     except Exception as exc:  # a view must never sink the delivery
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
         logger.warning("EPUB view skipped for job %s: %s", ctx.job_id, exc, exc_info=True)
-        return None
+        return CompanionArtifactResult(
+            kind="epub",
+            status="failed",
+            duration_ms=duration_ms,
+            error=str(exc),
+        )
 
 
 def _artifact_payload(report: ArtifactReport) -> dict[str, Any]:
@@ -1137,7 +1207,7 @@ def _write_artifact_check(
     rendered_path: Path,
     translations: Mapping[str, str],
     blocks: list[IRBlock],
-) -> Path | None:
+) -> CompanionArtifactResult:
     """Write the artifact check beside the artifact.
 
     Records whether the delivered artifact actually carries each text block's
@@ -1145,7 +1215,12 @@ def _write_artifact_check(
     never sink the delivery.
     """
     if not ctx.config.emit_attestation_shadow:
-        return None
+        return CompanionArtifactResult(
+            kind="attestation",
+            status="skipped",
+            reason="config.emit_attestation_shadow is disabled",
+        )
+    t0 = time.perf_counter()
     try:
         from ubt.core.job_options import companion_path
         from ubt.core.ports import check_artifact
@@ -1161,10 +1236,24 @@ def _write_artifact_check(
             )
         path = companion_path(rendered_path, "_attestations.json")
         atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        return path
+        size_bytes = path.stat().st_size if path.exists() else None
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        return CompanionArtifactResult(
+            kind="attestation",
+            status="generated",
+            path=path,
+            size_bytes=size_bytes,
+            duration_ms=duration_ms,
+        )
     except Exception as exc:  # an audit companion must never sink the delivery
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
         logger.warning("Artifact check skipped for job %s: %s", ctx.job_id, exc, exc_info=True)
-        return None
+        return CompanionArtifactResult(
+            kind="attestation",
+            status="failed",
+            duration_ms=duration_ms,
+            error=str(exc),
+        )
 
 
 def _font_delivery_for(ctx: StageContext) -> dict[str, Any] | None:
@@ -1213,6 +1302,7 @@ async def _build_reports(
     run_usage: Any,
     delivery_contract: dict[str, Any] | None = None,
     mode_advisory: dict[str, Any] | None = None,
+    companion_artifacts: list[dict[str, Any]] | None = None,
 ) -> tuple[QualityReport, Path]:
     """Write the quality report + versioned KPI artifact; return both handles.
 
@@ -1308,6 +1398,7 @@ async def _build_reports(
         delivery_contract=delivery_contract,
         mode_advisory=mode_advisory,
         font_delivery=_font_delivery_for(ctx),
+        companion_artifacts=companion_artifacts,
     )
     if report.summary.failed_blocks > 0:
         logger.warning(
@@ -1534,17 +1625,56 @@ async def run_export_stage(
         )
     delivery_contract = contract.model_dump(mode="json")
 
-    # Bilingual XLIFF companion (source + delivered target). Read-only,
-    # best-effort: it cannot affect the artifact, only add a file beside it.
-    await asyncio.to_thread(_write_xliff_companion, ctx, rendered_path, final_blocks)
+    # Bilingual XLIFF companion, HTML/EPUB views, and Attestation shadow.
+    # Read-only, best-effort companions with structured audit contract.
+    xliff_res = await asyncio.to_thread(_write_xliff_companion, ctx, rendered_path, final_blocks)
+    html_res = await asyncio.to_thread(
+        _write_html_view, ctx, rendered_path, translations, final_blocks
+    )
+    epub_res = await asyncio.to_thread(
+        _write_epub_view, ctx, rendered_path, translations, final_blocks
+    )
+    attestation_res = await asyncio.to_thread(
+        _write_artifact_check, ctx, rendered_path, translations, final_blocks
+    )
 
-    # HTML / EPUB views and the artifact check of the delivered blocks.
-    # Read-only, best-effort companions.
-    await asyncio.to_thread(_write_html_view, ctx, rendered_path, translations, final_blocks)
-    await asyncio.to_thread(_write_epub_view, ctx, rendered_path, translations, final_blocks)
-    await asyncio.to_thread(_write_artifact_check, ctx, rendered_path, translations, final_blocks)
+    companion_results: list[CompanionArtifactResult] = [
+        xliff_res,
+        html_res,
+        epub_res,
+        attestation_res,
+    ]
     if getattr(ctx.config, "spill_policy", "error") in ("appendix", "warn", "source_kept_warn"):
-        await asyncio.to_thread(_write_spill_appendix, ctx, rendered_path, final_blocks, contract)
+        spill_path = await asyncio.to_thread(
+            _write_spill_appendix, ctx, rendered_path, final_blocks, contract
+        )
+        if spill_path is not None:
+            companion_results.append(
+                CompanionArtifactResult(
+                    kind="spill_appendix",
+                    status="generated",
+                    path=spill_path,
+                    size_bytes=spill_path.stat().st_size if spill_path.exists() else None,
+                )
+            )
+
+    companion_summary = CompanionExportSummary(results=companion_results)
+    companion_summary_dict = companion_summary.model_dump(mode="json")
+
+    # Persist companion audit record to ledger job metadata
+    await asyncio.to_thread(
+        ledger.set_job_metadata_value, actual_job_id, "companion_artifacts", companion_summary_dict
+    )
+    if hasattr(ctx.manifest, "metadata") and isinstance(ctx.manifest.metadata, dict):
+        ctx.manifest.metadata["companion_artifacts"] = companion_summary_dict
+
+    comp_event = await create_event_fn(
+        EventType.COMPANIONS_EXPORTED,
+        actual_job_id,
+        ledger,
+        message=f"Companion artifacts exported: {companion_summary.summary_line()}",
+    )
+    yield comp_event
 
     # Post-render visual gate: T0/T1 deterministic +
     # optional pixel confirmation + sampled T2 VLM + VisualVerifyLoop.
@@ -1570,7 +1700,28 @@ async def run_export_stage(
     # Append translated table appendix and generate companion files when tables were translated
     table_mode = getattr(ctx.config, "table_render_mode", "auto")
     if table_mode in ("auto", "appendix"):
-        await asyncio.to_thread(_write_table_appendix, ctx, rendered_path, final_blocks)
+        table_path = await asyncio.to_thread(
+            _write_table_appendix, ctx, rendered_path, final_blocks
+        )
+        if table_path is not None:
+            companion_results.append(
+                CompanionArtifactResult(
+                    kind="table_appendix",
+                    status="generated",
+                    path=table_path,
+                    size_bytes=table_path.stat().st_size if table_path.exists() else None,
+                )
+            )
+            companion_summary = CompanionExportSummary(results=companion_results)
+            companion_summary_dict = companion_summary.model_dump(mode="json")
+            await asyncio.to_thread(
+                ledger.set_job_metadata_value,
+                actual_job_id,
+                "companion_artifacts",
+                companion_summary_dict,
+            )
+            if hasattr(ctx.manifest, "metadata") and isinstance(ctx.manifest.metadata, dict):
+                ctx.manifest.metadata["companion_artifacts"] = companion_summary_dict
 
     # Persist this run's spend to the ledger before the report reads it: the
     # visual gate and complementary render above made paid calls after the last
@@ -1588,6 +1739,7 @@ async def run_export_stage(
         run_usage=run_usage,
         delivery_contract=delivery_contract,
         mode_advisory=render.bilingual_advisory,
+        companion_artifacts=companion_summary_dict["results"],
     )
 
     # Enforce AFTER the reports are on disk so a refused job keeps its audit

@@ -387,10 +387,26 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
                         "media_type": media_type,
                     }
                 )
+        companion_artifacts: list[dict[str, Any]] | None = None
+        db_path = _job_db_path(valid_id)
+        if db_path.exists() and _is_job_ledger_sync(valid_id):
+            try:
+                with SQLiteJobLedger(db_path, read_only=True) as ledger:
+                    meta = ledger.get_job_metadata_value(valid_id, "companion_artifacts")
+                    if (
+                        isinstance(meta, dict)
+                        and "results" in meta
+                        and isinstance(meta["results"], list)
+                    ):
+                        companion_artifacts = meta["results"]
+            except Exception:
+                pass
+
         return JSONResponse(
             {
                 "job_id": valid_id,
                 "deliverables": items,
+                "companion_artifacts": companion_artifacts,
                 # Lets the console offer "re-render first" instead of opening a
                 # download that the guard below will refuse.
                 "stale": await asyncio.to_thread(_delivery_is_stale, valid_id),

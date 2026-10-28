@@ -716,6 +716,8 @@ class DeliverableListResponse(BaseModel):
     #: endpoint unless ``?force=1``; surfacing it here lets the console warn
     #: before the click instead of after the 409.
     delivery_verdict: str | None = None
+    #: Companion artifact export audit summaries (e.g. status, size, reason).
+    companion_artifacts: list[dict[str, Any]] | None = None
 
 
 class GlossaryResponse(BaseModel):

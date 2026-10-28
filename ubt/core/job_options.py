@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, get_args
 
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
+
 from ubt.core.config import (
     DocumentMode,
     DualMode,
@@ -399,8 +401,6 @@ def adaptive_dual_mode(
 def _coerce_field(key: str, value: Any) -> Any:
     """Wrap string credentials in ``SecretStr``; pass everything else through."""
     if key in ("api_key", "ocr_api_key") and isinstance(value, str):
-        from pydantic import SecretStr
-
         return SecretStr(value)
     return value
 
@@ -823,6 +823,85 @@ class DeliveredArtifact:
 def delivered_artifact(rendered_path: str | Path, target_output: str | Path) -> DeliveredArtifact:
     """Name the two artifact identities once, where the render returns."""
     return DeliveredArtifact(Path(rendered_path), Path(target_output))
+
+
+#: Status of a companion artifact export attempt.
+CompanionArtifactStatus = Literal["generated", "skipped", "failed"]
+
+#: Companion artifact kinds.
+CompanionKind = Literal[
+    "xliff",
+    "html",
+    "epub",
+    "attestation",
+    "table_appendix",
+    "spill_appendix",
+]
+
+#: Recognized artifact kinds for delivery packages and companion audit.
+ArtifactKind = CompanionKind
+
+
+class CompanionArtifactResult(BaseModel):
+    """Result of exporting a single companion deliverable with audit metadata."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: CompanionKind | str
+    status: CompanionArtifactStatus
+    path: Path | None = None
+    size_bytes: int | None = None
+    duration_ms: float | None = None
+    reason: str | None = None
+    error: str | None = None
+
+    @property
+    def is_generated(self) -> bool:
+        return self.status == "generated"
+
+    @property
+    def is_skipped(self) -> bool:
+        return self.status == "skipped"
+
+    @property
+    def is_failed(self) -> bool:
+        return self.status == "failed"
+
+
+class CompanionExportSummary(BaseModel):
+    """Unified audit summary of all companion artifact export outcomes."""
+
+    model_config = ConfigDict(frozen=True)
+
+    results: list[CompanionArtifactResult] = Field(default_factory=list)
+
+    @property
+    def generated(self) -> list[CompanionArtifactResult]:
+        return [r for r in self.results if r.status == "generated"]
+
+    @property
+    def skipped(self) -> list[CompanionArtifactResult]:
+        return [r for r in self.results if r.status == "skipped"]
+
+    @property
+    def failed(self) -> list[CompanionArtifactResult]:
+        return [r for r in self.results if r.status == "failed"]
+
+    def summary_line(self) -> str:
+        return (
+            f"{len(self.generated)} generated, "
+            f"{len(self.skipped)} skipped, "
+            f"{len(self.failed)} failed"
+        )
+
+    def get(self, kind: str) -> CompanionArtifactResult | None:
+        for r in self.results:
+            if r.kind == kind:
+                return r
+        return None
+
+
+CompanionExportManifest = CompanionExportSummary
 
 
 #: Every derived report that hangs off one deliverable, as
