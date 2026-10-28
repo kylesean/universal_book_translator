@@ -69,6 +69,7 @@ class RapidOcrDriver:
         page_size_pt: tuple[float, float],
         scale: float,
         rotation: int = 0,
+        origin_pt: tuple[float, float] = (0.0, 0.0),
     ) -> PageTranscript:
         import numpy as np
 
@@ -112,6 +113,13 @@ class RapidOcrDriver:
                 page_width_pt,
                 height_pt,
             )
+            if origin_pt != (0.0, 0.0):
+                measured = (
+                    measured[0] + origin_pt[0],
+                    measured[1] + origin_pt[1],
+                    measured[2] + origin_pt[0],
+                    measured[3] + origin_pt[1],
+                )
             lines.append(
                 VlmLine(
                     text=str(text).strip(),

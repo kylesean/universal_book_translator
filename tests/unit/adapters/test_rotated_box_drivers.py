@@ -121,3 +121,51 @@ def test_an_unrotated_page_keeps_the_drivers_old_boxes(driver_kind: str) -> None
     (line,) = transcript.lines
     # z0/y0 flipped out of image space, no rotation applied.
     assert line.measured_box == pytest.approx((445.0, 198.0, 456.0, 246.0), abs=0.5)
+
+
+def test_the_cloud_rest_driver_applies_cropbox_origin() -> None:
+    driver = CloudOcrDriver(endpoint="https://ocr.example.com/api", api_key="k", provider="paddle")
+    payload: dict[str, object] = {
+        "lines": [{"text": "hello", "box": _INK_PX, "confidence": 0.9}],
+        "coord_system": "image_pixel",
+    }
+
+    with patch(
+        "ubt.adapters.pdf.vlm.drivers.cloud_driver.httpx.Client",
+        return_value=_http_client(payload),
+    ):
+        transcript = driver.recognize(
+            Image.new("RGB", (500, 300)),
+            _DISPLAY_PT,
+            1.0,
+            rotation=90,
+            origin_pt=(50.0, 60.0),
+        )
+
+    (line,) = transcript.lines
+    expected = (_USER_PT[0] + 50.0, _USER_PT[1] + 60.0, _USER_PT[2] + 50.0, _USER_PT[3] + 60.0)
+    assert line.measured_box == pytest.approx(expected, abs=0.5)
+
+
+def test_the_sidecar_driver_applies_cropbox_origin() -> None:
+    driver = SidecarOcrDriver(endpoint="http://localhost:8765")
+    payload: dict[str, object] = {
+        "lines": [{"text": "hello", "box": _INK_PX, "confidence": 0.9}],
+        "coord_system": "image_pixel",
+    }
+
+    with patch(
+        "ubt.adapters.pdf.vlm.drivers.sidecar_driver.httpx.Client",
+        return_value=_http_client(payload),
+    ):
+        transcript = driver.recognize(
+            Image.new("RGB", (500, 300)),
+            _DISPLAY_PT,
+            1.0,
+            rotation=90,
+            origin_pt=(50.0, 60.0),
+        )
+
+    (line,) = transcript.lines
+    expected = (_USER_PT[0] + 50.0, _USER_PT[1] + 60.0, _USER_PT[2] + 50.0, _USER_PT[3] + 60.0)
+    assert line.measured_box == pytest.approx(expected, abs=0.5)

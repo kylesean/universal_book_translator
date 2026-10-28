@@ -59,6 +59,7 @@ def anchor_transcript(
     transcript: PageTranscript,
     page_size_pt: tuple[float, float],
     rotation: int = 0,
+    origin_pt: tuple[float, float] = (0.0, 0.0),
 ) -> tuple[list[AnchoredLine], AnchorStats]:
     """Settle per-line text+geometry. Pure function (unit-testable).
 
@@ -85,6 +86,13 @@ def anchor_transcript(
         whole_page = rotate_rect_clockwise(
             (0.0, 0.0, width, height), undo_page_rotation(rotation), width, height
         )
+        if origin_pt != (0.0, 0.0):
+            whole_page = (
+                whole_page[0] + origin_pt[0],
+                whole_page[1] + origin_pt[1],
+                whole_page[2] + origin_pt[0],
+                whole_page[3] + origin_pt[1],
+            )
         out = [
             AnchoredLine(
                 text=ln.text.strip(),

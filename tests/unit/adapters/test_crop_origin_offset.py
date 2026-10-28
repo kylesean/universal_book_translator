@@ -145,3 +145,31 @@ def test_crop_uses_the_cropbox_not_the_mediabox(tmp_path: Path) -> None:
     # black out-of-bounds padding here instead.
     probe = img.convert("RGB").getpixel((5, 495))
     assert probe == (0, 255, 0), probe
+
+
+def test_resolver_and_scalpel_roundtrip_with_shifted_cropbox(tmp_path: Path) -> None:
+    """PageBBoxResolver and visual_scalpel agree on non-zero CropBox coordinates."""
+    from ubt.adapters.pdf import visual_scalpel
+    from ubt.adapters.pdf.coordinate_resolver import PageBBoxResolver
+
+    pdf_path = tmp_path / "cropbox_shift.pdf"
+    write_text_pdf(pdf_path, [("TEST",)], width=400.0, height=400.0, background=(255, 0, 0))
+    _page_with_cropbox(pdf_path, (50.0, 60.0, 250.0, 260.0))
+
+    # Visible page is 200x200 starting at (50, 60)
+    resolver = PageBBoxResolver(page_width=200.0, page_height=200.0, origin_x=50.0, origin_y=60.0)
+    # OCR detected a box covering normalized (0.2, 0.2, 0.8, 0.8)
+    bbox = resolver.resolve_bbox((0.2, 0.2, 0.8, 0.8), coord_system="normalized_1")
+    assert bbox is not None
+    # User-space bounds: x in 50 + [40, 160] = [90, 210]; y in 60 + [40, 160] = [100, 220]
+    assert bbox == pytest.approx((90.0, 100.0, 210.0, 220.0))
+
+    visual_scalpel._PAGE_CACHE = None
+    try:
+        img = visual_scalpel.crop_block_pil(pdf_path, 1, bbox, dpi=72, bleed_pt=0.0)
+        assert img.size == (120, 120)
+        # Background is red (255, 0, 0)
+        probe = img.convert("RGB").getpixel((10, 10))
+        assert probe == (255, 0, 0), probe
+    finally:
+        visual_scalpel._PAGE_CACHE = None

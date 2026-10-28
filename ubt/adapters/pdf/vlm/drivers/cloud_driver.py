@@ -116,6 +116,7 @@ class CloudOcrDriver:
         page_size_pt: tuple[float, float],
         scale: float,
         rotation: int = 0,
+        origin_pt: tuple[float, float] = (0.0, 0.0),
     ) -> PageTranscript:
         """Route to Vision LLM or Cloud REST API based on provider."""
         # Convert PIL image to JPEG bytes
@@ -131,7 +132,9 @@ class CloudOcrDriver:
 
         if self._vision_llm:
             return self._recognize_via_vision_llm(img_bytes)
-        return self._recognize_via_cloud_rest(img_bytes, image, page_size_pt, scale, rotation)
+        return self._recognize_via_cloud_rest(
+            img_bytes, image, page_size_pt, scale, rotation, origin_pt=origin_pt
+        )
 
     def _recognize_via_vision_llm(self, img_bytes: bytes) -> PageTranscript:
         """Transcribe text using OpenAI-compatible multimodal vision endpoint."""
@@ -225,6 +228,7 @@ class CloudOcrDriver:
         page_size_pt: tuple[float, float],
         scale: float,
         rotation: int = 0,
+        origin_pt: tuple[float, float] = (0.0, 0.0),
     ) -> PageTranscript:
         """Call standard cloud OCR endpoint and parse returned lines + bounding boxes."""
         headers: dict[str, str] = {}
@@ -255,6 +259,8 @@ class CloudOcrDriver:
             # in the display frame; undo the page's /Rotate to land in the
             # unrotated user-space frame block geometry and masks live in.
             rotation=undo_page_rotation(rotation),
+            origin_x=origin_pt[0],
+            origin_y=origin_pt[1],
         )
 
         vlm_lines: list[VlmLine] = []

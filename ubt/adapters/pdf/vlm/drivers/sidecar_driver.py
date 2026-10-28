@@ -75,6 +75,7 @@ class SidecarOcrDriver:
         page_size_pt: tuple[float, float],
         scale: float,
         rotation: int = 0,
+        origin_pt: tuple[float, float] = (0.0, 0.0),
     ) -> PageTranscript:
         """Send page image to OCR sidecar and return measured VlmLine items."""
         # Convert PIL image to JPEG bytes
@@ -125,6 +126,8 @@ class SidecarOcrDriver:
             # in the display frame; undo the page's /Rotate to land in the
             # unrotated user-space frame block geometry and masks live in.
             rotation=undo_page_rotation(rotation),
+            origin_x=origin_pt[0],
+            origin_y=origin_pt[1],
         )
         coord_system = payload.get("coord_system")
         if not coord_system:

@@ -46,6 +46,7 @@ class VlmDriver(Protocol):
         page_size_pt: tuple[float, float],
         scale: float,
         rotation: int = 0,
+        origin_pt: tuple[float, float] = (0.0, 0.0),
     ) -> PageTranscript:
         """Recognize ``image`` (PIL) rendered at ``scale`` px/pt.
 

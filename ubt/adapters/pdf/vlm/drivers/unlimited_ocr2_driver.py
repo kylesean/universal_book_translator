@@ -238,6 +238,7 @@ class UnlimitedOcr2Driver:
         page_size_pt: tuple[float, float],
         scale: float,
         rotation: int = 0,
+        origin_pt: tuple[float, float] = (0.0, 0.0),
     ) -> PageTranscript:
         """Text-only witness: the model reads the page, anchoring owns geometry."""
         buf = io.BytesIO()

@@ -62,3 +62,65 @@ def test_image_pixel_page_is_inferred_from_image_dimensions() -> None:
 def test_infer_falls_back_to_auto_without_usable_boxes() -> None:
     assert PageBBoxResolver.infer_coord_system([], *_A4) == "auto"
     assert PageBBoxResolver.infer_coord_system([None, (1.0, 2.0)], *_A4) == "auto"
+
+
+def test_cropbox_origin_offset_normalized_1() -> None:
+    # Page with CropBox starting at (50, 60) with size 200x300
+    resolver = PageBBoxResolver(page_width=200.0, page_height=300.0, origin_x=50.0, origin_y=60.0)
+    box = (0.1, 0.2, 0.6, 0.7)
+    resolved = resolver.resolve_bbox(box, coord_system="normalized_1")
+    assert resolved is not None
+    # x: 50 + [0.1*200, 0.6*200] = [70, 170]
+    # y: 60 + [(1-0.7)*300, (1-0.2)*300] = [150, 300]
+    assert resolved == pytest.approx((70.0, 150.0, 170.0, 300.0))
+
+
+def test_cropbox_origin_offset_normalized_1000() -> None:
+    resolver = PageBBoxResolver(page_width=200.0, page_height=300.0, origin_x=50.0, origin_y=60.0)
+    box = (100.0, 200.0, 600.0, 700.0)
+    resolved = resolver.resolve_bbox(box, coord_system="normalized_1000")
+    assert resolved is not None
+    assert resolved == pytest.approx((70.0, 150.0, 170.0, 300.0))
+
+
+def test_cropbox_origin_offset_image_pixel() -> None:
+    resolver = PageBBoxResolver(
+        page_width=200.0,
+        page_height=300.0,
+        image_width=400.0,
+        image_height=600.0,
+        origin_x=50.0,
+        origin_y=60.0,
+    )
+    # At scale 2 (400x600 px), box (40, 120, 240, 420) is identical to the 100x200pt box above
+    box = (40.0, 120.0, 240.0, 420.0)
+    resolved = resolver.resolve_bbox(box, coord_system="image_pixel")
+    assert resolved is not None
+    assert resolved == pytest.approx((70.0, 150.0, 170.0, 300.0))
+
+
+def test_cropbox_origin_offset_top_left_points() -> None:
+    resolver = PageBBoxResolver(page_width=200.0, page_height=300.0, origin_x=50.0, origin_y=60.0)
+    box = (20.0, 60.0, 120.0, 210.0)
+    resolved = resolver.resolve_bbox(box, origin="top-left")
+    assert resolved is not None
+    assert resolved == pytest.approx((70.0, 150.0, 170.0, 300.0))
+
+
+def test_cropbox_origin_offset_with_page_rotation() -> None:
+    # A rotated 90 page displayed as 500x300 with unrotated CropBox origin (50, 60)
+    # rotation=270 un-rotates the displayed box into unrotated user-space orientation
+    resolver = PageBBoxResolver(
+        page_width=500.0,
+        page_height=300.0,
+        rotation=270,
+        origin_x=50.0,
+        origin_y=60.0,
+    )
+    # Box at pixels (445, 54)-(456, 102) on 500x300 image
+    # Without origin offset, it lands at unrotated points (54, 445, 102, 456)
+    # With origin offset (50, 60), it lands at (104, 505, 152, 516)
+    box = (445.0, 54.0, 456.0, 102.0)
+    resolved = resolver.resolve_bbox(box, coord_system="image_pixel")
+    assert resolved is not None
+    assert resolved == pytest.approx((104.0, 505.0, 152.0, 516.0), abs=0.5)

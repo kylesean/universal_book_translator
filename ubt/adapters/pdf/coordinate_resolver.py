@@ -67,6 +67,12 @@ class PageBBoxResolver:
     #: passes :func:`undo_page_rotation` of that page's ``/Rotate``, which lands
     #: the box in the unrotated user-space frame every consumer reads.
     rotation: int = 0
+    #: The rendered CropBox / MediaBox lower-left corner in PDF user space.
+    #: Bounding boxes measured from a rendered raster image are in that raster's
+    #: local frame; adding (origin_x, origin_y) translates them into canonical
+    #: unrotated PDF user space matching visual_scalpel.
+    origin_x: float = 0.0
+    origin_y: float = 0.0
 
     def resolve_bbox(
         self,
@@ -169,7 +175,13 @@ class PageBBoxResolver:
         if rx1 <= rx0 or ry1 <= ry0:
             return None
 
-        return self._apply_rotation(rx0, ry0, rx1, ry1)
+        rot_x0, rot_y0, rot_x1, rot_y1 = self._apply_rotation(rx0, ry0, rx1, ry1)
+        return (
+            rot_x0 + self.origin_x,
+            rot_y0 + self.origin_y,
+            rot_x1 + self.origin_x,
+            rot_y1 + self.origin_y,
+        )
 
     @staticmethod
     def infer_coord_system(

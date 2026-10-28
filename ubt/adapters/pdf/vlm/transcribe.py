@@ -146,6 +146,13 @@ def transcribe_page_to_blocks(
                 # that frame instead of handing back a sideways page.
                 width, height = float(page.get_width()), float(page.get_height())
                 rotation = int(page.get_rotation())
+                try:
+                    cropbox = page.get_cropbox()
+                    origin_x = float(cropbox[0])
+                    origin_y = float(cropbox[1])
+                except Exception:
+                    origin_x = 0.0
+                    origin_y = 0.0
                 image = page.render(scale=scale).to_pil().convert("RGB")
                 textpage = page.get_textpage()
                 try:
@@ -159,8 +166,15 @@ def transcribe_page_to_blocks(
 
     if driver is None:
         driver = get_driver(driver_name)
-    transcript = driver.recognize(image, (width, height), scale, rotation)
-    anchored, stats = anchor_transcript(pdfium_lines, transcript, (width, height), rotation)
+    try:
+        transcript = driver.recognize(
+            image, (width, height), scale, rotation, origin_pt=(origin_x, origin_y)
+        )
+    except TypeError:
+        transcript = driver.recognize(image, (width, height), scale, rotation)
+    anchored, stats = anchor_transcript(
+        pdfium_lines, transcript, (width, height), rotation, origin_pt=(origin_x, origin_y)
+    )
     logger.info(
         "vlm p%d via %s: %d lines matched=%d vlm_only=%d pdfium_only=%d",
         page_no,
