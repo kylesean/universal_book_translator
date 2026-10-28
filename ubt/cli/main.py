@@ -22,6 +22,7 @@ from ubt.cli.commands.glossary_cmd import glossary_app
 from ubt.cli.commands.layout_audit import layout_audit_command
 from ubt.cli.commands.optimize_pdf_cmd import optimize_pdf_command
 from ubt.cli.commands.pareto_cmd import pareto_command
+from ubt.cli.commands.patch_cmd import patch_app
 from ubt.cli.commands.roundtrip_cmd import roundtrip_command
 from ubt.cli.commands.route_cmd import route_app
 from ubt.cli.commands.status import (
@@ -646,6 +647,7 @@ app.command(name="optimize-pdf")(optimize_pdf_command)
 app.add_typer(glossary_app, name="glossary")
 app.add_typer(route_app, name="route")
 app.add_typer(coref_app, name="coref")
+app.add_typer(patch_app, name="patch")
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 
@@ -669,6 +671,7 @@ __all__ = [
     "roundtrip_command",
     "optimize_pdf_command",
     "glossary_app",
+    "patch_app",
     "version",
     "_build_config",
     "_resolve_db_dir",
