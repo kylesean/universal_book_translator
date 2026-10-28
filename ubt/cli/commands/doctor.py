@@ -1,5 +1,6 @@
 """Self-check configuration, credentials, and local environment."""
 
+import contextlib
 import importlib
 import importlib.util
 import json
@@ -39,6 +40,7 @@ _GROUPS: tuple[tuple[str, str], ...] = (
     ("storage", "Storage & privacy"),
     ("quality", "Quality & optional tiers"),
     ("rendering", "Rendering & toolchain"),
+    ("deep", "Deep offline & hardware"),
 )
 
 _STATUS_MARK = {"OK": "\u2713", "WARN": "\u26a0", "FAIL": "\u2717", "SKIP": "\u00b7"}
@@ -75,6 +77,13 @@ CHECK_CODES: dict[str, tuple[str, ...]] = {
         "pdf_raster",
         "pillow",
         "cjk_font_metrics",
+        "gpu_acceleration",
+        "system_memory",
+        "local_inference",
+        "ghostscript",
+        "typst_version",
+        "cjk_coverage",
+        "offline_assets",
     ),
     "details": (
         "api_key.missing",
@@ -146,6 +155,27 @@ CHECK_CODES: dict[str, tuple[str, ...]] = {
         "cjk_font_metrics.ok",
         "cjk_font_metrics.missing",
         "cjk_font_metrics.no_module",
+        "gpu_acceleration.cuda_ok",
+        "gpu_acceleration.metal_ok",
+        "gpu_acceleration.low_vram",
+        "gpu_acceleration.none",
+        "system_memory.ok",
+        "system_memory.low",
+        "system_memory.critical",
+        "local_inference.online",
+        "local_inference.model_missing",
+        "local_inference.unreachable",
+        "local_inference.none",
+        "ghostscript.ok",
+        "ghostscript.missing",
+        "typst_version.ok",
+        "typst_version.outdated",
+        "typst_version.missing",
+        "cjk_coverage.complete",
+        "cjk_coverage.partial",
+        "cjk_coverage.missing",
+        "offline_assets.ok",
+        "offline_assets.missing",
     ),
     "fixes": (
         "api_key.missing",
@@ -171,6 +201,18 @@ CHECK_CODES: dict[str, tuple[str, ...]] = {
         "poppler.missing",
         "pdf_raster.missing",
         "pillow.missing",
+        "gpu_acceleration.none",
+        "gpu_acceleration.low_vram",
+        "system_memory.low",
+        "system_memory.critical",
+        "local_inference.model_missing",
+        "local_inference.unreachable",
+        "ghostscript.missing",
+        "typst_version.outdated",
+        "typst_version.missing",
+        "cjk_coverage.partial",
+        "cjk_coverage.missing",
+        "offline_assets.missing",
     ),
 }
 
@@ -320,6 +362,21 @@ def doctor_command(
             help="Live network probe: check endpoint connectivity, measure RTT, and verify models via /v1/models.",
         ),
     ] = False,
+    deep: Annotated[
+        bool,
+        typer.Option(
+            "--deep",
+            help="Deep offline probe: hardware acceleration, memory, local LLM ports, and font coverage.",
+        ),
+    ] = False,
+    fix_script: Annotated[
+        Path | None,
+        typer.Option(
+            "--fix-script",
+            "-s",
+            help="Generate an automated bash remediation script based on detected issues.",
+        ),
+    ] = None,
 ) -> None:
     """Self-check configuration, credentials, and local environment.
 
@@ -366,7 +423,16 @@ def doctor_command(
             console.print(f"[bold red]Configuration invalid:[/] {exc}")
         raise typer.Exit(code=2) from exc
 
-    checks = collect_checks(config, probe=probe)
+    checks = collect_checks(config, probe=probe, deep=deep)
+    if fix_script is not None:
+        from ubt.cli.commands.doctor_deep import generate_fix_script
+
+        script_content = generate_fix_script(checks)
+        fix_script.write_text(script_content, encoding="utf-8")
+        with contextlib.suppress(OSError):
+            fix_script.chmod(0o755)
+        if not json_output:
+            console.print(f"[bold green]Remediation script generated:[/] {fix_script}")
     if json_output:
         _emit_json(checks)
     else:
@@ -442,7 +508,12 @@ def _record_ledger_permissions(config: UBTConfig, record: Callable[..., None]) -
         )
 
 
-def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
+def collect_checks(
+    config: UBTConfig,
+    *,
+    probe: bool = False,
+    deep: bool = False,
+) -> list[_Check]:
     """Run every read-only self-check and return the results.
 
     Shared by ``ubt doctor`` and the console's ``/system/doctor`` endpoint so the
@@ -1301,5 +1372,26 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
             code="cjk_font_metrics",
             detail_code="cjk_font_metrics.no_module",
         )
+
+    if deep:
+        group_code = _GROUPS[4][0]
+        group = _GROUPS[4][1]
+        from ubt.cli.commands.doctor_deep import (
+            probe_cjk_coverage,
+            probe_ghostscript,
+            probe_gpu_acceleration,
+            probe_local_inference,
+            probe_offline_assets,
+            probe_system_memory,
+            probe_typst_version,
+        )
+
+        probe_gpu_acceleration(record)
+        probe_system_memory(record)
+        probe_local_inference(config, record)
+        probe_ghostscript(record)
+        probe_typst_version(record)
+        probe_cjk_coverage(record)
+        probe_offline_assets(record)
 
     return checks
