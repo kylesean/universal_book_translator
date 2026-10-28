@@ -16,6 +16,7 @@ from ubt.cli.commands.assess import _assess_money, assess_cmd
 from ubt.cli.commands.config_cmd import config_command
 from ubt.cli.commands.console import console_command
 from ubt.cli.commands.doctor import doctor_command
+from ubt.cli.commands.layout_audit import layout_audit_command
 from ubt.cli.commands.status import (
     inspect_book,
     job_status,
@@ -589,6 +590,7 @@ app.command(name="doctor")(doctor_command)
 app.command(name="worker")(worker_command)
 app.command(name="config")(config_command)
 app.command(name="verify")(verify_command)
+app.command(name="layout-audit")(layout_audit_command)
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 
@@ -605,6 +607,7 @@ __all__ = [
     "worker_command",
     "config_command",
     "verify_command",
+    "layout_audit_command",
     "version",
     "_build_config",
     "_resolve_db_dir",

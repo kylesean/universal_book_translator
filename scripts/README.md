@@ -21,6 +21,16 @@ It takes `--corpus corpus` (default) and exits 0 on pass.
 - `cost_benchmark.py` — writes `docs/benchmarks/` (see that README).
 - `knob_sweep.py`, `biou_score.py` — experiment/benchmark harnesses for
   tuning runs.
+- `probe_facsimile.py` — feasibility probe for the 1:1 facsimile delivery
+  channel (design: `docs/design/inplace_delivery.md`). For a source PDF it
+  reports, per page, the largest single body size at which every paragraph
+  still fits its source box — the acceptance number for that channel. Pure
+  geometry: no render, no model, no ledger, so it is safe to run before paying
+  for a job. `--json` for machine reading, `--summary` to skip the page table.
+- `diagnose_spills.py` — Typst layout spill and physical overflow diagnostic tool.
+  Deterministic geometry scanner over rendered PDF artifacts to detect margin
+  breaches, multi-column gutter overruns, table/formula clipping, and type collapse;
+  emits 2D spatial terminal heatmaps, structured JSON, and actionable fix advice.
 
 ## Utilities
 

@@ -96,6 +96,14 @@ def verify_command(
             help="Corpus: translate each case's `document` (dry-run) before verifying",
         ),
     ] = False,
+    layout: Annotated[
+        bool,
+        typer.Option(
+            "--layout",
+            "-l",
+            help="Also audit physical PDF layout spills and margin overflows",
+        ),
+    ] = False,
     json_output: Annotated[
         bool, typer.Option("--json", help="Machine-readable mode: stdout carries JSON")
     ] = False,
@@ -106,17 +114,30 @@ def verify_command(
             corpus, db_dir=db_dir, require_all=require_all, run=run, json_output=json_output
         )
         return
+    layout_passed = True
     if job is not None:
         report = _verify_job(job, db_dir=db_dir, json_output=json_output)
     elif artifact is not None:
         report = _verify_artifact(artifact, json_output=json_output)
+        if layout and artifact.suffix.lower() == ".pdf" and artifact.exists():
+            from ubt.render.typst.layout_diagnostics import (
+                PageLayoutSpec,
+                diagnose_pdf_layout,
+                print_rich_layout_report,
+            )
+
+            spec = PageLayoutSpec.book()
+            layout_rep = diagnose_pdf_layout(artifact, spec=spec)
+            layout_passed = layout_rep.passed
+            if not json_output:
+                print_rich_layout_report(layout_rep, spec=spec, console=console, show_heatmap=True)
     else:
         if json_output:
             print(json.dumps({"status": "error", "error": "pass an ARTIFACT, --job, or --corpus"}))
         else:
             console.print("[bold red]Nothing to verify:[/] pass an ARTIFACT, --job, or --corpus.")
         raise typer.Exit(code=2)
-    raise typer.Exit(code=0 if report.passed else 1)
+    raise typer.Exit(code=0 if (report.passed and layout_passed) else 1)
 
 
 def _verify_artifact(artifact: Path, *, json_output: bool) -> ReconciliationReport:
