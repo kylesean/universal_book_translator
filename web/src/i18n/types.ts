@@ -612,6 +612,24 @@ export interface TranslationDictionary {
     metricSkippedBlocks: string
     metricFailClosedBlocks: string
     metricPreservedBlocks: string
+    postEditAction: string
+    postEditTitle: string
+    postEditSubtitle: string
+    postEditScopeAll: string
+    postEditScopeIssues: string
+    postEditSearchPlaceholder: string
+    postEditColSource: string
+    postEditColTarget: string
+    postEditSaveBtn: string
+    postEditSavedToast: string
+    postEditResetBtn: string
+    postEditReExportBtn: string
+    postEditReExporting: string
+    postEditReExportSuccess: string
+    postEditOpenFullWorkbench: string
+    postEditDirtyIndicator: string
+    postEditNoSegmentsFound: string
+    postEditTotalSegments: string
   }
   assets: {
     title: string

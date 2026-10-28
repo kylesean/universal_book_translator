@@ -14,6 +14,7 @@ import {
   Copy,
   CheckCheck,
   Download,
+  Edit3,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -35,6 +36,7 @@ import {
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
 import { PreviewDrawer } from './PreviewDrawer'
+import { PostEditDrawer } from './PostEditDrawer'
 import { deliverableName, fmtSize, isPreviewableProduct } from './artifactMeta'
 
 type CheckStatus = 'pass' | 'warn' | 'fail'
@@ -101,6 +103,7 @@ export function QualityGateView() {
   const [visualMissing, setVisualMissing] = useState(false)
   const [expanded, setExpanded] = useState<number | null>(null)
   const [previewItem, setPreviewItem] = useState<DeliverableItem | null>(null)
+  const [postEditOpen, setPostEditOpen] = useState(false)
   const [jobMissing, setJobMissing] = useState(false)
 
   const handleCopyJobId = (idToCopy: string) => {
@@ -520,10 +523,16 @@ export function QualityGateView() {
             {t.quality.subtitle}
           </p>
         </div>
-        <Button onClick={() => navigate(`/jobs/${jobId}/review`)} variant="secondary" size="sm">
-          {t.mission.openWorkbench}
-          <ArrowUpRight />
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button onClick={() => setPostEditOpen(true)} variant="secondary" size="sm">
+            <Edit3 />
+            {t.quality.postEditAction}
+          </Button>
+          <Button onClick={() => navigate(`/jobs/${jobId}/review`)} variant="outline" size="sm">
+            {t.mission.openWorkbench}
+            <ArrowUpRight />
+          </Button>
+        </div>
       </header>
 
       {!hasReport && (
@@ -805,6 +814,14 @@ export function QualityGateView() {
           jobId={jobId}
           item={previewItem}
           onClose={() => setPreviewItem(null)}
+        />
+      )}
+
+      {postEditOpen && (
+        <PostEditDrawer
+          jobId={jobId}
+          onClose={() => setPostEditOpen(false)}
+          onReExportComplete={() => void loadAll()}
         />
       )}
     </div>
