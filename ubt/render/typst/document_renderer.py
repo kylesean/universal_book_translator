@@ -2094,10 +2094,10 @@ class TypstDocumentRenderer:
                     converted = None
                 if converted:
                     if getattr(self, "break_long_formulas", False):
-                        from ubt.render.typst.auto_healing import fold_multiline_math
+                        from ubt.core.math.breaker import break_equation
 
                         max_chars = 40 if self.columns > 1 else 65
-                        converted = fold_multiline_math(converted, max_chars=max_chars)
+                        converted = break_equation(converted, target_width=max_chars, align=False)
 
                     f_scale = getattr(self, "formula_scale", 1.0)
                     if f_scale < 1.0:

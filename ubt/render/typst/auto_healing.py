@@ -29,36 +29,6 @@ from ubt.render.typst.layout_diagnostics import (
 
 logger = logging.getLogger(__name__)
 
-#: Top-level math operators suitable for line breaking in Typst math mode.
-_RELATION_OPERATORS = (
-    " = ",
-    " <= ",
-    " >= ",
-    " < ",
-    " > ",
-    " approx ",
-    " equiv ",
-    " != ",
-    " arrow.r ",
-    " ==> ",
-    " --> ",
-    " propto ",
-    " \\approx ",
-    " \\le ",
-    " \\ge ",
-    " \\to ",
-    " \\implies ",
-)
-
-_BINARY_OPERATORS = (
-    " + ",
-    " - ",
-    " \\pm ",
-    " \\mp ",
-    " \\times ",
-    " \\cdot ",
-)
-
 
 def fold_multiline_math(math_body: str, max_chars: int = 50) -> str:
     """Break a long Typst math expression across lines at top-level operators.
@@ -67,59 +37,10 @@ def fold_multiline_math(math_body: str, max_chars: int = 50) -> str:
     fractions, matrices, and sub-expressions are preserved intact.
     Inserts Typst math line breaks (`\\ `) immediately before operator tokens.
     """
-    if len(math_body) <= max_chars or "\n" in math_body or "\\\n" in math_body:
-        return math_body
+    from ubt.core.math.breaker import break_equation
+    from ubt.core.math.models import MathSyntax
 
-    out: list[str] = []
-    depth = 0
-    i = 0
-    line_start = 0
-    n = len(math_body)
-
-    while i < n:
-        c = math_body[i]
-
-        # Track grouping depth
-        if c in "({[":
-            depth += 1
-            out.append(c)
-            i += 1
-            continue
-        if c in ")}]":
-            if depth > 0:
-                depth -= 1
-            out.append(c)
-            i += 1
-            continue
-
-        # Look for break opportunities only at depth 0
-        if depth == 0 and (i - line_start) >= max_chars:
-            # Check relation operators first (higher priority for break)
-            matched_op: str | None = None
-            for op in _RELATION_OPERATORS:
-                if math_body.startswith(op, i):
-                    matched_op = op
-                    break
-            if not matched_op:
-                for op in _BINARY_OPERATORS:
-                    if math_body.startswith(op, i):
-                        matched_op = op
-                        break
-
-            if matched_op:
-                # Insert line break in Typst math mode: backslash followed by newline
-                out.append(" \\\n ")
-                # Strip leading space from operator as we prepended newline
-                trimmed_op = matched_op.lstrip()
-                out.append(trimmed_op)
-                i += len(matched_op)
-                line_start = i
-                continue
-
-        out.append(c)
-        i += 1
-
-    return "".join(out)
+    return break_equation(math_body, target_width=max_chars, syntax=MathSyntax.TYPST, align=False)
 
 
 @dataclass(frozen=True, slots=True)
