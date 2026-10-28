@@ -22,6 +22,7 @@ from ubt.cli.commands.layout_audit import layout_audit_command
 from ubt.cli.commands.optimize_pdf_cmd import optimize_pdf_command
 from ubt.cli.commands.pareto_cmd import pareto_command
 from ubt.cli.commands.roundtrip_cmd import roundtrip_command
+from ubt.cli.commands.route_cmd import route_app
 from ubt.cli.commands.status import (
     inspect_book,
     job_status,
@@ -642,6 +643,7 @@ app.command(name="workbench")(workbench_command)
 app.command(name="roundtrip")(roundtrip_command)
 app.command(name="optimize-pdf")(optimize_pdf_command)
 app.add_typer(glossary_app, name="glossary")
+app.add_typer(route_app, name="route")
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 

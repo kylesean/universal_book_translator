@@ -478,6 +478,10 @@ class TypstConfig(BaseModel):
     delivery_mode: DeliveryMode = "reflow"
     enable_pdf_optimization: bool = True
     pdf_optimize_profile: Literal["lossless", "ebook", "screen"] = "lossless"
+    enable_dynamic_routing: bool = False
+    dynamic_routing_policy: Literal["pareto", "quality_first", "cost_first"] = "pareto"
+    budget_model: str | None = None
+    flagship_model: str | None = None
 
 
 class QualityConfig(BaseModel):
@@ -1260,6 +1264,10 @@ class UBTConfig(BaseSettings):
     delivery_mode: DeliveryMode = "reflow"
     enable_pdf_optimization: bool = True
     pdf_optimize_profile: Literal["lossless", "ebook", "screen"] = "lossless"
+    enable_dynamic_routing: bool = False
+    dynamic_routing_policy: Literal["pareto", "quality_first", "cost_first"] = "pareto"
+    budget_model: str | None = None
+    flagship_model: str | None = None
 
     # -- Table rendering strategy for PDF ----------------------------------------
     # The publication renderer rebuilds every table from the IR, so a table is

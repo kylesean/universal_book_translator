@@ -5,6 +5,15 @@ from ubt.core.router.capabilities import (
     ModelProfile,
     PromptStrategy,
 )
+from ubt.core.router.dynamic_scheduler import (
+    BlockComplexityClassifier,
+    BlockComplexityMetrics,
+    ComplexityTier,
+    DynamicModelAssignment,
+    DynamicParetoScheduler,
+    DynamicRoutingPolicy,
+    DynamicRoutingSimulationReport,
+)
 from ubt.core.router.extractor import TranslationOutputExtractor
 from ubt.core.router.provider import (
     BaseModelProvider,
@@ -19,6 +28,13 @@ from ubt.core.router.router import ModelRouter
 __all__ = [
     "AdaptiveTokenBucket",
     "BaseModelProvider",
+    "BlockComplexityClassifier",
+    "BlockComplexityMetrics",
+    "ComplexityTier",
+    "DynamicModelAssignment",
+    "DynamicParetoScheduler",
+    "DynamicRoutingPolicy",
+    "DynamicRoutingSimulationReport",
     "ExtractionStrategy",
     "MockModelProvider",
     "ModelCapabilityRegistry",

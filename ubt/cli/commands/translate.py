@@ -638,6 +638,27 @@ def translate(
             show_default=False,
         ),
     ] = None,
+    dynamic_routing: Annotated[
+        bool,
+        typer.Option(
+            "--dynamic-routing/--no-dynamic-routing",
+            help="Enable Pareto dynamic multi-model routing (routes simple text to budget models and complex math/code to flagship models)",
+        ),
+    ] = False,
+    flagship_model: Annotated[
+        str | None,
+        typer.Option(
+            "--flagship-model",
+            help="Flagship model for complex/extreme blocks in dynamic routing",
+        ),
+    ] = None,
+    budget_model: Annotated[
+        str | None,
+        typer.Option(
+            "--budget-model",
+            help="Budget model for trivial/standard blocks in dynamic routing",
+        ),
+    ] = None,
     fresh: Annotated[
         bool | None,
         typer.Option(
@@ -758,6 +779,9 @@ def translate(
         "delivery_mode": "page_locked"
         if page_locked
         else ("facsimile" if facsimile else (delivery_mode or "reflow")),
+        "enable_dynamic_routing": dynamic_routing,
+        "flagship_model": flagship_model,
+        "budget_model": budget_model,
         "translate_chrome": translate_chrome,
         "preset": preset,
         "pdf_engine": pdf_engine,

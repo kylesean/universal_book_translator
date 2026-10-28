@@ -316,6 +316,8 @@ class DraftPolicy:
     #: Kept equal to ``UBTConfig.macro_chunk_size``'s default so a DraftPolicy
     #: built without the config kwarg does not silently disagree with production.
     macro_chunk_size: int = 8
+    dynamic_routing_enabled: bool = False
+    dynamic_scheduler: Any | None = None
 
 
 def _draft_failure_prefix(exc: BaseException) -> str:
@@ -805,7 +807,41 @@ class _DraftProcessor:
                 block_to_draft = block.with_source_text(masked_source)
                 draft_raw: str | None = None
                 last_exc: Exception | None = None
+                model_override: str | None = None
+                if getattr(self.policy, "dynamic_routing_enabled", False) and getattr(
+                    self.policy, "dynamic_scheduler", None
+                ):
+                    glossary_sources = [
+                        str(g.get("source", ""))
+                        for g in getattr(self.policy, "glossary_dicts", [])
+                        if g.get("source")
+                    ]
+                    assignment = self.policy.dynamic_scheduler.resolve_model_for_block(
+                        block,
+                        glossary_terms=glossary_sources,
+                        is_retry_or_repair=False,
+                    )
+                    model_override = assignment.assigned_model
+
                 for attempt in range(self.policy.draft_max_retries + 1):
+                    current_model = model_override
+                    if (
+                        attempt > 0
+                        and getattr(self.policy, "dynamic_routing_enabled", False)
+                        and getattr(self.policy, "dynamic_scheduler", None)
+                    ):
+                        glossary_sources = [
+                            str(g.get("source", ""))
+                            for g in getattr(self.policy, "glossary_dicts", [])
+                            if g.get("source")
+                        ]
+                        escalated = self.policy.dynamic_scheduler.resolve_model_for_block(
+                            block,
+                            glossary_terms=glossary_sources,
+                            is_retry_or_repair=True,
+                        )
+                        current_model = escalated.assigned_model
+
                     try:
                         draft_raw = await self.runtime.router.draft(
                             block=block_to_draft,
@@ -819,6 +855,7 @@ class _DraftProcessor:
                             epoch_summary=inputs.epoch_ctx,
                             global_glossary=self.policy.global_glossary_table,
                             few_shot_reference=inputs.few_shot_reference,
+                            model=current_model,
                         )
                         break
                     except Exception as exc:
@@ -950,8 +987,51 @@ class _DraftProcessor:
         if not extracted_by_id:
             async with self.runtime.concurrency_sem:
                 blocks_to_draft = [b.with_source_text(inp.masked_source) for b, inp in chunk]
+                chunk_model_override: str | None = None
+                if getattr(self.policy, "dynamic_routing_enabled", False) and getattr(
+                    self.policy, "dynamic_scheduler", None
+                ):
+                    glossary_sources = [
+                        str(g.get("source", ""))
+                        for g in getattr(self.policy, "glossary_dicts", [])
+                        if g.get("source")
+                    ]
+                    assignments = [
+                        self.policy.dynamic_scheduler.resolve_model_for_block(
+                            b, glossary_terms=glossary_sources, is_retry_or_repair=False
+                        )
+                        for b in blocks_to_draft
+                    ]
+                    tier_ranks = {"trivial": 1, "standard": 2, "complex": 3, "extreme": 4}
+                    chunk_model_override = max(
+                        assignments, key=lambda a: tier_ranks.get(a.tier.value, 2)
+                    ).assigned_model
+
                 try:
                     for attempt in range(self.policy.draft_max_retries + 1):
+                        current_chunk_model = chunk_model_override
+                        if (
+                            attempt > 0
+                            and getattr(self.policy, "dynamic_routing_enabled", False)
+                            and getattr(self.policy, "dynamic_scheduler", None)
+                        ):
+                            glossary_sources = [
+                                str(g.get("source", ""))
+                                for g in getattr(self.policy, "glossary_dicts", [])
+                                if g.get("source")
+                            ]
+                            escalated_assignments = [
+                                self.policy.dynamic_scheduler.resolve_model_for_block(
+                                    b, glossary_terms=glossary_sources, is_retry_or_repair=True
+                                )
+                                for b in blocks_to_draft
+                            ]
+                            tier_ranks = {"trivial": 1, "standard": 2, "complex": 3, "extreme": 4}
+                            current_chunk_model = max(
+                                escalated_assignments,
+                                key=lambda a: tier_ranks.get(a.tier.value, 2),
+                            ).assigned_model
+
                         try:
                             extracted_by_id = await self.runtime.router.draft_macro_chunk(
                                 blocks=blocks_to_draft,
@@ -966,6 +1046,7 @@ class _DraftProcessor:
                                 global_glossary=self.policy.global_glossary_table,
                                 few_shot_reference=few_shot,
                                 section_context=section_context,
+                                model=current_chunk_model,
                             )
                             break
                         except Exception as exc:
@@ -1382,6 +1463,31 @@ async def _build_draft_runtime(
         max_batch_size=int(config.ledger_flush_batch_size),
     )
 
+    dynamic_scheduler = None
+    if getattr(config, "enable_dynamic_routing", False):
+        from ubt.core.router.dynamic_scheduler import (
+            DynamicParetoScheduler,
+            DynamicRoutingPolicy,
+        )
+
+        policy_raw = getattr(config, "dynamic_routing_policy", "pareto")
+        try:
+            policy_enum = DynamicRoutingPolicy(policy_raw)
+        except Exception:
+            policy_enum = DynamicRoutingPolicy.PARETO
+
+        budget_m = getattr(config, "budget_model", None) or router.draft_model
+        std_m = router.draft_model
+        flagship_m = (
+            getattr(config, "flagship_model", None) or router.repair_model or "claude-3-7-sonnet"
+        )
+        dynamic_scheduler = DynamicParetoScheduler(
+            policy=policy_enum,
+            budget_model=budget_m,
+            standard_model=std_m,
+            flagship_model=flagship_m,
+        )
+
     processor = _DraftProcessor(
         runtime=DraftRuntime(
             ledger=ledger,
@@ -1411,6 +1517,8 @@ async def _build_draft_runtime(
             draft_retry_base_delay=draft_retry_base_delay,
             rolling_enabled=rolling_enabled,
             macro_chunk_size=max(1, int(config.macro_chunk_size)),
+            dynamic_routing_enabled=bool(dynamic_scheduler is not None),
+            dynamic_scheduler=dynamic_scheduler,
         ),
     )
     return _DraftAssembly(
