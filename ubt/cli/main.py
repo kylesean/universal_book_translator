@@ -31,6 +31,7 @@ from ubt.cli.commands.status import (
 from ubt.cli.commands.translate import console as console
 from ubt.cli.commands.translate import translate
 from ubt.cli.commands.verify import verify_command
+from ubt.cli.commands.workbench_cmd import workbench_command
 from ubt.cli.commands.worker import worker_command
 from ubt.core.config import (
     UBTConfig,
@@ -119,6 +120,7 @@ async def _run_translation(
     output_path: Path | None,
     dry_run: bool = False,
     quiet: bool = False,
+    interactive: bool = False,
     **request: Any,
 ) -> Path:
     """Async execution wrapper with rich interactive dual-dashboard.
@@ -191,6 +193,44 @@ async def _run_translation(
         orchestrator = create_dry_run_orchestrator(config, finalize_job=_persist_artifact_pointer)
     else:
         orchestrator = PipelineOrchestrator(config=config, finalize_job=_persist_artifact_pointer)
+
+    if interactive:
+        from ubt.cli.workbench.controller import WorkbenchController
+        from ubt.cli.workbench.models import WorkbenchMode
+        from ubt.cli.workbench.runner import run_workbench
+
+        controller = WorkbenchController(
+            mode=WorkbenchMode.SINGLE_JOB,
+            concurrency=int(request.get("max_concurrency") or 1),
+        )
+        controller.state.active_job_id = str(job_id or f"job_{input_path.stem}")
+        controller.state.active_job_title = input_path.name
+        controller.state.target_lang = str(request.get("target_lang", "zh"))
+        controller.state.source_lang = str(request.get("source_lang", "en"))
+
+        final_output: Path | None = None
+
+        async def _wb_drain(ctrl: WorkbenchController) -> None:
+            nonlocal final_output
+            async for event in orchestrator.run(
+                input_path=input_path,
+                output_path=output_path,
+                cancel_token=ctrl.cancel_token,
+                **run_kwargs_from_request(request),
+            ):
+                await ctrl.wait_if_paused()
+                ctrl.update_from_event(
+                    event_type=_event_label(event.event_type),
+                    message=event.message,
+                    meta=event.metadata or {},
+                )
+                if event.event_type == EventType.EXPORT_COMPLETED:
+                    final_output = Path(event.artifact_path or event.message)
+
+        await run_workbench(controller, task_fn=_wb_drain)
+        if final_output is None and not controller.is_cancelled:
+            raise UBTError("Pipeline failed to complete document rendering.")
+        return final_output or Path(str(output_path or input_path))
 
     async def _drain() -> Path | None:
         final_output: Path | None = None
@@ -595,6 +635,7 @@ app.command(name="verify")(verify_command)
 app.command(name="layout-audit")(layout_audit_command)
 app.command(name="benchmark")(benchmark_command)
 app.command(name="pareto")(pareto_command)
+app.command(name="workbench")(workbench_command)
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 
@@ -614,6 +655,7 @@ __all__ = [
     "layout_audit_command",
     "benchmark_command",
     "pareto_command",
+    "workbench_command",
     "version",
     "_build_config",
     "_resolve_db_dir",

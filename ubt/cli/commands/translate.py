@@ -704,6 +704,14 @@ def translate(
             help="Exit non-zero unless the run is fully clean: no failed / needs-human / blocked blocks and no fail-closed render skips.",
         ),
     ] = False,
+    interactive: Annotated[
+        bool,
+        typer.Option(
+            "--interactive",
+            "-i",
+            help="Launch interactive console workbench with live pause/resume, concurrency throttling, and telemetry.",
+        ),
+    ] = False,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -861,6 +869,7 @@ def translate(
                 output_path=output,
                 dry_run=dry_run,
                 quiet=json_output,
+                interactive=interactive,
                 **request,
             )
         )
