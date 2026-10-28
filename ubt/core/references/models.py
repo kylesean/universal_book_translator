@@ -16,6 +16,41 @@ class ReferenceKind(StrEnum):
     TABLE = "table"
     EQUATION = "equation"
     FOOTNOTE = "footnote"
+    PAGE = "page"
+    LISTING = "listing"
+    ALGORITHM = "algorithm"
+
+
+class CrossRefStyle(StrEnum):
+    """Visual presentation style for internal cross references."""
+
+    LINK_ONLY = "link_only"
+    WITH_PAGE = "with_page"
+    PAGE_ONLY = "page_only"
+    NATIVE_REF = "native_ref"
+
+
+class CrossRefPrefixScheme(StrEnum):
+    """Naming standard for cross-reference labels and mentions."""
+
+    ORIGINAL = "original"
+    CHINESE_STANDARD = "chinese_standard"
+    ACADEMIC_FORMAL = "academic_formal"
+    COMPACT = "compact"
+
+
+@dataclass(slots=True)
+class CrossRefConfig:
+    """Configuration options for cross-reference link formatting."""
+
+    style: CrossRefStyle = CrossRefStyle.LINK_ONLY
+    prefix_scheme: CrossRefPrefixScheme = CrossRefPrefixScheme.ORIGINAL
+    show_page_number: bool = False
+    enable_page_references: bool = True
+    target_format: str = "typst"  # typst, html, markdown, epub
+    link_css_class: str = "ubt-xref"
+    open_in_new_tab: bool = False
+    target_lang: str = "zh"
 
 
 @dataclass(frozen=True, slots=True)

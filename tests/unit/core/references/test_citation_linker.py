@@ -304,3 +304,238 @@ def test_typst_document_renderer_emits_anchors_and_links(tmp_path: Path) -> None
     assert "#link(<bib-1>)[\\[1\\]]" in source
     # Bibliography entry should carry anchor point
     assert "<bib-1>" in source
+
+
+def test_extract_page_listing_and_algorithm_anchors() -> None:
+    blocks = [
+        _make_block(
+            "p1",
+            Paragraph(id="p1", spine_index=0, span=Span(page=1), text="Text on page 1"),
+            page=1,
+        ),
+        _make_block(
+            "p2",
+            Paragraph(id="p2", spine_index=1, span=Span(page=3), text="Text on page 3"),
+            page=3,
+        ),
+        _make_block(
+            "lst1",
+            Caption(id="lst1", spine_index=2, span=Span(page=3), text="Listing 1: Server setup"),
+            page=3,
+        ),
+        _make_block(
+            "alg1",
+            Caption(id="alg1", spine_index=3, span=Span(page=4), text="Algorithm 2: Fast search"),
+            page=4,
+        ),
+    ]
+
+    topology = extract_document_anchors(blocks)
+    assert "page-1" in topology.anchors
+    assert "page-3" in topology.anchors
+    assert "page-4" in topology.anchors
+    assert "lst-1" in topology.anchors
+    assert "algo-2" in topology.anchors
+
+    assert topology.key_to_anchor[(ReferenceKind.PAGE, "1")] == "page-1"
+    assert topology.key_to_anchor[(ReferenceKind.PAGE, "3")] == "page-3"
+    assert topology.key_to_anchor[(ReferenceKind.LISTING, "1")] == "lst-1"
+    assert topology.key_to_anchor[(ReferenceKind.ALGORITHM, "2")] == "algo-2"
+
+
+def test_format_mention_text_schemes() -> None:
+    from ubt.core.references.linker import format_mention_text
+    from ubt.core.references.models import CrossRefPrefixScheme
+
+    # Chinese standard
+    assert (
+        format_mention_text(
+            "Figure 2",
+            ReferenceKind.FIGURE,
+            "2",
+            CrossRefPrefixScheme.CHINESE_STANDARD,
+            lang="zh",
+        )
+        == "图 2"
+    )
+    assert (
+        format_mention_text(
+            "Table 3",
+            ReferenceKind.TABLE,
+            "3",
+            CrossRefPrefixScheme.CHINESE_STANDARD,
+            lang="zh",
+        )
+        == "表 3"
+    )
+    assert (
+        format_mention_text(
+            "Section 4.1",
+            ReferenceKind.HEADING,
+            "4.1",
+            CrossRefPrefixScheme.CHINESE_STANDARD,
+            lang="zh",
+        )
+        == "第 4.1 节"
+    )
+    assert (
+        format_mention_text(
+            "Chapter 5",
+            ReferenceKind.HEADING,
+            "5",
+            CrossRefPrefixScheme.CHINESE_STANDARD,
+            lang="zh",
+        )
+        == "第 5 章"
+    )
+    assert (
+        format_mention_text(
+            "page 15",
+            ReferenceKind.PAGE,
+            "15",
+            CrossRefPrefixScheme.CHINESE_STANDARD,
+            lang="zh",
+        )
+        == "第 15 页"
+    )
+
+    # Academic formal
+    assert (
+        format_mention_text(
+            "图 2",
+            ReferenceKind.FIGURE,
+            "2",
+            CrossRefPrefixScheme.ACADEMIC_FORMAL,
+            lang="en",
+        )
+        == "Figure 2"
+    )
+    assert (
+        format_mention_text(
+            "表 3",
+            ReferenceKind.TABLE,
+            "3",
+            CrossRefPrefixScheme.ACADEMIC_FORMAL,
+            lang="en",
+        )
+        == "Table 3"
+    )
+
+    # Compact
+    assert (
+        format_mention_text(
+            "Figure 2",
+            ReferenceKind.FIGURE,
+            "2",
+            CrossRefPrefixScheme.COMPACT,
+            lang="en",
+        )
+        == "Fig. 2"
+    )
+    assert (
+        format_mention_text(
+            "Section 4.1",
+            ReferenceKind.HEADING,
+            "4.1",
+            CrossRefPrefixScheme.COMPACT,
+            lang="en",
+        )
+        == "Sec. 4.1"
+    )
+
+
+def test_inject_hyperlinks_with_page_and_native_ref() -> None:
+    from ubt.core.references.models import CrossRefConfig, CrossRefStyle
+
+    blocks = [
+        _make_block(
+            "cap1", Caption(id="cap1", spine_index=0, span=Span(page=2), text="Figure 2: Layout")
+        ),
+        _make_block(
+            "p1",
+            Paragraph(id="p1", spine_index=1, span=Span(page=5), text="Text on page 5"),
+            page=5,
+        ),
+    ]
+    topology = build_citation_topology(blocks)
+
+    text = "Refer to Figure 2, see page 5 for details."
+
+    # 1. With page number dynamic lookup
+    cfg_page = CrossRefConfig(style=CrossRefStyle.WITH_PAGE, target_lang="zh")
+    linked_page = inject_hyperlinks(text, topology, target_format="typst", config=cfg_page)
+    assert "#link(<fig-2>)[Figure 2]#context" in linked_page
+    assert "loc.first().location().page() != here().page()" in linked_page
+    assert "#link(<page-5>)[see page 5]" in linked_page
+
+    # 2. Native ref
+    cfg_native = CrossRefConfig(style=CrossRefStyle.NATIVE_REF)
+    linked_native = inject_hyperlinks(text, topology, target_format="typst", config=cfg_native)
+    assert "#ref(<fig-2>)" in linked_native
+
+
+def test_inject_hyperlinks_html_and_markdown() -> None:
+    from ubt.core.references.models import CrossRefConfig
+
+    blocks = [
+        _make_block(
+            "cap1",
+            Caption(id="cap1", spine_index=0, span=Span(page=1), text="Table 3: Benchmarks"),
+        ),
+    ]
+    topology = build_citation_topology(blocks)
+
+    text = "Detailed metrics are shown in Table 3."
+
+    # HTML
+    cfg_html = CrossRefConfig(link_css_class="doc-link", open_in_new_tab=True)
+    linked_html = inject_hyperlinks(text, topology, target_format="html", config=cfg_html)
+    assert (
+        '<a href="#tbl-3" class="doc-link doc-link-table" data-ref-kind="table" target="_blank" rel="noopener noreferrer">Table 3</a>'
+        in linked_html
+    )
+
+    # Markdown
+    linked_md = inject_hyperlinks(text, topology, target_format="markdown")
+    assert "[Table 3](#tbl-3)" in linked_md
+
+
+def test_typst_document_renderer_with_xref_enabled(tmp_path: Path) -> None:
+    from ubt.core.references.models import CrossRefConfig, CrossRefStyle
+
+    blocks = [
+        _make_block(
+            "h1",
+            Heading(id="h1", spine_index=0, span=Span(page=1), level=1, text="1. Overview"),
+            page=1,
+        ),
+        _make_block(
+            "eq1",
+            Formula(id="eq1", spine_index=1, span=Span(page=1), source="E = m c^2 \\quad (1)"),
+            page=1,
+        ),
+        _make_block(
+            "p1",
+            Paragraph(
+                id="p1",
+                spine_index=2,
+                span=Span(page=2),
+                text="In Section 1, we defined Equation (1). See page 1.",
+            ),
+            page=2,
+        ),
+    ]
+
+    cfg = CrossRefConfig(style=CrossRefStyle.WITH_PAGE, target_lang="zh")
+    renderer = TypstDocumentRenderer(enable_xref=True, xref_config=cfg)
+    source, stats = renderer.build_source(blocks, tmp_path)
+
+    # Page start metadata emitted
+    assert '[#metadata("page-start") <page-1>]' in source
+    assert '[#metadata("page-start") <page-2>]' in source
+
+    # Equation label emitted
+    assert "<eq-1>" in source
+
+    # Page reference linked
+    assert "#link(<page-1>)[See page 1]" in source

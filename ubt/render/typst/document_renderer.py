@@ -1645,6 +1645,8 @@ class TypstDocumentRenderer:
         table_continuation_config: object | None = None,
         enable_epigraph: bool = False,
         epigraph_config: object | None = None,
+        enable_xref: bool = False,
+        xref_config: object | None = None,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
@@ -1675,6 +1677,8 @@ class TypstDocumentRenderer:
         self.table_continuation_config = table_continuation_config
         self.enable_epigraph = bool(enable_epigraph)
         self.epigraph_config = epigraph_config
+        self.enable_xref = bool(enable_xref)
+        self.xref_config = xref_config
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: ``auto`` is none for a paper (by convention) and one for a book that
         #: carries TOC rows; see :func:`resolve_toc_mode`.
@@ -1715,7 +1719,12 @@ class TypstDocumentRenderer:
         #: non-text asset.
         self.table_reconstructions: list[ReconstructionRecord] = []
 
-    def _prose(self, text: str, runs: Sequence[InlineRun] = ()) -> str:
+    def _prose(
+        self,
+        text: str,
+        runs: Sequence[InlineRun] = (),
+        skip_anchors: set[str] | None = None,
+    ) -> str:
         """``render_prose`` bound to this renderer's compile gate."""
         if not runs:
             from ubt.render.typst.container_repair import inject_soft_breaks
@@ -1734,7 +1743,14 @@ class TypstDocumentRenderer:
         if topology is not None:
             from ubt.core.references.linker import inject_hyperlinks
 
-            rendered = inject_hyperlinks(rendered, topology, target_format="typst")
+            xref_cfg = getattr(self, "xref_config", None)
+            rendered = inject_hyperlinks(
+                rendered,
+                topology,
+                target_format="typst",
+                config=xref_cfg,
+                skip_anchors=skip_anchors,
+            )
         return rendered
 
     def _prewarm_math_gate(self, blocks: Sequence[IRBlock]) -> None:
@@ -2008,8 +2024,20 @@ class TypstDocumentRenderer:
         #: what actually gets rendered.
         list_runs = self._group_list_runs(blocks, toc_consumed)
         chapter_needs_dropcap = False
+        last_page_emitted: int | None = None
 
         for i, block in enumerate(blocks):
+            block_span = getattr(getattr(block, "element", None), "span", None)
+            block_page = (
+                block.bbox.page
+                if block.bbox is not None and block.bbox.page is not None
+                else getattr(block_span, "page", None)
+            )
+            if block_page is not None and block_page != last_page_emitted:
+                last_page_emitted = block_page
+                if getattr(self, "enable_xref", False):
+                    body.append(f'[#metadata("page-start") <page-{last_page_emitted}>]')
+
             if should_render_toc and i in toc_by_insertion_point:
                 flush_figure()
                 for chunk in toc_by_insertion_point[i]:
@@ -2301,10 +2329,25 @@ class TypstDocumentRenderer:
                         converted = break_equation(converted, target_width=max_chars, align=False)
 
                     f_scale = getattr(self, "formula_scale", 1.0)
-                    if f_scale < 1.0:
-                        body.append(f"#text(size: {10.5 * f_scale:.2f}pt)[$ {converted} $]")
-                    else:
-                        body.append(f"$ {converted} $")
+                    formula_markup = (
+                        f"#text(size: {10.5 * f_scale:.2f}pt)[$ {converted} $]"
+                        if f_scale < 1.0
+                        else f"$ {converted} $"
+                    )
+
+                    topology = getattr(self, "citation_topology", None)
+                    if topology is not None:
+                        from ubt.core.references.extractor import _EQUATION_LABEL_RE
+                        from ubt.core.references.models import ReferenceKind
+
+                        m_eq = _EQUATION_LABEL_RE.search(source) or _EQUATION_LABEL_RE.search(text)
+                        if m_eq:
+                            eq_key = (m_eq.group(1) or m_eq.group(2)).lower()
+                            if (ReferenceKind.EQUATION, eq_key) in topology.key_to_anchor:
+                                aid = topology.key_to_anchor[(ReferenceKind.EQUATION, eq_key)]
+                                formula_markup = f"{formula_markup} <{aid}>"
+
+                    body.append(formula_markup)
                     self.stats.formulas += 1
                     self.stats.blocks_rendered += 1
                     if from_target:
@@ -2604,6 +2647,7 @@ class TypstDocumentRenderer:
             width = f"{ratio:.1f}%"
 
         anchor_suffix = ""
+        aid: str | None = None
         topology = getattr(self, "citation_topology", None)
         if topology is not None and figure.caption:
             from ubt.core.references.extractor import _FIGURE_CAPTION_RE
@@ -2617,10 +2661,11 @@ class TypstDocumentRenderer:
                     anchor_suffix = f" <{aid}>"
 
         if figure.caption:
+            skip_s = {aid} if aid else None
             lines_fig = [
                 "#figure(",
                 f'  image("{target.name}", width: {width}),',
-                f"  caption: [{self._prose(figure.caption)}],",
+                f"  caption: [{self._prose(figure.caption, skip_anchors=skip_s)}],",
                 "  numbering: none,",
                 f"){anchor_suffix}",
             ]
@@ -2715,10 +2760,11 @@ class TypstDocumentRenderer:
             layout_mode=FigureLayoutMode.GRID,
         )
 
+        skip_grid = {anchor_id} if anchor_id else None
         return render_figure_grid_typst(
             panel,
             asset_resolver=lambda a: a,
-            prose_renderer=self._prose,
+            prose_renderer=lambda t: self._prose(t, skip_anchors=skip_grid),
             config=cfg,
         )
 

@@ -32,7 +32,7 @@ from ubt.cli.commands.notes_cmd import notes_app
 from ubt.cli.commands.optimize_pdf_cmd import optimize_pdf_command
 from ubt.cli.commands.pareto_cmd import pareto_command
 from ubt.cli.commands.patch_cmd import patch_app
-from ubt.cli.commands.reference_cmd import ref_app
+from ubt.cli.commands.reference_cmd import ref_app, xref_app
 from ubt.cli.commands.roundtrip_cmd import roundtrip_command
 from ubt.cli.commands.route_cmd import route_app
 from ubt.cli.commands.status import (
@@ -662,6 +662,7 @@ app.add_typer(coref_app, name="coref")
 app.add_typer(patch_app, name="patch")
 app.add_typer(table_app, name="table")
 app.add_typer(ref_app, name="ref")
+app.add_typer(xref_app, name="xref")
 app.add_typer(kinsoku_app, name="kinsoku")
 app.add_typer(styler_app, name="styler")
 app.add_typer(colophon_app, name="colophon")

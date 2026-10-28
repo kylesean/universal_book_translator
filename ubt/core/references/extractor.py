@@ -73,11 +73,51 @@ _PROSE_EQUATION_REF_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: Page mentions: 第 15 页, 见第 3 页, 参见第 4 页, page 12, p. 5, see page 20, (page 10)
+_PROSE_PAGE_REF_RE = re.compile(
+    r"(?:(?:(?:参见|见)?(?:第\s*)?(\d+)\s*页)|\b(?:see\s+)?(?:page|p\.)\s*(\d+)\b)",
+    re.IGNORECASE,
+)
+
+#: Listing captions and references
+_LISTING_CAPTION_RE = re.compile(
+    r"^(?:listing|list\.|代码清单)\s*(\d+(?:\.\d+)*)",
+    re.IGNORECASE,
+)
+
+_PROSE_LISTING_REF_RE = re.compile(
+    r"\b(?:listing|list\.)\s*(\d+(?:\.\d+)*)|(?:代码清单)\s*(\d+(?:\.\d+)*)",
+    re.IGNORECASE,
+)
+
+#: Algorithm captions and references
+_ALGORITHM_CAPTION_RE = re.compile(
+    r"^(?:algorithm|algo\.|算法)\s*(\d+(?:\.\d+)*)",
+    re.IGNORECASE,
+)
+
+_PROSE_ALGORITHM_REF_RE = re.compile(
+    r"\b(?:algorithm|algo\.)\s*(\d+(?:\.\d+)*)|(?:算法)\s*(\d+(?:\.\d+)*)",
+    re.IGNORECASE,
+)
+
 
 def _clean_anchor_id(prefix: str, key: str) -> str:
     """Produce a safe Typst/HTML anchor ID."""
     sanitized = re.sub(r"[^a-zA-Z0-9_\-]", "-", key.strip()).strip("-").lower()
     return f"{prefix}-{sanitized}"
+
+
+def _get_block_page(block: IRBlock) -> int | None:
+    """Extract page number from block bbox or element span."""
+    if block.bbox is not None and block.bbox.page is not None:
+        return block.bbox.page
+    element = getattr(block, "element", None)
+    if element is not None:
+        span = getattr(element, "span", None)
+        if span is not None and getattr(span, "page", None) is not None:
+            return span.page
+    return None
 
 
 def extract_document_anchors(blocks: Sequence[IRBlock]) -> CitationTopology:
@@ -89,7 +129,23 @@ def extract_document_anchors(blocks: Sequence[IRBlock]) -> CitationTopology:
         src = (block.source_text or "").strip()
         if not src:
             continue
-        page = block.bbox.page if block.bbox is not None else None
+        page = _get_block_page(block)
+
+        # Register page anchor for cross-referencing pages
+        if page is not None:
+            page_key = str(page)
+            page_anchor_id = f"page-{page_key}"
+            if page_anchor_id not in topology.anchors:
+                anchor = AnchorTarget(
+                    anchor_id=page_anchor_id,
+                    kind=ReferenceKind.PAGE,
+                    key=page_key,
+                    block_id=block.id,
+                    page=page,
+                    title=f"Page {page}",
+                )
+                topology.anchors[page_anchor_id] = anchor
+                topology.key_to_anchor[(ReferenceKind.PAGE, page_key)] = page_anchor_id
 
         # Check for bibliography section heading
         if block.block_type is BlockType.HEADING:
@@ -129,7 +185,11 @@ def extract_document_anchors(blocks: Sequence[IRBlock]) -> CitationTopology:
                 topology.key_to_anchor[(ReferenceKind.BIBLIOGRAPHY, key)] = anchor_id
 
         # Figures and figure captions
-        if block.block_type is BlockType.IMAGE or block.region is RegionKind.CAPTION:
+        if (
+            block.block_type is BlockType.IMAGE
+            or block.region is RegionKind.CAPTION
+            or _FIGURE_CAPTION_RE.search(src)
+        ):
             m_fig = _FIGURE_CAPTION_RE.search(src)
             if m_fig:
                 key = m_fig.group(1).lower()
@@ -146,7 +206,11 @@ def extract_document_anchors(blocks: Sequence[IRBlock]) -> CitationTopology:
                 topology.key_to_anchor[(ReferenceKind.FIGURE, key)] = anchor_id
 
         # Tables and table captions
-        if block.block_type is BlockType.TABLE or block.region is RegionKind.CAPTION:
+        if (
+            block.block_type is BlockType.TABLE
+            or block.region is RegionKind.CAPTION
+            or _TABLE_CAPTION_RE.search(src)
+        ):
             m_tbl = _TABLE_CAPTION_RE.search(src)
             if m_tbl:
                 key = m_tbl.group(1).lower()
@@ -178,6 +242,43 @@ def extract_document_anchors(blocks: Sequence[IRBlock]) -> CitationTopology:
                 )
                 topology.anchors[anchor_id] = anchor
                 topology.key_to_anchor[(ReferenceKind.EQUATION, key)] = anchor_id
+
+        # Code listings
+        if block.block_type is BlockType.CODE or block.region is RegionKind.CAPTION:
+            m_lst = _LISTING_CAPTION_RE.search(src)
+            if m_lst:
+                key = m_lst.group(1).lower()
+                anchor_id = _clean_anchor_id("lst", key)
+                anchor = AnchorTarget(
+                    anchor_id=anchor_id,
+                    kind=ReferenceKind.LISTING,
+                    key=key,
+                    block_id=block.id,
+                    page=page,
+                    title=src[:60],
+                )
+                topology.anchors[anchor_id] = anchor
+                topology.key_to_anchor[(ReferenceKind.LISTING, key)] = anchor_id
+
+        # Algorithms
+        if block.region is RegionKind.CAPTION or block.block_type in (
+            BlockType.CODE,
+            BlockType.NARRATIVE,
+        ):
+            m_alg = _ALGORITHM_CAPTION_RE.search(src)
+            if m_alg:
+                key = m_alg.group(1).lower()
+                anchor_id = _clean_anchor_id("algo", key)
+                anchor = AnchorTarget(
+                    anchor_id=anchor_id,
+                    kind=ReferenceKind.ALGORITHM,
+                    key=key,
+                    block_id=block.id,
+                    page=page,
+                    title=src[:60],
+                )
+                topology.anchors[anchor_id] = anchor
+                topology.key_to_anchor[(ReferenceKind.ALGORITHM, key)] = anchor_id
 
     return topology
 
@@ -339,6 +440,96 @@ def find_prose_citations(
                 {
                     "source_block_id": source_block_id,
                     "kind": ReferenceKind.EQUATION.value,
+                    "text": key,
+                    "raw": match.group(0),
+                }
+            )
+
+    # 6. Page references
+    for match in _PROSE_PAGE_REF_RE.finditer(text):
+        val = match.group(1) or match.group(2)
+        if not val:
+            continue
+        key = val.strip().lower()
+        anchor_id = topology.key_to_anchor.get((ReferenceKind.PAGE, key))
+        topology.total_citations_found += 1
+        if anchor_id:
+            topology.resolved_citations_count += 1
+            links.append(
+                CitationLink(
+                    source_block_id=source_block_id,
+                    target_anchor_id=anchor_id,
+                    matched_text=match.group(0),
+                    kind=ReferenceKind.PAGE,
+                    span_start=match.start(),
+                    span_end=match.end(),
+                )
+            )
+        else:
+            topology.unresolved_mentions.append(
+                {
+                    "source_block_id": source_block_id,
+                    "kind": ReferenceKind.PAGE.value,
+                    "text": key,
+                    "raw": match.group(0),
+                }
+            )
+
+    # 7. Listing references
+    for match in _PROSE_LISTING_REF_RE.finditer(text):
+        val = match.group(1) or match.group(2)
+        if not val:
+            continue
+        key = val.strip().lower()
+        anchor_id = topology.key_to_anchor.get((ReferenceKind.LISTING, key))
+        topology.total_citations_found += 1
+        if anchor_id:
+            topology.resolved_citations_count += 1
+            links.append(
+                CitationLink(
+                    source_block_id=source_block_id,
+                    target_anchor_id=anchor_id,
+                    matched_text=match.group(0),
+                    kind=ReferenceKind.LISTING,
+                    span_start=match.start(),
+                    span_end=match.end(),
+                )
+            )
+        else:
+            topology.unresolved_mentions.append(
+                {
+                    "source_block_id": source_block_id,
+                    "kind": ReferenceKind.LISTING.value,
+                    "text": key,
+                    "raw": match.group(0),
+                }
+            )
+
+    # 8. Algorithm references
+    for match in _PROSE_ALGORITHM_REF_RE.finditer(text):
+        val = match.group(1) or match.group(2)
+        if not val:
+            continue
+        key = val.strip().lower()
+        anchor_id = topology.key_to_anchor.get((ReferenceKind.ALGORITHM, key))
+        topology.total_citations_found += 1
+        if anchor_id:
+            topology.resolved_citations_count += 1
+            links.append(
+                CitationLink(
+                    source_block_id=source_block_id,
+                    target_anchor_id=anchor_id,
+                    matched_text=match.group(0),
+                    kind=ReferenceKind.ALGORITHM,
+                    span_start=match.start(),
+                    span_end=match.end(),
+                )
+            )
+        else:
+            topology.unresolved_mentions.append(
+                {
+                    "source_block_id": source_block_id,
+                    "kind": ReferenceKind.ALGORITHM.value,
                     "text": key,
                     "raw": match.group(0),
                 }
