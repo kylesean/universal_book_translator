@@ -23,6 +23,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any, Self
 
+from ubt.core.engine.storage_utils import warn_if_network_filesystem
 from ubt.core.exceptions import LedgerError
 from ubt.core.fs_perms import ensure_private_dir, restrict_sqlite_family
 from ubt.core.ir.models import (
@@ -393,6 +394,7 @@ class LedgerBase:
 
     def _init_connection(self) -> None:
         """Establish a persistent, thread-safe connection configured with WAL and busy timeout once."""
+        warn_if_network_filesystem(self.db_path, "Job ledger")
         try:
             if self.read_only:
                 conn = sqlite3.connect(

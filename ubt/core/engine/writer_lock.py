@@ -72,12 +72,11 @@ class LedgerWriterLock:
         # ledger's own policy (the lock row lives inside a file that also carries
         # the manuscript).
         ensure_private_dir(self.db_path.parent)
-        # A short busy timeout: the row write is a single statement, and under
-        # WAL a concurrent reader never blocks it. The timeout only covers
-        # another writer's brief transaction.
-        conn = sqlite3.connect(str(self.db_path), timeout=10.0, isolation_level=None)
+        # Busy timeout aligned with JobQueue and Ledger (30.0s). The timeout
+        # covers another writer's brief transaction without timing out early.
+        conn = sqlite3.connect(str(self.db_path), timeout=30.0, isolation_level=None)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout = 10000;")
+        conn.execute("PRAGMA busy_timeout = 30000;")
         return conn
 
     def _table_exists(self, conn: sqlite3.Connection) -> bool:

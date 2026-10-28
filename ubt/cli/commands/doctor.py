@@ -108,6 +108,8 @@ CHECK_CODES: dict[str, tuple[str, ...]] = {
         "disk_space.unknown",
         "sqlite_wal.ok",
         "sqlite_wal.failed",
+        "sqlite_wal.network_fs",
+        "sqlite_wal.network_fs",
         "page_images.disabled",
         "page_images.allowed",
         "qe.tiered",
@@ -157,6 +159,7 @@ CHECK_CODES: dict[str, tuple[str, ...]] = {
         "disk_space.critical",
         "disk_space.low",
         "sqlite_wal.failed",
+        "sqlite_wal.network_fs",
         "page_images.allowed",
         "pdf_engine.docling_missing",
         "pdf_engine.auto_missing",
@@ -840,14 +843,29 @@ def collect_checks(config: UBTConfig, *, probe: bool = False) -> list[_Check]:
             probe_db.with_name(probe_db.name + "-shm"),
         ):
             p.unlink(missing_ok=True)
-        record(
-            "SQLite WAL Ledger",
-            "OK",
-            f"journal_mode={mode_str}, write lock acquired and released cleanly",
-            code="sqlite_wal",
-            detail_code="sqlite_wal.ok",
-            params={"mode": mode_str},
-        )
+        from ubt.core.engine.storage_utils import detect_filesystem_type
+
+        fs_type, is_net = detect_filesystem_type(config.db_dir)
+        if is_net:
+            record(
+                "SQLite WAL Ledger",
+                "WARN",
+                f"{config.db_dir} is on network filesystem ({fs_type}); SQLite WAL requires POSIX advisory locks and shared memory (mmap)",
+                fix="move DB_DIR to a local NVMe/SSD volume (NFS/network mounts risk silent corruption)",
+                code="sqlite_wal",
+                detail_code="sqlite_wal.network_fs",
+                fix_code="sqlite_wal.network_fs",
+                params={"db_dir": str(config.db_dir), "fs_type": fs_type},
+            )
+        else:
+            record(
+                "SQLite WAL Ledger",
+                "OK",
+                f"journal_mode={mode_str}, write lock acquired and released cleanly",
+                code="sqlite_wal",
+                detail_code="sqlite_wal.ok",
+                params={"mode": mode_str},
+            )
     except Exception as exc:
         record(
             "SQLite WAL Ledger",

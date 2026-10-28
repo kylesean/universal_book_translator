@@ -32,6 +32,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from ubt.core.engine.storage_utils import warn_if_network_filesystem
 from ubt.core.exceptions import QueueDepthExceededError
 from ubt.core.fs_perms import ensure_private_dir, restrict_sqlite_family
 
@@ -165,6 +166,7 @@ class JobQueue:
         restrict_sqlite_family(self.db_path)
 
     def _init_connection(self) -> None:
+        warn_if_network_filesystem(self.db_path, "Job queue")
         conn = sqlite3.connect(
             str(self.db_path),
             check_same_thread=False,

@@ -299,6 +299,7 @@ class SqliteTokenBucket(AdaptiveTokenBucket):
             check_same_thread=False,
         )
         self._conn.row_factory = sqlite3.Row
+        self._conn.execute(f"PRAGMA busy_timeout={int(busy_timeout * 1000)};")
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA synchronous=NORMAL;")
         self._conn.execute(

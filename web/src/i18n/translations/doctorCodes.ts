@@ -86,6 +86,8 @@ export const doctorCodesZh: DoctorCodeTables = {
     'disk_space.unknown': '无法查询可用空间：{error}',
     'sqlite_wal.ok': '运行数据可正常写入',
     'sqlite_wal.failed': '运行数据无法写入：{error}',
+    'sqlite_wal.network_fs':
+      '{db_dir} 位于网络文件系统 ({fs_type})，SQLite WAL 强依赖本地 POSIX 共享内存与文件锁，在网络存储上易导致死锁或静默损坏',
     'page_images.disabled':
       '书页图像不会离开本机；需要图像外发的检查会自动跳过。',
     'page_images.allowed': '已允许；当前生效路径：{routes}',
@@ -146,6 +148,7 @@ export const doctorCodesZh: DoctorCodeTables = {
     'disk_space.critical': '释放运行数据目录所在磁盘的空间',
     'disk_space.low': '为大批量编译预留至少 5 GB 空闲空间',
     'sqlite_wal.failed': '请确认运行数据目录位于支持文件锁的本地磁盘',
+    'sqlite_wal.network_fs': '请将 DB_DIR 迁移至本地 NVMe/SSD 磁盘卷（网络挂载存在数据损坏风险）',
     'page_images.allowed': '关闭页面外发可让页面图像保留在本机',
     'pdf_engine.docling_missing': '在服务端安装 PDF 高精度解析组件',
     'pdf_engine.auto_missing': '安装高精度解析组件，或切换为基础解析模式',
