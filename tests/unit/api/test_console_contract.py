@@ -294,6 +294,7 @@ def test_deliverable_paths_match_the_export_stage_naming(tmp_path: Path) -> None
     assert paths["xliff"] == companion_path(output, ".xliff")
     assert paths["contract"] == sidecar_path(output, "contract.json")
     assert paths["quality_report"] == sidecar_path(output, "quality_report.json")
+    assert paths["attestation"] == companion_path(output, "_attestations.json")
     # Both directions. The old assertion only checked "every path key has a
     # label", which is the direction that would KeyError — but it could not see
     # a label with no producer, nor a default companion missing from the table.

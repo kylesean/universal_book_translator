@@ -58,6 +58,7 @@ import {
   reExportJob,
   reparseJob,
   subscribeJobProgress,
+  type CompanionArtifactInfo,
   type DeliverableItem,
   type DeliverableListing,
   type JobSummary,
@@ -461,6 +462,108 @@ function DeliverableRow({
   )
 }
 
+function CompanionArtifactRow({
+  comp,
+  onDownload,
+}: {
+  comp: CompanionArtifactInfo
+  onDownload: () => void
+}) {
+  const { t } = useI18n()
+
+  const kindLabel = () => {
+    switch (comp.kind) {
+      case 'xliff':
+        return t.quality.xliffDoc
+      case 'html':
+        return t.quality.htmlView
+      case 'epub':
+        return t.quality.epub
+      case 'attestation':
+        return t.quality.attestationJson
+      default:
+        return comp.kind.toUpperCase()
+    }
+  }
+
+  const kindBadge = () => {
+    switch (comp.kind) {
+      case 'xliff':
+        return 'XLIFF'
+      case 'html':
+        return 'HTML'
+      case 'epub':
+        return 'EPUB'
+      case 'attestation':
+        return 'ATTEST'
+      default:
+        return comp.kind.toUpperCase()
+    }
+  }
+
+  const isGenerated = comp.status === 'generated'
+  const isSkipped = comp.status === 'skipped'
+  const isFailed = comp.status === 'failed'
+
+  return (
+    <div className="flex items-center justify-between gap-3 p-3 transition-colors hover:bg-muted/25">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-xs font-bold text-foreground">
+          {kindBadge()}
+        </span>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="truncate text-sm font-medium text-foreground">
+              {kindLabel()}
+            </span>
+            {isGenerated && (
+              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                {t.mission.companionGeneratedBadge}
+              </span>
+            )}
+            {isSkipped && (
+              <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs font-semibold text-muted-foreground">
+                {t.mission.companionSkippedBadge}
+              </span>
+            )}
+            {isFailed && (
+              <span className="rounded bg-destructive/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-destructive">
+                {t.mission.companionFailedBadge}
+              </span>
+            )}
+          </div>
+          <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+            {isGenerated && (
+              <>
+                {comp.path ? comp.path.split('/').pop() : ''}
+                {comp.sizeBytes != null ? ` · ${formatBytes(comp.sizeBytes)}` : ''}
+                {comp.durationMs != null ? ` · ${comp.durationMs.toFixed(1)} ms` : ''}
+              </>
+            )}
+            {isSkipped && (
+              <span>{comp.reason || t.mission.companionSkippedBadge}</span>
+            )}
+            {isFailed && (
+              <span className="text-destructive/90">{comp.error || t.mission.companionFailedBadge}</span>
+            )}
+          </div>
+        </div>
+      </div>
+      {isGenerated && (
+        <Button
+          onClick={onDownload}
+          variant="outline"
+          size="sm"
+          className="h-8 shrink-0 px-3 text-xs"
+        >
+          <Download className="mr-1.5 size-3.5" />
+          <span>{t.mission.downloadPrimary}</span>
+        </Button>
+      )}
+    </div>
+  )
+}
+
 export function MissionControl() {
   const { t } = useI18n()
   const missionT = t.mission
@@ -608,20 +711,30 @@ export function MissionControl() {
   const [resuming, setResuming] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [deliverables, setDeliverables] = useState<DeliverableItem[]>([])
+  const [companionArtifacts, setCompanionArtifacts] = useState<CompanionArtifactInfo[]>([])
 
   useEffect(() => {
     let alive = true
     if (currentJobId && statusStr === 'completed') {
       listDeliverables(currentJobId)
         .then((listing) => {
-          if (alive) setDeliverables(listing.items)
+          if (alive) {
+            setDeliverables(listing.items)
+            setCompanionArtifacts(listing.companionArtifacts ?? [])
+          }
         })
         .catch(() => {
-          if (alive) setDeliverables([])
+          if (alive) {
+            setDeliverables([])
+            setCompanionArtifacts([])
+          }
         })
     } else {
       queueMicrotask(() => {
-        if (alive) setDeliverables((prev) => (prev.length > 0 ? [] : prev))
+        if (alive) {
+          setDeliverables((prev) => (prev.length > 0 ? [] : prev))
+          setCompanionArtifacts((prev) => (prev.length > 0 ? [] : prev))
+        }
       })
     }
     return () => {
@@ -1957,7 +2070,7 @@ export function MissionControl() {
             <TabsContent value="deliverables" className="mt-0">
               <Card className="overflow-hidden shadow-sm border-border">
                 <CardContent className="p-0">
-                  {deliverables.length === 0 ? (
+                  {deliverables.length === 0 && companionArtifacts.length === 0 ? (
                     <div className="py-12 text-center text-xs text-muted-foreground font-mono">
                       {isCompleted ? t.mission.noDeliverables : t.mission.backgroundProcessing}
                     </div>
@@ -2015,6 +2128,28 @@ export function MissionControl() {
                             ))}
                         </div>
                       </section>
+
+                      {companionArtifacts.length > 0 && (
+                        <section className="overflow-hidden rounded-lg border border-border/70">
+                          <div className="flex items-center justify-between border-b border-border/70 bg-indigo-500/5 px-3 py-2">
+                            <h3 className="text-xs font-semibold tracking-wide text-foreground">
+                              {missionT.companionArtifactsTitle}
+                            </h3>
+                            <span className="font-mono text-xs text-muted-foreground">
+                              {companionArtifacts.filter((c) => c.status === 'generated').length} / {companionArtifacts.length}
+                            </span>
+                          </div>
+                          <div className="divide-y divide-border/60">
+                            {companionArtifacts.map((comp) => (
+                              <CompanionArtifactRow
+                                key={comp.kind}
+                                comp={comp}
+                                onDownload={() => void handleDownload(comp.kind)}
+                              />
+                            ))}
+                          </div>
+                        </section>
+                      )}
                     </div>
                   )}
                 </CardContent>

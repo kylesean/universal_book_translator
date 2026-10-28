@@ -38,6 +38,8 @@ export function deliverableName(key: string, fallback: string, t: Translation): 
       return t.quality.htmlView
     case 'xliff':
       return t.quality.xliffDoc
+    case 'attestation':
+      return t.quality.attestationJson
     default:
       return fallback
   }

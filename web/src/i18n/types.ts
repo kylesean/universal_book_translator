@@ -382,6 +382,10 @@ export interface TranslationDictionary {
     downloadPrimary: string
     oneClickExport: string
     readerProductsTitle: string
+    companionArtifactsTitle: string
+    companionGeneratedBadge: string
+    companionSkippedBadge: string
+    companionFailedBadge: string
     reviewFilesTitle: string
     openReview: string
     exportPrimaryHint: string
@@ -512,6 +516,7 @@ export interface TranslationDictionary {
     qualityReportJson: string
     visualReportJson: string
     metricsJson: string
+    attestationJson: string
     //: The two companions the export stage writes by default. Their keys were
     //: missing from the label switch, so the button fell back to the backend's
     //: English `label` — the only two deliverables still untranslated.

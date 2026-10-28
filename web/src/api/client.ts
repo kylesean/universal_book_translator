@@ -489,6 +489,16 @@ export function subscribeJobProgress(
 // Deliverables
 // --------------------------------------------------------------------------- //
 
+export interface CompanionArtifactInfo {
+  kind: 'xliff' | 'html' | 'epub' | 'attestation' | string
+  status: 'generated' | 'skipped' | 'failed' | string
+  path?: string | null
+  sizeBytes?: number | null
+  durationMs?: number | null
+  reason?: string | null
+  error?: string | null
+}
+
 export interface DeliverableListing {
   items: DeliverableItem[]
   /** True when the files on disk predate the job's ledger text. The download
@@ -499,6 +509,7 @@ export interface DeliverableListing {
    *  reader-facing files unless `force` is set — callers should warn before
    *  opening the download rather than surface the 409 afterwards. */
   deliveryVerdict: 'passed' | 'warning' | 'blocked' | null
+  companionArtifacts?: CompanionArtifactInfo[]
 }
 
 export async function listDeliverables(jobId: string): Promise<DeliverableListing> {
@@ -509,6 +520,17 @@ export async function listDeliverables(jobId: string): Promise<DeliverableListin
     items: data.deliverables ?? [],
     stale: Boolean(data.stale),
     deliveryVerdict: data.delivery_verdict ?? null,
+    companionArtifacts: Array.isArray(data.companion_artifacts)
+      ? data.companion_artifacts.map((c: any) => ({
+          kind: c.kind,
+          status: c.status,
+          path: c.path,
+          sizeBytes: c.size_bytes,
+          durationMs: c.duration_ms,
+          reason: c.reason,
+          error: c.error,
+        }))
+      : [],
   }
 }
 

@@ -30,6 +30,7 @@ import {
   reExportJob,
   pagePreviewUrl,
   ApiError,
+  type CompanionArtifactInfo,
   type DeliverableItem,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
@@ -92,6 +93,7 @@ export function QualityGateView() {
   const [copiedId, setCopiedId] = useState(false)
   const [report, setReport] = useState<Record<string, any> | null>(null)
   const [deliverables, setDeliverables] = useState<DeliverableItem[]>([])
+  const [companionArtifacts, setCompanionArtifacts] = useState<CompanionArtifactInfo[]>([])
   const [deliveryStale, setDeliveryStale] = useState(false)
   const [downloadBusy, setDownloadBusy] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
@@ -121,9 +123,11 @@ export function QualityGateView() {
     try {
       const listing = await listDeliverables(jobId)
       setDeliverables(listing.items)
+      setCompanionArtifacts(listing.companionArtifacts ?? [])
       setDeliveryStale(listing.stale)
     } catch {
       setDeliverables([])
+      setCompanionArtifacts([])
     }
     try {
       setVisual(await getVisualReport(jobId))
@@ -447,6 +451,7 @@ export function QualityGateView() {
         await reExportJob(jobId)
         const refreshed = await listDeliverables(jobId)
         setDeliverables(refreshed.items)
+        setCompanionArtifacts(refreshed.companionArtifacts ?? [])
         setDeliveryStale(refreshed.stale)
         currentItems = refreshed.items
       }
@@ -755,6 +760,38 @@ export function QualityGateView() {
                 <p className="p-5 text-sm text-muted-foreground">{t.quality.primaryProductMissing}</p>
               )}
             </Card>
+
+            {companionArtifacts.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t.mission.companionArtifactsTitle}:
+                </span>
+                {companionArtifacts.map((comp) => (
+                  <span
+                    key={comp.kind}
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-xs',
+                      comp.status === 'generated'
+                        ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                        : comp.status === 'failed'
+                        ? 'border border-destructive/20 bg-destructive/10 text-destructive'
+                        : 'border border-border bg-muted text-muted-foreground'
+                    )}
+                    title={comp.reason || comp.error || `${comp.kind.toUpperCase()} ${comp.status}`}
+                  >
+                    <span className="font-bold">{comp.kind.toUpperCase()}</span>
+                    <span className="opacity-80">
+                      {comp.status === 'generated'
+                        ? (comp.sizeBytes ? fmtSize(comp.sizeBytes) : t.mission.companionGeneratedBadge)
+                        : comp.status === 'skipped'
+                        ? t.mission.companionSkippedBadge
+                        : t.mission.companionFailedBadge}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            )}
+
             <p className="text-xs leading-relaxed text-muted-foreground">
               {t.quality.technicalReportHint}
             </p>

@@ -98,6 +98,7 @@ DELIVERABLE_LABELS: dict[str, tuple[str, str]] = {
     "quality_report": ("Quality report (JSON)", "application/json"),
     "visual_report": ("Visual gate report (JSON)", "application/json"),
     "metrics": ("Run metrics (JSON)", "application/json"),
+    "attestation": ("Text realization attestation (JSON)", "application/json"),
 }
 
 
@@ -121,6 +122,7 @@ def deliverable_paths(output_file: str | Path) -> dict[str, Path]:
         "quality_report": sidecar_path(out, "quality_report.json"),
         "visual_report": sidecar_path(out, "visual_report.json"),
         "metrics": sidecar_path(out, "metrics.json"),
+        "attestation": companion_path(out, "_attestations.json"),
     }
     for tag in ("_mono", "_dual"):
         candidate = out.with_name(f"{stem}{tag}{suffix}")
