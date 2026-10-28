@@ -1468,12 +1468,17 @@ class TypstDocumentRenderer:
         if getattr(self, "layout_template", "book") == "academic":
             from ubt.render.typst.academic import academic_preamble
 
-            return academic_preamble(
+            ret = academic_preamble(
                 target_lang=target_lang,
                 font_stack=self.font_stack,
                 paper_title=getattr(self, "paper_title", ""),
                 columns=getattr(self, "columns", 1),
             )
+            if getattr(self, "enable_decor", False):
+                from ubt.core.decor.dropcap import TYPST_DROPCAP_MACRO
+
+                ret = ret + "\n" + TYPST_DROPCAP_MACRO
+            return ret
 
         from ubt.layout.theme import direction_for
 
@@ -1524,7 +1529,7 @@ class TypstDocumentRenderer:
         else:
             indent_rule = ")"
         par_spacing = getattr(self, "par_spacing_em", 0.9)
-        return "\n".join(
+        base_preamble = "\n".join(
             [
                 TypstDocumentRenderer._PAGE_SETUP,
                 f"#set text(font: ({body}), size: 10.5pt{typst_lang_arguments(lang)})" + rtl,
@@ -1546,6 +1551,11 @@ class TypstDocumentRenderer:
                 "#show figure.caption: it => block(text(size: 9pt, fill: luma(60))[#it.body])",
             ]
         )
+        if getattr(self, "enable_decor", False):
+            from ubt.core.decor.dropcap import TYPST_DROPCAP_MACRO
+
+            return base_preamble + "\n" + TYPST_DROPCAP_MACRO
+        return base_preamble
 
     def __init__(
         self,
@@ -1571,6 +1581,8 @@ class TypstDocumentRenderer:
         colophon: object | None = None,
         enable_index: bool = False,
         index: object | None = None,
+        enable_decor: bool = False,
+        decor_spec: object | None = None,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
@@ -1589,6 +1601,8 @@ class TypstDocumentRenderer:
         self.colophon = colophon
         self.enable_index = bool(enable_index)
         self.index = index
+        self.enable_decor = bool(enable_decor)
+        self.decor_spec = decor_spec
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: ``auto`` is none for a paper (by convention) and one for a book that
         #: carries TOC rows; see :func:`resolve_toc_mode`.
@@ -1873,6 +1887,7 @@ class TypstDocumentRenderer:
         #: already ``continue``d on TOC rows and the grouping must agree with
         #: what actually gets rendered.
         list_runs = self._group_list_runs(blocks, toc_consumed)
+        chapter_needs_dropcap = False
 
         for i, block in enumerate(blocks):
             if should_render_toc and i in toc_by_insertion_point:
@@ -1936,6 +1951,21 @@ class TypstDocumentRenderer:
                         if (ReferenceKind.HEADING, sec_key) in topology.key_to_anchor:
                             aid = topology.key_to_anchor[(ReferenceKind.HEADING, sec_key)]
                             anchor_suffix = f" <{aid}>"
+
+                if getattr(self, "enable_decor", False) and level == 1:
+                    from ubt.core.decor.header import render_chapter_header_typst
+                    from ubt.core.decor.models import DecorSpec
+
+                    decor_cfg = (
+                        self.decor_spec if isinstance(self.decor_spec, DecorSpec) else DecorSpec()
+                    )
+                    header_markup = render_chapter_header_typst(text, decor_cfg.header)
+                    if anchor_suffix:
+                        header_markup = f"{header_markup}\n[#metadata(()) {anchor_suffix.strip()}]"
+                    body.append(self._maybe_pair(block, header_markup))
+                    chapter_needs_dropcap = True
+                    self.stats.blocks_rendered += 1
+                    continue
 
                 body.append(
                     self._maybe_pair(
@@ -2223,7 +2253,18 @@ class TypstDocumentRenderer:
                     flush_figure()
                     continue
                 flush_figure()
-            body.append(self._maybe_pair(block, self._prose(text, block_runs(block))))
+            rendered_prose = self._prose(text, block_runs(block))
+            if chapter_needs_dropcap and getattr(self, "enable_decor", False):
+                from ubt.core.decor.dropcap import apply_dropcap_typst
+                from ubt.core.decor.models import DecorSpec
+
+                decor_cfg = (
+                    self.decor_spec if isinstance(self.decor_spec, DecorSpec) else DecorSpec()
+                )
+                rendered_prose = apply_dropcap_typst(rendered_prose, decor_cfg.drop_cap)
+                chapter_needs_dropcap = False
+
+            body.append(self._maybe_pair(block, rendered_prose))
             self.stats.blocks_rendered += 1
 
         flush_figure()

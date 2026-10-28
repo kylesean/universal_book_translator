@@ -18,6 +18,7 @@ from ubt.cli.commands.colophon_cmd import colophon_app
 from ubt.cli.commands.config_cmd import config_command
 from ubt.cli.commands.console import console_command
 from ubt.cli.commands.coref_cmd import coref_app
+from ubt.cli.commands.decor_cmd import decor_app
 from ubt.cli.commands.doctor import doctor_command
 from ubt.cli.commands.glossary_cmd import glossary_app
 from ubt.cli.commands.index_cmd import index_app
@@ -662,6 +663,7 @@ app.add_typer(styler_app, name="styler")
 app.add_typer(colophon_app, name="colophon")
 app.add_typer(index_app, name="index")
 app.add_typer(math_app, name="math")
+app.add_typer(decor_app, name="decor")
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 

@@ -1759,3 +1759,68 @@ def test_renderer_with_index_enabled(tmp_path: Path) -> None:
     assert "#heading(level: 1, numbering: none)[索引 (Index)]" in source
     assert "#columns(3" in source
     assert "*Consensus Algorithm* (共识算法)" in source
+
+
+def test_renderer_with_decor_enabled(tmp_path: Path) -> None:
+    """Renderer with enable_decor=True emits decorative headers and drop caps."""
+    blocks = [
+        _block(
+            BlockType.HEADING,
+            block_id="h1",
+            source="Chapter 1: Distributed Storage",
+            target="第 1 章：分布式存储架构",
+        ),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="p1",
+            source="In modern computing systems, scalability is paramount.",
+            target="在现代计算系统中，可扩展性是核心设计指标。",
+        ),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="p2",
+            source="Another consideration is data persistence.",
+            target="另一个重要考量是数据持久性。",
+        ),
+        _block(
+            BlockType.HEADING,
+            block_id="h2",
+            source="Chapter 2: Replication Protocols",
+            target="第 2 章：副本复制协议",
+        ),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="p3",
+            source="“Replication guarantees fault tolerance.”",
+            target="“副本技术保障了系统的容错能力。”",
+        ),
+    ]
+    from ubt.core.decor.models import (
+        ChapterHeaderConfig,
+        DecorSpec,
+        DropCapConfig,
+        HeaderStyle,
+    )
+
+    spec = DecorSpec(
+        header=ChapterHeaderConfig(style=HeaderStyle.CLASSIC),
+        drop_cap=DropCapConfig(lines=2, color="#1e3a8a"),
+    )
+    renderer = TypstDocumentRenderer(enable_decor=True, decor_spec=spec)
+    source, _ = renderer.build_source(blocks, tmp_path / "build")
+
+    # Drop cap macro in preamble
+    assert "#let ubt-dropcap" in source
+    # Classic decorative header for Chapter 1
+    assert "第 1 章" in source
+    assert "分布式存储架构" in source
+    assert "❦" in source
+    # Drop cap on p1
+    assert '#ubt-dropcap("在", prefix: "", lines: 2, fill: rgb("#1e3a8a"))' in source
+    # p2 does NOT have drop cap
+    assert '#ubt-dropcap("另"' not in source
+    # Chapter 2 header
+    assert "第 2 章" in source
+    assert "副本复制协议" in source
+    # Drop cap on p3 with quote prefix
+    assert '#ubt-dropcap("副", prefix: "“", lines: 2, fill: rgb("#1e3a8a"))' in source
