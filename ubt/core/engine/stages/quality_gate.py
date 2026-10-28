@@ -6,7 +6,7 @@ from typing import Any
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import Scoring, Terminology
 from ubt.core.engine.services import RunServices
-from ubt.core.engine.stage_context import StageContext
+from ubt.core.engine.stage_context import StageContext, check_stage_cancelled
 from ubt.core.exceptions import MTQEEvaluationError
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.cjk_matcher import count_term_in_text
@@ -267,6 +267,7 @@ async def run_quality_gate_stage(
     on structural invariants alone. An empty sheet keeps the previous behaviour
     for callers that have no glossary.
     """
+    check_stage_cancelled(ctx)
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
     fast_pass = services.fast_pass
@@ -300,6 +301,7 @@ async def run_quality_gate_stage(
     drafted_blocks = await asyncio.to_thread(
         ledger.fetch_blocks_by_status, actual_job_id, BlockStatus.DRAFTED, chapter_id=chapter_id
     )
+    check_stage_cancelled(ctx)
     glossary_validator = (
         GlossaryConsistencyValidator(glossary=glossary_dicts) if glossary_dicts else None
     )
@@ -327,6 +329,7 @@ async def run_quality_gate_stage(
     # are now carried back for every sampled block.
     audited_demotions: list[dict[str, Any]] = []
     if passed_updates:
+        check_stage_cancelled(ctx)
         by_id = {b.id: b for b in drafted_blocks}
         pass_blocks = [by_id[u["block_id"]] for u in passed_updates if u["block_id"] in by_id]
         # The *shippable* bar, not the raw config value: releasing a sampled
@@ -335,6 +338,7 @@ async def run_quality_gate_stage(
         audited = await _audit_pass_sample(
             qe_runner, pass_blocks, shippable_threshold(ctx.config.qe_threshold)
         )
+        check_stage_cancelled(ctx)
         demoted, scored = audited
         if demoted:
             demoted_ids = {b.id for b in demoted}
@@ -375,6 +379,7 @@ async def run_quality_gate_stage(
         await asyncio.to_thread(ledger.save_checkpoints_batch, audited_demotions)
 
     if suspicious_blocks:
+        check_stage_cancelled(ctx)
         # ``may_be_calibrated`` (not ``is_calibrated``): a dynamic or deferred
         # runner reports uncalibrated until its *first* batch answers, so gating the
         # scoring call on ``is_calibrated`` meant the first call was never made
@@ -383,11 +388,13 @@ async def run_quality_gate_stage(
         runner = qe_runner
         attempt = getattr(runner, "may_be_calibrated", runner.is_calibrated)()
         if attempt:
+            check_stage_cancelled(ctx)
             pairs = [
                 {"src": b.source_text, "mt": b.target_text or "", "block_type": str(b.block_type)}
                 for b in suspicious_blocks
             ]
             raw_scores = await runner.score_pairs(pairs)
+            check_stage_cancelled(ctx)
             if len(raw_scores) != len(suspicious_blocks):
                 raise MTQEEvaluationError(
                     f"QE runner returned {len(raw_scores)} score(s) "
@@ -487,6 +494,7 @@ async def run_quality_gate_stage(
                 }
             )
 
+        check_stage_cancelled(ctx)
         if qe_updates:
             await asyncio.to_thread(ledger.save_checkpoints_batch, qe_updates)
 

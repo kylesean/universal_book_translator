@@ -119,6 +119,7 @@ async def backfill_abbreviation_translations(
     entries: list[dict[str, Any]],
     complete: Callable[[str, str], Awaitable[str]],
     target_lang: str = "zh",
+    cancel_check: Callable[[], None] | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """Fill empty translations of mined abbreviation pairs in bulk.
 
@@ -138,6 +139,8 @@ async def backfill_abbreviation_translations(
     filled_total = 0
     groups = list(by_key.values())
     for start in range(0, len(groups), _MAX_BATCH):
+        if cancel_check is not None:
+            cancel_check()
         batch_groups = groups[start : start + _MAX_BATCH]
         representatives = [group[0] for group in batch_groups]
         system_prompt, user_prompt = build_backfill_prompt(representatives, target_lang)

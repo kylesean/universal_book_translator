@@ -39,7 +39,12 @@ from typing import Any
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import Scoring, Terminology
 from ubt.core.engine.services import RunServices
-from ubt.core.engine.stage_context import StageContext
+from ubt.core.engine.stage_context import StageContext, check_stage_cancelled
+from ubt.core.exceptions import (
+    BudgetExceededError,
+    JobInterruptedError,
+    LedgerWriterLeaseLostError,
+)
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
 from ubt.core.policy.layout_policy import is_fatal_leak, is_non_prose_degradable
@@ -145,6 +150,7 @@ async def run_triage_stage(
     scoring: Scoring,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Classify unresolved blocks by MQM severity and route them accordingly."""
+    check_stage_cancelled(ctx)
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
     repair_loop = scoring.repair_loop or services.repair_loop
@@ -178,6 +184,7 @@ async def run_triage_stage(
     ]
     if not candidates:
         return
+    check_stage_cancelled(ctx)
 
     counters = {
         "critical_resolved": 0,
@@ -269,6 +276,7 @@ async def run_triage_stage(
         escalate_tick = _ProgressThrottle()
         try:
             while pending:
+                check_stage_cancelled(ctx)
                 done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
                 for task in done:
                     cand = tasks[task]
@@ -302,6 +310,16 @@ async def run_triage_stage(
                                 cand.id,
                             )
                     else:
+                        if isinstance(
+                            exc,
+                            (
+                                BudgetExceededError,
+                                JobInterruptedError,
+                                asyncio.CancelledError,
+                                LedgerWriterLeaseLostError,
+                            ),
+                        ):
+                            raise exc
                         # The block still lands in BLOCKED_HUMAN below, but without a
                         # marker nobody can tell "escalation never ran" apart from
                         # "escalation ran and failed" in the PE queue.
@@ -320,6 +338,7 @@ async def run_triage_stage(
     # ------------------------------------------------------------------
     # Persist triage decisions (single transactional batch).
     # ------------------------------------------------------------------
+    check_stage_cancelled(ctx)
     updates: list[dict[str, Any]] = []
     for cand, severity, span_dicts in triaged:
         mqm_update: dict[str, Any] = {

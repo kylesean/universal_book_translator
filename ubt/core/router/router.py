@@ -19,7 +19,12 @@ from typing import TYPE_CHECKING, Literal, overload
 if TYPE_CHECKING:
     pass
 
-from ubt.core.exceptions import BudgetExceededError, JobInterruptedError, ModelProviderError
+from ubt.core.exceptions import (
+    BudgetExceededError,
+    JobInterruptedError,
+    LedgerWriterLeaseLostError,
+    ModelProviderError,
+)
 from ubt.core.ir.models import IRBlock
 from ubt.core.router.capabilities import (
     ModelProfile,
@@ -87,19 +92,29 @@ _TRANSPORT_OWNS_REASONING_BUDGET = frozenset({"anthropic-messages"})
 #: cancel for A could not interrupt A's own sleep). Context vars are
 #: inherited per asyncio task, so each run's context carries its own token.
 _cancel_token_ctx: ContextVar[asyncio.Event | None] = ContextVar("ubt_cancel_token", default=None)
+_lease_lost_ctx: ContextVar[asyncio.Event | None] = ContextVar("ubt_lease_lost", default=None)
 
 
-def set_run_cancel_token(token: asyncio.Event | None) -> None:
-    """Bind the current run's cooperative-cancel token for provider backoff."""
+def set_run_cancel_token(
+    token: asyncio.Event | None,
+    lease_lost: asyncio.Event | None = None,
+) -> None:
+    """Bind the current run's cooperative-cancel and lease-lost tokens for provider backoff."""
     _cancel_token_ctx.set(token)
+    _lease_lost_ctx.set(lease_lost)
 
 
 def _raise_if_cancelled(fallback: asyncio.Event | None = None) -> None:
-    """Raise :class:`JobInterruptedError` when this run's cancel token is set.
+    """Raise when this run's lease is lost or cancel token is set.
 
-    The ContextVar is the per-task token; ``fallback`` is the router's
+    Raises :class:`LedgerWriterLeaseLostError` if the writer lease was lost,
+    or :class:`JobInterruptedError` when this run's cancel token is set.
+    The ContextVars are the per-task tokens; ``fallback`` is the router's
     constructor-time field, for library callers that never bind one.
     """
+    lease_lost = _lease_lost_ctx.get()
+    if lease_lost is not None and lease_lost.is_set():
+        raise LedgerWriterLeaseLostError("Writer lease was reclaimed by another process")
     token = _cancel_token_ctx.get() or fallback
     if token is not None and token.is_set():
         raise JobInterruptedError("Job cancelled before the next provider call")
@@ -706,32 +721,54 @@ class ModelRouter:
         raise ModelProviderError(f"All models in the fallback chain failed: {effective_chain}")
 
     async def _interruptible_sleep(self, seconds: float) -> None:
-        """Sleep ``seconds``, aborting early on the cooperative-cancel token.
+        """Sleep ``seconds``, aborting early on writer lease loss or cooperative-cancel token.
 
         A rate-limit backoff can be many minutes (a clamped ``Retry-After``);
         sleeping it in one ``asyncio.sleep`` gives the retry loop no cancel point
-        until it wakes, so a job cancelled mid-backoff kept a worker pinned. When
-        a cancellable token is present the wait is raced against it and a set
-        token raises :class:`JobInterruptedError` — the same cooperative stop the
-        stages raise.
+        until it wakes, so a job cancelled or whose lease was reclaimed mid-backoff
+        kept a worker pinned. When a cancellable token or lease-lost event is present,
+        the wait is raced against them.
         """
         token = _cancel_token_ctx.get() or self.cancel_token
-        if token is None:
+        lease_lost = _lease_lost_ctx.get()
+
+        if lease_lost is not None and lease_lost.is_set():
+            raise LedgerWriterLeaseLostError(
+                "Writer lease was reclaimed during provider retry backoff"
+            )
+        if token is not None and token.is_set():
+            raise JobInterruptedError("Job cancelled during provider retry backoff")
+
+        if token is None and lease_lost is None:
             await asyncio.sleep(seconds)
             return
+
         sleep_task = asyncio.ensure_future(asyncio.sleep(seconds))
-        token_waiter = asyncio.ensure_future(token.wait())
+        waiters: list[asyncio.Future[object]] = [sleep_task]
+        token_waiter: asyncio.Future[object] | None = None
+        lease_waiter: asyncio.Future[object] | None = None
+
+        if token is not None:
+            token_waiter = asyncio.ensure_future(token.wait())
+            waiters.append(token_waiter)
+        if lease_lost is not None:
+            lease_waiter = asyncio.ensure_future(lease_lost.wait())
+            waiters.append(lease_waiter)
+
         try:
-            done, _pending = await asyncio.wait(
-                {sleep_task, token_waiter}, return_when=asyncio.FIRST_COMPLETED
-            )
+            done, _pending = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
         finally:
-            for task in (sleep_task, token_waiter):
+            for task in waiters:
                 if not task.done():
                     task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
-        if token_waiter in done and token.is_set():
+
+        if lease_lost is not None and lease_lost.is_set():
+            raise LedgerWriterLeaseLostError(
+                "Writer lease was reclaimed during provider retry backoff"
+            )
+        if token is not None and token.is_set():
             raise JobInterruptedError("Job cancelled during provider retry backoff")
 
     async def _execute_single_model(
@@ -773,6 +810,7 @@ class ModelRouter:
         reasoning_budget_retried = False
 
         while True:
+            _raise_if_cancelled(self.cancel_token)
             if attempt_budget is not None:
                 if attempt_budget[0] <= 0:
                     raise ModelProviderError(
@@ -963,7 +1001,7 @@ class ModelRouter:
                 raise ModelProviderError(
                     f"Provider response could not be parsed: {type(exc).__name__}: {exc}"
                 ) from exc
-            except (BudgetExceededError, JobInterruptedError):
+            except (BudgetExceededError, JobInterruptedError, LedgerWriterLeaseLostError):
                 # A hard stop (spend cap / cooperative cancel) is not a transient
                 # provider error: retrying it burns the budget the cap exists to
                 # protect, and rewrapping it as "Unexpected provider error" hides
@@ -1080,7 +1118,7 @@ class ModelRouter:
                         self.rate_limiter.report_success()
                 except Exception:
                     logger.warning("continuation limiter bookkeeping failed", exc_info=True)
-            except (BudgetExceededError, JobInterruptedError):
+            except (BudgetExceededError, JobInterruptedError, LedgerWriterLeaseLostError):
                 # Keeping the partial output is right for a transient provider
                 # failure, but wrong for a hard stop: swallowing a spend cap or a
                 # cooperative cancel here would let a still-billing generation
@@ -1396,7 +1434,12 @@ class ModelRouter:
                     raw_res,
                     strategy=actual_profile.extraction_strategy,
                 )
-            except (asyncio.CancelledError, JobInterruptedError, BudgetExceededError):
+            except (
+                asyncio.CancelledError,
+                JobInterruptedError,
+                BudgetExceededError,
+                LedgerWriterLeaseLostError,
+            ):
                 raise
             except Exception as exc:
                 logger.warning(

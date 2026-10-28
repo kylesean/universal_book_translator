@@ -11,8 +11,12 @@ from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import Scoring, Terminology
 from ubt.core.engine.ledger_flusher import CheckpointBatchFlusher
 from ubt.core.engine.services import RunServices
-from ubt.core.engine.stage_context import StageContext
-from ubt.core.exceptions import BudgetExceededError, JobInterruptedError
+from ubt.core.engine.stage_context import StageContext, check_stage_cancelled
+from ubt.core.exceptions import (
+    BudgetExceededError,
+    JobInterruptedError,
+    LedgerWriterLeaseLostError,
+)
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
 from ubt.core.qe.defect_taxonomy import REPAIR_ERROR_PREFIX
@@ -66,6 +70,7 @@ async def run_repair_stage(
     chapter_id: str | None = None,
 ) -> AsyncGenerator[TranslationProgressEvent, None]:
     """Execute iterative surgical repairs on candidate blocks with Option B draft retention."""
+    check_stage_cancelled(ctx)
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
     # Short chain caps at 1 round: the deterministic glossary enforcer at export
@@ -106,7 +111,7 @@ async def run_repair_stage(
             )
 
     for round_idx in range(max_repair_rounds):
-        ctx.check_cancelled()
+        check_stage_cancelled(ctx)
         repair_eligible = await asyncio.to_thread(
             ledger.fetch_repair_eligible_blocks,
             actual_job_id,
@@ -183,14 +188,20 @@ async def run_repair_stage(
         try:
             for chunk_start in range(0, len(repair_candidates), batch_size):
                 chunk = repair_candidates[chunk_start : chunk_start + batch_size]
-                ctx.check_cancelled()
+                check_stage_cancelled(ctx)
                 results = await asyncio.gather(
                     *[_repair_and_record(cand) for cand in chunk],
                     return_exceptions=True,
                 )
                 for outcome in results:
                     if isinstance(
-                        outcome, (BudgetExceededError, JobInterruptedError, asyncio.CancelledError)
+                        outcome,
+                        (
+                            BudgetExceededError,
+                            JobInterruptedError,
+                            asyncio.CancelledError,
+                            LedgerWriterLeaseLostError,
+                        ),
                     ):
                         raise outcome
                     if isinstance(outcome, BaseException):

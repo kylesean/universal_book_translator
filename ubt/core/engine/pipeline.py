@@ -1127,20 +1127,17 @@ class PipelineOrchestrator:
         runtime_fast_pass = prep.fast_pass
         actual_job_id = prep.actual_job_id
         run_session = prep.run_session
-        # Make a provider Retry-After backoff cancellable: the router sleeps the
-        # clamped header, and a job cancelled mid-wait must stop there rather than
-        # pin the worker to the rest of the pause. The token rides a ContextVar
-        # (per asyncio task), NOT a router field: a shared router (JobWorker
-        # with concurrency>1) serves several jobs at once, and a field write
-        # let job B's run() overwrite job A's token — cancelling B then aborted
-        # A's backoff, and cancelling A could not interrupt A's own sleep.
-        set_run_cancel_token(cancel_token)
         # The renewal task signals a lost lease through its own event; reset the
         # per-run flags so a reused orchestrator cannot inherit a previous run's
         # verdict. A fresh Event per run is required: the old one may already be
         # set from a previous run whose lease was reclaimed.
         self._lease_lost_event = asyncio.Event()
         self._lease_lost_reason = None
+        # Make a provider Retry-After backoff cancellable: the router sleeps the
+        # clamped header, and a job cancelled mid-wait or whose lease was reclaimed
+        # must stop there rather than pin the worker to the rest of the pause.
+        # The tokens ride ContextVars (per asyncio task), NOT router fields.
+        set_run_cancel_token(cancel_token, lease_lost=self._lease_lost_event)
         ledger: SQLiteJobLedger | None = None
         tm: TranslationMemory | None = None
         writer_lock: LedgerWriterLock | None = None
@@ -1453,7 +1450,7 @@ class PipelineOrchestrator:
             # ``JobWorker`` runs job after job on the same task: leaving a set
             # token bound made the next job's first backoff raise
             # JobInterruptedError for a cancel that belonged to its predecessor.
-            set_run_cancel_token(None)
+            set_run_cancel_token(None, None)
             # Release the WAL + connection per run, and close the
             # provider's HTTP pool (it is recreated lazily on the next call, so
             # reusing this orchestrator for another job stays correct).

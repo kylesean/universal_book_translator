@@ -23,6 +23,7 @@ from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import (
     BudgetExceededError,
     JobInterruptedError,
+    LedgerWriterLeaseLostError,
     ProviderUnreachableError,
     UBTError,
 )
@@ -870,7 +871,12 @@ class _DraftProcessor:
                         draft_raw,
                         context=context,
                     )
-            except (asyncio.CancelledError, JobInterruptedError, BudgetExceededError):
+            except (
+                asyncio.CancelledError,
+                JobInterruptedError,
+                BudgetExceededError,
+                LedgerWriterLeaseLostError,
+            ):
                 raise
             except (AssertionError, TypeError, AttributeError, NameError, UnboundLocalError) as exc:
                 logger.critical(
@@ -971,7 +977,12 @@ class _DraftProcessor:
                             delay = min(8.0, self.policy.draft_retry_base_delay * (2**attempt))
                             delay += random.uniform(0, delay * 0.25)
                             await asyncio.sleep(delay)
-                except (asyncio.CancelledError, JobInterruptedError, BudgetExceededError):
+                except (
+                    asyncio.CancelledError,
+                    JobInterruptedError,
+                    BudgetExceededError,
+                    LedgerWriterLeaseLostError,
+                ):
                     raise
                 except (
                     AssertionError,
@@ -1011,7 +1022,12 @@ class _DraftProcessor:
                 # path then cleared their target text and re-billed them.
                 try:
                     clean_by_id[b.id] = await self.finalize_draft(b, text.strip(), inp)
-                except (asyncio.CancelledError, JobInterruptedError, BudgetExceededError):
+                except (
+                    asyncio.CancelledError,
+                    JobInterruptedError,
+                    BudgetExceededError,
+                    LedgerWriterLeaseLostError,
+                ):
                     raise
                 except (
                     AssertionError,
@@ -1116,7 +1132,15 @@ class _DraftProcessor:
         critical_exc: BaseException | None = None
         stranded: list[dict[str, Any]] = []
         for res, group in zip(results, groups, strict=True):
-            if isinstance(res, (BudgetExceededError, JobInterruptedError, asyncio.CancelledError)):
+            if isinstance(
+                res,
+                (
+                    BudgetExceededError,
+                    JobInterruptedError,
+                    asyncio.CancelledError,
+                    LedgerWriterLeaseLostError,
+                ),
+            ):
                 if critical_exc is None:
                     critical_exc = res
                 continue

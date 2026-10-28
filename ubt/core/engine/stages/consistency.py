@@ -17,8 +17,12 @@ from typing import Any
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import Scoring, Terminology
 from ubt.core.engine.services import RunServices
-from ubt.core.engine.stage_context import StageContext
-from ubt.core.exceptions import BudgetExceededError, JobInterruptedError
+from ubt.core.engine.stage_context import StageContext, check_stage_cancelled
+from ubt.core.exceptions import (
+    BudgetExceededError,
+    JobInterruptedError,
+    LedgerWriterLeaseLostError,
+)
 from ubt.core.ir.models import BlockStatus
 from ubt.core.memory.glossary_table import build_chunk_glossary_table
 from ubt.core.qe.consistency_enforce import ConsistencyTask, plan_consistency_tasks
@@ -38,7 +42,15 @@ def _split_repair_results(results: list[Any]) -> list[dict[str, Any]]:
     """
     updates: list[dict[str, Any]] = []
     for outcome in results:
-        if isinstance(outcome, (BudgetExceededError, JobInterruptedError, asyncio.CancelledError)):
+        if isinstance(
+            outcome,
+            (
+                BudgetExceededError,
+                JobInterruptedError,
+                asyncio.CancelledError,
+                LedgerWriterLeaseLostError,
+            ),
+        ):
             raise outcome
         if isinstance(outcome, BaseException):
             logger.warning("Consistency repair task failed: %s", outcome)
@@ -54,6 +66,7 @@ async def run_consistency_stage(
     scoring: Scoring,
 ) -> AsyncIterator[TranslationProgressEvent]:
     """Detect terminology drift and (mode='repair') re-translate drifted blocks."""
+    check_stage_cancelled(ctx)
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
     repair_loop = scoring.repair_loop or services.repair_loop
@@ -90,6 +103,7 @@ async def run_consistency_stage(
         return
 
     metrics = await asyncio.to_thread(evaluate_terms, deliverable, glossary_dicts)
+    check_stage_cancelled(ctx)
     tasks = plan_consistency_tasks(metrics, max_repairs)
     if not tasks:
         return
@@ -111,6 +125,7 @@ async def run_consistency_stage(
     async def _repair_block(
         block_id: str, block_tasks: list[ConsistencyTask]
     ) -> dict[str, Any] | None:
+        check_stage_cancelled(ctx)
         block = by_id.get(block_id)
         if block is None:
             return None

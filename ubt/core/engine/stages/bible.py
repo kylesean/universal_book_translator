@@ -9,7 +9,7 @@ from typing import Any
 
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import Terminology
-from ubt.core.engine.stage_context import StageContext
+from ubt.core.engine.stage_context import StageContext, check_stage_cancelled
 from ubt.core.ir.models import IRBlock
 from ubt.core.memory.abbreviation_backfill import backfill_abbreviation_translations
 from ubt.core.memory.abbreviation_miner import mine_abbreviations_stream
@@ -139,6 +139,7 @@ async def run_bible_stage(
     invalidates the cache). Deterministic seeds and chapter-title translations
     are re-applied on top either way, so user-facing inputs stay live.
     """
+    check_stage_cancelled(ctx)
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
     manifest = ctx.manifest
@@ -257,6 +258,7 @@ async def run_bible_stage(
             yield event
         return
 
+    check_stage_cancelled(ctx)
     mined_abbreviations: list[dict[str, Any]] = []
     mined_characters: list[dict[str, Any]] = []
     block_texts: list[str] = []
@@ -269,6 +271,7 @@ async def run_bible_stage(
     elif hasattr(ledger, "fetch_source_texts"):
         block_texts = await asyncio.to_thread(ledger.fetch_source_texts, actual_job_id)
 
+    check_stage_cancelled(ctx)
     # Tier-2: Language-agnostic LLM Document-Skeleton Terminology Extraction.
     #
     # This runs on the fast lane too. Gating it left the short route with **no
@@ -281,6 +284,7 @@ async def run_bible_stage(
     # and the lane's actual saving comes from the batch API, which is unaffected.
     skeleton_input = blocks if blocks else block_texts
     if complete_raw_fn is not None and skeleton_input:
+        check_stage_cancelled(ctx)
         from ubt.core.memory.skeleton_extractor import extract_skeleton_terms_llm
 
         skeleton_entries = await extract_skeleton_terms_llm(
@@ -289,6 +293,7 @@ async def run_bible_stage(
             source_lang=source_lang,
             target_lang=target_lang,
         )
+        check_stage_cancelled(ctx)
         if skeleton_entries:
             logger.info(
                 "Extracted %d domain terminology entries from document skeleton for %s",
@@ -335,16 +340,19 @@ async def run_bible_stage(
     # there") stopped being true once the 0-token miners were un-gated above.
     backfilled_count = 0
     if any(not e.translation for e in merged_entries):
+        check_stage_cancelled(ctx)
         try:
             merged_dicts, backfilled_count = await backfill_abbreviation_translations(
                 [e.model_dump() for e in merged_entries],
                 complete_raw_fn,
                 target_lang,
+                cancel_check=getattr(ctx, "check_cancelled", None),
             )
             merged_entries = [BibleEntry.model_validate(d) for d in merged_dicts]
         except Exception as exc:
             logger.warning("Abbreviation translation backfill failed: %s", exc)
             backfilled_count = 0
+        check_stage_cancelled(ctx)
         # Fold again, now that the mined entries carry renderings.
         #
         # The merge above runs before backfill, when a mined entry still has
@@ -375,6 +383,7 @@ async def run_bible_stage(
     )
     glossary_dicts, abbreviation_entries = _split_bible_entries(bible.glossary)
 
+    check_stage_cancelled(ctx)
     await asyncio.to_thread(
         ledger.set_job_metadata_value,
         actual_job_id,

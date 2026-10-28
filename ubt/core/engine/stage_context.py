@@ -189,3 +189,13 @@ class StageContext:
     def source_pdf_path(self) -> Path | None:
         """The source PDF for the stages that need pixel-level evidence."""
         return self.input_path if self.input_path.suffix.lower() == ".pdf" else None
+
+
+def check_stage_cancelled(ctx: object) -> None:
+    """Stop the run if the context exposes check_cancelled and is cancelled.
+
+    Gracefully no-ops if the object does not expose ``check_cancelled`` (e.g. lightweight test doubles).
+    """
+    fn = getattr(ctx, "check_cancelled", None)
+    if callable(fn):
+        fn()
