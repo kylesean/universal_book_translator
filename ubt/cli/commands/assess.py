@@ -234,6 +234,8 @@ def assess_cmd(
     ]
     if report.route.recommended_dual_mode != "dual":
         command_parts += ["--dual-mode", report.route.recommended_dual_mode]
+    rec_mode = "paper" if report.document.category == "academic_paper" else "book"
+    command_parts += ["--mode", rec_mode]
     # The profile decides prompt assembly, glossary seeding and whether
     # chapter rolling summaries happen at all, so a quote taken under the
     # recommended one is only reproducible if the command carries it.
@@ -286,6 +288,7 @@ def assess_cmd(
             f"{rec.recommended_preset}（本次报价基于默认配置 standard；如需按推荐预设报价请加 --preset {rec.recommended_preset}）",
         )
     )
+    route_table.add_row(ui_msg("Document mode", "文档模式"), rec_mode)
     route_table.add_row(ui_msg("Preset", "预设"), preset_note)
     route_table.add_row(ui_msg("Layout", "版式"), rec.recommended_dual_mode)
     route_table.add_row(ui_msg("Domain profile", "领域档案"), rec.recommended_profile)

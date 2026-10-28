@@ -352,12 +352,14 @@ async def run_ingest_stage(
     # Coerce to JSON-safe scalars: the identity is persisted, and a test (or a
     # duck-typed caller) may hand in a non-serializable stand-in.
     profile_name = str(ctx.profile_name)
-    # Bridge the genre profile onto the manifest so the renderer can route to
-    # the academic two-column template. The profile is a run decision that
-    # already flows through the pipeline and the ledger, but nothing carried it
-    # onto the manifest — so ``is_academic_document`` (which reads the manifest)
-    # always answered False and the two-column branch was unreachable. An
-    # explicit value on the manifest (e.g. from a caller or a resume) wins.
+    # Bridge document_mode and genre profile onto the manifest so the renderer can route
+    # accurately between academic paper layout and book layout.
+    doc_mode = getattr(ctx.config, "document_mode", "auto")
+    if doc_mode == "auto":
+        from ubt.core.job_options import resolve_document_mode
+
+        doc_mode = resolve_document_mode(doc_mode, ctx.input_path)
+    manifest.metadata["document_mode"] = doc_mode
     if not manifest.metadata.get("genre_profile"):
         manifest.metadata["genre_profile"] = profile_name
     # The run identity must match what ``derive_job_id`` used, including the

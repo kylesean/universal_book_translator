@@ -314,21 +314,31 @@ async def run_bible_stage(
         for m in mined_abbreviations
     )
 
-    # 0-token person-name mining (same: free, so not gated on the fast lane).
-    is_fiction = profile_name.lower() in ("fiction", "novel", "literature", "classic")
-    mined_characters = mine_characters_stream(
-        block_texts, source_lang=source_lang, allow_bare_tokens=is_fiction
-    )
-    bible_entries.extend(
-        BibleEntry(
-            source=m["source"],
-            translation="",
-            aliases=list(m["aliases"]),
-            kind="person",
-            frequency=int(m.get("frequency", 0)),
+    # 0-token person-name mining: in Paper mode, person names are academic citations
+    # or authors rather than fiction characters. Skip character mining in Paper mode.
+    doc_mode = getattr(ctx.config, "document_mode", "auto")
+    if doc_mode == "auto":
+        doc_mode = manifest.metadata.get("document_mode") or "auto"
+    if doc_mode == "auto":
+        from ubt.core.job_options import resolve_document_mode
+
+        doc_mode = resolve_document_mode(doc_mode, ctx.input_path)
+
+    if doc_mode != "paper":
+        is_fiction = profile_name.lower() in ("fiction", "novel", "literature", "classic")
+        mined_characters = mine_characters_stream(
+            block_texts, source_lang=source_lang, allow_bare_tokens=is_fiction
         )
-        for m in mined_characters
-    )
+        bible_entries.extend(
+            BibleEntry(
+                source=m["source"],
+                translation="",
+                aliases=list(m["aliases"]),
+                kind="person",
+                frequency=int(m.get("frequency", 0)),
+            )
+            for m in mined_characters
+        )
 
     merged_entries = merge_bible_entries(bible_entries)
 

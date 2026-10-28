@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Literal, get_args
 
 from ubt.core.config import (
+    DocumentMode,
     DualMode,
     UBTConfig,
     env_var_names,
@@ -39,6 +40,7 @@ from ubt.core.presets import PRESET_ENGINE_FIELDS, Preset, resolve_engine_params
 _ENUM_REQUEST_FIELDS: dict[str, tuple[str, ...]] = {
     "dual_mode": get_args(DualMode),
     "preset": tuple(p.value for p in Preset),
+    "document_mode": get_args(DocumentMode),
 }
 
 
@@ -182,8 +184,48 @@ def resolve_profile_name(profile: str | None, input_path: str | Path | None = No
         return "general"
 
 
+def resolve_document_mode(
+    document_mode: str | None,
+    input_path: Path | str | None,
+) -> DocumentMode:
+    """Resolve 'auto' document mode to 'paper' or 'book' based on document archetype.
+
+    When set explicitly to 'paper' or 'book', that choice is respected.
+    When 'auto' (or omitted):
+    - Academic paper category -> 'paper'
+    - Literature / technical book / general -> 'book'
+    """
+    mode = (document_mode or "").strip().lower()
+    if mode in ("paper", "book"):
+        return mode  # type: ignore[return-value]
+    if input_path is None:
+        return "book"
+    path = Path(input_path)
+    if not path.exists():
+        return "book"
+    if path.suffix.lower() == ".pdf":
+        from ubt.core.ports import reject_encrypted_pdf
+
+        try:
+            reject_encrypted_pdf(path)
+        except DocumentParseError:
+            return "book"
+    try:
+        from ubt.core.archetype import DocCategory, analyze_archetype
+
+        arch = analyze_archetype(path)
+        if arch.category == DocCategory.ACADEMIC_PAPER:
+            return "paper"
+        return "book"
+    except Exception:
+        return "book"
+
+
 # Request keys whose name differs from the UBTConfig field they set.
-_REQUEST_KEY_ALIASES: dict[str, str] = {"glossary": "glossary_path"}
+_REQUEST_KEY_ALIASES: dict[str, str] = {
+    "glossary": "glossary_path",
+    "mode": "document_mode",
+}
 
 # Run-only keys (consumed by PipelineOrchestrator.run, not UBTConfig).
 RUN_ONLY_KEYS: tuple[str, ...] = (

@@ -385,6 +385,15 @@ def translate(
     target_lang: Annotated[
         str, typer.Option("--target-lang", "-l", help="Target translation language")
     ] = "zh",
+    mode: Annotated[
+        str,
+        typer.Option(
+            "--mode",
+            "--document-mode",
+            "-m",
+            help="Document scenario mode: 'paper' (academic paper layout, strict domain terminology, vector math, suppressed TOC & character mining), 'book' (long-form book, literary/fluent flow, Sliding Epoch continuous memory, TOC & character tracking, EPUB/book layout), or 'auto' (inferred from document archetype).",
+        ),
+    ] = "auto",
     profile: Annotated[
         str,
         typer.Option(
@@ -686,8 +695,10 @@ def translate(
     # ``--profile auto`` probes the document (paper/fiction/semiconductor/…);
     # the shared resolver is the same one every other surface goes through, so
     # the CLI no longer owns the only copy of this rule.
+    from ubt.core.job_options import resolve_document_mode as _resolve_document_mode
     from ubt.core.job_options import resolve_profile_name as _resolve_profile
 
+    mode = _resolve_document_mode(mode, input_path)
     profile = _resolve_profile(profile, input_path)
 
     # The shared job-request surface (ubt.core.job_options): keys are
@@ -698,6 +709,7 @@ def translate(
     request: dict[str, Any] = {
         "target_lang": target_lang,
         "source_lang": source_lang,
+        "document_mode": mode,
         "profile": profile,
         "job_id": job_id,
         "layout_columns": columns,
@@ -805,7 +817,7 @@ def translate(
         console.print(
             Panel.fit(
                 f"[bold cyan]UBT Universal Book Translator{' [yellow](DRY RUN)[/]' if dry_run else ''}[/]\n"
-                f"[dim]Input:[/] {input_path.name}  |  [dim]Source:[/] {source_lang}  |  [dim]Target:[/] {target_lang}  |  [dim]Profile:[/] {profile}",
+                f"[dim]Input:[/] {input_path.name}  |  [dim]Source:[/] {source_lang}  |  [dim]Target:[/] {target_lang}  |  [dim]Mode:[/] {mode}  |  [dim]Profile:[/] {profile}",
                 border_style="yellow" if dry_run else "cyan",
             )
         )

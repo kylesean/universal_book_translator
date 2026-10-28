@@ -122,6 +122,7 @@ PromptStrategyName = Literal["auto", "minimal", "hybrid", "rich"]
 ExtractionStrategyName = Literal["auto", "xml_tag", "raw", "cp"]
 OcrMode = Literal["auto", "local", "vlm", "off"]
 ExecMode = Literal["auto", "short", "long"]
+DocumentMode = Literal["auto", "paper", "book"]
 FormulaEnrichment = Literal["auto", "on", "off"]
 TocMode = Literal["auto", "on", "off"]
 #: Table handling for PDF. ``auto`` translates every table (complex ones also
@@ -1047,6 +1048,15 @@ class UBTConfig(BaseSettings):
     # and a different output-recovery rule.
     prompt_strategy: PromptStrategyName = "auto"
 
+    # -- Document scenario mode (Paper vs Book core experience decoupling) -----
+    # 'auto' (default): probes the document archetype and infers 'paper' (academic paper)
+    #   or 'book' (long-form book / literature / general).
+    # 'paper': Academic paper scenario — prioritizes scientific rigor, academic Typst layout,
+    #   vector math preservation, and suppresses fiction character mining and standalone TOC.
+    # 'book': Book scenario — prioritizes literary flow, Sliding Epoch continuous memory,
+    #   fictional character tracking, TOC preservation, and reflowable EPUB / book styling.
+    document_mode: DocumentMode = "auto"
+
     # -- Execution-mode router (unified entry, adaptive execution) --------------
     # 'auto' (default): decide() probes the PDF (pages/chars/scan) and routes
     #   <= short_max_pages born-digital pages to the short chain (whole-chapter
@@ -1138,6 +1148,7 @@ class UBTConfig(BaseSettings):
         "dual_mode",
         "prompt_strategy",
         "exec_mode",
+        "document_mode",
         "formula_enrichment",
         "toc_mode",
         "spill_policy",

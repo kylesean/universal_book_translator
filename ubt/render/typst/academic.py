@@ -49,6 +49,14 @@ def is_academic_document(manifest_or_meta: Any) -> bool:
             if not doc_type:
                 doc_type = meta.get("doc_type") or meta.get("layout_template")
 
+    doc_mode = meta.get("document_mode") or getattr(manifest_or_meta, "document_mode", None)
+    if doc_mode:
+        normalized_mode = str(doc_mode).strip().lower()
+        if normalized_mode == "paper":
+            return True
+        if normalized_mode == "book":
+            return False
+
     if doc_type and str(doc_type).lower() in (
         "paper",
         "academic",
