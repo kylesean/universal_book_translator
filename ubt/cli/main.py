@@ -36,6 +36,7 @@ from ubt.cli.commands.status import (
     rewrite_flag_text,
     upgrade_flags,
 )
+from ubt.cli.commands.styler_cmd import styler_app
 from ubt.cli.commands.table_cmd import table_app
 from ubt.cli.commands.translate import console as console
 from ubt.cli.commands.translate import translate
@@ -654,6 +655,7 @@ app.add_typer(patch_app, name="patch")
 app.add_typer(table_app, name="table")
 app.add_typer(ref_app, name="ref")
 app.add_typer(kinsoku_app, name="kinsoku")
+app.add_typer(styler_app, name="styler")
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 

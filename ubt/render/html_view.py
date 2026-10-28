@@ -40,166 +40,14 @@ from ubt.render.delivered_text import (
 )
 from ubt.render.inline_spans import SpanStyle, block_runs, styled_chunks
 from ubt.render.outputs import Composition, Placement
+from ubt.render.styler import (
+    generate_html_interactivity_script,
+    generate_modern_html_css,
+)
 
 _TAIL = "</main>\n</body>\n</html>\n"
 
-_MODERN_CSS = """
-:root {
-  --bg: #ffffff;
-  --text: #1f2937;
-  --muted: #64748b;
-  --border: #e2e8f0;
-  --accent: #2563eb;
-  --card-bg: #f8fafc;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f172a;
-    --text: #f1f5f9;
-    --muted: #94a3b8;
-    --border: #334155;
-    --accent: #3b82f6;
-    --card-bg: #1e293b;
-  }
-}
-/* Explicit theme wins over the OS preference so the toolbar toggle works. */
-:root[data-theme="dark"] {
-  --bg: #0f172a;
-  --text: #f1f5f9;
-  --muted: #94a3b8;
-  --border: #334155;
-  --accent: #3b82f6;
-  --card-bg: #1e293b;
-}
-:root[data-theme="light"] {
-  --bg: #ffffff;
-  --text: #1f2937;
-  --muted: #64748b;
-  --border: #e2e8f0;
-  --accent: #2563eb;
-  --card-bg: #f8fafc;
-}
-.katex-display { overflow-x: auto; overflow-y: hidden; padding: 0.25em 0; }
-.katex { font-size: 1.05em; }
-body {
-  margin: 0;
-  padding: 2.5rem 1.5rem;
-  background-color: var(--bg);
-  color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Source Han Serif SC", "Noto Serif CJK SC", serif;
-  font-size: 1.05rem;
-  line-height: 1.8;
-}
-.ubt-article-container {
-  max-width: 860px;
-  margin: 0 auto;
-  transition: max-width 0.2s ease;
-}
-h1, h2, h3, h4, h5, h6 {
-  color: var(--text);
-  font-weight: 700;
-  line-height: 1.35;
-  margin-top: 2em;
-  margin-bottom: 0.6em;
-}
-h1 { font-size: 2.1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.6rem; }
-h2 { font-size: 1.55rem; }
-h3 { font-size: 1.25rem; }
-p { margin-top: 0; margin-bottom: 1.25em; text-align: justify; }
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1.8em 0;
-  font-size: 0.95rem;
-  background-color: var(--card-bg);
-  border-radius: 6px;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-}
-th, td {
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-}
-th {
-  font-weight: 600;
-  border-bottom: 2px solid var(--border);
-}
-pre {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1.2rem;
-  overflow-x: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.9rem;
-  line-height: 1.5;
-}
-figure {
-  margin: 2.5em 0;
-  text-align: center;
-}
-figure img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 6px;
-  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
-}
-figcaption {
-  font-size: 0.9rem;
-  color: var(--muted);
-  margin-top: 0.6em;
-}
-.formula {
-  font-family: "KaTeX_Main", "Times New Roman", serif;
-  display: inline-block;
-}
-/* Reading toolbar */
-.ubt-toolbar {
-  position: sticky;
-  top: 1rem;
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  margin-bottom: 2rem;
-  z-index: 100;
-}
-.ubt-btn {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 0.35rem 0.8rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.ubt-btn:hover, .ubt-btn.active {
-  background: var(--accent);
-  color: #ffffff;
-  border-color: var(--accent);
-}
-/* View modes */
-body.mode-stacked .bilingual-pair .source-row {
-  display: block;
-  color: var(--muted);
-  font-size: 0.92em;
-  font-style: italic;
-  margin-bottom: 0.35em;
-}
-body.mode-split .ubt-article-container {
-  max-width: 1400px;
-}
-body.mode-split .bilingual-pair {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2.5rem;
-  margin-bottom: 1.5em;
-}
-body.mode-target .source-row {
-  display: none;
-}
-"""
+_MODERN_CSS = generate_modern_html_css()
 
 
 #: Resolves a block's ``asset_id`` to an absolute path (``None`` when the file
@@ -266,39 +114,7 @@ def document_head(
         '  onload="renderUbtMath()"></script>\n'
     )
 
-    theme_script = (
-        "<script>\n"
-        "function setTheme(theme) {\n"
-        "  document.documentElement.setAttribute('data-theme', theme);\n"
-        "  try { localStorage.setItem('ubt_theme', theme); } catch(e){}\n"
-        "  var b = document.getElementById('ubt-theme-btn');\n"
-        "  if (b) b.textContent = (theme === 'dark') ? '浅色' : '深色';\n"
-        "}\n"
-        "function toggleTheme() {\n"
-        "  var cur = document.documentElement.getAttribute('data-theme');\n"
-        "  if (!cur) { cur = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; }\n"
-        "  setTheme(cur === 'dark' ? 'light' : 'dark');\n"
-        "}\n"
-        "function renderUbtMath() {\n"
-        "  if (typeof renderMathInElement !== 'function') return;\n"
-        "  document.querySelectorAll('.math-tex').forEach(function(el){\n"
-        "    try { renderMathInElement(el, { delimiters: [\n"
-        "      {left: '$$', right: '$$', display: true},\n"
-        "      {left: '$', right: '$', display: false},\n"
-        "      {left: '\\\\(', right: '\\\\)', display: false},\n"
-        "      {left: '\\\\[', right: '\\\\]', display: true}\n"
-        "    ], throwOnError: false }); } catch(e){}\n"
-        "  });\n"
-        "}\n"
-        "(function(){\n"
-        "  try {\n"
-        "    var savedTheme = localStorage.getItem('ubt_theme');\n"
-        "    if (savedTheme) setTheme(savedTheme);\n"
-        "  } catch(e){}\n"
-        "  document.addEventListener('DOMContentLoaded', renderUbtMath);\n"
-        "})();\n"
-        "</script>\n"
-    )
+    theme_script = generate_html_interactivity_script()
 
     toolbar = ""
     if bilingual:
@@ -309,23 +125,6 @@ def document_head(
             '  <button class="ubt-btn" onclick="setMode(\'mode-split\', this)">左右对照</button>\n'
             '  <button id="ubt-theme-btn" class="ubt-btn" onclick="toggleTheme()">深色</button>\n'
             "</div>\n"
-            "<script>\n"
-            "function setMode(mode, btn) {\n"
-            "  document.body.className = mode;\n"
-            "  document.querySelectorAll('.ubt-btn').forEach(function(b){ if (b.id !== 'ubt-theme-btn') b.classList.remove('active'); });\n"
-            "  if (btn) btn.classList.add('active');\n"
-            "  try { localStorage.setItem('ubt_view_mode', mode); } catch(e){}\n"
-            "}\n"
-            "(function(){\n"
-            "  try {\n"
-            "    var saved = localStorage.getItem('ubt_view_mode');\n"
-            "    if (saved) {\n"
-            "      var btn = document.querySelector('.ubt-btn[onclick*=\"' + saved + '\"]');\n"
-            "      if (btn) setMode(saved, btn);\n"
-            "    }\n"
-            "  } catch(e){}\n"
-            "})();\n"
-            "</script>\n"
         )
 
     return (
@@ -456,7 +255,11 @@ def _render_table(markup: str) -> str:
     body_rows = "".join(
         "<tr>" + "".join(f"<td>{html.escape(cell)}</td>" for cell in row) + "</tr>" for row in rows
     )
-    return f"<table><thead><tr>{head}</tr></thead><tbody>{body_rows}</tbody></table>"
+    return (
+        f'<div class="table-responsive">'
+        f"<table><thead><tr>{head}</tr></thead><tbody>{body_rows}</tbody></table>"
+        f"</div>"
+    )
 
 
 def _html_style_wrap(segment: str, style: SpanStyle) -> str:

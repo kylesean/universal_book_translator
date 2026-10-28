@@ -20,6 +20,7 @@ from ubt.core.atomic import atomic_write_path
 from ubt.core.ir.models import IRBlock
 from ubt.render.html_view import render_fragment
 from ubt.render.outputs import Composition
+from ubt.render.styler import generate_epub_css
 
 #: ``dcterms:modified`` when the caller supplies none. EPUB 3 requires the
 #: element, and a wall-clock value made two renders of one document differ.
@@ -55,28 +56,8 @@ _XHTML_HEAD = (
 )
 _XHTML_TAIL = "\n</body>\n</html>\n"
 
-#: Minimal reading stylesheet, linked from every content document.
-#:
-#: The package previously shipped with no CSS at all: every reading system fell
-#: back to its own default, which on a phone means an unindented wall of text at
-#: one fixed size. This is intentionally small — a body size, a measure, line
-#: height, paragraph spacing and a caption size — because the delivered file is
-#: *reflowable*: the reading system owns the viewport and the user owns the font.
-_EPUB_CSS = """\
-body { margin: 0 5%; line-height: 1.6; }
-p { margin: 0 0 0.8em; text-align: justify; }
-h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 1.2em 0 0.5em; page-break-after: avoid; }
-h1 { font-size: 1.5em; }
-h2 { font-size: 1.3em; }
-h3 { font-size: 1.15em; }
-figure { margin: 1em 0; text-align: center; page-break-inside: avoid; }
-figure img { max-width: 100%; height: auto; }
-figcaption { font-size: 0.9em; opacity: 0.8; text-align: left; margin-top: 0.4em; }
-table { border-collapse: collapse; width: 100%; font-size: 0.9em; margin: 0.8em 0; }
-th, td { border: 1px solid #999; padding: 0.25em 0.4em; vertical-align: top; }
-pre { overflow-x: auto; font-size: 0.85em; line-height: 1.4; }
-blockquote { margin: 0.8em 0 0.8em 1.5em; }
-"""
+#: Responsive publication-grade reading stylesheet, linked from every content document.
+_EPUB_CSS = generate_epub_css()
 
 
 def _dir_attr(direction: str) -> str:
@@ -158,6 +139,7 @@ def compose_epub(
     direction: str = "ltr",
     doc_id: str = "",
     modified: str | None = None,
+    bilingual: bool = False,
 ) -> Composition:
     """Lower the delivered blocks to an EPUB 3 package, recording every placement.
 
@@ -200,7 +182,11 @@ def compose_epub(
         return href
 
     fragment, placements = render_fragment(
-        blocks, translations, asset_resolver=_resolve_asset, math_renderer="unicode"
+        blocks,
+        translations,
+        asset_resolver=_resolve_asset,
+        math_renderer="unicode",
+        bilingual=bilingual,
     )
 
     with atomic_write_path(output) as tmp_path, zipfile.ZipFile(tmp_path, "w") as archive:
