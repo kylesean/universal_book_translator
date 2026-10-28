@@ -24,7 +24,10 @@ from ubt.core.exceptions import (
     LedgerWriterLeaseLostError,
 )
 from ubt.core.ir.models import BlockStatus
-from ubt.core.memory.glossary_table import build_chunk_glossary_table
+from ubt.core.memory.glossary_table import (
+    build_chunk_glossary_table,
+    build_global_glossary_table,
+)
 from ubt.core.qe.consistency_enforce import ConsistencyTask, plan_consistency_tasks
 from ubt.core.qe.heuristic import GLOSSARY_VIOLATION_MARKER
 from ubt.core.qe.term_metrics import evaluate_terms
@@ -72,6 +75,9 @@ async def run_consistency_stage(
     repair_loop = scoring.repair_loop or services.repair_loop
     glossary_dicts = terminology.glossary_dicts
     abbreviation_entries = terminology.abbreviation_entries
+    global_glossary_table = build_global_glossary_table(
+        glossary_dicts or [], getattr(ctx.config, "glossary_max_global_entries", 80)
+    )
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang
     fast_pass = services.fast_pass
@@ -157,6 +163,7 @@ async def run_consistency_stage(
                 fast_pass=fast_pass,
                 glossary_entries=glossary_dicts,
                 source_pdf_path=source_pdf_path,
+                global_glossary=global_glossary_table,
             )
         status = repaired.status
         error_flags = list(repaired.error_flags)

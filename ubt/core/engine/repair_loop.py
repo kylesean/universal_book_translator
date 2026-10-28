@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from ubt.core.ir.models import BlockStatus, IRBlock
+from ubt.core.memory.glossary_table import build_global_glossary_table
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.defect_taxonomy import CONSTRAINT_PREFIX, classify_defect, is_format_only
 from ubt.core.qe.fast_pass import FastPassFilter
@@ -284,6 +285,7 @@ class RepairLoop:
         glossary_entries: list[dict[str, Any]] | None = None,
         escalated: bool = False,
         source_pdf_path: Path | None = None,
+        global_glossary: str = "",
     ) -> IRBlock:
         """Execute one targeted repair iteration with hard circuit breaker at max_rounds.
 
@@ -405,6 +407,12 @@ class RepairLoop:
             except Exception as exc:
                 logger.debug("Visual scalpel crop skipped for block %s: %s", block.id, exc)
 
+        effective_global = global_glossary or (
+            build_global_glossary_table(glossary_entries, max_entries=80)
+            if glossary_entries
+            else ""
+        )
+
         async def _repair_call() -> str:
             return await self.router.repair(
                 block=block,
@@ -417,6 +425,7 @@ class RepairLoop:
                 annotated_draft=annotated_draft,
                 has_error_spans=has_spans,
                 image_b64=image_b64,
+                global_glossary=effective_global,
             )
 
         # Best-of-n repair (MBR-lite): when enabled and the QE runner can rank,

@@ -18,7 +18,10 @@ from ubt.core.exceptions import (
     LedgerWriterLeaseLostError,
 )
 from ubt.core.ir.models import BlockStatus, IRBlock
-from ubt.core.memory.glossary_table import build_chunk_glossary_table
+from ubt.core.memory.glossary_table import (
+    build_chunk_glossary_table,
+    build_global_glossary_table,
+)
 from ubt.core.qe.defect_taxonomy import REPAIR_ERROR_PREFIX
 from ubt.core.qe.error_summary import summarize_provider_error
 from ubt.core.qe.score_policy import is_shippable
@@ -85,6 +88,9 @@ async def run_repair_stage(
     repair_loop = scoring.repair_loop or services.repair_loop
     glossary_dicts = terminology.glossary_dicts
     abbreviation_entries = terminology.abbreviation_entries
+    global_glossary_table = build_global_glossary_table(
+        glossary_dicts or [], getattr(ctx.config, "glossary_max_global_entries", 80)
+    )
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang
     fast_pass = services.fast_pass
@@ -144,6 +150,7 @@ async def run_repair_stage(
                     fast_pass=fast_pass,
                     glossary_entries=glossary_dicts,
                     source_pdf_path=resolved_pdf_path,
+                    global_glossary=global_glossary_table,
                 )
             return {
                 "block_id": repaired.id,

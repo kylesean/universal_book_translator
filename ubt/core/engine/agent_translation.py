@@ -1014,7 +1014,7 @@ class AgentTranslationService:
                 error_flags=[],
                 target_lang=str((config_meta or {}).get("target_lang", "zh")),
                 source_lang=str((config_meta or {}).get("source_lang", "en")),
-                glossary_table=global_glossary,
+                global_glossary=global_glossary,
             )
         instructions = (
             "Repair each block's draft_text against masked_source and error_flags. "
@@ -1087,6 +1087,7 @@ class AgentTranslationService:
                 glossary_table=glossary_table,
                 target_lang=target_lang,
                 source_lang=source_lang,
+                global_glossary=global_glossary,
             )
         else:
             _, user_prompt = build_rich_draft_prompt(

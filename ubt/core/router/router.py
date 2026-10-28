@@ -458,6 +458,7 @@ class ModelRouter:
         annotated_draft: str = "",
         has_error_spans: bool = False,
         model: str | None = None,
+        global_glossary: str = "",
     ) -> tuple[str, str]:
         """Construct repair prompt using strategy configured on the model capability profile."""
         profile = self._get_profile(model or self.repair_model)
@@ -469,6 +470,7 @@ class ModelRouter:
                 glossary_table=glossary_table,
                 target_lang=target_lang,
                 source_lang=source_lang,
+                global_glossary=global_glossary,
             )
         if profile.prompt_strategy == PromptStrategy.HYBRID:
             return build_hybrid_repair_prompt(
@@ -480,6 +482,7 @@ class ModelRouter:
                 source_lang=source_lang,
                 annotated_draft=annotated_draft,
                 has_error_spans=has_error_spans,
+                global_glossary=global_glossary,
             )
         return build_rich_repair_prompt(
             source_text=source_text,
@@ -490,6 +493,7 @@ class ModelRouter:
             source_lang=source_lang,
             annotated_draft=annotated_draft,
             has_error_spans=has_error_spans,
+            global_glossary=global_glossary,
         )
 
     def _local_fallback_base_url(self) -> str:
@@ -1383,6 +1387,7 @@ class ModelRouter:
         annotated_draft: str = "",
         has_error_spans: bool = False,
         image_b64: str | None = None,
+        global_glossary: str = "",
     ) -> str:
         """Route to repair model tier with strategy-driven prompt construction and extraction."""
         effort = reasoning_effort or self.repair_reasoning_effort
@@ -1415,6 +1420,7 @@ class ModelRouter:
                     annotated_draft=annotated_draft,
                     has_error_spans=has_error_spans,
                     model=self.repair_model,
+                    global_glossary=global_glossary,
                 )
                 vision_prompt = (
                     f"{user_prompt}\n\n"
@@ -1459,6 +1465,7 @@ class ModelRouter:
                 annotated_draft=annotated_draft,
                 has_error_spans=has_error_spans,
                 model=cand_model,
+                global_glossary=global_glossary,
             )
 
         def _calc_repair_max_tokens(cand_model: str, cand_profile: ModelProfile) -> int | None:

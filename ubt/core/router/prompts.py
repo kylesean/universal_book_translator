@@ -30,6 +30,12 @@ from ubt.core.ir.emphasis import (
     strip_emphasis_markers,
 )
 from ubt.core.language_profile import PROFILES
+from ubt.core.prompts.assembler import (
+    assemble_continuity_context,
+    assemble_critique_issues,
+    assemble_terminology_table,
+)
+from ubt.core.prompts.budget import truncate_text_to_budget
 
 #: Wrapper tags the extractor treats as the answer envelope. A source span that
 #: merely *mentions* one ("use <translation> tags") must not be mistaken for the
@@ -287,14 +293,13 @@ def build_minimal_draft_prompt(
         tgt_profile.name if tgt_profile else (target_lang.upper() if target_lang else "TARGET")
     )
 
-    glossary_sections = [
-        section.strip() for section in (global_glossary, glossary_table) if section.strip()
-    ]
+    b_global, b_chunk = assemble_terminology_table(global_glossary, glossary_table)
+    glossary_sections = [section.strip() for section in (b_global, b_chunk) if section.strip()]
     parts = []
     if glossary_sections:
         parts.append("Glossary:\n" + "\n\n".join(glossary_sections))
     if few_shot_reference.strip():
-        parts.append(few_shot_reference.strip())
+        parts.append(truncate_text_to_budget(few_shot_reference.strip(), 1024))
     domain_hint = ""
     if domain:
         domain_hint = f" Use standard {domain} terminology."
@@ -356,24 +361,29 @@ def build_hybrid_draft_prompt(
             + _EMPHASIS_RULE
         )
 
+    b_global, b_chunk = assemble_terminology_table(global_glossary, glossary_table)
+    b_epoch, b_rolling = assemble_continuity_context(epoch_summary, rolling_summary)
+    b_neighbor = truncate_text_to_budget(neighbor_context.strip(), 1536)
+    b_few_shot = truncate_text_to_budget(few_shot_reference.strip(), 1024)
+
     user_parts: list[str] = []
-    if global_glossary.strip():
-        user_parts.append(f"### Terminology Glossary\n{global_glossary.strip()}\n")
+    if b_global.strip():
+        user_parts.append(f"### Terminology Glossary\n{b_global.strip()}\n")
 
-    if epoch_summary.strip():
-        user_parts.append(f"### Book Continuity (Compressed History)\n{epoch_summary.strip()}\n")
+    if b_epoch.strip():
+        user_parts.append(f"### Book Continuity (Compressed History)\n{b_epoch.strip()}\n")
 
-    if rolling_summary.strip():
-        user_parts.append(f"### Story Context\n{rolling_summary.strip()}\n")
+    if b_rolling.strip():
+        user_parts.append(f"### Story Context\n{b_rolling.strip()}\n")
 
-    if glossary_table.strip():
-        user_parts.append(f"### Terminology Glossary (this section)\n{glossary_table.strip()}\n")
+    if b_chunk.strip():
+        user_parts.append(f"### Terminology Glossary (this section)\n{b_chunk.strip()}\n")
 
-    if neighbor_context.strip():
-        user_parts.append(f"{neighbor_context.strip()}\n")
+    if b_neighbor.strip():
+        user_parts.append(f"{b_neighbor.strip()}\n")
 
-    if few_shot_reference.strip():
-        user_parts.append(f"{few_shot_reference.strip()}\n")
+    if b_few_shot.strip():
+        user_parts.append(f"{b_few_shot.strip()}\n")
 
     user_parts.append(
         f"### Source Paragraph to Translate\n{_neutralize_reserved_tags(source_text).strip()}\n\n"
@@ -437,9 +447,14 @@ def build_rich_draft_prompt(
         + _EMPHASIS_RULE,
     ]
 
-    if global_glossary.strip():
+    b_global, b_chunk = assemble_terminology_table(global_glossary, glossary_table)
+    b_epoch, b_rolling = assemble_continuity_context(epoch_summary, rolling_summary)
+    b_neighbor = truncate_text_to_budget(neighbor_context.strip(), 1536)
+    b_few_shot = truncate_text_to_budget(few_shot_reference.strip(), 1024)
+
+    if b_global.strip():
         system_parts.append(
-            f"### Translation Bible (Strict Global Terminology Mappings)\n{global_glossary.strip()}"
+            f"### Translation Bible (Strict Global Terminology Mappings)\n{b_global.strip()}"
         )
 
     system_prompt = "\n\n".join(system_parts)
@@ -447,21 +462,21 @@ def build_rich_draft_prompt(
     # Tier 2: Semi-static L3 epoch (changes only every N steps)
     # then Macro Snapshot Prefix & Chunk Glossary
     user_parts: list[str] = []
-    if epoch_summary.strip():
-        user_parts.append(f"### Book Continuity (Compressed History)\n{epoch_summary.strip()}\n")
-    if rolling_summary.strip():
+    if b_epoch.strip():
+        user_parts.append(f"### Book Continuity (Compressed History)\n{b_epoch.strip()}\n")
+    if b_rolling.strip():
         user_parts.append(
-            f"### Document Continuation Context (Macro Snapshot)\n{rolling_summary.strip()}\n"
+            f"### Document Continuation Context (Macro Snapshot)\n{b_rolling.strip()}\n"
         )
-    if glossary_table.strip():
-        user_parts.append(f"### Translation Bible (Strict Mappings)\n{glossary_table.strip()}\n")
+    if b_chunk.strip():
+        user_parts.append(f"### Translation Bible (Strict Mappings)\n{b_chunk.strip()}\n")
 
     # Tier 3: Dynamic Tail (L1 Neighbor Excerpts + TM few-shot + Target IRBlock)
-    if neighbor_context.strip():
-        user_parts.append(f"{neighbor_context.strip()}\n")
+    if b_neighbor.strip():
+        user_parts.append(f"{b_neighbor.strip()}\n")
 
-    if few_shot_reference.strip():
-        user_parts.append(f"{few_shot_reference.strip()}\n")
+    if b_few_shot.strip():
+        user_parts.append(f"{b_few_shot.strip()}\n")
 
     user_parts.append(
         f"### Source Paragraph to Translate\n{_neutralize_reserved_tags(source_text).strip()}\n\n"
@@ -524,32 +539,38 @@ def build_macro_chunk_draft_prompt(
         + _EMPHASIS_RULE,
     ]
 
-    if global_glossary.strip():
+    b_global, b_chunk = assemble_terminology_table(global_glossary, glossary_table)
+    b_epoch, b_rolling = assemble_continuity_context(epoch_summary, rolling_summary)
+    b_neighbor = truncate_text_to_budget(neighbor_context.strip(), 1536)
+    b_few_shot = truncate_text_to_budget(few_shot_reference.strip(), 1024)
+    b_section = truncate_text_to_budget(section_context.strip(), 1536)
+
+    if b_global.strip():
         system_parts.append(
-            f"### Translation Bible (Strict Global Terminology Mappings)\n{global_glossary.strip()}"
+            f"### Translation Bible (Strict Global Terminology Mappings)\n{b_global.strip()}"
         )
 
     system_prompt = "\n\n".join(system_parts)
 
     user_parts: list[str] = []
-    if epoch_summary.strip():
-        user_parts.append(f"### Book Continuity (Compressed History)\n{epoch_summary.strip()}\n")
-    if rolling_summary.strip():
+    if b_epoch.strip():
+        user_parts.append(f"### Book Continuity (Compressed History)\n{b_epoch.strip()}\n")
+    if b_rolling.strip():
         user_parts.append(
-            f"### Document Continuation Context (Macro Snapshot)\n{rolling_summary.strip()}\n"
+            f"### Document Continuation Context (Macro Snapshot)\n{b_rolling.strip()}\n"
         )
-    if section_context.strip():
+    if b_section.strip():
         # Where these blocks sit in the document. Placed ahead of the per-chunk
         # dynamic glossary to preserve prefix caching across chunks in the same section.
-        user_parts.append(f"### Section Context\n{section_context.strip()}\n")
-    if glossary_table.strip():
-        user_parts.append(f"### Translation Bible (Strict Mappings)\n{glossary_table.strip()}\n")
+        user_parts.append(f"### Section Context\n{b_section.strip()}\n")
+    if b_chunk.strip():
+        user_parts.append(f"### Translation Bible (Strict Mappings)\n{b_chunk.strip()}\n")
 
-    if neighbor_context.strip():
-        user_parts.append(f"{neighbor_context.strip()}\n")
+    if b_neighbor.strip():
+        user_parts.append(f"{b_neighbor.strip()}\n")
 
-    if few_shot_reference.strip():
-        user_parts.append(f"{few_shot_reference.strip()}\n")
+    if b_few_shot.strip():
+        user_parts.append(f"{b_few_shot.strip()}\n")
 
     # Escape source text and ids: a block containing </block> or </blocks>
     # (books about XML/HTML, code samples) would otherwise close the envelope
@@ -598,6 +619,7 @@ def build_minimal_repair_prompt(
     glossary_table: str = "",
     target_lang: str = "zh",
     source_lang: str = "en",
+    global_glossary: str = "",
 ) -> tuple[str, str]:
     """Direct, minimalist repair prompt without metaprompts.
 
@@ -614,9 +636,11 @@ def build_minimal_repair_prompt(
         tgt_profile.name if tgt_profile else (target_lang.upper() if target_lang else "TARGET")
     )
 
+    b_global, b_chunk = assemble_terminology_table(global_glossary, glossary_table)
     parts = []
-    if glossary_table.strip():
-        parts.append(f"Glossary:\n{glossary_table.strip()}")
+    glossary_sections = [s.strip() for s in (b_global, b_chunk) if s.strip()]
+    if glossary_sections:
+        parts.append("Glossary:\n" + "\n\n".join(glossary_sections))
     grid_info = _detect_table_grid(source_text)
     if grid_info:
         rows, cols = grid_info
@@ -647,6 +671,7 @@ def build_hybrid_repair_prompt(
     source_lang: str = "en",
     annotated_draft: str = "",
     has_error_spans: bool = False,
+    global_glossary: str = "",
 ) -> tuple[str, str]:
     """Hybrid repair prompt for instruction-tuned models."""
     src_profile = PROFILES.get(source_lang.strip().lower()) if source_lang else None
@@ -677,15 +702,20 @@ def build_hybrid_repair_prompt(
         f"{table_guardrail}"
     )
 
-    issues_formatted = (
-        "\n".join(f"- {flag}" for flag in error_flags)
-        if error_flags
-        else "- General fluency / quality score below threshold"
-    )
+    b_global, b_chunk = assemble_terminology_table(global_glossary, glossary_table)
+    issues_formatted = assemble_critique_issues(error_flags)
 
     user_parts: list[str] = []
-    if glossary_table.strip():
-        user_parts.append(f"### Terminology Glossary\n{glossary_table.strip()}\n")
+    if b_global.strip():
+        user_parts.append(f"### Terminology Glossary\n{b_global.strip()}\n")
+
+    if b_chunk.strip():
+        heading = (
+            "### Terminology Glossary (this section)\n"
+            if b_global.strip()
+            else "### Terminology Glossary\n"
+        )
+        user_parts.append(f"{heading}{b_chunk.strip()}\n")
 
     if grid_info:
         rows, cols = grid_info
@@ -722,6 +752,7 @@ def build_rich_repair_prompt(
     source_lang: str = "en",
     annotated_draft: str = "",
     has_error_spans: bool = False,
+    global_glossary: str = "",
 ) -> tuple[str, str]:
     """Targeted repair prompt following 2026 Task-Structured Reasoning and MQM Infilling standards."""
     src_profile = PROFILES.get(source_lang.strip().lower()) if source_lang else None
@@ -733,17 +764,16 @@ def build_rich_repair_prompt(
         tgt_profile.name if tgt_profile else (target_lang.upper() if target_lang else "TARGET")
     )
 
-    issues_formatted = (
-        "\n".join(f"- {flag}" for flag in error_flags)
-        if error_flags
-        else "- General fluency / quality score below threshold"
-    )
+    b_global, b_chunk = assemble_terminology_table(global_glossary, glossary_table)
+    issues_formatted = assemble_critique_issues(error_flags)
 
     grid_info = _detect_table_grid(source_text)
 
     user_parts: list[str] = []
-    if glossary_table.strip():
-        user_parts.append(f"### Translation Bible\n{glossary_table.strip()}\n")
+    if b_global.strip():
+        user_parts.append(f"### Translation Bible (Global Terminology)\n{b_global.strip()}\n")
+    if b_chunk.strip():
+        user_parts.append(f"### Translation Bible\n{b_chunk.strip()}\n")
 
     if grid_info:
         rows, cols = grid_info
