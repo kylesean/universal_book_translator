@@ -1415,19 +1415,11 @@ def _heading_level(block: IRBlock) -> int:
     return min(level, 6)
 
 
-def _raw_block_markup(text: str) -> str:
-    """Typeset a code listing as a monospace block that keeps its line breaks.
+def _raw_block_markup(text: str, container_width_pt: float = 470.0) -> str:
+    """Typeset a code listing as a monospace block that keeps its line breaks and fits container."""
+    from ubt.render.typst.container_repair import repair_code_block_markup
 
-    A markup newline folds into a space and prose escaping would leave the
-    listing set in the body face, so the listing is passed to Typst ``raw`` as
-    a plain *string* (``raw("...")``): inside that string literal nothing can
-    enter markup or code mode, so every ``#``, ``"``, ``;``, ``\\`` and
-    newline in the listing stays literal. The only character that must be
-    escaped is the double quote itself, so the payload cannot terminate the
-    string early.
-    """
-    payload = text.replace("\\", "\\\\").replace('"', '\\"')
-    return f'#block(fill: luma(245), inset: 8pt, radius: 4pt, width: 100%)[#raw("{payload}")]'
+    return repair_code_block_markup(text, container_width_pt=container_width_pt)
 
 
 class TypstDocumentRenderer:
@@ -1626,6 +1618,10 @@ class TypstDocumentRenderer:
 
     def _prose(self, text: str, runs: Sequence[InlineRun] = ()) -> str:
         """``render_prose`` bound to this renderer's compile gate."""
+        if not runs:
+            from ubt.render.typst.container_repair import inject_soft_breaks
+
+            text = inject_soft_breaks(text)
         return render_prose(text, runs, is_math_ok=self._math_gate)
 
     def _prewarm_math_gate(self, blocks: Sequence[IRBlock]) -> None:
@@ -2089,7 +2085,7 @@ class TypstDocumentRenderer:
                 flush_figure()
                 kept = (block.source_text or "").strip()
                 if kept:
-                    body.append(_raw_block_markup(kept))
+                    body.append(_raw_block_markup(kept, container_width_pt=self._table_width_pt()))
                     self.stats.blocks_rendered += 1
                 continue
 

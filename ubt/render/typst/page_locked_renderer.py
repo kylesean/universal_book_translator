@@ -276,6 +276,17 @@ class PageLockedReflowRenderer:
             elif b.block_type == BlockType.FORMULA:
                 # Math formula
                 lines.append(f"  $ {escaped} $")
+            elif b.block_type == BlockType.CODE:
+                from ubt.render.typst.container_repair import repair_code_block_markup
+
+                col_w = (
+                    geom.page_w
+                    - geom.margin_left
+                    - geom.margin_right
+                    - (geom.columns - 1) * geom.column_gutter_pt
+                ) / max(1, geom.columns)
+                code_mk = repair_code_block_markup(txt, container_width_pt=col_w)
+                lines.append(f"  {code_mk}")
             else:
                 lines.append(f"  {escaped}")
                 lines.append("")
