@@ -80,6 +80,8 @@ QeEngine = Literal["heuristic", "tiered"]
 #: source is impossible (it changes the page count). ``auto`` lets the advisor
 #: pick from the document's structure.
 DualMode = Literal["mono", "dual", "auto"]
+#: Document delivery channel: 'reflow' (responsive Typst reflow) or 'facsimile' (1:1 visual canvas isomorphism).
+DeliveryMode = Literal["reflow", "facsimile"]
 
 #: What the export stage does when a block's text cannot be placed (a layout
 #: spill). ``error`` fails the delivery contract; the other three downgrade it
@@ -473,6 +475,7 @@ class TypstConfig(BaseModel):
     toc_mode: TocMode = "auto"
     enable_layout_auto_heal: bool = True
     layout_auto_heal_max_passes: int = 2
+    delivery_mode: DeliveryMode = "reflow"
 
 
 class QualityConfig(BaseModel):
@@ -1252,6 +1255,7 @@ class UBTConfig(BaseSettings):
     # breaking long display formulas across lines.
     enable_layout_auto_heal: bool = True
     layout_auto_heal_max_passes: int = 2
+    delivery_mode: DeliveryMode = "reflow"
 
     # -- Table rendering strategy for PDF ----------------------------------------
     # The publication renderer rebuilds every table from the IR, so a table is
@@ -1397,6 +1401,7 @@ class UBTConfig(BaseSettings):
         "toc_mode",
         "spill_policy",
         "table_render_mode",
+        "delivery_mode",
         "env",
         mode="before",
     )

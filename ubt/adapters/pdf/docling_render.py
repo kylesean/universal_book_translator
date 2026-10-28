@@ -49,10 +49,12 @@ class DoclingRenderStrategy:
         font_family: str | None = None,
         enable_layout_auto_heal: bool = True,
         layout_auto_heal_max_passes: int = 2,
+        delivery_mode: str = "reflow",
     ) -> None:
         self.font_family = font_family
         self.enable_layout_auto_heal = enable_layout_auto_heal
         self.layout_auto_heal_max_passes = layout_auto_heal_max_passes
+        self.delivery_mode = delivery_mode
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: Set from the resolved config by the adapter (``apply_config``).
         self.toc_mode = "auto"
@@ -241,6 +243,206 @@ class DoclingRenderStrategy:
         self.last_render_reconstructions = list(renderer.table_reconstructions)
         return output_path
 
+    async def _render_facsimile(
+        self,
+        manifest: BookManifest,
+        blocks: list[IRBlock],
+        target_lang: str,
+        output_path: Path,
+        bilingual: bool = False,
+    ) -> Path:
+        """Rebuild the document using 1:1 in-place facsimile (Canvas) rendering."""
+        import pikepdf
+
+        from ubt.adapters.pdf.strip_pdf_text import strip_text_streams
+        from ubt.render.delivered_text import delivered_text
+        from ubt.render.flow import approximate_measure, solve_flow
+        from ubt.render.layout_solver import PageLayoutSolution, solve_page_2d
+        from ubt.render.typst.facsimile_renderer import (
+            FacsimileBlockPlacement,
+            FacsimilePageSpec,
+            FacsimileRenderer,
+        )
+
+        source_path = Path(
+            str(
+                getattr(manifest, "source_path", "")
+                or manifest.metadata.get("source_path", "")
+                or manifest.metadata.get("input_path", "")
+                or ""
+            )
+        )
+        if not source_path.exists():
+            logger.warning(
+                "Facsimile render requested but source PDF not found at %s; falling back to publication reflow",
+                source_path,
+            )
+            return await self._render_publish(manifest, blocks, target_lang, output_path, bilingual)
+
+        build_dir = output_path.parent / f".build_{output_path.stem}_facsimile"
+        build_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Background vector text stripping
+        bg_stripped = build_dir / "bg_stripped.pdf"
+        try:
+            strip_text_streams(source_path, bg_stripped)
+        except Exception as exc:
+            logger.warning(
+                "Failed to strip background text streams: %s; falling back to reflow", exc
+            )
+            return await self._render_publish(manifest, blocks, target_lang, output_path, bilingual)
+
+        with pikepdf.open(source_path) as src_doc:
+            total_pages = len(src_doc.pages)
+            page_dims: list[tuple[float, float]] = []
+            for page in src_doc.pages:
+                box = page.CropBox if page.get("/CropBox") is not None else page.MediaBox
+                pw = float(box[2] - box[0])
+                ph = float(box[3] - box[1])
+                page_dims.append((pw, ph))
+
+        # 2. Group blocks by page
+        blocks_by_page: dict[int, list[IRBlock]] = {}
+        for b in blocks:
+            p = 0
+            if b.bbox and b.bbox.page > 0:
+                p = b.bbox.page
+            elif hasattr(b.element, "span") and b.element.span and b.element.span.page > 0:
+                p = b.element.span.page
+            if p > 0:
+                blocks_by_page.setdefault(p, []).append(b)
+
+        pages_spec: list[FacsimilePageSpec] = []
+        for pno in range(1, total_pages + 1):
+            pw, ph = page_dims[pno - 1] if pno <= len(page_dims) else (595.0, 842.0)
+            page_blocks = blocks_by_page.get(pno, [])
+            records: list[dict[str, Any]] = []
+            placements: list[FacsimileBlockPlacement] = []
+
+            for b in page_blocks:
+                if not b.bbox:
+                    continue
+                w = max(0.0, b.bbox.x1 - b.bbox.x0)
+                h = max(0.0, b.bbox.y1 - b.bbox.y0)
+                if w <= 0 or h <= 0:
+                    continue
+
+                target_content = delivered_text(b)
+                if not target_content:
+                    target_content = b.source_text
+
+                is_hdr = b.block_type == BlockType.HEADING
+                color = (
+                    b.style.text_color_hex
+                    if (b.style and b.style.text_color_hex)
+                    else ("#0078ae" if is_hdr else "#000000")
+                )
+                weight = "bold" if is_hdr or (b.style and b.style.is_bold) else "regular"
+
+                records.append(
+                    {
+                        "id": b.id,
+                        "top": b.bbox.y1,
+                        "bot": b.bbox.y0,
+                        "w": w,
+                        "n": max(1, round(h / 12.0)),
+                        "glyphs": len(target_content.strip()),
+                    }
+                )
+
+                # If block has multiple continuation boxes across columns/pages, flow across them
+                if (
+                    b.provenance
+                    and b.provenance.physical_boxes
+                    and len(b.provenance.physical_boxes) > 1
+                ):
+                    from ubt.model.span import boxes_from_provenance
+
+                    boxes = boxes_from_provenance(b.provenance.physical_boxes)
+                    page_boxes = [box for box in boxes if box.page == pno]
+                    if len(page_boxes) > 1:
+                        measure = approximate_measure(font_size_pt=10.0, leading_pt=13.0)
+                        flowed = solve_flow(target_content, page_boxes, measure)
+                        for fl_idx, fl_pl in enumerate(flowed):
+                            if not fl_pl.text.strip():
+                                continue
+                            placements.append(
+                                FacsimileBlockPlacement(
+                                    block_id=f"{b.id}_flow_{fl_idx}",
+                                    page=pno,
+                                    x0=fl_pl.box.bbox[0],
+                                    y0=fl_pl.box.bbox[1],
+                                    x1=fl_pl.box.bbox[2],
+                                    y1=fl_pl.box.bbox[3],
+                                    text=fl_pl.text,
+                                    is_heading=is_hdr,
+                                    heading_level=getattr(b.element, "level", 1) if is_hdr else 1,
+                                    text_color_hex=color,
+                                    font_weight=weight,
+                                )
+                            )
+                        continue
+
+                placements.append(
+                    FacsimileBlockPlacement(
+                        block_id=b.id,
+                        page=pno,
+                        x0=b.bbox.x0,
+                        y0=b.bbox.y0,
+                        x1=b.bbox.x1,
+                        y1=b.bbox.y1,
+                        text=target_content,
+                        is_heading=is_hdr,
+                        heading_level=getattr(b.element, "level", 1) if is_hdr else 1,
+                        text_color_hex=color,
+                        font_weight=weight,
+                        skip_render=(
+                            b.skip_translate or b.block_type in (BlockType.FORMULA, BlockType.IMAGE)
+                        ),
+                    )
+                )
+
+            if records:
+                sol = solve_page_2d([records], source_size_pt=10.0, source_leading_pt=13.0)
+            else:
+                sol = PageLayoutSolution(
+                    uniform_size_pt=10.0,
+                    leading_em=0.35,
+                    tracking_em=0.0,
+                    fits=True,
+                    source_overlap=False,
+                    delivery_tier="L1",
+                    bottleneck_seg_ids=[],
+                )
+
+            pages_spec.append(
+                FacsimilePageSpec(
+                    page_no=pno,
+                    page_w=round(pw, 2),
+                    page_h=round(ph, 2),
+                    uniform_size_pt=sol.uniform_size_pt,
+                    leading_em=sol.leading_em,
+                    tracking_em=sol.tracking_em,
+                    placements=placements,
+                )
+            )
+
+        renderer = FacsimileRenderer(font_stack=self._font_stack_for(target_lang))
+        renderer.render_document(
+            pages_spec,
+            bg_stripped,
+            output_path,
+            build_dir,
+            target_lang=target_lang,
+        )
+
+        record_toolchain_versions(manifest)
+        manifest.metadata["delivery_mode"] = "facsimile"
+        self.last_render_skips = []
+        self.last_render_flags = []
+        self.last_render_reconstructions = []
+        return output_path
+
     def _font_stack_for(self, target_lang: str) -> tuple[str, ...]:
         """Body/heading font stack for the preamble, resolved against this machine.
 
@@ -325,6 +527,10 @@ class DoclingRenderStrategy:
             # renderer cannot do (it changes the page count), so it now
             # pairs per block like the others.
             publish_bilingual = active_mode != "monolingual"
+            if self.delivery_mode == "facsimile":
+                return await self._render_facsimile(
+                    manifest, list(blocks), target_lang, out_path, publish_bilingual
+                )
             return await self._render_publish(
                 manifest, list(blocks), target_lang, out_path, publish_bilingual
             )

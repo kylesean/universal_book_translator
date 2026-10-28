@@ -23,6 +23,7 @@ from typing import Any, Literal, get_args
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from ubt.core.config import (
+    DeliveryMode,
     DocumentMode,
     DualMode,
     UBTConfig,
@@ -41,6 +42,7 @@ from ubt.core.presets import PRESET_ENGINE_FIELDS, Preset, resolve_engine_params
 #: surfaces no longer offer it.
 _ENUM_REQUEST_FIELDS: dict[str, tuple[str, ...]] = {
     "dual_mode": get_args(DualMode),
+    "delivery_mode": get_args(DeliveryMode),
     "preset": tuple(p.value for p in Preset),
     "document_mode": get_args(DocumentMode),
 }

@@ -7,6 +7,12 @@
 > [`MODE_SPACE_CONSOLIDATION_RFC.md`](MODE_SPACE_CONSOLIDATION_RFC.md) §7），
 > 第 1–4 节据此重写；第 7、9–11 节讲的是**翻译质量**而非渲染，内容仍然有效。
 >
+> **2026-10-28 增补**：第二渲染通道“1:1 版式（facsimile）”的设计规格见
+> [`../design/inplace_delivery.md`](../design/inplace_delivery.md)。它**不是**已删除的
+> overlay——背景层只删 `BT…ET` 文本块，译文层由 Typst 在原坐标重排（同一
+> `typst_compile`、同一 `math_transpiler`、同一 gate），不写内容流、不嵌字体、
+> 不自研断行。本文档描述的重排路径仍是**默认且唯一已落地**的 PDF 路径。
+>
 > 本文档描述：翻译产物 PDF 如何由 IR **重建**并由 Typst 排版，以及若干
 > 跨语言的格式保真问题（内联样式、引用、标题膨胀等）。
 >

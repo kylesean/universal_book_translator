@@ -1037,6 +1037,7 @@ class PipelineOrchestrator:
                 docling_isolate_process=self.config.docling_isolate_process,
                 enable_layout_auto_heal=self.config.enable_layout_auto_heal,
                 layout_auto_heal_max_passes=self.config.layout_auto_heal_max_passes,
+                delivery_mode=self.config.delivery_mode,
             ),
         )
 

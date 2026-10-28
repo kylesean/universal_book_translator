@@ -40,7 +40,7 @@ uv run ubt verify --corpus corpus
 uv run ubt verify /path/to/book_mono.pdf
 
 # Re-derive the contract from a finished job's ledger (independent cross-check).
-uv run ubt verify --job job_<docid>_zh --engine rigid
+uv run ubt verify --job job_<docid>_zh
 ```
 
 Local run for the checked-in cases (source PDFs are not committed; drop the
@@ -155,7 +155,7 @@ with an unaccounted text node or a missing asset fails even with no `expect`.
 
 | Case | Axis it pins |
 |---|---|
-| `twocol-paper-2609` | multi-column + figures/tables → rigid; no lost assets |
+| `twocol-paper-2609` | multi-column + figures/tables survive; no lost assets |
 | `paper-2608` | figures/tables survive across a second document |
 | `paper-2609-22978` | math-dense paper; tables reconstructed+verified or preserved whole |
 | `book-chapter-3` | figure-heavy prose chapter; reflow delivers text, figures preserved |

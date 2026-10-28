@@ -616,6 +616,21 @@ def translate(
             show_default=False,
         ),
     ] = None,
+    facsimile: Annotated[
+        bool,
+        typer.Option(
+            "--facsimile/--no-facsimile",
+            help="Enable Track A 1:1 facsimile delivery channel (in-place visual canvas isomorphism with stripped vector background)",
+        ),
+    ] = False,
+    delivery_mode: Annotated[
+        str | None,
+        typer.Option(
+            "--delivery-mode",
+            help="PDF delivery mode: 'reflow' for responsive flow, or 'facsimile' for 1:1 in-place visual canvas isomorphism",
+            show_default=False,
+        ),
+    ] = None,
     fresh: Annotated[
         bool | None,
         typer.Option(
@@ -725,6 +740,7 @@ def translate(
         "macro_chunk_size": macro_chunk_size,
         "chapter_streaming_enabled": chapter_streaming,
         "dual_mode": dual_mode,
+        "delivery_mode": "facsimile" if facsimile else (delivery_mode or "reflow"),
         "translate_chrome": translate_chrome,
         "preset": preset,
         "pdf_engine": pdf_engine,

@@ -37,6 +37,7 @@
 
 | 文档 | 内容 |
 | --- | --- |
+| [`design/inplace_delivery.md`](design/inplace_delivery.md) | **1:1 版式通道（Track A）设计规格 v1.0**：源页剥文字做背景层 + Typst 原坐标重排译文层，一页对一页、页码一致；含 EN→ZH 长度方向实测（中文只占英文 56% 面积）、页级统一字号二分算法、`solve_flow` 恢复清单、调研报告 15 条主张核查 |
 | [`guides/FICTION_PRESET_AND_LITERARY_OPTIMIZATION.md`](guides/FICTION_PRESET_AND_LITERARY_OPTIMIZATION.md) | 小说/文学 preset 与文学化优化建议（草案待评审） |
 
 ## 历史快照
