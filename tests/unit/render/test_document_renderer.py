@@ -1921,3 +1921,65 @@ def test_renderer_with_backmatter_enabled(tmp_path: Path) -> None:
     assert "附录 A：定理证明" in source
     # References heading rendered with numbering: none
     assert "#heading(level: 1, numbering: none)[参考文献]" in source
+
+
+def test_renderer_with_grid_figures_enabled(tmp_path: Path) -> None:
+    """Renderer with enable_grid_figures=True aligns adjacent images and subcaptions in a Typst grid."""
+    from ubt.core.figures.models import FigureLayoutConfig
+
+    img_dir = tmp_path / "img_assets"
+    img_dir.mkdir()
+    f1 = img_dir / "panel_a.png"
+    f2 = img_dir / "panel_b.png"
+    f1.write_bytes(b"PNG_FAKE_DATA_1")
+    f2.write_bytes(b"PNG_FAKE_DATA_2")
+
+    blocks = [
+        _block(
+            BlockType.NARRATIVE,
+            block_id="p1",
+            source="Here is the experiment comparison:",
+            target="以下是实验对比：",
+        ),
+        _block(
+            BlockType.IMAGE,
+            block_id="img1",
+            source=str(f1),
+            target=str(f1),
+        ),
+        _block(
+            BlockType.IMAGE,
+            block_id="img2",
+            source=str(f2),
+            target=str(f2),
+        ),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="cap",
+            source="Figure 2: Performance analysis. (a) Latency. (b) Memory.",
+            target="图 2：性能分析。（a）延迟 （b）内存占用。",
+        ),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="p2",
+            source="Subsequent discussion text.",
+            target="后续正文讨论。",
+        ),
+    ]
+
+    cfg = FigureLayoutConfig(columns=2, gutter_pt=12.0)
+    renderer = TypstDocumentRenderer(
+        assets_root=img_dir,
+        enable_grid_figures=True,
+        figure_config=cfg,
+    )
+    source, stats = renderer.build_source(blocks, tmp_path / "build_grid")
+
+    # Grid figure markup is emitted with 2 columns
+    assert "grid(" in source
+    assert "columns: (1fr, 1fr)" in source
+    assert "gutter: 12.0pt" in source
+    assert "*(a)*" in source
+    assert "*(b)*" in source
+    assert "caption: [图 2：性能分析。]" in source
+    assert stats.figures == 2

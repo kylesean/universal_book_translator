@@ -1212,6 +1212,11 @@ def _looks_like_a_label(text: str) -> bool:
     if not body:
         # A bare label ("FIG. 3.1") is a caption on its own.
         return True
+    from ubt.core.figures.detector import _SUB_MARKER_RE
+
+    if _SUB_MARKER_RE.search(body):
+        # A composite caption naming subfigures ("(a) ... (b) ...") is a caption.
+        return True
     if len(body) > _CAPTION_LABEL_BODY_MAX_CHARS:
         return False
     # One sentence at most: a caption does not narrate.
@@ -1587,6 +1592,8 @@ class TypstDocumentRenderer:
         notes_config: object | None = None,
         enable_backmatter: bool = False,
         backmatter_config: object | None = None,
+        enable_grid_figures: bool = False,
+        figure_config: object | None = None,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
@@ -1611,6 +1618,8 @@ class TypstDocumentRenderer:
         self.notes_config = notes_config
         self.enable_backmatter = bool(enable_backmatter)
         self.backmatter_config = backmatter_config
+        self.enable_grid_figures = bool(enable_grid_figures)
+        self.figure_config = figure_config
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: ``auto`` is none for a paper (by convention) and one for a book that
         #: carries TOC rows; see :func:`resolve_toc_mode`.
@@ -1913,13 +1922,16 @@ class TypstDocumentRenderer:
                 # The banner *precedes* the TOC: a paper opens on its title.
                 body.insert(0, banner)
         pending: _Figure | None = None
+        pending_grid: list[_Figure] = []
 
         def flush_figure() -> None:
-            nonlocal pending
-            if pending is None:
-                return
-            body.append(self._figure_markup(pending, build_dir))
-            pending = None
+            nonlocal pending, pending_grid
+            if pending is not None:
+                body.append(self._figure_markup(pending, build_dir))
+                pending = None
+            if pending_grid:
+                body.append(self._figure_grid_markup(pending_grid, build_dir))
+                pending_grid = []
 
         #: Consecutive list items are emitted as ONE list, so the reader gets a
         #: real list rather than a run of paragraphs that happen to start with a
@@ -2056,7 +2068,6 @@ class TypstDocumentRenderer:
                 continue
 
             if block_type == "image":
-                flush_figure()
                 # The extractor stores the asset path in the element (``asset_id``)
                 # and, for the PDF adapter, repeats it in ``source_text``. Read
                 # both so a caller that populates only one still resolves.
@@ -2064,12 +2075,17 @@ class TypstDocumentRenderer:
                     block.source_text or ""
                 )
                 bbox = block.bbox
-                pending = _Figure(
+                fig = _Figure(
                     asset=asset.strip(),
                     width_pt=(bbox.x1 - bbox.x0) if bbox is not None else None,
                     block_id=block.id,
                     is_picture=str(getattr(block, "flow_id", None) or "") == "caption",
                 )
+                if getattr(self, "enable_grid_figures", False):
+                    pending_grid.append(fig)
+                else:
+                    flush_figure()
+                    pending = fig
                 continue
 
             if block_type == "table":
@@ -2325,7 +2341,13 @@ class TypstDocumentRenderer:
             text = _block_text(block)
             if not text:
                 continue
-            if pending is not None:
+            if getattr(self, "enable_grid_figures", False) and pending_grid:
+                if _binds_as_caption(block, text, pending_grid[-1]):
+                    body.append(self._figure_grid_markup(pending_grid, build_dir, caption=text))
+                    pending_grid = []
+                    continue
+                flush_figure()
+            elif pending is not None:
                 # A ``Figure N …`` / ``表 N …`` label binds regardless of length:
                 # a long caption is still a caption, and an explicit label is a
                 # far stronger signal than the length heuristic. The heuristic
@@ -2501,6 +2523,101 @@ class TypstDocumentRenderer:
             ]
             return "\n".join(lines_fig)
         return f'#figure(image("{target.name}", width: {width}), numbering: none){anchor_suffix}'
+
+    def _figure_grid_markup(
+        self, figures: list[_Figure], build_dir: Path, caption: str = ""
+    ) -> str:
+        """Render one or more figures as a publication-ready Typst grid panel."""
+        from ubt.core.figures.detector import (
+            calculate_grid_columns,
+            extract_main_and_subcaptions,
+        )
+        from ubt.core.figures.generator import render_figure_grid_typst
+        from ubt.core.figures.models import (
+            FigureLayoutConfig,
+            FigureLayoutMode,
+            FigurePanel,
+            SubFigure,
+        )
+
+        cfg = (
+            self.figure_config
+            if isinstance(self.figure_config, FigureLayoutConfig)
+            else FigureLayoutConfig()
+        )
+
+        main_cap, parsed_subs = extract_main_and_subcaptions(caption) if caption else ("", [])
+
+        if len(figures) == 1 and not parsed_subs:
+            single = figures[0]
+            single.caption = caption
+            return self._figure_markup(single, build_dir)
+
+        subfigs: list[SubFigure] = []
+        for i, fig in enumerate(figures):
+            resolved = self._resolve_asset(fig.asset)
+            if resolved is None:
+                self.stats.assets_missing.append((fig.block_id, fig.asset))
+                asset_ref = f"[missing figure: {Path(fig.asset).name or 'unknown'}]"
+            else:
+                target = self._copy_asset(resolved, build_dir)
+                self.stats.figures += 1
+                self.stats.blocks_rendered += 1
+                asset_ref = target.name
+
+            lbl = ""
+            sub_cap = ""
+            if i < len(parsed_subs):
+                lbl, sub_cap = parsed_subs[i]
+            elif cfg.auto_subfigures and len(figures) > 1:
+                char = chr(ord("a") + (i % 26))
+                lbl = f"({char})"
+
+            subfigs.append(
+                SubFigure(
+                    asset=asset_ref,
+                    label=lbl,
+                    caption=sub_cap,
+                    width_pt=fig.width_pt,
+                    block_id=fig.block_id,
+                )
+            )
+
+        cols = calculate_grid_columns(len(subfigs), cfg.max_columns)
+        span_full = any(
+            (sf.width_pt is not None and sf.width_pt >= cfg.max_full_width_threshold_pt)
+            for sf in subfigs
+        )
+
+        anchor_id = ""
+        topology = getattr(self, "citation_topology", None)
+        if topology is not None and caption:
+            from ubt.core.references.extractor import _FIGURE_CAPTION_RE
+            from ubt.core.references.models import ReferenceKind
+
+            m_fig = _FIGURE_CAPTION_RE.search(caption)
+            if m_fig:
+                fig_key = m_fig.group(1).lower()
+                if (ReferenceKind.FIGURE, fig_key) in topology.key_to_anchor:
+                    anchor_id = topology.key_to_anchor[(ReferenceKind.FIGURE, fig_key)]
+
+        panel = FigurePanel(
+            panel_id=f"fig-panel-{len(self.stats.assets_missing) + self.stats.figures}",
+            main_caption=main_cap or caption,
+            subfigures=subfigs,
+            columns=cols,
+            gutter_pt=cfg.gutter_pt,
+            span_full_width=span_full,
+            anchor_id=anchor_id,
+            layout_mode=FigureLayoutMode.GRID,
+        )
+
+        return render_figure_grid_typst(
+            panel,
+            asset_resolver=lambda a: a,
+            prose_renderer=self._prose,
+            config=cfg,
+        )
 
     def _copy_asset(self, resolved: Path, build_dir: Path) -> Path:
         """Copy one figure into ``build_dir`` under a content-addressed name.

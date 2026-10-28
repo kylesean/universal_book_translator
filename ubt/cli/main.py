@@ -21,6 +21,7 @@ from ubt.cli.commands.console import console_command
 from ubt.cli.commands.coref_cmd import coref_app
 from ubt.cli.commands.decor_cmd import decor_app
 from ubt.cli.commands.doctor import doctor_command
+from ubt.cli.commands.figure_cmd import figure_app
 from ubt.cli.commands.glossary_cmd import glossary_app
 from ubt.cli.commands.index_cmd import index_app
 from ubt.cli.commands.kinsoku_cmd import kinsoku_app
@@ -668,6 +669,7 @@ app.add_typer(math_app, name="math")
 app.add_typer(decor_app, name="decor")
 app.add_typer(notes_app, name="notes")
 app.add_typer(backmatter_app, name="backmatter")
+app.add_typer(figure_app, name="figure")
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 
