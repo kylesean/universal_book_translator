@@ -703,6 +703,10 @@ def render_table(
     allow_landscape: bool = False,
     table_scale_factor: float = 1.0,
     is_multipage: bool = False,
+    enable_continuation: bool = False,
+    table_uid: str = "",
+    target_lang: str = "zh",
+    continuation_config: object | None = None,
 ) -> str:
     """Render a Markdown table as a Typst ``#table`` with a three-line frame.
 
@@ -1139,15 +1143,48 @@ def render_table(
     emitted_scale = min(table_scale, float(_TABLE_TEXT_SCALE) * table_scale_factor)
     if scale_out is not None:
         scale_out.append(emitted_scale)
+
+    start_anchor = ""
+    header_continuation_cell = ""
+    footer_continuation_block = ""
+    end_anchor = ""
+
+    if enable_continuation and (is_multipage or len(rows) >= 4):
+        from ubt.core.tables.models import TableContinuationConfig
+        from ubt.core.tables.styler import generate_typst_table_continuation_elements
+
+        t_cfg = (
+            continuation_config
+            if isinstance(continuation_config, TableContinuationConfig)
+            else TableContinuationConfig()
+        )
+        if len(rows) >= t_cfg.min_rows_for_continuation or is_multipage:
+            (
+                start_anchor,
+                header_continuation_cell,
+                footer_continuation_block,
+                end_anchor,
+            ) = generate_typst_table_continuation_elements(
+                columns=columns,
+                table_uid=table_uid or f"tbl-{abs(hash(markup)) % 100000}",
+                lang=target_lang,
+                config=t_cfg,
+                indent=indent,
+            )
+
     if full_page:
         lines = ['#place(top + center, scope: "parent", float: true, rect(width: 98%)[']
         if emitted_scale < 1.0:
             lines.append(f"  #set text(size: {emitted_scale:.2f}em)")
+        if start_anchor:
+            lines.append(f"  {start_anchor}")
         lines.append("  #table(")
     elif landscape:
         lines = ["#page(flipped: true)["]
         if emitted_scale < 1.0:
             lines.append(f"  #set text(size: {emitted_scale:.2f}em)")
+        if start_anchor:
+            lines.append(f"  {start_anchor}")
         lines.append("  #table(")
     else:
         # ``#[`` opens a *content block*; a bare ``[`` is ordinary text in markup
@@ -1162,6 +1199,8 @@ def render_table(
         lines = ["#["]
         if shrink:
             lines.append(f"  #set text(size: {emitted_scale:.2f}em)")
+        if start_anchor:
+            lines.append(f"  {start_anchor}")
         lines.append("  #table(")
     lines += [
         f"{indent}columns: {column_spec},",
@@ -1171,6 +1210,10 @@ def render_table(
         f"{indent}stroke: none,",
         f"{indent}table.header(",
         f"{indent}  repeat: true,",
+    ]
+    if header_continuation_cell:
+        lines.append(header_continuation_cell)
+    lines += [
         f"{indent}  table.hline(stroke: 1.1pt),",
         f"{indent}  {cells(headers, header=True)},",
         f"{indent}  table.hline(stroke: 0.5pt),",
@@ -1179,7 +1222,11 @@ def render_table(
     for row in rows:
         lines.append(f"{indent}{cells(row, header=False)},")
     lines.append(f"{indent}table.hline(stroke: 1.1pt),")
+    if footer_continuation_block:
+        lines.append(footer_continuation_block)
     lines.append(f"{indent})")
+    if end_anchor:
+        lines.append(f"  {end_anchor}")
     lines.append("])" if full_page else "]")
     return "\n".join(lines)
 
@@ -1594,6 +1641,8 @@ class TypstDocumentRenderer:
         backmatter_config: object | None = None,
         enable_grid_figures: bool = False,
         figure_config: object | None = None,
+        enable_table_continuation: bool = False,
+        table_continuation_config: object | None = None,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
@@ -1620,6 +1669,8 @@ class TypstDocumentRenderer:
         self.backmatter_config = backmatter_config
         self.enable_grid_figures = bool(enable_grid_figures)
         self.figure_config = figure_config
+        self.enable_table_continuation = bool(enable_table_continuation)
+        self.table_continuation_config = table_continuation_config
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: ``auto`` is none for a paper (by convention) and one for a book that
         #: carries TOC rows; see :func:`resolve_toc_mode`.
@@ -2104,6 +2155,10 @@ class TypstDocumentRenderer:
                         content_width_pt=table_width,
                         allow_landscape=False,
                         is_multipage=is_multipage,
+                        enable_continuation=getattr(self, "enable_table_continuation", False),
+                        table_uid=f"src-{block.id}",
+                        target_lang=target_lang,
+                        continuation_config=getattr(self, "table_continuation_config", None),
                     )
                     or None
                 )
@@ -2122,6 +2177,10 @@ class TypstDocumentRenderer:
                     allow_landscape=allow_landscape,
                     table_scale_factor=getattr(self, "table_scale_factor", 1.0),
                     is_multipage=is_multipage,
+                    enable_continuation=getattr(self, "enable_table_continuation", False),
+                    table_uid=f"tgt-{block.id}",
+                    target_lang=target_lang,
+                    continuation_config=getattr(self, "table_continuation_config", None),
                 )
                 fell_back = False
                 if not markup:

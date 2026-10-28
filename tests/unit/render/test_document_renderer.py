@@ -1983,3 +1983,55 @@ def test_renderer_with_grid_figures_enabled(tmp_path: Path) -> None:
     assert "*(b)*" in source
     assert "caption: [图 2：性能分析。]" in source
     assert stats.figures == 2
+
+
+def test_renderer_with_table_continuation_enabled(tmp_path: Path) -> None:
+    """Renderer with enable_table_continuation=True emits repeated headers and continuation notices."""
+    from ubt.core.tables.models import TableContinuationConfig
+
+    md_table = (
+        "| 参数 | 基线 | 优化版 |\n"
+        "| --- | --- | --- |\n"
+        "| 吞吐量 | 100 req/s | 550 req/s |\n"
+        "| P99 延迟 | 45ms | 8ms |\n"
+        "| 内存开销 | 2.1GB | 680MB |\n"
+        "| 错误率 | 0.05% | 0.001% |\n"
+        "| 恢复时间 | 30s | 1.2s |\n"
+    )
+
+    blocks = [
+        _block(
+            BlockType.NARRATIVE,
+            block_id="p1",
+            source="System performance comparison across versions:",
+            target="各版本系统性能对比总结：",
+        ),
+        _block(
+            BlockType.TABLE,
+            block_id="tbl1",
+            source=md_table,
+            target=md_table,
+        ),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="p2",
+            source="Further analysis follow up.",
+            target="后续深度分析正文。",
+        ),
+    ]
+
+    cfg = TableContinuationConfig(min_rows_for_continuation=4)
+    renderer = TypstDocumentRenderer(
+        enable_table_continuation=True,
+        table_continuation_config=cfg,
+    )
+    source, stats = renderer.build_source(blocks, tmp_path / "build_tbl")
+
+    # Table continuation anchors and header/footer cells are emitted
+    assert "<ubt-tbl-start-tgt-tbl1>" in source
+    assert "<ubt-tbl-end-tgt-tbl1>" in source
+    assert "table.header(" in source
+    assert "（续表）" in source
+    assert "table.footer(" in source
+    assert "（续下页）" in source
+    assert stats.tables == 1
