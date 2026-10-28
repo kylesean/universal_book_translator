@@ -1625,7 +1625,13 @@ class TypstDocumentRenderer:
             from ubt.render.typst.container_repair import inject_soft_breaks
 
             text = inject_soft_breaks(text)
-        return render_prose(text, runs, is_math_ok=self._math_gate)
+        rendered = render_prose(text, runs, is_math_ok=self._math_gate)
+        topology = getattr(self, "citation_topology", None)
+        if topology is not None:
+            from ubt.core.references.linker import inject_hyperlinks
+
+            rendered = inject_hyperlinks(rendered, topology, target_format="typst")
+        return rendered
 
     def _prewarm_math_gate(self, blocks: Sequence[IRBlock]) -> None:
         """Resolve every not-yet-known math body in one batched probe.
@@ -1737,6 +1743,9 @@ class TypstDocumentRenderer:
         self.stats = ReflowStats()
         build_dir.mkdir(parents=True, exist_ok=True)
         self._prewarm_math_gate(blocks)
+        from ubt.core.references.linker import build_citation_topology
+
+        self.citation_topology = build_citation_topology(blocks)
         body: list[str] = []
 
         # Table of contents: the reader records ``toc_entry`` per row so the TOC
@@ -1884,10 +1893,25 @@ class TypstDocumentRenderer:
                     continue
                 flush_figure()
                 level = _heading_level(block)
+                anchor_suffix = ""
+                topology = getattr(self, "citation_topology", None)
+                if topology is not None:
+                    from ubt.core.references.extractor import _HEADING_NUMBER_RE
+                    from ubt.core.references.models import ReferenceKind
+
+                    m_sec = _HEADING_NUMBER_RE.match(text) or _HEADING_NUMBER_RE.match(
+                        block.source_text or ""
+                    )
+                    if m_sec:
+                        sec_key = (m_sec.group(1) or m_sec.group(2) or m_sec.group(3)).lower()
+                        if (ReferenceKind.HEADING, sec_key) in topology.key_to_anchor:
+                            aid = topology.key_to_anchor[(ReferenceKind.HEADING, sec_key)]
+                            anchor_suffix = f" <{aid}>"
+
                 body.append(
                     self._maybe_pair(
                         block,
-                        f"#heading(level: {level})[{self._prose(text, block_runs(block))}]",
+                        f"#heading(level: {level})[{self._prose(text, block_runs(block))}]{anchor_suffix}",
                     )
                 )
                 self.stats.blocks_rendered += 1
@@ -1988,6 +2012,21 @@ class TypstDocumentRenderer:
                 # flag, never a skip: the translated cells shipped.
                 if table_scale and table_scale[0] <= _TABLE_MIN_TEXT_SCALE + 1e-6:
                     self.last_render_flags.append((block.id, "low_legibility_font"))
+
+                topology = getattr(self, "citation_topology", None)
+                if topology is not None:
+                    from ubt.core.references.extractor import _TABLE_CAPTION_RE
+                    from ubt.core.references.models import ReferenceKind
+
+                    m_tbl = _TABLE_CAPTION_RE.search(source_text) or _TABLE_CAPTION_RE.search(
+                        target_text
+                    )
+                    if m_tbl:
+                        tbl_key = m_tbl.group(1).lower()
+                        if (ReferenceKind.TABLE, tbl_key) in topology.key_to_anchor:
+                            aid = topology.key_to_anchor[(ReferenceKind.TABLE, tbl_key)]
+                            markup = f"{markup} <{aid}>"
+
                 # A bilingual pair whose target fell back to the source grid
                 # would show the same grid twice; pair only a genuine
                 # translation against the source.
@@ -2105,7 +2144,20 @@ class TypstDocumentRenderer:
                 flush_figure()
                 kept = (block.source_text or "").strip()
                 if kept:
-                    body.append(self._prose(kept))
+                    anchor_prefix = ""
+                    topology = getattr(self, "citation_topology", None)
+                    if topology is not None:
+                        from ubt.core.references.extractor import _BIB_ITEM_STARTER_RE
+                        from ubt.core.references.models import ReferenceKind
+
+                        m_bib = _BIB_ITEM_STARTER_RE.match(kept)
+                        if m_bib:
+                            bib_key = (m_bib.group(1) or m_bib.group(2)).lower()
+                            if (ReferenceKind.BIBLIOGRAPHY, bib_key) in topology.key_to_anchor:
+                                aid = topology.key_to_anchor[(ReferenceKind.BIBLIOGRAPHY, bib_key)]
+                                anchor_prefix = f"[#metadata(()) <{aid}>] "
+
+                    body.append(f"{anchor_prefix}{self._prose(kept)}")
                     self.stats.blocks_rendered += 1
                 continue
 
@@ -2216,11 +2268,6 @@ class TypstDocumentRenderer:
         resolved = self._resolve_asset(figure.asset)
         if resolved is None:
             self.stats.assets_missing.append((figure.block_id, figure.asset))
-            # A missing asset must not silently vanish from the page: leave a
-            # visible placeholder so the gap is attributable. The caption is
-            # rendered too — it is translated prose that the reader needs, and
-            # it is the *only* surviving description of what the picture showed,
-            # which makes dropping it worse here than anywhere else.
             note = escape_markup(f"[missing figure: {Path(figure.asset).name or 'unknown'}]")
             if figure.caption:
                 return (
@@ -2231,29 +2278,34 @@ class TypstDocumentRenderer:
         target = self._copy_asset(resolved, build_dir)
         self.stats.figures += 1
         self.stats.blocks_rendered += 1
-        # A graphic renders at its own physical width when that is narrower than
-        # the text block, and at the default cap otherwise. Sizing everything to
-        # ``figure_width`` stretched a 121pt logo to 420pt (3.5x) and distorted
-        # its aspect; a wide figure still fills the column. The threshold keeps a
-        # full-width figure on the cap and lets a small mark stay small.
         width = self.figure_width
         if figure.width_pt is not None and 0 < figure.width_pt < _FIGURE_NATIVE_MAX_PT:
-            # Relative to the container, so the same figure fits a single-column
-            # page (470.55pt) and a two-column one (228.98pt): Typst resolves
-            # "100%" against whatever the enclosing column is. An absolute "pt"
-            # width is laid out at that size no matter how narrow the column is,
-            # which is how a 290pt graphic crossed the gutter on the academic
-            # template.
             ratio = min(figure.width_pt / _FIGURE_REFERENCE_TEXT_WIDTH_PT, 1.0) * 100.0
             width = f"{ratio:.1f}%"
+
+        anchor_suffix = ""
+        topology = getattr(self, "citation_topology", None)
+        if topology is not None and figure.caption:
+            from ubt.core.references.extractor import _FIGURE_CAPTION_RE
+            from ubt.core.references.models import ReferenceKind
+
+            m_fig = _FIGURE_CAPTION_RE.search(figure.caption)
+            if m_fig:
+                fig_key = m_fig.group(1).lower()
+                if (ReferenceKind.FIGURE, fig_key) in topology.key_to_anchor:
+                    aid = topology.key_to_anchor[(ReferenceKind.FIGURE, fig_key)]
+                    anchor_suffix = f" <{aid}>"
+
         if figure.caption:
-            return (
-                "#figure(\n"
-                f'  image("{target.name}", width: {width}),\n'
-                f"  caption: [{self._prose(figure.caption)}],\n"
-                "  numbering: none,\n)"
-            )
-        return f'#figure(image("{target.name}", width: {width}), numbering: none)'
+            lines_fig = [
+                "#figure(",
+                f'  image("{target.name}", width: {width}),',
+                f"  caption: [{self._prose(figure.caption)}],",
+                "  numbering: none,",
+                f"){anchor_suffix}",
+            ]
+            return "\n".join(lines_fig)
+        return f'#figure(image("{target.name}", width: {width}), numbering: none){anchor_suffix}'
 
     def _copy_asset(self, resolved: Path, build_dir: Path) -> Path:
         """Copy one figure into ``build_dir`` under a content-addressed name.
