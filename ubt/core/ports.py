@@ -27,7 +27,7 @@ call site). If nothing calls a piece of surface, it does not belong here.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
@@ -38,8 +38,10 @@ if TYPE_CHECKING:
     # Type-only edges: they keep the port's signature checked against the
     # stage contracts without entering the runtime import graph. The layering
     # invariant forbids *module-level* edges only; a TYPE_CHECKING edge is not one.
+    from ubt.adapters.pdf.artifact_text import ArtifactReport
     from ubt.adapters.pdf.engine_selector import PDFRoutePlan
     from ubt.adapters.pdf.extraction_witness import PageVerdict
+    from ubt.adapters.pdf.font_probe import FontStack
     from ubt.adapters.pdf.page_profiler import PageKind
     from ubt.adapters.pdf.visual_gate import VisualGateResult
     from ubt.segment.placeholders import MaskedSource, PlaceholderEngine
@@ -460,6 +462,34 @@ def sample_pdf_pages(input_path: Path) -> tuple[int, bool, str]:
     return _sample(input_path)
 
 
+def reject_encrypted_pdf(path: Path) -> None:
+    """Refuse an encrypted PDF early with an actionable message."""
+    from ubt.adapters.pdf.encryption import reject_encrypted_pdf as _reject
+
+    _reject(path)
+
+
+def resolve_font_for_render(
+    target_lang: str,
+    font_override: str | None = None,
+) -> FontStack:
+    """Resolve font availability for a given target language."""
+    from ubt.adapters.pdf.font_probe import resolve_for_render as _resolve
+
+    return cast("FontStack", _resolve(target_lang, font_override=font_override))
+
+
+def check_artifact(
+    blocks: Sequence[IRBlock],
+    translations: Mapping[str, str],
+    rendered_path: Path,
+) -> ArtifactReport:
+    """Check whether the delivered PDF artifact carries each text block's realization."""
+    from ubt.adapters.pdf.artifact_text import check_artifact as _check
+
+    return cast("ArtifactReport", _check(blocks, translations, rendered_path))
+
+
 # --------------------------------------------------------------------------- #
 # Translation-unit layer bridges (``ubt.segment`` / ``ubt.translate``).
 # --------------------------------------------------------------------------- #
@@ -510,3 +540,30 @@ def translation_engine(
         prompt_version=prompt_version,
         cache=cache,
     )
+
+
+def export_xliff(
+    blocks: list[IRBlock],
+    *,
+    src_lang: str,
+    trg_lang: str,
+    original: str = "",
+    job_id: str = "",
+) -> tuple[str, int] | None:
+    """Generate XLIFF companion XML content and segment count without a core import edge."""
+    from ubt.segment.document import segments_from_blocks
+    from ubt.segment.placeholders import default_placeholder_engine
+    from ubt.segment.xliff import to_xliff
+
+    engine = default_placeholder_engine()
+    segments = segments_from_blocks(blocks, engine=engine)
+    if not segments:
+        return None
+    xml = to_xliff(
+        segments,
+        src_lang=src_lang,
+        trg_lang=trg_lang,
+        original=original,
+        job_id=job_id,
+    )
+    return xml, len(segments)

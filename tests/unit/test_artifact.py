@@ -29,9 +29,9 @@ from ubt.adapters.pdf.artifact_text import (
     _tokenize,
 )
 from ubt.core.ir.models import BlockType, IRBlock, make_element
+from ubt.core.job_options import DeliveredArtifact, delivered_artifact
 from ubt.core.qe.fast_pass import REHEARSAL_MARKER, strip_rehearsal_marker
 from ubt.model.ast import RegionKind
-from ubt.pipeline.artifact import DeliveredArtifact, delivered_artifact
 
 pytestmark = pytest.mark.fast
 

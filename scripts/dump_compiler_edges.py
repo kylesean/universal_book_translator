@@ -94,71 +94,107 @@ def scan(path: Path):
     return top, lazy
 
 
-print("== 模块级 core→编译器包 ==")
-n = 0
-forbidden = 0
-for f in sorted(Path("ubt/core").rglob("*.py")):
-    for ln, mod in scan(f)[0]:
-        if any(mod == c or mod.startswith(c + ".") for c in COMPILER):
-            print(f"  {f}:{ln} -> {mod}")
-            n += 1
-            if not (mod == _EXEMPT_LEAF or mod.startswith(_EXEMPT_LEAF + ".")):
-                forbidden += 1
-print(f"  合计: {n}（验收：pipeline/segment/translate 三类 = 0）")
+def main() -> int:
+    print("== 模块级 core→编译器包 ==")
+    n = 0
+    forbidden = 0
+    for f in sorted(Path("ubt/core").rglob("*.py")):
+        for ln, mod in scan(f)[0]:
+            if any(mod == c or mod.startswith(c + ".") for c in COMPILER):
+                print(f"  {f}:{ln} -> {mod}")
+                n += 1
+                if not (mod == _EXEMPT_LEAF or mod.startswith(_EXEMPT_LEAF + ".")):
+                    forbidden += 1
+    print(f"  合计: {n}（验收：pipeline/segment/translate 三类 = 0）")
 
-# ``core`` is the domain layer: it must not import an adapter. Without this the
-# gate only watched the compiler packages, so any core module that reached for
-# ``ubt.adapters`` (docling, typst, playwright) passed CI green while dragging
-# those trees into the domain's import graph — the exact edge
-# ARCHITECTURE.md says is forbidden and claims is enforced.
-#
-# ``sys.modules`` lookups from a function body and ``TYPE_CHECKING`` imports do
-# not enter the runtime graph and are excluded by ``scan``.
-adapters_forbidden: list[tuple[str, int, str]] = []
-for f in sorted(Path("ubt/core").rglob("*.py")):
-    for ln, mod in scan(f)[0]:
-        if mod == "ubt.adapters" or mod.startswith("ubt.adapters."):
-            adapters_forbidden.append((str(f), ln, mod))
-if adapters_forbidden:
-    print("== 模块级 core→adapters（验收：0）==")
-    for f, ln, mod in adapters_forbidden:
-        print(f"  {f}:{ln} -> {mod}")
-else:
-    print("== 模块级 core→adapters（验收：0）: 0 ==")
+    # ``core`` is the domain layer: it must not import an adapter. Without this the
+    # gate only watched the compiler packages, so any core module that reached for
+    # ``ubt.adapters`` (docling, typst, playwright) passed CI green while dragging
+    # those trees into the domain's import graph — the exact edge
+    # ARCHITECTURE.md says is forbidden and claims is enforced.
+    #
+    # ``sys.modules`` lookups from a function body and ``TYPE_CHECKING`` imports do
+    # not enter the runtime graph and are excluded by ``scan``.
+    adapters_forbidden: list[tuple[str, int, str]] = []
+    for f in sorted(Path("ubt/core").rglob("*.py")):
+        for ln, mod in scan(f)[0]:
+            if mod == "ubt.adapters" or mod.startswith("ubt.adapters."):
+                adapters_forbidden.append((str(f), ln, mod))
+    if adapters_forbidden:
+        print("== 模块级 core→adapters（验收：0）==")
+        for f_path, ln, mod in adapters_forbidden:
+            print(f"  {f_path}:{ln} -> {mod}")
+    else:
+        print("== 模块级 core→adapters（验收：0）: 0 ==")
 
-edges: dict[str, set[str]] = {}
-for f in Path("ubt").rglob("*.py"):
-    src = pkg_of(f)
-    for _, mod in scan(f)[0]:
-        if mod.startswith("ubt."):
-            parts = mod.split(".")
-            cand = Path(*parts, "__init__.py")
-            tgt = pkg_of(cand if cand.exists() else Path(*parts, "x.py"))
-            if tgt != src:
-                edges.setdefault(src, set()).add(tgt)
+    edges: dict[str, set[str]] = {}
+    for f in Path("ubt").rglob("*.py"):
+        src = pkg_of(f)
+        for _, mod in scan(f)[0]:
+            if mod.startswith("ubt."):
+                parts = mod.split(".")
+                cand = Path(*parts, "__init__.py")
+                tgt = pkg_of(cand if cand.exists() else Path(*parts, "x.py"))
+                if tgt != src:
+                    edges.setdefault(src, set()).add(tgt)
 
-a, b = "ubt.core.engine", "ubt.pipeline"
-ab, ba = b in edges.get(a, set()), a in edges.get(b, set())
-cycle = ab and ba
-print(f"== {a} <-> {b}: cycle={cycle}（验收：False）==")
+    a, b = "ubt.core.engine", "ubt.pipeline"
+    ab, ba = b in edges.get(a, set()), a in edges.get(b, set())
+    cycle = ab and ba
+    print(f"== {a} <-> {b}: cycle={cycle}（验收：False）==")
 
-# Render toolbox is a DOWNSTREAM-free layer: ubt/render may not reach back
-# into ubt/adapters at module level. The one edge that made this a real
-# package-level cycle (render/typst/math_transpiler importing the
-# adapters/pdf/typst_symbols shim) is gone; keep it gone.
-render_violations: list[str] = []
-for src, tgts in sorted(edges.items()):
-    if src == "ubt.render" or src.startswith("ubt.render."):
-        for tgt in sorted(tgts):
-            if tgt == "ubt.adapters" or tgt.startswith("ubt.adapters."):
-                render_violations.append(f"{src} -> {tgt}")
-if render_violations:
-    print("== render→adapters 模块级边（验收：0）==")
-    for edge in render_violations:
-        print(f"  {edge}")
-else:
-    print("== render→adapters 模块级边（验收：0）: 0 ==")
+    # Render toolbox is a DOWNSTREAM-free layer: ubt/render may not reach back
+    # into ubt/adapters at module level. The one edge that made this a real
+    # package-level cycle (render/typst/math_transpiler importing the
+    # adapters/pdf/typst_symbols shim) is gone; keep it gone.
+    render_violations: list[str] = []
+    for src, tgts in sorted(edges.items()):
+        if src == "ubt.render" or src.startswith("ubt.render."):
+            for tgt in sorted(tgts):
+                if tgt == "ubt.adapters" or tgt.startswith("ubt.adapters."):
+                    render_violations.append(f"{src} -> {tgt}")
+    if render_violations:
+        print("== render→adapters 模块级边（验收：0）==")
+        for edge in render_violations:
+            print(f"  {edge}")
+    else:
+        print("== render→adapters 模块级边（验收：0）: 0 ==")
 
-raise SystemExit(
-    0 if forbidden == 0 and not cycle and not render_violations and not adapters_forbidden else 1
-)
+    # --------------------------------------------------------------------------- #
+    # Port-boundary invariant: within ubt.core, only ubt/core/ports.py is
+    # permitted to contain function-level (lazy) bridges into ubt.adapters or the
+    # compiler packages (ubt.pipeline, ubt.segment, ubt.translate).
+    # Any lazy import elsewhere in ubt.core is an architectural leak bypassing the
+    # designated port bridge.
+    # --------------------------------------------------------------------------- #
+    lazy_leaks: list[tuple[str, int, str]] = []
+    for f in sorted(Path("ubt/core").rglob("*.py")):
+        if f.name == "ports.py":
+            continue
+        for ln, mod in scan(f)[1]:
+            for bad in ("ubt.adapters", "ubt.pipeline", "ubt.segment", "ubt.translate"):
+                if mod == bad or mod.startswith(bad + "."):
+                    lazy_leaks.append((str(f), ln, mod))
+
+    if lazy_leaks:
+        print("== 形式主义 lazy import 违规（核心域绕过 ports.py 验收：0）==")
+        for f_str, ln, mod in lazy_leaks:
+            print(f"  {f_str}:{ln} -> {mod}")
+    else:
+        print("== 函数级 core→adapters/compiler（仅限 ports.py，其他模块验收：0）: 0 ==")
+
+    return (
+        0
+        if forbidden == 0
+        and not cycle
+        and not render_violations
+        and not adapters_forbidden
+        and not lazy_leaks
+        else 1
+    )
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())

@@ -424,15 +424,15 @@ class AgentTranslationService:
         placeholder_engine: PlaceholderEngine | None = None,
     ) -> None:
         self.config = config
-        # Deferred: ubt.segment / ubt.translate.engine are compiler layer, and
-        # the layering invariant forbids module-level core imports of them.
-        # With `from __future__ import annotations` the signature annotation
-        # needs nothing at runtime; only these calls do.
-        from ubt.segment.placeholders import default_placeholder_engine
-        from ubt.translate.engine import TranslationEngine
+        from ubt.core.ports import (
+            placeholder_engine as default_placeholder_engine,
+        )
+        from ubt.core.ports import (
+            translation_engine,
+        )
 
         self.placeholders = placeholder_engine or default_placeholder_engine()
-        self.engine = TranslationEngine(
+        self.engine = translation_engine(
             placeholders=self.placeholders,
             model="agent-host",
             prompt_version="agent-v1",

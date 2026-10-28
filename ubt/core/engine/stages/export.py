@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from ubt.adapters.pdf.artifact_text import ArtifactReport
     from ubt.adapters.pdf.visual_gate import VisualGateResult
     from ubt.core.content.contract import ReconciliationReport
-    from ubt.pipeline.artifact import DeliveredArtifact
+    from ubt.core.job_options import DeliveredArtifact
 from ubt.core.engine.facts import RenderPlan, Terminology
 from ubt.core.engine.services import RunServices
 from ubt.core.qe.defect_taxonomy import UNTRANSLATED_PREFIX
@@ -1029,31 +1029,25 @@ def _write_xliff_companion(
         return None
     try:
         from ubt.core.job_options import companion_path
+        from ubt.core.ports import export_xliff
 
-        # Lazy: the compiler packages depend on core; a module-level edge would
-        # reverse the layering.
-        from ubt.segment.document import segments_from_blocks
-        from ubt.segment.placeholders import default_placeholder_engine
-        from ubt.segment.xliff import to_xliff
-
-        engine = default_placeholder_engine()
-        segments = segments_from_blocks(blocks, engine=engine)
-        if not segments:
-            return None
-        xml = to_xliff(
-            segments,
+        res = export_xliff(
+            blocks,
             src_lang=ctx.source_lang or "en",
             trg_lang=ctx.target_lang,
             original=Path(ctx.input_path).name,
             job_id=ctx.job_id,
         )
+        if not res:
+            return None
+        xml, segment_count = res
         path = companion_path(rendered_path, ".xliff")
         atomic_write_text(path, xml, encoding="utf-8")
         logger.info(
             "XLIFF companion for job %s: %s (%d segment(s))",
             ctx.job_id,
             path.name,
-            len(segments),
+            segment_count,
         )
         return path
     except Exception as exc:  # a companion must never sink the delivery
@@ -1153,8 +1147,8 @@ def _write_artifact_check(
     if not ctx.config.emit_attestation_shadow:
         return None
     try:
-        from ubt.adapters.pdf.artifact_text import check_artifact
         from ubt.core.job_options import companion_path
+        from ubt.core.ports import check_artifact
 
         artifact = check_artifact(blocks, translations, rendered_path)
         payload: dict[str, Any] = {"artifact": _artifact_payload(artifact)}
@@ -1187,7 +1181,7 @@ def _font_delivery_for(ctx: StageContext) -> dict[str, Any] | None:
     as a measured one.
     """
     try:
-        from ubt.adapters.pdf.font_probe import resolve_for_render
+        from ubt.core.ports import resolve_font_for_render as resolve_for_render
 
         stack = resolve_for_render(
             ctx.manifest.target_lang,
@@ -1566,7 +1560,7 @@ async def run_export_stage(
     # render-mode override plumbing.
     # The two artifact identities (requested target vs returned file, which the
     # visual gate may have rewritten) named once, where the render returns.
-    from ubt.pipeline.artifact import delivered_artifact
+    from ubt.core.job_options import delivered_artifact
 
     artifact = delivered_artifact(rendered_path, target_output)
     secondary_path = await _render_complementary_artifact(
