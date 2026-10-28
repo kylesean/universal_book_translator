@@ -63,6 +63,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+import pydantic
+
 from ubt.core.router.capabilities import (
     ExtractionStrategy,
     ModelProfile,
@@ -184,7 +186,7 @@ def _parse_profile_item(item: Any, source: str) -> ModelProfile | None:
         return None
     try:
         return ModelProfile(**item)
-    except Exception as exc:
+    except (pydantic.ValidationError, TypeError, ValueError) as exc:
         # ``ModelProfile`` forbids unknown keys, so this also reports a
         # misspelled capability instead of letting it fall back to the default.
         logger.warning(

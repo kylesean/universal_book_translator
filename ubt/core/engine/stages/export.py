@@ -1057,7 +1057,7 @@ def _write_xliff_companion(
         )
         return path
     except Exception as exc:  # a companion must never sink the delivery
-        logger.warning("XLIFF companion skipped for job %s: %s", ctx.job_id, exc)
+        logger.warning("XLIFF companion skipped for job %s: %s", ctx.job_id, exc, exc_info=True)
         return None
 
 
@@ -1094,7 +1094,7 @@ def _write_html_view(
         logger.info("HTML view for job %s: %s", ctx.job_id, path.name)
         return path
     except Exception as exc:  # a view must never sink the delivery
-        logger.warning("HTML view skipped for job %s: %s", ctx.job_id, exc)
+        logger.warning("HTML view skipped for job %s: %s", ctx.job_id, exc, exc_info=True)
         return None
 
 
@@ -1125,7 +1125,7 @@ def _write_epub_view(
         logger.info("EPUB view for job %s: %s", ctx.job_id, path.name)
         return path
     except Exception as exc:  # a view must never sink the delivery
-        logger.warning("EPUB view skipped for job %s: %s", ctx.job_id, exc)
+        logger.warning("EPUB view skipped for job %s: %s", ctx.job_id, exc, exc_info=True)
         return None
 
 
@@ -1169,7 +1169,7 @@ def _write_artifact_check(
         atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
     except Exception as exc:  # an audit companion must never sink the delivery
-        logger.warning("Artifact check skipped for job %s: %s", ctx.job_id, exc)
+        logger.warning("Artifact check skipped for job %s: %s", ctx.job_id, exc, exc_info=True)
         return None
 
 

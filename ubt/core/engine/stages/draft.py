@@ -872,6 +872,14 @@ class _DraftProcessor:
                     )
             except (asyncio.CancelledError, JobInterruptedError, BudgetExceededError):
                 raise
+            except (AssertionError, TypeError, AttributeError, NameError, UnboundLocalError) as exc:
+                logger.critical(
+                    "Programming defect encountered during drafting for block %s: %s",
+                    block.id,
+                    exc,
+                    exc_info=True,
+                )
+                raise
             except Exception as exc:
                 retryable = classify_provider_error(exc).retryable
                 if retryable:
@@ -879,13 +887,6 @@ class _DraftProcessor:
                 else:
                     self.runtime.fail_fast_consecutive += 1
                     self.runtime.last_fail_fast_reason = str(exc)
-                if isinstance(exc, (TypeError, AttributeError, NameError, UnboundLocalError)):
-                    logger.error(
-                        "Programming defect encountered during drafting for block %s: %s",
-                        block.id,
-                        exc,
-                        exc_info=True,
-                    )
                 # A non-retryable failure is recorded under a prefix the resume
                 # path does NOT treat as transient: the same 401/402/400 recurs
                 # on every run, so re-queueing the block only re-bills it.
@@ -972,6 +973,19 @@ class _DraftProcessor:
                             await asyncio.sleep(delay)
                 except (asyncio.CancelledError, JobInterruptedError, BudgetExceededError):
                     raise
+                except (
+                    AssertionError,
+                    TypeError,
+                    AttributeError,
+                    NameError,
+                    UnboundLocalError,
+                ) as exc:
+                    logger.critical(
+                        "Programming defect encountered during macro-chunk drafting: %s",
+                        exc,
+                        exc_info=True,
+                    )
+                    raise
                 except Exception as exc:
                     logger.warning(
                         "Macro-chunk draft failed for %d blocks (%s); redrafting blocks individually",
@@ -999,11 +1013,26 @@ class _DraftProcessor:
                     clean_by_id[b.id] = await self.finalize_draft(b, text.strip(), inp)
                 except (asyncio.CancelledError, JobInterruptedError, BudgetExceededError):
                     raise
+                except (
+                    AssertionError,
+                    TypeError,
+                    AttributeError,
+                    NameError,
+                    UnboundLocalError,
+                ) as exc:
+                    logger.critical(
+                        "Programming defect encountered finalizing block %s: %s",
+                        b.id,
+                        exc,
+                        exc_info=True,
+                    )
+                    raise
                 except Exception as exc:
                     logger.warning(
                         "Finalizing macro-chunk block %s failed (%s); marking only it",
                         b.id,
                         exc,
+                        exc_info=True,
                     )
                     prefix = _draft_failure_prefix(exc)
                     await self.runtime.flusher.enqueue(
@@ -1154,7 +1183,9 @@ def _persist_memory_state(
     try:
         ledger.set_job_metadata_value(actual_job_id, "memory_state", state)
     except Exception as exc:
-        logger.warning("Failed to persist rolling memory state for %s: %s", actual_job_id, exc)
+        logger.warning(
+            "Failed to persist rolling memory state for %s: %s", actual_job_id, exc, exc_info=True
+        )
 
 
 def _restore_memory_state(
@@ -1169,7 +1200,9 @@ def _restore_memory_state(
     try:
         memory_mgr.restore_state(raw)
     except Exception as exc:
-        logger.warning("Failed to restore rolling memory state for %s: %s", actual_job_id, exc)
+        logger.warning(
+            "Failed to restore rolling memory state for %s: %s", actual_job_id, exc, exc_info=True
+        )
         return
     logger.info(
         "Restored hierarchical memory state for %s (%d L2 snapshots, %d L3 epochs)",
@@ -1439,7 +1472,9 @@ async def run_draft_stage(
                         router.complete_raw, target_lang=target_lang
                     )
                 except Exception as exc:
-                    logger.warning("Hierarchical step snapshot generation failed: %s", exc)
+                    logger.warning(
+                        "Hierarchical step snapshot generation failed: %s", exc, exc_info=True
+                    )
                 if rolling_enabled:
                     await asyncio.to_thread(
                         _persist_memory_state, ledger, actual_job_id, memory_mgr
@@ -1470,7 +1505,9 @@ async def run_draft_stage(
                         router.complete_raw, target_lang=target_lang
                     )
                 except Exception as exc:
-                    logger.warning("Hierarchical step snapshot generation failed: %s", exc)
+                    logger.warning(
+                        "Hierarchical step snapshot generation failed: %s", exc, exc_info=True
+                    )
                 if rolling_enabled:
                     await asyncio.to_thread(
                         _persist_memory_state, ledger, actual_job_id, memory_mgr
@@ -1529,7 +1566,10 @@ async def run_draft_stage(
                     )
                 except Exception as exc:
                     logger.warning(
-                        "Chapter-end hierarchical snapshot failed for %s: %s", actual_job_id, exc
+                        "Chapter-end hierarchical snapshot failed for %s: %s",
+                        actual_job_id,
+                        exc,
+                        exc_info=True,
                     )
             await asyncio.to_thread(_persist_memory_state, ledger, actual_job_id, memory_mgr)
         memory_mgr.discard_pending_blocks()

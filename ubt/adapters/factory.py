@@ -104,6 +104,7 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
                     "Content probe failed on '%s' (%s); defaulting engine to 'pdfium'.",
                     path.name,
                     exc,
+                    exc_info=True,
                 )
                 plan = None
             if plan is None:

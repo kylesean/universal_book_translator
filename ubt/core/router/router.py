@@ -969,6 +969,17 @@ class ModelRouter:
                 # protect, and rewrapping it as "Unexpected provider error" hides
                 # the real cause from the caller.
                 raise
+            except (
+                AssertionError,
+                TypeError,
+                AttributeError,
+                NameError,
+                NotImplementedError,
+            ) as err:
+                logger.critical(
+                    "Programming defect encountered in ModelRouter: %s", err, exc_info=True
+                )
+                raise
             except Exception as exc:
                 retries += 1
                 if retries > self.max_retries:
@@ -1075,6 +1086,17 @@ class ModelRouter:
                 # cooperative cancel here would let a still-billing generation
                 # continue as if nothing happened.
                 raise
+            except (
+                AssertionError,
+                TypeError,
+                AttributeError,
+                NameError,
+                NotImplementedError,
+            ) as err:
+                logger.critical(
+                    "Programming defect encountered during continuation: %s", err, exc_info=True
+                )
+                raise
             except Exception as exc:
                 # Any failure of the *continuation* keeps the already-produced
                 # partial: the primary call succeeded and was billed, and half a
@@ -1086,7 +1108,9 @@ class ModelRouter:
                         await self.rate_limiter.report_429_async()
                     else:
                         self.rate_limiter.report_429()
-                logger.warning("Continuation call failed, keeping partial output: %s", exc)
+                logger.warning(
+                    "Continuation call failed, keeping partial output: %s", exc, exc_info=True
+                )
                 return text
             text = _merge_continuation(text, continuation)
             if finish_reason != "length":

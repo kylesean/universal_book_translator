@@ -155,8 +155,8 @@ def _read_shipped_prices() -> dict[str, PriceEntry]:
     try:
         with _SHIPPED_PRICES_REGISTRY.open("rb") as f:
             data = tomllib.load(f)
-    except Exception as exc:
-        logger.warning("Failed to parse shipped prices.toml: %s", exc)
+    except (tomllib.TOMLDecodeError, OSError) as exc:
+        logger.warning("Failed to parse shipped prices.toml: %s", exc, exc_info=True)
         return {}
     raw_prices = data.get("prices", {})
     if not isinstance(raw_prices, dict):
@@ -198,8 +198,8 @@ def _load_prices_cached(signature: tuple[str | None, int, int]) -> dict[str, Pri
     try:
         with Path(path_str).open("rb") as f:
             data = tomllib.load(f)
-    except Exception as exc:
-        logger.warning("Failed to parse user prices file %s: %s", path_str, exc)
+    except (tomllib.TOMLDecodeError, OSError) as exc:
+        logger.warning("Failed to parse user prices file %s: %s", path_str, exc, exc_info=True)
         return table
     raw = data.get("prices", {})
     if isinstance(raw, dict):
