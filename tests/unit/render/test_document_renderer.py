@@ -1865,3 +1865,59 @@ def test_renderer_with_notes_enabled(tmp_path: Path) -> None:
     assert "#link(<fn-ch1-1>)[#super[1]]" in source_end
     assert "#heading(level: 2)[注释]" in source_end
     assert "Herlihy 与 Wing 于 1990 年提出。" in source_end
+
+
+def test_renderer_with_backmatter_enabled(tmp_path: Path) -> None:
+    """Renderer with enable_backmatter=True resets heading counter and numbers appendices."""
+    from ubt.core.backmatter.models import BackmatterConfig
+
+    blocks = [
+        _block(
+            BlockType.HEADING,
+            block_id="h1",
+            source="Chapter 1: Foundations",
+            target="第 1 章：基础理论",
+        ),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="p1",
+            source="Main prose content.",
+            target="正文基础理论描述。",
+        ),
+        _block(
+            BlockType.HEADING,
+            block_id="app1",
+            source="Appendix: Proofs",
+            target="附录：定理证明",
+        ),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="p_app",
+            source="Proof content.",
+            target="证明细节内容。",
+        ),
+        _block(
+            BlockType.HEADING,
+            block_id="bib",
+            source="References",
+            target="参考文献",
+        ),
+        _block(
+            BlockType.NARRATIVE,
+            block_id="p_bib",
+            source="[1] Reference item.",
+            target="[1] 参考文献条目。",
+        ),
+    ]
+
+    cfg = BackmatterConfig(appendix_numbering="A.1")
+    renderer = TypstDocumentRenderer(enable_backmatter=True, backmatter_config=cfg)
+    source, _ = renderer.build_source(blocks, tmp_path / "build_bm")
+
+    # Appendix mode switch is emitted
+    assert "#counter(heading).update(0)" in source
+    assert '#set heading(numbering: "A.1")' in source
+    # Appendix heading rendered with letter A
+    assert "附录 A：定理证明" in source
+    # References heading rendered with numbering: none
+    assert "#heading(level: 1, numbering: none)[参考文献]" in source

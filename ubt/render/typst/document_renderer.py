@@ -1585,6 +1585,8 @@ class TypstDocumentRenderer:
         decor_spec: object | None = None,
         enable_notes: bool = False,
         notes_config: object | None = None,
+        enable_backmatter: bool = False,
+        backmatter_config: object | None = None,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
@@ -1607,6 +1609,8 @@ class TypstDocumentRenderer:
         self.decor_spec = decor_spec
         self.enable_notes = bool(enable_notes)
         self.notes_config = notes_config
+        self.enable_backmatter = bool(enable_backmatter)
+        self.backmatter_config = backmatter_config
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: ``auto`` is none for a paper (by convention) and one for a book that
         #: carries TOC rows; see :func:`resolve_toc_mode`.
@@ -1797,6 +1801,18 @@ class TypstDocumentRenderer:
                 self._notes_by_chapter.setdefault(n.chapter_index, []).append(n)
             self._notes_emitted_chapters = set()
             self._notes_current_chapter = 1
+
+        if getattr(self, "enable_backmatter", False):
+            from ubt.core.backmatter.detector import detect_backmatter_manifest
+            from ubt.core.backmatter.models import BackmatterConfig
+
+            self._bm_cfg = (
+                self.backmatter_config
+                if isinstance(self.backmatter_config, BackmatterConfig)
+                else BackmatterConfig()
+            )
+            self._bm_manifest = detect_backmatter_manifest(blocks, self._bm_cfg)
+            self._bm_appendix_switched = False
 
         self._prewarm_math_gate(blocks)
         from ubt.core.references.linker import build_citation_topology
@@ -1990,6 +2006,30 @@ class TypstDocumentRenderer:
                             body.append(render_endnote_section_typst(prev_notes, self._notes_cfg))
                             self._notes_emitted_chapters.add(self._notes_current_chapter)
                         self._notes_current_chapter += 1
+
+                if level == 1 and getattr(self, "enable_backmatter", False):
+                    bm_sec = self._bm_manifest.section_for_heading(block.id)
+                    if bm_sec is not None:
+                        from ubt.core.backmatter.generator import (
+                            emit_appendix_switch_typst,
+                            render_backmatter_heading_typst,
+                        )
+                        from ubt.core.backmatter.models import BackmatterKind
+
+                        if (
+                            bm_sec.kind == BackmatterKind.APPENDIX
+                            and not self._bm_appendix_switched
+                        ):
+                            body.append(emit_appendix_switch_typst(self._bm_cfg))
+                            self._bm_appendix_switched = True
+
+                        aid = anchor_suffix.strip(" <>") if anchor_suffix else None
+                        bm_markup = render_backmatter_heading_typst(
+                            bm_sec, self._bm_cfg, anchor_id=aid
+                        )
+                        body.append(self._maybe_pair(block, bm_markup))
+                        self.stats.blocks_rendered += 1
+                        continue
 
                 if getattr(self, "enable_decor", False) and level == 1:
                     from ubt.core.decor.header import render_chapter_header_typst

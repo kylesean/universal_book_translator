@@ -13,6 +13,7 @@ from rich.table import Table
 
 from ubt import __version__
 from ubt.cli.commands.assess import _assess_money, assess_cmd
+from ubt.cli.commands.backmatter_cmd import backmatter_app
 from ubt.cli.commands.benchmark_cmd import benchmark_command
 from ubt.cli.commands.colophon_cmd import colophon_app
 from ubt.cli.commands.config_cmd import config_command
@@ -666,6 +667,7 @@ app.add_typer(index_app, name="index")
 app.add_typer(math_app, name="math")
 app.add_typer(decor_app, name="decor")
 app.add_typer(notes_app, name="notes")
+app.add_typer(backmatter_app, name="backmatter")
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 
