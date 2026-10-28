@@ -1220,6 +1220,12 @@ def _write_artifact_check(
             status="skipped",
             reason="config.emit_attestation_shadow is disabled",
         )
+    if rendered_path.suffix.lower() != ".pdf":
+        return CompanionArtifactResult(
+            kind="attestation",
+            status="skipped",
+            reason=f"Attestation artifact check only applies to PDF deliverables, got {rendered_path.suffix}",
+        )
     t0 = time.perf_counter()
     try:
         from ubt.core.job_options import companion_path

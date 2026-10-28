@@ -122,7 +122,15 @@ class DoclingWorkerPool:
         self._executor = None
         if executor is not None:
             try:
-                executor.shutdown(wait=False, cancel_futures=True)
+                processes = getattr(executor, "_processes", None)
+                if processes:
+                    for p in list(processes.values()):
+                        try:
+                            if p.is_alive():
+                                p.terminate()
+                        except Exception:
+                            pass
+                executor.shutdown(wait=True, cancel_futures=True)
             except Exception as exc:
                 logger.debug("Error shutting down DoclingWorkerPool: %s", exc)
 
