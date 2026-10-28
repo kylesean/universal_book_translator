@@ -702,6 +702,7 @@ def render_table(
     scale_out: list[float] | None = None,
     allow_landscape: bool = False,
     table_scale_factor: float = 1.0,
+    is_multipage: bool = False,
 ) -> str:
     """Render a Markdown table as a Typst ``#table`` with a three-line frame.
 
@@ -1045,7 +1046,9 @@ def render_table(
         or columns >= _TABLE_MAX_COMFORTABLE_COLUMNS
         or sum(weights) * TABLE_BASE_PT > width
     )
-    full_page = page_columns > 1 and too_wide
+    # Multi-page or tall tables (>18 rows) must not be wrapped in #place floats:
+    # Typst floating blocks cannot break across page boundaries.
+    full_page = page_columns > 1 and too_wide and not is_multipage and len(rows) <= 18
     landscape = allow_landscape and page_columns == 1 and columns >= _TABLE_MAX_COMFORTABLE_COLUMNS
     shrink = too_wide and not full_page and not landscape
 
@@ -1914,6 +1917,7 @@ class TypstDocumentRenderer:
                 # half of a bilingual pair.
                 source_text = (block.source_text or "").strip()
                 table_width = self._table_width_pt()
+                is_multipage = bool(block.provenance and block.provenance.fused_block_ids)
                 source_markup = (
                     render_table(
                         source_text,
@@ -1921,6 +1925,7 @@ class TypstDocumentRenderer:
                         page_columns=self.columns,
                         content_width_pt=table_width,
                         allow_landscape=False,
+                        is_multipage=is_multipage,
                     )
                     or None
                 )
@@ -1938,6 +1943,7 @@ class TypstDocumentRenderer:
                     scale_out=table_scale,
                     allow_landscape=allow_landscape,
                     table_scale_factor=getattr(self, "table_scale_factor", 1.0),
+                    is_multipage=is_multipage,
                 )
                 fell_back = False
                 if not markup:

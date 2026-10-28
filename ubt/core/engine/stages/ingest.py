@@ -10,6 +10,7 @@ from typing import Any
 
 from ubt.core.cleaners.lnds_pruner import LNDSPageCleaner, dedup_duplicate_blocks
 from ubt.core.cleaners.skip_rules import classify_skip
+from ubt.core.cleaners.table_stitcher import stitch_multipage_tables
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.stage_context import StageContext
@@ -503,6 +504,8 @@ async def run_ingest_stage(
             # Drop physically duplicated extraction fragments (same page,
             # same text) before they trip the visual gate's overlap finding.
             cleaned_blocks = dedup_duplicate_blocks(cleaned_blocks)
+            # Fuse cross-page fragmented tables into continuous-flow tables
+            cleaned_blocks = stitch_multipage_tables(cleaned_blocks, drop_absorbed=True)
             in_bibliography = False
             for idx_b, b in enumerate(cleaned_blocks):
                 in_bibliography = update_bibliography_section_state(

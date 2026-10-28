@@ -34,6 +34,7 @@ from ubt.cli.commands.status import (
     rewrite_flag_text,
     upgrade_flags,
 )
+from ubt.cli.commands.table_cmd import table_app
 from ubt.cli.commands.translate import console as console
 from ubt.cli.commands.translate import translate
 from ubt.cli.commands.verify import verify_command
@@ -648,6 +649,7 @@ app.add_typer(glossary_app, name="glossary")
 app.add_typer(route_app, name="route")
 app.add_typer(coref_app, name="coref")
 app.add_typer(patch_app, name="patch")
+app.add_typer(table_app, name="table")
 app.command(name="console")(console_command)
 app.command(name="web")(console_command)
 
