@@ -43,15 +43,38 @@ def _typst_source_path(pdf_path: Path) -> Path | None:
     anything: the source tier silently never ran, and nothing in the report
     said so. Both spellings are accepted so a caller holding a PDF from some
     other build dir still gets scanned.
+
+    The facsimile renderer writes ``<output dir>/.build_<stem>_facsimile/
+    facsimile.typ`` instead, and it was missing from this list for exactly as
+    long as the canvas tier failed to run: the gate reads the canvas page map
+    out of that file (``visual_gate.canvas_page_pairs``), so without it every
+    facsimile delivery reported "no canvas pages recorded" and the ink-collision
+    check never measured a single page.
+
+    When several exist the **newest** wins. Order in the tuple is only a
+    deterministic tie-break: a resumed job that changed delivery mode leaves the
+    previous renderer's build directory behind, and the older source describes a
+    document that was never delivered.
     """
     candidates = (
+        pdf_path.parent / f".build_{pdf_path.stem}_facsimile" / "facsimile.typ",
         pdf_path.parent / f".{pdf_path.stem}_typst" / "main.typ",
         pdf_path.with_suffix(".typ"),
     )
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    return None
+    # Newest wins when more than one exists. A resumed job that changed delivery
+    # mode leaves the previous renderer's build directory behind, and the older
+    # source describes a document that was never delivered — reading it would
+    # make the gate look for a canvas page map in markup for a different
+    # artifact. Order is therefore a tie-break only, not the rule.
+    found = [candidate for candidate in candidates if candidate.is_file()]
+    if not found:
+        return None
+    if len(found) == 1:
+        return found[0]
+    try:
+        return max(found, key=lambda candidate: candidate.stat().st_mtime)
+    except OSError:
+        return found[0]
 
 
 class VisualVerifyLoop:
@@ -132,7 +155,38 @@ class VisualVerifyLoop:
             sample_pages=self.sample_pages,
             max_vlm_pages=self.max_vlm_pages,
             vlm_judge=vlm_judge,
+            canvas_background_pdf=self._canvas_background_path(),
         )
+
+    def _canvas_background_path(self) -> Path | None:
+        """The stripped background the facsimile renderer drew under the text.
+
+        Only the facsimile path produces one, and it records the path on the
+        manifest (``_render_facsimile``) because this loop runs a stage later and
+        holds no reference to the render call. ``None`` is the ordinary answer —
+        reflow and page_locked deliveries have no background — and the gate turns
+        it into a printed "the canvas tier did not run" note rather than a
+        silent omission.
+
+        A recorded path that no longer exists is also ``None``: the gate must not
+        crash on a stale metadata entry left by an earlier run of the same job,
+        and reporting "measured clean" for a file it could not open would be
+        worse than reporting nothing.
+        """
+        metadata = getattr(self.manifest, "metadata", None)
+        if not isinstance(metadata, dict):
+            return None
+        recorded = metadata.get("background_pdf")
+        if not recorded:
+            return None
+        candidate = Path(str(recorded))
+        if candidate.is_file():
+            return candidate
+        logger.debug(
+            "Visual gate: recorded background %s is gone; canvas tier will be skipped",
+            candidate,
+        )
+        return None
 
     async def run(
         self,

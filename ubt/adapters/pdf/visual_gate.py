@@ -15,6 +15,13 @@ Design (warn-only, ROI-first):
   paper to 22 pages with type down to 0.49pt while every structural check
   passed (no text lost, no overflow, no blank page). ``type_illegible`` is
   fail-closed in ``blocking_gate_tripped``.
+- Canvas ink-collision (L1 facsimile): when the caller passes the stripped
+  background the facsimile renderer drew under the translation, the sampled
+  pages are rasterised a second time from it and diffed against the artifact.
+  This is the only tier that can see translated glyphs landing on background
+  ink the stripper kept — the geometry tier reads *text* rects, so a table rule
+  is invisible to it. Warn-only by decision, and skipped (with a printed note,
+  never silently) on every reflow delivery. See ``canvas_ink_collision_pages``.
 - Pixel confirmation + T2 VLM are *optional*: page PNGs are rendered
   in-process by ``pdf_oxide`` (base dependency; no poppler ``pdftoppm``
   subprocess) and inspected with Pillow. PyMuPDF is deliberately NOT used
@@ -284,6 +291,53 @@ def scan_typ_source(typ_text: str) -> list[VisualFinding]:
             )
         )
     return findings
+
+
+#: Matches the canvas background a facsimile page embeds. ``FacsimileRenderer``
+#: emits exactly one form —
+#: ``#page(..., background: image("bg_stripped.pdf", page: N, ...))`` — and an
+#: L2 (reflowed) page emits no ``background:`` at all, which is the distinction
+#: this pattern exists to recover.
+_CANVAS_PAGE_RE = re.compile(
+    r'background:\s*image\(\s*"[^"]+"\s*,\s*page:\s*(\d+)',
+)
+
+
+def canvas_page_pairs(typ_text: str) -> dict[int, int] | None:
+    """Artifact page -> the background page it embeds, from the Typst source.
+
+    ``None`` when the source cannot answer the question, which happens for every
+    delivery that is not a facsimile (reflow, page_locked — neither embeds a
+    background) and for a source that carries no ``#page(`` markers at all. The
+    caller must treat ``None`` as "the canvas tier does not apply", never as
+    "every page is on the canvas": assuming the identity mapping is exactly the
+    bug that made this function necessary.
+
+    **Why the source and not the PDF.** The delivered PDF does not record which
+    page was drawn over which background; only the markup does. A page that
+    solved to L2 is reflowed from the IR and embeds nothing, so pairing it with
+    the same-numbered background page compares two unrelated pages. On a dry run
+    of ``chapter-3.pdf`` 7 of 26 pages were L2, and 5 of them were reported as
+    36–59% "ink collision" purely from that mismatch.
+
+    Pages are counted by ``#page(`` at the start of a line, which is the only
+    form the renderer emits (a ``#page`` nested inside a block would be a
+    different document). A page whose ``#page(`` line carries no background
+    image is an L2 page and is simply absent from the returned map.
+    """
+    if "#page(" not in typ_text:
+        return None
+    pairs: dict[int, int] = {}
+    page_no = 0
+    for line in typ_text.splitlines():
+        stripped = line.lstrip()
+        if not stripped.startswith("#page("):
+            continue
+        page_no += 1
+        match = _CANVAS_PAGE_RE.search(stripped)
+        if match is not None:
+            pairs[page_no] = int(match.group(1))
+    return pairs or None
 
 
 def pdf_page_count(pdf_path: Path) -> int:
@@ -1120,6 +1174,482 @@ def text_occlusion_findings(
     return findings
 
 
+# -- canvas ink collision (Tier L1 facsimile) -------------------------------
+#
+# The facsimile channel draws translated text ON TOP of a background layer that
+# is the source page with its body text removed. Everything the stripper failed
+# to remove — a vector rule, a figure, a table grid, a glyph whose pen offset
+# overshot its erase rect — is still visible ink under the new text. Nothing in
+# this module measured that until now:
+#
+#   * the geometry tier reads the artifact's *text* rects, so a background rule
+#     is invisible to it;
+#   * the type tier measures glyph heights;
+#   * ``blank_page`` and ``text_occluded`` ask whether text is MISSING, not
+#     whether it landed on something;
+#   * the VLM tier is sampled, opt-in, and costs tokens.
+#
+# The failure this exists for is the ordinary one: a translated line grows (CJK
+# is set larger than the Latin it replaced) and its baseline drifts onto a table
+# rule the stripper deliberately kept. The text layer is perfect, the page count
+# is 1:1, every existing gate passes, and the reader gets a line struck through
+# by a horizontal rule.
+#
+# **Measurement, not modelling.** Collision is defined on rasters:
+#
+#   CollisionRatio(p) = |{(x,y) in M_text : |grad I_bg(x,y)| > tau}|
+#                       ---------------------------------------------
+#                                    |M_text|
+#
+# where ``I_bg`` is the stripped background page and ``M_text`` is the mask of
+# pixels that changed when the foreground text was drawn on top of it. Comparing
+# the FINAL artifact against the stripped background (rather than compiling a
+# foreground-only PDF) costs one extra rasterisation of the same pages and needs
+# no second Typst compile, which is why it is the shape implemented here.
+#
+# Three measured choices keep the ratio honest:
+#
+# 1. **Text pixels come from a diff, not from a colour rule.** "Dark pixels in
+#    the final page" would count every background rule as text and every solid
+#    figure fill as a collision. A pixel is a text pixel iff the final page
+#    differs from the background there.
+# 2. **Flat and graduated backgrounds are excluded.** |grad| is only large at an
+#    EDGE, so a tinted panel or a gradual grey wash contributes no collisions —
+#    that is the whole reason a gradient magnitude is used instead of "is this
+#    pixel dark". Pinned by the unit tests on a full-page grey tint and a
+#    horizontal grey wash, both of which measure 0.000.
+# 3. **Thin-ink dilation.** Antialiasing leaves a 1px halo of partial coverage
+#    around every glyph, and a stroke drawn exactly ON a black rule changes no
+#    pixel (black on black), so the diff alone cannot see the collision it exists
+#    to find. The mask is dilated by one pixel to recover the stroke. The edge
+#    test then runs on ``I_bg`` alone — the stripped background carries no
+#    translated glyphs at all, so every edge in it is ink that was already on the
+#    page. Dilation does cost some false coverage: text merely *adjacent* to a
+#    rule is counted, which is why the budget is 3% rather than 0%.
+#
+# 4. **The pair must be the same page.** The channel is a fusion: an L1 page
+#    embeds its own stripped background, an L2 page is reflowed and embeds
+#    nothing. Pairing by page number regardless of tier compared reflowed prose
+#    against pages of the source's formulas and reported 36-59% "collision" on
+#    pages nothing had been drawn on. ``CANVAS_PAIR_IDENTITY_MIN`` is the guard,
+#    and :func:`canvas_page_pairs` supplies the map.
+#
+# **Warn-only, by decision.** The design doc's §9 proposed auto-downgrading a
+# tripped page from L1 to L2 and recompiling. That needs a per-page re-render, a
+# page splice, and a second page-count reconciliation — a large machine whose
+# failure mode is a book that renders twice and still ships the collision. The
+# gate therefore reports ``canvas_ink_collision`` (MAJOR) per page with the
+# measured ratio, and the corpus run is what decides whether it is ever promoted
+# to a fail-closed code. A warning nobody has ever seen fire is not a gate; a
+# measured baseline on five real books is what makes promotion defensible.
+
+#: Share of a page's translated-text pixels that may sit on pre-existing ink
+#: before the page is reported. 3% is the design doc's number, and it is
+#: deliberately generous: a translated caption legitimately sits inside a figure
+#: box, a formula's own delimiters sit near its rule, and a page-furniture line
+#: can run under a short heading. What it is NOT generous enough to hide is a
+#: body line lying along a table rule, which reads far higher.
+CANVAS_COLLISION_RATIO = 0.03
+
+#: Edge magnitude (0-255 greyscale units, ``ImageFilter.FIND_EDGES``) above which
+#: a background pixel counts as ink that was already on the page. Calibrated
+#: against the corpus: a hairline rule at 110 dpi reads well over 100 through
+#: FIND_EDGES, while a flat tint reads 0 and a smooth gradient reads in the
+#: single digits. 40 sits in that gap broadly enough that the number is a
+#: threshold, not a magic constant tuned to one book — the unit tests pin both
+#: ends (a rule must trip, a gradient must not).
+CANVAS_EDGE_THRESHOLD = 40.0
+
+#: Per-pixel channel difference (0-255) that marks a pixel as carrying new text.
+#:
+#: This is **not** a small "rounding" allowance, and the difference matters.
+#: Measured on a real facsimile run of ``chapter-3.pdf``: the artifact embeds the
+#: stripped background through Typst's ``image(...)``, so the comparison is
+#: *background PDF rendered directly* versus *background PDF → raster → embedded
+#: → re-rendered*. That round trip resamples every antialiased edge and produces
+#: a thin band of small differences across the entire page. With a threshold of
+#: 8 those bands read as "new text" and the gate scored pages that received no
+#: translation at all:
+#:
+#:     page 11 (never translated)   309 px above 8,    0 above 96
+#:     page 16 (never translated)  10235 px above 8,   10 above 96
+#:     page 22 (never translated)     0 px above 8,    0 above 96
+#:
+#: The same three pages scored 51%, 24% and 59% "ink collision" while the
+#: rasters were visually identical. A translated glyph, by contrast, is drawn
+#: black over light paper and differs by ~200-255 at its core: the translated
+#: pages of that run measured 15k-39k pixels above 96. 128 sits in a gap that is
+#: two orders of magnitude wide, which is what a threshold needs to be — not a
+#: tuning constant.
+#:
+#: The cost of being strict: a mid-grey glyph over a mid-grey figure fill differs
+#: by less than this and is not counted. Body text is black on white; a low
+#: contrast label inside a figure is a different defect, and the VLM tier is what
+#: judges it.
+CANVAS_TEXT_DIFF_THRESHOLD = 128
+
+#: Share of a page's pixels that must carry new ink before the page can be
+#: judged. Measured on a real dry run of ``chapter-3.pdf``: a page the artifact
+#: left *blank* differs from its background by nothing above the text threshold,
+#: and a page that rendered identically differs by at most 10 pixels. A floor
+#: expressed as a share rather than an absolute count survives a change of DPI,
+#: where the same page covers 4x the pixels.
+#:
+#: 0.05% is two orders of magnitude above that noise (10 px of 840k = 0.001%) and
+#: an order of magnitude below a real text page: six lines of 12pt body at
+#: 110 dpi measure ~15k px on a 840k-pixel page (1.8%).
+CANVAS_MIN_TEXT_SHARE = 0.0005
+
+#: Absolute floor for tiny pages, where a share would admit a handful of pixels.
+CANVAS_MIN_TEXT_PIXELS = 200
+
+#: Radius, in pixels, by which the text mask is grown before it is tested
+#: against the background's edges. A glyph stroke drawn ON a black rule changes
+#: no pixel (black on black), so the diff alone cannot see the exact collision
+#: being measured — only its antialiased fringe. One pixel recovers the stroke
+#: without swallowing the neighbouring whitespace (at 110 dpi a 9pt body stroke
+#: is ~2px wide, so a 3x3 growth covers a stroke and its fringe).
+CANVAS_MASK_DILATE_PX = 1
+
+#: Greyscale level below which a pixel counts as "ink" when asking *whether the
+#: two rasters are the same page at all*. Deliberately loose: this is not a
+#: legibility threshold, it is a membership test, and 200 catches a grey table
+#: fill as readily as a black rule.
+CANVAS_INK_LEVEL = 200
+
+#: Minimum share of the background's ink that must still be present in the
+#: artifact page before the two are treated as the same page.
+#:
+#: **This guard is not a nicety; without it the canvas tier measures nonsense.**
+#: The facsimile channel is a fusion: pages that solve to L1 embed their own
+#: stripped background as a Typst ``image(...)``, and pages that solve to L2 are
+#: *reflowed from scratch* and embed no background at all. The gate used to
+#: rasterise background page N and compare it against artifact page N regardless
+#: of tier — so on a real book it compared a reflowed page of new prose against a
+#: page of the source's formulas, and reported 52% and 59% "ink collision" on
+#: pages that were never drawn on the canvas.
+#:
+#: Measured on a dry run of ``chapter-3.pdf`` (26 pages: 19 L1, 7 L2), share of
+#: background ink still present in the artifact page:
+#:
+#:     L1 pages   0.9777 .. 0.9999   (19 pages; the low end is a page whose
+#:                                    background lost a figure the renderer
+#:                                    re-drew as text)
+#:     L2 pages   0.0000 .. 0.1318   (7 pages — no background embedded)
+#:
+#: 0.85 sits in a gap more than seven times wider than the noise on either side,
+#: so it separates "the renderer drew this page over that background" from "these
+#: are two unrelated pages" without being tuned to one book. A pair below it is
+#: reported as *not paired* and never enters the ratio: measuring it would say
+#: "the translation collides with ink" when the truth is "this page has no
+#: background".
+CANVAS_PAIR_IDENTITY_MIN = 0.85
+
+
+@dataclass(frozen=True, slots=True)
+class InkCollisionPage:
+    """Measured ink collision for one page.
+
+    Carries the counts as well as the ratio so ``visual_report.json`` can answer
+    the question the ratio alone cannot: *how close* was this book to the
+    threshold, and would a different threshold have fired. A report that keeps
+    only the findings above the line cannot be re-thresholded after the fact and
+    makes the warn-to-fail promotion decision guesswork.
+
+    ``pair_identity`` is the share of the background page's ink that is still
+    present in the artifact page — the evidence that the two rasters are the
+    same page. It is recorded even for pages that pass, because "this page was
+    drawn on the canvas" is the precondition of the whole measurement and a
+    report that does not carry it cannot be audited after the fact.
+    """
+
+    page: int
+    ratio: float
+    text_pixels: int
+    collided_pixels: int
+    pair_identity: float = 1.0
+
+    @property
+    def paired(self) -> bool:
+        """Whether these two rasters are the same page at all."""
+        return self.pair_identity >= CANVAS_PAIR_IDENTITY_MIN
+
+
+def canvas_page_pair_identity(background_png: Path, final_png: Path) -> float | None:
+    """Share of the background page's ink that the artifact page still carries.
+
+    The membership test for :func:`canvas_ink_collision_ratio`, split out so the
+    gate can report *why* a page was skipped instead of silently omitting it.
+    ``None`` on an unreadable or mismatched pair, which is also "not the same
+    page" for every caller's purposes.
+
+    Implemented with ``ImageChops.lighter`` rather than a numpy mask because
+    numpy is only declared for the OCR extras. Two pixels are both ink iff the
+    *lighter* of the two is still below ``CANVAS_INK_LEVEL`` — ``max(b, a) < T``
+    is the pointwise intersection of the two dark sets, whereas the pointwise
+    minimum would be their union and would count any page that merely had ink
+    somewhere.
+    """
+    try:
+        from PIL import Image, ImageChops
+    except ImportError:
+        return None
+    try:
+        with Image.open(background_png) as bg_img:
+            background = bg_img.convert("L")
+        with Image.open(final_png) as fg_img:
+            final = fg_img.convert("L")
+    except (OSError, ValueError):
+        return None
+    if background.size != final.size or background.size[0] < 3 or background.size[1] < 3:
+        return None
+
+    background_ink = background.point(lambda value: 255 if value < CANVAS_INK_LEVEL else 0)
+    total = background_ink.histogram()[255]
+    if total <= 0:
+        # A background with no ink carries no evidence either way, and 0/0 is
+        # vacuous rather than damning: every one of its (zero) ink pixels is
+        # still present, and a page with nothing on it cannot collide with
+        # anything. Returning 1.0 keeps a genuinely blank page measurable at
+        # ratio 0.0, which is the answer a caller wants for it.
+        return 1.0
+    still_ink = ImageChops.lighter(background, final).point(
+        lambda value: 255 if value < CANVAS_INK_LEVEL else 0
+    )
+    # ``lighter`` keeps the GREATER of the two values, so the result is still ink
+    # here only when both the background and the artifact pixel are dark — the
+    # intersection, without a per-pixel loop.
+    return still_ink.histogram()[255] / total
+
+
+def canvas_ink_collision_ratio(
+    background_png: Path,
+    final_png: Path,
+) -> tuple[float, int, int] | None:
+    """Measure ``(ratio, text_pixels, collided_pixels)`` for one page pair.
+
+    ``None`` means "not measurable" (unreadable image, mismatched size, too
+    little text). Never raises: a gate that crashes on one page must not lose the
+    measurement for the rest of the book, and it must not report a clean 0.0 for
+    a page it never measured.
+
+    Requires Pillow only. Every step is a whole-image C operation
+    (``ImageChops``/``ImageFilter``), not a Python pixel loop: numpy is declared
+    for the OCR extras and importing it here would break the gate on a base
+    install, while a per-pixel loop over a 1.2M-pixel A4 raster costs seconds
+    per page.
+
+    **Why the mask is dilated.** The diff sees a glyph pixel only where the glyph
+    changed it. A glyph stroke drawn exactly on top of a black rule changes
+    nothing (black on black), so the stroke's own pixels vanish from the diff —
+    and those are precisely the pixels the gate is looking for. The antialiased
+    *edge* of that stroke still differs, so dilating the diff mask by a couple of
+    pixels recovers the whole stroke. The cost is that text merely sitting next to
+    a rule also gets counted; at a 3% page budget that is noise, and the
+    alternative (under-count the exact defect being measured) is worse.
+
+    **Why the diff is one-sided, and why that is not an optimisation.** The mask
+    is ``subtract(background, final)``: a pixel counts as translated text only
+    where the artifact is *darker* than the background, i.e. where the renderer
+    drew something the background did not have. The symmetric difference is
+    wrong, and a real book proved it: on a dry run of ``chapter-3.pdf`` the
+    artifact's page 22 came out blank while its background was a full page of
+    formulas, so a symmetric diff measured 24,569 changed pixels — none of them
+    darker — and the gate reported 58.6% ink collision on a page with no ink on
+    it at all. (That run predates the one-sided change and used the old
+    threshold; the number is quoted as the evidence that motivated the change,
+    not as output of this code.) Removed content is a blank-page defect,
+    reported by the pixel tier and fail-closed there; it is not a collision, and
+    counting it here made the gate loud in exactly the situation where its output
+    is least useful.
+
+    **Why the floor is a share.** The same run measured 841 changed pixels on a
+    page that rendered identically (antialiasing alone). 841 is above any
+    absolute floor small enough to be useful, and one pixel of dilation grew it
+    into a 5,970-pixel "footprint" that then read 52% collided. A page is judged
+    only when new ink covers ``CANVAS_MIN_TEXT_SHARE`` of it — a share, so the
+    test survives a change of DPI (4x the pixels at 2x dpi).
+
+    **This function does not check that the two rasters are the same page.** It
+    cannot: the page number it was handed is the only evidence it has, and an
+    unpaired page measures perfectly happily. Callers must go through
+    :func:`canvas_ink_collision_pages`, which applies
+    :func:`canvas_page_pair_identity` first. Calling this directly on a pair you
+    have not verified is how 36-59% "collisions" appeared on pages that were
+    never drawn on the canvas.
+    """
+    try:
+        from PIL import Image, ImageChops, ImageFilter
+    except ImportError:
+        return None
+    try:
+        with Image.open(background_png) as bg_img:
+            background = bg_img.convert("L")
+        with Image.open(final_png) as fg_img:
+            final = fg_img.convert("L")
+    except (OSError, ValueError) as exc:
+        logger.debug(
+            "Visual gate: cannot open canvas pair %s / %s: %s", background_png, final_png, exc
+        )
+        return None
+
+    if background.size != final.size or background.size[0] < 3 or background.size[1] < 3:
+        # Different DPI or a degenerate page. Comparing a resampled pair would
+        # attribute every resampling artefact to the text layer.
+        logger.debug(
+            "Visual gate: canvas pair size mismatch (%s vs %s); page not measured",
+            background.size,
+            final.size,
+        )
+        return None
+
+    # One-sided: only ink the artifact ADDED. See the docstring.
+    added = ImageChops.subtract(background, final)
+    mask = added.point(lambda value: 255 if value > CANVAS_TEXT_DIFF_THRESHOLD else 0)
+
+    page_pixels = background.size[0] * background.size[1]
+    raw_pixels = mask.histogram()[255]
+    if raw_pixels < CANVAS_MIN_TEXT_PIXELS or raw_pixels < CANVAS_MIN_TEXT_SHARE * page_pixels:
+        # Too little new ink to be a text page: a blank artifact page, a page
+        # that rendered identically, or a figure with one label. Judging a ratio
+        # here measures the renderer's antialiasing, not a collision.
+        return None
+
+    # Grow the glyph footprint over its own antialiasing and over strokes that
+    # landed on already-dark ink (see the docstring).
+    footprint = mask.filter(ImageFilter.MaxFilter(2 * CANVAS_MASK_DILATE_PX + 1))
+
+    # Edges of the BACKGROUND only. The background carries no translated glyphs
+    # (they were stripped), so every edge here is ink that was already on the
+    # page: a rule, a table grid, a figure, or a leftover source glyph.
+    edges = background.filter(ImageFilter.FIND_EDGES).point(
+        lambda value: 255 if value > CANVAS_EDGE_THRESHOLD else 0
+    )
+    collided_map = ImageChops.multiply(footprint, edges)
+
+    text_pixels = footprint.histogram()[255]
+    collided = collided_map.histogram()[255]
+    return collided / text_pixels, text_pixels, collided
+
+
+def canvas_ink_collision_pages(
+    background_pngs: Mapping[int, Path],
+    final_pngs: Mapping[int, Path],
+    *,
+    page_pairs: Mapping[int, int] | None = None,
+) -> list[InkCollisionPage]:
+    """Measure every page the caller says is on the canvas, in artifact page order.
+
+    ``page_pairs`` maps **artifact page -> the background page it embeds**. It is
+    not optional bookkeeping: the facsimile channel is a fusion, and an L2
+    (reflowed) page embeds no background at all. Comparing artifact page N with
+    background page N without knowing which pages are on the canvas compares two
+    unrelated documents — on a real book that scored 52% and 59% "ink collision"
+    on pages nothing had been drawn on.
+
+    When ``page_pairs`` is omitted the identity of each pair is still *checked*
+    rather than assumed, and a page whose background ink is largely absent from
+    the artifact is skipped. That keeps the single-call entry point honest for
+    scripts; ``run_visual_gate`` passes the real map so every page it measures is
+    one it knows is on the canvas.
+
+    Pages that were not measurable are omitted, never recorded as 0.0: a page the
+    gate did not look at must not read as a page the gate found clean.
+    """
+    measured: list[InkCollisionPage] = []
+    if page_pairs is not None:
+        candidates = sorted(page_pairs.items())
+    else:
+        candidates = [(page, page) for page in sorted(set(background_pngs) & set(final_pngs))]
+
+    for artifact_page, background_page in candidates:
+        background_png = background_pngs.get(background_page)
+        final_png = final_pngs.get(artifact_page)
+        if background_png is None or final_png is None:
+            continue
+        identity = canvas_page_pair_identity(background_png, final_png)
+        if identity is None or identity < CANVAS_PAIR_IDENTITY_MIN:
+            logger.debug(
+                "Visual gate: page %d is not drawn on background page %d "
+                "(ink identity %s); canvas check skipped for it",
+                artifact_page,
+                background_page,
+                "unmeasurable" if identity is None else f"{identity:.3f}",
+            )
+            continue
+        result = canvas_ink_collision_ratio(background_png, final_png)
+        if result is None:
+            continue
+        ratio, text_pixels, collided = result
+        measured.append(
+            InkCollisionPage(
+                page=artifact_page,
+                ratio=ratio,
+                text_pixels=text_pixels,
+                collided_pixels=collided,
+                pair_identity=identity,
+            )
+        )
+    return measured
+
+
+def _collision_findings(
+    measured: Sequence[InkCollisionPage],
+    *,
+    ratio_threshold: float = CANVAS_COLLISION_RATIO,
+) -> list[VisualFinding]:
+    """One ``canvas_ink_collision`` finding per page over ``ratio_threshold``.
+
+    Split from the measurement so ``run_visual_gate`` can measure once and use
+    the same numbers twice: findings for the verdict, and ratios for ``stats``.
+    Measuring inside the finding builder meant the highest ratio of a page just
+    under the threshold left no trace anywhere in the report.
+
+    MAJOR, not CRITICAL: this is a legibility defect in a shipping artifact,
+    which is exactly what ``text_occluded`` and ``block_overlap`` are, and every
+    one of those is warn-only unless the opt-in blocking gate is on.
+    """
+    findings: list[VisualFinding] = []
+    for page in measured:
+        if page.ratio <= ratio_threshold:
+            continue
+        findings.append(
+            VisualFinding(
+                severity="major",
+                code="canvas_ink_collision",
+                message=(
+                    f"Page {page.page}: {page.ratio:.1%} of the translated text "
+                    f"({page.collided_pixels} of {page.text_pixels} px) sits on ink "
+                    "that was already on the page (stripped background "
+                    "rule/figure/glyph); the translation may be struck through or "
+                    "unreadable"
+                ),
+                page=page.page,
+            )
+        )
+    return findings
+
+
+def canvas_ink_collision_findings(
+    background_pngs: Mapping[int, Path],
+    final_pngs: Mapping[int, Path],
+    *,
+    ratio_threshold: float = CANVAS_COLLISION_RATIO,
+) -> list[VisualFinding]:
+    """Measure and report in one call — the shape a caller with no ``stats`` wants.
+
+    ``run_visual_gate`` does not use this: it needs the ratios themselves for
+    the report, so it calls :func:`canvas_ink_collision_pages` and
+    :func:`_collision_findings` separately. This keeps the single-call entry
+    point available for scripts and for the tests, without making the gate pay
+    for a second raster diff.
+    """
+    return _collision_findings(
+        canvas_ink_collision_pages(background_pngs, final_pngs),
+        ratio_threshold=ratio_threshold,
+    )
+
+
 def _tier_coverage(
     vlm_pages: Sequence[int],
     skip_notes: Sequence[str],
@@ -1127,6 +1657,7 @@ def _tier_coverage(
     rendered_pages: int,
     sampled_pages: int,
     source_available: bool = True,
+    canvas_available: bool = False,
 ) -> str:
     """State which gate tiers actually ran, and which were skipped.
 
@@ -1146,9 +1677,13 @@ def _tier_coverage(
     - ``geometry`` runs off the PDF's own text rects, so it needs no render;
     - ``type`` measures glyph heights on the page, so it needs the render too;
     - ``pixel`` inspects the raster;
+    - ``canvas`` diffs the raster against the stripped background, so it needs
+      both renders;
     - ``vlm`` only when pages were actually sent to the judge.
     """
-    ran, skipped = _tier_lists(vlm_pages, rendered_pages, source_available)
+    ran, skipped = _tier_lists(
+        vlm_pages, rendered_pages, source_available, canvas_available=canvas_available
+    )
     coverage = f"tiers run: {', '.join(ran)}"
     if skipped:
         coverage += f" (not run: {', '.join(skipped)})"
@@ -1164,6 +1699,19 @@ _SKIP_CODES: dict[str, str] = {
     "page render failed (pdf_oxide); pixel checks skipped": "page_render_failed",
     "vlm judge disabled": "vlm_judge_disabled",
     "no typst source beside the artifact; source scan skipped": "typst_source_absent",
+    "no stripped background supplied; canvas ink-collision check skipped": (
+        "canvas_background_absent"
+    ),
+    "the artifact's Typst source records no canvas pages; canvas ink-collision "
+    "check skipped": "canvas_pages_unknown",
+    "no sampled page was drawn on the canvas; canvas ink-collision check skipped": (
+        "canvas_not_sampled"
+    ),
+    "background page render failed (pdf_oxide); canvas ink-collision check skipped": (
+        "canvas_background_render_failed"
+    ),
+    "canvas pages were sampled but none carried new ink on its background; "
+    "canvas ink-collision check measured no page": "canvas_nothing_measured",
 }
 
 
@@ -1181,6 +1729,7 @@ def _tier_lists(
     vlm_pages: Sequence[int],
     rendered_pages: int,
     source_available: bool = True,
+    canvas_available: bool = False,
 ) -> tuple[list[str], list[str]]:
     """Which tiers ran and which did not — the structured form of ``coverage``.
 
@@ -1191,6 +1740,13 @@ def _tier_lists(
     the Typst source ``if typ_text is not None``, and nothing recorded the
     ``None`` case, so a run whose source scan never happened reported the same
     ``tiers_ran`` as one where it ran and found nothing.
+
+    ``canvas`` is its own tier for the same reason, and it is the default-skipped
+    one: the ink-collision check needs the stripped background PDF, which only
+    the facsimile renderer produces. A reflow delivery — or a facsimile run whose
+    background was never threaded through — must say the check did not run, not
+    quietly omit it. Omitting it is how "the L1 channel is verified" became an
+    assumption nobody could falsify.
     """
     ran: list[str] = ["geometry"]
     skipped: list[str] = []
@@ -1202,6 +1758,10 @@ def _tier_lists(
         ran.extend(["type", "pixel"])
     else:
         skipped.extend(["type", "pixel"])
+    if canvas_available and rendered_pages > 0:
+        ran.append("canvas")
+    else:
+        skipped.append("canvas")
     if vlm_pages:
         ran.append("vlm")
     else:
@@ -1217,8 +1777,19 @@ async def run_visual_gate(
     max_vlm_pages: int = 3,
     vlm_judge: VlmJudgeFn | None = None,
     dpi: int = DEFAULT_DPI,
+    canvas_background_pdf: Path | None = None,
 ) -> VisualGateResult:
-    """Run T0+T1 always, pixel+T2 only when tools/judge are available."""
+    """Run T0+T1 always, pixel+T2 only when tools/judge are available.
+
+    ``canvas_background_pdf`` turns on the L1 facsimile tier (§9 of
+    ``docs/design/inplace_delivery.md``): the stripped background the facsimile
+    renderer drew under the translation. When given, every sampled page is
+    rasterised a second time from it and the two rasters are diffed to measure
+    how much of the translated text landed on pre-existing ink. When omitted the
+    tier is skipped and the report says so — it is the only way to measure the
+    facsimile channel's own failure mode, and "no background was supplied" must
+    not read as "measured clean".
+    """
     if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
         return VisualGateResult(passed=True, skipped_reason="not a rendered pdf")
     total = pdf_page_count(pdf_path)
@@ -1317,6 +1888,7 @@ async def run_visual_gate(
     flagged = [f.page for f in findings if f.page is not None]
     sampled = select_sample_pages(total, flagged, adaptive_sample_budget(total, sample_pages))
     vlm_pages: list[int] = []
+    canvas_pages: list[InkCollisionPage] = []
     skip_notes: list[str] = []
     with tempfile.TemporaryDirectory(prefix="ubt_visual_") as tmp_dir:
         # render_pages_to_png rasterizes each sampled page in-process via
@@ -1352,6 +1924,85 @@ async def run_visual_gate(
                 if page not in contentless:
                     p_findings = [f for f in p_findings if f.code != "blank_page"]
                 findings.extend(p_findings)
+        # Canvas ink collision runs only on the pages the renderer actually drew
+        # over the stripped background. ``canvas_page_pairs`` reads that map out
+        # of the Typst source, because it is the only place it is recorded: an L1
+        # page embeds ``image("bg_stripped.pdf", page: N)`` and an L2 page embeds
+        # nothing, having been reflowed from the IR. Pairing by page number
+        # regardless of tier compared reflowed prose against pages of the
+        # source's formulas and reported 36–59% "collision" on pages that were
+        # never on the canvas.
+        #
+        # The background is rendered a second time, in its own subdirectory:
+        # ``render_pages_to_png`` writes ``p<page>.png`` and would otherwise
+        # overwrite the artifact rasters the pixel tier above and the VLM tier
+        # below both read.
+        #
+        # It is deliberately checked even when the artifact render failed: a
+        # background that renders fine next to an artifact that does not is
+        # itself the finding, and silently reporting "no collisions" from an
+        # empty comparison is the failure mode this whole section exists to end.
+        canvas_pairs = canvas_page_pairs(typ_text) if typ_text is not None else None
+        if canvas_background_pdf is None:
+            skip_notes.append("no stripped background supplied; canvas ink-collision check skipped")
+        elif canvas_pairs is None:
+            skip_notes.append(
+                "the artifact's Typst source records no canvas pages; canvas "
+                "ink-collision check skipped"
+            )
+        else:
+            wanted = sorted(
+                {
+                    background_page
+                    for artifact_page, background_page in canvas_pairs.items()
+                    if artifact_page in sampled
+                }
+            )
+            if not wanted:
+                skip_notes.append(
+                    "no sampled page was drawn on the canvas; canvas ink-collision check skipped"
+                )
+            bg_pngs = (
+                await asyncio.to_thread(
+                    render_pages_to_png,
+                    canvas_background_pdf,
+                    wanted,
+                    dpi=dpi,
+                    work_dir=Path(tmp_dir) / "bg",
+                )
+                if wanted
+                else {}
+            )
+            if wanted and not bg_pngs:
+                skip_notes.append(
+                    "background page render failed (pdf_oxide); canvas ink-collision check skipped"
+                )
+            elif bg_pngs:
+                sampled_pairs = {
+                    artifact_page: background_page
+                    for artifact_page, background_page in canvas_pairs.items()
+                    if artifact_page in sampled
+                }
+                canvas_pages = await asyncio.to_thread(
+                    canvas_ink_collision_pages,
+                    bg_pngs,
+                    pngs,
+                    page_pairs=sampled_pairs,
+                )
+                findings.extend(_collision_findings(canvas_pages))
+                if not canvas_pages:
+                    # Two very different things land here and the report must not
+                    # stay silent about either: a page can fail the pairing check
+                    # (it was never drawn on this background) or carry no ink the
+                    # artifact added (it was never translated). Both produce zero
+                    # measurements, and a zero with no explanation reads as "this
+                    # book has no collisions" — which is the exact substitution
+                    # this tier exists to prevent. The counts are in ``stats``
+                    # (``canvas_declared_pages`` / ``canvas_sampled_declared``).
+                    skip_notes.append(
+                        "canvas pages were sampled but none carried new ink on its "
+                        "background; canvas ink-collision check measured no page"
+                    )
         if vlm_judge is not None and pngs and max_vlm_pages > 0:
             flagged_set = set(flagged)
             chart_set = chart_pages_from_blocks(blocks)
@@ -1383,13 +2034,16 @@ async def run_visual_gate(
         # it used to be skipped silently whenever the sidecar was missing (which
         # was always — see VisualVerifyLoop._evaluate_gate).
         skip_notes.append("no typst source beside the artifact; source scan skipped")
-    ran_tiers, skipped_tiers = _tier_lists(vlm_pages, len(pngs), typ_text is not None)
+    ran_tiers, skipped_tiers = _tier_lists(
+        vlm_pages, len(pngs), typ_text is not None, canvas_available=bool(canvas_pages)
+    )
     coverage = _tier_coverage(
         vlm_pages,
         skip_notes,
         rendered_pages=len(pngs),
         sampled_pages=len(sampled),
         source_available=typ_text is not None,
+        canvas_available=bool(canvas_pages),
     )
     stats: dict[str, str | int | float] = {
         "total_pages": total,
@@ -1406,6 +2060,37 @@ async def run_visual_gate(
         # structural check sees. Keep its counts in the report beside the others.
         "type_illegible_pages": sum(f.code == "type_illegible" for f in findings),
         "type_collapsed_pages": sum(f.code == "type_collapsed" for f in findings),
+        # Canvas ink collision: keep every measured page's numbers, not just the
+        # ones over the line. ``canvas_pages`` is how many pages the check could
+        # actually measure — 0 means the tier did not run, which is different
+        # from "ran and found nothing", and the two used to be indistinguishable
+        # in every prior report because the check did not exist at all.
+        # ``canvas_worst_ratio`` is what the warn-to-fail promotion decision is
+        # made on: a corpus whose worst page reads 0.031 is not the same artefact
+        # as one whose worst page reads 0.35, and only the ratio says which.
+        "canvas_pages": len(canvas_pages),
+        "canvas_collision_pages": sum(page.ratio > CANVAS_COLLISION_RATIO for page in canvas_pages),
+        "canvas_worst_ratio": (round(max((page.ratio for page in canvas_pages), default=0.0), 4)),
+        "canvas_worst_page": max(
+            ((page.ratio, page.page) for page in canvas_pages), default=(0.0, 0)
+        )[1],
+        # How many pages the artifact declares to be on the canvas at all, and
+        # how many of those the sample covered. ``canvas_pages`` alone cannot
+        # distinguish "the book has no canvas pages" from "the sample happened to
+        # miss every one of them", and the two call for different responses.
+        "canvas_declared_pages": len(canvas_pairs or {}),
+        "canvas_sampled_declared": sum(1 for page in (canvas_pairs or {}) if page in sampled),
+        # Declared canvas pages that were sampled but produced no measurement.
+        # Deliberately named "unmeasured" rather than "unpaired": the measurement
+        # refuses a page for two different reasons (it is not drawn on that
+        # background, or it added no ink above the text floor) and this count
+        # cannot tell them apart. ``canvas_pages`` next to it is what a reader
+        # should compare against ``canvas_sampled_declared``.
+        "canvas_unmeasured_pages": sum(
+            1
+            for artifact_page in (canvas_pairs or {})
+            if artifact_page in sampled and artifact_page not in {p.page for p in canvas_pages}
+        ),
     }
     return VisualGateResult(
         passed=passed,

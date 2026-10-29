@@ -302,8 +302,14 @@ def test_the_visual_gate_tiers_are_named_in_both_locales() -> None:
     through these maps, so a tier or code with no entry falls back to the raw
     English token, which is the same leak with extra steps.
     """
-    tiers = {"geometry", "type", "pixel", "vlm"}
-    codes = {"vlm_judge_disabled", "page_render_failed", "unknown"}
+    tiers = {"geometry", "type", "pixel", "canvas", "vlm"}
+    codes = {
+        "vlm_judge_disabled",
+        "page_render_failed",
+        "canvas_background_absent",
+        "canvas_background_render_failed",
+        "unknown",
+    }
 
     for locale in ("en", "zh"):
         text = _source(_REPO_ROOT / "web" / "src" / "i18n" / "translations" / f"{locale}.ts")

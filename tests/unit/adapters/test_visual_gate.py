@@ -418,7 +418,17 @@ def test_the_sample_puts_flagged_pages_first_and_covers_the_anchors() -> None:
 def test_the_report_names_the_tiers_that_ran_and_the_one_that_did_not() -> None:
     from ubt.adapters.pdf.visual_gate import _tier_coverage
 
-    default_run = _tier_coverage((), ["vlm judge disabled"], rendered_pages=5, sampled_pages=5)
+    # ``canvas_available=True`` keeps this test about the VLM tier: the canvas
+    # tier is default-skipped (it needs the stripped background) and has its own
+    # test below, so leaving it out here would make "the one that did not run"
+    # ambiguous.
+    default_run = _tier_coverage(
+        (),
+        ["vlm judge disabled"],
+        rendered_pages=5,
+        sampled_pages=5,
+        canvas_available=True,
+    )
     assert "geometry" in default_run
     assert "type" in default_run
     assert "pixel" in default_run
@@ -428,9 +438,34 @@ def test_the_report_names_the_tiers_that_ran_and_the_one_that_did_not() -> None:
 def test_a_run_with_the_vlm_judge_reports_three_tiers() -> None:
     from ubt.adapters.pdf.visual_gate import _tier_coverage
 
-    full = _tier_coverage((1, 2), [], rendered_pages=5, sampled_pages=5)
+    full = _tier_coverage((1, 2), [], rendered_pages=5, sampled_pages=5, canvas_available=True)
     assert "vlm" in full
     assert "not run" not in full
+
+
+def test_the_canvas_tier_is_reported_as_skipped_when_no_background_was_supplied() -> None:
+    """A reflow delivery must not read as "the L1 channel was verified".
+
+    The ink-collision tier needs the stripped background PDF, which only the
+    facsimile renderer produces. Before this tier existed, every report was
+    silent about the L1 channel's own failure mode, so "no findings" for a
+    facsimile book and "no findings" for a reflow book were the same string.
+    """
+    from ubt.adapters.pdf.visual_gate import _tier_coverage, _tier_lists
+
+    reflow = _tier_coverage((), [], rendered_pages=5, sampled_pages=5)
+    assert "not run: canvas, vlm" in reflow
+
+    _, skipped = _tier_lists((), rendered_pages=5)
+    assert "canvas" in skipped
+
+    # A background that failed to render is not a background that measured clean.
+    _, skipped_with_bg = _tier_lists((), rendered_pages=0, canvas_available=True)
+    assert "canvas" in skipped_with_bg
+
+    ran, skipped_ok = _tier_lists((), rendered_pages=5, canvas_available=True)
+    assert "canvas" in ran
+    assert "canvas" not in skipped_ok
 
 
 def test_a_report_never_claims_a_tier_that_did_not_run() -> None:
@@ -455,7 +490,7 @@ def test_a_report_never_claims_a_tier_that_did_not_run() -> None:
         "the type tier needs a rendered page and must not be claimed"
     )
     assert "pixel" not in nothing_rendered.split("not run")[0]
-    assert "not run: type, pixel, vlm" in nothing_rendered
+    assert "not run: type, pixel, canvas, vlm" in nothing_rendered
     assert "0 of 5 sampled page(s) rendered" in nothing_rendered
     # The geometry tier reads the PDF's own text rects, so it does still run.
     assert "tiers run: geometry" in nothing_rendered
@@ -659,25 +694,27 @@ def test_tier_lists_distinguish_a_render_failure_from_a_judge_miss() -> None:
     from ubt.adapters.pdf.visual_gate import _tier_lists
 
     # Pages rendered, no judge: only the semantic tier is missing.
+    # ``canvas`` is skipped by default because it needs the stripped background,
+    # which a reflow delivery does not produce; see its own test.
     ran, skipped = _tier_lists((), rendered_pages=6)
     assert ran == ["geometry", "source", "type", "pixel"]
-    assert skipped == ["vlm"]
+    assert skipped == ["canvas", "vlm"]
 
     # Nothing rendered: the raster tiers could not run either.
     ran, skipped = _tier_lists((), rendered_pages=0)
     assert ran == ["geometry", "source"]
-    assert skipped == ["type", "pixel", "vlm"]
+    assert skipped == ["type", "pixel", "canvas", "vlm"]
 
     # No Typst source beside the artifact: the source tier has to *say* it did
     # not run. It used to be invisible, so "scanned and clean" and "never
     # scanned" produced the same tiers_ran list.
     ran, skipped = _tier_lists((), rendered_pages=6, source_available=False)
     assert ran == ["geometry", "type", "pixel"]
-    assert skipped == ["source", "vlm"]
+    assert skipped == ["source", "canvas", "vlm"]
 
-    # Everything ran, including the judge.
-    ran, skipped = _tier_lists((2,), rendered_pages=6)
-    assert ran == ["geometry", "source", "type", "pixel", "vlm"]
+    # Everything ran, including the judge and the canvas diff.
+    ran, skipped = _tier_lists((2,), rendered_pages=6, canvas_available=True)
+    assert ran == ["geometry", "source", "type", "pixel", "canvas", "vlm"]
     assert skipped == []
 
 
