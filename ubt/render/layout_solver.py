@@ -153,6 +153,11 @@ def solve_page_2d(
     Step 1: Check source overlap. If resolve_overlaps is True, resolves micro-overlaps.
     Step 2: Binary search for uniform font size s* in [floor_pt, ceiling].
     Step 3: In contraction mode (EN->ZH), dynamically stretch leading to absorb whitespace.
+
+    Every returned solution is at or above ``floor_pt``. A ceiling below the
+    floor (a mis-measured source size) routes to L2 rather than returning a
+    too-small L1, because "never sacrifice quality for layout" means the floor
+    bounds the *output*, not just the search.
     """
     effective_cols = (
         [resolve_local_overlaps(col) for col in columns_records]
@@ -177,6 +182,26 @@ def solve_page_2d(
     ceiling = min(max_body_pt, source_size_pt * ceiling_ratio)
     tracking = 0.0
     em_used = base_em
+
+    # A ceiling below the floor means the source size itself was measured small —
+    # measured on ``chapter-3.pdf`` p22, a formula-dense page where the modal
+    # reported size is a math font (6.2pt) rather than the 8.9pt body, giving
+    # ``ceiling = 6.82pt``. Returning that as ``fits=True, delivery_tier="L1"``
+    # would deliver text *smaller than the source it reproduces*, which is the
+    # one outcome this channel exists to avoid: the floor is the lowest size the
+    # channel is allowed to ship, not a target it may fall through. Route to L2
+    # instead, which keeps the page count and the cloned geometry but sizes the
+    # text to fit rather than to the mis-measured ceiling.
+    if ceiling < floor_pt:
+        return PageLayoutSolution(
+            uniform_size_pt=round(floor_pt, 2),
+            leading_em=0.33,
+            tracking_em=0.0,
+            fits=False,
+            source_overlap=False,
+            delivery_tier="L2",
+            bottleneck_seg_ids=_find_bottlenecks(effective_cols, floor_pt, base_em),
+        )
 
     # Step 1: Binary search for uniform size s*
     if fits_all(effective_cols, ceiling, base_em, tol_pt=tol_pt):
