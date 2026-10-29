@@ -38,14 +38,11 @@ def _mk_block(
         level=level,
         flow_id=flow_id,
     )
-    return IRBlock(
-        id=b_id,
-        block_type=b_type,
-        source_text=source or target,
-        target_text=target or source,
-        element=el,
-        flow_id=flow_id,
-    )
+    # ``IRBlock`` carries its structure in ``element``; ``id``, ``block_type``,
+    # ``source_text`` and ``flow_id`` all live on the element (``flow_id`` is
+    # passed to ``make_element`` above) and were silently dropped here by
+    # ``extra="ignore"``. ``target_text`` is a real block field and stays.
+    return IRBlock(element=el, target_text=target or source)
 
 
 @pytest.mark.fast
@@ -186,6 +183,10 @@ def test_manager_transform_blocks_footnote_inline() -> None:
     # Footnote definition block is consumed
     assert len(res) == 1
     assert res[0].id == "p1"
+    # ``target_text`` is ``str | None`` (a block need not be translated yet);
+    # asserting the presence first keeps a missing translation distinct from a
+    # wrong one, and lets the substring check type-check.
+    assert res[0].target_text is not None
     assert "#footnote[Karger 等人，1997年。]" in res[0].target_text
 
 
@@ -206,8 +207,10 @@ def test_manager_transform_blocks_chapter_endnote() -> None:
 
     # Contains heading, transformed p1 with link, and endnote section block
     assert len(res) == 3
+    assert res[1].target_text is not None
     assert "#link(<fn-ch1-1>)[#super[1]]" in res[1].target_text
     assert res[2].id == "endnotes-ch1"
+    assert res[2].target_text is not None
     assert "Lamport, 1998." in res[2].target_text
 
 

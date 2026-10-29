@@ -32,13 +32,9 @@ def _make_block(
         block_type=btype,
         source_text=asset_id or text,
     )
-    return IRBlock(
-        id=block_id,
-        type=btype,
-        source_text=text,
-        target_text=text,
-        element=elem,
-    )
+    # Only ``element`` and ``target_text`` are fields of ``IRBlock``; the rest
+    # were silently ignored by ``extra="ignore"``.
+    return IRBlock(element=elem, target_text=text)
 
 
 def test_extract_main_and_subcaptions_english() -> None:

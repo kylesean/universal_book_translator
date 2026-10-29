@@ -15,7 +15,7 @@ pytestmark = pytest.mark.fast
 runner = CliRunner()
 
 
-def test_patch_diff_command(tmp_path: Path):
+def test_patch_diff_command(tmp_path: Path) -> None:
     """Verify ubt patch diff calculates reusable blocks and outputs table/json/markdown."""
     base_file = tmp_path / "v1.md"
     base_file.write_text(
@@ -63,7 +63,7 @@ def test_patch_diff_command(tmp_path: Path):
     assert file_data["unchanged_count"] == 1
 
 
-def test_patch_apply_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_patch_apply_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify ubt patch apply creates seeded ledger job in dry-run and commit mode."""
     db_dir = tmp_path / "ledgers"
     db_dir.mkdir(parents=True, exist_ok=True)

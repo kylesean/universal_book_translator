@@ -178,7 +178,7 @@ async def test_worker_writer_lock_conflict_backs_off_using_lease_expiry(tmp_path
         if False:
             yield
 
-    worker._event_source = throwing_event_source  # type: ignore[method-assign]
+    worker._event_source = throwing_event_source
 
     with unittest.mock.patch("asyncio.sleep", side_effect=fake_sleep):
         result = await worker.execute(job)  # type: ignore[arg-type]

@@ -15,6 +15,7 @@ source page's measured size, both of which run for real here.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pikepdf
 import pytest
@@ -75,7 +76,7 @@ def _ledger(tmp_path: Path) -> SQLiteJobLedger:
     return SQLiteJobLedger(tmp_path / "ledger.db")
 
 
-def _render(strategy: DoclingRenderStrategy, manifest, blocks, out: Path) -> None:
+def _render(strategy: DoclingRenderStrategy, manifest: Any, blocks: Any, out: Path) -> None:
     import asyncio
 
     asyncio.run(strategy.render_blocks(manifest, blocks, "zh", out))

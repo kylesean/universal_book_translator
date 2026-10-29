@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pypdf import PdfWriter
@@ -123,7 +124,7 @@ def _write_page(
             NameObject("/BaseFont"): NameObject("/Helvetica"),
         }
     )
-    page[NameObject("/Resources")] = DictionaryObject(  # type: ignore[index]
+    page[NameObject("/Resources")] = DictionaryObject(
         {
             NameObject("/Font"): DictionaryObject(
                 {NameObject("/F1"): writer._add_object(font)}  # noqa: SLF001
@@ -153,7 +154,7 @@ _REFLOW_SOURCE = (
 )
 
 
-def _gate(pdf: Path, background: Path | None, *, typ_text: str | None = _CANVAS_SOURCE):
+def _gate(pdf: Path, background: Path | None, *, typ_text: str | None = _CANVAS_SOURCE) -> Any:
     return asyncio.run(
         run_visual_gate(
             pdf,

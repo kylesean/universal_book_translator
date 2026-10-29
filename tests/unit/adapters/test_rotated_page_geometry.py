@@ -118,7 +118,12 @@ class _RecordingDriver:
         page_size_pt: tuple[float, float],
         scale: float,
         rotation: int = 0,
+        origin_pt: tuple[float, float] = (0.0, 0.0),
     ) -> PageTranscript:
+        # ``origin_pt`` is part of the ``VlmDriver`` protocol: a driver that
+        # measures boxes needs the crop's PDF origin to place them. These
+        # recording doubles do not measure, so the value is accepted and unused
+        # -- but it must be accepted, or the double is not a ``VlmDriver``.
         self.calls.append((page_size_pt, scale, rotation))
         return PageTranscript(lines=(VlmLine("ABCDEF"),), engine=self.name, measured_boxes=False)
 
@@ -156,7 +161,12 @@ class _DetectorDriver:
         page_size_pt: tuple[float, float],
         scale: float,
         rotation: int = 0,
+        origin_pt: tuple[float, float] = (0.0, 0.0),
     ) -> PageTranscript:
+        # ``origin_pt`` is part of the ``VlmDriver`` protocol: a driver that
+        # measures boxes needs the crop's PDF origin to place them. These
+        # recording doubles do not measure, so the value is accepted and unused
+        # -- but it must be accepted, or the double is not a ``VlmDriver``.
         width, height = page_size_pt
         ink = ImageOps.invert(image.convert("L")).getbbox()  # type: ignore[attr-defined]
         assert ink is not None

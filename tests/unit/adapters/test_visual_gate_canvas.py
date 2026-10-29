@@ -29,6 +29,7 @@ figure fill a collision and fire on healthy books.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -59,8 +60,18 @@ def _draw_text(draw: ImageDraw.ImageDraw) -> None:
         draw.rectangle(box, fill=0)
 
 
-def _page_pair(tmp_path: Path, name: str, *, background=None, text: bool = True):
+def _page_pair(
+    tmp_path: Path,
+    name: str,
+    *,
+    background: Callable[[ImageDraw.ImageDraw], None] | None = None,
+    text: bool = True,
+) -> tuple[Path, Path]:
     """Write a ``(background, final)`` PNG pair; the final is background + text.
+
+    ``background`` is a *drawing callback*, not a path: each test paints the
+    hazard it needs (a rule through the text, a filled bar, an edge) onto the
+    background layer before the glyphs go on top.
 
     The final page is a copy of the background with the text drawn on top, which
     is structurally what the facsimile renderer produces: the same page, one

@@ -26,7 +26,7 @@ def test_diagnose_spills_parse_pages() -> None:
 
 
 def test_diagnose_spills_script_help(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Invoking scripts/diagnose_spills.py with --help exits cleanly."""
     monkeypatch.setattr(sys, "argv", ["diagnose_spills.py", "--help"])
@@ -38,7 +38,7 @@ def test_diagnose_spills_script_help(
 
 
 def test_diagnose_spills_script_summary_mode(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Summary mode reports concise one-line pass status."""
     if not _DOC_PATH.is_file():
@@ -63,7 +63,7 @@ def test_diagnose_spills_script_summary_mode(
 
 
 def test_diagnose_spills_script_json_mode(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """JSON mode outputs machine-readable layout diagnosis payload."""
     if not _DOC_PATH.is_file():

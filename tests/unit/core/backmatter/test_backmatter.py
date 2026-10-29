@@ -33,13 +33,9 @@ def _mk_block(b_id: str, b_type: BlockType, target: str, level: int = 1) -> IRBl
         source_text=target,
         level=level,
     )
-    return IRBlock(
-        id=b_id,
-        block_type=b_type,
-        source_text=target,
-        target_text=target,
-        element=el,
-    )
+    # Only ``element`` and ``target_text`` are fields of ``IRBlock``; the rest
+    # were silently ignored by ``extra="ignore"``.
+    return IRBlock(element=el, target_text=target)
 
 
 def test_classify_heading() -> None:

@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from ubt.adapters.pdf.strip_pdf_text import BoxRect
 from ubt.adapters.pdf.typst_compile import typst_version
@@ -52,7 +53,43 @@ _MIN_BLOCK_SIZE_PT: float = 4.5
 _HEADING_SIZE_RATIO: float = 1.6
 
 
-def _block_font_size(block: IRBlock, *, is_hdr: bool, body_size: float) -> float | None:
+class _StripPlannable(Protocol):
+    """The four attributes :func:`_facsimile_strip_plan` actually reads.
+
+    Structural rather than ``IRBlock`` so a test (or any caller holding only a
+    box and a kind) can plan strips without inventing an ``element``. The
+    properties on ``IRBlock`` derive ``bbox``/``block_type``/``skip_translate``
+    from the element, so a real block satisfies this unchanged.
+
+    They are declared as read-only ``@property`` because that is what
+    ``IRBlock`` exposes: a plain attribute annotation would demand a settable
+    member and a read-only property does not satisfy it.
+    """
+
+    @property
+    def bbox(self) -> Any: ...
+
+    @property
+    def skip_translate(self) -> bool: ...
+
+    @property
+    def block_type(self) -> BlockType: ...
+
+
+class _SizedBlock(Protocol):
+    """The only two attributes ``_block_font_size`` reads.
+
+    A structural type rather than ``IRBlock``: the function needs a measured
+    ``font_size`` on the style and on the provenance, and nothing else. Naming
+    that lets a caller with just a measurement be checked, instead of being
+    forced to build a whole block whose other fields are never touched.
+    """
+
+    style: Any
+    provenance: Any
+
+
+def _block_font_size(block: _SizedBlock, *, is_hdr: bool, body_size: float) -> float | None:
     """A block's own size in points, or ``None`` to inherit the page's body size.
 
     Body prose inherits the page size, which the solver already picked. A
@@ -60,6 +97,10 @@ def _block_font_size(block: IRBlock, *, is_hdr: bool, body_size: float) -> float
     chapter title was being drawn at ~10pt and every page read as a flat wall of
     uniform text. The size is taken from the block's own style/provenance
     measurement, and only when that measurement is plausible.
+
+    Takes ``_SizedBlock`` rather than ``IRBlock`` because only two attributes
+    are read. Requiring the full model forced callers with a measured size but
+    no ``element`` to fabricate one.
     """
     candidates: list[float] = []
     if block.style is not None and block.style.font_size is not None:
@@ -113,7 +154,7 @@ def _page_metrics(source_path: Path, page_no: int) -> _PageMetrics | None:
 
 
 def _facsimile_strip_plan(
-    blocks_by_page: dict[int, list[IRBlock]],
+    blocks_by_page: Mapping[int, Sequence[_StripPlannable]],
     total_pages: int,
     source_path: Path,
 ) -> tuple[dict[int, list[BoxRect]], dict[int, list[BoxRect]]]:

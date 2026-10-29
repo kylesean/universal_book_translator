@@ -68,7 +68,9 @@ def _manifest(tmp_path: Path, *, background: Path | None) -> BookManifest:
     return manifest
 
 
-def test_the_recorded_background_reaches_the_gate(tmp_path: Path) -> None:
+def test_the_recorded_background_reaches_the_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     background = tmp_path / "bg_stripped.pdf"
     background.write_bytes(b"%PDF-1.4\n%%EOF\n")
     manifest = _manifest(tmp_path, background=background)
@@ -86,12 +88,13 @@ def test_the_recorded_background_reaches_the_gate(tmp_path: Path) -> None:
 
     import ubt.core.engine.visual_verify_loop as loop_module
 
-    original = loop_module.get_visual_gate_runner
-    loop_module.get_visual_gate_runner = lambda: _runner  # type: ignore[assignment]
-    try:
-        asyncio.run(loop._evaluate_gate(tmp_path / "artifact.pdf", []))
-    finally:
-        loop_module.get_visual_gate_runner = original  # type: ignore[assignment]
+    # ``monkeypatch.setattr`` rather than a hand-rolled save/restore: the module
+    # imports ``get_visual_gate_runner`` from ``ubt.core.ports`` for its own
+    # use and does not re-export it, so assigning the attribute needs a
+    # ``type: ignore`` that then has to be kept in step with the import. The
+    # fixture does the same thing without weakening the type of the module.
+    monkeypatch.setattr(loop_module, "get_visual_gate_runner", lambda: _runner)
+    asyncio.run(loop._evaluate_gate(tmp_path / "artifact.pdf", []))
 
     assert captured["canvas_background_pdf"] == background
 

@@ -26,7 +26,7 @@ pytestmark = pytest.mark.fast
 runner = CliRunner()
 
 
-def test_detect_package_manager(monkeypatch: pytest.MonkeyPatch):
+def test_detect_package_manager(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify package manager detection across platforms."""
     # Darwin -> brew
     monkeypatch.setattr("sys.platform", "darwin")
@@ -44,7 +44,7 @@ def test_detect_package_manager(monkeypatch: pytest.MonkeyPatch):
     assert detect_package_manager() == "pacman"
 
 
-def test_probe_gpu_acceleration_nvidia(monkeypatch: pytest.MonkeyPatch):
+def test_probe_gpu_acceleration_nvidia(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify GPU probe with mock nvidia-smi output."""
     monkeypatch.setattr(
         "shutil.which", lambda cmd: "/usr/bin/nvidia-smi" if cmd == "nvidia-smi" else None
@@ -66,7 +66,7 @@ def test_probe_gpu_acceleration_nvidia(monkeypatch: pytest.MonkeyPatch):
     assert "RTX 4090" in args[2]
 
 
-def test_probe_gpu_acceleration_cpu_fallback(monkeypatch: pytest.MonkeyPatch):
+def test_probe_gpu_acceleration_cpu_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify fallback to CPU execution when no GPU is detected."""
     monkeypatch.setattr("shutil.which", lambda cmd: None)
     monkeypatch.setattr("importlib.util.find_spec", lambda mod: None)
@@ -80,7 +80,7 @@ def test_probe_gpu_acceleration_cpu_fallback(monkeypatch: pytest.MonkeyPatch):
     assert kwargs["detail_code"] == "gpu_acceleration.none"
 
 
-def test_probe_system_memory(monkeypatch: pytest.MonkeyPatch):
+def test_probe_system_memory(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify system RAM headroom classifications."""
     # 1. Healthy (16GB total, 8GB available)
     mock_vm_ok = MagicMock()
@@ -104,7 +104,7 @@ def test_probe_system_memory(monkeypatch: pytest.MonkeyPatch):
     assert rec_crit[0][1]["detail_code"] == "system_memory.critical"
 
 
-def test_probe_ghostscript(monkeypatch: pytest.MonkeyPatch):
+def test_probe_ghostscript(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify Ghostscript binary version inspection."""
     # Present
     monkeypatch.setattr("shutil.which", lambda cmd: "/usr/bin/gs" if cmd == "gs" else None)
@@ -124,7 +124,7 @@ def test_probe_ghostscript(monkeypatch: pytest.MonkeyPatch):
     assert rec_missing[0][1]["detail_code"] == "ghostscript.missing"
 
 
-def test_probe_typst_version(monkeypatch: pytest.MonkeyPatch):
+def test_probe_typst_version(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify Typst version parsing and compatibility threshold."""
     # 1. Modern Typst 0.15.1 -> OK
     monkeypatch.setattr("shutil.which", lambda cmd: "/usr/bin/typst" if cmd == "typst" else None)
@@ -153,7 +153,7 @@ def test_probe_typst_version(monkeypatch: pytest.MonkeyPatch):
     assert rec_miss[0][1]["detail_code"] == "typst_version.missing"
 
 
-def test_probe_cjk_coverage(monkeypatch: pytest.MonkeyPatch):
+def test_probe_cjk_coverage(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify CJK Serif and Sans font coverage classifications."""
     # Both Serif and Sans
     monkeypatch.setattr(
@@ -176,7 +176,7 @@ def test_probe_cjk_coverage(monkeypatch: pytest.MonkeyPatch):
     assert rec_part[0][1]["detail_code"] == "cjk_coverage.partial"
 
 
-def test_probe_offline_assets():
+def test_probe_offline_assets() -> None:
     """Verify core offline assets probe."""
     rec = []
     probe_offline_assets(lambda *args, **kwargs: rec.append((args, kwargs)))
@@ -185,7 +185,7 @@ def test_probe_offline_assets():
     assert rec[0][1]["detail_code"] == "offline_assets.ok"
 
 
-def test_generate_fix_script():
+def test_generate_fix_script() -> None:
     """Verify remediation script generation for missing dependencies."""
     from ubt.cli.commands.doctor import _Check
 
@@ -251,7 +251,7 @@ def test_generate_fix_script():
     assert "brew install" in brew_script
 
 
-def test_doctor_deep_cli_execution(tmp_path: Path):
+def test_doctor_deep_cli_execution(tmp_path: Path) -> None:
     """Verify CLI integration for `ubt doctor --deep` and `--fix-script`."""
     script_path = tmp_path / "fix_env.sh"
 

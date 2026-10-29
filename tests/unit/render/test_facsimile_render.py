@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pikepdf
 import pytest
@@ -62,13 +63,43 @@ from ubt.render.typst.facsimile_renderer import (
 pytestmark = pytest.mark.fast
 
 
+def _instructions_in(page: pikepdf.Page) -> list[tuple[Any, Any]]:
+    """The ``(operands, operator)`` pairs of a page's content stream.
+
+    ``parse_content_stream`` is typed as an iterator over
+    ``ContentStreamInstruction | ContentStreamInlineImage``. Only the
+    instruction carries operands; an inline image is a bare object and has no
+    tuple to unpack, so the two cases are separated here rather than at each
+    use. (``_ObjectList`` is not a ``list`` subclass, which is why the operand
+    test is duck-typed instead of ``isinstance``.)
+    """
+    pairs: list[tuple[Any, Any]] = []
+    for item in pikepdf.parse_content_stream(page):
+        operands = getattr(item, "operands", None)
+        operator = getattr(item, "operator", None)
+        if operands is None or operator is None:
+            continue  # inline image
+        if not hasattr(operands, "__iter__"):
+            continue
+        pairs.append((operands, operator))
+    return pairs
+
+
 def _texts_in(stream_bytes: bytes) -> list[str]:
-    """Literal glyph runs left in a content stream (empty runs dropped)."""
+    """Literal glyph runs left in a content stream (empty runs dropped).
+
+    ``parse_content_stream`` yields a union: an instruction whose operands are
+    an ``_ObjectList``, or an inline image whose operands are not iterable. The
+    image case carries no text, so it is skipped explicitly. The check is for
+    ``list`` *and* the list-like object pikepdf uses -- ``_ObjectList`` is not a
+    ``list`` subclass, and testing only for ``list`` silently dropped every
+    operator.
+    """
     pdf = pikepdf.Pdf.new()
     page = pdf.add_blank_page(page_size=(300, 300))
     page.Contents = pdf.make_stream(stream_bytes)
     out: list[str] = []
-    for operands, operator in pikepdf.parse_content_stream(page):
+    for operands, operator in _instructions_in(page):
         if str(operator) not in ("Tj", "TJ", "'", '"'):
             continue
         for operand in operands:
@@ -83,7 +114,21 @@ def _operators_in(stream_bytes: bytes) -> list[str]:
     pdf = pikepdf.Pdf.new()
     page = pdf.add_blank_page(page_size=(300, 300))
     page.Contents = pdf.make_stream(stream_bytes)
-    return [str(operator) for _operands, operator in pikepdf.parse_content_stream(page)]
+    return [str(operator) for _operands, operator in _instructions_in(page)]
+
+
+def _source_pdf(tmp_path: Path) -> Path:
+    """A real one-page PDF at the geometry the strip plans are measured on.
+
+    ``_facsimile_strip_plan`` opens the source file to detect vector-diagram
+    regions, so it cannot take ``None``: a page with no diagram simply yields
+    no extra keep rects, which is what these cases want.
+    """
+    path = tmp_path / "source_666.pdf"
+    pdf = pikepdf.Pdf.new()
+    pdf.add_blank_page(page_size=(540, 666))
+    pdf.save(path)
+    return path
 
 
 def _fake_block(
@@ -351,7 +396,13 @@ def test_strip_form_xobjects_keeps_figure_labels_without_erase_rects() -> None:
     form[pikepdf.Name("/BBox")] = pikepdf.Array([0, 0, 100, 100])
     page[pikepdf.Name("/Resources")] = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Fm0=form))
 
-    visited = strip_form_xobjects_recursive(page.Resources)
+    # ``page.Resources`` is typed as ``Object`` (a PDF value can be a
+    # dictionary, an array or a name). This page's resources were just assigned
+    # as a dictionary, so asserting that states the precondition the function
+    # relies on instead of casting it away.
+    resources = page.Resources
+    assert isinstance(resources, pikepdf.Dictionary)
+    visited = strip_form_xobjects_recursive(resources)
     assert visited == 1
     assert b"Axis 68" in form.read_bytes()
     assert b"25 25 l" in form.read_bytes()
@@ -612,6 +663,7 @@ def test_block_font_size_clones_a_small_caption_below_the_body_floor() -> None:
         provenance=SimpleNamespace(font_size=6.45),
     )
     size = _block_font_size(block, is_hdr=True, body_size=8.0)
+    assert size is not None, "a heading with a plausible measurement must not inherit"
     assert size == pytest.approx(6.45)
     assert size < FLOOR_PT, "the caption is below the body floor by design"
 
@@ -698,7 +750,7 @@ def test_facsimile_renderer_tables_are_tables() -> None:
     assert "|" not in markup
 
 
-def test_facsimile_strip_plan_does_not_band_the_furniture_margins() -> None:
+def test_facsimile_strip_plan_does_not_band_the_furniture_margins(tmp_path: Path) -> None:
     """The plan must not add a full-width keep band at the page's top or bottom.
 
     The first implementation kept ``[0, 0.08·H]`` and ``[0.92·H, H]`` on every
@@ -734,7 +786,7 @@ def test_facsimile_strip_plan_does_not_band_the_furniture_margins() -> None:
         skip_translate=True,
     )
 
-    erase, keep = _facsimile_strip_plan({1: [body, running_head]}, 1, None)
+    erase, keep = _facsimile_strip_plan({1: [body, running_head]}, 1, _source_pdf(tmp_path))
 
     assert len(erase[1]) == 1, "the translated body block must be erased"
     assert len(keep[1]) == 1, (
@@ -746,7 +798,7 @@ def test_facsimile_strip_plan_does_not_band_the_furniture_margins() -> None:
     )
 
 
-def test_facsimile_strip_plan_keeps_body_prose_that_reaches_into_the_margin() -> None:
+def test_facsimile_strip_plan_keeps_body_prose_that_reaches_into_the_margin(tmp_path: Path) -> None:
     """End-to-end: a paragraph line below ``0.08·H`` must still be erased.
 
     This is the defect the band caused, reproduced at the strip level so the
@@ -767,7 +819,9 @@ def test_facsimile_strip_plan_keeps_body_prose_that_reaches_into_the_margin() ->
         block_type=BlockType.NARRATIVE,
         skip_translate=False,
     )
-    erase, keep = _facsimile_strip_plan({1: [body]}, 1, None)
+    # ``_facsimile_strip_plan`` reads the source PDF to detect vector-diagram
+    # regions, so it needs a real path; ``None`` would have raised inside it.
+    erase, keep = _facsimile_strip_plan({1: [body]}, 1, _source_pdf(tmp_path))
     stripped = strip_stream_text(page, erase_rects=erase[1], keep_rects=keep.get(1, []))
 
     texts = _texts_in(stripped)

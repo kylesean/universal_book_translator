@@ -26,7 +26,7 @@ from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
 pytestmark = pytest.mark.fast
 
 
-def test_parse_scope_spec():
+def test_parse_scope_spec() -> None:
     """Verify parsing of various scope spec strings and shorthands."""
     assert parse_scope_spec(None) == (ScopeLevel.GLOBAL, "*")
     assert parse_scope_spec("") == (ScopeLevel.GLOBAL, "*")
@@ -48,7 +48,7 @@ def test_parse_scope_spec():
     assert parse_scope_spec("dom:psychology") == (ScopeLevel.DOMAIN, "psychology")
 
 
-def test_matches_scope():
+def test_matches_scope() -> None:
     """Verify scope matching against active ScopeContext."""
     ctx = ScopeContext(
         chapter_index=2,
@@ -85,7 +85,7 @@ def test_matches_scope():
     assert matches_scope("domain:golf", ctx) == (False, ScopeLevel.DOMAIN)
 
 
-def test_score_context_affinity():
+def test_score_context_affinity() -> None:
     """Verify positive context hint boosting and negative disqualification."""
     entry_hardware = {
         "source": "driver",
@@ -111,7 +111,7 @@ def test_score_context_affinity():
     assert score3 <= -100.0
 
 
-def test_arbitrate_competing_entries_scope_override():
+def test_arbitrate_competing_entries_scope_override() -> None:
     """Verify that narrower scope wins over broader scope."""
     entry_global = {
         "source": "driver",
@@ -154,7 +154,7 @@ def test_arbitrate_competing_entries_scope_override():
     assert winner_ch5["translation"] == "驾驶员"
 
 
-def test_arbitrate_competing_entries_context_hints():
+def test_arbitrate_competing_entries_context_hints() -> None:
     """Verify that context affinity breaks ties among identical scopes."""
     entry_cs = {
         "source": "driver",
@@ -177,7 +177,7 @@ def test_arbitrate_competing_entries_context_hints():
     assert verdict == GlossaryConflictVerdict.RESOLVED_BY_CONTEXT
 
 
-def test_arbitrate_competing_entries_priority_and_frequency():
+def test_arbitrate_competing_entries_priority_and_frequency() -> None:
     """Verify user priority and frequency fallbacks."""
     entry_low_prio = {
         "source": "term",
@@ -215,7 +215,7 @@ def test_arbitrate_competing_entries_priority_and_frequency():
     assert verdict_freq == GlossaryConflictVerdict.RESOLVED_BY_FREQUENCY
 
 
-def test_resolve_effective_glossary():
+def test_resolve_effective_glossary() -> None:
     """Verify resolve_effective_glossary produces unambiguous term mappings."""
     entries = [
         BibleEntry(
@@ -267,7 +267,7 @@ def test_resolve_effective_glossary():
     assert lookup_ch99["driver"] == "驾驶员"
 
 
-def test_audit_glossary_conflicts():
+def test_audit_glossary_conflicts() -> None:
     """Verify conflict auditor catches unresolved ambiguities vs. scoped partitions."""
     clean_entries = [
         {"source": "driver", "translation": "驱动程序", "scope": "chapter:2"},
@@ -292,7 +292,7 @@ def test_audit_glossary_conflicts():
     assert summary_ambig.unresolved_conflicts == 1
 
 
-def test_glossary_table_and_enforcer_integration():
+def test_glossary_table_and_enforcer_integration() -> None:
     """Verify end-to-end integration with glossary_table and DeterministicGlossaryEnforcer."""
     entries = [
         BibleEntry(source="kernel", translation="操作系统内核", scope="chapter:1"),

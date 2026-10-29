@@ -14,6 +14,8 @@ pins the ratio and ``test_visual_gate_canvas_pdf.py`` pins the end-to-end wiring
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from ubt.adapters.pdf.visual_gate import (
@@ -125,7 +127,7 @@ def test_the_identity_threshold_is_a_real_gap_not_a_tuned_constant() -> None:
     assert (CANVAS_PAIR_IDENTITY_MIN - l2_ceiling) > 3 * (l1_floor - CANVAS_PAIR_IDENTITY_MIN)
 
 
-def test_a_blank_background_does_not_disqualify_a_blank_page(tmp_path) -> None:
+def test_a_blank_background_does_not_disqualify_a_blank_page(tmp_path: Path) -> None:
     """A page with nothing on it is vacuously the same page, and cannot collide.
 
     0/0 is the one case the identity metric cannot answer, and answering it the
@@ -143,7 +145,7 @@ def test_a_blank_background_does_not_disqualify_a_blank_page(tmp_path) -> None:
     assert canvas_page_pair_identity(blank, also_blank) == 1.0
 
 
-def test_an_unreadable_pair_is_unmeasurable_not_unpaired(tmp_path) -> None:
+def test_an_unreadable_pair_is_unmeasurable_not_unpaired(tmp_path: Path) -> None:
     """``None`` and ``0.0`` mean different things and the gate treats them alike."""
     from PIL import Image
 
@@ -156,7 +158,7 @@ def test_an_unreadable_pair_is_unmeasurable_not_unpaired(tmp_path) -> None:
     assert canvas_page_pair_identity(good, junk) is None
 
 
-def test_a_size_mismatch_is_unmeasurable(tmp_path) -> None:
+def test_a_size_mismatch_is_unmeasurable(tmp_path: Path) -> None:
     """Same rule as the ratio: never resample one page onto the other."""
     from PIL import Image
 

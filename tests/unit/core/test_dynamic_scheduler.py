@@ -29,7 +29,7 @@ def _make_block(
     return IRBlock(element=el)
 
 
-def test_classify_heading_as_trivial():
+def test_classify_heading_as_trivial() -> None:
     """Verify section headings are classified as TRIVIAL complexity."""
     classifier = BlockComplexityClassifier()
     block = _make_block("blk-h1", "# Chapter 1: Introduction", BlockType.HEADING)
@@ -40,7 +40,7 @@ def test_classify_heading_as_trivial():
     assert "Heading structure" in metrics.reasons
 
 
-def test_classify_standard_narrative():
+def test_classify_standard_narrative() -> None:
     """Verify ordinary expository text is classified as STANDARD."""
     classifier = BlockComplexityClassifier()
     text = (
@@ -55,7 +55,7 @@ def test_classify_standard_narrative():
     assert 0.20 <= metrics.score < 0.60
 
 
-def test_classify_math_complexity_and_extreme():
+def test_classify_math_complexity_and_extreme() -> None:
     """Verify formulas and LaTeX equations elevate complexity to COMPLEX and EXTREME."""
     classifier = BlockComplexityClassifier()
 
@@ -77,7 +77,7 @@ def test_classify_math_complexity_and_extreme():
     assert metrics_display.score >= 0.82
 
 
-def test_classify_code_block():
+def test_classify_code_block() -> None:
     """Verify programming code listing is elevated in complexity."""
     classifier = BlockComplexityClassifier()
     code_text = (
@@ -96,7 +96,7 @@ def test_classify_code_block():
     assert metrics_code.code_syntax_score > 0.0
 
 
-def test_classify_with_glossary_density():
+def test_classify_with_glossary_density() -> None:
     """Verify dense domain terminology increases complexity score."""
     classifier = BlockComplexityClassifier()
     text = "The kernel driver configures the memory buffer via the bus controller."
@@ -110,7 +110,7 @@ def test_classify_with_glossary_density():
     assert metrics_with_glossary.term_matches_count >= 3
 
 
-def test_pareto_scheduler_model_assignment():
+def test_pareto_scheduler_model_assignment() -> None:
     """Verify DynamicParetoScheduler assigns models based on tier and policy."""
     scheduler = DynamicParetoScheduler(
         policy=DynamicRoutingPolicy.PARETO,
@@ -136,7 +136,7 @@ def test_pareto_scheduler_model_assignment():
     assert assign_m.tier == ComplexityTier.EXTREME
 
 
-def test_pareto_scheduler_retry_escalation():
+def test_pareto_scheduler_retry_escalation() -> None:
     """Verify that failure / retry escalates model assignment to higher tier."""
     scheduler = DynamicParetoScheduler(
         policy=DynamicRoutingPolicy.PARETO,
@@ -162,7 +162,7 @@ def test_pareto_scheduler_retry_escalation():
     assert retry_assign.assigned_model == "gpt-4o-mini"
 
 
-def test_quality_first_and_cost_first_policies():
+def test_quality_first_and_cost_first_policies() -> None:
     """Verify QUALITY_FIRST and COST_FIRST routing policies."""
     scheduler_quality = DynamicParetoScheduler(
         policy=DynamicRoutingPolicy.QUALITY_FIRST,
@@ -190,7 +190,7 @@ def test_quality_first_and_cost_first_policies():
     assert assign_c.assigned_model == "deepseek-chat"
 
 
-def test_simulate_document_routing():
+def test_simulate_document_routing() -> None:
     """Verify simulate_document_routing computes metrics and savings."""
     scheduler = DynamicParetoScheduler(
         policy=DynamicRoutingPolicy.PARETO,

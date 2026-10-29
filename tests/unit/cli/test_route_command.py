@@ -15,7 +15,7 @@ pytestmark = pytest.mark.fast
 runner = CliRunner()
 
 
-def test_route_simulate_command_table_and_json(tmp_path: Path):
+def test_route_simulate_command_table_and_json(tmp_path: Path) -> None:
     """Verify ubt route simulate outputs rich table and clean JSON."""
     doc_path = tmp_path / "book.md"
     doc_path.write_text(
@@ -50,7 +50,7 @@ def test_route_simulate_command_table_and_json(tmp_path: Path):
     assert "# Dynamic Pareto Routing Simulation Report" in res_md.stdout
 
 
-def test_route_inspect_command(tmp_path: Path):
+def test_route_inspect_command(tmp_path: Path) -> None:
     """Verify ubt route inspect shows block-by-block diagnostics."""
     doc_path = tmp_path / "doc.md"
     doc_path.write_text(
@@ -79,7 +79,7 @@ def test_route_inspect_command(tmp_path: Path):
     assert len(items) == 3
 
 
-def test_route_invalid_policy(tmp_path: Path):
+def test_route_invalid_policy(tmp_path: Path) -> None:
     """Verify ubt route simulate rejects invalid policy name."""
     doc_path = tmp_path / "simple.md"
     doc_path.write_text("Simple text.", encoding="utf-8")

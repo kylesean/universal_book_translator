@@ -22,6 +22,7 @@ convention rather than a guarantee:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
@@ -98,7 +99,9 @@ class _Provider:
         self.tag = tag
         self.calls = 0
 
-    def translate(self):
+    def translate(self) -> Callable[[str], Awaitable[str]]:
+        """A fresh provider callable, tagged so a crossed reply is visible."""
+
         async def _do(source: str) -> str:
             self.calls += 1
             return f"[{self.tag}] {source}"

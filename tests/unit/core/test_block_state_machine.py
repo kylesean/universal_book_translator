@@ -123,18 +123,28 @@ def test_ir_block_transition_to_method() -> None:
     block.transition_to(BlockStatus.DRAFTED)
     assert block.status == BlockStatus.DRAFTED
 
-    # String input coerced to BlockStatus
+    # String input coerced to BlockStatus. Read the value back through the
+    # enum constructor: mypy narrows ``block.status`` to the literal
+    # ``DRAFTED`` after the assertion above, so a direct comparison reads as
+    # non-overlapping. The round-trip keeps the check meaningful.
     block.transition_to("mtqe_passed")
-    assert block.status == BlockStatus.MTQE_PASSED
+    assert BlockStatus(block.status) is BlockStatus.MTQE_PASSED
 
-    # Forbidden transition raises and leaves status intact
+    # Forbidden transition raises and leaves status intact.
+    #
+    # The comparison is written against ``BlockStatus(block.status)`` rather
+    # than the attribute directly: after the assertion above mypy narrows
+    # ``block.status`` to the literal ``MTQE_PASSED``, so re-comparing it with
+    # ``MTQE_PASSED`` reads as a tautology and mypy reports a non-overlapping
+    # equality. Reading the value back through the enum keeps the assertion
+    # meaningful -- it fails if the status actually moved.
     with pytest.raises(InvalidBlockStatusTransitionError):
         block.transition_to(BlockStatus.DRAFTED)
-    assert block.status == BlockStatus.MTQE_PASSED
+    assert BlockStatus(block.status) is BlockStatus.MTQE_PASSED
 
-    # Override allows administrative reset
+    # Override allows administrative reset (same enum round-trip as above)
     block.transition_to(BlockStatus.PENDING, allow_override=True)
-    assert block.status == BlockStatus.PENDING
+    assert BlockStatus(block.status) is BlockStatus.PENDING
 
 
 def test_ir_block_model_copy_status_guard() -> None:
@@ -177,7 +187,11 @@ def test_ledger_checkpoint_state_machine_guard(tmp_path: Path) -> None:
         job_id=job_id,
     )
     assert updated == 0
-    assert ledger.get_block("ch1#1", job_id=job_id).status == BlockStatus.PENDING
+    reloaded = ledger.get_block("ch1#1", job_id=job_id)
+    # A ``None`` here means the block vanished, which is a different
+    # failure from the wrong status; asserting presence keeps the two apart.
+    assert reloaded is not None
+    assert reloaded.status == BlockStatus.PENDING
 
     # 2. In strict mode, invalid transition raises InvalidBlockStatusTransitionError
     with pytest.raises(InvalidBlockStatusTransitionError, match="Predecessor condition not met"):
@@ -193,7 +207,11 @@ def test_ledger_checkpoint_state_machine_guard(tmp_path: Path) -> None:
         job_id=job_id,
     )
     assert updated == 1
-    assert ledger.get_block("ch1#1", job_id=job_id).status == BlockStatus.DRAFTED
+    reloaded = ledger.get_block("ch1#1", job_id=job_id)
+    # A ``None`` here means the block vanished, which is a different
+    # failure from the wrong status; asserting presence keeps the two apart.
+    assert reloaded is not None
+    assert reloaded.status == BlockStatus.DRAFTED
 
     # 4. Valid transition from DRAFTED to MTQE_PASSED succeeds
     updated = ledger.save_checkpoints_batch(
@@ -201,7 +219,11 @@ def test_ledger_checkpoint_state_machine_guard(tmp_path: Path) -> None:
         job_id=job_id,
     )
     assert updated == 1
-    assert ledger.get_block("ch1#1", job_id=job_id).status == BlockStatus.MTQE_PASSED
+    reloaded = ledger.get_block("ch1#1", job_id=job_id)
+    # A ``None`` here means the block vanished, which is a different
+    # failure from the wrong status; asserting presence keeps the two apart.
+    assert reloaded is not None
+    assert reloaded.status == BlockStatus.MTQE_PASSED
 
     # 5. MTQE_PASSED cannot be demoted back to DRAFTED without override
     updated = ledger.save_checkpoints_batch(
@@ -209,7 +231,11 @@ def test_ledger_checkpoint_state_machine_guard(tmp_path: Path) -> None:
         job_id=job_id,
     )
     assert updated == 0
-    assert ledger.get_block("ch1#1", job_id=job_id).status == BlockStatus.MTQE_PASSED
+    reloaded = ledger.get_block("ch1#1", job_id=job_id)
+    # A ``None`` here means the block vanished, which is a different
+    # failure from the wrong status; asserting presence keeps the two apart.
+    assert reloaded is not None
+    assert reloaded.status == BlockStatus.MTQE_PASSED
 
     # 6. Invalid status string raises InvalidBlockStatusTransitionError
     with pytest.raises(InvalidBlockStatusTransitionError, match="Unknown target block status"):

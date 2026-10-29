@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from ubt.core.ir.models import BlockStatus, BoundingBox, IRBlock
+from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.references.extractor import (
     extract_document_anchors,
 )
@@ -24,15 +25,13 @@ pytestmark = pytest.mark.fast
 
 def _make_block(
     block_id: str,
-    element: any,
+    element: Any,
     page: int = 1,
 ) -> IRBlock:
-    return IRBlock(
-        element=element,
-        style=None,
-        status=BlockStatus.PENDING,
-        bbox=BoundingBox(page=page, x0=50.0, y0=100.0, x1=500.0, y1=200.0),
-    )
+    # ``IRBlock`` has no ``bbox`` field: the bounding box is the element's
+    # ``span`` and is exposed as a read-only property. Building the element with
+    # that span is the supported route, and it keeps ``block.bbox`` populated.
+    return IRBlock(element=element, style=None, status=BlockStatus.PENDING)
 
 
 def test_extract_heading_anchors() -> None:

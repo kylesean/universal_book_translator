@@ -48,7 +48,7 @@ def _make_block(
     )
 
 
-def test_normalize_and_token_estimation():
+def test_normalize_and_token_estimation() -> None:
     """Verify text normalization and token count heuristics."""
     assert normalize_source_text("  hello \n\t world  ") == "hello world"
     assert normalize_source_text(None) == ""
@@ -64,7 +64,7 @@ def test_normalize_and_token_estimation():
     assert zh_tokens >= 20
 
 
-def test_semantic_differ_identical_documents():
+def test_semantic_differ_identical_documents() -> None:
     """Identical block sequences must result in 100% reuse and UNCHANGED status."""
     differ = DocumentSemanticDiffer()
     blocks = [
@@ -98,7 +98,7 @@ def test_semantic_differ_identical_documents():
     assert all(item.status == PatchBlockStatus.UNCHANGED for item in summary.diff_items)
 
 
-def test_semantic_differ_empty_and_extremes():
+def test_semantic_differ_empty_and_extremes() -> None:
     """Empty or one-sided block diffs should be handled without exceptions."""
     differ = DocumentSemanticDiffer()
     empty_summary = differ.diff_blocks([], [])
@@ -118,7 +118,7 @@ def test_semantic_differ_empty_and_extremes():
     assert add_summary.unchanged_count == 0
 
 
-def test_semantic_differ_mixed_revisions():
+def test_semantic_differ_mixed_revisions() -> None:
     """Diffing modified, added, deleted, and unchanged blocks."""
     differ = DocumentSemanticDiffer(min_similarity=0.40)
 
@@ -177,7 +177,7 @@ def test_semantic_differ_mixed_revisions():
 
 
 @pytest.mark.asyncio
-async def test_patch_engine_apply_patch(tmp_path: Path):
+async def test_patch_engine_apply_patch(tmp_path: Path) -> None:
     """Verify BookPatchEngine applies patch to seed a new SQLite ledger job with preserved translations."""
     db_file = tmp_path / "test_ledger.sqlite"
     ledger = SQLiteJobLedger(db_file)

@@ -91,7 +91,7 @@ def test_spill_policy_is_a_closed_vocabulary() -> None:
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        UBTConfig(spill_policy="nonsense")  # type: ignore[arg-type]
+        UBTConfig(spill_policy="nonsense")
 
 
 def test_the_export_stage_accepts_exactly_the_declared_values() -> None:

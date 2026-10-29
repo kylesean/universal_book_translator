@@ -311,13 +311,14 @@ def test_benchmark_runner_in_process_execution(tmp_path: Path) -> None:
         _make_dummy_pdf(out_pdf)
         contract = ReconciliationReport(
             doc_id=case_id,
-            target_lang="zh",
-            source_lang="en",
             total_text=10,
             delivered_text=8,
             verbatim_text=2,
             missing_assets=0,
-            violations=[],
+            # ``violations`` is a tuple (frozen model) and there is no
+            # ``target_lang``/``source_lang`` field: language is not part of
+            # the delivery contract, so passing them was silently dropped.
+            violations=(),
         )
         c_path = contract_path_for_artifact(out_pdf)
         c_path.write_text(contract.model_dump_json(indent=2), encoding="utf-8")

@@ -15,7 +15,7 @@ pytestmark = pytest.mark.fast
 runner = CliRunner()
 
 
-def test_glossary_audit_command_json_and_table(tmp_path: Path):
+def test_glossary_audit_command_json_and_table(tmp_path: Path) -> None:
     """Verify ubt glossary audit outputs rich table and clean JSON."""
     glossary_file = tmp_path / "glossary.csv"
     glossary_file.write_text(
@@ -42,7 +42,7 @@ def test_glossary_audit_command_json_and_table(tmp_path: Path):
     assert data["conflicting_sources"] == 1
 
 
-def test_glossary_audit_strict_fails_on_unresolved(tmp_path: Path):
+def test_glossary_audit_strict_fails_on_unresolved(tmp_path: Path) -> None:
     """Verify ubt glossary audit --strict exits with code 1 if ambiguities exist."""
     glossary_file = tmp_path / "ambiguous.csv"
     glossary_file.write_text(
@@ -66,7 +66,7 @@ def test_glossary_audit_strict_fails_on_unresolved(tmp_path: Path):
     assert result_strict_json.exit_code == 1
 
 
-def test_glossary_resolve_command(tmp_path: Path):
+def test_glossary_resolve_command(tmp_path: Path) -> None:
     """Verify ubt glossary resolve calculates chapter/section scope inheritance."""
     glossary_file = tmp_path / "terms.json"
     glossary_data = [

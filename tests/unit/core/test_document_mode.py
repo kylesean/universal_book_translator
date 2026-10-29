@@ -34,7 +34,7 @@ def test_document_mode_validation() -> None:
 
     # Invalid values raise ValidationError
     with pytest.raises(ValidationError):
-        UBTConfig(document_mode="invalid_mode")  # type: ignore[arg-type]
+        UBTConfig(document_mode="invalid_mode")
 
 
 def test_resolve_document_mode_explicit() -> None:

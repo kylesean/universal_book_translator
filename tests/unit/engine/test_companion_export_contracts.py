@@ -190,7 +190,10 @@ def test_write_html_view_contract(tmp_path: Path) -> None:
     out_pdf = tmp_path / "book.pdf"
     out_pdf.write_bytes(b"%PDF")
     block = _make_block()
-    translations = {block.id: block.target_text}
+    # ``target_text`` is ``str | None`` on the block, while every companion
+    # writer takes an already-placed ``dict[str, str]``: an unresolved block
+    # is simply absent from the map rather than mapped to ``None``.
+    translations = {block.id: block.target_text or ""}
 
     # 1. Skipped when disabled
     ctx_disabled = _make_ctx(tmp_path, emit_html=False)
@@ -223,7 +226,10 @@ def test_write_epub_view_contract(tmp_path: Path) -> None:
     out_pdf = tmp_path / "book.pdf"
     out_pdf.write_bytes(b"%PDF")
     block = _make_block()
-    translations = {block.id: block.target_text}
+    # ``target_text`` is ``str | None`` on the block, while every companion
+    # writer takes an already-placed ``dict[str, str]``: an unresolved block
+    # is simply absent from the map rather than mapped to ``None``.
+    translations = {block.id: block.target_text or ""}
 
     # 1. Skipped when disabled
     ctx_disabled = _make_ctx(tmp_path, emit_epub=False)
@@ -258,7 +264,10 @@ def test_write_artifact_check_contract(tmp_path: Path) -> None:
     out_pdf = tmp_path / "book.pdf"
     out_pdf.write_bytes(b"%PDF")
     block = _make_block()
-    translations = {block.id: block.target_text}
+    # ``target_text`` is ``str | None`` on the block, while every companion
+    # writer takes an already-placed ``dict[str, str]``: an unresolved block
+    # is simply absent from the map rather than mapped to ``None``.
+    translations = {block.id: block.target_text or ""}
 
     # 1. Skipped when disabled
     ctx_disabled = _make_ctx(tmp_path, emit_attestation=False)

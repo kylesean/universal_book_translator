@@ -15,7 +15,7 @@ pytestmark = pytest.mark.fast
 runner = CliRunner()
 
 
-def test_coref_inspect_command(tmp_path: Path):
+def test_coref_inspect_command(tmp_path: Path) -> None:
     """Verify ubt coref inspect outputs table and clean JSON."""
     doc_path = tmp_path / "chapter.md"
     doc_path.write_text(
@@ -42,7 +42,7 @@ def test_coref_inspect_command(tmp_path: Path):
     assert "It" in spans
 
 
-def test_coref_audit_command(tmp_path: Path):
+def test_coref_audit_command(tmp_path: Path) -> None:
     """Verify ubt coref audit detects excessive '它-ism'."""
     clean_path = tmp_path / "clean_zh.txt"
     clean_path.write_text(

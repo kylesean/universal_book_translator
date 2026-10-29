@@ -21,8 +21,14 @@ from ubt.adapters.pdf.docling_worker import (
     get_docling_worker_pool,
     is_docling_process_isolation_enabled,
 )
-from ubt.core.ir.models import IRBlock, Paragraph, Span
+
+# ``Paragraph``/``Span`` are defined in ``ubt.model`` and only re-imported by
+# ``ubt.core.ir.models``; importing them from the defining module keeps the
+# dependency explicit instead of relying on an incidental re-export.
+from ubt.core.ir.models import IRBlock
 from ubt.core.ports import AdapterRuntimeConfig
+from ubt.model.ast import Paragraph
+from ubt.model.span import Span
 
 pytestmark = pytest.mark.fast
 
@@ -171,7 +177,9 @@ def test_extract_with_docling_worker_fallback(tmp_path: Path) -> None:
             isolate_process=True,
         )
         assert len(blocks) == 1
-        assert blocks[0].element.text == "Fallback text"
+        # ``IRBlock.source_text`` dispatches by element class; ``element.text``
+        # exists only on prose and mypy cannot narrow the union here.
+        assert blocks[0].source_text == "Fallback text"
 
 
 def test_docling_adapter_lifecycle_and_teardown() -> None:

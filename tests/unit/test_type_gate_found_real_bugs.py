@@ -11,15 +11,28 @@ from __future__ import annotations
 import pytest
 
 from ubt.core.index.extractor import extract_index_from_blocks
-from ubt.core.ir.models import IRBlock
+from ubt.core.ir.models import BlockType, IRBlock, make_element
 from ubt.core.memory.bible import BibleEntry
-from ubt.model.ast import Paragraph
 
 pytestmark = pytest.mark.fast
 
 
 def _block(block_id: str, text: str) -> IRBlock:
-    return IRBlock(element=Paragraph(id=block_id, spine_index=0, span=None, text=text))
+    """A prose block built through the production factory.
+
+    ``make_element`` is the one place that maps a flat finding (type + text +
+    geometry) onto the closed element union, and it supplies the ``span``
+    that ``Paragraph`` requires; constructing the element by hand skipped that
+    and produced an unrepresentable element.
+    """
+    return IRBlock(
+        element=make_element(
+            id=block_id,
+            spine_index=0,
+            block_type=BlockType.NARRATIVE,
+            source_text=text,
+        )
+    )
 
 
 # --- 1. ubt index --glossary crashed on every entry ------------------------

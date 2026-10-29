@@ -19,6 +19,7 @@ and the blocks' measured pages, both of which the stub reproduces faithfully
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pikepdf
 import pytest
@@ -103,7 +104,7 @@ def _outline(path: Path) -> list[str]:
     return out
 
 
-async def _render(strategy: DoclingRenderStrategy, manifest, blocks, out: Path) -> None:
+async def _render(strategy: DoclingRenderStrategy, manifest: Any, blocks: Any, out: Path) -> None:
     await strategy.render_blocks(manifest, blocks, "zh", out)
 
 

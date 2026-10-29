@@ -13,7 +13,7 @@ from ubt.core.memory.hierarchical_memory import HierarchicalMemoryManager, StepS
 pytestmark = pytest.mark.fast
 
 
-def test_extract_entities_from_text():
+def test_extract_entities_from_text() -> None:
     """Verify extraction of technical acronyms, multi-word terms, and glossary concepts."""
     resolver = CoreferenceResolver()
     text = (
@@ -32,7 +32,7 @@ def test_extract_entities_from_text():
     assert "Transformer" in names
 
 
-def test_find_pronoun_mentions():
+def test_find_pronoun_mentions() -> None:
     """Verify identification of personal, demonstrative, and relational pronouns."""
     resolver = CoreferenceResolver()
     text = (
@@ -54,7 +54,7 @@ def test_find_pronoun_mentions():
     assert "the latter" in spans
 
 
-def test_resolve_inter_block_neighbor_antecedent():
+def test_resolve_inter_block_neighbor_antecedent() -> None:
     """Verify resolving pronoun in current block using neighbor context."""
     resolver = CoreferenceResolver()
     neighbor = "In the previous section, we designed the Byzantine Fault Tolerant Protocol."
@@ -69,7 +69,7 @@ def test_resolve_inter_block_neighbor_antecedent():
     assert its_mention.recommended_chinese_rendering == "该Byzantine Fault Tolerant Protocol的"
 
 
-def test_resolve_relational_former_and_latter():
+def test_resolve_relational_former_and_latter() -> None:
     """Verify 'the former' and 'the latter' map to first and second candidate entities."""
     resolver = CoreferenceResolver()
     neighbor = "We compare Convolutional Neural Network against Vision Transformer."
@@ -90,7 +90,7 @@ def test_resolve_relational_former_and_latter():
     assert "后者" in (latter_mention.recommended_chinese_rendering or "")
 
 
-def test_resolve_demonstrative_phrase():
+def test_resolve_demonstrative_phrase() -> None:
     """Verify 'this approach' resolves to preceding algorithm or concept."""
     resolver = CoreferenceResolver()
     neighbor = "We propose Layer Normalization to stabilize recurrent dynamics."
@@ -104,7 +104,7 @@ def test_resolve_demonstrative_phrase():
     assert "该" in (demo_mention.recommended_chinese_rendering or "")
 
 
-def test_dummy_it_is_excluded():
+def test_dummy_it_is_excluded() -> None:
     """Verify dummy expletive 'it is important to ...' is not resolved as an entity."""
     resolver = CoreferenceResolver()
     text = "It is important to observe that gradients vanish in deep networks."
@@ -116,7 +116,7 @@ def test_dummy_it_is_excluded():
         assert it_mention.inferred_antecedent is None
 
 
-def test_format_coreference_prompt_hint():
+def test_format_coreference_prompt_hint() -> None:
     """Verify formatting of resolved mentions into an LLM prompt hint block."""
     resolver = CoreferenceResolver()
     neighbor = "The team implemented the Raft Consensus Protocol."
@@ -130,7 +130,7 @@ def test_format_coreference_prompt_hint():
     assert "建议译为" in hint
 
 
-def test_audit_pronoun_usage_clean_vs_overuse():
+def test_audit_pronoun_usage_clean_vs_overuse() -> None:
     """Verify pronoun audit detects natural prose vs '它-ism' repetition."""
     resolver = CoreferenceResolver()
 
@@ -152,7 +152,7 @@ def test_audit_pronoun_usage_clean_vs_overuse():
     assert len(overuse_report.issues) > 0
 
 
-def test_hierarchical_memory_salient_entities_integration():
+def test_hierarchical_memory_salient_entities_integration() -> None:
     """Verify HierarchicalMemoryManager extracts salient entities for coreference."""
     mem_mgr = HierarchicalMemoryManager()
     mem_mgr._snapshots.append(

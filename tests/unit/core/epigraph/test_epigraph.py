@@ -34,13 +34,9 @@ def _make_block(btype: BlockType, text: str, block_id: str = "b1", level: int = 
         source_text=text,
         level=level,
     )
-    return IRBlock(
-        id=block_id,
-        type=btype,
-        source_text=text,
-        target_text=text,
-        element=elem,
-    )
+    # Only ``element`` and ``target_text`` are fields of ``IRBlock``; the rest
+    # were silently ignored by ``extra="ignore"``.
+    return IRBlock(element=elem, target_text=text)
 
 
 def test_parse_epigraph_multiline() -> None:
