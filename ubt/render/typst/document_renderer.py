@@ -44,6 +44,7 @@ from ubt.render.delivered_text import delivered_text, dropped_page_furniture, is
 from ubt.render.delivered_text import is_placeholder as _is_placeholder
 from ubt.render.delivered_text import unwrap_mark as _unwrap_mark  # noqa: F401 -- re-exported
 from ubt.render.inline_spans import block_runs, locate_runs
+from ubt.render.page_trim import COLUMN_GUTTER_SHARE, MM_PER_PT, PageSetup
 from ubt.render.table_compiler import parse_markdown_table, verify_table_reconstruction
 from ubt.render.typst.artifact_guard import find_sentinels, has_sentinel
 from ubt.render.typst.escape import typst_escape
@@ -57,6 +58,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from ubt.core.ir.models import InlineRun, IRBlock
+    from ubt.render.typst.layout_diagnostics import PageLayoutSpec
 
 #: A display-math or inline-math span in the *source* text. Matched before
 #: escaping so the formula is transpiled rather than escaped into literal text.
@@ -148,8 +150,15 @@ _CAPTION_RE = re.compile(
 #: instead (the old assumption of ~470pt) is what hid the overflow.
 _FIGURE_NATIVE_MAX_PT = 300.0
 
-#: A4 text width, the denominator for turning a source figure's point width into
-#: the container-relative width Typst actually needs.
+#: A *source-side* reference width, the denominator for turning a source figure's
+#: point width into the container-relative width Typst needs.
+#:
+#: Deliberately not the emitted text width: a figure should keep the same
+#: *fraction* of the text block that the author gave it, so the denominator must
+#: describe the page it was measured on, not the page it is being delivered on.
+#: A4 at the old 2.2cm margin is the historical proxy for "a page like the
+#: source". Changing it to the emitted width would make every figure ~12% larger
+#: on a reflow page just because the margins were widened for the measure.
 _FIGURE_REFERENCE_TEXT_WIDTH_PT = 470.55
 
 #: Longest *unlabelled* paragraph that still binds as a figure's caption. A
@@ -1485,8 +1494,61 @@ class TypstDocumentRenderer:
     without depending on the Typst binary.
     """
 
-    #: Base page setup, shared by every target language.
-    _PAGE_SETUP = '#set page(paper: "a4", margin: (x: 2.2cm, y: 2.4cm), numbering: "1")'
+    #: The page setup this renderer emits when no caller supplied one: A4 with
+    #: the margin that yields the 146mm target measure. Computed from
+    #: :mod:`ubt.render.page_trim` rather than spelled here, so the fallback and
+    #: the measured path cannot disagree about what "no trim" means.
+    #:
+    #: The previous literal was ``x: 2.2cm``, which set the body at 44.8 Chinese
+    #: characters per line — over the 25-40 convention, past which the eye's
+    #: return sweep starts skipping lines.
+    _PAGE_SETUP_FORMAT = (
+        '#set page({size}margin: (x: {margin_x}mm, y: {margin_y}mm), numbering: "1")'
+    )
+
+    def _page_setup(self) -> str:
+        """The ``#set page(...)`` line for this renderer's page setup.
+
+        One string, built from one object: the *same* :class:`PageSetup` is
+        handed to the layout audit, so the page that is emitted and the page
+        that is judged cannot drift apart.
+
+        A measured trim is emitted as ``width:``/``height:`` rather than as
+        ``paper:`` because Typst's ``paper`` parameter takes a *name* from a
+        closed list and rejects a size dictionary outright.
+        """
+        setup = self.page_setup_obj()
+        return self._PAGE_SETUP_FORMAT.format(
+            size=f"{setup.typst_page_args()}, " if setup.measured else 'paper: "a4", ',
+            margin_x=f"{self.margin_x_mm():g}",
+            margin_y=f"{setup.margin_y_mm:g}",
+        )
+
+    def page_setup_obj(self) -> PageSetup:
+        """The page setup in force: the measured one, else the A4 fallback."""
+        setup: PageSetup | None = self.page_setup
+        if setup is not None:
+            return setup
+        from ubt.render.page_trim import resolved_page_setup
+
+        return resolved_page_setup(None)
+
+    def margin_x_mm(self) -> float:
+        """Horizontal margin actually emitted, in millimetres.
+
+        The academic template keeps its own submission margins, so this is not
+        always the setup's margin: on the same paper the two channels set
+        different measures, deliberately.
+        """
+        if getattr(self, "layout_template", "book") != "academic":
+            return self.page_setup_obj().margin_x_mm
+        from ubt.render.typst.academic import (
+            ACADEMIC_DUAL_MARGIN_X_CM,
+            ACADEMIC_SINGLE_MARGIN_X_CM,
+        )
+
+        columns = max(1, int(getattr(self, "columns", 1) or 1))
+        return (ACADEMIC_DUAL_MARGIN_X_CM if columns > 1 else ACADEMIC_SINGLE_MARGIN_X_CM) * 10.0
 
     def _table_width_pt(self) -> float:
         """Width the tables will be typeset into, from the layout actually used.
@@ -1495,13 +1557,58 @@ class TypstDocumentRenderer:
         fits a two-column page's 219.5pt column and one that needs a 493pt
         page-wide block are different questions, and answering both with one
         constant is how the old heuristic mis-fired.
+
+        Derived from the page setup rather than from ``_PAGE_TEXT_WIDTH_PT``,
+        which describes A4 at the academic margins: a book set on 190.5mm has a
+        narrower text block, and sizing a table for the A4 block it is not on
+        puts the overflow into the artifact where only a reader sees it.
         """
-        template = getattr(self, "layout_template", "book")
-        if template == "academic":
-            if getattr(self, "columns", 1) > 1:
-                return _PAGE_TEXT_WIDTH_PT["academic_2col"]
-            return _PAGE_TEXT_WIDTH_PT["academic_1col"]
-        return _PAGE_TEXT_WIDTH_PT["book"]
+        return self.text_width_pt()
+
+    def text_width_pt(self) -> float:
+        """Body text width in points, for this template's page setup.
+
+        Public because the layout audit and the visual gate size their checks
+        from it: three independent recomputations of "how wide is the text" is
+        how the margins and the audit end up disagreeing.
+        """
+        setup = self.page_setup_obj()
+        columns = max(1, int(getattr(self, "columns", 1) or 1))
+        block_mm = max(0.0, setup.width_mm - 2 * self.margin_x_mm())
+        if columns > 1:
+            block_mm = block_mm * (1.0 - COLUMN_GUTTER_SHARE) / columns
+        return block_mm / MM_PER_PT
+
+    def layout_spec_for_audit(self) -> PageLayoutSpec:
+        """The spec the layout audit should judge this render's output against.
+
+        Built from the geometry this renderer emits, not from
+        :meth:`PageLayoutSpec.book`: that classmethod describes A4 at 2.2cm, so
+        auditing a 190.5mm book against it declares a safe area ~28pt wider per
+        side than the page has. A real spill then reads as clean, and a correct
+        page "heals" by shrinking.
+
+        The gutter is Typst's own 4%-of-block rule, so the column bounds the
+        audit checks are the column bounds Typst laid out.
+        """
+        from ubt.render.typst.layout_diagnostics import PageLayoutSpec
+
+        setup = self.page_setup_obj()
+        columns = max(1, int(getattr(self, "columns", 1) or 1))
+        margin_x_pt = self.margin_x_mm() / MM_PER_PT
+        margin_y_pt = setup.margin_y_mm / MM_PER_PT
+        block_mm = max(0.0, setup.width_mm - 2 * self.margin_x_mm())
+        return PageLayoutSpec(
+            page_width=setup.width_mm / MM_PER_PT,
+            page_height=setup.height_mm / MM_PER_PT,
+            margin_left=margin_x_pt,
+            margin_right=margin_x_pt,
+            margin_bottom=margin_y_pt,
+            margin_top=margin_y_pt,
+            columns=columns,
+            gutter=(block_mm * COLUMN_GUTTER_SHARE / MM_PER_PT) if columns > 1 else 0.0,
+            name="academic" if getattr(self, "layout_template", "book") == "academic" else "book",
+        )
 
     def preamble(self, target_lang: str = "zh") -> str:
         """The Typst preamble for ``target_lang``.
@@ -1525,6 +1632,16 @@ class TypstDocumentRenderer:
                 font_stack=self.font_stack,
                 paper_title=getattr(self, "paper_title", ""),
                 columns=getattr(self, "columns", 1),
+                # The page *size* is the reader's physical copy, so a paper
+                # whose source is 190.5x234.9mm keeps that trim. The *margins*
+                # stay the venue's submission style (see ``academic_preamble``):
+                # imposing the book channel's 146mm measure on an author's
+                # thesis would be answering a question nobody asked.
+                page_size=(
+                    self.page_setup_obj().typst_page_args()
+                    if self.page_setup_obj().measured
+                    else None
+                ),
             )
             if getattr(self, "enable_decor", False):
                 from ubt.core.decor.dropcap import TYPST_DROPCAP_MACRO
@@ -1583,7 +1700,7 @@ class TypstDocumentRenderer:
         par_spacing = getattr(self, "par_spacing_em", 0.9)
         base_preamble = "\n".join(
             [
-                TypstDocumentRenderer._PAGE_SETUP,
+                self._page_setup(),
                 f"#set text(font: ({body}), size: 10.5pt{typst_lang_arguments(lang)})" + rtl,
                 # Leading comes from the same convention owner, not a literal
                 # here: this line and ``Theme.leading_em`` disagreed (0.78 vs
@@ -1647,6 +1764,7 @@ class TypstDocumentRenderer:
         epigraph_config: object | None = None,
         enable_xref: bool = False,
         xref_config: object | None = None,
+        page_setup: PageSetup | None = None,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
         self.figure_width = figure_width
@@ -1718,6 +1836,17 @@ class TypstDocumentRenderer:
         #: the existence-only ``PRESERVED_OPAQUE`` it used to assert for every
         #: non-text asset.
         self.table_reconstructions: list[ReconstructionRecord] = []
+        #: The page geometry the source declared, when it declared one. ``None``
+        #: keeps the A4 fallback (:meth:`page_setup_obj`), which is the honest
+        #: answer for a source with no pages (EPUB/Markdown) and for a PDF whose
+        #: pages disagree about their size.
+        #:
+        #: Kept as one object rather than four floats so the emitted
+        #: ``#set page(...)``, the table-fit arithmetic, and the layout audit
+        #: that judges the artifact all read the same numbers. They were four
+        #: independent parameters at first, which is how a page and the audit of
+        #: that page end up disagreeing.
+        self.page_setup = page_setup
 
     def _prose(
         self,

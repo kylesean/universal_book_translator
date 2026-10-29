@@ -22,6 +22,19 @@ from ubt.render.typst.document_renderer import escape_markup, typst_lang_argumen
 #: single-column, so the bar is a bare majority, not an absolute.
 _MULTICOLUMN_SHARE_FLOOR = 0.5
 
+#: Academic submission margins, in centimetres, single-column.
+#:
+#: Exported because the layout audit builds its safe-area spec from the same
+#: numbers (:meth:`ubt.render.typst.layout_diagnostics.PageLayoutSpec
+#: .academic_single`). They were spelled in both places, so a change in one would
+#: have left the other auditing a safe area the page did not have.
+ACADEMIC_SINGLE_MARGIN_X_CM: float = 2.5
+ACADEMIC_SINGLE_MARGIN_Y_CM: float = 2.5
+#: Academic submission margins, in centimetres, two-column. The narrower x is
+#: deliberate: two columns need the room, and 1.8cm is the submission convention.
+ACADEMIC_DUAL_MARGIN_X_CM: float = 1.8
+ACADEMIC_DUAL_MARGIN_Y_CM: float = 2.0
+
 
 def is_academic_document(manifest_or_meta: Any) -> bool:
     """Whether a document manifest or metadata indicates academic content styling.
@@ -187,8 +200,24 @@ def academic_preamble(
     font_stack: Sequence[str] | None = None,
     paper_title: str = "",
     columns: int = 1,
+    page_size: str | None = None,
 ) -> str:
-    """Generate the Typst preamble for an academic paper (single or dual column)."""
+    """Generate the Typst preamble for an academic paper (single or dual column).
+
+    ``page_size`` is the source document's own trim, as Typst markup
+    (``(width: 190.5mm, height: 234.9mm)``) — see
+    :func:`ubt.render.page_trim.TrimSize.typst_page_spec`. ``None`` keeps A4, which
+    is the right fallback for a source with no pages to measure (EPUB, Markdown)
+    and for a PDF whose pages disagree: the caller decides that, not this
+    template, so the choice is visible where it is made.
+
+    The *margins* stay this template's own (see ``ACADEMIC_MARGIN_*_MM``). A
+    paper's page is a submission requirement, not a trade-book readability
+    decision: the 146mm measure the book channel targets would be a strange thing
+    to impose on an author's thesis. The page *size* is honoured because it is
+    the reader's physical copy; the measure is not, because it is the venue's
+    style.
+    """
     direction = direction_for(target_lang or "zh").value
     lang = (target_lang or "zh").replace("_", "-")
     rtl = "\n#set text(dir: rtl)" if direction == "rtl" else ""
@@ -239,8 +268,20 @@ def academic_preamble(
 
     is_dual = columns == 2
     col_str = "  columns: 2," if is_dual else "  columns: 1,"
-    margin_str = "  margin: (x: 1.8cm, y: 2.0cm)," if is_dual else "  margin: (x: 2.5cm, y: 2.5cm),"
+    # The venue's margins, not the book channel's measure. Kept as named
+    # constants so the layout audit (``PageLayoutSpec.academic_*``) and this
+    # template cannot drift apart: they used to spell the same 1.8/2.5cm twice,
+    # and a change in one would leave the other reporting spills that were not.
+    margin_x_cm = ACADEMIC_DUAL_MARGIN_X_CM if is_dual else ACADEMIC_SINGLE_MARGIN_X_CM
+    margin_y_cm = ACADEMIC_DUAL_MARGIN_Y_CM if is_dual else ACADEMIC_SINGLE_MARGIN_Y_CM
+    margin_str = f"  margin: (x: {margin_x_cm:.1f}cm, y: {margin_y_cm:.1f}cm),"
     font_size = "9.5pt" if is_dual else "10.5pt"
+    # The page is the source's own trim when one was measured, else A4. Emitted
+    # as ``width:``/``height:`` rather than as a ``paper:`` name because Typst's
+    # ``paper`` parameter takes a name from a closed list and rejects a size:
+    # a measured trim is usually not a named paper, and snapping to the nearest
+    # name would undo the measurement this whole path exists to honour.
+    size_str = f"  {page_size}," if page_size else '  paper: "a4",'
     # The indent follows the target's own convention (ja/ko indent one
     # character, zh two); only the tight leading is a property of the measure.
     # A paper keeps a first-line indent even in a Latin target — that is
@@ -260,7 +301,7 @@ def academic_preamble(
 
     lines = [
         "#set page(",
-        '  paper: "a4",',
+        size_str,
         col_str,
         margin_str,
         header_block,

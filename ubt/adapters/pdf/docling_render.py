@@ -312,10 +312,23 @@ class DoclingRenderStrategy:
         # minutes of per-body Typst startups before this); ``check`` still
         # answers any body the pre-warm did not see.
         math_probe = TypstMathProbe()
+        from ubt.render.page_trim import measure_trim, resolved_page_setup
         from ubt.render.typst.academic import is_academic_document, resolve_document_columns
 
         is_academic = is_academic_document(manifest)
         columns = resolve_document_columns(manifest)
+        # The source's own trim. ``None`` for a source with no pages, and the
+        # caller-side fallback is A4 -- deliberately made *here*, where it can be
+        # read, rather than inside the measurement function which would then be
+        # reporting a measurement it never took.
+        #
+        # One object rather than four floats: the page that gets emitted and the
+        # page the layout audit judges must be the same page, and passing the
+        # size and the margins separately is what lets them drift.
+        page_setup = resolved_page_setup(
+            measure_trim(getattr(manifest, "source_path", "") or None),
+            columns=columns,
+        )
         renderer = TypstDocumentRenderer(
             assets_root=assets_root,
             bilingual=bilingual,
@@ -331,6 +344,7 @@ class DoclingRenderStrategy:
             paper_title=manifest.title if is_academic else "",
             abstract=manifest.metadata.get("abstract", "") if is_academic else "",
             toc_mode=getattr(self, "toc_mode", "auto"),
+            page_setup=page_setup,
         )
         source, stats = renderer.build_source(blocks, build_dir, target_lang)
         typ_path = build_dir / "main.typ"
@@ -351,16 +365,11 @@ class DoclingRenderStrategy:
         # gutter overruns and iteratively remediates through smart formula breaking and table scaling.
         if getattr(self, "enable_layout_auto_heal", True) and output_path.exists():
             from ubt.render.typst.auto_healing import LayoutAutoHealer
-            from ubt.render.typst.layout_diagnostics import PageLayoutSpec
 
-            if is_academic:
-                layout_spec = (
-                    PageLayoutSpec.academic_dual()
-                    if columns > 1
-                    else PageLayoutSpec.academic_single()
-                )
-            else:
-                layout_spec = PageLayoutSpec.book()
+            # The audit's spec must describe the page that was just emitted, not
+            # A4 with 2.2cm margins. The renderer owns both the emitted geometry
+            # and this spec, so asking it is the only way the two cannot drift.
+            layout_spec = renderer.layout_spec_for_audit()
 
             def _renderer_builder(**overrides: Any) -> TypstDocumentRenderer:
                 return TypstDocumentRenderer(
@@ -374,6 +383,7 @@ class DoclingRenderStrategy:
                     paper_title=manifest.title if is_academic else "",
                     abstract=manifest.metadata.get("abstract", "") if is_academic else "",
                     toc_mode=getattr(self, "toc_mode", "auto"),
+                    page_setup=page_setup,
                     **overrides,
                 )
 
