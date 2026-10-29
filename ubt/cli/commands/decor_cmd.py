@@ -168,7 +168,11 @@ def decor_inspect_command(
     current_chapter: dict[str, str] | None = None
 
     for block in blocks:
-        text = block.target_text or (block.element.text if block.element else "") or ""
+        # ``IRBlock.source_text`` dispatches on the element class: ``text`` for
+        # prose, ``source`` for formulas, ``markup`` for tables, ``asset_id``
+        # for figures. Reading ``block.element.text`` here only worked for
+        # prose and silently produced "" for the other three.
+        text = block.target_text or block.source_text or ""
         el = getattr(block, "element", None)
         level = getattr(el, "level", None) or getattr(block, "level", None) or 1
         is_h1 = (isinstance(el, Heading) and level == 1) or (

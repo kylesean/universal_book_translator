@@ -60,7 +60,11 @@ class PdfOptimizeOptions(BaseModel):
     engine: OptimizationEngine = OptimizationEngine.AUTO
     deduplicate_streams: bool = True
     linearize: bool = True
-    flate_level: int = Field(default=9, ge=1, le=9)
+    # ``ge=1, le=9`` is a runtime check; ``Literal`` states the same range in
+    # the type so pikepdf's ``set_flate_compression_level`` (which accepts only
+    # -1..9) can be called without a cast. ``-1`` is pikepdf's "leave as is"
+    # sentinel and is deliberately not exposed as a user choice.
+    flate_level: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = Field(default=9, ge=1, le=9)
     max_image_dimension: int | None = None
     jpeg_quality: int = Field(default=85, ge=1, le=100)
     subset_fonts: bool = True
@@ -362,8 +366,17 @@ def optimize_pdf(
         raise FileNotFoundError(f"Source PDF not found at {src}")
 
     opts = options or PdfOptimizeOptions()
-    in_place = output_path is None or Path(output_path).resolve() == src.resolve()
-    target_path = src if in_place else Path(output_path)
+    # A separate ``in_place`` flag cannot narrow ``output_path`` for a type
+    # checker: the flag and the ``None`` test are two facts, and only the second
+    # is a narrowing condition. The flag is still needed further down (the
+    # backup step depends on it), so it is derived here from the same branch
+    # that resolves the destination.
+    if output_path is None or Path(output_path).resolve() == src.resolve():
+        in_place = True
+        target_path = src
+    else:
+        in_place = False
+        target_path = Path(output_path)
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     start_time = time.perf_counter()

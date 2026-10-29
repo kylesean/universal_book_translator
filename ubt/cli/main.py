@@ -59,7 +59,7 @@ from ubt.core.config import (
 from ubt.core.engine.dry_run import create_dry_run_orchestrator
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.pipeline import PipelineOrchestrator
-from ubt.core.engine.progress import persist_progress_metadata
+from ubt.core.engine.progress import ProgressSnapshot, persist_progress_metadata
 from ubt.core.exceptions import UBTError
 from ubt.core.job_options import (
     JOB_ID_MAX_LEN,
@@ -240,7 +240,7 @@ async def _run_translation(
                 ctrl.update_from_event(
                     event_type=_event_label(event.event_type),
                     message=event.message,
-                    meta=event.metadata or {},
+                    meta=_workbench_meta(event),
                 )
                 if event.event_type == EventType.EXPORT_COMPLETED:
                     final_output = Path(event.artifact_path or event.message)
@@ -286,6 +286,34 @@ async def _run_translation(
         raise UBTError("Pipeline failed to complete document rendering.")
 
     return final_output
+
+
+def _workbench_meta(event: TranslationProgressEvent) -> dict[str, Any]:
+    """Project a progress event onto the key names the workbench consumes.
+
+    ``WorkbenchController.update_from_event`` reads a flat mapping with short
+    keys (``pct``, ``blocks_done``, ``prompt_tokens``), while
+    :class:`~ubt.core.engine.events.TranslationProgressEvent` carries them as
+    named fields (``progress_percent``, ``completed_blocks``, ...) and has no
+    ``metadata`` attribute at all.
+
+    The previous call site read ``event.metadata``, which does not exist on the
+    model, so the interactive workbench raised ``AttributeError`` on the very
+    first progress event -- every ``--interactive`` run died before showing
+    progress. The translation happens here, in one place, so the two shapes
+    cannot drift apart again unnoticed.
+    """
+    progress = ProgressSnapshot.from_event(event)
+    meta: dict[str, Any] = {
+        "pct": progress.progress_percent,
+        "blocks_done": progress.completed_blocks,
+        "blocks_total": progress.total_blocks,
+        "quarantined": progress.needs_human_blocks + progress.blocked_human_blocks,
+        "repaired": progress.repaired_blocks,
+    }
+    if progress.estimated_cost_usd is not None:
+        meta["cost_usd"] = progress.estimated_cost_usd
+    return meta
 
 
 def _event_label(event_type: EventType) -> str:

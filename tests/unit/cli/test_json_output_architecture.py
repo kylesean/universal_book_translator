@@ -38,7 +38,13 @@ def _json_emitting_rich_calls(path: Path) -> list[tuple[int, str, list[str]]]:
         segment = ast.get_source_segment(source, node) or ""
         if "json.dump" not in segment and "dumps" not in segment:
             continue
-        found.append((node.lineno, func.attr, sorted(k.value for k in node.keywords if k.arg)))
+        found.append(
+            (
+                node.lineno,
+                func.attr,
+                sorted(str(k.value) for k in node.keywords if k.arg is not None),
+            )
+        )
     return found
 
 

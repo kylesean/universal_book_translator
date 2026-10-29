@@ -22,7 +22,13 @@ logger = logging.getLogger(__name__)
 class InteractiveKeyReader:
     """Non-blocking keyboard event reader for POSIX terminals."""
 
-    def __init__(self, on_key: Callable[[str], None]) -> None:
+    def __init__(self, on_key: Callable[[str], object]) -> None:
+        # ``object`` rather than ``None``: the workbench passes
+        # ``controller.handle_key``, which returns a ``KeyAction | None``
+        # describing what it did. The reader deliberately ignores that value --
+        # the action has already been applied by the time it returns -- so the
+        # parameter accepts any return type instead of forcing call sites to
+        # wrap a callback in a discarding lambda.
         self.on_key = on_key
         self._fd = sys.stdin.fileno() if sys.stdin.isatty() else None
         self._old_settings: Any = None
@@ -31,23 +37,26 @@ class InteractiveKeyReader:
     def start(self, loop: asyncio.AbstractEventLoop) -> None:
         if self._fd is None:
             return
+        # Bind once so the closures below capture a narrowed ``int``; mypy does
+        # not track the ``None`` check into an attribute read inside a callback.
+        fd = self._fd
 
         try:
             import termios
             import tty
 
-            self._old_settings = termios.tcgetattr(self._fd)
-            tty.setcbreak(self._fd)
+            self._old_settings = termios.tcgetattr(fd)
+            tty.setcbreak(fd)
 
             def _read_char() -> None:
                 try:
-                    ch = os.read(self._fd, 32).decode("utf-8", errors="ignore")
+                    ch = os.read(fd, 32).decode("utf-8", errors="ignore")
                     for c in ch:
                         self.on_key(c)
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("Key read error: %s", exc)
 
-            loop.add_reader(self._fd, _read_char)
+            loop.add_reader(fd, _read_char)
             self._registered = True
         except Exception as exc:  # noqa: BLE001
             logger.debug("Failed to initialize cbreak mode on stdin: %s", exc)

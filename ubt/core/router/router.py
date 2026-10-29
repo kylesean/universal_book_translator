@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 if TYPE_CHECKING:
     pass
@@ -748,9 +748,15 @@ class ModelRouter:
             return
 
         sleep_task = asyncio.ensure_future(asyncio.sleep(seconds))
-        waiters: list[asyncio.Future[object]] = [sleep_task]
-        token_waiter: asyncio.Future[object] | None = None
-        lease_waiter: asyncio.Future[object] | None = None
+        # ``asyncio.Future`` is invariant in its result type, so a
+        # ``Task[None]`` (the sleep) and a ``Task[Literal[True]]`` (an
+        # ``Event.wait``) have no common parameterised supertype. The result of
+        # each waiter is never read -- the race only needs ``done()`` and
+        # ``cancel()`` -- so the element type is ``Any`` by construction rather
+        # than by convenience.
+        waiters: list[asyncio.Future[Any]] = [sleep_task]
+        token_waiter: asyncio.Future[Any] | None = None
+        lease_waiter: asyncio.Future[Any] | None = None
 
         if token is not None:
             token_waiter = asyncio.ensure_future(token.wait())
@@ -758,7 +764,6 @@ class ModelRouter:
         if lease_lost is not None:
             lease_waiter = asyncio.ensure_future(lease_lost.wait())
             waiters.append(lease_waiter)
-
         try:
             done, _pending = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
         finally:

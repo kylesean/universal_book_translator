@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -327,7 +327,11 @@ def index_stats_command(
     grouped_zh = idx.grouped_by_target_initial()
     top_terms = idx.top_terms(5)
 
-    stats_data = {
+    #: Values are heterogeneous (counts, nested group sizes, a term list), so
+    #: the element type is declared rather than inferred -- inference from a
+    #: literal with mixed value types falls back to ``object``, which then makes
+    #: ``stats_data["top_5_terms"]`` unindexable below.
+    stats_data: dict[str, Any] = {
         "source": resolved_src,
         "total_terms": idx.total_terms,
         "total_occurrences": idx.total_occurrences,

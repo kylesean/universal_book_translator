@@ -87,7 +87,9 @@ def tokenize_words(text: str, lang: str = "en") -> list[str]:
     # CJK script tokenization (using jieba if Chinese)
     if lang.startswith("zh"):
         try:
-            import jieba
+            # jieba ships no py.typed marker and has no stub package; the same
+            # narrow ignore is used in ``ubt.core.validators.glossary_enforcer``.
+            import jieba  # type: ignore[import-untyped]
 
             return [t.strip() for t in jieba.cut(text) if t.strip()]
         except Exception:  # noqa: BLE001

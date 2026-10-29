@@ -320,6 +320,25 @@ class DraftPolicy:
     dynamic_scheduler: Any | None = None
 
 
+def _routing_scheduler(policy: Any) -> Any | None:
+    """The scheduler when dynamic routing is on, else ``None``.
+
+    ``dynamic_scheduler`` is ``Any | None``, and testing it through
+    ``getattr`` inside a guard does not narrow the *attribute* for the calls
+    that follow -- so each call site repeated the same two-part check and still
+    needed a cast. Reading it once into a local lets ``:=`` narrow it.
+
+    A module-level function rather than a ``DraftPolicy`` method: the policy is
+    a plain dataclass that callers and tests substitute with their own object,
+    and a method would require every stand-in to grow the same member. Only the
+    two attributes this reads are part of the contract.
+    """
+    if not getattr(policy, "dynamic_routing_enabled", False):
+        return None
+    scheduler: Any | None = getattr(policy, "dynamic_scheduler", None)
+    return scheduler
+
+
 def _draft_failure_prefix(exc: BaseException) -> str:
     """Choose the resume marker for a failed provider call.
 
@@ -830,15 +849,13 @@ class _DraftProcessor:
                 draft_raw: str | None = None
                 last_exc: Exception | None = None
                 model_override: str | None = None
-                if getattr(self.policy, "dynamic_routing_enabled", False) and getattr(
-                    self.policy, "dynamic_scheduler", None
-                ):
+                if (scheduler := _routing_scheduler(self.policy)) is not None:
                     glossary_sources = [
                         str(g.get("source", ""))
                         for g in getattr(self.policy, "glossary_dicts", [])
                         if g.get("source")
                     ]
-                    assignment = self.policy.dynamic_scheduler.resolve_model_for_block(
+                    assignment = scheduler.resolve_model_for_block(
                         block,
                         glossary_terms=glossary_sources,
                         is_retry_or_repair=False,
@@ -847,17 +864,13 @@ class _DraftProcessor:
 
                 for attempt in range(self.policy.draft_max_retries + 1):
                     current_model = model_override
-                    if (
-                        attempt > 0
-                        and getattr(self.policy, "dynamic_routing_enabled", False)
-                        and getattr(self.policy, "dynamic_scheduler", None)
-                    ):
+                    if attempt > 0 and (scheduler := _routing_scheduler(self.policy)) is not None:
                         glossary_sources = [
                             str(g.get("source", ""))
                             for g in getattr(self.policy, "glossary_dicts", [])
                             if g.get("source")
                         ]
-                        escalated = self.policy.dynamic_scheduler.resolve_model_for_block(
+                        escalated = scheduler.resolve_model_for_block(
                             block,
                             glossary_terms=glossary_sources,
                             is_retry_or_repair=True,
@@ -1010,16 +1023,14 @@ class _DraftProcessor:
             async with self.runtime.concurrency_sem:
                 blocks_to_draft = [b.with_source_text(inp.masked_source) for b, inp in chunk]
                 chunk_model_override: str | None = None
-                if getattr(self.policy, "dynamic_routing_enabled", False) and getattr(
-                    self.policy, "dynamic_scheduler", None
-                ):
+                if (scheduler := _routing_scheduler(self.policy)) is not None:
                     glossary_sources = [
                         str(g.get("source", ""))
                         for g in getattr(self.policy, "glossary_dicts", [])
                         if g.get("source")
                     ]
                     assignments = [
-                        self.policy.dynamic_scheduler.resolve_model_for_block(
+                        scheduler.resolve_model_for_block(
                             b, glossary_terms=glossary_sources, is_retry_or_repair=False
                         )
                         for b in blocks_to_draft
@@ -1034,8 +1045,7 @@ class _DraftProcessor:
                         current_chunk_model = chunk_model_override
                         if (
                             attempt > 0
-                            and getattr(self.policy, "dynamic_routing_enabled", False)
-                            and getattr(self.policy, "dynamic_scheduler", None)
+                            and (scheduler := _routing_scheduler(self.policy)) is not None
                         ):
                             glossary_sources = [
                                 str(g.get("source", ""))
@@ -1043,7 +1053,7 @@ class _DraftProcessor:
                                 if g.get("source")
                             ]
                             escalated_assignments = [
-                                self.policy.dynamic_scheduler.resolve_model_for_block(
+                                scheduler.resolve_model_for_block(
                                     b, glossary_terms=glossary_sources, is_retry_or_repair=True
                                 )
                                 for b in blocks_to_draft

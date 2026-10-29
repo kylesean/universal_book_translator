@@ -111,7 +111,7 @@ def roundtrip_command(
 
         ledger = SQLiteJobLedger(db_path, read_only=True)
         try:
-            blocks = ledger.fetch_all_blocks(job_id)
+            blocks = ledger.get_all_blocks(job_id)
             for b in blocks:
                 src = (b.source_text or "").strip()
                 mt = (b.target_text or b.draft_text or "").strip()

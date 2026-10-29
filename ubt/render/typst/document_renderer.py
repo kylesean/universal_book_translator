@@ -57,7 +57,10 @@ from ubt.render.typst.math_transpiler import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from ubt.core.colophon.models import ColophonMetadata
+    from ubt.core.index.models import ConcordanceIndex
     from ubt.core.ir.models import InlineRun, IRBlock
+    from ubt.core.notes.models import FootnoteItem
     from ubt.render.typst.layout_diagnostics import PageLayoutSpec
 
 #: A display-math or inline-math span in the *source* text. Matched before
@@ -1747,9 +1750,9 @@ class TypstDocumentRenderer:
         par_spacing_em: float = 0.9,
         enable_kinsoku: bool = False,
         enable_colophon: bool = False,
-        colophon: object | None = None,
+        colophon: ColophonMetadata | None = None,
         enable_index: bool = False,
-        index: object | None = None,
+        index: ConcordanceIndex | None = None,
         enable_decor: bool = False,
         decor_spec: object | None = None,
         enable_notes: bool = False,
@@ -1847,6 +1850,21 @@ class TypstDocumentRenderer:
         #: independent parameters at first, which is how a page and the audit of
         #: that page end up disagreeing.
         self.page_setup = page_setup
+
+    def _prose_for_block(self, block: IRBlock) -> Callable[[str], str]:
+        """A ``Callable[[str], str]`` that renders prose in ``block``'s run context.
+
+        The epigraph/abstract generators accept a plain one-argument callback.
+        An inline ``lambda t, b=block: ...`` cannot be typed by mypy (there is
+        no signature to infer the parameters from), and pass-through of the
+        surrounding block has to be explicit anyway, so the binding lives here
+        instead of at each call site.
+        """
+
+        def render(text: str) -> str:
+            return self._prose(text, block_runs(block))
+
+        return render
 
     def _prose(
         self,
@@ -2001,14 +2019,14 @@ class TypstDocumentRenderer:
             )
             self._notes_topology = extract_notes_topology(blocks, self._notes_cfg)
             self._notes_def_ids = self._notes_topology.def_block_ids
-            self._notes_by_source = {}
+            self._notes_by_source: dict[str, list[FootnoteItem]] = {}
             for n in self._notes_topology.notes:
                 if n.source_block_id:
                     self._notes_by_source.setdefault(n.source_block_id, []).append(n)
-            self._notes_by_chapter = {}
+            self._notes_by_chapter: dict[int, list[FootnoteItem]] = {}
             for n in self._notes_topology.notes:
                 self._notes_by_chapter.setdefault(n.chapter_index, []).append(n)
-            self._notes_emitted_chapters = set()
+            self._notes_emitted_chapters: set[int] = set()
             self._notes_current_chapter = 1
 
         if getattr(self, "enable_backmatter", False):
@@ -2615,7 +2633,7 @@ class TypstDocumentRenderer:
                     epi_markup = render_epigraph_typst(
                         epi,
                         config=self._epigraph_cfg,
-                        prose_renderer=lambda t, b=block: self._prose(t, block_runs(b)),
+                        prose_renderer=self._prose_for_block(block),
                     )
                     body.append(self._maybe_pair(block, epi_markup))
                     self.stats.blocks_rendered += 1
@@ -2627,7 +2645,7 @@ class TypstDocumentRenderer:
                     ab_markup = render_abstract_typst(
                         ab,
                         config=self._epigraph_cfg,
-                        prose_renderer=lambda t, b=block: self._prose(t, block_runs(b)),
+                        prose_renderer=self._prose_for_block(block),
                     )
                     body.append(self._maybe_pair(block, ab_markup))
                     self.stats.blocks_rendered += 1

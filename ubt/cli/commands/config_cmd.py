@@ -20,7 +20,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import typer
-from pydantic import SecretStr
+from pydantic import BaseModel, SecretStr
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
@@ -40,7 +40,7 @@ console = Console()
 #: Fields whose value must never be printed; shown as a length, not the secret.
 _SECRET_FIELDS = frozenset({"api_key", "ocr_api_key", "service_api_key", "qe_judge_api_key"})
 
-DOMAIN_CONFIG_MODELS: dict[str, tuple[type, str]] = {
+DOMAIN_CONFIG_MODELS: dict[str, tuple[type[BaseModel], str]] = {
     "router": (RouterConfig, "LLM routing, providers, endpoints, and rate limits"),
     "typst": (TypstConfig, "Document rendering, Typst typesetting, and page layouts"),
     "quality": (QualityConfig, "Quality gates, MTQE, defect screening, and consistency"),

@@ -99,14 +99,48 @@ def clean_zh_term(term: str) -> str:
     return res
 
 
+def _glossary_pair(item: Any) -> tuple[str, str, str]:
+    """Read ``(source, target, category)`` from either glossary shape.
+
+    Two glossary types reach this function and they do not share an interface:
+
+    * a mapping (``{"source": ..., "target": ..., "category": ...}``) as built
+      by callers that already normalised their input, and
+    * :class:`ubt.core.memory.bible.BibleEntry`, the model
+      :func:`ubt.core.memory.seed_glossary.load_external_glossary` returns --
+      its approved rendering lives on ``translation``, and it has no ``.get``.
+
+    The previous code assumed the mapping and did ``item.get("source")``, so
+    ``ubt index inspect --glossary entries.csv`` raised
+    ``AttributeError: 'BibleEntry' object has no attribute 'get'`` on the first
+    entry. Normalising here keeps one place aware of the two shapes.
+    """
+    if isinstance(item, dict):
+        return (
+            str(item.get("source", "")).strip(),
+            str(item.get("target", "")).strip(),
+            str(item.get("category", item.get("domain", ""))).strip(),
+        )
+    return (
+        str(getattr(item, "source", "") or "").strip(),
+        str(getattr(item, "translation", "") or getattr(item, "target", "") or "").strip(),
+        str(getattr(item, "kind", "") or getattr(item, "domain", "") or "").strip(),
+    )
+
+
 def extract_index_from_blocks(
     blocks: Sequence[IRBlock],
-    glossary: Sequence[dict[str, Any]] | None = None,
+    glossary: Sequence[dict[str, Any]] | Sequence[Any] | None = None,
     min_occurrences: int = 1,
     doc_id: str = "",
     title: str = "",
 ) -> ConcordanceIndex:
-    """Extract a bilingual concordance index from IRBlocks and optional glossary."""
+    """Extract a bilingual concordance index from IRBlocks and optional glossary.
+
+    ``glossary`` accepts either mapping entries or
+    :class:`~ubt.core.memory.bible.BibleEntry` objects; see
+    :func:`_glossary_pair`.
+    """
     active_section_title = ""
     active_section_anchor = ""
     heading_counter = 0
@@ -119,9 +153,7 @@ def extract_index_from_blocks(
     compiled_glossary: list[tuple[str, str, str, str, re.Pattern[str], re.Pattern[str]]] = []
     if glossary:
         for item in glossary:
-            src = str(item.get("source", "")).strip()
-            tgt = str(item.get("target", "")).strip()
-            cat = str(item.get("category", item.get("domain", ""))).strip()
+            src, tgt, cat = _glossary_pair(item)
             if src or tgt:
                 key = src.lower() if src else tgt.lower()
                 if key not in term_entries:

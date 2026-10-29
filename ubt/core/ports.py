@@ -495,7 +495,10 @@ def resolve_font_for_render(
     """Resolve font availability for a given target language."""
     from ubt.adapters.pdf.font_probe import resolve_for_render as _resolve
 
-    return cast("FontStack", _resolve(target_lang, font_override=font_override))
+    # No cast: ``resolve_for_render`` already declares ``-> FontStack``. The
+    # adapter import is deferred to keep this module free of a hard dependency
+    # on the PDF stack, not because the type was unknown.
+    return _resolve(target_lang, font_override=font_override)
 
 
 def check_artifact(
@@ -506,7 +509,8 @@ def check_artifact(
     """Check whether the delivered PDF artifact carries each text block's realization."""
     from ubt.adapters.pdf.artifact_text import check_artifact as _check
 
-    return cast("ArtifactReport", _check(blocks, translations, rendered_path))
+    # No cast: ``check_artifact`` already declares ``-> ArtifactReport``.
+    return _check(blocks, translations, rendered_path)
 
 
 # --------------------------------------------------------------------------- #
