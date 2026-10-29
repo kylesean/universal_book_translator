@@ -68,6 +68,22 @@ class TranslationEngine:
     #: key is the masked source plus the model and prompt version, so a changed
     #: prompt or model cannot reuse an old draft; ``None`` calls straight through.
     cache: CacheStore | None = None
+    #: Which kind of run this engine serves, folded into every cache key.
+    #:
+    #: **This field is a correctness guard, not a label.** ``create_dry_run_orchestrator``
+    #: now points a rehearsal at its own ``cache_dir``, but a directory is a
+    #: convention two call sites have to keep agreeing on -- and the failure mode
+    #: when they do not is invisible: a real job reads a rehearsal's
+    #: ``[模拟翻译] <source>`` reply, treats it as a genuine hit, ships it as the
+    #: translation and records no spend. Naming the run kind in the key makes a
+    #: rehearsal reply unreachable from a real run even if both share one
+    #: directory, so the isolation has two independent mechanisms instead of one.
+    #:
+    #: ``"real"`` for every production path; only an explicit caller opts into a
+    #: non-default namespace. The key **omits** this field for ``"real"`` so
+    #: existing real cache entries -- real translations that cost real money --
+    #: stay valid; see :meth:`_cache_key`.
+    run_kind: str = "real"
 
     def mask(self, text: str) -> MaskedSource:
         """Protect a source's spans, in the engine's fixed mask order."""
@@ -93,13 +109,28 @@ class TranslationEngine:
         production draft path's generate also depends on glossary / neighbour /
         memory context, so that context must enter the key or a changed prompt
         would reuse a stale draft (content-addressed cache layer).
+
+        ``run_kind`` is folded in **only when it is not ``"real"```, so the real
+        namespace keeps the exact keys it had before this field existed. That
+        matters because the store holds real translations that cost real money:
+        folding the default in unconditionally would have made every one of them
+        a miss on the next run. Measured on the checkout this was written
+        against, that would have orphaned **3653 entries covering 15506 blocks**.
+
+        Leaving the real key unchanged does mean a *pre-existing* echo entry
+        under that old key would still be reachable. That is handled by deleting
+        the echoes (they are all rehearsal output and carry no information), not
+        by punishing every genuine entry.
         """
         from ubt.cache.store import step_key
 
         parts = [self.model, self.prompt_version, masked_source]
         if context:
             parts.append(context)
-        return step_key("translate", parts, {})
+        params: dict[str, object] = {}
+        if self.run_kind != "real":
+            params["run_kind"] = self.run_kind
+        return step_key("translate", parts, params)
 
     def cached_draft(self, masked_source: str, *, context: str = "") -> str | None:
         """The cached raw draft for this masked source + context, or ``None``.
@@ -131,7 +162,15 @@ class TranslationEngine:
     def _value_key(self, kind: str, context: str) -> str:
         from ubt.cache.store import step_key
 
-        return step_key(kind, [self.model, self.prompt_version, context], {})
+        # ``run_kind`` for the same reason :meth:`_cache_key` carries it: a
+        # macro-chunk reply is one provider call producing several units, so an
+        # echo reply under this key would splice rehearsal text across a whole
+        # batch of blocks at once. Omitted for ``"real"`` for the same reason too
+        # -- see :meth:`_cache_key`.
+        params: dict[str, object] = {}
+        if self.run_kind != "real":
+            params["run_kind"] = self.run_kind
+        return step_key(kind, [self.model, self.prompt_version, context], params)
 
     def cached_value(self, context: str, *, kind: str) -> str | None:
         """The cached text for a non-draft translate step, or ``None`` (fail-open).

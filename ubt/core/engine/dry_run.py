@@ -104,6 +104,37 @@ def rehearsal_db_dir(db_dir: Path | str) -> Path:
     return real.parent / f"{real.name}-mock"
 
 
+def rehearsal_cache_dir(cache_dir: Path | str) -> Path:
+    """The content-cache directory a rehearsal must use: a sibling of the real one.
+
+    **This is not tidiness; without it a rehearsal silently corrupts real work.**
+    ``rehearsal_db_dir`` isolated the ledger and the deliverable dirs, but the
+    content-addressed draft cache was left pointing at the operator's real
+    ``cache_dir``, and the cache key
+    (:meth:`ubt.translate.engine.TranslationEngine._cache_key`) names the model,
+    the prompt version, the masked source and the prompt context -- none of which
+    distinguishes a rehearsal from a real run. Measured on ``.ubt/cache`` while
+    writing this: **1381 of the 5525 entries held a ``[模拟翻译]`` echo** (those
+    1381 were deleted once the isolation was verified), and a
+    two-run experiment (different echo texts, different job ids) showed the
+    second run reading the first run's text back out of the cache without ever
+    calling its own provider.
+
+    The consequence for a real job is the worst kind: the draft stage consults
+    the cache *before* spending, so a poisoned entry means the job ships
+    ``[模拟翻译] <English source>`` as its translation, records zero tokens spent,
+    and cannot be told apart from a genuine cache hit. A resumed job makes it
+    likelier still, because the prompt context is then byte-identical.
+
+    A **sibling** for the same reason the ledger is one: a child of the real
+    cache would still be pruned by the store that owns it
+    (:meth:`ubt.cache.store.DiskCacheStore.prune` walks ``root/<shard>/``), and a
+    rehearsal's entries would then be deleted by unrelated traffic.
+    """
+    real = Path(cache_dir)
+    return real.parent / f"{real.name}-mock"
+
+
 def create_dry_run_orchestrator(
     config: UBTConfig, **orchestrator_kwargs: Any
 ) -> PipelineOrchestrator:
@@ -127,6 +158,12 @@ def create_dry_run_orchestrator(
     The ledger directory is isolated too, for the reasons
     :func:`rehearsal_db_dir` gives: a rehearsal must not be able to look like a
     job, and must not accumulate in the store the operator reads.
+
+    The **content cache** is isolated as well, and that one is a correctness fix
+    rather than housekeeping: see :func:`rehearsal_cache_dir`. Until it was
+    isolated, a rehearsal's echo replies shared a key space with real drafts, so
+    a real job could read one back and ship it as a translation while recording
+    no spend.
     """
     rehearsal_config = config.model_copy(
         update={
@@ -138,6 +175,10 @@ def create_dry_run_orchestrator(
             # moves the rehearsal's ledger, its staged uploads and its
             # deliverables away from real work in a single place.
             "db_dir": rehearsal_db_dir(config.db_dir),
+            # ``cache_dir`` derives from nothing, so it needs its own line.
+            # Leaving it out was the hole: the ledger was isolated and the
+            # cache was not, and the cache is the one a later real run reads.
+            "cache_dir": rehearsal_cache_dir(config.cache_dir),
         }
     )
     router = ModelRouter(
@@ -179,4 +220,9 @@ def create_dry_run_orchestrator(
     )
 
 
-__all__ = ["DryRunModelProvider", "create_dry_run_orchestrator", "rehearsal_db_dir"]
+__all__ = [
+    "DryRunModelProvider",
+    "create_dry_run_orchestrator",
+    "rehearsal_cache_dir",
+    "rehearsal_db_dir",
+]

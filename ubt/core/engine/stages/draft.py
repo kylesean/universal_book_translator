@@ -1386,6 +1386,11 @@ async def _build_draft_runtime(
         model=router.draft_model,
         prompt_version=PROMPT_VERSION,
         cache=draft_cache,
+        # A rehearsal's echo replies must not be reachable from a real run.
+        # The rehearsal's own ``cache_dir`` already separates the two stores;
+        # this separates their key spaces as well, so neither isolation depends
+        # on the other still being wired.
+        run_kind="rehearsal" if ctx.is_mock_run else "real",
     )
     # How many blocks the book holds: derived here from the ledger (it is
     # observable state, not something a stage has to hand forward) and read by
