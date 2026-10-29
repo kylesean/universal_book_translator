@@ -190,3 +190,27 @@ async def test_a_render_that_writes_nothing_is_a_failure_not_a_success(
 
     assert result.status == "failed"
     assert result.error is not None and "without writing" in result.error
+
+
+def test_the_companion_is_wired_into_the_export_stage() -> None:
+    """The exporter must be *called* and its result registered, not just exist.
+
+    A helper that passes its own tests but is never invoked from the stage is
+    the exact shape of a shipped-but-dead feature. This guards the call site:
+    ``run_export_stage`` has to append the result to ``companion_results`` so it
+    reaches ``CompanionExportSummary``, and from there the quality report and the
+    job's metadata.
+
+    Asserted by reading the source rather than by running the whole stage: the
+    export stage needs an adapter, a ledger, a render plan and a visual gate, so
+    a behavioural test here would become an integration test of the pipeline —
+    a different, already-covered thing.
+    """
+    import inspect
+
+    from ubt.core.engine.stages import export as export_module
+
+    stage = inspect.getsource(export_module.run_export_stage)
+    assert "_write_reflow_companion" in stage, "the exporter is never called"
+    assert "companion_results.append" in stage, "the result never reaches the summary"
+    assert "companion_summary" in stage, "the summary is never built/persisted"

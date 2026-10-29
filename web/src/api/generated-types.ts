@@ -1722,6 +1722,11 @@ export interface components {
              */
             emit_both?: boolean | null;
             /**
+             * Companion Reflow
+             * @description Also write a reflow (L3) reading copy beside a facsimile/page_locked delivery: same translation, source trim, no background, selectable text. No extra model cost
+             */
+            companion_reflow?: boolean | null;
+            /**
              * Ocr Mode
              * @description OCR engine (auto, local, vlm, off)
              */

@@ -5801,6 +5801,18 @@
             "title": "Emit Both",
             "description": "Emit both the primary and complementary dual_mode deliverables (e.g. mono and bilingual)"
           },
+          "companion_reflow": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Companion Reflow",
+            "description": "Also write a reflow (L3) reading copy beside a facsimile/page_locked delivery: same translation, source trim, no background, selectable text. No extra model cost"
+          },
           "ocr_mode": {
             "anyOf": [
               {
