@@ -838,6 +838,7 @@ CompanionKind = Literal[
     "attestation",
     "table_appendix",
     "spill_appendix",
+    "reflow",
 ]
 
 #: Recognized artifact kinds for delivery packages and companion audit.

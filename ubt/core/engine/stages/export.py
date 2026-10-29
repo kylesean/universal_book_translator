@@ -1022,6 +1022,103 @@ def _write_table_appendix(
         return None
 
 
+async def _write_reflow_companion(
+    ctx: StageContext,
+    adapter: DocumentAdapter,
+    final_blocks: list[IRBlock],
+    rendered_path: Path,
+    render: RenderPlan,
+) -> CompanionArtifactResult:
+    """Write an L3 reading copy beside a facsimile/page_locked delivery (D13).
+
+    The facsimile artifact is the faithful one but its text is painted glyphs: a
+    reader cannot restyle it, search it, or re-wrap it on a small screen. This
+    renders the *same* translated blocks through the reflow channel, so the
+    companion is selectable text on the source book's own trim and no
+    background — at zero extra model cost, because nothing is translated twice.
+
+    Deliberately reuses ``render_blocks`` on the same adapter with
+    ``delivery_mode`` swapped rather than calling the Typst renderer directly:
+    the channel choice, the trim measurement and the layout audit all belong to
+    one strategy, and a second entry point would be a second place for them to
+    disagree.
+
+    Non-fatal, like every companion: a failed reading copy must not sink a
+    facsimile delivery that already succeeded. The failure is *recorded* with a
+    reason rather than swallowed, so a report can say why it is absent.
+    """
+    if not getattr(ctx.config, "companion_reflow", False):
+        return CompanionArtifactResult(
+            kind="reflow",
+            status="skipped",
+            reason="config.companion_reflow is disabled (--companion-reflow)",
+        )
+
+    delivered_mode = str(getattr(getattr(adapter, "_renderer", None), "delivery_mode", ""))
+    if delivered_mode == "reflow":
+        # Two identical PDFs is not a feature. Skip rather than duplicate, and
+        # say why: "I asked for a reading copy and got nothing" with no reason
+        # reads as a bug in the pipeline, not as a redundant request.
+        return CompanionArtifactResult(
+            kind="reflow",
+            status="skipped",
+            reason=(
+                "the primary delivery is already reflow, so a reflow companion would duplicate it"
+            ),
+        )
+
+    # Same base name, distinct suffix, so ``book_mono.pdf`` yields
+    # ``book_mono_reflow.pdf`` and never overwrites the delivery.
+    target = rendered_path.with_name(f"{rendered_path.stem}_reflow{rendered_path.suffix}")
+    t0 = time.perf_counter()
+    swapped = False
+    try:
+        strategy = getattr(adapter, "_renderer", None)
+        if strategy is not None and hasattr(strategy, "delivery_mode"):
+            strategy.delivery_mode = "reflow"
+            swapped = True
+        try:
+            await _render_adapter_output(
+                adapter=adapter,
+                manifest=ctx.manifest,
+                blocks=final_blocks,
+                target_lang=ctx.target_lang,
+                output_path=target,
+                bilingual_mode=render.bilingual_mode,
+                render_plan=render,
+            )
+        finally:
+            if swapped and strategy is not None:
+                # Restore before anything else can read the strategy, so the
+                # primary's mode is never left saying "reflow".
+                strategy.delivery_mode = delivered_mode
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        if not target.exists():
+            return CompanionArtifactResult(
+                kind="reflow",
+                status="failed",
+                duration_ms=duration_ms,
+                error="the reflow render returned without writing the artifact",
+            )
+        logger.info("Reflow reading copy generated: %s", target.name)
+        return CompanionArtifactResult(
+            kind="reflow",
+            status="generated",
+            path=target,
+            size_bytes=target.stat().st_size,
+            duration_ms=duration_ms,
+        )
+    except Exception as exc:
+        # Best-effort, but never silent: the reason is carried out on the result.
+        logger.warning("Reflow companion generation failed for job %s: %s", ctx.job_id, exc)
+        return CompanionArtifactResult(
+            kind="reflow",
+            status="failed",
+            duration_ms=round((time.perf_counter() - t0) * 1000, 2),
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
+
 def _write_xliff_companion(
     ctx: StageContext, rendered_path: Path, blocks: list[IRBlock]
 ) -> CompanionArtifactResult:
@@ -1651,6 +1748,11 @@ async def run_export_stage(
         epub_res,
         attestation_res,
     ]
+    # The reading copy is rendered, not serialized like the views above, so it
+    # runs here where the adapter and the final blocks are both in scope.
+    companion_results.append(
+        await _write_reflow_companion(ctx, adapter, final_blocks, rendered_path, render)
+    )
     if getattr(ctx.config, "spill_policy", "error") in ("appendix", "warn", "source_kept_warn"):
         spill_path = await asyncio.to_thread(
             _write_spill_appendix, ctx, rendered_path, final_blocks, contract

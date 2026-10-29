@@ -646,6 +646,19 @@ def translate(
             show_default=False,
         ),
     ] = None,
+    companion_reflow: Annotated[
+        bool | None,
+        typer.Option(
+            "--companion-reflow/--no-companion-reflow",
+            help=(
+                "Also write a reflow (L3) reading copy beside the delivery: the same "
+                "translation re-typeset on the source's own trim, no background, "
+                "selectable text, at no extra model cost. Recorded as skipped (not an "
+                "error) when the primary delivery is already reflow"
+            ),
+            show_default=False,
+        ),
+    ] = None,
     facsimile: Annotated[
         bool | None,
         typer.Option(
@@ -817,6 +830,7 @@ def translate(
         "preset": preset,
         "pdf_engine": pdf_engine,
         "emit_both": emit_both,
+        "companion_reflow": companion_reflow,
         "fresh": fresh,
         "ocr_mode": ocr,
         "ocr_endpoint": ocr_endpoint,

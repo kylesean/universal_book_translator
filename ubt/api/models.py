@@ -180,6 +180,14 @@ class JobSubmitRequest(BaseModel):
         default=None,
         description="Emit both the primary and complementary dual_mode deliverables (e.g. mono and bilingual)",
     )
+    companion_reflow: bool | None = Field(
+        default=None,
+        description=(
+            "Also write a reflow (L3) reading copy beside a facsimile/page_locked "
+            "delivery: same translation, source trim, no background, selectable "
+            "text. No extra model cost"
+        ),
+    )
     # Formula pipeline.
     # OCR engine selection. ``ocr_endpoint`` / ``ocr_api_key`` stay operator-only.
     ocr_mode: OcrMode | None = Field(default=None, description="OCR engine (auto, local, vlm, off)")
