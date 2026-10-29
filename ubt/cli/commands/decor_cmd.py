@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Annotated
 
 import typer
@@ -11,6 +10,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ubt.cli.ui import emit_json
 from ubt.core.decor.dropcap import (
     HTML_DROPCAP_CSS,
     TYPST_DROPCAP_MACRO,
@@ -108,28 +108,23 @@ def decor_preview_command(
         raise typer.Exit(code=1)
 
     if json_output:
-        console.print(
-            json.dumps(
-                {
-                    "heading_raw": heading_text,
-                    "parsed": {
-                        "label": label,
-                        "title": title,
-                        "subtitle": subtitle,
-                    },
-                    "dropcap": {
-                        "prefix": prefix,
-                        "initial_char": initial_char,
-                        "lines": dropcap_lines,
-                    },
-                    "style": style,
-                    "format": fmt,
-                    "markup": combined,
+        emit_json(
+            {
+                "heading_raw": heading_text,
+                "parsed": {
+                    "label": label,
+                    "title": title,
+                    "subtitle": subtitle,
                 },
-                indent=2,
-                ensure_ascii=False,
-            ),
-            soft_wrap=True,
+                "dropcap": {
+                    "prefix": prefix,
+                    "initial_char": initial_char,
+                    "lines": dropcap_lines,
+                },
+                "style": style,
+                "format": fmt,
+                "markup": combined,
+            }
         )
         return
 
@@ -199,17 +194,12 @@ def decor_inspect_command(
                 current_chapter["dropcap_letter"] = f"{prefix}{letter}"
 
     if json_output:
-        console.print(
-            json.dumps(
-                {
-                    "source": resolved_src,
-                    "total_chapters": len(chapters),
-                    "chapters": chapters,
-                },
-                indent=2,
-                ensure_ascii=False,
-            ),
-            soft_wrap=True,
+        emit_json(
+            {
+                "source": resolved_src,
+                "total_chapters": len(chapters),
+                "chapters": chapters,
+            }
         )
         return
 

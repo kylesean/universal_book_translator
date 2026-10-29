@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from typing import Annotated
 
@@ -12,6 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ubt.cli.ui import emit_json
 from ubt.core.math.breaker import audit_math_blocks, break_equation
 from ubt.core.math.models import MathSyntax
 from ubt.core.patch.engine import load_document_blocks
@@ -60,7 +60,7 @@ def math_inspect_command(
     if json_output:
         res_data = report.to_dict()
         res_data["source"] = resolved_src
-        console.print(json.dumps(res_data, indent=2, ensure_ascii=False), soft_wrap=True)
+        emit_json(res_data)
         return
 
     table = Table(
@@ -154,36 +154,28 @@ def math_break_command(
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(broken, encoding="utf-8")
         if json_output:
-            console.print(
-                json.dumps(
-                    {
-                        "original_length": len(formula_text),
-                        "output_file": str(output),
-                        "syntax": str(syn),
-                        "align": align,
-                    },
-                    indent=2,
-                )
+            emit_json(
+                {
+                    "original_length": len(formula_text),
+                    "output_file": str(output),
+                    "syntax": str(syn),
+                    "align": align,
+                }
             )
         else:
             console.print(f"[bold green]Successfully saved broken formula to:[/] {output}")
         return
 
     if json_output:
-        console.print(
-            json.dumps(
-                {
-                    "original": formula_text,
-                    "original_length": len(formula_text),
-                    "broken": broken,
-                    "lines_count": len(broken.splitlines()),
-                    "syntax": str(syn),
-                    "align": align,
-                },
-                indent=2,
-                ensure_ascii=False,
-            ),
-            soft_wrap=True,
+        emit_json(
+            {
+                "original": formula_text,
+                "original_length": len(formula_text),
+                "broken": broken,
+                "lines_count": len(broken.splitlines()),
+                "syntax": str(syn),
+                "align": align,
+            }
         )
     else:
         console.print(broken)
@@ -246,7 +238,7 @@ def math_audit_command(
         res_data["source"] = resolved_src
         res_data["passed"] = passed
         res_data["strict"] = strict
-        console.print(json.dumps(res_data, indent=2, ensure_ascii=False), soft_wrap=True)
+        emit_json(res_data)
         if not passed:
             raise typer.Exit(code=1)
         return

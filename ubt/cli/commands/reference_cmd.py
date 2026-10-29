@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -12,6 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ubt.cli.ui import emit_json
 from ubt.core.patch.engine import load_document_blocks
 from ubt.core.references.linker import (
     build_citation_topology,
@@ -102,7 +102,7 @@ def ref_inspect_command(
     }
 
     if json_output:
-        console.print(json.dumps(result_data, indent=2, ensure_ascii=False))
+        emit_json(result_data)
         return
 
     # Terminal output
@@ -202,7 +202,7 @@ def ref_check_command(
     }
 
     if json_output:
-        console.print(json.dumps(report, indent=2, ensure_ascii=False))
+        emit_json(report)
     elif passed:
         console.print(
             f"[bold green]PASS:[/bold green] Citation resolution rate {rate_pct:.1f}% "
@@ -325,7 +325,7 @@ def ref_transform_command(
             "show_pages": show_page_number,
             "output": transformed,
         }
-        console.print(json.dumps(res, indent=2, ensure_ascii=False), soft_wrap=True, markup=False)
+        emit_json(res)
     elif output is None:
         console.print(transformed, markup=False)
 
@@ -416,7 +416,7 @@ def ref_format_mention_command(
             "lang": lang,
             "formatted_text": formatted,
         }
-        console.print(json.dumps(res, indent=2, ensure_ascii=False), soft_wrap=True, markup=False)
+        emit_json(res)
     else:
         console.print(formatted, markup=False)
 

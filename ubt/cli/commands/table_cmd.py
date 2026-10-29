@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ubt.cli.ui import emit_json
 from ubt.core.cleaners.table_stitcher import (
     TableStitchSummary,
     parse_table_fingerprint,
@@ -81,7 +82,7 @@ def table_inspect_command(
     }
 
     if json_output:
-        console.print(json.dumps(result_data, indent=2, ensure_ascii=False))
+        emit_json(result_data)
         return
 
     # Terminal output
@@ -174,7 +175,7 @@ def table_stitch_command(
         )
 
     if json_output:
-        console.print(json.dumps(data, indent=2, ensure_ascii=False))
+        emit_json(data)
     elif output is None:
         console.print(
             f"[bold green]Stitching Complete:[/bold green] {summary.tables_stitched_count} table pairs "
@@ -384,9 +385,7 @@ def table_audit_command(
     }
 
     if json_output:
-        console.print(
-            json.dumps(res_data, indent=2, ensure_ascii=False), soft_wrap=True, markup=False
-        )
+        emit_json(res_data)
         return
 
     console.print(

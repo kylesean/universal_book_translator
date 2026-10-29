@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Annotated
 
@@ -17,6 +16,7 @@ from ubt.adapters.pdf.pdf_optimizer import (
     PdfOptimizeOptions,
     optimize_pdf,
 )
+from ubt.cli.ui import emit_json
 
 console = Console()
 
@@ -131,7 +131,7 @@ def optimize_pdf_command(
     result = optimize_pdf(pdf_path, output_path=output, options=opts)
 
     if json_output:
-        console.print_json(json.dumps(result.model_dump()))
+        emit_json(result.model_dump())
         if result.status == "failed":
             raise typer.Exit(code=1)
         return

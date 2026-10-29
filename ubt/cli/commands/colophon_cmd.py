@@ -11,6 +11,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from ubt.cli.ui import emit_json
 from ubt.core.colophon.generator import (
     extract_colophon_from_blocks,
     render_colophon_html,
@@ -80,7 +81,7 @@ def colophon_inspect_command(
     }
 
     if json_output:
-        console.print(json.dumps(result_data, indent=2, ensure_ascii=False), soft_wrap=True)
+        emit_json(result_data)
         return
 
     # Terminal output
@@ -243,7 +244,7 @@ def colophon_validate_isbn_command(
     }
 
     if json_output:
-        console.print(json.dumps(result, indent=2), soft_wrap=True)
+        emit_json(result)
         if not is_valid:
             raise typer.Exit(code=1)
         return

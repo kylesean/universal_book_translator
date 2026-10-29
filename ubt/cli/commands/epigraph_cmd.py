@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from typing import Annotated
 
@@ -12,6 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ubt.cli.ui import emit_json
 from ubt.core.epigraph.detector import detect_chapter_epigraphs_and_abstracts
 from ubt.core.epigraph.generator import (
     render_abstract_html,
@@ -84,7 +84,7 @@ def epigraph_inspect_command(
                 for ab in abstracts_by_id.values()
             ],
         }
-        console.print(json.dumps(res, indent=2, ensure_ascii=False), soft_wrap=True, markup=False)
+        emit_json(res)
         return
 
     console.print(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from typing import Annotated
 
@@ -12,6 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ubt.cli.ui import emit_json
 from ubt.core.index.extractor import extract_index_from_blocks
 from ubt.core.index.generator import (
     render_index_html,
@@ -112,19 +112,14 @@ def index_inspect_command(
             }
             for e in idx.entries[:limit]
         ]
-        console.print(
-            json.dumps(
-                {
-                    "source": resolved_src,
-                    "total_terms": idx.total_terms,
-                    "total_occurrences": idx.total_occurrences,
-                    "primary_lang": lang,
-                    "entries": raw_entries,
-                },
-                indent=2,
-                ensure_ascii=False,
-            ),
-            soft_wrap=True,
+        emit_json(
+            {
+                "source": resolved_src,
+                "total_terms": idx.total_terms,
+                "total_occurrences": idx.total_occurrences,
+                "primary_lang": lang,
+                "entries": raw_entries,
+            }
         )
         return
 
@@ -254,17 +249,14 @@ def index_generate_command(
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(content, encoding="utf-8")
         if json_output:
-            console.print(
-                json.dumps(
-                    {
-                        "source": resolved_src,
-                        "output_file": str(output),
-                        "format": fmt,
-                        "total_terms": idx.total_terms,
-                        "total_occurrences": idx.total_occurrences,
-                    },
-                    indent=2,
-                )
+            emit_json(
+                {
+                    "source": resolved_src,
+                    "output_file": str(output),
+                    "format": fmt,
+                    "total_terms": idx.total_terms,
+                    "total_occurrences": idx.total_occurrences,
+                }
             )
         else:
             console.print(
@@ -274,19 +266,14 @@ def index_generate_command(
         return
 
     if json_output:
-        console.print(
-            json.dumps(
-                {
-                    "source": resolved_src,
-                    "format": fmt,
-                    "total_terms": idx.total_terms,
-                    "total_occurrences": idx.total_occurrences,
-                    "content": content,
-                },
-                indent=2,
-                ensure_ascii=False,
-            ),
-            soft_wrap=True,
+        emit_json(
+            {
+                "source": resolved_src,
+                "format": fmt,
+                "total_terms": idx.total_terms,
+                "total_occurrences": idx.total_occurrences,
+                "content": content,
+            }
         )
     else:
         console.print(content)
@@ -356,7 +343,7 @@ def index_stats_command(
     }
 
     if json_output:
-        console.print(json.dumps(stats_data, indent=2, ensure_ascii=False), soft_wrap=True)
+        emit_json(stats_data)
         return
 
     top_str = "\n".join(

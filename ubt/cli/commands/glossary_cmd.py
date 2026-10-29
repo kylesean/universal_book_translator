@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Annotated
 
@@ -11,6 +10,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ubt.cli.ui import emit_json
 from ubt.core.memory.scoped_glossary import (
     GlossaryConflictVerdict,
     ScopeContext,
@@ -62,7 +62,7 @@ def glossary_audit_command(
     summary = audit_glossary_conflicts(entries)
 
     if json_output:
-        console.print_json(json.dumps(summary.model_dump()))
+        emit_json(summary.model_dump())
         if strict and not summary.is_clean:
             raise typer.Exit(code=1)
         return
@@ -188,7 +188,7 @@ def glossary_resolve_command(
     effective = resolve_effective_glossary(entries, ctx)
 
     if json_output:
-        console.print_json(json.dumps(effective))
+        emit_json(effective)
         return
 
     table = Table(

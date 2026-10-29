@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Annotated
 
@@ -10,6 +9,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from ubt.cli.ui import emit_json
 from ubt.core.ir.models import BlockType, IRBlock, make_element
 from ubt.core.memory.seed_glossary import load_external_glossary
 from ubt.core.router.dynamic_scheduler import (
@@ -147,7 +147,7 @@ def route_simulate_command(
     report = scheduler.simulate_document_routing(blocks, glossary_terms=glossary_terms)
 
     if json_output:
-        console.print_json(scheduler.render_simulation_json(report))
+        emit_json(report.model_dump())
         return
 
     if markdown_output:
@@ -234,7 +234,7 @@ def route_inspect_command(
 
     if json_output:
         data = [a.model_dump() for a in displayed]
-        console.print_json(json.dumps(data, ensure_ascii=False))
+        emit_json(data)
         return
 
     table = Table(

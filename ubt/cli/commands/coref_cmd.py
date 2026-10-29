@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Annotated
 
@@ -11,6 +10,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ubt.cli.ui import emit_json
 from ubt.core.memory.coreference import (
     CoreferencePronounType,
     CoreferenceResolver,
@@ -75,7 +75,7 @@ def coref_inspect_command(
 
     if json_output:
         data = [m.model_dump() for m in mentions]
-        console.print_json(json.dumps(data, ensure_ascii=False))
+        emit_json(data)
         return
 
     resolved_count = sum(1 for m in mentions if m.inferred_antecedent)
@@ -151,7 +151,7 @@ def coref_audit_command(
     report = resolver.audit_pronoun_usage(text)
 
     if json_output:
-        console.print_json(json.dumps(report.model_dump(), ensure_ascii=False))
+        emit_json(report.model_dump())
         if strict and not report.is_acceptable:
             raise typer.Exit(code=1)
         return

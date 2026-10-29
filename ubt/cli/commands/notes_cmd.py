@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from typing import Annotated
 
@@ -12,6 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ubt.cli.ui import emit_json
 from ubt.core.notes.extractor import extract_notes_topology
 from ubt.core.notes.manager import (
     render_endnote_section_html,
@@ -90,7 +90,7 @@ def notes_inspect_command(
     if json_output:
         res = topology.to_dict()
         res["source"] = resolved_src
-        console.print(json.dumps(res, indent=2, ensure_ascii=False), soft_wrap=True)
+        emit_json(res)
         return
 
     rate_color = (
@@ -226,18 +226,13 @@ def notes_generate_command(
         return
 
     if json_output:
-        console.print(
-            json.dumps(
-                {
-                    "source": resolved_src,
-                    "format": fmt,
-                    "total_notes": topology.total_notes,
-                    "markup": markup,
-                },
-                indent=2,
-                ensure_ascii=False,
-            ),
-            soft_wrap=True,
+        emit_json(
+            {
+                "source": resolved_src,
+                "format": fmt,
+                "total_notes": topology.total_notes,
+                "markup": markup,
+            }
         )
         return
 
@@ -280,21 +275,16 @@ def notes_audit_command(
     passed = topology.resolution_rate >= min_resolution
 
     if json_output:
-        console.print(
-            json.dumps(
-                {
-                    "source": resolved_src,
-                    "passed": passed,
-                    "resolution_rate": round(topology.resolution_rate, 4),
-                    "min_resolution": min_resolution,
-                    "total_notes": topology.total_notes,
-                    "orphan_callouts": topology.orphan_callouts,
-                    "orphan_definitions": topology.orphan_definitions,
-                },
-                indent=2,
-                ensure_ascii=False,
-            ),
-            soft_wrap=True,
+        emit_json(
+            {
+                "source": resolved_src,
+                "passed": passed,
+                "resolution_rate": round(topology.resolution_rate, 4),
+                "min_resolution": min_resolution,
+                "total_notes": topology.total_notes,
+                "orphan_callouts": topology.orphan_callouts,
+                "orphan_definitions": topology.orphan_definitions,
+            }
         )
         if not passed:
             raise typer.Exit(code=1)

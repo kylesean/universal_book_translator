@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -12,6 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ubt.cli.ui import emit_json
 from ubt.core.patch.engine import load_document_blocks
 from ubt.model.ast import Caption, CodeBlock, Figure, Formula, Heading, ListItem, Paragraph
 from ubt.model.ast import Table as ASTTable
@@ -103,7 +103,7 @@ def styler_inspect_command(
     }
 
     if json_output:
-        console.print(json.dumps(result_data, indent=2, ensure_ascii=False), soft_wrap=True)
+        emit_json(result_data)
         return
 
     # Terminal output
@@ -209,7 +209,7 @@ def styler_render_html_command(
     }
 
     if json_output:
-        console.print(json.dumps(result, indent=2, ensure_ascii=False), soft_wrap=True)
+        emit_json(result)
     else:
         console.print(f"[bold green]✓ Responsive HTML rendered to:[/bold green] {comp.output_path}")
 
@@ -274,7 +274,7 @@ def styler_render_epub_command(
     }
 
     if json_output:
-        console.print(json.dumps(result, indent=2, ensure_ascii=False), soft_wrap=True)
+        emit_json(result)
     else:
         console.print(
             f"[bold green]✓ Reflowable EPUB 3 rendered to:[/bold green] {comp.output_path}"

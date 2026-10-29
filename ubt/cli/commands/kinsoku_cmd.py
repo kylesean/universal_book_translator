@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -12,6 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ubt.cli.ui import emit_json
 from ubt.core.cleaners.kinsoku import (
     WORD_JOINER,
     KinsokuAuditReport,
@@ -108,7 +108,7 @@ def kinsoku_inspect_command(
     }
 
     if json_output:
-        console.print(json.dumps(result_data, indent=2, ensure_ascii=False), soft_wrap=True)
+        emit_json(result_data)
         return
 
     # Terminal output
@@ -214,7 +214,7 @@ def kinsoku_audit_command(
     }
 
     if json_output:
-        console.print(json.dumps(result, indent=2), soft_wrap=True)
+        emit_json(result)
         if not passed:
             raise typer.Exit(code=1)
         return
@@ -290,6 +290,6 @@ def kinsoku_fix_command(
     }
 
     if json_output:
-        console.print(json.dumps(stats, indent=2), soft_wrap=True)
+        emit_json(stats)
     elif not output:
         console.print(fixed_text)

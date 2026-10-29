@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from typing import Annotated
 
@@ -12,6 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ubt.cli.ui import emit_json
 from ubt.core.backmatter.detector import detect_backmatter_manifest
 from ubt.core.backmatter.generator import (
     emit_appendix_switch_typst,
@@ -58,7 +58,7 @@ def backmatter_inspect_command(
     if json_output:
         res = manifest.to_dict()
         res["source"] = resolved_src
-        console.print(json.dumps(res, indent=2, ensure_ascii=False), soft_wrap=True)
+        emit_json(res)
         return
 
     console.print(
@@ -177,18 +177,13 @@ def backmatter_generate_command(
         return
 
     if json_output:
-        console.print(
-            json.dumps(
-                {
-                    "source": resolved_src,
-                    "format": fmt,
-                    "total_sections": manifest.total_sections,
-                    "markup": markup,
-                },
-                indent=2,
-                ensure_ascii=False,
-            ),
-            soft_wrap=True,
+        emit_json(
+            {
+                "source": resolved_src,
+                "format": fmt,
+                "total_sections": manifest.total_sections,
+                "markup": markup,
+            }
         )
         return
 
@@ -233,19 +228,14 @@ def backmatter_validate_command(
     passed = len(errors) == 0
 
     if json_output:
-        console.print(
-            json.dumps(
-                {
-                    "source": resolved_src,
-                    "passed": passed,
-                    "total_sections": manifest.total_sections,
-                    "appendix_count": manifest.appendix_count,
-                    "errors": errors,
-                },
-                indent=2,
-                ensure_ascii=False,
-            ),
-            soft_wrap=True,
+        emit_json(
+            {
+                "source": resolved_src,
+                "passed": passed,
+                "total_sections": manifest.total_sections,
+                "appendix_count": manifest.appendix_count,
+                "errors": errors,
+            }
         )
         if not passed:
             raise typer.Exit(code=1)

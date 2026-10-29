@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 from pathlib import Path
 from typing import Annotated
@@ -13,6 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ubt.cli.ui import emit_json
 from ubt.core.figures.detector import (
     calculate_grid_columns,
     detect_figure_panels,
@@ -90,7 +90,7 @@ def figure_inspect_command(
                 for p in panels
             ],
         }
-        console.print(json.dumps(res, indent=2, ensure_ascii=False), soft_wrap=True, markup=False)
+        emit_json(res)
         return
 
     console.print(
