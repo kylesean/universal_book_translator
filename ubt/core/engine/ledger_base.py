@@ -138,6 +138,63 @@ _SCHEMA_SQL = """
     CREATE INDEX IF NOT EXISTS idx_blocks_spine ON blocks(job_id, spine_index);
 """
 
+#: Per-page typographic geometry, as *measured from the source* and as
+#: *actually delivered*. Kept as its own DDL statement rather than inlined into
+#: :data:`_SCHEMA_SQL` because it must also be applied to an **existing**
+#: database that is already at :data:`SCHEMA_VERSION` — a page's delivered size
+#: stopped being recoverable once the render process exited, and that is an
+#: auditability defect in ledgers written before this table existed.
+#:
+#: Page-level on purpose: one page carries ~20 blocks, so a
+#: ``blocks.geometry_json`` column would store the same page's facts 20 times
+#: and turn one page's update into a 20-row consistency problem.
+#:
+#: **Additive, and that is what makes it shippable.** ``CREATE TABLE IF NOT
+#: EXISTS`` touching no existing row is not the data-loss shape the
+#: no-in-place-migration rule forbids (that rule is about rewriting a
+#: half-migrated ``blocks`` table in place). So this needs no ``--fresh`` and
+#: discards no translations — which is why :data:`SCHEMA_VERSION` is deliberately
+#: **not** bumped here: the stamp is what *refuses* an older ledger, and adding
+#: an empty table is not a reason to refuse one.
+_PAGE_GEOMETRY_DDL = """
+    CREATE TABLE IF NOT EXISTS page_geometry (
+        job_id TEXT NOT NULL,
+        page_no INTEGER NOT NULL,
+        page_w_pt REAL,
+        page_h_pt REAL,
+        measured_size_pt REAL,
+        measured_leading_pt REAL,
+        delivered_size_pt REAL,
+        delivered_leading_em REAL,
+        tracking_em REAL,
+        tier TEXT,
+        fits INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (job_id, page_no),
+        FOREIGN KEY(job_id) REFERENCES job_meta(job_id)
+    );
+"""
+
+#: The columns ``retrieve_page_geometry`` reads, verified on startup for the
+#: same reason ``_REQUIRED_BLOCK_COLUMNS`` exists: a version stamp (or an
+#: ``IF NOT EXISTS`` that found a malformed table) is not evidence the shape is
+#: right, and a missing column would otherwise fail deep inside a resume.
+_REQUIRED_PAGE_GEOMETRY_COLUMNS = frozenset(
+    {
+        "job_id",
+        "page_no",
+        "page_w_pt",
+        "page_h_pt",
+        "measured_size_pt",
+        "measured_leading_pt",
+        "delivered_size_pt",
+        "delivered_leading_em",
+        "tracking_em",
+        "tier",
+        "fits",
+    }
+)
+
 # Every column ``_row_to_block`` reads by name. Kept as a literal (not derived
 # from the CREATE statement) to guarantee all required schema fields are verified
 # during startup; see the check in ``_init_db_with_migrations``.
@@ -581,6 +638,11 @@ class LedgerBase:
                 # Already at the flat baseline; verify the columns are actually
                 # present (a version stamp is not evidence the schema is right).
                 self._verify_block_columns(conn, current_version)
+                # An additive table the baseline gained *without* a version bump:
+                # a ledger written before it existed gains it here, in place, with
+                # every row untouched. Deliberately not gated on ``--fresh`` — see
+                # ``_PAGE_GEOMETRY_DDL``.
+                self._ensure_page_geometry_table(conn)
                 return
 
             if current_version == 0:
@@ -623,6 +685,35 @@ class LedgerBase:
                 )
 
             self._verify_block_columns(conn, SCHEMA_VERSION)
+            self._ensure_page_geometry_table(conn)
+
+    def _ensure_page_geometry_table(self, conn: sqlite3.Connection) -> None:
+        """Create ``page_geometry`` if absent, and verify its shape.
+
+        Runs on every successful open path (fresh, ``--fresh`` reset, and the
+        already-at-baseline path) so a ledger from any build gets the table.
+
+        ``IF NOT EXISTS`` means an existing table is left exactly as it is, which
+        is the property that makes this safe to run unconditionally: it cannot
+        rewrite a row, so it is not the in-place migration the ledger refuses.
+        The column check afterwards is what keeps "the table exists" from being
+        mistaken for "the table is usable" — a hand-edited or partially written
+        file can hold a ``page_geometry`` table missing a column, and
+        ``retrieve_page_geometry`` would then fail deep inside a resume.
+        """
+        conn.executescript(_PAGE_GEOMETRY_DDL)
+        columns = {
+            str(row["name"]) for row in conn.execute("PRAGMA table_info(page_geometry);").fetchall()
+        }
+        missing = sorted(_REQUIRED_PAGE_GEOMETRY_COLUMNS - columns)
+        if missing:
+            raise LedgerError(
+                f"Ledger at {self.db_path} has a page_geometry table missing "
+                f"columns: {', '.join(missing)}. The file is corrupt or was "
+                "written by an incompatible build. Delete it to start fresh, or "
+                "restore a backup.",
+                details={"missing_columns": missing},
+            )
 
     def _reset_to_baseline(self, conn: sqlite3.Connection) -> None:
         """Drop this build's tables and recreate the flat baseline schema.
@@ -641,10 +732,23 @@ class LedgerBase:
         table's shape is part of the baseline schema and is recreated by
         ``_SCHEMA_SQL`` with ``IF NOT EXISTS``, so leaving the live row in place
         keeps both the schema and the guard intact.
+
+        ``page_geometry`` **is** dropped: it holds per-page measurements of the
+        job being discarded, and ``--fresh`` means "re-measure from the source",
+        so keeping rows for a ``job_id`` whose ``blocks`` were just deleted would
+        leave geometry describing pages that no longer exist.
         """
-        for table in ("blocks", "job_meta", "batch_jobs", "blocks_v10", "blocks_v11"):
+        for table in (
+            "blocks",
+            "job_meta",
+            "batch_jobs",
+            "blocks_v10",
+            "blocks_v11",
+            "page_geometry",
+        ):
             conn.execute(f"DROP TABLE IF EXISTS {table};")
         conn.executescript(_SCHEMA_SQL)
+        conn.executescript(_PAGE_GEOMETRY_DDL)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION};")
         self._job_scope = None
 

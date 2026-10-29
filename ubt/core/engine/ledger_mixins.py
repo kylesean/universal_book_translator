@@ -11,7 +11,7 @@ costume (the diamond was linear, but the type said "is-a base" four times).
 
 import json
 import sqlite3
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -989,6 +989,112 @@ class LedgerJobsMixin(_LedgerHost):
                     logger.debug("Unreadable visual_report metadata for %s: %s", job_id, exc)
                     return None
             return None
+
+    def record_page_geometry(self, job_id: str, pages: Sequence[Mapping[str, Any]]) -> int:
+        """Upsert one row per page into ``page_geometry``; return the row count.
+
+        Written once per render, replacing any previous measurement for the same
+        page: a re-render at a different size must not leave two contradictory
+        answers to "how big was page 12".
+
+        Only the columns this table declares are read from each mapping, so a
+        caller may pass the renderer's own per-page dict without projecting it
+        first. A malformed row (a non-integer page) is skipped rather than
+        aborting the batch: geometry is an audit record, and losing all of it
+        because one page's number was a string is a worse outcome than losing
+        that page.
+        """
+        rows: list[tuple[Any, ...]] = []
+        for page in pages:
+            try:
+                page_no = int(page["page_no"])
+            except (KeyError, TypeError, ValueError):
+                logger.debug("Skipping page geometry with no usable page_no: %r", page)
+                continue
+            rows.append(
+                (
+                    job_id,
+                    page_no,
+                    page.get("page_w_pt"),
+                    page.get("page_h_pt"),
+                    page.get("measured_size_pt"),
+                    page.get("measured_leading_pt"),
+                    page.get("delivered_size_pt"),
+                    page.get("delivered_leading_em"),
+                    page.get("tracking_em"),
+                    page.get("tier"),
+                    None if page.get("fits") is None else int(bool(page.get("fits"))),
+                )
+            )
+        if not rows:
+            return 0
+        with self._get_conn() as conn:
+            actual_id = self._resolve_actual_job_id(conn, job_id)
+            conn.execute("BEGIN IMMEDIATE;")
+            try:
+                conn.executemany(
+                    """
+                    INSERT INTO page_geometry (
+                        job_id, page_no, page_w_pt, page_h_pt,
+                        measured_size_pt, measured_leading_pt,
+                        delivered_size_pt, delivered_leading_em,
+                        tracking_em, tier, fits
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(job_id, page_no) DO UPDATE SET
+                        page_w_pt = excluded.page_w_pt,
+                        page_h_pt = excluded.page_h_pt,
+                        measured_size_pt = excluded.measured_size_pt,
+                        measured_leading_pt = excluded.measured_leading_pt,
+                        delivered_size_pt = excluded.delivered_size_pt,
+                        delivered_leading_em = excluded.delivered_leading_em,
+                        tracking_em = excluded.tracking_em,
+                        tier = excluded.tier,
+                        fits = excluded.fits
+                    """,
+                    [(actual_id, *row[1:]) for row in rows],
+                )
+                conn.execute("COMMIT;")
+            except BaseException:
+                with suppress(Exception):
+                    conn.execute("ROLLBACK;")
+                raise
+        return len(rows)
+
+    def retrieve_page_geometry(self, job_id: str) -> dict[int, dict[str, Any]]:
+        """Every stored page's geometry for ``job_id``, keyed by page number.
+
+        Empty when the job never rendered under a build that wrote this table —
+        which is the ordinary case for a ledger from an earlier run, and must
+        read as "not measured", not as an error.
+        """
+        with self._get_conn() as conn:
+            actual_id = self._resolve_actual_job_id(conn, job_id)
+            try:
+                fetched = conn.execute(
+                    "SELECT page_no, page_w_pt, page_h_pt, measured_size_pt, "
+                    "measured_leading_pt, delivered_size_pt, delivered_leading_em, "
+                    "tracking_em, tier, fits "
+                    "FROM page_geometry WHERE job_id = ? ORDER BY page_no",
+                    (actual_id,),
+                ).fetchall()
+            except sqlite3.Error as exc:
+                logger.debug("page_geometry unreadable for %s: %s", job_id, exc)
+                return {}
+            return {
+                int(row["page_no"]): {
+                    "page_no": int(row["page_no"]),
+                    "page_w_pt": row["page_w_pt"],
+                    "page_h_pt": row["page_h_pt"],
+                    "measured_size_pt": row["measured_size_pt"],
+                    "measured_leading_pt": row["measured_leading_pt"],
+                    "delivered_size_pt": row["delivered_size_pt"],
+                    "delivered_leading_em": row["delivered_leading_em"],
+                    "tracking_em": row["tracking_em"],
+                    "tier": row["tier"],
+                    "fits": None if row["fits"] is None else bool(row["fits"]),
+                }
+                for row in fetched
+            }
 
 
 class LedgerBlocksMixin(_LedgerHost):
