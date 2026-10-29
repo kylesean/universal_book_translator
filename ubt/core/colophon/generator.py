@@ -33,7 +33,10 @@ def extract_colophon_from_blocks(
     total_chars = 0
 
     for block in blocks:
-        text = block.target_text or (block.element.text if block.element else "") or ""
+        # ``source_text`` is the IR's kind-aware projection of ``element``, so it
+        # replaces the old ``element.text`` fallback without narrowing the
+        # ``Element`` union by hand.
+        text = block.target_text or block.source_text or ""
         total_chars += len(text)
 
         # Detect primary heading title

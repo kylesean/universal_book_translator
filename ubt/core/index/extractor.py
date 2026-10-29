@@ -142,7 +142,10 @@ def extract_index_from_blocks(
                 compiled_glossary.append((key, src, tgt, cat, src_pat, tgt_pat))
 
     for block in blocks:
-        text = block.target_text or (block.element.text if block.element else "") or ""
+        # ``source_text`` projects ``element`` by kind; the old ``element.text``
+        # fallback could not type-check against the ``Element`` union and was
+        # unreachable for every non-prose arm.
+        text = block.target_text or block.source_text or ""
         source_text = block.source_text or ""
         block_id = (
             getattr(block, "id", None)

@@ -74,12 +74,12 @@ _CHINESE_DIGIT_MAP: Final[dict[str, str]] = {
 
 
 def _block_text(block: IRBlock) -> str:
-    return (
-        block.target_text
-        or block.source_text
-        or (block.element.text if block.element else "")
-        or ""
-    ).strip()
+    # ``source_text`` is the IR's canonical projection of ``element``: it
+    # already reads ``.text``/``.source``/``.markup``/``.asset_id`` by element
+    # kind, so the old ``element.text`` fallback was dead code that only type-
+    # checked by accident (``Element`` is a union and most arms have no
+    # ``.text``).
+    return (block.target_text or block.source_text or "").strip()
 
 
 def _is_heading_1(block: IRBlock) -> bool:

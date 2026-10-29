@@ -88,12 +88,11 @@ _CIRCLED_MAP: Final[dict[str, int]] = {
 
 
 def _block_text(block: IRBlock) -> str:
-    return (
-        block.target_text
-        or block.source_text
-        or (block.element.text if block.element else "")
-        or ""
-    ).strip()
+    # ``source_text`` projects ``element`` by kind (``.text`` for prose,
+    # ``.source`` for a formula, ``.markup`` for a table, ``.asset_id`` for a
+    # figure), so the extra ``element.text`` fallback was unreachable and
+    # untypeable — ``Element`` is a union whose arms mostly have no ``.text``.
+    return (block.target_text or block.source_text or "").strip()
 
 
 def _is_heading_1(block: IRBlock) -> bool:

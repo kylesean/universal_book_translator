@@ -180,31 +180,27 @@ class FootnoteFlowManager:
                         block_type=BlockType.NARRATIVE,
                         source_text=endnote_markup,
                     )
-                    result.append(
-                        IRBlock(
-                            id=f"endnotes-ch{current_chapter_idx}",
-                            block_type=BlockType.NARRATIVE,
-                            source_text=endnote_markup,
-                            target_text=endnote_markup,
-                            element=el,
-                        )
-                    )
+                    # Only ``element`` and the state fields are real inputs;
+                    # ``id``/``block_type``/``source_text`` are read-only
+                    # projections of it, so passing them was silently dropped by
+                    # ``extra="ignore"`` and made the call look like it could
+                    # disagree with its own element.
+                    result.append(IRBlock(element=el, target_text=endnote_markup))
                 current_chapter_idx += 1
 
             # Inlining for page-bottom footnote placement in Typst
             if self.config.placement == NotePlacement.FOOTNOTE and block.id in notes_by_source:
                 text = block.target_text or block.source_text or ""
                 transformed_text = inject_typst_footnotes_into_text(text, notes_by_source[block.id])
-                new_block = IRBlock(
-                    id=block.id,
-                    block_type=block.block_type,
-                    source_text=block.source_text,
-                    target_text=transformed_text,
-                    element=block.element,
-                    bbox=block.bbox,
-                    provenance=block.provenance,
+                result.append(
+                    IRBlock(
+                        element=block.element,
+                        target_text=transformed_text,
+                        draft_text=block.draft_text,
+                        status=block.status,
+                        provenance=block.provenance,
+                    )
                 )
-                result.append(new_block)
                 continue
 
             # Inlining link anchors for endnote placement
@@ -221,16 +217,15 @@ class FootnoteFlowManager:
                     transformed_text = re.sub(
                         re.escape(note.callout_marker), link_callout, transformed_text, count=1
                     )
-                new_block = IRBlock(
-                    id=block.id,
-                    block_type=block.block_type,
-                    source_text=block.source_text,
-                    target_text=transformed_text,
-                    element=block.element,
-                    bbox=block.bbox,
-                    provenance=block.provenance,
+                result.append(
+                    IRBlock(
+                        element=block.element,
+                        target_text=transformed_text,
+                        draft_text=block.draft_text,
+                        status=block.status,
+                        provenance=block.provenance,
+                    )
                 )
-                result.append(new_block)
                 continue
 
             result.append(block)
@@ -246,15 +241,7 @@ class FootnoteFlowManager:
                     block_type=BlockType.NARRATIVE,
                     source_text=endnote_markup,
                 )
-                result.append(
-                    IRBlock(
-                        id=f"endnotes-ch{current_chapter_idx}",
-                        block_type=BlockType.NARRATIVE,
-                        source_text=endnote_markup,
-                        target_text=endnote_markup,
-                        element=el,
-                    )
-                )
+                result.append(IRBlock(element=el, target_text=endnote_markup))
         elif self.config.placement == NotePlacement.BOOK_ENDNOTE:
             all_notes = topology.notes
             if all_notes:
@@ -265,14 +252,6 @@ class FootnoteFlowManager:
                     block_type=BlockType.NARRATIVE,
                     source_text=endnote_markup,
                 )
-                result.append(
-                    IRBlock(
-                        id="endnotes-book",
-                        block_type=BlockType.NARRATIVE,
-                        source_text=endnote_markup,
-                        target_text=endnote_markup,
-                        element=el,
-                    )
-                )
+                result.append(IRBlock(element=el, target_text=endnote_markup))
 
         return result

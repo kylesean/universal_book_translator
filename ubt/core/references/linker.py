@@ -58,11 +58,7 @@ def format_mention_text(
     if scheme is CrossRefPrefixScheme.ORIGINAL:
         return original_text
 
-    is_zh = lang.lower().startswith("zh")
-
-    if scheme is CrossRefPrefixScheme.CHINESE_STANDARD or (
-        scheme is CrossRefPrefixScheme.ORIGINAL and is_zh
-    ):
+    if scheme is CrossRefPrefixScheme.CHINESE_STANDARD:
         if kind is ReferenceKind.FIGURE:
             return f"图 {key}"
         elif kind is ReferenceKind.TABLE:

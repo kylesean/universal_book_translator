@@ -109,15 +109,20 @@ def _clean_anchor_id(prefix: str, key: str) -> str:
 
 
 def _get_block_page(block: IRBlock) -> int | None:
-    """Extract page number from block bbox or element span."""
+    """Extract page number from block bbox or element span.
+
+    ``bbox`` returns ``None`` when the element's span carries no box, which is
+    the normal case for a block that came from Markdown rather than a PDF page,
+    so the span itself is the second source. That read is spelled through
+    ``getattr`` on the element because ``CompositeSpan`` and ``Span`` agree on
+    ``page`` but not on a shared declared base.
+    """
     if block.bbox is not None and block.bbox.page is not None:
-        return block.bbox.page
-    element = getattr(block, "element", None)
-    if element is not None:
-        span = getattr(element, "span", None)
-        if span is not None and getattr(span, "page", None) is not None:
-            return span.page
-    return None
+        return int(block.bbox.page)
+    element = block.element
+    span = getattr(element, "span", None)
+    page = getattr(span, "page", None)
+    return int(page) if page is not None else None
 
 
 def extract_document_anchors(blocks: Sequence[IRBlock]) -> CitationTopology:
