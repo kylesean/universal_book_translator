@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from ubt.core.ir.models import BlockType, BoundingBox, IRBlock, StyleMeta, make_element
+from ubt.render.layout_solver import FLOOR_PT
 from ubt.render.typst.facsimile_renderer import (
     FacsimileBlockPlacement,
     FacsimilePageSpec,
@@ -18,6 +19,7 @@ from ubt.render.typst.page_locked_renderer import (
     PageLockedPageSpec,
     PageLockedReflowRenderer,
     extract_page_geometry,
+    page_overflow_at_floor,
     solve_page_lock,
 )
 
@@ -141,6 +143,98 @@ def test_solve_page_lock_tight() -> None:
     size, leading, spacing, tracking = solve_page_lock(geom, blocks, target_lang="zh")
     assert size < 10.0
     assert leading <= 0.35
+
+
+def test_solve_page_lock_never_returns_below_the_body_floor() -> None:
+    """A page that cannot fit is typeset AT the floor and reported, not shrunk.
+
+    The renderer used to default ``floor_pt`` to 7.0 and its page-count guard
+    then subtracted 0.6pt per round down to a hard 6.8pt. Both are below
+    ``FLOOR_PT`` (7.5), the size every other layout path refuses to cross, so
+    the 1:1 page promise was being paid for with unreadable type. This test
+    feeds a page overloaded far beyond the old 6.8pt floor: the solver must
+    stop at 7.5 exactly.
+    """
+    geom = PageGeometry(
+        page_w=300.0,
+        page_h=360.0,
+        margin_top=36.0,
+        margin_bottom=36.0,
+        margin_left=36.0,
+        margin_right=36.0,
+        columns=1,
+    )
+    # ~20x the page's capacity at any legal size.
+    blocks = [_make_block(f"p{i}", "这段文字在页面上绝对放不下。" * 60) for i in range(8)]
+    size, _, _, _ = solve_page_lock(geom, blocks, target_lang="zh")
+    assert size == FLOOR_PT, f"solver returned {size}pt, below the {FLOOR_PT}pt floor"
+
+
+def test_solve_page_lock_floor_is_configurable_but_still_a_floor() -> None:
+    geom = PageGeometry(
+        page_w=300.0,
+        page_h=360.0,
+        margin_top=36.0,
+        margin_bottom=36.0,
+        margin_left=36.0,
+        margin_right=36.0,
+    )
+    blocks = [_make_block("p1", "这段文字在页面上绝对放不下。" * 60)]
+    size, _, _, _ = solve_page_lock(geom, blocks, target_lang="zh", floor_pt=9.0)
+    assert size == 9.0
+
+
+def test_page_overflow_at_floor_names_the_block_and_the_deficit() -> None:
+    """The replacement for the silent shrink: which block breaks the page, by how much."""
+    geom = PageGeometry(
+        page_w=300.0,
+        page_h=360.0,
+        margin_top=36.0,
+        margin_bottom=36.0,
+        margin_left=36.0,
+        margin_right=36.0,
+    )
+    blocks = [
+        _make_block("short", "一句话。"),
+        _make_block("overflowing", "这段文字在页面上绝对放不下。" * 60),
+    ]
+    found = page_overflow_at_floor(
+        geom,
+        blocks,
+        size_pt=FLOOR_PT,
+        leading_em=0.22,
+        par_spacing_em=0.35,
+        tracking_em=-0.015,
+    )
+    assert found is not None
+    block_id, deficit = found
+    # The page is attributed to the block that crosses the capacity line, and
+    # the deficit is positive and measured in points.
+    assert block_id == "overflowing"
+    assert deficit > 0.0
+
+
+def test_page_overflow_at_floor_is_none_when_the_page_fits() -> None:
+    geom = PageGeometry(
+        page_w=595.0,
+        page_h=842.0,
+        margin_top=50.0,
+        margin_bottom=50.0,
+        margin_left=50.0,
+        margin_right=50.0,
+    )
+    blocks = [_make_block("p1", "Short text paragraph.")]
+    assert (
+        page_overflow_at_floor(
+            geom,
+            blocks,
+            size_pt=11.5,
+            leading_em=0.35,
+            par_spacing_em=0.65,
+            tracking_em=0.0,
+        )
+        is None
+    )
 
 
 def test_build_page_markup() -> None:

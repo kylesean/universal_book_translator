@@ -4,6 +4,11 @@ Renders translated documents with 100% visual and structural isomorphism:
 - Background: text-stripped vector PDF (bg.pdf) carrying original diagrams, lines, and colors
 - Text: typeset with Typst over original bounding box coordinates using `#place(top + left, dx, dy)`
 - Typography: page-level uniform font size and dynamic leading from layout_solver.py
+
+A placed block is drawn at the *page's* uniform body size unless it carries its
+own ``font_size_pt``. That exception is what makes a heading look like a heading:
+the page solves for one body size, so without it a 16.2pt chapter title was
+drawn at ~10pt and the delivered page read as a flat wall of uniform text.
 """
 
 from __future__ import annotations
@@ -27,6 +32,12 @@ DEFAULT_FONT_STACK: tuple[str, ...] = (
     "SimSun",
 )
 
+#: Font weights the renderer will pass through to Typst verbatim. Anything else
+#: falls back to the block's own bold/regular classification rather than being
+#: interpolated into the markup unchecked (a measured ``"semibold condensed"``
+#: would have produced an invalid ``weight:`` value and failed the whole page).
+_KNOWN_WEIGHTS: frozenset[str] = frozenset({"regular", "medium", "semibold", "bold", "black"})
+
 
 @dataclass(frozen=True, slots=True)
 class FacsimileBlockPlacement:
@@ -45,6 +56,15 @@ class FacsimileBlockPlacement:
     font_weight: str = "regular"
     align: str = "justify"
     skip_render: bool = False
+    #: The block's own measured size, in points. ``None`` means "use the page's
+    #: uniform body size". A heading needs this: the page solves for the body.
+    font_size_pt: float | None = None
+    #: The block is a Markdown table grid and must be typeset as ``#table``,
+    #: not escaped and printed as literal pipe text.
+    is_table: bool = False
+    #: The block is a code listing and must be typeset in a monospace face with
+    #: its line structure intact.
+    is_code: bool = False
 
 
 @dataclass(slots=True)
@@ -66,11 +86,78 @@ class FacsimilePageSpec:
             self.placements = []
 
 
+def _normalise_weight(font_weight: str, *, is_heading: bool, bold: bool) -> str:
+    """The Typst ``weight`` value for a block.
+
+    ``font_weight`` is what the extractor measured; ``bold`` is the block's own
+    classification, used when the measurement is not a value Typst accepts.
+
+    The previous expression was ``"bold" if font_weight in ("regular", "")``,
+    which inverted the sense: every heading whose measured weight was regular
+    was emitted bold, and a genuinely bold one was passed through only by luck.
+    """
+    candidate = (font_weight or "").strip().lower()
+    if candidate in _KNOWN_WEIGHTS:
+        return candidate
+    if is_heading or bold:
+        return "bold"
+    return "regular"
+
+
 class FacsimileRenderer:
     """Produces and compiles 1:1 facsimile Typst documents."""
 
     def __init__(self, font_stack: Sequence[str] | None = None) -> None:
         self.font_stack = tuple(font_stack) if font_stack else DEFAULT_FONT_STACK
+
+    def _placement_content(
+        self,
+        pl: FacsimileBlockPlacement,
+        *,
+        width_pt: float,
+        target_lang: str,
+    ) -> str:
+        """Typst markup for one placement's text, sized and styled by its block type."""
+        if pl.is_table:
+            from ubt.render.typst.document_renderer import render_table
+
+            table_markup = render_table(
+                pl.text,
+                page_columns=1,
+                content_width_pt=width_pt,
+                target_lang=target_lang,
+            )
+            if table_markup:
+                return table_markup
+            # An unparseable grid degrades to escaped text rather than vanishing:
+            # a table the compiler cannot lay out is still content the reader
+            # needs, and an empty block would silently drop a whole exhibit.
+            logger.warning(
+                "Facsimile: block %s looked like a table but did not parse; delivering it as text",
+                pl.block_id,
+            )
+
+        if pl.is_code:
+            from ubt.render.typst.container_repair import repair_code_block_markup
+
+            return repair_code_block_markup(pl.text.strip(), container_width_pt=width_pt)
+
+        escaped = typst_escape(pl.text.strip())
+        size = f"size: {pl.font_size_pt}pt, " if pl.font_size_pt else ""
+
+        if pl.is_heading:
+            weight = _normalise_weight(pl.font_weight, is_heading=True, bold=True)
+            return (
+                f"#set par(justify: false)\n"
+                f'    #text({size}weight: "{weight}", '
+                f'fill: rgb("{pl.text_color_hex}"))[{escaped}]'
+            )
+
+        if size or pl.font_weight not in ("", "regular"):
+            weight = _normalise_weight(pl.font_weight, is_heading=False, bold=False)
+            fill = f'fill: rgb("{pl.text_color_hex}"), ' if pl.text_color_hex != "#000000" else ""
+            return f'#text({size}{fill}weight: "{weight}")[{escaped}]'
+        return escaped
 
     def build_markup(
         self,
@@ -109,16 +196,8 @@ class FacsimileRenderer:
                 dx = round(pl.x0, 2)
                 dy = round(p.page_h - pl.y1, 2)
                 width = round(max(10.0, pl.x1 - pl.x0), 2)
-                escaped = typst_escape(pl.text.strip())
 
-                if pl.is_heading:
-                    weight = "bold" if pl.font_weight in ("regular", "") else pl.font_weight
-                    content = (
-                        f"#set par(justify: false)\n"
-                        f'    #text(weight: "{weight}", fill: rgb("{pl.text_color_hex}"))[{escaped}]'
-                    )
-                else:
-                    content = escaped
+                content = self._placement_content(pl, width_pt=width, target_lang=target_lang)
 
                 lines.append(
                     f"  #place(top + left, dx: {dx}pt, dy: {dy}pt, block(width: {width}pt)[\n"
@@ -153,6 +232,11 @@ class FacsimileRenderer:
         typ_path = build_dir / "facsimile.typ"
         typ_path.write_text(markup, encoding="utf-8")
 
+        #: One callable type for both branches. Annotating ``compiler`` from
+        #: scratch (rather than letting the ``if``/``else`` infer it) matters:
+        #: without it mypy pins the variable to the nested function's def type
+        #: and then rejects the caller's ``Callable``, which is the same shape.
+        compiler: Callable[[str, str, str], tuple[bool, str]]
         if compile_fn is None:
             from ubt.adapters.pdf.typst_compile import typst_compile
 

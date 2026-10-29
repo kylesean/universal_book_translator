@@ -103,11 +103,22 @@ def test_preflight_really_invokes_the_typesetter(
 def test_preflight_fails_when_no_fragment_can_be_typeset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A dead compiler must fail the preflight, whichever channel runs.
+
+    The match list names three messages because the preflight rehearses whichever
+    delivery mode the run will actually use, and each renderer words its own
+    compile failure: ``Facsimile compile failed`` (now the default mode, and the
+    one that also proves the background strip worked), ``Page-locked reflow
+    compile failed``, and the publish renderer's ``failed to compile``. Pinning
+    only the publish wording is what broke this test when ``delivery_mode``
+    moved to ``facsimile``; the behaviour under test — fail before billing —
+    never changed.
+    """
     fake = _FakeTypst(ok=False)
     _patch(monkeypatch, tmp_path, fake)
     adapter, manifest, blocks = _setup(tmp_path)
 
-    with pytest.raises(DocumentParseError, match="failed to compile|no usable PDF"):
+    with pytest.raises(DocumentParseError, match="compile failed|no usable PDF"):
         asyncio.run(
             run_render_preflight(
                 adapter=adapter, manifest=manifest, blocks=blocks, target_lang="zh"
