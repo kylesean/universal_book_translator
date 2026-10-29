@@ -1691,6 +1691,22 @@ async def run_export_stage(
         ctx, adapter, final_blocks, rendered_path, render
     )
 
+    # Page geometry: what the facsimile solver measured off the source and what
+    # it actually delivered, per page. Persisted because this fact existed only
+    # inside the build until now, so "why is page 12 at 7.5pt" became
+    # unanswerable once the process exited — and the QA report, the visual gate
+    # and the operator all ask that question about a shipped artifact.
+    #
+    # Written from the adapter's side channel rather than re-measured: the
+    # solver already made these decisions, and a second measurement could
+    # disagree with what actually shipped. Empty for a non-facsimile render,
+    # which measures no page — recorded as nothing rather than as zeroes.
+    page_geometry = getattr(adapter, "last_page_geometry", None) or []
+    if page_geometry:
+        await asyncio.to_thread(ctx.ledger.record_page_geometry, actual_job_id, page_geometry)
+        if hasattr(manifest, "metadata") and isinstance(manifest.metadata, dict):
+            manifest.metadata["page_geometry_pages"] = len(page_geometry)
+
     # Miniaturization & stream optimization pass for final delivered PDF
     if rendered_path.suffix.lower() == ".pdf" and getattr(
         ctx.config, "enable_pdf_optimization", True

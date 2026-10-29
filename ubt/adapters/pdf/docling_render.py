@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ubt.adapters.pdf.strip_pdf_text import BoxRect
 from ubt.adapters.pdf.typst_compile import typst_version
 from ubt.core.content.nodes import ReconstructionRecord
 from ubt.core.exceptions import DocumentParseError
@@ -40,6 +42,175 @@ def record_toolchain_versions(manifest: BookManifest) -> None:
         manifest.metadata["typst_version"] = version
 
 
+#: A block whose own measured size is below this is not a real body size; fall
+#: back to the page's. No delivered face sets text at 4.5pt (``textgeom`` drops
+#: char styles under the same threshold).
+_MIN_BLOCK_SIZE_PT: float = 4.5
+#: A heading is set at least this many times the body size when its own size is
+#: unmeasured. 1.6 is the smallest ratio that still reads as a heading against a
+#: page of uniform body text.
+_HEADING_SIZE_RATIO: float = 1.6
+
+
+def _block_font_size(block: IRBlock, *, is_hdr: bool, body_size: float) -> float | None:
+    """A block's own size in points, or ``None`` to inherit the page's body size.
+
+    Body prose inherits the page size, which the solver already picked. A
+    *heading* must not: the page solves one size for its body, so a 16.2pt
+    chapter title was being drawn at ~10pt and every page read as a flat wall of
+    uniform text. The size is taken from the block's own style/provenance
+    measurement, and only when that measurement is plausible.
+    """
+    candidates: list[float] = []
+    if block.style is not None and block.style.font_size is not None:
+        candidates.append(float(block.style.font_size))
+    if block.provenance is not None and block.provenance.font_size is not None:
+        candidates.append(float(block.provenance.font_size))
+    measured = next((size for size in candidates if size >= _MIN_BLOCK_SIZE_PT), None)
+
+    if not is_hdr:
+        # Body prose: the page's uniform size is the whole point of the channel.
+        return None
+    if measured is not None:
+        return round(measured, 2)
+    return round(body_size * _HEADING_SIZE_RATIO, 2)
+
+
+@dataclass(frozen=True, slots=True)
+class _PageMetrics:
+    """One page's measured body size and leading, in points."""
+
+    size_pt: float
+    leading_pt: float
+
+
+def _page_metrics(source_path: Path, page_no: int) -> _PageMetrics | None:
+    """Measure the source page's body size and leading, or ``None`` if unreadable.
+
+    Measured from the page's own lines rather than assumed: the corpus spans
+    9.0–11.3pt, and the previous hardcoded 10.0/13.0 forced every page to
+    ``min(12.0, 10.0*1.10) = 11.0pt`` — smaller than the source on every 11.3pt
+    page. ``textgeom.extract_lines`` is pdfium-backed and serialized, so this is
+    one call per page and cheap relative to the compile that follows.
+    """
+    try:
+        from ubt.adapters.pdf.source_metrics import (
+            body_lines,
+            source_body_size,
+            source_leading,
+        )
+        from ubt.adapters.pdf.textgeom import extract_lines
+
+        lines, (_page_w, page_h) = extract_lines(source_path, page_no)
+        body = body_lines(lines, page_h)
+        if not body:
+            return None
+        size = source_body_size(body)
+        return _PageMetrics(size_pt=size, leading_pt=source_leading(body, size))
+    except Exception as exc:
+        logger.debug("Could not measure source metrics for page %d: %s", page_no, exc)
+        return None
+
+
+def _facsimile_strip_plan(
+    blocks_by_page: dict[int, list[IRBlock]],
+    total_pages: int,
+    source_path: Path,
+) -> tuple[dict[int, list[BoxRect]], dict[int, list[BoxRect]]]:
+    """Which text the background layer erases, and which it must protect.
+
+    The background layer is the source page minus the text a Typst block will
+    re-draw. Everything else must survive, and the distinction is not cosmetic:
+
+    * **Erase** every block whose translation is placed by Typst — its box is
+      exactly the region the new text will occupy.
+    * **Keep** every block that is *not* re-drawn: formulas, figures, and any
+      block the pipeline decided not to translate. Their source ink is the
+      deliverable.
+    * **Keep** detected vector-diagram regions, which carry axis labels the
+      figure block's bbox does not always cover.
+
+    Keep always wins over erase, so an overlap degrades to "kept".
+
+    **There is no blanket furniture band, and that is deliberate.** The first
+    implementation kept the full width of ``[0, 0.08·H]`` and ``[0.92·H, H]``
+    on every page, on the reasoning that a folio or running head has no block in
+    the IR (the parser discards repeating chrome) and so would be erased with
+    nothing to redraw it. Measurement refuted that reasoning on the real IR:
+
+    * The band protects nothing. Text outside every block box has no erase rect
+      over it, so it survives on its own. On ``chapter-3.pdf`` p1–p3 the same
+      furniture survived with the bands and without them, and the formula and
+      running head were kept in both cases.
+    * The band actively leaks English. Body prose routinely reaches below
+      ``0.08·H``: p2's last paragraph line sits at ``y0 = 31.3`` (a 666pt page
+      puts the band top at 53.3) and p1's at ``y0 = 69.4``. Those lines *do* have
+      translated blocks, so they get an erase rect — which the band then vetoes.
+      Result: the source line keeps its ink under the translation. Measured
+      leak: 2 source lines on each of p1–p3, 0 with the bands removed.
+
+    A running head that Docling keeps in the IR arrives as a ``skip_translate``
+    block in a ``HEADER``/``FOOTER`` region and is protected as a keep rect like
+    any other untranslated block. One it drops has no erase rect over it either.
+    Neither case needs a geometric band.
+    """
+    erase: dict[int, list[BoxRect]] = {}
+    keep: dict[int, list[BoxRect]] = {}
+
+    for pno, page_blocks in blocks_by_page.items():
+        for b in page_blocks:
+            if b.bbox is None or b.bbox.page != pno:
+                continue
+            rect = BoxRect(
+                page_index=pno,
+                x0=float(b.bbox.x0),
+                y0=float(b.bbox.y0),
+                x1=float(b.bbox.x1),
+                y1=float(b.bbox.y1),
+            )
+            if rect.width <= 0 or rect.height <= 0:
+                continue
+            keeps_source = b.skip_translate or b.block_type in (
+                BlockType.FORMULA,
+                BlockType.IMAGE,
+            )
+            if keeps_source:
+                keep.setdefault(pno, []).append(rect)
+            else:
+                erase.setdefault(pno, []).append(rect)
+
+    # No furniture bands are added here. See the docstring: a blanket
+    # ``[0, 0.08·H]`` / ``[0.92·H, H]`` keep rect protects nothing (unowned text
+    # has no erase rect over it anyway) while vetoing real body prose that
+    # reaches into the band — which leaks the source line under its translation.
+    # Page furniture that Docling keeps in the IR arrives as a ``skip_translate``
+    # block and is protected by the loop above like any other untranslated block.
+
+    # Vector-diagram regions: their labels are figure content, and a figure's IR
+    # bbox does not always cover the axis text drawn outside it. Table bboxes are
+    # excluded because a table has its own pipeline and its cell text must be
+    # erased, not protected.
+    try:
+        from ubt.adapters.pdf.svg_diagram import detect_diagram_regions
+
+        table_boxes: dict[int, list[tuple[float, float, float, float]]] = {}
+        for pno, page_blocks in blocks_by_page.items():
+            for b in page_blocks:
+                if b.block_type is BlockType.TABLE and b.bbox is not None:
+                    table_boxes.setdefault(pno, []).append(
+                        (float(b.bbox.x0), float(b.bbox.y0), float(b.bbox.x1), float(b.bbox.y1))
+                    )
+
+        for pno in range(1, total_pages + 1):
+            regions = detect_diagram_regions(source_path, pno, exclude=table_boxes.get(pno) or None)
+            for x0, y0, x1, y1 in regions:
+                keep.setdefault(pno, []).append(BoxRect(page_index=pno, x0=x0, y0=y0, x1=x1, y1=y1))
+    except Exception as exc:
+        logger.debug("Diagram-region detection unavailable: %s", exc)
+
+    return erase, keep
+
+
 class DoclingRenderStrategy:
     """Delivery-leg collaborators plus the last render's skip side channel."""
 
@@ -49,7 +220,7 @@ class DoclingRenderStrategy:
         font_family: str | None = None,
         enable_layout_auto_heal: bool = True,
         layout_auto_heal_max_passes: int = 2,
-        delivery_mode: str = "reflow",
+        delivery_mode: str = "facsimile",
         enable_pdf_optimization: bool = True,
         pdf_optimize_profile: str = "lossless",
     ) -> None:
@@ -74,6 +245,11 @@ class DoclingRenderStrategy:
         # from the most recent render: the delivery contract records a rebuilt
         # table/formula as RECONSTRUCTED (verified or corrupt) from these.
         self.last_render_reconstructions: list[ReconstructionRecord] = []
+        # Per-page typographic geometry from the most recent facsimile render:
+        # the measured source size/leading and the size/tier actually delivered.
+        # This fact used to exist only inside the build and died with the
+        # process, so "why is page 12 at 7.5pt" was unanswerable after the run.
+        self.last_page_geometry: list[dict[str, Any]] = []
         # Render outcome side channel (compiler render plan protocol): the mode
         # the renderer actually used. The renderer has no downgrade path
         # (bilingual pairing is per block and cannot fail independently), so this
@@ -271,7 +447,7 @@ class DoclingRenderStrategy:
         from ubt.adapters.pdf.strip_pdf_text import strip_text_streams
         from ubt.render.delivered_text import delivered_text
         from ubt.render.flow import approximate_measure, solve_flow
-        from ubt.render.layout_solver import PageLayoutSolution, solve_page_2d
+        from ubt.render.layout_solver import solve_page_2d
         from ubt.render.typst.facsimile_renderer import (
             FacsimileBlockPlacement,
             FacsimilePageSpec,
@@ -292,40 +468,44 @@ class DoclingRenderStrategy:
                 or ""
             )
         )
-        if not source_path.exists():
-            logger.warning(
-                "Facsimile render requested but source PDF not found at %s; falling back to publication reflow",
-                source_path,
+        # Facsimile delivery *needs* the source page itself: the stripped vector
+        # background it draws under the translation comes from source page N.
+        # Without one there is no page to be isomorphic to, so degrade to reflow
+        # and say why. Deliberately INFO, not a warning and not an error: the
+        # delivery_mode default is now ``facsimile`` (see
+        # ``UBTConfig.delivery_mode``), so "no source PDF" is the ordinary case
+        # for a resumed job whose source moved, not a defect. Raising here would
+        # make the new default break every run that used to work.
+        #
+        # ``manifest.metadata["delivery_mode"]`` is rewritten to the mode that
+        # actually ran: a report claiming ``facsimile`` over a reflow artefact is
+        # worse than either, because it is unfalsifiable from the outside.
+        if not source_path.exists() or source_path.suffix.lower() != ".pdf":
+            logger.info(
+                "Delivery mode 'facsimile' needs the source PDF, which is %s; "
+                "delivering this book as 'reflow' instead (pass --delivery-mode reflow "
+                "to silence this and pick the mode explicitly).",
+                f"missing at {source_path}" if not source_path.exists() else "not a PDF",
             )
+            manifest.metadata["delivery_mode"] = "reflow"
             return await self._render_publish(manifest, blocks, target_lang, output_path, bilingual)
 
         build_dir = output_path.parent / f".build_{output_path.stem}_facsimile"
         build_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Background vector text stripping (for L1 Canvas pages)
-        is_pure_page_locked = self.delivery_mode == "page_locked"
-        bg_stripped = build_dir / "bg_stripped.pdf"
-        if not is_pure_page_locked:
-            try:
-                strip_text_streams(source_path, bg_stripped)
-            except Exception as exc:
-                logger.warning(
-                    "Failed to strip background text streams: %s; falling back to reflow", exc
-                )
-                return await self._render_publish(
-                    manifest, blocks, target_lang, output_path, bilingual
-                )
-
+        # 1. Group blocks by page, and collect the page's physical size.
         with pikepdf.open(source_path) as src_doc:
             total_pages = len(src_doc.pages)
             page_dims: list[tuple[float, float]] = []
             for page in src_doc.pages:
                 box = page.CropBox if page.get("/CropBox") is not None else page.MediaBox
-                pw = float(box[2] - box[0])
-                ph = float(box[3] - box[1])
+                # ``box`` is a pikepdf Object whose items mypy types as opaque,
+                # so the subtraction is done on explicit floats rather than on
+                # the two Object operands.
+                pw = float(box[2]) - float(box[0])
+                ph = float(box[3]) - float(box[1])
                 page_dims.append((pw, ph))
 
-        # 2. Group blocks by page
         blocks_by_page: dict[int, list[IRBlock]] = {}
         for b in blocks:
             p = 0
@@ -336,12 +516,49 @@ class DoclingRenderStrategy:
             if p > 0:
                 blocks_by_page.setdefault(p, []).append(b)
 
+        # 2. Decide what the background layer keeps and what the translation
+        #    replaces. This is the whole correctness of the channel: the
+        #    background must lose exactly the text a Typst block will re-draw,
+        #    and must keep everything else — formulas, figure labels, folios.
+        erase_rects, keep_rects = _facsimile_strip_plan(blocks_by_page, total_pages, source_path)
+
+        # 3. Background vector text stripping (for L1 Canvas pages)
+        is_pure_page_locked = self.delivery_mode == "page_locked"
+        bg_stripped = build_dir / "bg_stripped.pdf"
+        if not is_pure_page_locked:
+            try:
+                strip_text_streams(
+                    source_path,
+                    bg_stripped,
+                    per_page_erase_rects=erase_rects,
+                    per_page_keep_rects=keep_rects,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to strip background text streams: %s; falling back to reflow", exc
+                )
+                manifest.metadata["delivery_mode"] = "reflow"
+                return await self._render_publish(
+                    manifest, blocks, target_lang, output_path, bilingual
+                )
+
         pages_spec: list[FacsimilePageSpec] = []
+        skipped: list[tuple[str, str]] = []
+        reconstructions: list[ReconstructionRecord] = []
+        # Reset every render: geometry describes *this* artifact, and a stale
+        # page count from a previous run would be reported as this page's.
+        page_geometry: list[dict[str, Any]] = []
+
         for pno in range(1, total_pages + 1):
             pw, ph = page_dims[pno - 1] if pno <= len(page_dims) else (595.0, 842.0)
             page_blocks = blocks_by_page.get(pno, [])
-            records: list[dict[str, Any]] = []
             placements: list[FacsimileBlockPlacement] = []
+
+            metrics = _page_metrics(source_path, pno)
+            source_size_pt = metrics.size_pt if metrics else 9.0
+            source_leading_pt = metrics.leading_pt if metrics else source_size_pt * 1.333
+
+            records_by_column: dict[int, list[dict[str, Any]]] = {}
 
             for b in page_blocks:
                 if not b.bbox:
@@ -364,17 +581,33 @@ class DoclingRenderStrategy:
                 color = style_color if style_color else ("#0078ae" if is_hdr else "#000000")
                 is_bold = getattr(b.style, "is_bold", False) if b.style else False
                 weight = "bold" if is_hdr or is_bold else "regular"
+                block_size = _block_font_size(b, is_hdr=is_hdr, body_size=source_size_pt)
 
-                records.append(
+                # A block that is not re-drawn keeps its own box protected in the
+                # background layer: a formula or figure must survive untouched.
+                skip_render = b.skip_translate or b.block_type in (
+                    BlockType.FORMULA,
+                    BlockType.IMAGE,
+                )
+                if skip_render:
+                    skipped.append((b.id, "facsimile_preserved_opaque"))
+
+                # Column bucket for the 2D solver: a left-column paragraph must
+                # not be bounded by where the right column happens to start.
+                column = 0 if w > 0.65 * pw or b.bbox.x0 < pw * 0.55 else 1
+                records_by_column.setdefault(column, []).append(
                     {
                         "id": b.id,
                         "top": b.bbox.y1,
                         "bot": b.bbox.y0,
                         "w": w,
-                        "n": max(1, round(h / 12.0)),
+                        "n": max(1, round(h / source_leading_pt)),
                         "glyphs": len(target_content.strip()),
                     }
                 )
+
+                if skip_render:
+                    continue
 
                 # If block has multiple continuation boxes across columns/pages, flow across them
                 if (
@@ -387,7 +620,10 @@ class DoclingRenderStrategy:
                     boxes = boxes_from_provenance(b.provenance.physical_boxes)
                     page_boxes = [box for box in boxes if box.page == pno]
                     if len(page_boxes) > 1:
-                        measure = approximate_measure(font_size_pt=10.0, leading_pt=13.0)
+                        measure = approximate_measure(
+                            font_size_pt=block_size or source_size_pt,
+                            leading_pt=source_leading_pt,
+                        )
                         flowed = solve_flow(target_content, page_boxes, measure)
                         for fl_idx, fl_pl in enumerate(flowed):
                             if not fl_pl.text.strip():
@@ -405,9 +641,18 @@ class DoclingRenderStrategy:
                                     heading_level=getattr(b.element, "level", 1) if is_hdr else 1,
                                     text_color_hex=color,
                                     font_weight=weight,
+                                    font_size_pt=block_size,
                                 )
                             )
                         continue
+
+                is_table = b.block_type == BlockType.TABLE
+                if is_table:
+                    reconstructions.append(
+                        ReconstructionRecord(
+                            block_id=b.id, verified=False, corrupt=False, reason="facsimile_table"
+                        )
+                    )
 
                 placements.append(
                     FacsimileBlockPlacement(
@@ -422,24 +667,18 @@ class DoclingRenderStrategy:
                         heading_level=getattr(b.element, "level", 1) if is_hdr else 1,
                         text_color_hex=color,
                         font_weight=weight,
-                        skip_render=(
-                            b.skip_translate or b.block_type in (BlockType.FORMULA, BlockType.IMAGE)
-                        ),
+                        font_size_pt=block_size,
+                        is_table=is_table,
+                        is_code=b.block_type == BlockType.CODE,
                     )
                 )
 
-            if records:
-                sol = solve_page_2d([records], source_size_pt=10.0, source_leading_pt=13.0)
-            else:
-                sol = PageLayoutSolution(
-                    uniform_size_pt=10.0,
-                    leading_em=0.35,
-                    tracking_em=0.0,
-                    fits=True,
-                    source_overlap=False,
-                    delivery_tier="L1",
-                    bottleneck_seg_ids=[],
-                )
+            columns = [records_by_column[k] for k in sorted(records_by_column)] or [[]]
+            sol = solve_page_2d(
+                columns,
+                source_size_pt=source_size_pt,
+                source_leading_pt=source_leading_pt,
+            )
 
             use_l2 = (
                 is_pure_page_locked
@@ -475,6 +714,20 @@ class DoclingRenderStrategy:
                         l2_spec=l2_page,
                     )
                 )
+                page_geometry.append(
+                    {
+                        "page_no": pno,
+                        "page_w_pt": round(pw, 2),
+                        "page_h_pt": round(ph, 2),
+                        "measured_size_pt": round(source_size_pt, 3),
+                        "measured_leading_pt": round(source_leading_pt, 3),
+                        "delivered_size_pt": round(l2_size, 3),
+                        "delivered_leading_em": round(l2_leading, 4),
+                        "tracking_em": round(l2_tracking, 4),
+                        "tier": "L2",
+                        "fits": bool(sol.fits),
+                    }
+                )
             else:
                 pages_spec.append(
                     FacsimilePageSpec(
@@ -487,6 +740,20 @@ class DoclingRenderStrategy:
                         placements=placements,
                         tier="L1",
                     )
+                )
+                page_geometry.append(
+                    {
+                        "page_no": pno,
+                        "page_w_pt": round(pw, 2),
+                        "page_h_pt": round(ph, 2),
+                        "measured_size_pt": round(source_size_pt, 3),
+                        "measured_leading_pt": round(source_leading_pt, 3),
+                        "delivered_size_pt": round(sol.uniform_size_pt, 3),
+                        "delivered_leading_em": round(sol.leading_em, 4),
+                        "tracking_em": round(sol.tracking_em, 4),
+                        "tier": "L1",
+                        "fits": bool(sol.fits),
+                    }
                 )
 
         font_stack = self._font_stack_for(target_lang)
@@ -511,11 +778,29 @@ class DoclingRenderStrategy:
                 target_lang=target_lang,
             )
             manifest.metadata["delivery_mode"] = "facsimile"
+            # Hand the stripped background to the visual gate. Without it the
+            # ink-collision tier cannot run, and "the L1 channel was verified"
+            # becomes an assumption nobody can falsify: every other tier reads
+            # text rects and glyph heights, and none of them can see a translated
+            # line landing on a table rule the stripper kept.
+            #
+            # Recorded as a path rather than passed through the adapter because
+            # the gate runs in ``VisualVerifyLoop``, a later stage that holds the
+            # manifest and nothing else from this call. It lives under the same
+            # hidden ``.build_*`` directory as the renderer's Typst source, which
+            # already survives the render, so this adds no new artifact to the
+            # delivery listing. The gate checks the path exists before using it
+            # and reports a skipped tier — never an error — when it does not.
+            manifest.metadata["background_pdf"] = str(bg_stripped)
 
         record_toolchain_versions(manifest)
-        self.last_render_skips = []
+        # The delivery contract reads these to record preserved assets and to
+        # raise ASSET_MISSING / ASSET_*_RECONSTRUCTION. The facsimile path used to
+        # report all three empty, which made those violation kinds unreachable.
+        self.last_render_skips = skipped
         self.last_render_flags = []
-        self.last_render_reconstructions = []
+        self.last_render_reconstructions = reconstructions
+        self.last_page_geometry = page_geometry
 
         # Miniaturization & lossless stream compression pass
         if getattr(self, "enable_pdf_optimization", True) and output_path.exists():
@@ -525,6 +810,29 @@ class DoclingRenderStrategy:
             opt_res = optimize_pdf_in_place(output_path, profile=opt_prof)
             if opt_res.status == "optimized":
                 manifest.metadata["pdf_optimization"] = opt_res.model_dump()
+
+        # Chapter bookmarks, written *after* the optimization pass so the
+        # outline belongs to the file that ships (an optimizer that rewrites the
+        # object graph is exactly the step that could drop a tree written
+        # before it). The source book had a working sidebar and the translation
+        # had none — the reader's only way back to chapter 7 was scrolling.
+        #
+        # Only these two channels qualify. Both emit exactly one output page per
+        # source page (``range(1, total_pages + 1)`` above), so a heading's
+        # measured ``bbox.page`` names the delivered page. The reflow channel's
+        # page count tracks the target language's length instead, so the same
+        # page number would point at the wrong place; ``write_outline_from_blocks``
+        # checks the invariant against ``expected_pages`` and writes nothing when
+        # it does not hold, rather than mislabelling the navigation.
+        outline_written = 0
+        if output_path.exists():
+            from ubt.adapters.pdf.outline_writer import write_outline_from_blocks
+
+            outline_written = write_outline_from_blocks(
+                output_path, blocks, expected_pages=total_pages
+            )
+        if outline_written:
+            manifest.metadata["pdf_outline_entries"] = outline_written
 
         return output_path
 

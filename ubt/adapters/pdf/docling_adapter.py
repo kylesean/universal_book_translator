@@ -78,6 +78,9 @@ class _PDFRenderStackMixin:
     last_render_skips: list[tuple[str, str]]
     last_render_flags: list[tuple[str, str]]
     last_render_outcome: RenderOutcome | None
+    #: Per-page typographic geometry from the most recent render (measured vs
+    #: delivered). ``[]`` for a non-facsimile render, which measures no page.
+    last_page_geometry: list[dict[str, Any]]
     _renderer: DoclingRenderStrategy
     _font_family: str | None
     #: Engine hooks ``parse_stream`` calls; each adapter class provides them.
@@ -105,10 +108,16 @@ class _PDFRenderStackMixin:
     ) -> None:
         self.allow_page_upload = False
         self._font_family = None
-        self.delivery_mode = "reflow"
+        # Mirrors ``DoclingRenderStrategy``'s own default and
+        # ``UBTConfig.delivery_mode``: one value, three places, and the resolution
+        # below keeps them in step. ``apply_config`` overwrites this from the
+        # resolved config; the literal only decides what a bare adapter (a test,
+        # a script) does before any config is applied.
+        self.delivery_mode = "facsimile"
         self.last_render_skips = []
         self.last_render_flags: list[tuple[str, str]] = []
         self.last_render_outcome = None
+        self.last_page_geometry: list[dict[str, Any]] = []
         self._renderer = DoclingRenderStrategy(
             font_family=None,
         )
@@ -152,6 +161,11 @@ class _PDFRenderStackMixin:
         # once already.
         self.last_render_reconstructions = list(self._renderer.last_render_reconstructions)
         self.last_render_outcome = self._renderer.last_outcome
+        # Per-page geometry from this render, for the ledger's ``page_geometry``
+        # table. Read off the renderer rather than recomputed: the solver already
+        # decided these numbers, and a second measurement would risk disagreeing
+        # with what actually shipped.
+        self.last_page_geometry = list(getattr(self._renderer, "last_page_geometry", []))
         return out_path
 
     def _extract_with_oxide(self, path: Path) -> list[IRBlock]:
@@ -355,7 +369,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         self._renderer.toc_mode = runtime_config.toc_mode
         self._renderer.enable_layout_auto_heal = runtime_config.enable_layout_auto_heal
         self._renderer.layout_auto_heal_max_passes = runtime_config.layout_auto_heal_max_passes
-        self.delivery_mode = getattr(runtime_config, "delivery_mode", "reflow")
+        self.delivery_mode = getattr(runtime_config, "delivery_mode", "facsimile")
         self._renderer.delivery_mode = self.delivery_mode
         self._renderer.enable_pdf_optimization = getattr(
             runtime_config, "enable_pdf_optimization", True
