@@ -327,6 +327,36 @@ def _report_degrades_bilingual_delivery(report_data: dict[str, Any]) -> bool:
     )
 
 
+def _resolve_delivery_mode(
+    *,
+    facsimile: bool | None,
+    page_locked: bool,
+    delivery_mode: str | None,
+) -> str | None:
+    """Turn the three delivery flags into one ``delivery_mode`` value.
+
+    ``None`` is returned when the user expressed no preference, which lets the
+    resolved config default decide — now ``facsimile``. The ``--facsimile`` flag
+    used to default to ``False`` and be read as "not requested", so the CLI
+    pinned ``reflow`` for every run that did not pass it and the config field was
+    unreachable from the command line.
+
+    Precedence, most explicit first:
+    ``--delivery-mode <value>`` > ``--page-locked`` > ``--facsimile/--no-facsimile``
+    > unset (config default). ``--no-facsimile`` means "reflow" and is how a user
+    opts out of the new default.
+    """
+    if delivery_mode:
+        return delivery_mode
+    if page_locked:
+        return "page_locked"
+    if facsimile is True:
+        return "facsimile"
+    if facsimile is False:
+        return "reflow"
+    return None
+
+
 def _find_companion_paths(
     result_path: Path, *, report_data: dict[str, Any] | None = None
 ) -> list[Path]:
@@ -617,12 +647,13 @@ def translate(
         ),
     ] = None,
     facsimile: Annotated[
-        bool,
+        bool | None,
         typer.Option(
             "--facsimile/--no-facsimile",
-            help="Enable Track A 1:1 facsimile delivery channel (in-place visual canvas isomorphism with stripped vector background)",
+            help="1:1 facsimile delivery channel (in-place canvas isomorphism over the stripped vector background). On by default for PDF; --no-facsimile forces the generic reflow layout",
+            show_default=False,
         ),
-    ] = False,
+    ] = None,
     page_locked: Annotated[
         bool,
         typer.Option(
@@ -776,9 +807,9 @@ def translate(
         "macro_chunk_size": macro_chunk_size,
         "chapter_streaming_enabled": chapter_streaming,
         "dual_mode": dual_mode,
-        "delivery_mode": "page_locked"
-        if page_locked
-        else ("facsimile" if facsimile else (delivery_mode or "reflow")),
+        "delivery_mode": _resolve_delivery_mode(
+            facsimile=facsimile, page_locked=page_locked, delivery_mode=delivery_mode
+        ),
         "enable_dynamic_routing": dynamic_routing,
         "flagship_model": flagship_model,
         "budget_model": budget_model,

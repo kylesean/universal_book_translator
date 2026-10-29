@@ -475,7 +475,20 @@ class TypstConfig(BaseModel):
     toc_mode: TocMode = "auto"
     enable_layout_auto_heal: bool = True
     layout_auto_heal_max_passes: int = 2
-    delivery_mode: DeliveryMode = "reflow"
+    #: How a PDF target is delivered. ``facsimile`` (the default) rebuilds the
+    #: page on top of the source's own stripped vector background, keeping the
+    #: book's trim size, margins, columns and colour — a translated book that
+    #: still looks like the book. ``reflow`` is the generic A4/typeset layout
+    #: and remains available explicitly (``--delivery-mode reflow``);
+    #: ``page_locked`` clones geometry but reflows the text inside it.
+    #:
+    #: The default is ``facsimile`` because reflow is the *fallback*, not the
+    #: product: an isomorphic artefact is what D13 commissioned, and a default
+    #: that has to be discovered via ``--facsimile`` meant most runs never
+    #: produced one. Inputs without a source PDF (EPUB/DOCX/MD/HTML) cannot be
+    #: facsimiled at all — the renderer degrades to reflow with an INFO line
+    #: naming the reason, see ``DoclingRenderStrategy._render_facsimile``.
+    delivery_mode: DeliveryMode = "facsimile"
     enable_pdf_optimization: bool = True
     pdf_optimize_profile: Literal["lossless", "ebook", "screen"] = "lossless"
     enable_dynamic_routing: bool = False
@@ -1261,7 +1274,12 @@ class UBTConfig(BaseSettings):
     # breaking long display formulas across lines.
     enable_layout_auto_heal: bool = True
     layout_auto_heal_max_passes: int = 2
-    delivery_mode: DeliveryMode = "reflow"
+    #: See ``TypstConfig.delivery_mode``: facsimile is the default delivery for a
+    #: PDF target, reflow is the explicit fallback. Mirrored here because
+    #: ``UBTConfig`` is the flat surface the CLI/REST/MCP resolve against, and the
+    #: two definitions must not disagree — a default that differs by entry surface
+    #: is a bug no test can see.
+    delivery_mode: DeliveryMode = "facsimile"
     enable_pdf_optimization: bool = True
     pdf_optimize_profile: Literal["lossless", "ebook", "screen"] = "lossless"
     enable_dynamic_routing: bool = False

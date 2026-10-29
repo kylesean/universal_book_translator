@@ -93,7 +93,12 @@ class AdapterRuntimeConfig:
     #: Enable adaptive layout auto-healing pass during Typst publication render.
     enable_layout_auto_heal: bool = True
     layout_auto_heal_max_passes: int = 2
-    delivery_mode: str = "reflow"
+    #: PDF delivery channel. ``facsimile`` (default) keeps the source page's own
+    #: layout; ``reflow`` rebuilds on a generic A4; ``page_locked`` clones the
+    #: geometry and reflows the text inside it. Mirrors
+    #: ``UBTConfig.delivery_mode`` — see the comment there for why the default
+    #: moved off ``reflow``.
+    delivery_mode: str = "facsimile"
     #: Enable PDF size miniaturization and lossless stream compression.
     enable_pdf_optimization: bool = True
     pdf_optimize_profile: str = "lossless"
@@ -544,8 +549,14 @@ def translation_engine(
     model: str = "",
     prompt_version: str = "",
     cache: Any = None,
+    run_kind: str = "real",
 ) -> TranslationEngine:
-    """Build the per-unit transform engine (mask -> restore -> judge)."""
+    """Build the per-unit transform engine (mask -> restore -> judge).
+
+    ``run_kind`` namespaces the content cache. A rehearsal must pass something
+    other than ``"real"`` (see :func:`ubt.core.engine.dry_run.rehearsal_cache_dir`)
+    so its echo replies can never be served to a real job.
+    """
     from ubt.translate.engine import TranslationEngine
 
     return TranslationEngine(
@@ -553,6 +564,7 @@ def translation_engine(
         model=model,
         prompt_version=prompt_version,
         cache=cache,
+        run_kind=run_kind,
     )
 
 
