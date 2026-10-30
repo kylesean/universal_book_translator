@@ -292,6 +292,38 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
         )
 
     @api_app.get(
+        "/jobs/{job_id}/delivery-contract",
+        tags=["Jobs"],
+        summary="Fetch the artifact delivery contract (11-point QA, CELS distortion, and layout invariants)",
+    )
+    async def get_delivery_contract(
+        job_id: str, x_ubt_tenant: str | None = Header(default=None)
+    ) -> JSONResponse:
+        valid_id = validate_job_id(job_id)
+        if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):
+            raise cross_tenant_404(valid_id)
+        output_file = await _primary_output_file(valid_id)
+        if output_file:
+            candidate = deliverable_paths(output_file).get("delivery_contract")
+            if candidate is not None:
+                try:
+                    resolved = resolve_secure_path(candidate, must_exist=True, config=app_config)
+                    if resolved.is_file():
+                        content = await asyncio.to_thread(resolved.read_text, encoding="utf-8")
+                        return JSONResponse(content=json.loads(content))
+                except Exception as exc:
+                    logger.warning("Could not read delivery contract for %s: %s", valid_id, exc)
+
+        record = manager.get_job(valid_id)
+        db_path = app_config.db_dir / f"{valid_id}.sqlite"
+        if not record and not db_path.exists():
+            raise HTTPException(status_code=404, detail=f"Job not found: {valid_id}")
+        raise HTTPException(
+            status_code=400,
+            detail="Delivery contract is not yet generated or available.",
+        )
+
+    @api_app.get(
         "/jobs/{job_id}/download",
         tags=["Jobs"],
     )

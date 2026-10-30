@@ -28,6 +28,8 @@ export function deliverableName(key: string, fallback: string, t: Translation): 
       return t.quality.epub
     case 'contract':
       return t.quality.contractJson
+    case 'delivery_contract':
+      return t.quality.deliveryContractJson
     case 'quality_report':
       return t.quality.qualityReportJson
     case 'visual_report':

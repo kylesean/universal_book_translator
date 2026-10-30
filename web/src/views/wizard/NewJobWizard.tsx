@@ -230,6 +230,9 @@ export function NewJobWizard() {
   // 已确认过的报价指纹：同一配置确认一次即可。
   const quoteRiskAckRef = useRef('')
   const [domainProfile, setDomainProfile] = useState('auto')
+  const [deliveryMode, setDeliveryMode] = useState<'auto' | 'readable' | 'faithful'>('auto')
+  const [allowDegrade, setAllowDegrade] = useState(false)
+  const [enableCels, setEnableCels] = useState(true)
   const [dualMode, setDualMode] = useState<'auto' | 'dual' | 'mono'>('auto')
   // 'auto' submits as null, which lets the engine align the delivered layout to
   // the source. The engine accepts only 1 or 2, so the sentinel never reaches it.
@@ -685,6 +688,9 @@ export function NewJobWizard() {
     provider: provider || null,
     repair_provider: repairProvider || null,
     preset: preset,
+    delivery_mode: deliveryMode,
+    allow_degrade: deliveryMode === 'faithful' ? allowDegrade : null,
+    enable_cels: deliveryMode === 'faithful' ? enableCels : null,
     dual_mode: dualMode === 'auto' ? null : dualMode,
     // null = "align to the source layout"; the engine rejects anything but 1/2.
     layout_columns: layoutColumns === 'auto' ? null : Number(layoutColumns),
@@ -1374,6 +1380,58 @@ export function NewJobWizard() {
                       {t.wizard.advancedDeliveryHelp}
                     </p>
                     <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <div className="flex items-center gap-1.5">
+                          <FieldLabel htmlFor="wizard-delivery-mode">{t.wizard.deliveryMode}</FieldLabel>
+                          <InfoTip label={t.wizard.deliveryMode}>{t.wizard.deliveryModeHelp}</InfoTip>
+                        </div>
+                        <ChoiceSelect
+                          id="wizard-delivery-mode"
+                          value={deliveryMode}
+                          onValueChange={(value) => setDeliveryMode(value as typeof deliveryMode)}
+                          options={[
+                            { value: 'auto', label: t.wizard.deliveryModeAuto },
+                            { value: 'readable', label: t.wizard.deliveryModeReadable },
+                            { value: 'faithful', label: t.wizard.deliveryModeFaithful },
+                          ]}
+                        />
+                      </div>
+                      {deliveryMode === 'faithful' && (
+                        <>
+                          <div className="flex items-center justify-between rounded-lg border border-border/80 p-3 sm:col-span-2">
+                            <div className="space-y-0.5 pr-4">
+                              <div className="flex items-center gap-1.5">
+                                <Label htmlFor="wizard-allow-degrade" className="text-sm font-medium">
+                                  {t.wizard.allowDegrade}
+                                </Label>
+                                <InfoTip label={t.wizard.allowDegrade}>{t.wizard.allowDegradeHelp}</InfoTip>
+                              </div>
+                              <p className="text-xs text-muted-foreground">{t.wizard.allowDegradeHelp}</p>
+                            </div>
+                            <Switch
+                              id="wizard-allow-degrade"
+                              checked={allowDegrade}
+                              onCheckedChange={setAllowDegrade}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between rounded-lg border border-border/80 p-3 sm:col-span-2">
+                            <div className="space-y-0.5 pr-4">
+                              <div className="flex items-center gap-1.5">
+                                <Label htmlFor="wizard-enable-cels" className="text-sm font-medium">
+                                  {t.wizard.enableCels}
+                                </Label>
+                                <InfoTip label={t.wizard.enableCels}>{t.wizard.enableCelsHelp}</InfoTip>
+                              </div>
+                              <p className="text-xs text-muted-foreground">{t.wizard.enableCelsHelp}</p>
+                            </div>
+                            <Switch
+                              id="wizard-enable-cels"
+                              checked={enableCels}
+                              onCheckedChange={setEnableCels}
+                            />
+                          </div>
+                        </>
+                      )}
                       <div className="space-y-1.5">
                         <div className="flex items-center gap-1.5">
                           <FieldLabel htmlFor="wizard-dual-mode">{t.wizard.dualMode}</FieldLabel>

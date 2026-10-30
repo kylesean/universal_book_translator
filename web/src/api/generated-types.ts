@@ -577,6 +577,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/jobs/{job_id}/delivery-contract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch the artifact delivery contract (11-point QA, CELS distortion, and layout invariants) */
+        get: operations["get_delivery_contract_jobs__job_id__delivery_contract_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/jobs/{job_id}/download": {
         parameters: {
             query?: never;
@@ -1666,6 +1683,11 @@ export interface components {
              * @description When a new faithful request is ineligible, re-route to readable instead of refusing the run (legacy modes are grandfathered)
              */
             allow_degrade?: boolean | null;
+            /**
+             * Enable Cels
+             * @description Whether to use Column-Aware Elastic Layout Solver (CELS) for faithful delivery. Set false to rollback to legacy 2D packing layout
+             */
+            enable_cels?: boolean | null;
             /**
              * Pages
              * @description Page range filter (e.g. 1-10)
@@ -3669,6 +3691,42 @@ export interface operations {
         };
     };
     get_visual_report_jobs__job_id__visual_report_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-ubt-tenant"?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_delivery_contract_jobs__job_id__delivery_contract_get: {
         parameters: {
             query?: never;
             header?: {

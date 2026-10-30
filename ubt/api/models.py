@@ -129,6 +129,13 @@ class JobSubmitRequest(BaseModel):
             "instead of refusing the run (legacy modes are grandfathered)"
         ),
     )
+    enable_cels: bool | None = Field(
+        default=None,
+        description=(
+            "Whether to use Column-Aware Elastic Layout Solver (CELS) for faithful "
+            "delivery. Set false to rollback to legacy 2D packing layout"
+        ),
+    )
     pages: str | None = Field(default=None, description="Page range filter (e.g. 1-10)")
 
     @field_validator("pages")

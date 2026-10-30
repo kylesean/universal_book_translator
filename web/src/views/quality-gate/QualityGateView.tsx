@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils'
 import {
   getJobReport,
   getVisualReport,
+  getDeliveryContract,
   listDeliverables,
   deliverableDownloadUrl,
   triggerBrowserDownload,
@@ -101,6 +102,7 @@ export function QualityGateView() {
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [visual, setVisual] = useState<Record<string, any> | null>(null)
   const [visualMissing, setVisualMissing] = useState(false)
+  const [deliveryContract, setDeliveryContract] = useState<Record<string, any> | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
   const [previewItem, setPreviewItem] = useState<DeliverableItem | null>(null)
   const [postEditOpen, setPostEditOpen] = useState(false)
@@ -138,6 +140,11 @@ export function QualityGateView() {
     } catch {
       setVisual(null)
       setVisualMissing(true)
+    }
+    try {
+      setDeliveryContract(await getDeliveryContract(jobId))
+    } catch {
+      setDeliveryContract(null)
     }
   }, [jobId])
 
@@ -235,7 +242,187 @@ export function QualityGateView() {
         ? 'fail'
         : 'pass'
 
+  const contractSummary = (deliveryContract?.summary as Record<string, any>) ?? {}
+  const contractCritical = Number(contractSummary.critical ?? 0)
+  const contractMajor = Number(contractSummary.major ?? 0)
+  const contractChecks: Array<{ name: string; status: string }> = Array.isArray(deliveryContract?.checks)
+    ? deliveryContract.checks
+    : []
+  const contractFindings: Array<Record<string, any>> = Array.isArray(deliveryContract?.findings)
+    ? deliveryContract.findings
+    : []
+  const celsDistortions: Array<{
+    page: number
+    score: number
+    verdict: string
+    deficit_pt?: number
+    track_count?: number
+    is_multicolumn?: boolean
+  }> = Array.isArray(deliveryContract?.cels_distortions)
+    ? deliveryContract.cels_distortions
+    : []
+
+  const contractStatus: CheckStatus = !deliveryContract
+    ? 'warn'
+    : contractCritical > 0 || deliveryContract.passed === false
+      ? 'fail'
+      : contractMajor > 0
+        ? 'warn'
+        : 'pass'
+
+  const avgDistortion =
+    celsDistortions.length > 0
+      ? celsDistortions.reduce((acc, cur) => acc + (cur.score || 0), 0) / celsDistortions.length
+      : null
+
   const checks: Check[] = [
+    {
+      title: t.quality.chipDeliveryContract,
+      summary: !deliveryContract
+        ? (language === 'zh' ? '暂未生成交付契约报告' : 'Delivery contract report not available')
+        : `${String(deliveryContract.contract ?? 'CONTRACT').toUpperCase()} · ${
+            deliveryContract.deliverable
+              ? (language === 'zh' ? '准予出厂交付' : 'Deliverable')
+              : (language === 'zh' ? '阻断交付' : 'Blocked')
+          } (${contractCritical} critical, ${contractMajor} major)`,
+      status: contractStatus,
+      value: !deliveryContract ? 0 : contractStatus === 'pass' ? 1 : contractStatus === 'warn' ? 0.7 : 0,
+      detail: (
+        <div className="space-y-4">
+          <dl className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
+            {[
+              [t.quality.contractModeLabel, String(deliveryContract?.contract ?? '—')],
+              [
+                t.quality.contractDeliverableLabel,
+                deliveryContract ? (
+                  <Badge
+                    variant={deliveryContract.deliverable ? 'default' : 'destructive'}
+                    className={cn(
+                      'font-mono text-xs',
+                      deliveryContract.deliverable
+                        ? 'border border-emerald-600/30 bg-emerald-600/15 text-emerald-700 dark:text-emerald-400'
+                        : ''
+                    )}
+                  >
+                    {deliveryContract.deliverable ? 'PASS · DELIVERABLE' : 'FAIL · BLOCKED'}
+                  </Badge>
+                ) : '—',
+              ],
+              [language === 'zh' ? 'Critical 违规' : 'Critical Violations', contractCritical],
+              [language === 'zh' ? 'Major 违规' : 'Major Violations', contractMajor],
+              [
+                language === 'zh' ? '平均版面畸变分' : 'Avg Distortion Score',
+                avgDistortion !== null ? avgDistortion.toFixed(4) : '—',
+              ],
+            ].map(([label, value]) => (
+              <div key={String(label)} className="flex items-baseline justify-between gap-4 border-b border-border/60 pb-1.5">
+                <dt className="text-muted-foreground">{label}</dt>
+                <dd className="font-mono font-medium tabular-nums text-foreground">{value}</dd>
+              </div>
+            ))}
+          </dl>
+
+          {contractChecks.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-muted-foreground">{t.quality.contractChecksTitle}</div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {contractChecks.map((chk) => (
+                  <div
+                    key={chk.name}
+                    className={cn(
+                      'flex items-center justify-between rounded border px-2.5 py-1.5 text-xs',
+                      chk.status === 'pass'
+                        ? 'border-emerald-600/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                        : chk.status === 'warn'
+                          ? 'border-amber-600/20 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                          : 'border-destructive/20 bg-destructive/10 text-destructive'
+                    )}
+                  >
+                    <span className="font-mono">{chk.name}</span>
+                    <span className="font-bold uppercase">{chk.status}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {celsDistortions.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-muted-foreground">{t.quality.celsDistortionTitle}</div>
+              <div className="max-h-40 overflow-y-auto rounded border border-border/60">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-border/60 bg-muted/40 font-medium text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-1.5">Page</th>
+                      <th className="px-3 py-1.5">{t.quality.celsDistortionScore}</th>
+                      <th className="px-3 py-1.5">Verdict</th>
+                      <th className="px-3 py-1.5">{t.quality.celsTracks}</th>
+                      <th className="px-3 py-1.5">{t.quality.celsDeficit}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/40 font-mono">
+                    {celsDistortions.map((d) => (
+                      <tr key={d.page} className="hover:bg-muted/30">
+                        <td className="px-3 py-1">P{d.page}</td>
+                        <td
+                          className={cn(
+                            'px-3 py-1 font-semibold tabular-nums',
+                            d.score < 0.08
+                              ? 'text-emerald-700 dark:text-emerald-400'
+                              : d.score <= 0.15
+                                ? 'text-amber-700 dark:text-amber-400'
+                                : 'text-destructive'
+                          )}
+                        >
+                          {d.score.toFixed(4)}
+                        </td>
+                        <td className="px-3 py-1 text-xs uppercase">{d.verdict}</td>
+                        <td className="px-3 py-1 tabular-nums">{d.track_count ?? 1}</td>
+                        <td className="px-3 py-1 tabular-nums">{d.deficit_pt != null ? `${d.deficit_pt}pt` : '0pt'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {contractFindings.length > 0 ? (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-destructive">
+                {language === 'zh' ? '违规项明细' : 'Findings Detail'} ({contractFindings.length})
+              </div>
+              <ul className="max-h-48 space-y-1.5 overflow-y-auto">
+                {contractFindings.map((finding, idx) => (
+                  <li
+                    key={`${finding.code}-${finding.page}-${idx}`}
+                    className="flex gap-2 rounded border border-destructive/20 bg-destructive/5 p-2 text-xs"
+                  >
+                    <Badge variant="destructive" className="shrink-0 text-[10px] uppercase">
+                      {String(finding.severity)}
+                    </Badge>
+                    <div className="flex-1 space-y-0.5">
+                      <div className="flex items-center gap-2 font-mono text-muted-foreground">
+                        {finding.page != null && <span>P{finding.page}</span>}
+                        {finding.block_id && <span>[{finding.block_id}]</span>}
+                        <span className="font-semibold text-foreground">{String(finding.code)}</span>
+                      </div>
+                      <p className="text-foreground">{String(finding.message)}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {language === 'zh'
+                ? '✓ 无契约违规项，版面几何与文本实现物理不变量完全闭环。'
+                : '✓ Zero contract findings. Layout geometry and text realization invariants strictly held.'}
+            </p>
+          )}
+        </div>
+      ),
+    },
     {
       title: t.quality.chipMath,
       summary: t.quality.mathSummary

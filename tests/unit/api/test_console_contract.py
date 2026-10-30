@@ -2231,3 +2231,60 @@ def test_the_shell_is_never_cached_and_the_bundles_always_are(tmp_path: Path) ->
     asset = client.get(f"/assets/{match.group(1)}")
     assert asset.status_code == 200
     assert asset.headers.get("cache-control") == "public, max-age=31536000, immutable"
+
+
+def test_delivery_contract_endpoint_and_cels_option(tmp_path: Path) -> None:
+    """Verify delivery contract endpoint and CELS submission options."""
+    from ubt.api.models import JobSubmitRequest
+
+    # JobSubmitRequest parses enable_cels and delivery knobs cleanly
+    req = JobSubmitRequest(
+        input_path=str(tmp_path / "book.pdf"),
+        target_lang="zh",
+        delivery_mode="faithful",
+        allow_degrade=True,
+        enable_cels=False,
+    )
+    assert req.enable_cels is False
+    assert req.delivery_mode == "faithful"
+    assert req.allow_degrade is True
+
+    # Deliverable paths & labels include delivery_contract
+    assert "delivery_contract" in DELIVERABLE_LABELS
+    paths = _deliverable_paths(tmp_path / "book.pdf")
+    assert "delivery_contract" in paths
+    assert paths["delivery_contract"].name == "book_pdf_delivery_contract.json"
+
+    # API endpoint serves delivery contract sidecar
+    contract_data = {
+        "contract": "faithful",
+        "passed": True,
+        "deliverable": True,
+        "summary": {"critical": 0, "major": 0, "total": 0},
+        "findings": [],
+        "checks": [{"name": "overlap", "status": "pass"}],
+    }
+    paths["delivery_contract"].write_text(json.dumps(contract_data), encoding="utf-8")
+
+    from ubt.core.engine.ledger import SQLiteJobLedger
+    from ubt.core.ir.models import BookManifest
+
+    job_id = "web_testjob123"
+    cfg = _config(tmp_path)
+    cfg.db_dir.mkdir(parents=True, exist_ok=True)
+    db_path = cfg.db_dir / f"{job_id}.sqlite"
+    output_pdf = tmp_path / "book.pdf"
+    output_pdf.write_bytes(b"%PDF-1.4\n")
+    with SQLiteJobLedger(db_path) as ledger:
+        ledger.init_job_from_manifest(
+            job_id, BookManifest(doc_id=job_id, title="Test", source_path=str(output_pdf))
+        )
+        ledger.set_job_metadata_value(job_id, "output_file", str(output_pdf))
+
+    client = TestClient(create_app(cfg))
+    resp = client.get(f"/jobs/{job_id}/delivery-contract", headers=_AUTH)
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["contract"] == "faithful"
+    assert payload["deliverable"] is True
+    assert payload["summary"]["critical"] == 0

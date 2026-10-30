@@ -384,6 +384,12 @@ export async function getVisualReport(jobId: string): Promise<Record<string, unk
   return res.json()
 }
 
+export async function getDeliveryContract(jobId: string): Promise<Record<string, unknown>> {
+  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/delivery-contract`)
+  if (!res.ok) throw await apiError(res, "Failed to fetch delivery contract")
+  return res.json()
+}
+
 //: Terminal SSE event names the backend emits (``event: <status>``).
 const TERMINAL_EVENTS = ['completed', 'failed', 'cancelled'] as const
 

@@ -2124,6 +2124,94 @@
         }
       }
     },
+    "/jobs/{job_id}/delivery-contract": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Fetch the artifact delivery contract (11-point QA, CELS distortion, and layout invariants)",
+        "operationId": "get_delivery_contract_jobs__job_id__delivery_contract_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/jobs/{job_id}/download": {
       "get": {
         "tags": [
@@ -5670,6 +5758,18 @@
             ],
             "title": "Allow Degrade",
             "description": "When a new faithful request is ineligible, re-route to readable instead of refusing the run (legacy modes are grandfathered)"
+          },
+          "enable_cels": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable Cels",
+            "description": "Whether to use Column-Aware Elastic Layout Solver (CELS) for faithful delivery. Set false to rollback to legacy 2D packing layout"
           },
           "pages": {
             "anyOf": [

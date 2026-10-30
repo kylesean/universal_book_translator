@@ -190,6 +190,15 @@ export interface TranslationDictionary {
     domainPaper: string
     domainFiction: string
     domainHumanities: string
+    deliveryMode: string
+    deliveryModeHelp: string
+    deliveryModeAuto: string
+    deliveryModeReadable: string
+    deliveryModeFaithful: string
+    allowDegrade: string
+    allowDegradeHelp: string
+    enableCels: string
+    enableCelsHelp: string
     dualMode: string
     dualModeHelp: string
     dualModeAuto: string
@@ -512,6 +521,7 @@ export interface TranslationDictionary {
     targetPdf: string
     epub: string
     contractJson: string
+    deliveryContractJson: string
     secondaryDoc: string
     qualityReportJson: string
     visualReportJson: string
@@ -587,6 +597,17 @@ export interface TranslationDictionary {
     chipLayout: string
     chipComplete: string
     chipCost: string
+    chipDeliveryContract: string
+    contractModeLabel: string
+    contractDeliverableLabel: string
+    contractChecksTitle: string
+    celsDistortionTitle: string
+    celsDistortionScore: string
+    celsDistortionSafe: string
+    celsDistortionWarn: string
+    celsDistortionCritical: string
+    celsTracks: string
+    celsDeficit: string
     mathSummary: string
     termSummary: string
     coverageSummary: string

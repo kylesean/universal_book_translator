@@ -1461,9 +1461,29 @@ def _evaluate_delivery(
     report = evaluate_delivery_contract(evidence)
     path = sidecar_path(rendered_path, "delivery_contract.json")
     try:
+        payload = report.to_payload()
+        plan_meta = (getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_plan")
+        if isinstance(plan_meta, dict):
+            payload["delivery_plan"] = plan_meta
+        page_distortions = []
+        for page in getattr(adapter, "last_page_geometry", None) or []:
+            if "cels_distortion_score" in page:
+                page_distortions.append(
+                    {
+                        "page": page.get("page_no"),
+                        "score": page.get("cels_distortion_score"),
+                        "verdict": page.get("cels_distortion_verdict"),
+                        "deficit_pt": page.get("cels_deficit_pt"),
+                        "track_count": page.get("cels_track_count"),
+                        "is_multicolumn": page.get("cels_is_multicolumn"),
+                    }
+                )
+        if page_distortions:
+            payload["cels_distortions"] = page_distortions
+
         atomic_write_text(
             path,
-            json.dumps(report.to_payload(), ensure_ascii=False, indent=2),
+            json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
     except OSError as exc:
