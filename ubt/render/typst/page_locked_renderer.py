@@ -736,6 +736,9 @@ class PageLockedReflowRenderer:
             if b.block_type is BlockType.IMAGE:
                 if asset_copier is None:
                     continue
+                # Suppress tiny decorative icons / badges (e.g. author ORCID badges, license marks < 55x55pt)
+                if b.bbox and (b.bbox.x1 - b.bbox.x0 < 55.0) and (b.bbox.y1 - b.bbox.y0 < 55.0):
+                    continue
                 name = asset_copier(b.source_text)
                 if not name:
                     continue

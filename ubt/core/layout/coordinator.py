@@ -206,9 +206,23 @@ def solve_page_cels(
             for i, b in enumerate(track_blocks)
         ]
 
-        # Stage 3B: Cassowary Kiwi vertical solver (envelope encompasses blocks and printable area)
-        track_y_min = min(printable_box.y0, min(b.box.y0 for b in track_blocks))
-        track_y_max = max(printable_box.y1, max(b.box.y1 for b in track_blocks))
+        # Stage 3B: Cassowary Kiwi vertical solver
+        # The vertical track must be bounded by the blocks and any pinned obstacles in this column,
+        # rather than unconditionally expanding to the entire page printable area.
+        blocks_y_min = min(b.box.y0 for b in track_blocks)
+        blocks_y_max = max(b.box.y1 for b in track_blocks)
+        track_y_min = max(printable_box.y0, blocks_y_min - 15.0)
+        track_y_max = min(printable_box.y1, blocks_y_max + 15.0)
+
+        for p in all_pinned:
+            if min(p.box.x1, track.x1) > max(p.box.x0, track.x0) + 1.0:
+                if p.box.y0 >= blocks_y_max - 5.0:
+                    track_y_max = min(track_y_max, p.box.y0 - min_gap_pt)
+                elif p.box.y1 <= blocks_y_min + 5.0:
+                    track_y_min = max(track_y_min, p.box.y1 + min_gap_pt)
+
+        track_y_min = min(track_y_min, blocks_y_min)
+        track_y_max = max(track_y_max, blocks_y_max)
         v_track = VerticalTrack(y_min_pt=track_y_min, y_max_pt=track_y_max)
         solved_specs = solve_vertical(v_inputs, track=v_track, min_gap_pt=min_gap_pt)
 

@@ -1091,13 +1091,33 @@ class DoclingRenderStrategy:
                     pl_h = pl.y1 - pl.y0
                     if pl_w <= 0.0 or pl_h <= 0.0 or pl.skip_render:
                         continue
+                    # Estimate needed height for the target text at the body/block font size
+                    target_txt = pl.text.strip()
+                    eff_size = pl.font_size_pt or body_group.size_pt
+                    is_tbl = target_txt.startswith("|") or "\n|" in target_txt
+                    if target_txt and not pl.is_heading and not is_tbl:
+                        n_ascii = sum(1 for c in target_txt if ord(c) < 128)
+                        aspect = (len(target_txt) - n_ascii + n_ascii * 0.50) / max(
+                            1, len(target_txt)
+                        )
+                        eff_glyph_w = eff_size * max(0.85, 1.0 + body_group.tracking_em) * aspect
+                        chars_per_line = max(1.0, pl_w / eff_glyph_w)
+                        lines_count = max(1, math.ceil(len(target_txt) / chars_per_line))
+                        target_h = (
+                            eff_size
+                            if lines_count <= 1
+                            else float(lines_count) * body_group.pitch * eff_size
+                        )
+                        needed_h = max(pl_h, target_h)
+                    else:
+                        needed_h = pl_h
                     cels_blocks.append(
                         PageLayoutBlock(
                             block_id=pl.block_id,
                             box=Box(x0=pl.x0, y0=pl.y0, x1=pl.x1, y1=pl.y1),
                             text=pl.text,
-                            source_font_size_pt=pl.font_size_pt or source_size_pt,
-                            required_height_pt=pl_h,
+                            source_font_size_pt=eff_size,
+                            required_height_pt=needed_h,
                             is_pinned=False,
                         )
                     )
@@ -1265,15 +1285,19 @@ class DoclingRenderStrategy:
             # Its body size then starts from the group size (``preferred_pt``) and
             # only drops below it if the content genuinely does not fit.
             cels_distortion_critical = (
-                (cels_sol.distortion.is_critical or cels_sol.distortion.score >= 0.15)
+                (
+                    cels_sol.distortion.is_critical
+                    or cels_sol.distortion.score >= 0.15
+                    or cels_sol.total_deficit_pt > 1.0
+                )
                 if cels_sol is not None
                 else False
             )
+            cels_succeeded = cels_sol is not None and not cels_distortion_critical
             use_l2 = (
                 is_pure_page_locked
                 or sol.source_overlap
-                or not page_fit.fits
-                or cels_distortion_critical
+                or (not cels_succeeded if cels_sol is not None else not page_fit.fits)
             )
 
             if not use_l2 and cels_sol is not None and cels_sol.solved_blocks_by_id:
