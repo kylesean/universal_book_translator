@@ -112,30 +112,25 @@ def _central_band_is_occupied(
     bboxes: Sequence[Any],
     page_w: float,
     *,
-    band_pt: float = 6.0,
     coverage: float = 0.40,
 ) -> bool:
-    """Whether blocks cover enough of the page's central vertical band to rule out a gutter.
+    """Whether blocks cover enough vertical measure across the page midpoint.
 
-    A two-column page has a vertical gutter: a band around the page midpoint
-    that no body block crosses. A single-column page has full-measure prose
-    across that band, even when its display formulas are centred and its short
-    labels sit on the left.
+    A two-column page has a vertical gutter: no body block crosses the page
+    midpoint. A single-column page has full-measure prose across it, even when
+    its display formulas are centred and its short labels sit on the left.
     """
     if not bboxes or page_w <= 0:
         return False
     mid = page_w / 2.0
-    left, right = mid - band_pt, mid + band_pt
     intervals: list[tuple[float, float]] = []
     for bb in bboxes:
         bx0 = float(bb.x0)
         bx1 = float(bb.x1)
-        # A box occupies the central gutter if it substantially straddles the page midpoint.
-        # A box strictly to the left (bx1 <= mid) or strictly to the right (bx0 >= mid) is
-        # within its column and does not cross the gutter.
+        # A box occupies the central gutter if it crosses the page midpoint:
+        # a box strictly to the left (bx1 <= mid) or strictly to the right
+        # (bx0 >= mid) sits within its column and does not cross the gutter.
         if bx1 <= mid or bx0 >= mid:
-            continue
-        if bx1 <= left or bx0 >= right:
             continue
         lo = min(float(bb.y0), float(bb.y1))
         hi = max(float(bb.y0), float(bb.y1))

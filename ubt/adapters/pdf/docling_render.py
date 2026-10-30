@@ -1095,7 +1095,6 @@ class DoclingRenderStrategy:
                     target_txt = pl.text.strip()
                     eff_size = pl.font_size_pt or body_group.size_pt
                     is_tbl = target_txt.startswith("|") or "\n|" in target_txt
-                    is_wide = pl_w > 0.60 * pw
                     if pl.is_heading:
                         needed_h = max(pl_h, eff_size * 1.25)
                     elif target_txt and not is_tbl:
@@ -1121,7 +1120,7 @@ class DoclingRenderStrategy:
                             text=pl.text,
                             source_font_size_pt=eff_size,
                             required_height_pt=needed_h,
-                            is_pinned=is_wide,
+                            is_pinned=False,
                         )
                     )
 

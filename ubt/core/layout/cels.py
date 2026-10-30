@@ -90,7 +90,15 @@ MAX_TRACKS: int = 4
 #: slop on the corpus (see ``PEN_PAD_EM`` in ``strip_pdf_text``).
 EDGE_TOL_PT: float = 0.5
 
-ObstacleKind = Literal["figure", "formula", "rule", "header", "footer", "full_width", "other"]
+#: ``straddler`` marks a flowable block wider than one column of a multi-column
+#: page (a spanning title or table): it is pinned so gutter detection and the
+#: column flow route around it instead of collapsing the columns. Only the
+#: coordinator may classify a block as a straddler, and only after the narrower
+#: flow has actually revealed a multi-column layout -- on a single-column page
+#: the body itself is wide and must keep flowing.
+ObstacleKind = Literal[
+    "figure", "formula", "rule", "header", "footer", "full_width", "straddler", "other"
+]
 
 
 @dataclass(frozen=True, slots=True)

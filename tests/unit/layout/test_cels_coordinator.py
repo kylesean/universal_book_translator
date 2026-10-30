@@ -240,3 +240,86 @@ def test_elastic_segments_carry_y_up_orientation() -> None:
         # The segment must cover the source blocks it was built from.
         assert seg.y_top >= max(box.y1 for box in seg.source)
         assert seg.y_bottom <= min(box.y0 for box in seg.source)
+
+
+def test_wide_spanning_block_pins_only_on_multicolumn_pages() -> None:
+    """A >60%-wide block rides as a straddler pin only when columns exist.
+
+    On a two-column page a full-width section title would fill the gutter and
+    collapse the column detection, so it is pinned and the columns survive.
+    Where the narrower flow reveals no columns (a single-column page), the
+    wide block must keep flowing: pinning it would leave nothing flowable and
+    collapse the solve.
+    """
+    printable = Box(x0=54.0, y0=54.0, x1=558.0, y1=738.0)
+    title = PageLayoutBlock(
+        block_id="title",
+        box=Box(x0=54.0, y0=690.0, x1=558.0, y1=720.0),
+        text="跨栏章节标题：结果与分析",
+        source_font_size_pt=12.0,
+        required_height_pt=30.0,
+    )
+    columns: list[PageLayoutBlock] = []
+    for i in range(4):
+        y = 620.0 - i * 60.0
+        columns.append(
+            PageLayoutBlock(
+                block_id=f"left_{i}",
+                box=Box(x0=54.0, y0=y, x1=280.0, y1=y + 40.0),
+                text=f"左栏正文 {i}",
+                source_font_size_pt=9.0,
+                required_height_pt=40.0,
+            )
+        )
+        columns.append(
+            PageLayoutBlock(
+                block_id=f"right_{i}",
+                box=Box(x0=332.0, y0=y, x1=558.0, y1=y + 40.0),
+                text=f"右栏正文 {i}",
+                source_font_size_pt=9.0,
+                required_height_pt=40.0,
+            )
+        )
+
+    sol = solve_page_cels(
+        page_no=1,
+        blocks=[title, *columns],
+        page_width=612.0,
+        page_height=792.0,
+        printable_box=printable,
+        source_body_size_pt=9.0,
+        realized_body_size_pt=9.0,
+    )
+    assert sol.detection.is_multicolumn
+    assert len(sol.track_solutions) == 2
+    flowed_ids = {bid for track_sol in sol.track_solutions for bid in track_sol.block_ids}
+    # The title is pinned as a straddler instead of flowing into one column,
+    # and every column block still flows inside its own track.
+    assert "title" not in flowed_ids
+    assert {f"left_{i}" for i in range(4)} <= flowed_ids
+    assert {f"right_{i}" for i in range(4)} <= flowed_ids
+
+    # The same wide title above a single-column narrow flow: no columns are
+    # revealed, so the title keeps flowing instead of being pinned.
+    prose = [
+        PageLayoutBlock(
+            block_id=f"p{i}",
+            box=Box(x0=54.0, y0=600.0 - i * 40.0, x1=300.0, y1=600.0 - i * 40.0 + 30.0),
+            text=f"单栏正文段落 {i}",
+            source_font_size_pt=10.0,
+            required_height_pt=30.0,
+        )
+        for i in range(4)
+    ]
+    sol_single = solve_page_cels(
+        page_no=2,
+        blocks=[title, *prose],
+        page_width=612.0,
+        page_height=792.0,
+        printable_box=printable,
+        source_body_size_pt=10.0,
+        realized_body_size_pt=10.0,
+    )
+    assert not sol_single.detection.is_multicolumn
+    flowed_single = {bid for track_sol in sol_single.track_solutions for bid in track_sol.block_ids}
+    assert "title" in flowed_single

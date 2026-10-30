@@ -158,14 +158,25 @@ def solve_page_cels(
 
     # 1. Stage 1: Detect column tracks using horizontal projection profile
     # Flowable text boxes determine column tracks; pinned blocks (figures, titles) are preserved.
-    # Spanning blocks (> 60% page width) cannot fit into a single column of a multi-column page
-    # and must be treated as pinned straddler obstacles so they do not poison column track detection.
-    flowable_boxes = [b.box for b in blocks if not b.is_pinned and b.box.width <= 0.60 * page_width]
-    spanning_pinned = [
-        pin_from(b.box, kind="straddler")
-        for b in blocks
-        if not b.is_pinned and b.box.width > 0.60 * page_width
-    ]
+    # A block wider than 60% of the page cannot fit into one column of a
+    # multi-column page and would poison gutter detection, so it rides as a
+    # pinned straddler obstacle -- but only when the narrower flow actually
+    # reveals columns. On a single-column page the body itself is wider than
+    # 60% of the page; pinning it would leave nothing flowable and collapse
+    # the solve, so there the wide blocks keep flowing.
+    flowable_blocks = [b for b in blocks if not b.is_pinned]
+    wide_limit = 0.60 * page_width
+    narrow_blocks = [b for b in flowable_blocks if b.box.width <= wide_limit]
+    wide_blocks = [b for b in flowable_blocks if b.box.width > wide_limit]
+    spanning_pinned: list[PinnedObstacle] = []
+    if wide_blocks and narrow_blocks:
+        narrow_detection = detect_columns(
+            [b.box for b in narrow_blocks], page_width=page_width, page_height=page_height
+        )
+        if narrow_detection.is_multicolumn:
+            spanning_pinned = [pin_from(b.box, kind="straddler") for b in wide_blocks]
+            flowable_blocks = narrow_blocks
+    flowable_boxes = [b.box for b in flowable_blocks]
     explicit_pinned = [
         pin_from(b.box, kind="other") for b in blocks if b.is_pinned
     ] + spanning_pinned

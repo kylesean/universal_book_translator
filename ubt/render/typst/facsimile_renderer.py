@@ -276,7 +276,7 @@ class FacsimileRenderer:
                 lines.append(f"  // bbox: {dx} {dy} {width} {height}")
                 lines.append(
                     f"  #place(top + left, dx: {dx}pt, dy: {dy}pt, "
-                    f"block(width: {width}pt, height: {height}pt, clip: false)[\n"
+                    f"block(width: {width}pt, height: {height}pt, clip: true)[\n"
                     f"    {content}\n"
                     f"  ])"
                 )
