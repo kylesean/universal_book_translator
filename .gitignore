@@ -35,13 +35,14 @@ web/node_modules/
 node_modules/
 web/dist/
 
-# Docs: the working notes (benchmarks, reviews) change too often to track and
-# stay unversioned, but `docs/guides/` is referenced as the authority by
-# CONTRIBUTING.md, pyproject.toml, the pre-commit config and code comments —
-# those links must resolve in a fresh clone, so the guides are versioned.
-/docs/*
-!/docs/README.md
-!/docs/guides/
+# Design notes, RFCs and the adaptive-delivery PRD are local working notes and
+# are NOT in the repository. They each describe one HEAD and move with every
+# audit round, so a clone carries code and tests only. Consequence for readers:
+# a `docs/... §N` citation in a code comment names *where a decision was
+# recorded*, not a link that must resolve — the load-bearing reason is inlined
+# in the comment itself. Convention stated in ARCHITECTURE.md, "Docs are not in
+# the repo".
+/docs/
 
 # Fetched font set (scripts/fetch_fonts.py). Not committed: a CJK subset is
 # 6.5-15 MB per language, and most checkouts never render a PDF. Absent, the
