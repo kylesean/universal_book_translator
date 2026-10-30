@@ -503,8 +503,12 @@ def test_inject_hyperlinks_with_page_and_native_ref() -> None:
 
     text = "Refer to Figure 2, see page 5 for details."
 
-    # 1. With page number dynamic lookup
-    cfg_page = CrossRefConfig(style=CrossRefStyle.WITH_PAGE, target_lang="zh")
+    # 1. With page number dynamic lookup. Page references are opt-in since the
+    # dangling-label hardening (enable_page_references defaults to False): this
+    # topology does contain a page-5 block, so the link is safe to emit here.
+    cfg_page = CrossRefConfig(
+        style=CrossRefStyle.WITH_PAGE, target_lang="zh", enable_page_references=True
+    )
     linked_page = inject_hyperlinks(text, topology, target_format="typst", config=cfg_page)
     assert "#link(<fig-2>)[Figure 2]#context" in linked_page
     assert "loc.first().location().page() != here().page()" in linked_page
@@ -514,6 +518,36 @@ def test_inject_hyperlinks_with_page_and_native_ref() -> None:
     cfg_native = CrossRefConfig(style=CrossRefStyle.NATIVE_REF)
     linked_native = inject_hyperlinks(text, topology, target_format="typst", config=cfg_native)
     assert "#ref(<fig-2>)" in linked_native
+
+
+def test_page_references_default_off() -> None:
+    """``enable_page_references`` defaults to False: no <page-N> links.
+
+    Prose like "see page 5" used to emit ``#link(<page-5>)``, but that label
+    only exists when page 5 still has surviving blocks at render time, so a
+    reference into a pruned page aborted the whole Typst compile
+    (AD-034). The opt-in flag keeps the feature available where the caller
+    knows every referenced page survives; the default must stay link-free.
+    """
+    from ubt.core.references.models import CrossRefConfig, CrossRefStyle
+
+    blocks = [
+        _make_block(
+            "p1",
+            Paragraph(id="p1", spine_index=1, span=Span(page=5), text="Text on page 5"),
+            page=5,
+        ),
+    ]
+    topology = build_citation_topology(blocks)
+
+    linked = inject_hyperlinks(
+        "see page 5 for details.",
+        topology,
+        target_format="typst",
+        config=CrossRefConfig(style=CrossRefStyle.WITH_PAGE, target_lang="zh"),
+    )
+    assert "#link(<page-5>)" not in linked
+    assert "see page 5" in linked
 
 
 def test_inject_hyperlinks_html_and_markdown() -> None:
@@ -568,7 +602,11 @@ def test_typst_document_renderer_with_xref_enabled(tmp_path: Path) -> None:
         ),
     ]
 
-    cfg = CrossRefConfig(style=CrossRefStyle.WITH_PAGE, target_lang="zh")
+    # Page references are opt-in (dangling <page-N> hardening); this topology
+    # contains the page-1 block, so the reference is safe to link.
+    cfg = CrossRefConfig(
+        style=CrossRefStyle.WITH_PAGE, target_lang="zh", enable_page_references=True
+    )
     renderer = TypstDocumentRenderer(enable_xref=True, xref_config=cfg)
     source, stats = renderer.build_source(blocks, tmp_path)
 
