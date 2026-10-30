@@ -219,7 +219,7 @@ export interface TranslationDictionary {
     ocrModeEgressWarning: string
     ocrModeAuto: string
     ocrModeLocal: string
-    ocrModeVlm: string
+    ocrModeCloud: string
     ocrModeOff: string
     pageFilter: string
     pageFilterPlaceholder: string

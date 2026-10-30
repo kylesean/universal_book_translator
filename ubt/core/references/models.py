@@ -46,7 +46,7 @@ class CrossRefConfig:
     style: CrossRefStyle = CrossRefStyle.LINK_ONLY
     prefix_scheme: CrossRefPrefixScheme = CrossRefPrefixScheme.ORIGINAL
     show_page_number: bool = False
-    enable_page_references: bool = True
+    enable_page_references: bool = False
     target_format: str = "typst"  # typst, html, markdown, epub
     link_css_class: str = "ubt-xref"
     open_in_new_tab: bool = False

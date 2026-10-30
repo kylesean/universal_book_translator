@@ -622,7 +622,7 @@ def _build_cost(
         if (config.visual_judge_enabled and config.allow_page_upload)
         else 0
     )
-    ocr_page_calls = scan_pages if (scan_pages and config.ocr_mode in ("cloud", "vlm")) else 0
+    ocr_page_calls = scan_pages if (scan_pages and config.ocr_mode == "cloud") else 0
     # The two channels bill different models: the visual judge runs on
     # ``visual_judge_model`` while the OCR driver bills ``UBT_OCR_MODEL``. UBT
     # ships no OCR model default, so an unset one leaves the vision figure

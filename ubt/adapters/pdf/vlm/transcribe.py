@@ -27,9 +27,11 @@ from ubt.core.ir.models import (
 
 logger = logging.getLogger(__name__)
 
-#: Four-tier fallback switch: "off" (default), "missing", "weak", "all".
-#: Accepts truthy strings ("1", "true") as "missing" for environment compatibility.
-FALLBACK_ENV_VAR = "UBT_VLM_SCAN_FALLBACK"
+#: Four-tier fallback tier vocabulary (``UBTConfig.ocr_fallback``). The env
+#: read below is the direct-caller fallback (tests, library use) for a caller
+#: that arrives without a config handle — the resolved config always wins
+#: through ``AdapterRuntimeConfig.ocr_fallback``.
+FALLBACK_ENV_VAR = "UBT_OCR_FALLBACK"
 
 
 class VlmFallbackMode(StrEnum):
@@ -41,8 +43,13 @@ class VlmFallbackMode(StrEnum):
     ALL = "all"
 
 
-def get_fallback_mode() -> VlmFallbackMode:
-    raw = os.environ.get(FALLBACK_ENV_VAR, "").strip().lower()
+def get_fallback_mode(fallback: str | None = None) -> VlmFallbackMode:
+    """Resolve the fallback tier: config value first, env for direct callers.
+
+    ``off`` stays the default on every path: a scanned page the OCR channel
+    cannot read must reject the book, not silently ship a partial read.
+    """
+    raw = (fallback or os.environ.get(FALLBACK_ENV_VAR, "")).strip().lower()
     if raw in ("1", "true", "missing"):
         return VlmFallbackMode.MISSING
     if raw in ("weak", "degraded"):

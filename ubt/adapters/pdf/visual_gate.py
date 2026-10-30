@@ -704,6 +704,70 @@ def page_has_no_content(pdf_path: Path, pages: Sequence[int]) -> set[int]:
     return contentless
 
 
+def _attribute_artifact_overlaps(
+    artifact_findings: list[VisualFinding],
+    artifact_boxes: Sequence[_ArtifactBox],
+    ir_blocks: Sequence[object],
+) -> list[VisualFinding]:
+    """Map artifact-rect overlap findings back to IR block IDs when possible."""
+    if not ir_blocks or not artifact_findings:
+        return artifact_findings
+    from ubt.adapters.pdf.textgeom import box_iou
+
+    rect_by_id: dict[str, tuple[int, tuple[float, float, float, float]]] = {}
+    for abox in artifact_boxes:
+        rect_by_id[abox.id] = (
+            abox.bbox.page,
+            (abox.bbox.x0, abox.bbox.y0, abox.bbox.x1, abox.bbox.y1),
+        )
+
+    ir_by_page: dict[int, list[tuple[str, tuple[float, float, float, float]]]] = {}
+    for block in ir_blocks:
+        bbox = getattr(block, "bbox", None)
+        if bbox is None:
+            continue
+        try:
+            pg = int(bbox.page)
+            r = (float(bbox.x0), float(bbox.y0), float(bbox.x1), float(bbox.y1))
+            bid = str(getattr(block, "id", "") or "")
+            if bid:
+                ir_by_page.setdefault(pg, []).append((bid, r))
+        except (AttributeError, TypeError, ValueError):
+            continue
+
+    attributed: list[VisualFinding] = []
+    for finding in artifact_findings:
+        raw_ids = [part.strip() for part in (finding.block_id or "").split(",") if part.strip()]
+        mapped_ids: list[str] = []
+        for rid in raw_ids:
+            info = rect_by_id.get(rid)
+            if info is None:
+                mapped_ids.append(rid)
+                continue
+            pg, rect = info
+            candidates = ir_by_page.get(pg, [])
+            best_id = rid
+            best_score = 0.05
+            for ir_id, ir_rect in candidates:
+                score = box_iou(rect, ir_rect)
+                if score > best_score:
+                    best_score = score
+                    best_id = ir_id
+            if best_id not in mapped_ids:
+                mapped_ids.append(best_id)
+        new_block_id = ",".join(mapped_ids) if mapped_ids else finding.block_id
+        attributed.append(
+            VisualFinding(
+                severity=finding.severity,
+                code=finding.code,
+                message=finding.message,
+                page=finding.page,
+                block_id=new_block_id,
+            )
+        )
+    return attributed
+
+
 def block_overlap_findings(blocks: Sequence[object]) -> list[VisualFinding]:
     """T1: flag heavily overlapping text blocks on the same page.
 
@@ -1962,8 +2026,20 @@ async def run_visual_gate(
         # frame, while an IR ``bbox`` comes from the extractor and may use a
         # different origin (Docling reports BOTTOMLEFT). Comparing an IR bbox
         # against the MediaBox flagged a perfectly placed block as clipped.
-        overlap_source = list(blocks) if blocks else list(artifact_boxes)
-        findings.extend(block_overlap_findings(overlap_source))
+        raw_artifact_overlaps = block_overlap_findings(artifact_boxes)
+        attributed_overlaps = _attribute_artifact_overlaps(
+            raw_artifact_overlaps, artifact_boxes, blocks
+        )
+        if blocks:
+            ir_overlaps = block_overlap_findings(blocks)
+            seen_keys = {(f.page, f.block_id) for f in ir_overlaps}
+            findings.extend(ir_overlaps)
+            for af in attributed_overlaps:
+                if (af.page, af.block_id) not in seen_keys:
+                    findings.append(af)
+                    seen_keys.add((af.page, af.block_id))
+        else:
+            findings.extend(attributed_overlaps)
         findings.extend(blocks_out_of_bounds_findings(artifact_boxes, bounds))
         if len(geometry_pages) < total:
             findings.append(

@@ -247,7 +247,12 @@ class FacsimileRenderer:
                 f"#page(width: {p.page_w}pt, height: {p.page_h}pt, margin: 0pt, "
                 f'background: image("{bg_pdf_filename}", page: {p.page_no}, width: 100%, height: 100%))['
             )
-            lines.append(f"  #set text(size: {p.uniform_size_pt}pt)")
+            # ``tracking`` is part of the document body group (G4 Stage 3A): the
+            # planner's height estimate already assumed it, so leaving it out of
+            # the markup made the estimate and the artifact disagree on every
+            # page the ladder compressed.
+            tracking = f", tracking: {p.tracking_em}em" if p.tracking_em else ""
+            lines.append(f"  #set text(size: {p.uniform_size_pt}pt{tracking})")
             # ``p.leading_em`` is a *ratio* (solver contract); Typst wants the
             # *gap* on top of the font's own line height. Without the
             # subtraction a 1.35 line height arrives as ~1.08 and captions

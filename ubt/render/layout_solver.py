@@ -39,7 +39,25 @@ def estimate_needed_height(
     em_ratio: float,
     tracking_em: float = 0.0,
 ) -> float:
-    """Estimated vertical height (pt) this record's text occupies at size and em_ratio."""
+    """Vertical height (pt) this record's text occupies at ``size`` and ``em_ratio``.
+
+    When ``record`` carries a measured height from ``MeasurementService`` for the
+    requested ``(size, em_ratio, tracking_em, w)``, the real measurement is used
+    directly; otherwise falls back to the glyph-advance model.
+    """
+    measured_h = record.get("measured_height_pt")
+    if isinstance(measured_h, (int, float)) and measured_h > 0.0:
+        m_size = record.get("measured_size_pt")
+        m_pitch = record.get("measured_pitch")
+        m_track = record.get("measured_tracking_em", 0.0)
+        m_w = record.get("measured_w")
+        if (
+            (m_size is None or abs(float(m_size) - size) <= 1e-3)
+            and (m_pitch is None or abs(float(m_pitch) - em_ratio) <= 1e-3)
+            and abs(float(m_track) - tracking_em) <= 1e-4
+            and (m_w is None or abs(float(m_w) - float(record.get("w", 0.0))) <= 0.1)
+        ):
+            return float(measured_h)
     w = float(record.get("w", 0.0))
     if w <= 0.0:
         lines = float(record.get("n", 1))
@@ -176,6 +194,92 @@ def _find_bottlenecks(
     return bottlenecks
 
 
+@dataclass(frozen=True, slots=True)
+class FitReport:
+    """Feasibility of one page at a *fixed* size — no search.
+
+    G4 Stage 3A picks the size once for the whole document body group
+    (``ubt/core/layout/style_group.py``); the per-page question left is only
+    "does this page hold it?", and the answer must carry the numbers a reviewer
+    needs (worst deficit, which blocks) rather than a bare boolean.
+    """
+
+    fits: bool
+    deficit_pt: float = 0.0
+    block_ids: tuple[str, ...] = ()
+    width_borrowed_pt: float = 0.0
+    #: Why the page failed. ``does_not_fit`` is a height shortfall against the
+    #: group size; ``l2_shrink`` means the page-locked reflow had to go *below*
+    #: the group size to hold the page, and ``deficit_pt`` then carries the size
+    #: difference instead of a height.
+    reason: str = "does_not_fit"
+
+
+def apply_width_borrow(
+    columns_records: Sequence[Sequence[dict[str, Any]]],
+    borrow_pt: float,
+) -> tuple[list[list[dict[str, Any]]], float]:
+    """Widen each record toward the same column's right whitespace, up to ``borrow_pt``.
+
+    The limit for a record is its ``right_budget`` (set by the caller that knows
+    the column track; see AD-020's trailing-ink pad). A record without one is
+    left alone: guessing a bound from page width would let a left-column
+    paragraph borrow through the gutter, which is the cross-column bleed
+    Stage 1 exists to prevent.
+
+    Returns the widened records and the largest widen actually applied, so the
+    plan can report how much of the rung was really used.
+    """
+    if borrow_pt <= 0.0:
+        return [[dict(record) for record in records] for records in columns_records], 0.0
+    widened: list[list[dict[str, Any]]] = []
+    used = 0.0
+    for records in columns_records:
+        out: list[dict[str, Any]] = []
+        for record in records:
+            copy = dict(record)
+            budget = record.get("right_budget")
+            if budget is not None:
+                room = max(0.0, float(budget) - float(record.get("x1", 0.0)))
+                delta = min(float(borrow_pt), room)
+                if delta > 0.0:
+                    copy["w"] = float(record.get("w", 0.0)) + delta
+                    copy["x1"] = float(record.get("x1", 0.0)) + delta
+                    used = max(used, delta)
+            out.append(copy)
+        widened.append(out)
+    return widened, round(used, 3)
+
+
+def fit_at_size(
+    columns_records: Sequence[Sequence[dict[str, Any]]],
+    *,
+    size_pt: float,
+    pitch: float,
+    tracking_em: float = 0.0,
+    width_borrow_pt: float = 0.0,
+    tol_pt: float = TOL_PT,
+) -> FitReport:
+    """Answer "does this page hold the group size?" and quantify the shortfall."""
+    columns, borrowed = apply_width_borrow(columns_records, width_borrow_pt)
+    failing: list[str] = []
+    worst = 0.0
+    for records in columns:
+        for idx, rec in enumerate(records):
+            limit = _effective_limit(records, idx, tol_pt)
+            needed = estimate_needed_height(rec, size_pt, pitch, tracking_em)
+            slack = (float(rec["top"]) - limit) - needed
+            if slack < -tol_pt:
+                failing.append(str(rec.get("id") or f"col_{idx}"))
+                worst = max(worst, -slack)
+    return FitReport(
+        fits=not failing,
+        deficit_pt=round(worst, 3),
+        block_ids=tuple(failing),
+        width_borrowed_pt=borrowed,
+    )
+
+
 def solve_page_2d(
     columns_records: Sequence[Sequence[dict[str, Any]]],
     *,
@@ -305,11 +409,14 @@ __all__ = [
     "CEILING_RATIO",
     "DEFAULT_EN_PER_ZH",
     "FLOOR_PT",
+    "FitReport",
     "MAX_BODY_PT",
     "PageLayoutSolution",
     "TOL_PT",
+    "apply_width_borrow",
     "check_source_overlap",
     "estimate_needed_height",
+    "fit_at_size",
     "fits_all",
     "resolve_local_overlaps",
     "solve_page_2d",

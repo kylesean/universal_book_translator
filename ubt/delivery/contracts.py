@@ -137,6 +137,9 @@ class DeliveryPlan(BaseModel):
     #: document-level routing pass; the render strategy fills it in.
     page_strategies: dict[int, PageStrategy] = Field(default_factory=dict)
     degrade_policy: DegradePolicy = DegradePolicy.FAIL
+    #: Whether a ``readable`` reflow companion copy should be emitted alongside
+    #: a ``faithful`` artifact (PRD §5.2).
+    companion_reflow: bool = False
     reasons: tuple[str, ...] = ()
     signals: DeliverySignals
 

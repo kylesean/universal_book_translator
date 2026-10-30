@@ -20,6 +20,7 @@ from rich.table import Table
 
 from ubt.cache.dirs import cache_root
 from ubt.core.config import UBTConfig, credential_required, has_real_credential
+from ubt.core.endpoint_locality import endpoint_on_this_machine
 from ubt.core.exceptions import DocumentParseError, UBTError
 from ubt.core.fs_perms import world_readable_files
 from ubt.core.job_options import default_output_dir_for_scan
@@ -133,6 +134,7 @@ CHECK_CODES: dict[str, tuple[str, ...]] = {
         "ocr_engine.sidecar",
         "ocr_engine.rapidocr",
         "ocr_engine.rapidocr_no_backend",
+        "ocr_engine.vision",
         "ocr_engine.vlm_ok",
         "ocr_engine.vlm_blocked",
         "ocr_engine.none",
@@ -955,24 +957,25 @@ def collect_checks(
             "Page images",
             "OK",
             "egress disabled (UBT_ALLOW_PAGE_UPLOAD=false): book pages never leave "
-            "this machine; cloud/vlm OCR refuses to start, visual repair degrades to text",
+            "this machine; cloud OCR refuses to start and local vision endpoints "
+            "(localhost) keep working, visual repair degrades to text",
             code="page_images",
             detail_code="page_images.disabled",
         )
     else:
         routes: list[str] = []
-        if config.ocr_mode == "vlm":
+        if config.ocr_mode == "cloud":
             routes.append(
                 f"OCR {config.ocr_mode} pages -> {config.ocr_endpoint or config.base_url}"
             )
         elif config.ocr_mode == "auto":
-            routes.append("OCR auto: local first, then VLM")
+            routes.append("OCR auto: local first, then cloud")
         if config.visual_judge_enabled:
             routes.append(f"VLM page judge -> {config.visual_judge_model or config.repair_model}")
         routes.append("visual scalpel page crops -> repair model (when vision-capable)")
         record(
             "Page images",
-            "WARN" if config.ocr_mode in ("vlm", "auto") or config.visual_judge_enabled else "OK",
+            "WARN" if config.ocr_mode in ("cloud", "auto") or config.visual_judge_enabled else "OK",
             "allowed; active routes: " + "; ".join(routes),
             fix="set UBT_ALLOW_PAGE_UPLOAD=false to keep pages local",
             code="page_images",
@@ -1138,12 +1141,26 @@ def collect_checks(
                 detail_code="ocr_engine.rapidocr_no_backend",
                 fix_code="ocr_engine.rapidocr_no_backend",
             )
-        elif config.ocr_mode == "vlm":
+        elif (
+            config.ocr_endpoint
+            and config.ocr_model
+            and endpoint_on_this_machine(config.ocr_endpoint)
+        ):
+            record(
+                "OCR engine",
+                "OK",
+                f"local vision endpoint {config.ocr_endpoint} ready "
+                f"(model {config.ocr_model}; no page egress)",
+                code="ocr_engine",
+                detail_code="ocr_engine.vision",
+                params={"mode": config.ocr_mode},
+            )
+        elif config.ocr_mode == "cloud":
             if config.allow_page_upload:
                 record(
                     "OCR engine",
                     "OK",
-                    "vlm egress enabled",
+                    "cloud vision egress enabled",
                     code="ocr_engine",
                     detail_code="ocr_engine.vlm_ok",
                     params={"mode": config.ocr_mode},
@@ -1152,8 +1169,8 @@ def collect_checks(
                 record(
                     "OCR engine",
                     "WARN",
-                    "ocr_mode='vlm' but allow_page_upload=False — scanned pages cannot egress",
-                    fix="enable page upload or install local rapidocr/sidecar",
+                    "ocr_mode='cloud' but allow_page_upload=False — scanned pages cannot egress",
+                    fix="enable page upload, pin a localhost vision endpoint, or install local rapidocr/sidecar",
                     code="ocr_engine",
                     detail_code="ocr_engine.vlm_blocked",
                     fix_code="ocr_engine.vlm_blocked",
@@ -1163,8 +1180,8 @@ def collect_checks(
             record(
                 "OCR engine",
                 "WARN",
-                "no local OCR engine operational (sidecar offline, rapidocr/onnxruntime not installed) — scanned PDFs will fail",
-                fix="uv sync --all-extras (or docker run -d -p 8765:8765 ubt-ocr-sidecar)",
+                "no local OCR engine operational (sidecar offline, rapidocr/onnxruntime not installed, no local vision endpoint) — scanned PDFs will fail",
+                fix="uv sync --all-extras, or set UBT_OCR_ENDPOINT+UBT_OCR_MODEL to a localhost vision server, or docker run -d -p 8765:8765 ubt-ocr-sidecar",
                 code="ocr_engine",
                 detail_code="ocr_engine.none",
                 fix_code="ocr_engine.none",

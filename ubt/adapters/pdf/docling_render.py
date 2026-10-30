@@ -309,6 +309,7 @@ class DoclingRenderStrategy:
         delivery_mode: str = "facsimile",
         enable_pdf_optimization: bool = True,
         pdf_optimize_profile: str = "lossless",
+        enable_cels: bool = True,
     ) -> None:
         self.font_family = font_family
         self.enable_layout_auto_heal = enable_layout_auto_heal
@@ -316,6 +317,7 @@ class DoclingRenderStrategy:
         self.delivery_mode = delivery_mode
         self.enable_pdf_optimization = enable_pdf_optimization
         self.pdf_optimize_profile = pdf_optimize_profile
+        self.enable_cels = enable_cels
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: Set from the resolved config by the adapter (``apply_config``).
         self.toc_mode = "auto"
@@ -554,10 +556,19 @@ class DoclingRenderStrategy:
         """Rebuild the document using 1:1 in-place facsimile (Canvas) rendering."""
         import pikepdf
 
+        from ubt.adapters.pdf.facsimile_plan import (
+            _right_edge_budgets,
+            build_page_fit_models,
+            exceptions_from_fit,
+            group_multi_region_boxes,
+            plan_facsimile_body_group,
+        )
         from ubt.adapters.pdf.strip_pdf_text import strip_text_streams
+        from ubt.core.ir.models import BoundingBox
+        from ubt.core.layout import Box, PageLayoutBlock, solve_page_cels
         from ubt.render.delivered_text import delivered_text
         from ubt.render.flow import approximate_measure, solve_flow
-        from ubt.render.layout_solver import solve_page_2d
+        from ubt.render.layout_solver import FitReport, fit_at_size, solve_page_2d
         from ubt.render.typst.artifact_guard import has_sentinel
         from ubt.render.typst.facsimile_renderer import (
             FacsimileBlockPlacement,
@@ -594,7 +605,21 @@ class DoclingRenderStrategy:
         # ``manifest.metadata["delivery_mode"]`` is rewritten to the mode that
         # actually ran: a report claiming ``facsimile`` over a reflow artefact is
         # worse than either, because it is unfalsifiable from the outside.
+        plan_meta = (
+            manifest.metadata.get("delivery_plan") if isinstance(manifest.metadata, dict) else None
+        )
+        is_explicit_non_legacy_faithful = (
+            isinstance(plan_meta, dict)
+            and plan_meta.get("contract") == "faithful"
+            and plan_meta.get("degrade_policy") == "fail"
+            and not bool(manifest.metadata.get("delivery_mode_legacy", True))
+        )
         if not source_path.exists() or source_path.suffix.lower() != ".pdf":
+            if is_explicit_non_legacy_faithful:
+                raise DocumentParseError(
+                    f"Faithful delivery contract requires source PDF ({source_path}), "
+                    "and degrade_policy='fail' forbids silent downgrade to reflow."
+                )
             logger.info(
                 "Delivery mode 'facsimile' needs the source PDF, which is %s; "
                 "delivering this book as 'reflow' instead (pass --delivery-mode reflow "
@@ -667,6 +692,10 @@ class DoclingRenderStrategy:
                     descend_forms=True,
                 )
             except Exception as exc:
+                if is_explicit_non_legacy_faithful:
+                    raise DocumentParseError(
+                        f"Failed to strip background text streams for faithful contract: {exc}"
+                    ) from exc
                 logger.warning(
                     "Failed to strip background text streams: %s; falling back to reflow", exc
                 )
@@ -697,18 +726,58 @@ class DoclingRenderStrategy:
         )
         manifest.metadata["document_style_profile"] = style_profile.to_metadata_dict()
 
+        # 4. One body size for the whole document (G4 Stage 3A). Decided here,
+        #    before the page loop, because the alternative — searching per page —
+        #    is exactly what produced the 2.29pt style drift: roomy pages climbed
+        #    to their ceiling while tight pages were pushed to the floor. The
+        #    plan is computed from page-level fit models; the per-page verdicts
+        #    inside the loop are the authority and replace any prediction that
+        #    disagrees (``replacing_exceptions``).
+        measured_by_page: dict[int, Any] = {
+            page_no: _page_metrics(source_path, page_no) for page_no in range(1, total_pages + 1)
+        }
+        body_metrics: dict[int, tuple[float, float]] = {}
+        for page_no, measured in measured_by_page.items():
+            if measured is None:
+                continue
+            pitch = measured.leading_pt / measured.size_pt if measured.size_pt > 0 else 1.348
+            body_metrics[page_no] = (round(measured.size_pt, 3), round(pitch, 3))
+        translatable_blocks = sum(
+            1
+            for block in blocks
+            if not block.skip_translate
+            and block.block_type not in (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE)
+            and (block.target_text or "").strip()
+        )
+        fit_models = build_page_fit_models(
+            blocks_by_page,
+            page_dims,
+            body_metrics,
+            total_pages=total_pages,
+        )
+        style_plan = plan_facsimile_body_group(fit_models, block_count=translatable_blocks)
+        body_group = style_plan.group
+        page_fits: dict[int, Any] = {}
+        l2_blocks_by_page: dict[int, list[IRBlock]] = {}
+
         for pno in range(1, total_pages + 1):
             pw, ph = page_dims[pno - 1] if pno <= len(page_dims) else (595.0, 842.0)
             page_blocks = blocks_by_page.get(pno, [])
             placements: list[FacsimileBlockPlacement] = []
+            page_l2_blocks: list[IRBlock] = []
 
-            metrics = _page_metrics(source_path, pno)
+            metrics = measured_by_page.get(pno)
             source_size_pt = metrics.size_pt if metrics else 9.0
             source_leading_pt = metrics.leading_pt if metrics else source_size_pt * 1.333
 
             records_by_column: dict[int, list[dict[str, Any]]] = {}
             obstacles_by_column: dict[int, list[float]] = {}
             page_preserved: list[IRBlock] = []
+            other_page_texts = [
+                (delivered_text(other) or other.source_text or "")
+                for other in page_blocks
+                if other.bbox and other.bbox.page == pno and not other.skip_translate
+            ]
 
             for b in page_blocks:
                 if not b.bbox:
@@ -751,6 +820,7 @@ class DoclingRenderStrategy:
                     # column (or full-width across both columns), so the solver's
                     # vertical glue must clamp at ``b.bbox.y1``.
                     page_preserved.append(b)
+                    page_l2_blocks.append(b)
                     if b.bbox.page == pno:
                         obs_top = float(b.bbox.y1)
                         if w > 0.65 * pw:
@@ -772,105 +842,111 @@ class DoclingRenderStrategy:
                 # flow text across those region containers. If all physical boxes are in the same
                 # column on the same page, they are consecutive lines within a single block and
                 # must not be split into line-by-line fragments.
-                if (
+                grouped_boxes = group_multi_region_boxes(b, pw)
+                if grouped_boxes is not None:
+                    if any(gbox.page == pno for gbox in grouped_boxes):
+                        eff_flow_size = block_size or body_group.size_pt
+                        eff_flow_leading = max(1.0, eff_flow_size * body_group.pitch)
+                        measure = approximate_measure(
+                            font_size_pt=eff_flow_size,
+                            leading_pt=eff_flow_leading,
+                        )
+                        flowed = solve_flow(target_content, grouped_boxes, measure)
+                        page_slice_texts: list[str] = []
+                        page_slice_boxes: list[tuple[float, float, float, float]] = []
+                        for fl_idx, fl_pl in enumerate(flowed):
+                            if fl_pl.box.page != pno or not fl_pl.text.strip():
+                                continue
+                            fl_text = fl_pl.text.strip()
+                            # Guard against LLM context over-translation on cross-page
+                            # continuations: if a continuation slice on a subsequent page
+                            # is already contained verbatim inside another block native to
+                            # this page, suppress the redundant continuation slice.
+                            if fl_idx > 0 and b.bbox.page != pno and len(fl_text) >= 12:
+                                norm_slice = "".join(fl_text.split())
+                                if any(
+                                    norm_slice in "".join(other_txt.split())
+                                    for other_txt in other_page_texts
+                                ):
+                                    continue
+                            fl_x0, fl_y0, fl_x1, fl_y1 = fl_pl.box.bbox
+                            fl_w = max(0.0, fl_x1 - fl_x0)
+                            fl_h = max(0.0, fl_y1 - fl_y0)
+                            if fl_w <= 0 or fl_h <= 0:
+                                continue
+                            page_slice_texts.append(fl_pl.text)
+                            page_slice_boxes.append((fl_x0, fl_y0, fl_x1, fl_y1))
+                            fl_mid_x = (fl_x0 + fl_x1) / 2.0
+                            fl_col = 0 if fl_w > 0.65 * pw or fl_mid_x < pw * 0.50 else 1
+                            fl_ascii = sum(1 for c in fl_pl.text if ord(c) < 128)
+                            fl_aspect = (len(fl_pl.text) - fl_ascii + fl_ascii * 0.50) / max(
+                                1, len(fl_pl.text)
+                            )
+                            records_by_column.setdefault(fl_col, []).append(
+                                {
+                                    "id": f"{b.id}_flow_{fl_idx}",
+                                    "top": fl_y1,
+                                    "bot": fl_y0,
+                                    "w": fl_w,
+                                    "x0": fl_x0,
+                                    "x1": fl_x1,
+                                    "n": max(1, round(fl_h / source_leading_pt)),
+                                    "glyphs": len(fl_pl.text.strip()),
+                                    "glyph_aspect": fl_aspect,
+                                }
+                            )
+                            placements.append(
+                                FacsimileBlockPlacement(
+                                    block_id=f"{b.id}_flow_{fl_idx}",
+                                    page=pno,
+                                    x0=fl_x0,
+                                    y0=fl_y0,
+                                    x1=fl_x1,
+                                    y1=fl_y1,
+                                    text=fl_pl.text,
+                                    is_heading=is_hdr,
+                                    heading_level=getattr(b.element, "level", 1) if is_hdr else 1,
+                                    text_color_hex=color,
+                                    font_weight=weight,
+                                    font_size_pt=block_size,
+                                )
+                            )
+                        if page_slice_texts and page_slice_boxes:
+                            sx0 = min(bx[0] for bx in page_slice_boxes)
+                            sy0 = min(bx[1] for bx in page_slice_boxes)
+                            sx1 = max(bx[2] for bx in page_slice_boxes)
+                            sy1 = max(bx[3] for bx in page_slice_boxes)
+                            joined_slice = "".join(page_slice_texts)
+                            page_l2_blocks.append(
+                                b.model_copy(
+                                    update={
+                                        "target_text": joined_slice,
+                                        "draft_text": joined_slice,
+                                        "bbox": BoundingBox(
+                                            page=pno, x0=sx0, y0=sy0, x1=sx1, y1=sy1
+                                        ),
+                                    }
+                                )
+                            )
+                        continue
+                elif (
                     b.provenance
                     and b.provenance.physical_boxes
                     and len(b.provenance.physical_boxes) > 1
                 ):
-                    from ubt.model.span import PhysicalBox, boxes_from_provenance
+                    from ubt.model.span import boxes_from_provenance
 
                     raw_boxes = boxes_from_provenance(b.provenance.physical_boxes)
+                    same_page_boxes = [bx for bx in raw_boxes if bx.page == pno]
+                    if same_page_boxes:
+                        bx0 = min(float(bx.bbox[0]) for bx in same_page_boxes)
+                        by0 = min(float(bx.bbox[1]) for bx in same_page_boxes)
+                        bx1 = max(float(bx.bbox[2]) for bx in same_page_boxes)
+                        by1 = max(float(bx.bbox[3]) for bx in same_page_boxes)
+                        w = max(0.0, bx1 - bx0)
+                        h = max(0.0, by1 - by0)
 
-                    distinct_regions = {_physical_box_region(bx, pw) for bx in raw_boxes}
-                    if len(distinct_regions) > 1:
-                        grouped_boxes: list[PhysicalBox] = []
-                        curr_reg = None
-                        curr_page = 0
-                        ux0, uy0, ux1, uy1 = 0.0, 0.0, 0.0, 0.0
-                        for bx in raw_boxes:
-                            reg = _physical_box_region(bx, pw)
-                            if reg != curr_reg:
-                                if curr_reg is not None:
-                                    grouped_boxes.append(
-                                        PhysicalBox.of(curr_page, (ux0, uy0, ux1, uy1))
-                                    )
-                                curr_reg = reg
-                                curr_page = int(bx.page)
-                                ux0, uy0, ux1, uy1 = (
-                                    float(bx.bbox[0]),
-                                    float(bx.bbox[1]),
-                                    float(bx.bbox[2]),
-                                    float(bx.bbox[3]),
-                                )
-                            else:
-                                ux0 = min(ux0, float(bx.bbox[0]))
-                                uy0 = min(uy0, float(bx.bbox[1]))
-                                ux1 = max(ux1, float(bx.bbox[2]))
-                                uy1 = max(uy1, float(bx.bbox[3]))
-                        if curr_reg is not None:
-                            grouped_boxes.append(PhysicalBox.of(curr_page, (ux0, uy0, ux1, uy1)))
-
-                        if any(gbox.page == pno for gbox in grouped_boxes):
-                            measure = approximate_measure(
-                                font_size_pt=block_size or source_size_pt,
-                                leading_pt=source_leading_pt,
-                            )
-                            flowed = solve_flow(target_content, grouped_boxes, measure)
-                            for fl_idx, fl_pl in enumerate(flowed):
-                                if fl_pl.box.page != pno or not fl_pl.text.strip():
-                                    continue
-                                fl_x0, fl_y0, fl_x1, fl_y1 = fl_pl.box.bbox
-                                fl_w = max(0.0, fl_x1 - fl_x0)
-                                fl_h = max(0.0, fl_y1 - fl_y0)
-                                if fl_w <= 0 or fl_h <= 0:
-                                    continue
-                                fl_mid_x = (fl_x0 + fl_x1) / 2.0
-                                fl_col = 0 if fl_w > 0.65 * pw or fl_mid_x < pw * 0.50 else 1
-                                fl_ascii = sum(1 for c in fl_pl.text if ord(c) < 128)
-                                fl_aspect = (len(fl_pl.text) - fl_ascii + fl_ascii * 0.50) / max(
-                                    1, len(fl_pl.text)
-                                )
-                                records_by_column.setdefault(fl_col, []).append(
-                                    {
-                                        "id": f"{b.id}_flow_{fl_idx}",
-                                        "top": fl_y1,
-                                        "bot": fl_y0,
-                                        "w": fl_w,
-                                        "x0": fl_x0,
-                                        "x1": fl_x1,
-                                        "n": max(1, round(fl_h / source_leading_pt)),
-                                        "glyphs": len(fl_pl.text.strip()),
-                                        "glyph_aspect": fl_aspect,
-                                    }
-                                )
-                                placements.append(
-                                    FacsimileBlockPlacement(
-                                        block_id=f"{b.id}_flow_{fl_idx}",
-                                        page=pno,
-                                        x0=fl_x0,
-                                        y0=fl_y0,
-                                        x1=fl_x1,
-                                        y1=fl_y1,
-                                        text=fl_pl.text,
-                                        is_heading=is_hdr,
-                                        heading_level=getattr(b.element, "level", 1)
-                                        if is_hdr
-                                        else 1,
-                                        text_color_hex=color,
-                                        font_weight=weight,
-                                        font_size_pt=block_size,
-                                    )
-                                )
-                            continue
-                    else:
-                        same_page_boxes = [bx for bx in raw_boxes if bx.page == pno]
-                        if same_page_boxes:
-                            bx0 = min(float(bx.bbox[0]) for bx in same_page_boxes)
-                            by0 = min(float(bx.bbox[1]) for bx in same_page_boxes)
-                            bx1 = max(float(bx.bbox[2]) for bx in same_page_boxes)
-                            by1 = max(float(bx.bbox[3]) for bx in same_page_boxes)
-                            w = max(0.0, bx1 - bx0)
-                            h = max(0.0, by1 - by0)
+                page_l2_blocks.append(b)
 
                 # Heading font size scaling: ensure multi-line heading fits in its allocated vertical box
                 if is_hdr and block_size:
@@ -943,24 +1019,112 @@ class DoclingRenderStrategy:
                     if below_obs:
                         rec["obstacle_top"] = max(below_obs)
 
-            columns = [
-                sorted(records_by_column[k], key=lambda r: float(r["top"]), reverse=True)
-                for k in sorted(records_by_column)
-            ] or [[]]
+            columns: list[list[dict[str, Any]]] = []
+            for k in sorted(records_by_column):
+                col_sorted = sorted(
+                    records_by_column[k], key=lambda r: float(r["top"]), reverse=True
+                )
+                _right_edge_budgets(col_sorted)
+                columns.append(col_sorted)
+            if not columns:
+                columns = [[]]
+            l2_blocks_by_page[pno] = list(page_l2_blocks)
             sol = solve_page_2d(
                 columns,
                 source_size_pt=source_size_pt,
                 source_leading_pt=source_leading_pt,
             )
+            # The per-page search above still runs, but only for the signals the
+            # group cannot provide: whether the page's own source boxes overlap
+            # (that is what forces page-locked reflow) and which segments are the
+            # bottlenecks (the container-repair trigger). The *size* is not its
+            # decision any more.
+            page_fit = fit_at_size(
+                columns,
+                size_pt=body_group.size_pt,
+                pitch=body_group.pitch,
+                tracking_em=body_group.tracking_em,
+                width_borrow_pt=body_group.width_borrow_pt,
+            )
+            page_fits[pno] = page_fit
 
-            # If layout failed to fit due to only 1-2 bottleneck containers (and no source overlap),
+            # CELS layout coordinator & distortion check (optional via self.enable_cels)
+            cels_sol = None
+            if self.enable_cels:
+                cels_blocks: list[PageLayoutBlock] = []
+                for pb in page_preserved:
+                    if not pb.bbox:
+                        continue
+                    pbx0 = min(float(pb.bbox.x0), float(pb.bbox.x1))
+                    pbx1 = max(float(pb.bbox.x0), float(pb.bbox.x1))
+                    pby0 = min(float(pb.bbox.y0), float(pb.bbox.y1))
+                    pby1 = max(float(pb.bbox.y0), float(pb.bbox.y1))
+                    if pbx1 > pbx0 and pby1 > pby0:
+                        cels_blocks.append(
+                            PageLayoutBlock(
+                                block_id=pb.id,
+                                box=Box(x0=pbx0, y0=pby0, x1=pbx1, y1=pby1),
+                                text=pb.source_text or "",
+                                source_font_size_pt=source_size_pt,
+                                required_height_pt=pby1 - pby0,
+                                is_pinned=True,
+                            )
+                        )
+                for pl in placements:
+                    pl_w = pl.x1 - pl.x0
+                    pl_h = pl.y1 - pl.y0
+                    if pl_w <= 0.0 or pl_h <= 0.0 or pl.skip_render:
+                        continue
+                    cels_blocks.append(
+                        PageLayoutBlock(
+                            block_id=pl.block_id,
+                            box=Box(x0=pl.x0, y0=pl.y0, x1=pl.x1, y1=pl.y1),
+                            text=pl.text,
+                            source_font_size_pt=pl.font_size_pt or source_size_pt,
+                            required_height_pt=pl_h,
+                            is_pinned=False,
+                        )
+                    )
+
+                if cels_blocks:
+                    all_x0 = min(blk.box.x0 for blk in cels_blocks)
+                    all_x1 = max(blk.box.x1 for blk in cels_blocks)
+                    all_y0 = min(blk.box.y0 for blk in cels_blocks)
+                    all_y1 = max(blk.box.y1 for blk in cels_blocks)
+                    margin_x = 36.0
+                    margin_y = 36.0
+                    printable_box = Box(
+                        x0=max(0.0, min(margin_x, all_x0)),
+                        y0=max(0.0, min(margin_y, all_y0)),
+                        x1=min(pw, max(pw - margin_x, all_x1)),
+                        y1=min(ph, max(ph - margin_y, all_y1)),
+                    )
+                else:
+                    printable_box = Box(
+                        x0=36.0, y0=36.0, x1=max(46.0, pw - 36.0), y1=max(46.0, ph - 36.0)
+                    )
+
+                cels_sol = solve_page_cels(
+                    page_no=pno,
+                    blocks=cels_blocks,
+                    page_width=pw,
+                    page_height=ph,
+                    printable_box=printable_box,
+                    source_body_size_pt=source_size_pt,
+                    realized_body_size_pt=body_group.size_pt,
+                    target_lang=target_lang,
+                )
+
+            # If layout failed to fit due to bottleneck containers,
             # attempt controlled concise repair before falling back to L2
             # (docs/design/adaptive_delivery_prd.md §8.6; old §6.2).
             if (
                 not is_pure_page_locked
-                and not sol.fits
+                and (
+                    not page_fit.fits
+                    or (cels_sol is not None and cels_sol.requires_llm_condensation)
+                )
                 and not sol.source_overlap
-                and 1 <= len(sol.bottleneck_seg_ids) <= 2
             ):
                 import dataclasses
 
@@ -975,26 +1139,37 @@ class DoclingRenderStrategy:
                 placement_by_id = {plc.block_id: plc for plc in placements}
 
                 fit_specs: list[ContainerFitSpec] = []
-                for b_id in sol.bottleneck_seg_ids:
-                    r = rec_by_id.get(b_id)
-                    plc = placement_by_id.get(b_id)
-                    if not r or not plc:
-                        continue
-                    budget = compute_container_char_budget(
-                        container_width_pt=float(r["w"]),
-                        max_lines=max(1, int(r.get("n", 1))),
-                        floor_pt=7.5,
-                        target_lang=target_lang,
-                    )
-                    nums = extract_locked_numbers(plc.text)
-                    fit_specs.append(
-                        ContainerFitSpec(
-                            seg_id=b_id,
-                            current_translation=plc.text,
-                            max_target_chars=budget,
-                            locked_numbers=nums,
+                if (
+                    cels_sol is not None
+                    and cels_sol.requires_llm_condensation
+                    and cels_sol.stage4_requests
+                ):
+                    fit_specs.extend(cels_sol.to_container_fit_specs())
+                elif 1 <= len(sol.bottleneck_seg_ids) <= 2:
+                    for b_id in sol.bottleneck_seg_ids:
+                        r = rec_by_id.get(b_id)
+                        plc = placement_by_id.get(b_id)
+                        if not r or not plc:
+                            continue
+                        budget = compute_container_char_budget(
+                            container_width_pt=float(r["w"]),
+                            max_lines=max(1, int(r.get("n", 1))),
+                            # The budget targets the group size, not the global floor:
+                            # a repair sized for 7.5pt produces text the page cannot
+                            # hold at 9pt, so the "rescue" would only fit a size this
+                            # page is no longer allowed to use (G4 Stage 3A).
+                            floor_pt=body_group.size_pt,
+                            target_lang=target_lang,
                         )
-                    )
+                        nums = extract_locked_numbers(plc.text)
+                        fit_specs.append(
+                            ContainerFitSpec(
+                                seg_id=b_id,
+                                current_translation=plc.text,
+                                max_target_chars=budget,
+                                locked_numbers=nums,
+                            )
+                        )
 
                 if fit_specs:
                     repaired_texts = repair_bottleneck_containers(
@@ -1016,6 +1191,35 @@ class DoclingRenderStrategy:
                             source_size_pt=source_size_pt,
                             source_leading_pt=source_leading_pt,
                         )
+                        page_fit = fit_at_size(
+                            columns,
+                            size_pt=body_group.size_pt,
+                            pitch=body_group.pitch,
+                            tracking_em=body_group.tracking_em,
+                            width_borrow_pt=body_group.width_borrow_pt,
+                        )
+                        page_fits[pno] = page_fit
+                        cels_blocks_repaired = [
+                            PageLayoutBlock(
+                                block_id=b_cels.block_id,
+                                box=b_cels.box,
+                                text=repaired_texts.get(b_cels.block_id, b_cels.text),
+                                source_font_size_pt=b_cels.source_font_size_pt,
+                                required_height_pt=b_cels.required_height_pt,
+                                is_pinned=b_cels.is_pinned,
+                            )
+                            for b_cels in cels_blocks
+                        ]
+                        cels_sol = solve_page_cels(
+                            page_no=pno,
+                            blocks=cels_blocks_repaired,
+                            page_width=pw,
+                            page_height=ph,
+                            printable_box=printable_box,
+                            source_body_size_pt=source_size_pt,
+                            realized_body_size_pt=body_group.size_pt,
+                            target_lang=target_lang,
+                        )
                         for rep_id in repaired_texts:
                             render_flags.append((rep_id, "container_fit_repaired"))
                         repaired_meta = manifest.metadata.setdefault(
@@ -1024,12 +1228,41 @@ class DoclingRenderStrategy:
                         if isinstance(repaired_meta, list):
                             repaired_meta.extend(repaired_texts.keys())
 
+            # L2 is a *placement* strategy, not a different style: a page goes
+            # there when its own boxes cannot hold the group size, or when its
+            # source geometry overlaps, or when CELS distortion exceeds tolerance.
+            # Its body size then starts from the group size (``preferred_pt``) and
+            # only drops below it if the content genuinely does not fit.
+            cels_distortion_critical = (
+                (cels_sol.distortion.is_critical or cels_sol.distortion.score >= 0.15)
+                if cels_sol is not None
+                else False
+            )
             use_l2 = (
                 is_pure_page_locked
-                or sol.delivery_tier == "L2"
                 or sol.source_overlap
-                or (not sol.fits and sol.uniform_size_pt <= 7.5)
+                or not page_fit.fits
+                or cels_distortion_critical
             )
+
+            if not use_l2 and cels_sol is not None and cels_sol.solved_blocks_by_id:
+                solved_map = cels_sol.solved_blocks_by_id
+                import dataclasses
+
+                relaxed_placements: list[FacsimileBlockPlacement] = []
+                for pl in placements:
+                    spec = solved_map.get(pl.block_id)
+                    if spec is not None and spec.height_pt > 0:
+                        relaxed_placements.append(
+                            dataclasses.replace(
+                                pl,
+                                y0=round(spec.y_bottom_pt, 2),
+                                y1=round(spec.y_top_pt, 2),
+                            )
+                        )
+                    else:
+                        relaxed_placements.append(pl)
+                placements = relaxed_placements
 
             preserved_by_page[pno] = list(page_preserved)
             if use_l2:
@@ -1045,10 +1278,13 @@ class DoclingRenderStrategy:
                     elif pb.skip_translate:
                         skipped.append((pb.id, "skip_translate"))
                 geom = extract_page_geometry(
-                    pw, ph, page_blocks, default_theme_color=style_profile.primary_heading_hex
+                    pw, ph, page_l2_blocks, default_theme_color=style_profile.primary_heading_hex
                 )
                 l2_size, l2_leading, l2_spacing, l2_tracking = solve_page_lock(
-                    geom, page_blocks, target_lang=target_lang
+                    geom,
+                    page_l2_blocks,
+                    target_lang=target_lang,
+                    preferred_pt=body_group.size_pt,
                 )
                 l2_page = PageLockedPageSpec(
                     page_no=pno,
@@ -1057,7 +1293,7 @@ class DoclingRenderStrategy:
                     leading_em=l2_leading,
                     par_spacing_em=l2_spacing,
                     tracking_em=l2_tracking,
-                    blocks=page_blocks,
+                    blocks=page_l2_blocks,
                 )
                 pages_spec.append(
                     FacsimilePageSpec(
@@ -1072,6 +1308,23 @@ class DoclingRenderStrategy:
                         l2_spec=l2_page,
                     )
                 )
+                if l2_size < body_group.size_pt - 0.01:
+                    # The page-locked reflow is the last placement strategy, and
+                    # it had to go under the group to hold this page. That is a
+                    # style exception with its own reason: the page is readable,
+                    # the group is broken, and only Stage 4 can close it.
+                    page_fits[pno] = FitReport(
+                        fits=False,
+                        deficit_pt=round(body_group.size_pt - l2_size, 3),
+                        block_ids=(f"page:{pno}",),
+                        reason="l2_shrink",
+                    )
+                else:
+                    # L2 held the group size. The L1 verdict above said the page's
+                    # fixed boxes could not, but that verdict is superseded: the
+                    # page ships at the group size, so it is a member in good
+                    # standing and must not be reported as an exception.
+                    page_fits[pno] = FitReport(fits=True, reason="l2_holds")
                 page_geometry.append(
                     {
                         "page_no": pno,
@@ -1083,7 +1336,21 @@ class DoclingRenderStrategy:
                         "delivered_leading_em": round(l2_leading, 4),
                         "tracking_em": round(l2_tracking, 4),
                         "tier": "L2",
-                        "fits": bool(sol.fits),
+                        "fits": bool(page_fits[pno].fits),
+                        "style_group_id": body_group.group_id,
+                        "style_group_size_pt": round(body_group.size_pt, 3),
+                        "style_exception": not page_fits[pno].fits,
+                        **(
+                            {
+                                "cels_distortion_score": round(cels_sol.distortion.score, 4),
+                                "cels_distortion_verdict": cels_sol.distortion.verdict,
+                                "cels_is_multicolumn": cels_sol.detection.is_multicolumn,
+                                "cels_track_count": len(cels_sol.track_solutions),
+                                "cels_deficit_pt": round(cels_sol.total_deficit_pt, 3),
+                            }
+                            if cels_sol is not None
+                            else {"cels_enabled": False}
+                        ),
                     }
                 )
             else:
@@ -1094,9 +1361,9 @@ class DoclingRenderStrategy:
                         page_no=pno,
                         page_w=round(pw, 2),
                         page_h=round(ph, 2),
-                        uniform_size_pt=sol.uniform_size_pt,
-                        leading_em=sol.leading_em,
-                        tracking_em=sol.tracking_em,
+                        uniform_size_pt=body_group.size_pt,
+                        leading_em=body_group.leading_em,
+                        tracking_em=body_group.tracking_em,
                         placements=placements,
                         tier="L1",
                     )
@@ -1108,13 +1375,34 @@ class DoclingRenderStrategy:
                         "page_h_pt": round(ph, 2),
                         "measured_size_pt": round(source_size_pt, 3),
                         "measured_leading_pt": round(source_leading_pt, 3),
-                        "delivered_size_pt": round(sol.uniform_size_pt, 3),
-                        "delivered_leading_em": round(sol.leading_em, 4),
-                        "tracking_em": round(sol.tracking_em, 4),
+                        "delivered_size_pt": round(body_group.size_pt, 3),
+                        "delivered_leading_em": body_group.leading_em,
+                        "tracking_em": round(body_group.tracking_em, 4),
                         "tier": "L1",
-                        "fits": bool(sol.fits),
+                        "fits": bool(page_fit.fits),
+                        "style_group_id": body_group.group_id,
+                        "style_group_size_pt": round(body_group.size_pt, 3),
+                        "style_exception": not page_fit.fits,
+                        **(
+                            {
+                                "cels_distortion_score": round(cels_sol.distortion.score, 4),
+                                "cels_distortion_verdict": cels_sol.distortion.verdict,
+                                "cels_is_multicolumn": cels_sol.detection.is_multicolumn,
+                                "cels_track_count": len(cels_sol.track_solutions),
+                                "cels_deficit_pt": round(cels_sol.total_deficit_pt, 3),
+                            }
+                            if cels_sol is not None
+                            else {"cels_enabled": False}
+                        ),
                     }
                 )
+                if not page_fit.fits:  # pragma: no cover - routed to L2 above
+                    logger.warning(
+                        "Page %s holds the body group only with %spt deficit; "
+                        "recording it as a style exception",
+                        pno,
+                        page_fit.deficit_pt,
+                    )
 
         # The transpile gate, same contract as ``_render_publish_sync`` above:
         # both facsimile channels now route their text through ``render_prose``,
@@ -1215,7 +1503,7 @@ class DoclingRenderStrategy:
                         if idx < 0 or idx >= len(pages_spec):
                             continue
                         old_spec = pages_spec[idx]
-                        page_blocks = blocks_by_page.get(pno, [])
+                        page_blocks = l2_blocks_by_page.get(pno, blocks_by_page.get(pno, []))
                         pw, ph = old_spec.page_w, old_spec.page_h
                         geom = extract_page_geometry(
                             pw,
@@ -1224,7 +1512,10 @@ class DoclingRenderStrategy:
                             default_theme_color=style_profile.primary_heading_hex,
                         )
                         l2_size, l2_leading, l2_spacing, l2_tracking = solve_page_lock(
-                            geom, page_blocks, target_lang=target_lang
+                            geom,
+                            page_blocks,
+                            target_lang=target_lang,
+                            preferred_pt=body_group.size_pt,
                         )
                         l2_page = PageLockedPageSpec(
                             page_no=pno,
@@ -1253,7 +1544,15 @@ class DoclingRenderStrategy:
                                     "delivered_leading_em": round(l2_leading, 4),
                                     "tracking_em": round(l2_tracking, 4),
                                     "tier": "L2",
+                                    "style_exception": l2_size < body_group.size_pt - 0.01,
                                 }
+                            )
+                        if l2_size < body_group.size_pt - 0.01:
+                            page_fits[pno] = FitReport(
+                                fits=False,
+                                deficit_pt=round(body_group.size_pt - l2_size, 3),
+                                block_ids=(f"page:{pno}",),
+                                reason="l2_shrink",
                             )
                         for pb in preserved_by_page.get(pno, []):
                             pair_opaque = (pb.id, "facsimile_preserved_opaque")
@@ -1303,6 +1602,25 @@ class DoclingRenderStrategy:
         self.last_render_flags = render_flags
         self.last_render_reconstructions = reconstructions
         self.last_page_geometry = page_geometry
+
+        # Close the group record with the renderer's own verdicts — after the
+        # ink-collision reroute, because an auto-upgraded L2 page can still come
+        # out below the group size. The planner predicted exceptions from a
+        # cheaper model; these are the pages that actually missed. Membership
+        # still comes from the plan (group id, declared pages); only the numbers
+        # are replaced, never the other way round.
+        rendered_plan = style_plan.replacing_exceptions(
+            exceptions_from_fit(page_fits, rung=body_group.rung)
+        )
+        manifest.metadata["document_style_group"] = rendered_plan.to_metadata_dict()
+        if rendered_plan.exceptions:
+            logger.warning(
+                "Body group %spt (rung %s): %d page(s) declared as style exceptions (%s)",
+                body_group.size_pt,
+                body_group.rung,
+                len(rendered_plan.exceptions),
+                sorted(rendered_plan.exception_pages),
+            )
 
         # Miniaturization & lossless stream compression pass
         if getattr(self, "enable_pdf_optimization", True) and output_path.exists():

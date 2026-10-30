@@ -264,6 +264,17 @@ def test_collect_kpis_records_the_job_block() -> None:
     assert kpis.job["typst_version"] == ""  # None folds to empty string
 
 
+def test_collect_kpis_render_preserved_rate_is_bounded_in_zero_one() -> None:
+    """When preserved_blocks > total_blocks (translatable blocks),
+    render_preserved_rate must divide by total_blocks + preserved_blocks so the
+    rate never exceeds 1.0 (regression for 146 / 105 = 1.3904).
+    """
+    kpis = collect_kpis(_report(total_blocks=105, preserved_blocks=146))
+    rate = kpis.kpis["render_preserved_rate"]
+    assert 0.0 <= rate <= 1.0
+    assert rate == pytest.approx(146 / (105 + 146))
+
+
 # --------------------------------------------------------------------------- #
 # Persistence
 # --------------------------------------------------------------------------- #

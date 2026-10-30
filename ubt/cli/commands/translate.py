@@ -701,6 +701,25 @@ def translate(
             show_default=False,
         ),
     ] = None,
+    allow_major: Annotated[
+        bool | None,
+        typer.Option(
+            "--allow-major/--no-allow-major",
+            help=(
+                "Permit delivery when the artifact contract reports 'major' findings "
+                "(e.g. style_drift or overflow_recorded) with 0 critical findings"
+            ),
+            show_default=False,
+        ),
+    ] = None,
+    enable_cels: Annotated[
+        bool | None,
+        typer.Option(
+            "--enable-cels/--no-enable-cels",
+            help="Enable CELS layout synthesis (pass --no-enable-cels to rollback to legacy 2D packing)",
+            show_default=False,
+        ),
+    ] = None,
     dynamic_routing: Annotated[
         bool,
         typer.Option(
@@ -734,7 +753,7 @@ def translate(
         OcrMode | None,
         typer.Option(
             "--ocr",
-            help="Pluggable OCR mode: 'auto' (local first, then VLM), 'local' (measured-box engine on this machine), 'vlm' (vision LLM, needs UBT_ALLOW_PAGE_UPLOAD=true for remote endpoints), or 'off'. Unset follows config/UBT_OCR_MODE",
+            help="Pluggable OCR mode: 'auto' (best local engine first, then cloud), 'local' (never ships a page off this machine: rapidocr, a sidecar, or a localhost vision endpoint via --ocr-endpoint), 'cloud' (remote vision endpoint, needs UBT_ALLOW_PAGE_UPLOAD=true), or 'off'. Unset follows config/UBT_OCR_MODE",
             show_default=False,
         ),
     ] = None,
@@ -843,6 +862,8 @@ def translate(
             facsimile=facsimile, page_locked=page_locked, delivery_mode=delivery_mode
         ),
         "allow_degrade": allow_degrade,
+        "allow_major": allow_major,
+        "enable_cels": enable_cels,
         "enable_dynamic_routing": dynamic_routing,
         "flagship_model": flagship_model,
         "budget_model": budget_model,

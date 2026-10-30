@@ -85,6 +85,14 @@ class AdapterRuntimeConfig:
     #: VLM judge). Carried here so the adapter reads the resolved config value
     #: instead of re-deriving it from the environment — one gate, one source.
     allow_page_upload: bool
+    #: How eagerly the VLM fallback reads pages on top of the text layer
+    #: (``off`` / ``missing`` / ``weak`` / ``all``). Owned by
+    #: ``UBTConfig.ocr_fallback`` and carried here for the same one-knob-one-
+    #: source reason as the other OCR fields: the adapter passes the resolved
+    #: value down to the parser instead of the parser re-reading an env var.
+    #: Declared after ``allow_page_upload`` because a defaulted field may not
+    #: precede a required one; the value and its default are unchanged.
+    ocr_fallback: str = "off"
     #: Content-addressed step cache root (content-addressed cache layer). Empty disables it;
     #: the adapter builds a store from it for the render path's pixel witnesses.
     cache_dir: str = ""
@@ -100,6 +108,9 @@ class AdapterRuntimeConfig:
     #: Enable PDF size miniaturization and lossless stream compression.
     enable_pdf_optimization: bool = True
     pdf_optimize_profile: str = "lossless"
+    #: Enable CELS (Constraint-Enforced Layout Synthesis) in facsimile rendering.
+    #: If False, rolls back to legacy 2D packing facsimile placement.
+    enable_cels: bool = True
 
 
 def adapter_runtime_config(config: Any, *, delivery_mode: str) -> AdapterRuntimeConfig:
@@ -116,6 +127,7 @@ def adapter_runtime_config(config: Any, *, delivery_mode: str) -> AdapterRuntime
         ocr_endpoint=config.ocr_endpoint,
         ocr_api_key=config.ocr_api_key.get_secret_value(),
         ocr_model=config.ocr_model,
+        ocr_fallback=getattr(config, "ocr_fallback", "off"),
         formula_enrichment=config.formula_enrichment,
         docling_device=config.docling_device,
         formula_crop_margin=config.formula_crop_margin,
@@ -129,6 +141,7 @@ def adapter_runtime_config(config: Any, *, delivery_mode: str) -> AdapterRuntime
         delivery_mode=delivery_mode,
         enable_pdf_optimization=config.enable_pdf_optimization,
         pdf_optimize_profile=config.pdf_optimize_profile,
+        enable_cels=getattr(config, "enable_cels", True),
     )
 
 
@@ -215,6 +228,18 @@ def get_visual_gate_runner() -> VisualGateRunnerFn:
     from ubt.adapters.pdf.visual_gate import run_visual_gate
 
     return cast(VisualGateRunnerFn, run_visual_gate)
+
+
+def vision_ocr_driver(endpoint: str, api_key: str | None, model: str) -> Any:
+    """Build an OpenAI-compatible vision OCR driver (the engine's one vision endpoint).
+
+    The visual judge's local fallback shares the OCR channel's endpoint, so the
+    loop reaches the driver class through this bridge like every other
+    core→adapters crossing.
+    """
+    from ubt.adapters.pdf.vlm.drivers.cloud_driver import VisionEndpointDriver
+
+    return VisionEndpointDriver(endpoint=endpoint, api_key=api_key, model=model)
 
 
 def crashed_visual_gate_result(message: str) -> VisualGateResult:

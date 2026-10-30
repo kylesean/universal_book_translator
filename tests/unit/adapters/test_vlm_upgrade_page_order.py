@@ -53,7 +53,7 @@ def test_a_leading_table_keeps_its_place_when_the_page_is_upgraded() -> None:
             "ubt.adapters.pdf.vlm.transcribe.transcribe_page_to_blocks",
             return_value=([fresh], stats),
         ),
-        patch.dict("os.environ", {"UBT_VLM_SCAN_FALLBACK": "weak"}),
+        patch.dict("os.environ", {"UBT_OCR_FALLBACK": "weak"}),
     ):
         result = vlm_fallback_missing_pages(
             Path("scan.pdf"),

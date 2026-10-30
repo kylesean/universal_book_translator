@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from ubt.adapters.pdf.textgeom import extract_lines
@@ -29,8 +30,10 @@ from ubt.delivery.measurement import (
     LineBox,
     MeasuredBlock,
     MeasurementError,
+    MeasurementRequest,
     MeasurementStyle,
 )
+from ubt.render.typst.document_renderer import render_prose
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +48,15 @@ _OVERFLOW_OVERHANG_EM = 0.5
 
 
 class TypstMeasurementService:
-    """Measure a block by compiling the smallest Typst document that holds it."""
+    """Measure one or more blocks by compiling real Typst prose and math."""
 
     def __init__(self, *, binary: str = "typst", timeout: float = 30.0) -> None:
         self._binary = binary
         self._timeout = timeout
-        self._cache = CachedMeasurementService(self._measure_uncached)
+        self._cache = CachedMeasurementService(
+            self._measure_uncached,
+            batch_delegate=self._measure_many_uncached,
+        )
 
     @property
     def cache_size(self) -> int:
@@ -67,6 +73,13 @@ class TypstMeasurementService:
         width_pt: float,
     ) -> MeasuredBlock:
         return self._cache.measure_block(text, style, width_pt)
+
+    def measure_many(
+        self,
+        requests: Sequence[MeasurementRequest],
+    ) -> list[MeasuredBlock]:
+        """Measure multiple blocks in a single batched Typst compile pass."""
+        return self._cache.measure_many(requests)
 
     def _measure_uncached(
         self, text: str, style: MeasurementStyle, width_pt: float
@@ -98,26 +111,83 @@ class TypstMeasurementService:
             if not ok:
                 raise MeasurementError(f"Typst measurement compile failed: {stderr}")
             lines, _page_size = extract_lines(pdf_path, 1)
+        return self._measured_from_lines(lines, style, width_pt)
+
+    def _measure_many_uncached(self, requests: Sequence[MeasurementRequest]) -> list[MeasuredBlock]:
+        for req in requests:
+            if abs(req.style.horizontal_scale - 1.0) > 1e-6:
+                raise MeasurementError(
+                    "horizontal_scale is not supported by the Typst probe; "
+                    "use 1.0 until a shaping-backed measurement lands"
+                )
+        non_empty_indices = [i for i, req in enumerate(requests) if req.text.strip()]
+        if not non_empty_indices:
+            return [MeasuredBlock(height_pt=0.0, line_count=0, measurement_id="") for _ in requests]
+        if not typst_available(self._binary):
+            raise MeasurementError(
+                f"Typst compiler binary {self._binary!r} is not available; "
+                "cannot produce a real measurement"
+            )
+        pages_src = [
+            self._probe_page_source(requests[i].text, requests[i].style, requests[i].width_pt)
+            for i in non_empty_indices
+        ]
+        source = "\n#pagebreak(weak: false)\n".join(pages_src) + "\n"
+        lang = requests[non_empty_indices[0]].style.language
+        results_by_idx: dict[int, MeasuredBlock] = {}
+        with tempfile.TemporaryDirectory(prefix="ubt_measure_batch_") as tmp:
+            typ_path = Path(tmp) / "probe_batch.typ"
+            pdf_path = Path(tmp) / "probe_batch.pdf"
+            typ_path.write_text(source, encoding="utf-8")
+            ok, stderr = typst_compile(
+                str(typ_path),
+                str(pdf_path),
+                binary=self._binary,
+                timeout=max(self._timeout, 0.5 * len(non_empty_indices)),
+                target_lang=lang,
+            )
+            if not ok:
+                # Bisect/fallback to single-block compilation if one block's markup
+                # broke the batch compile.
+                for idx in non_empty_indices:
+                    req = requests[idx]
+                    results_by_idx[idx] = self._measure_uncached(req.text, req.style, req.width_pt)
+            else:
+                for page_no, idx in enumerate(non_empty_indices, start=1):
+                    req = requests[idx]
+                    lines, _page_size = extract_lines(pdf_path, page_no)
+                    results_by_idx[idx] = self._measured_from_lines(lines, req.style, req.width_pt)
+        return [
+            results_by_idx.get(i, MeasuredBlock(height_pt=0.0, line_count=0, measurement_id=""))
+            for i in range(len(requests))
+        ]
+
+    @staticmethod
+    def _measured_from_lines(
+        lines: Sequence[object],
+        style: MeasurementStyle,
+        width_pt: float,
+    ) -> MeasuredBlock:
         if not lines:
             raise MeasurementError("Typst measurement produced no text lines")
-        top = max(line.rect[3] for line in lines)
-        bottom = min(line.rect[1] for line in lines)
+        top = max(float(line.rect[3]) for line in lines)  # type: ignore[attr-defined]
+        bottom = min(float(line.rect[1]) for line in lines)  # type: ignore[attr-defined]
         height = top - bottom
         if height <= 0.0:
             raise MeasurementError("Typst measurement produced a non-positive height")
         boxes = tuple(
             LineBox(
-                x0=float(line.rect[0]),
-                y0=float(top - line.rect[3]),
-                x1=float(line.rect[2]),
-                y1=float(top - line.rect[1]),
+                x0=float(line.rect[0]),  # type: ignore[attr-defined]
+                y0=float(top - line.rect[3]),  # type: ignore[attr-defined]
+                x1=float(line.rect[2]),  # type: ignore[attr-defined]
+                y1=float(top - line.rect[1]),  # type: ignore[attr-defined]
             )
             for line in lines
         )
         overflow_tolerance = max(_OVERFLOW_TOLERANCE_PT, style.size_pt * _OVERFLOW_OVERHANG_EM)
         overflow = any(
-            float(line.rect[2]) > width_pt + overflow_tolerance
-            or float(line.rect[0]) < -overflow_tolerance
+            float(line.rect[2]) > width_pt + overflow_tolerance  # type: ignore[attr-defined]
+            or float(line.rect[0]) < -overflow_tolerance  # type: ignore[attr-defined]
             for line in lines
         )
         return MeasuredBlock(
@@ -128,13 +198,18 @@ class TypstMeasurementService:
             measurement_id="",
         )
 
-    @staticmethod
-    def _probe_source(text: str, style: MeasurementStyle, width_pt: float) -> str:
+    @classmethod
+    def _probe_source(cls, text: str, style: MeasurementStyle, width_pt: float) -> str:
         """Minimal Typst source for one block at the requested style."""
+        return cls._probe_page_source(text, style, width_pt) + "\n"
+
+    @staticmethod
+    def _probe_page_source(text: str, style: MeasurementStyle, width_pt: float) -> str:
+        """One page's Typst source using ``render_prose`` for real math & CJK-Latin shaping."""
         pitch_ratio = style.leading_pt / style.size_pt
         gap_em = max(0.0, pitch_ratio - style.font_line_height_em)
         family = json.dumps(style.font_family, ensure_ascii=False)
-        body = json.dumps(text, ensure_ascii=False)
+        body = render_prose(text)
         justify = "true" if style.justify else "false"
         return (
             f"#set page(width: {width_pt:g}pt, height: auto, margin: 0pt)\n"
@@ -143,5 +218,5 @@ class TypstMeasurementService:
             "overhang: true, cjk-latin-spacing: auto)\n"
             f"#set par(leading: {gap_em:.4f}em, justify: {justify}, "
             'linebreaks: "optimized")\n'
-            f"#text({body})\n"
+            f"#block(width: 100%)[{body}]"
         )

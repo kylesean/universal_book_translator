@@ -31,8 +31,17 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
+
+from ubt.core.layout.style_group import (
+    DRIFT_TOLERANCE_PT,
+    EXCEPTION_BLOCK_SHARE,
+    EXCEPTION_PAGE_SHARE,
+    StyleGroupPlan,
+    exception_shares,
+)
 
 Severity = Literal["critical", "major", "minor"]
 ContractName = Literal["readable", "faithful"]
@@ -58,8 +67,9 @@ _MIN_OVERLAP_AREA_PT2 = 40.0
 #: Page-edge tolerance, matching the visual gate's own allowance.
 _OUT_OF_BOUNDS_TOLERANCE_PT = 1.0
 
-#: Style drift tolerance: the PRD's "body group p5–p95 <= 0.5pt".
-_STYLE_DRIFT_PT = 0.5
+#: Style drift tolerance: the PRD's "body group p5–p95 <= 0.5pt". The value lives
+#: in the style-group module so the planner cannot widen it by editing one file.
+_STYLE_DRIFT_PT = DRIFT_TOLERANCE_PT
 
 _PLACEHOLDER_RE = re.compile(r"⟦|⟧|⟨missing⟩|SOUP_MASK|\[SENTINEL_|<v>|<m>")
 
@@ -87,10 +97,20 @@ _MATH_OR_MARKER_RE = re.compile(r"\$[^$]*\$|⟦[^⟧]*⟧")
 #: break between two characters is normal and whitespace-free comparison is
 #: exactly what a search index does.
 _LATIN_RUN_RE = re.compile(r"[A-Za-z]")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_LATIN_WORD_RE = re.compile(r"[A-Za-z0-9]+")
 
 #: A prose run this long is proof of presence; shorter runs are too common to
 #: distinguish "this sentence is here" from "these characters appear nearby".
 _PROSE_RUN_MIN = 8
+
+#: Maximum area (pt²) for a formula glyph cluster where a subscript/superscript
+#: box may legitimately extend outside the base symbol's bounding rect. Above
+#: this area threshold, a box is a body line/paragraph/caption and must
+#: geometrically contain (>= 80%) a sub-box to be exempted as nested aggregate
+#: text.
+_MAX_GLYPH_CLUSTER_AREA_PT2 = 300.0
+_MIN_AGGREGATE_CONTAINMENT = 0.80
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +160,10 @@ class StyleSample:
     page: int
     size_pt: float
     role: str = "body"
+    #: The document style group this sample was rendered for. ``""`` means the
+    #: artifact predates groups (or the renderer could not attribute the page),
+    #: in which case the contract falls back to a document-wide comparison.
+    group_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +191,10 @@ class ContractEvidence:
     font_issues: tuple[str, ...] = ()
     overflow_records: tuple[OverflowRecord, ...] = ()
     style_samples: tuple[StyleSample, ...] = ()
+    #: The document body group the renderer *declared* before drawing (G4 Stage
+    #: 3A). Membership and exceptions come from here; the sizes come from the
+    #: artifact. ``None`` keeps the pre-group behaviour for older artifacts.
+    style_group: StyleGroupPlan | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,9 +272,38 @@ class ContractReport:
         }
 
 
+_ZERO_WIDTH_RE = re.compile(r"[\u200b\u200c\u200d\ufeff\u00ad]")
+_HYPHEN_LIKE_RE = re.compile(r"[\u2212\u2010\u2011\u2012\u2013\u2014\u2015\uff0d\ufffe]")
+
+
 def _normalize(text: str) -> str:
     """Whitespace-free text, so a reflowed line break is not a mismatch."""
-    return "".join((text or "").split())
+    cleaned = _ZERO_WIDTH_RE.sub("", (text or ""))
+    cleaned = _HYPHEN_LIKE_RE.sub("-", cleaned)
+    return "".join(cleaned.split())
+
+
+def _strip_trailing_page_no(page_norm: str, page_no: int) -> str:
+    """Remove a trailing footer page number from a normalized page string."""
+    suffix = str(page_no)
+    if suffix and page_norm.endswith(suffix):
+        return page_norm[: -len(suffix)]
+    return page_norm
+
+
+_LEADING_RUNNING_HEAD_RE = re.compile(r"^.*?(?:第\d+页|Page\d+)", re.IGNORECASE)
+
+
+def _strip_leading_running_head(page_norm: str, page_no: int) -> str:
+    """Remove a leading Typst running header (e.g. ``<title>第3页`` or ``Page3``)."""
+    for marker in (f"第{page_no}页", f"Page{page_no}"):
+        pos = page_norm.find(marker)
+        if 0 <= pos <= 120:
+            return page_norm[pos + len(marker) :]
+    match = _LEADING_RUNNING_HEAD_RE.match(page_norm[:120])
+    if match:
+        return page_norm[match.end() :]
+    return page_norm
 
 
 def _box_area(box: ContractTextBox) -> float:
@@ -306,6 +363,15 @@ def _nested_aggregate_text(bigger: ContractTextBox, smaller: ContractTextBox) ->
     sizes_differ = small_size is not None and big_size is not None and small_size < big_size * 0.9
     if big_area < small_area * (1.05 if sizes_differ else 1.25):
         return False
+    # For non-trivial boxes (body lines, paragraphs, captions > 300pt²), the
+    # smaller box must actually lie inside the larger box (>= 80% geometric
+    # containment) to qualify as a PDFium aggregate/sub-rect pair. Edge
+    # collisions between a heading/label/symbol and a body paragraph that
+    # happens to mention the same characters are real overlaps, not aggregates.
+    if big_area > _MAX_GLYPH_CLUSTER_AREA_PT2:
+        overlap = _intersection(bigger, smaller)
+        if overlap / small_area < _MIN_AGGREGATE_CONTAINMENT:
+            return False
     if small_text in big_text:
         return True
     return sizes_differ and big_text in small_text
@@ -336,6 +402,10 @@ def _style_findings(evidence: ContractEvidence) -> list[ContractFinding]:
                 )
             ]
         return []
+
+    plan = evidence.style_group
+    if plan is not None:
+        return _group_style_findings(body, plan, evidence)
 
     ordered = sorted(body, key=lambda sample: sample.size_pt)
     if len(ordered) == 1:
@@ -371,6 +441,105 @@ def _style_findings(evidence: ContractEvidence) -> list[ContractFinding]:
             occurrences=occurrences,
         )
     ]
+
+
+def _group_style_findings(
+    body: Sequence[StyleSample],
+    plan: StyleGroupPlan,
+    evidence: ContractEvidence,
+) -> list[ContractFinding]:
+    """The group-aware style check (G4 Stage 3A).
+
+    Two separate questions, deliberately not merged:
+
+    * **Do the member pages hold the declared size?** Measured against the
+      declared number, not against each other. A group whose pages all drifted
+      to 9.0pt together would pass a p5–p95 comparison while proving nothing.
+    * **Did the group fail to hold pages?** Declared exceptions are reported as
+      their own finding and block the delivery, because "exception" is how a
+      broken group would otherwise become invisible. A flood (past the budget)
+      escalates to critical: at that point the group is not a group.
+
+    Only the renderer's declared membership counts. A page cannot excuse itself
+    by having been drawn at a different size — that is the drift, not an excuse.
+    """
+    findings: list[ContractFinding] = []
+    exception_pages = set(plan.exception_pages)
+    declared_pages = set(plan.group.pages)
+    members = [
+        sample
+        for sample in body
+        if sample.page not in exception_pages
+        and (not declared_pages or sample.page in declared_pages)
+        and (not sample.group_id or sample.group_id == plan.group.group_id)
+    ]
+
+    target = plan.group.size_pt
+    if target > 0 and members:
+        deviations = sorted(
+            ((abs(sample.size_pt - target), sample) for sample in members),
+            key=lambda pair: pair[0],
+            reverse=True,
+        )
+        worst, worst_sample = deviations[0]
+        ordered = sorted(members, key=lambda sample: sample.size_pt)
+        p5 = ordered[max(0, int(len(ordered) * 0.05))]
+        p95 = ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))]
+        drift = max(worst, p95.size_pt - p5.size_pt)
+        if drift > _STYLE_DRIFT_PT:
+            over = [
+                f"p{sample.page} {sample.size_pt:.2f}pt"
+                for deviation, sample in deviations
+                if deviation > _STYLE_DRIFT_PT
+            ]
+            findings.append(
+                ContractFinding(
+                    severity="major",
+                    code="style_drift",
+                    message=(
+                        f"Body group {plan.group.group_id} is {target:.2f}pt but "
+                        f"{len(over)} page(s) deviate by more than {_STYLE_DRIFT_PT}pt "
+                        f"(worst p{worst_sample.page} at {worst_sample.size_pt:.2f}pt, "
+                        f"drift {drift:.2f}pt)"
+                    ),
+                    page=worst_sample.page,
+                    occurrences=tuple(over[:8]),
+                )
+            )
+
+    if plan.exceptions:
+        page_share, block_share = exception_shares(plan, block_count=len(evidence.blocks))
+        flood = page_share > EXCEPTION_PAGE_SHARE or block_share > EXCEPTION_BLOCK_SHARE
+        occurrences = tuple(
+            f"p{exception.page} {exception.reason} "
+            f"{exception.deficit_pt:.2f}pt"
+            + (f" ({', '.join(exception.block_ids[:3])})" if exception.block_ids else "")
+            for exception in plan.exceptions
+        )
+        findings.append(
+            ContractFinding(
+                severity="critical" if flood else "major",
+                code="style_group_exception_flood" if flood else "style_group_exception",
+                message=(
+                    (
+                        f"Body group {plan.group.group_id} at {plan.group.size_pt:.2f}pt "
+                        f"cannot hold {len(plan.exceptions)} page(s) "
+                        f"({page_share:.1%} of pages, {block_share:.1%} of blocks) — past "
+                        "the exception budget, so the group is not a group"
+                    )
+                    if flood
+                    else (
+                        f"Body group {plan.group.group_id} at {plan.group.size_pt:.2f}pt "
+                        f"cannot hold {len(plan.exceptions)} page(s); declared as "
+                        "exceptions and held for review (Stage 4 compression or an "
+                        "explicit allow-major)"
+                    )
+                ),
+                page=plan.exceptions[0].page,
+                occurrences=occurrences,
+            )
+        )
+    return findings
 
 
 def _overlap_findings(evidence: ContractEvidence) -> list[ContractFinding]:
@@ -446,24 +615,87 @@ def _text_findings(
     overflow_by_block: dict[str, OverflowRecord],
 ) -> list[ContractFinding]:
     findings: list[ContractFinding] = []
+    raw_pages = list(evidence.page_texts)
+    matched_overflow_ids: set[str] = set()
+    body_pages = [
+        _strip_leading_running_head(_strip_trailing_page_no(text, index + 1), index + 1)
+        for index, text in enumerate(page_texts)
+    ]
+    body_joined = "".join(body_pages)
+
     for block in evidence.blocks:
         expected = _normalize(block.text)
         if not expected:
             continue
-        occurrences = joined.count(expected)
-        pages = [index + 1 for index, text in enumerate(page_texts) if expected in text]
+        occurrences = max(joined.count(expected), body_joined.count(expected))
+        pages = [
+            index + 1
+            for index, text in enumerate(page_texts)
+            if expected in text or expected in body_pages[index]
+        ]
         runs = _prose_runs(block.text)
         run_pages: dict[str, list[int]] = {
             run: [
                 index + 1
                 for index, text in enumerate(page_texts)
-                if _run_present(run, joined, [text])
+                if _run_present(
+                    run,
+                    joined,
+                    [text],
+                    [raw_pages[index]] if index < len(raw_pages) else (),
+                )
             ]
             for run in runs
         }
-        present_runs = [
-            run for run in runs if run_pages[run] or _run_share_present(run, joined) >= 0.9
-        ]
+        # A prose run split across a page boundary (first half at the bottom of
+        # page p, second half at the top of page p+1) is contiguous in the
+        # concatenated two-page window ``page_texts[i] + page_texts[i+1]``.
+        # Unlike single-character bag-of-words matching across the whole book,
+        # this preserves contiguous clause verification and still catches a
+        # middle clause dropped at a page break (e.g. b0050 on p6/p7).
+        cross_page_runs: dict[str, list[int]] = {}
+        for run in runs:
+            if run_pages[run]:
+                continue
+            for index in range(len(page_texts) - 1):
+                pair_norm = page_texts[index] + page_texts[index + 1]
+                left_stripped = _strip_trailing_page_no(page_texts[index], index + 1)
+                right_stripped = _strip_leading_running_head(page_texts[index + 1], index + 2)
+                pair_stripped = left_stripped + page_texts[index + 1]
+                pair_both_stripped = left_stripped + right_stripped
+                pair_raw = (
+                    f"{raw_pages[index]}\n{raw_pages[index + 1]}"
+                    if index + 1 < len(raw_pages)
+                    else pair_norm
+                )
+                if _run_present(
+                    run,
+                    joined,
+                    [pair_norm, pair_stripped, pair_both_stripped],
+                    [pair_raw],
+                ):
+                    cross_page_runs[run] = [index + 1, index + 2]
+                    break
+                # On page-locked/faithful pages where a top figure or background
+                # diagram precedes the continuation box at the top of page p+1,
+                # PDFium extracts the figure's axis/caption text before the
+                # continuation prose. Check if ``run`` is split into a suffix of
+                # ``left_stripped`` and a contiguous substring on ``page p+1``.
+                if block.allow_cross_page and len(run) >= _PROSE_RUN_MIN:
+                    right_page = page_texts[index + 1]
+                    for split_at in range(1, len(run)):
+                        left_part = run[:split_at]
+                        right_part = run[split_at:]
+                        if (
+                            left_stripped.endswith(left_part)
+                            or page_texts[index].endswith(left_part)
+                        ) and right_part in right_page:
+                            cross_page_runs[run] = [index + 1, index + 2]
+                            break
+                    if run in cross_page_runs:
+                        break
+
+        present_runs = [run for run in runs if run_pages[run] or cross_page_runs.get(run)]
 
         if occurrences == 0 and not (runs and len(present_runs) == len(runs)):
             if not runs and _token_present(block.text, page_texts):
@@ -489,7 +721,10 @@ def _text_findings(
                     )
                 )
                 continue
-            prefix = _longest_prefix(expected, joined)
+            prefix = max(
+                _longest_prefix(expected, joined),
+                _longest_prefix(expected, body_joined),
+            )
             if prefix >= _MIN_CLIPPED_PROBE:
                 findings.append(
                     ContractFinding(
@@ -515,37 +750,55 @@ def _text_findings(
                 )
             continue
 
-        # Duplication is checked on the *longest prose run* only for a
-        # formula-interrupted block: such a block never appears whole in the
-        # artifact, so the whole-string count is 0 even when it is printed
-        # twice (measured on b0014: all runs on both p2 and p3). For a plain
-        # block, the whole-string count is the right probe: a heading's text
-        # can legitimately recur inside a running head on every page, and
-        # counting that as duplication would flag the chapter title.
-        has_math = bool(_MATH_OR_MARKER_RE.search(block.text))
-        longest_run = max(runs, key=len) if (runs and has_math) else ""
-        run_pages_for_longest = run_pages.get(longest_run, []) if longest_run else []
-        duplicated = (len(expected) >= _MIN_DUPLICATE_PROBE and occurrences > 1) or (
-            len(longest_run) >= _MIN_DUPLICATE_PROBE and len(run_pages_for_longest) > 1
-        )
-        if duplicated:
-            where = run_pages_for_longest or pages
+        # Check duplication across ALL qualifying prose runs (>= _MIN_DUPLICATE_PROBE),
+        # not only ``longest_run``: a block truncated on page p and re-rendered in
+        # full on page p+1 duplicates its earlier runs while its longest run may
+        # appear only once (or an un-deduplicated continuation block on the same
+        # page may repeat the second half). Headings are exempt from run-level
+        # recurrence because a chapter title legitimately recurs in running heads.
+        dup_where: list[int] = []
+        if len(expected) >= _MIN_DUPLICATE_PROBE and occurrences > 1 and block.kind != "heading":
+            dup_where = pages or [
+                index + 1 for index, text in enumerate(page_texts) if expected in text
+            ]
+        elif block.kind != "heading":
+            for run in runs:
+                if len(run) < _MIN_DUPLICATE_PROBE:
+                    continue
+                if expected.count(run) > 1:
+                    continue
+                r_pages = run_pages.get(run, [])
+                r_count = joined.count(run)
+                if len(r_pages) > 1 or r_count > 1:
+                    dup_where = r_pages or [
+                        index + 1 for index, text in enumerate(page_texts) if run in text
+                    ]
+                    break
+
+        if dup_where:
             findings.append(
                 ContractFinding(
                     severity="critical",
                     code="text_duplicated",
                     message=(
                         f"Block {block.block_id} appears on page(s) "
-                        f"{', '.join(str(page) for page in where)}; "
+                        f"{', '.join(str(page) for page in dup_where)}; "
                         "each block must be realized exactly once"
                     ),
-                    page=where[0] if where else block.page,
+                    page=dup_where[0] if dup_where else block.page,
                     block_id=block.block_id,
                 )
             )
 
         if evidence.contract == "faithful" and not block.allow_cross_page:
-            found_pages = (run_pages_for_longest or pages) if has_math else pages
+            found_pages: list[int] = []
+            if runs:
+                for run in runs:
+                    for p in run_pages.get(run, []) or cross_page_runs.get(run, []):
+                        if p not in found_pages:
+                            found_pages.append(p)
+            if not found_pages:
+                found_pages = list(pages)
             if found_pages and block.page not in found_pages:
                 findings.append(
                     ContractFinding(
@@ -562,6 +815,7 @@ def _text_findings(
 
         record = overflow_by_block.get(block.block_id)
         if record is not None:
+            matched_overflow_ids.add(record.block_id)
             findings.append(
                 ContractFinding(
                     severity="major",
@@ -574,6 +828,22 @@ def _text_findings(
                     block_id=block.block_id,
                 )
             )
+
+    for record in evidence.overflow_records:
+        if record.block_id in matched_overflow_ids:
+            continue
+        findings.append(
+            ContractFinding(
+                severity="major",
+                code="overflow_recorded",
+                message=(
+                    f"Overflow recorded for {record.block_id} on page {record.page} "
+                    f"(deficit {record.deficit_pt:.1f}pt, {record.reason})"
+                ),
+                page=record.page,
+                block_id=record.block_id,
+            )
+        )
     return findings
 
 
@@ -588,27 +858,38 @@ def _prose_runs(text: str) -> list[str]:
     return [run for run in runs if len(run) >= _PROSE_RUN_MIN]
 
 
-def _run_present(run: str, joined: str, page_texts: list[str]) -> bool:
+def _run_present(
+    run: str,
+    joined: str,
+    page_texts: list[str],
+    raw_page_texts: Sequence[str] = (),
+) -> bool:
     """Whether one prose run is present, respecting its script.
 
-    CJK: whitespace-free containment, because a line break between two
-    ideographs is normal pagination.
+    CJK and mixed CJK/Latin runs: whitespace-free substring containment, with
+    a de-hyphenation fallback for Latin words wrapped across line breaks.
 
-    Latin: word-sequence containment. A PDF breaks a reference between
-    ``long-channel`` and ``cylindrical``, so the whitespace-free form never
-    appears even though the reference is plainly on the page. Requiring the
-    same *words* in order is the honest claim for a spaced script.
+    Pure Latin runs: word-sequence containment over alphanumeric tokens on the
+    page so line wraps or hyphenation between English words do not cause false
+    misses.
     """
+    if any(run in text for text in page_texts):
+        return True
     if not _LATIN_RUN_RE.search(run):
-        return any(run in text for text in page_texts)
-    words = _normalize(run).split()
+        return False
+    source_pages = raw_page_texts if raw_page_texts else page_texts
+    for raw_text in source_pages:
+        dehyphenated = _normalize(re.sub(r"-\s*[\r\n]+\s*", "", raw_text))
+        if run in dehyphenated:
+            return True
+    if _CJK_RE.search(run):
+        return False
+    words = _LATIN_WORD_RE.findall(run.casefold())
     if not words:
         return False
-    # Search page-scoped, so a run cannot be "found" by borrowing words from
-    # two different pages.
-    for text in page_texts:
-        haystack = _normalize(text).split()
-        if not haystack:
+    for raw_text in source_pages:
+        haystack = _LATIN_WORD_RE.findall(raw_text.casefold())
+        if len(haystack) < len(words):
             continue
         for start in range(len(haystack) - len(words) + 1):
             if haystack[start : start + len(words)] == words:
@@ -820,6 +1101,18 @@ def evaluate_delivery_contract(evidence: ContractEvidence) -> ContractReport:
             ),
         }
     )
+    if evidence.style_group is not None:
+        exception_findings = [
+            finding
+            for finding in style_findings
+            if finding.code in ("style_group_exception", "style_group_exception_flood")
+        ]
+        checks.append(
+            {
+                "name": "style_group",
+                "status": "fail" if exception_findings else "pass",
+            }
+        )
 
     geometry_measured = any(box.font_size_pt is not None for box in evidence.text_boxes)
     if evidence.contract == "faithful" and not geometry_measured:

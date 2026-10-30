@@ -1,40 +1,24 @@
-"""Driver registry: name -> lazy factory. No hard deps at import."""
+"""Driver registry: name -> lazy factory. No hard deps at import.
+
+The user-facing OCR vocabulary is the four modes on ``UBTConfig.ocr_mode`` —
+``off`` / ``local`` / ``cloud`` / ``auto``. Driver names are internal wiring:
+a user configures an endpoint and a model, and *locality* — not a driver's
+name or a URL substring — decides what the egress gate allows. The one rule
+every page-image route shares lives in :func:`assert_page_egress_allowed`;
+custom drivers register with ``local=True`` when they never ship a page
+off-machine, and the gate treats everything else as egress.
+"""
 
 from __future__ import annotations
 
-import ipaddress
 import logging
 import os
 from collections.abc import Callable
-from urllib.parse import urlparse
 
 from ubt.adapters.pdf.vlm.types import VlmDriver
+from ubt.core.endpoint_locality import endpoint_on_this_machine, resolved_ocr_endpoint
 
 logger = logging.getLogger(__name__)
-
-
-def _endpoint_is_local(endpoint: str | None) -> bool:
-    """True when the OCR endpoint stays on this machine (or is unset).
-
-    Judged from the resolved host, not a string prefix: a DNS name like
-    ``127.0.0.1.attacker.example`` is a *remote* host, and treating it as local
-    would let ``allow_page_upload=false`` send page images off the machine.
-    """
-    if not endpoint:
-        return True
-    # A schemeless host like "127.0.0.1:8765" parses with no hostname under
-    # urlparse, which would misclassify a local endpoint as non-local and trip
-    # the egress gate for an endpoint that never leaves the box.
-    if "://" not in endpoint:
-        endpoint = "http://" + endpoint
-    host = (urlparse(endpoint).hostname or "").lower()
-    if host in ("localhost", "host.docker.internal") or host.endswith(".localhost"):
-        return True
-    try:
-        ip = ipaddress.ip_address(host)
-        return ip.is_loopback or ip.is_private
-    except ValueError:
-        return False
 
 
 def _sidecar_endpoint(endpoint: str | None) -> str:
@@ -48,32 +32,38 @@ def _sidecar_endpoint(endpoint: str | None) -> str:
     return endpoint or os.environ.get("UBT_OCR_ENDPOINT", "http://localhost:8765")
 
 
-#: Endpoint shapes that mean the OpenAI-compatible vision chat route rather than
-#: a generic cloud-REST OCR API. Mirrors ``CloudOcrDriver``'s own heuristic.
-_VISION_ENDPOINT_HINTS = ("/chat/completions", "api.openai.com", "api.deepseek.com")
+def assert_page_egress_allowed(endpoint: str | None, *, allow_page_upload: bool, mode: str) -> None:
+    """The single choke point for page-image egress.
 
-
-def _cloud_endpoint(endpoint: str | None) -> str:
-    """The endpoint ``CloudOcrDriver`` will reach, mirroring its fallback chain.
-
-    ``OPENAI_BASE_URL`` is part of that chain — an endpoint *fallback*, never a
-    route selector — and the last resort is OpenAI's own default.
+    Every route that ships rendered book pages — OCR drivers, a pinned
+    ``ocr_mode='cloud'`` against a local server, non-local custom drivers —
+    passes through here. ``allow_page_upload`` is the operator's explicit
+    opt-in; endpoint locality is the technical exemption. A custom driver
+    registered without ``local=True`` has no endpoint to judge, so it counts
+    as egress and needs the opt-in.
     """
-    from ubt.adapters.pdf.vlm.drivers.cloud_driver import DEFAULT_OPENAI_ENDPOINT
-
-    return (endpoint or os.environ.get("UBT_OCR_ENDPOINT") or DEFAULT_OPENAI_ENDPOINT).rstrip("/")
-
-
-def _looks_like_vision_endpoint(endpoint: str) -> bool:
-    return any(hint in endpoint for hint in _VISION_ENDPOINT_HINTS)
-
-
-_FACTORIES: dict[str, Callable[[], VlmDriver]] = {}
+    if allow_page_upload or endpoint_on_this_machine(endpoint):
+        return
+    raise ValueError(
+        f"ocr_mode='{mode}' targets the non-local endpoint {endpoint!r} and "
+        "ships rendered book pages there, but allow_page_upload=false "
+        "(UBT_ALLOW_PAGE_UPLOAD) forbids page-image egress. Point UBT_OCR_ENDPOINT "
+        "at localhost or re-enable uploads."
+    )
 
 
-def register_driver(name: str, factory: Callable[[], VlmDriver]) -> None:
-    """Register (or override) a driver factory. Overrides are how tests inject fakes."""
-    _FACTORIES[name] = factory
+_FACTORIES: dict[str, tuple[Callable[[], VlmDriver], bool]] = {}
+
+
+def register_driver(name: str, factory: Callable[[], VlmDriver], *, local: bool = False) -> None:
+    """Register a driver factory.
+
+    ``local=True`` declares the driver never ships a page image off this
+    machine (in-process engines, localhost-only servers); only that declaration
+    exempts it from the page-egress opt-in. Overrides are how tests inject
+    fakes.
+    """
+    _FACTORIES[name] = (factory, local)
 
 
 def list_drivers() -> list[str]:
@@ -81,14 +71,14 @@ def list_drivers() -> list[str]:
 
 
 def default_driver_name() -> str:
-    return os.environ.get("UBT_VLM_DRIVER", "rapidocr").strip() or "rapidocr"
+    return "rapidocr"
 
 
 def get_driver(name: str | None = None) -> VlmDriver:
     """Instantiate the named driver (KeyError on unknown — fail closed)."""
     key = (name or default_driver_name()).strip()
     try:
-        factory = _FACTORIES[key]
+        factory, _ = _FACTORIES[key]
     except KeyError:
         raise KeyError(f"unknown VLM driver {key!r} (known: {list_drivers()})") from None
     return factory()
@@ -106,16 +96,10 @@ def _sidecar_factory() -> VlmDriver:
     return SidecarOcrDriver()
 
 
-def _cloud_factory() -> VlmDriver:
-    from ubt.adapters.pdf.vlm.drivers.cloud_driver import CloudOcrDriver
+def _vision_factory() -> VlmDriver:
+    from ubt.adapters.pdf.vlm.drivers.cloud_driver import VisionEndpointDriver
 
-    return CloudOcrDriver(provider="cloud")
-
-
-def _vlm_factory() -> VlmDriver:
-    from ubt.adapters.pdf.vlm.drivers.cloud_driver import CloudOcrDriver
-
-    return CloudOcrDriver(provider="vlm")
+    return VisionEndpointDriver()
 
 
 def _unlimited_ocr2_factory() -> VlmDriver:
@@ -124,12 +108,66 @@ def _unlimited_ocr2_factory() -> VlmDriver:
     return UnlimitedOcr2Driver()
 
 
-register_driver("rapidocr", _rapidocr_factory)
-register_driver("unlimited-ocr2", _unlimited_ocr2_factory)
-register_driver("sidecar", _sidecar_factory)
-register_driver("http", _sidecar_factory)
-register_driver("cloud", _cloud_factory)
-register_driver("vlm", _vlm_factory)
+register_driver("rapidocr", _rapidocr_factory, local=True)
+register_driver("sidecar", _sidecar_factory, local=True)
+register_driver("vision", _vision_factory, local=False)
+register_driver("unlimited-ocr2", _unlimited_ocr2_factory, local=True)
+
+
+def _probe_local(
+    endpoint: str | None,
+    api_key: str | None,
+    model: str | None,
+    allow_page_upload: bool,
+) -> tuple[str, VlmDriver] | tuple[None, None]:
+    """The best engine that never ships a page off this machine, fail-closed.
+
+    Preference order: a *configured* local vision endpoint (an explicit
+    ``ocr_endpoint`` + ``ocr_model`` is a deliberate pin — a model name is
+    meaningless to the sidecar contract, so its presence selects the
+    OpenAI-style route without URL sniffing) first, then the measured-box
+    engines a scan transcription needs (sidecar, in-process rapidocr), then
+    the in-process proofread VLM. ``allow_page_upload`` is forwarded so the
+    egress choke point, not this function, owns the exception.
+    """
+    # 1. An explicitly configured local vision endpoint.
+    vision_ep = endpoint or os.environ.get("UBT_OCR_ENDPOINT") or ""
+    if vision_ep and model and endpoint_on_this_machine(vision_ep):
+        from ubt.adapters.pdf.vlm.drivers.cloud_driver import VisionEndpointDriver
+
+        return "vision", VisionEndpointDriver(endpoint=vision_ep, api_key=api_key, model=model)
+
+    # 2. The sidecar (measured boxes): health-check the endpoint it will
+    # actually reach, and let the choke point judge it.
+    sidecar_ep = _sidecar_endpoint(endpoint)
+    assert_page_egress_allowed(sidecar_ep, allow_page_upload=allow_page_upload, mode="local")
+    from ubt.adapters.pdf.vlm.drivers.sidecar_driver import SidecarOcrDriver
+
+    if SidecarOcrDriver.is_healthy(sidecar_ep, api_key=api_key, timeout=0.3):
+        return "sidecar", SidecarOcrDriver(endpoint=sidecar_ep, api_key=api_key)
+
+    # 3. In-process rapidocr (measured boxes) — no endpoint at all.
+    from ubt.adapters.pdf.vlm.drivers.rapidocr_driver import RapidOcrDriver
+
+    if RapidOcrDriver.is_available():
+        return "rapidocr", get_driver("rapidocr")
+
+    # 4. A local vision endpoint without a model name cannot route (the
+    # driver fails closed on an empty model) — say so instead of silently
+    # skipping past a configured server.
+    if vision_ep and endpoint_on_this_machine(vision_ep) and not model:
+        logger.warning(
+            "UBT_OCR_ENDPOINT=%s is local but no model is set; set UBT_OCR_MODEL "
+            "so the vision endpoint has something to serve.",
+            vision_ep,
+        )
+
+    # 5. In-process Unlimited-OCR-2 (proofread only): configured via its model
+    # path env, runs behind a resident worker on this machine.
+    if os.environ.get("UBT_UNLIMITED_OCR2_MODEL", "").strip():
+        return "unlimited-ocr2", get_driver("unlimited-ocr2")
+
+    return None, None
 
 
 def probe_effective_driver(
@@ -139,17 +177,20 @@ def probe_effective_driver(
     model: str | None = None,
     allow_page_upload: bool = False,
 ) -> tuple[str, VlmDriver] | tuple[None, None]:
-    """Probe and return the most appropriate OCR driver according to mode and availability.
+    """Probe and return the most appropriate OCR driver for the requested mode.
 
-    Modes:
-    - 'off': Explicitly disabled.
-    - 'local': A measured-box engine that runs on this machine (rapidocr
-      in-process, or a sidecar HTTP endpoint). Can transcribe a true scan.
-    - 'vlm': An OpenAI-compatible vision chat endpoint (or an in-process
-      VLM driver such as unlimited-ocr2). Text-only: proofread only.
-    - 'auto': local first, then VLM. A book page must not leave the machine
-      while a local engine can read it; UBT_ALLOW_PAGE_UPLOAD=false skips the
-      remote route entirely.
+    The mode vocabulary is exactly ``UBTConfig.OcrMode``:
+
+    - ``off``: explicitly disabled.
+    - ``local``: the best engine that never ships a page off this machine
+      (see :func:`_probe_local`). Can transcribe a true scan when a
+      measured-box engine (sidecar/rapidocr) is available; a text-only
+      local VLM proofreads pages that already have a text layer.
+    - ``cloud``: a remote vision endpoint. Requires the page-egress opt-in
+      — unless the configured endpoint is itself local, which is the
+      "pin my localhost vision server" case and needs no opt-in.
+    - ``auto``: ``local`` first, then ``cloud``. A book page must not leave
+      the machine while a local engine can read it.
 
     ``allow_page_upload`` defaults to the banned answer on purpose: this is a
     probe of an egress route, and every caller that reached it without an
@@ -157,150 +198,72 @@ def probe_effective_driver(
     own privacy policy says the opposite.
     """
     clean_mode = (mode or "auto").strip().lower()
-    if clean_mode == "auto":
-        vlm_env = os.environ.get("UBT_VLM_DRIVER", "").strip().lower()
-        if vlm_env:
-            clean_mode = vlm_env
     if clean_mode == "off":
         return None, None
 
-    if clean_mode in ("local", "sidecar", "rapidocr", "http"):
-        # 'local' resolves to the best available in-process/sidecar engine:
-        # the explicit legacy names keep working so an existing config file
-        # does not silently change meaning. Egress is judged from the endpoint
-        # the sidecar will actually reach.
-        if clean_mode in ("sidecar", "http", "local"):
-            from ubt.adapters.pdf.vlm.drivers.sidecar_driver import SidecarOcrDriver
-
-            target_ep = _sidecar_endpoint(endpoint)
-            if not allow_page_upload and not _endpoint_is_local(target_ep):
-                raise ValueError(
-                    "ocr_mode='local' targets a non-local sidecar endpoint and ships "
-                    "rendered book pages there, but allow_page_upload=false "
-                    "(UBT_ALLOW_PAGE_UPLOAD) forbids page-image egress. Point "
-                    "UBT_OCR_ENDPOINT at localhost or re-enable uploads."
-                )
-            if SidecarOcrDriver.is_healthy(target_ep, api_key=api_key, timeout=0.3):
-                return "sidecar", SidecarOcrDriver(endpoint=target_ep, api_key=api_key)
-        # The sidecar is normally a local process, but UBT_OCR_ENDPOINT may point
-        # it at a remote host — which would ship page images off-machine while
-        # allow_page_upload=false. Gate on the endpoint the driver will actually
-        # reach (``endpoint`` or the env fallback), not the raw argument, so a
-        # ``endpoint=None`` call cannot slip a remote UBT_OCR_ENDPOINT past the
-        # gate. Only the non-local case is blocked; the local sidecar keeps
-        # working under the default closed gate.
-        if not allow_page_upload and not _endpoint_is_local(_sidecar_endpoint(endpoint)):
-            raise ValueError(
-                "ocr_mode='sidecar' targets a non-local endpoint and ships rendered "
-                "book pages there, but allow_page_upload=false (UBT_ALLOW_PAGE_UPLOAD) "
-                "forbids page-image egress. Point UBT_OCR_ENDPOINT at localhost or "
-                "re-enable uploads."
-            )
-        # The sidecar was not reachable (or the mode explicitly named rapidocr):
-        # fall back to the in-process engine, which has the same measured-boxes
-        # property the anchoring layer requires.
-        from ubt.adapters.pdf.vlm.drivers.rapidocr_driver import RapidOcrDriver
-
-        if not RapidOcrDriver.is_available():
-            if clean_mode == "rapidocr":
-                logger.warning(
-                    "OCR mode 'rapidocr' was requested, but rapidocr or its inference "
-                    "engine (onnxruntime) is not operational in this environment. "
-                    "Install them with: uv sync --all-extras (or uv pip install "
-                    "onnxruntime rapidocr)"
-                )
-                return None, None
+    if clean_mode == "local":
+        driver = _probe_local(endpoint, api_key, model, allow_page_upload)
+        if driver[0] is None:
             logger.warning(
-                "OCR mode 'local' was requested, but neither the sidecar nor "
-                "in-process rapidocr is operational. Install rapidocr with: "
-                "uv sync --all-extras, or run the sidecar container."
+                "OCR mode 'local' found no usable engine: no local sidecar, no "
+                "in-process rapidocr (install with: uv sync --all-extras), and "
+                "no local vision endpoint (set UBT_OCR_ENDPOINT + UBT_OCR_MODEL "
+                "to a localhost server)."
             )
-            return None, None
-        return "rapidocr", get_driver("rapidocr")
+        return driver
 
-    if clean_mode in ("vlm", "unlimited-ocr2", "openai_vision"):
-        if not allow_page_upload:
-            raise ValueError(
-                "ocr_mode='vlm' ships rendered book pages to a vision model, but "
-                "allow_page_upload=false (UBT_ALLOW_PAGE_UPLOAD) forbids page-image "
-                "egress. Choose a local engine (sidecar/rapidocr) or re-enable uploads."
-            )
-        if clean_mode == "unlimited-ocr2":
-            return "unlimited-ocr2", get_driver("unlimited-ocr2")
-        from ubt.adapters.pdf.vlm.drivers.cloud_driver import CloudOcrDriver
+    if clean_mode == "cloud":
+        from ubt.adapters.pdf.vlm.drivers.cloud_driver import DEFAULT_OPENAI_ENDPOINT
 
-        return "vlm", CloudOcrDriver(
-            endpoint=endpoint, api_key=api_key, model=model, provider="vlm"
-        )
+        target = resolved_ocr_endpoint(endpoint, DEFAULT_OPENAI_ENDPOINT)
+        assert_page_egress_allowed(target, allow_page_upload=allow_page_upload, mode="cloud")
+        from ubt.adapters.pdf.vlm.drivers.cloud_driver import VisionEndpointDriver
 
-    if clean_mode == "rapidocr":
-        from ubt.adapters.pdf.vlm.drivers.rapidocr_driver import RapidOcrDriver
+        # The driver fails closed on an empty model: a vision route must be
+        # told which model to call, loudly, at build time.
+        return "cloud", VisionEndpointDriver(endpoint=target, api_key=api_key, model=model)
 
-        if not RapidOcrDriver.is_available():
-            logger.warning(
-                "OCR mode 'rapidocr' was requested, but rapidocr or its inference engine "
-                "(onnxruntime) is not operational in this environment. Install them with: "
-                "uv sync --all-extras (or uv pip install onnxruntime rapidocr)"
-            )
-            return None, None
-        return "rapidocr", get_driver("rapidocr")
-
-    # Explicit custom registered driver
-    if clean_mode in _FACTORIES and clean_mode != "auto":
+    # Explicit custom registered driver (internal wiring; tests inject fakes).
+    if clean_mode in _FACTORIES:
+        _, is_local = _FACTORIES[clean_mode]
+        if not is_local:
+            assert_page_egress_allowed(None, allow_page_upload=allow_page_upload, mode=clean_mode)
         return clean_mode, get_driver(clean_mode)
 
-    # auto mode:
-    # 1. Probe sidecar health
-    from ubt.adapters.pdf.vlm.drivers.sidecar_driver import SidecarOcrDriver
+    if clean_mode == "auto":
+        local = _probe_local(endpoint, api_key, model, allow_page_upload)
+        if local[0] is not None:
+            return local
+        from ubt.adapters.pdf.vlm.drivers.cloud_driver import DEFAULT_OPENAI_ENDPOINT
 
-    target_ep = _sidecar_endpoint(endpoint)
-    # The explicit-mode egress gate already blocks a non-local sidecar when
-    # ``allow_page_upload=False``; auto must obey the same rule or a remote
-    # endpoint silently ships pages off-machine. A local sidecar (or uploads
-    # enabled) is fine and still preferred over the cloud route below.
-    if (allow_page_upload or _endpoint_is_local(target_ep)) and SidecarOcrDriver.is_healthy(
-        target_ep, api_key=api_key, timeout=0.3
-    ):
-        return "sidecar", SidecarOcrDriver(endpoint=target_ep, api_key=api_key)
+        target = resolved_ocr_endpoint(endpoint, DEFAULT_OPENAI_ENDPOINT)
+        has_credentials = bool(api_key or os.environ.get("UBT_OCR_API_KEY"))
+        if not allow_page_upload and not endpoint_on_this_machine(target):
+            # No local engine and egress closed: say so once, plainly.
+            logger.warning(
+                "OCR auto mode found no local engine and page egress is "
+                "disabled (UBT_ALLOW_PAGE_UPLOAD); scanned pages will be "
+                "rejected rather than shipped out. Pin a local engine via "
+                "UBT_OCR_MODE=local or re-enable uploads."
+            )
+            return None, None
+        if has_credentials or not endpoint_on_this_machine(target):
+            # A paid pick under auto must never be silent: every other paid
+            # route in this project (batch, neural QE) requires an explicit
+            # flag, and a surprise bill must not arrive through the back
+            # door. The warning names the env knobs so the operator can pin
+            # a local engine instead.
+            logger.warning(
+                "OCR auto mode selected the PAID cloud engine 'cloud' (no "
+                "local engine available); every scanned page will be billed. "
+                "Pin a free local engine via UBT_OCR_MODE or UBT_OCR_ENDPOINT "
+                "to avoid this."
+            )
+        from ubt.adapters.pdf.vlm.drivers.cloud_driver import VisionEndpointDriver
 
-    # 2. Local rapidocr before any cloud route: a book page must not leave
-    # the machine while a local engine can read it.
-    from ubt.adapters.pdf.vlm.drivers.rapidocr_driver import RapidOcrDriver
-
-    if RapidOcrDriver.is_available():
-        return "rapidocr", get_driver("rapidocr")
-
-    # 3. Cloud OCR / Vision only when page egress is allowed.
-    if not allow_page_upload:
-        return None, None
-    has_cloud_key = bool(api_key or os.environ.get("UBT_OCR_API_KEY"))
-    has_cloud_endpoint = bool(endpoint or os.environ.get("UBT_OCR_ENDPOINT"))
-    if has_cloud_key or (has_cloud_endpoint and not _endpoint_is_local(target_ep)):
-        from ubt.adapters.pdf.vlm.drivers.cloud_driver import CloudOcrDriver
-
-        # Vision vs generic cloud-REST is decided by the *endpoint*, not by the
-        # mere presence of an ambient OPENAI_API_KEY: that variable is only an
-        # OCR credential fallback, and letting it pick the wire protocol meant a
-        # key exported for some other tool hijacked the OCR classification (and
-        # sent an OpenAI vision payload to, say, a Baidu REST endpoint).
-        provider = "vlm" if _looks_like_vision_endpoint(_cloud_endpoint(endpoint)) else "cloud"
-        # A paid pick under auto must never be silent: every other paid route
-        # in this project (batch, neural QE) requires an explicit flag, and a
-        # surprise bill must not arrive through the back door. The warning
-        # names the env knobs so the operator can pin a local engine instead.
-        logger.warning(
-            "OCR auto mode selected the PAID cloud engine '%s' (no local "
-            "sidecar or rapidocr available); every scanned page will be "
-            "billed. Pin a free local engine via UBT_VLM_DRIVER or UBT_OCR_MODE "
-            "to avoid this.",
-            provider,
-        )
         # A missing vision model must fail loudly, not degrade to a silent
-        # skip: ``auto`` warns first, then ``CloudOcrDriver`` refuses to invent
-        # a model, so the ValueError propagates (see
-        # test_auto_vision_without_a_model_fails_loudly).
-        return provider, CloudOcrDriver(
-            endpoint=endpoint, api_key=api_key, model=model, provider=provider
-        )
+        # skip: ``auto`` warns first, then the driver refuses to invent a
+        # model, so the ValueError propagates.
+        return "cloud", VisionEndpointDriver(endpoint=target, api_key=api_key, model=model)
 
-    return None, None
+    raise ValueError(f"unknown ocr_mode {mode!r}: expected one of off/local/cloud/auto")

@@ -9,6 +9,7 @@ source-only sample would otherwise pass without ever touching the typesetter.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import re
 from pathlib import Path
 from typing import Any
@@ -196,6 +197,11 @@ def test_preflight_survives_a_book_of_empty_formula_placeholders(
     fake = _FakeTypst(ok=True)
     _patch(monkeypatch, tmp_path, fake)
     source = write_text_pdf(tmp_path / "src.pdf", [("Title", "The body of the page.")])
+    if importlib.util.find_spec("docling") is None:
+        # The probe reads this fixture as scanned (its text layer is not
+        # extractable), so the factory's capability-boundary escape routes it
+        # to docling — and a missing docling now refuses instead of degrading.
+        pytest.skip("docling is not installed; the refusal path is pinned separately")
     adapter = get_adapter_for_path(source, pdf_engine="pdfium")
     manifest = BookManifest(doc_id="d", title="t", source_path=str(source))
     blocks = [

@@ -100,20 +100,45 @@ def test_a_facsimile_render_records_one_row_per_page(tmp_path: Path, stub_compil
         assert row["tier"] in {"L1", "L2"}
 
 
-def test_the_delivered_size_is_the_solvers_decision_not_the_source_size(
+def test_the_delivered_size_is_the_group_decision_not_a_per_page_search(
     tmp_path: Path, stub_compile: None
 ) -> None:
-    """A Chinese translation of the same page needs less room, so the solver is
-    free to deliver *larger* than the source. Recording only ``measured_size_pt``
-    would make the ledger describe the input, not the artifact."""
+    """G4 Stage 3A moved the body size decision to the document.
+
+    A per-page search let roomy pages climb to ``source x 1.10`` while tight
+    pages fell to the 7.5pt floor, which is the 2.29pt drift the 26-page replay
+    measured. The ledger must now describe the *group* that shipped: one size,
+    with the group id alongside it, so a page that misses it is visible as an
+    exception rather than as another legitimate per-page value.
+    """
     src = _source_pdf(tmp_path / "book.pdf", 1)
     manifest = BookManifest(doc_id="d", title="t", source_path=str(src), target_lang="zh")
     strategy = DoclingRenderStrategy(delivery_mode="facsimile", enable_pdf_optimization=False)
     _render(strategy, manifest, [_body("b1", 1)], tmp_path / "out.pdf")
 
     row = strategy.last_page_geometry[0]
-    assert row["delivered_size_pt"] != row["measured_size_pt"]
-    assert row["delivered_size_pt"] > row["measured_size_pt"]
+    assert row["style_group_id"] == "body:document"
+    assert row["delivered_size_pt"] == row["style_group_size_pt"]
+    assert row["style_exception"] is False
+    group = manifest.metadata["document_style_group"]["group"]
+    assert row["delivered_size_pt"] == group["size_pt"]
+
+
+def test_every_L1_page_of_a_document_ships_the_same_body_size(
+    tmp_path: Path, stub_compile: None
+) -> None:
+    """The invariant the drift check reads: one size across the group."""
+    src = _source_pdf(tmp_path / "book.pdf", 3)
+    manifest = BookManifest(doc_id="d", title="t", source_path=str(src), target_lang="zh")
+    blocks = [_body(f"b{i}", i) for i in (1, 2, 3)]
+    strategy = DoclingRenderStrategy(delivery_mode="facsimile", enable_pdf_optimization=False)
+    _render(strategy, manifest, blocks, tmp_path / "out.pdf")
+
+    delivered = {
+        row["delivered_size_pt"] for row in strategy.last_page_geometry if row["tier"] == "L1"
+    }
+    assert len(delivered) == 1
+    assert manifest.metadata["document_style_group"]["exception_pages"] == []
 
 
 def test_geometry_does_not_leak_across_renders(tmp_path: Path, stub_compile: None) -> None:

@@ -16,6 +16,7 @@ import asyncio
 import dataclasses
 import json
 import logging
+import os
 from collections.abc import Sequence
 from contextlib import suppress
 from pathlib import Path
@@ -114,16 +115,107 @@ class VisualVerifyLoop:
         self.cancel_token = cancel_token
 
     def _build_vlm_judge(self) -> Any | None:
-        if not self.visual_judge_enabled or self.router is None:
+        if not self.visual_judge_enabled:
             return None
         router = self.router
         model = self.visual_judge_model
+        if router is not None:
+            # A named judge model (or the repair model) on the router: the
+            # strongest critic. When only the model name is unset the judge
+            # falls through to the OCR vision endpoint below rather than
+            # silently skipping the tier.
+            async def _judge(images: list[str], prompt: str) -> str:
+                res: str = await router.complete_with_images(prompt, images, model=model)
+                return res
 
-        async def _judge(images: list[str], prompt: str) -> str:
-            res: str = await router.complete_with_images(prompt, images, model=model)
-            return res
+            return _judge
 
-        return _judge
+        # No router model for the judge: reuse the OCR channel's vision
+        # endpoint (the same local server that transcribes scans — one vision
+        # endpoint serves the whole pipeline). A doc-parsing specialist is a
+        # weaker *layout* critic than a general VLM, but it catches the
+        # text-level failures (missing/garbled delivered text) locally at
+        # zero cost and zero egress; aesthetic judgement still wants a named
+        # ``visual_judge_model`` on the router.
+        endpoint = getattr(self.adapter, "ocr_endpoint", None) or os.environ.get(
+            "UBT_OCR_ENDPOINT", ""
+        )
+        model_name = getattr(self.adapter, "ocr_model", None) or os.environ.get("UBT_OCR_MODEL", "")
+        if not endpoint or not model_name:
+            return None
+        # Same choke point as the OCR drivers: without the opt-in, only a
+        # local endpoint may receive page images — including from the judge.
+        from ubt.core.endpoint_locality import endpoint_on_this_machine
+
+        allow_upload = bool(getattr(self.adapter, "allow_page_upload", False))
+        if not allow_upload and not endpoint_on_this_machine(endpoint):
+            return None
+        api_key = getattr(self.adapter, "ocr_api_key", None) or os.environ.get("UBT_OCR_API_KEY")
+        from ubt.core.ports import vision_ocr_driver
+
+        driver = vision_ocr_driver(endpoint, api_key, model_name)
+
+        def _post_judge(images: list[str], prompt: str) -> str:
+            """One bounded call per image; returns raw text for verdict parsing."""
+            import httpx
+
+            contents = []
+            for img in images:
+                # Images arrive as base64 data URLs or raw base64; pass through.
+                if img.startswith("data:"):
+                    contents.append({"type": "image_url", "image_url": {"url": img}})
+                else:
+                    contents.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{img}"},
+                        }
+                    )
+            payload = {
+                "model": driver.model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": prompt}, *contents],
+                    }
+                ],
+                "temperature": 0.0,
+            }
+            headers = {"Content-Type": "application/json"}
+            if driver.api_key:
+                headers["Authorization"] = f"Bearer {driver.api_key}"
+            url = (
+                driver.endpoint
+                if driver.endpoint.endswith("/chat/completions")
+                else f"{driver.endpoint}/chat/completions"
+            )
+            with httpx.Client(timeout=driver.timeout) as client:
+                resp = client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+            data = resp.json()
+            # Core-internal usage sink: the judge's tokens must land in the
+            # same ledger the OCR channel's do (unmeasured books as unknown,
+            # never fake $0.00).
+            from ubt.core.router.provider import _extract_cached_tokens, record_external_usage
+
+            usage = data.get("usage")
+            if isinstance(usage, dict) and usage:
+                record_external_usage(
+                    driver.model,
+                    prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
+                    completion_tokens=int(usage.get("completion_tokens", 0) or 0),
+                    cached_tokens=_extract_cached_tokens(usage),
+                )
+            else:
+                record_external_usage(driver.model, measured=False)
+            return data["choices"][0]["message"]["content"] or ""
+
+        async def _local_judge(images: list[str], prompt: str) -> str:
+            # The gate awaits its judge; the blocking HTTP call goes to a
+            # thread so the export event loop keeps pumping.
+            return await asyncio.to_thread(_post_judge, images, prompt)
+
+        return _local_judge
 
     async def _evaluate_gate(
         self,

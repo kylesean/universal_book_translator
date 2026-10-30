@@ -1130,16 +1130,17 @@ def test_the_wizard_offers_every_engine_ocr_mode() -> None:
 
 
 def test_the_wizard_marks_ocr_modes_that_need_page_egress() -> None:
-    """``vlm`` ships page images off the machine.
+    """``cloud`` ships page images off the machine.
 
-    The engine refuses it unless ``UBT_ALLOW_PAGE_UPLOAD=true``. Surfacing that
-    at selection time is the difference between a clear refusal and a
-    submit-time error the operator has to decode.
+    The engine refuses it unless ``UBT_ALLOW_PAGE_UPLOAD=true`` (a localhost
+    endpoint is exempt — locality, not the mode string, is the gate's
+    primitive). Surfacing that at selection time is the difference between a
+    clear refusal and a submit-time error the operator has to decode.
     """
     if not _WIZARD_SRC.exists():
         pytest.skip("web/ frontend is not present in this checkout")
     source = _WIZARD_SRC.read_text(encoding="utf-8")
-    assert re.search(r"ocrNeedsEgress\s*=\s*ocrMode === 'vlm'", source)
+    assert re.search(r"ocrNeedsEgress\s*=\s*ocrMode === 'cloud'", source)
     assert "ocrModeEgressWarning" in source
 
 

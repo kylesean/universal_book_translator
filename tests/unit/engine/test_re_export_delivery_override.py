@@ -71,3 +71,16 @@ def test_an_infeasible_request_fails_instead_of_rendering_the_other_contract() -
 
     # A refusal must not leave a half-written plan behind.
     assert manifest.metadata["delivery_plan"] == {"contract": "faithful"}
+
+
+def test_faithful_override_refuses_font_damaged_pdf_unless_allow_degrade_is_set() -> None:
+    manifest = _manifest()
+    manifest.metadata["confirmed_font_damage_pages"] = [2, 8]
+
+    with pytest.raises(ReExportError, match="not feasible"):
+        _apply_delivery_override(manifest, "faithful", allow_degrade=False)
+
+    effective = _apply_delivery_override(manifest, "faithful", allow_degrade=True)
+    assert effective == "reflow"
+    assert manifest.metadata["delivery_plan"]["contract"] == "readable"
+    assert manifest.metadata["delivery_plan"]["eligibility"]["eligible"] is False

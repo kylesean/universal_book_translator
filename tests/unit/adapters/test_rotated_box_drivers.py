@@ -3,13 +3,17 @@
 The bitmap a driver sends (or POSTs) is the *displayed* page, so the boxes the
 OCR comes back with are in the display frame. Every consumer downstream --
 anchoring, block geometry, the render compositor's masks -- reads unrotated
-user space, so the driver owes it the conversion. Both HTTP drivers do it by
-construction now: the ``PageBBoxResolver`` they already ran the boxes through
-is told the page's rotation.
+user space, so the driver owes it the conversion. Both measuring HTTP drivers
+do it by construction now: the ``PageBBoxResolver`` they already ran the boxes
+through is told the page's rotation.
 
 The numbers are a real /Rotate 90 page: a 300x500 media box displayed as
 500x300, with a line of text whose ink sits at image pixels (445, 54)-(456, 102)
 and at PDF points (54, 446)-(102, 455) in user space.
+
+The vision-endpoint driver has no box contract to keep: like every LLM-VLM
+driver it must return ``measured_box=None`` lines (hallucinated coordinates
+are worse than none), so it stays out of this suite by design.
 """
 
 from __future__ import annotations
@@ -19,7 +23,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PIL import Image
 
-from ubt.adapters.pdf.vlm.drivers.cloud_driver import CloudOcrDriver
 from ubt.adapters.pdf.vlm.drivers.sidecar_driver import SidecarOcrDriver
 from ubt.adapters.pdf.vlm.types import VlmDriver
 
@@ -42,23 +45,6 @@ def _http_client(payload: dict[str, object]) -> MagicMock:
     client.__enter__ = MagicMock(return_value=client)
     client.__exit__ = MagicMock(return_value=False)
     return client
-
-
-def test_the_cloud_rest_driver_undoes_the_page_rotation() -> None:
-    driver = CloudOcrDriver(endpoint="https://ocr.example.com/api", api_key="k", provider="paddle")
-    payload: dict[str, object] = {
-        "lines": [{"text": "hello", "box": _INK_PX, "confidence": 0.9}],
-        "coord_system": "image_pixel",
-    }
-
-    with patch(
-        "ubt.adapters.pdf.vlm.drivers.cloud_driver.httpx.Client",
-        return_value=_http_client(payload),
-    ):
-        transcript = driver.recognize(Image.new("RGB", (500, 300)), _DISPLAY_PT, 1.0, rotation=90)
-
-    (line,) = transcript.lines
-    assert line.measured_box == pytest.approx(_USER_PT, abs=0.5)
 
 
 def test_the_sidecar_driver_undoes_the_page_rotation() -> None:
@@ -96,8 +82,7 @@ def test_the_rapidocr_driver_undoes_the_page_rotation() -> None:
     assert line.measured_box == pytest.approx(_USER_PT, abs=0.5)
 
 
-@pytest.mark.parametrize("driver_kind", ["cloud", "sidecar"])
-def test_an_unrotated_page_keeps_the_drivers_old_boxes(driver_kind: str) -> None:
+def test_the_sidecar_driver_keeps_its_boxes_on_an_unrotated_page() -> None:
     # The regression guard for every document that was never turned: the same
     # payload with rotation=0 must come back as the display-frame box, exactly
     # as it did before the rotation was threaded through.
@@ -105,46 +90,17 @@ def test_an_unrotated_page_keeps_the_drivers_old_boxes(driver_kind: str) -> None
         "lines": [{"text": "hello", "box": _INK_PX, "confidence": 0.9}],
         "coord_system": "image_pixel",
     }
-    driver: VlmDriver
-    if driver_kind == "cloud":
-        driver = CloudOcrDriver(
-            endpoint="https://ocr.example.com/api", api_key="k", provider="paddle"
-        )
-        target = "ubt.adapters.pdf.vlm.drivers.cloud_driver.httpx.Client"
-    else:
-        driver = SidecarOcrDriver(endpoint="http://localhost:8765")
-        target = "ubt.adapters.pdf.vlm.drivers.sidecar_driver.httpx.Client"
+    driver: VlmDriver = SidecarOcrDriver(endpoint="http://localhost:8765")
 
-    with patch(target, return_value=_http_client(payload)):
+    with patch(
+        "ubt.adapters.pdf.vlm.drivers.sidecar_driver.httpx.Client",
+        return_value=_http_client(payload),
+    ):
         transcript = driver.recognize(Image.new("RGB", (500, 300)), _DISPLAY_PT, 1.0)
 
     (line,) = transcript.lines
     # z0/y0 flipped out of image space, no rotation applied.
     assert line.measured_box == pytest.approx((445.0, 198.0, 456.0, 246.0), abs=0.5)
-
-
-def test_the_cloud_rest_driver_applies_cropbox_origin() -> None:
-    driver = CloudOcrDriver(endpoint="https://ocr.example.com/api", api_key="k", provider="paddle")
-    payload: dict[str, object] = {
-        "lines": [{"text": "hello", "box": _INK_PX, "confidence": 0.9}],
-        "coord_system": "image_pixel",
-    }
-
-    with patch(
-        "ubt.adapters.pdf.vlm.drivers.cloud_driver.httpx.Client",
-        return_value=_http_client(payload),
-    ):
-        transcript = driver.recognize(
-            Image.new("RGB", (500, 300)),
-            _DISPLAY_PT,
-            1.0,
-            rotation=90,
-            origin_pt=(50.0, 60.0),
-        )
-
-    (line,) = transcript.lines
-    expected = (_USER_PT[0] + 50.0, _USER_PT[1] + 60.0, _USER_PT[2] + 50.0, _USER_PT[3] + 60.0)
-    assert line.measured_box == pytest.approx(expected, abs=0.5)
 
 
 def test_the_sidecar_driver_applies_cropbox_origin() -> None:

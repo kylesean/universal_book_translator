@@ -132,7 +132,11 @@ PromptStrategyName = Literal["auto", "minimal", "hybrid", "rich"]
 #: How to recover the translation from a raw completion. ``auto`` (the default)
 #: tries the XML tag first, then strips code fences and conversational lead-ins.
 ExtractionStrategyName = Literal["auto", "xml_tag", "raw", "cp"]
-OcrMode = Literal["auto", "local", "vlm", "off"]
+OcrMode = Literal["off", "auto", "local", "cloud"]
+#: How eagerly the VLM fallback transcribes/proofreads pages on top of the
+#: text layer (``missing`` = only textless pages, ``weak`` = also formula
+#: debris / sparse pages, ``all`` = every non-``editable_text`` page).
+OcrFallback = Literal["off", "missing", "weak", "all"]
 ExecMode = Literal["auto", "short", "long"]
 DocumentMode = Literal["auto", "paper", "book"]
 FormulaEnrichment = Literal["auto", "on", "off"]
@@ -514,6 +518,10 @@ class TypstConfig(BaseModel):
     #: instead of refusing the run. Legacy ``facsimile``/``page_locked`` are
     #: grandfathered and do not consult this flag.
     allow_degrade: bool = False
+    #: When False (the default per PRD §9.2), ``major`` findings in the
+    #: artifact delivery contract block delivery just like ``critical``
+    #: findings. Set True (``--allow-major``) to accept ``major`` findings.
+    allow_major: bool = False
     enable_pdf_optimization: bool = True
     pdf_optimize_profile: Literal["lossless", "ebook", "screen"] = "lossless"
     enable_dynamic_routing: bool = False
@@ -614,6 +622,7 @@ class EngineConfig(BaseModel):
     c_text_enabled: bool = False
     tm_enabled: bool = True
     tm_fuzzy_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    enable_cels: bool = Field(default=True, validation_alias="UBT_ENABLE_CELS")
 
 
 class UBTConfig(BaseSettings):
@@ -908,12 +917,22 @@ class UBTConfig(BaseSettings):
     docling_isolate_process: bool = True
 
     # -- Pluggable OCR Configuration -------------------------------------------
-    # 'auto' (default): local measured-box engine first, then VLM.
-    # 'local': measured-box engine on this machine (rapidocr or sidecar HTTP).
-    # 'vlm': OpenAI-compatible vision endpoint (or in-process unlimited-ocr2).
+    # 'auto' (default): best local engine first, then cloud.
+    # 'local': an engine that never ships a page off this machine — measured-box
+    #   engines (rapidocr, sidecar HTTP) or a *local* OpenAI-compatible vision
+    #   endpoint (llama-swap / SGLang / Ollama on localhost; set ocr_endpoint +
+    #   ocr_model and the probe routes to it with no egress opt-in).
+    # 'cloud': a remote vision endpoint. Requires page egress
+    #   (UBT_ALLOW_PAGE_UPLOAD=true) unless the endpoint is itself local.
     # 'off': Explicitly disable OCR (scanned pages preserved as source).
     ocr_mode: OcrMode = "auto"
     ocr_endpoint: str = ""
+    # Vision model for the OCR channel (env UBT_OCR_MODEL). Declared here so the
+    # spend pre-flight and the assessor can price the channel the driver
+    # actually bills against. No vendor default: the vision channel must be told
+    # which model to call, and an empty value fails closed (see _check_invariants
+    # and the vision driver) rather than silently billing a shipped model.
+    ocr_model: str = ""
     # Vision model for the OCR channel (env UBT_OCR_MODEL). Declared here so the
     # spend pre-flight and the assessor can price the channel the driver
     # actually bills against. No vendor default: the vision channel must be told
@@ -923,6 +942,13 @@ class UBTConfig(BaseSettings):
     # Plain declarative field: env_prefix maps this to UBT_OCR_API_KEY only, so
     # neither the bare ``OCR_API_KEY`` nor a shared LLM key can reach it.
     ocr_api_key: SecretStr = SecretStr("")
+    # How eagerly the VLM fallback reads pages on top of the text layer
+    # (formerly the undocumented UBT_VLM_SCAN_FALLBACK env). 'missing' covers
+    # textless scan pages, 'weak' also upgrades formula-debris / sparse pages,
+    # 'all' upgrades every non-editable_text page. Off by default: a scanned
+    # page the OCR channel cannot read must reject the book (fail closed),
+    # not silently ship a partial read.
+    ocr_fallback: OcrFallback = "off"
 
     # -- SQLite ledger storage directory ------------------------------------
     db_dir: Path = Path(".ubt/ledgers")
@@ -1109,20 +1135,30 @@ class UBTConfig(BaseSettings):
         """Models that bill through an endpoint other than ``base_url``.
 
         Today only the OCR channel: ``UBT_OCR_MODEL`` is billed through
-        ``UBT_OCR_ENDPOINT`` (OpenAI by default) when OCR may reach a cloud
-        route — ``auto`` counts only with page egress on, matching
-        ``ocr_can_bill_cloud`` in the budget pre-flight. An empty map means
-        everything bills through ``base_url``.
+        ``UBT_OCR_ENDPOINT`` (OpenAI by default) when OCR may reach a remote
+        route. Judged from *endpoint locality*, not the mode string: a
+        ``cloud`` mode pinned at localhost (llama-swap/SGLang) is free, and a
+        ``local`` mode pointed off-machine (only possible with page egress
+        on) still spends real money. ``auto`` counts the cloud fallback
+        whenever egress is on, because the probe may take it. An empty map
+        means everything bills through ``base_url``.
 
         Cost accounting needs this so a local ``base_url`` is not read as "the
         whole run is free": a local LLM with cloud OCR still spends real money.
         """
-        ocr_can_bill_cloud = self.ocr_mode == "vlm" or (
-            self.ocr_mode == "auto" and self.allow_page_upload
-        )
-        if not ocr_can_bill_cloud:
+        from ubt.core.endpoint_locality import endpoint_on_this_machine
+
+        endpoint = self.ocr_endpoint or os.environ.get("UBT_OCR_ENDPOINT", "")
+        if self.ocr_mode == "off":
             return {}
-        return {self.ocr_model: self.ocr_endpoint or ""}
+        if self.ocr_mode == "local" and (not endpoint or endpoint_on_this_machine(endpoint)):
+            return {}
+        if endpoint and endpoint_on_this_machine(endpoint):
+            return {}
+        if not self.allow_page_upload:
+            # The egress gate refuses the remote route before it can bill.
+            return {}
+        return {self.ocr_model: endpoint}
 
     # Master gate for every route that ships rendered PAGE IMAGES of the book to
     # model endpoints: visual-scalpel repair, VLM judge, and cloud/VLM OCR (auto
@@ -1334,6 +1370,10 @@ class UBTConfig(BaseSettings):
     #: See ``TypstConfig.allow_degrade``. Mirrored on the flat surface so CLI,
     #: REST and MCP resolve the same field.
     allow_degrade: bool = False
+    #: When False (the default per PRD §9.2), ``major`` findings in the
+    #: artifact delivery contract block delivery just like ``critical``
+    #: findings. Set True (``--allow-major``) to accept ``major`` findings.
+    allow_major: bool = False
     enable_pdf_optimization: bool = True
     pdf_optimize_profile: Literal["lossless", "ebook", "screen"] = "lossless"
     enable_dynamic_routing: bool = False
@@ -1445,6 +1485,7 @@ class UBTConfig(BaseSettings):
     # Exact hits skip the LLM entirely; fuzzy hits become few-shot references.
     tm_enabled: bool = True
     tm_fuzzy_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    enable_cels: bool = Field(default=True, validation_alias="UBT_ENABLE_CELS")
 
     # -- Service hardening / deployment (single source of truth) ----
     # Canonical fields for the deployment knobs: env_prefix already maps
@@ -1578,16 +1619,17 @@ class UBTConfig(BaseSettings):
                 "host in brackets: http://[::1]:11434/v1)."
             )
 
-        # The vision-LLM OCR route bills a model the operator must name: UBT
-        # ships no vendor default, so an explicitly requested 'vlm' with no
-        # model is unbuildable. 'auto' and 'local' pass (the driver resolves
-        # at runtime, not at config parse).
-        if self.ocr_mode == "vlm" and not self.ocr_model.strip():
+        # The vision OCR route calls a model the operator must name: UBT ships
+        # no vendor default, so an explicitly requested 'cloud' with no model
+        # is unbuildable. 'auto' and 'local' pass (the driver resolves at
+        # runtime, not at config parse; the probe fails closed with the same
+        # message when a local vision endpoint lacks its model name).
+        if self.ocr_mode == "cloud" and not self.ocr_model.strip():
             raise ValueError(
-                "ocr_mode='vlm' requires a model (UBT_OCR_MODEL): the vision OCR "
-                "channel bills the model you name, and UBT ships no vendor default. "
-                "Set UBT_OCR_MODEL, choose a local engine (UBT_VLM_DRIVER=rapidocr), "
-                "or set UBT_OCR_MODE=off."
+                "ocr_mode='cloud' requires a model (UBT_OCR_MODEL): the vision "
+                "OCR channel bills the model you name, and UBT ships no vendor "
+                "default. Set UBT_OCR_MODEL, choose a local engine "
+                "(UBT_OCR_MODE=local), or set UBT_OCR_MODE=off."
             )
 
         return self

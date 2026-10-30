@@ -457,3 +457,121 @@ def test_report_serializes_to_a_stable_payload() -> None:
     assert payload["passed"] is True
     assert payload["findings"] == []
     assert payload["checks"]
+
+
+def test_mixed_cjk_latin_prose_run_clipping_and_duplication_are_caught() -> None:
+    """Regression for _run_present / _run_share_present loophole:
+    A CJK paragraph containing ASCII tokens (e.g. (3.1), GCA, DG) must not fall
+    into whitespace-tokenized Latin matching or single-character bag-of-words
+    matching across the book.
+    """
+    full_text = (
+        "其中 $V_{ch}$ 是沟道的准费米电势，它仅具有 $y$ 方向的空间依赖性。"
+        "请注意，方程 (3.1) 是一个一维的泊松方程，其他两个维度被忽略是由于沟道长度较长（GCA 条件）以及 DG 结构。"
+    )
+    # 1. Clipped second run (even when characters appear scattered elsewhere)
+    clipped_rep = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b0050", full_text, page=1, allow_cross_page=False),),
+            page_texts=(
+                "其中 𝑉ch 是沟道的准费米电势，它仅具有 𝑦 方向的空间依赖性。",
+                "第2页：请注意方程 (3.1) 一维泊松方程其他两个维度被忽略是由于沟道长度较长 GCA 条件以及 DG 结构但顺序打乱。",
+            ),
+            expected_page_count=2,
+            contract="faithful",
+            style_samples=(StyleSample(page=1, size_pt=9.0),),
+        )
+    )
+    assert "clipped_overflow" in _codes(clipped_rep)
+
+    # 2. Duplicated first run across page 1 and page 2 (GAP-4 b0014 regression)
+    dup_rep = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b0014", full_text, page=1, allow_cross_page=False),),
+            page_texts=(
+                "其中 𝑉ch 是沟道的准费米电势，它仅具有 𝑦",
+                "其中 𝑉ch 是沟道的准费米电势，它仅具有 𝑦 方向的空间依赖性。请注意，方程 (3.1) 是一个一维的泊松方程，其他两个维度被忽略是由于沟道长度较长（GCA 条件）以及 DG 结构。",
+            ),
+            expected_page_count=2,
+            contract="faithful",
+            style_samples=(StyleSample(page=1, size_pt=9.0),),
+        )
+    )
+    assert "text_duplicated" in _codes(dup_rep)
+
+
+def test_cross_page_prose_run_with_footer_page_number_and_zwsp_is_accepted() -> None:
+    """A reflowed paragraph wrapping from page 1 to page 2 across a trailing
+    page-number footer and zero-width space after hyphen is recognized as
+    present without weakening contiguous run verification.
+    """
+    block_text = "求解漂移-扩散方程与圆柱形全环绕栅极 Cy-GAA 的核心模型基于对掺杂双栅极鳍式场效应晶体管的泊松方程解。"
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b0007", block_text, page=1, allow_cross_page=True),),
+            page_texts=(
+                "求解漂移-\u200b扩散方程与圆柱形全环绕栅极 Cy\ufffeGAA 的核心模型基于对掺杂双栅极鳍式场1",
+                "效应晶体管的泊松方程解。2",
+            ),
+            contract="readable",
+        )
+    )
+    assert report.passed, report.summary_line()
+    assert not report.findings
+
+
+def test_page_level_overflow_record_is_not_dropped() -> None:
+    """Page-level OverflowRecord(block_id='page:1') must emit overflow_recorded."""
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b1", "正文内容。"),),
+            page_texts=("正文内容。",),
+            overflow_records=(
+                OverflowRecord(
+                    block_id="page:1",
+                    page=1,
+                    deficit_pt=1.2,
+                    reason="page_lock_overflow",
+                ),
+            ),
+            style_samples=(StyleSample(page=1, size_pt=9.0),),
+        )
+    )
+    assert "overflow_recorded" in _codes(report)
+    assert not report.deliverable
+
+
+def test_large_box_edge_overlap_is_not_exempted_as_aggregate() -> None:
+    """A body paragraph box (> 300pt²) colliding at its edge with a smaller
+    label box whose characters happen to appear in the paragraph must still be
+    flagged as text_overlap when geometric containment < 80%.
+    """
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b1", "正文。"),),
+            page_texts=("正文。",),
+            boxes=(
+                # Large paragraph box: 300pt x 50pt = 15,000pt²
+                _box(
+                    1,
+                    100.0,
+                    100.0,
+                    400.0,
+                    150.0,
+                    text="这里讨论了 FIG 3.1 的核心结构与参数设置。",
+                    font_size_pt=9.5,
+                ),
+                # Small caption/heading box (50pt x 10pt = 500pt²) overlapping by 25% (y: 145..150 -> 5pt * 50pt = 250 / 500 = 50% < 80%)
+                _box(
+                    1,
+                    120.0,
+                    145.0,
+                    170.0,
+                    155.0,
+                    text="FIG 3.1",
+                    font_size_pt=8.0,
+                ),
+            ),
+        )
+    )
+    assert "text_overlap" in _codes(report)

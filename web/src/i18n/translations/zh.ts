@@ -239,7 +239,7 @@ export const zh: TranslationDictionary = {
       '此模式会把整页图像上传到外部服务，需要先允许页面外发。',
     ocrModeAuto: '系统自适应',
     ocrModeLocal: '本地 OCR（离线免费）',
-    ocrModeVlm: '视觉大模型 OCR（需外发）',
+    ocrModeCloud: '云端视觉模型（需外发；本地端点免费）',
     ocrModeOff: '关闭 OCR（跳过纯图页）',
     pageFilter: '页码试跑',
     pageFilterPlaceholder: '如 1-10',

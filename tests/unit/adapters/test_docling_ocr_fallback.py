@@ -95,10 +95,11 @@ def test_rapidocr_driver_is_available_graceful() -> None:
 
 
 def test_probe_effective_driver_when_rapidocr_unoperational() -> None:
-    # When rapidocr is requested or probed in auto, but is_available() returns False
+    # When no local engine is available (rapidocr's is_available() is False,
+    # no sidecar, no local vision endpoint), 'local' fails closed to (None, None)
     with patch.object(RapidOcrDriver, "is_available", return_value=False):
         driver_type, driver = probe_effective_driver(
-            mode="rapidocr",
+            mode="local",
             endpoint=None,
             api_key=None,
             allow_page_upload=False,
@@ -116,6 +117,13 @@ def test_probe_effective_driver_when_rapidocr_unoperational() -> None:
         assert driver_type_auto is None
         assert driver_auto is None
 
+    # A truly unknown mode fails loudly instead of being silently
+    # reinterpreted. (Registered driver names still resolve — the custom
+    # branch is internal wiring for tests — but the user-facing vocabulary
+    # is exactly off/local/cloud/auto.)
+    with pytest.raises(ValueError, match="unknown ocr_mode"):
+        probe_effective_driver(mode="bogus", allow_page_upload=False)
+
 
 def test_vlm_fallback_auto_promotes_to_missing_for_textless_scans() -> None:
     fake_path = Path("fake_scan.pdf")
@@ -128,7 +136,7 @@ def test_vlm_fallback_auto_promotes_to_missing_for_textless_scans() -> None:
     mock_doc.__len__.return_value = 1
     with (
         patch("pypdfium2.PdfDocument", return_value=mock_doc),
-        patch.dict("os.environ", {"UBT_VLM_SCAN_FALLBACK": "off"}),
+        patch.dict("os.environ", {"UBT_OCR_FALLBACK": "off"}),
     ):
         with pytest.raises(DocumentParseError) as exc_info:
             vlm_fallback_missing_pages(
@@ -163,7 +171,7 @@ def test_pages_the_ocr_driver_could_not_transcribe_are_refused_not_shipped() -> 
 
     with (
         patch("pypdfium2.PdfDocument", return_value=fake_pdf),
-        patch.dict("os.environ", {"UBT_VLM_SCAN_FALLBACK": "missing"}),
+        patch.dict("os.environ", {"UBT_OCR_FALLBACK": "missing"}),
         patch(
             "ubt.adapters.pdf.vlm.transcribe.get_driver",
             return_value=driver,
@@ -226,7 +234,7 @@ def test_a_block_spanning_a_page_break_covers_every_page_of_its_chain() -> None:
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("mode", ["vlm"])
+@pytest.mark.parametrize("mode", ["cloud"])
 def test_an_explicit_remote_ocr_mode_cannot_bypass_the_upload_gate(mode: str) -> None:
     """Naming a remote route is not consent to use it.
 

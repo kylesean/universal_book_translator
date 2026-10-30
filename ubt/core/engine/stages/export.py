@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import html
 import json
 import logging
@@ -1320,6 +1321,7 @@ def _delivery_contract_evidence(
     """
     from ubt.core.engine.delivery_contract import ContractBlock, OverflowRecord, StyleSample
     from ubt.core.ports import read_delivery_evidence
+    from ubt.render.delivered_text import delivered_text, dropped_page_furniture
 
     mode = str(getattr(getattr(ctx.config, "typst", None), "delivery_mode", "") or "")
     actual_mode = str((getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_mode", "") or "")
@@ -1338,14 +1340,26 @@ def _delivery_contract_evidence(
 
     blocks: list[ContractBlock] = []
     for block in final_blocks:
-        if block.skip_translate:
+        if block.skip_translate or dropped_page_furniture(block):
             continue
         if block.block_type in (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE):
             continue
-        text = (block.target_text or "").strip()
+        text = delivered_text(block).strip()
         if not text:
             continue
         page = int(block.bbox.page) if block.bbox is not None else 0
+        has_multi_page_boxes = False
+        if (
+            block.provenance
+            and block.provenance.physical_boxes
+            and len(block.provenance.physical_boxes) > 1
+        ):
+            box_pages = {
+                int(pbox.get("page", 0) if isinstance(pbox, dict) else getattr(pbox, "page", 0))
+                for pbox in block.provenance.physical_boxes
+            }
+            box_pages.discard(0)
+            has_multi_page_boxes = len(box_pages) > 1
         blocks.append(
             ContractBlock(
                 block_id=block.id,
@@ -1353,8 +1367,9 @@ def _delivery_contract_evidence(
                 page=page,
                 kind=str(block.block_type.value),
                 # A reflow may move a block to another page; a faithful page
-                # must keep it where the source put it.
-                allow_cross_page=contract == "readable",
+                # must keep it where the source put it, except when the source
+                # block itself spans multiple physical pages.
+                allow_cross_page=(contract == "readable") or has_multi_page_boxes,
             )
         )
 
@@ -1390,10 +1405,14 @@ def _delivery_contract_evidence(
         size = page.get("delivered_size_pt")
         if isinstance(size, (int, float)) and size > 0:
             style_samples.append(
-                StyleSample(page=int(page.get("page_no", 0) or 0), size_pt=float(size))
+                StyleSample(
+                    page=int(page.get("page_no", 0) or 0),
+                    size_pt=float(size),
+                    group_id=str(page.get("style_group_id") or ""),
+                )
             )
 
-    return read_delivery_evidence(
+    evidence = read_delivery_evidence(
         rendered_path,
         contract=contract,
         blocks=blocks,
@@ -1403,6 +1422,19 @@ def _delivery_contract_evidence(
         style_samples=style_samples,
         read_geometry=True,
     )
+
+    # The renderer declares the document body group before it draws (G4 Stage
+    # 3A); the reader above supplies the sizes. Keeping the two apart is what
+    # stops a drifted page from excusing itself: membership is the plan's, the
+    # number is the artifact's.
+    from ubt.core.layout.style_group import plan_from_metadata
+
+    style_group = plan_from_metadata(
+        (getattr(ctx.manifest, "metadata", {}) or {}).get("document_style_group")
+    )
+    if style_group is not None:
+        evidence = dataclasses.replace(evidence, style_group=style_group)
+    return evidence
 
 
 def _evaluate_delivery(
@@ -1436,7 +1468,8 @@ def _evaluate_delivery(
         )
     except OSError as exc:
         logger.warning("Could not write delivery contract sidecar: %s", exc)
-    if not report.passed:
+    allow_major = bool(getattr(ctx.config, "allow_major", False))
+    if not (report.passed if allow_major else report.deliverable):
         logger.warning(
             "Delivery contract BLOCKED for job %s: %s; see %s",
             ctx.job_id,
@@ -2060,7 +2093,13 @@ async def run_export_stage(
         if rendered_path.suffix.lower() == ".pdf"
         else None
     )
-    if delivery_report is not None and not delivery_report.passed and not ctx.is_mock_run:
+    allow_major = bool(getattr(ctx.config, "allow_major", False))
+    contract_ok = (
+        (delivery_report.passed if allow_major else delivery_report.deliverable)
+        if delivery_report is not None
+        else True
+    )
+    if delivery_report is not None and not contract_ok and not ctx.is_mock_run:
         raise IntegrityViolationError(
             f"Export blocked for job {ctx.job_id}: delivery contract failed — "
             f"{delivery_report.summary_line()}. See "

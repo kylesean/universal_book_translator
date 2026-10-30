@@ -38,6 +38,13 @@ It takes `--corpus corpus` (default) and exits 0 on pass.
   block with the requested width/style and reports real height, line boxes and
   overflow. Zero model tokens; use it to spot-check a font/width before changing
   the layout solver.
+- `style_group_probe.py` — G4 Stage 3A read-only probe. Reads a job's ledger
+  (translated text) plus its source PDF, builds the same per-page fit models the
+  renderer uses, and reports the document body size the planner would choose, the
+  micro-typography rung it needs, the exception pages with their deficits, and a
+  size sweep. No render, no model calls — run it before rewiring a renderer or to
+  explain a blocked `style_group_exception`. Writes `style_group_probe.json` and
+  `STYLE_GROUP_PROBE.md` under `--out-dir`.
 - `cels_spike.py` — G3 CELS feasibility probe on real pages: Stage 1 column
   detection (with every refused gutter and its reason) plus Stage 5 content-stream
   injection arms (`Tc`, forced `Tz`, `TL`+`T*` twin). Verifies the rewritten PDF by

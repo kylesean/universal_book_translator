@@ -42,6 +42,23 @@ from ubt.render.typst.escape import typst_escape
 FONT_LINE_HEIGHT_EM: float = 0.733
 
 
+def _text_set_line(
+    fonts_formatted: str, size_pt: float, tracking_em: float, target_lang: str
+) -> str:
+    """The ``#set text`` line for a page, carrying the group's tracking.
+
+    Typst 0.15 accepts ``text(tracking:)``, so the document body group's letter
+    spacing reaches the artifact instead of only feeding the height estimator.
+    Left out when zero: an explicit ``0em`` is the same value, but the emitted
+    page then differs from the pre-Stage-3A markup for no reason.
+    """
+    tracking = f", tracking: {tracking_em}em" if tracking_em else ""
+    return (
+        f"  #set text(font: ({fonts_formatted}), size: {size_pt}pt{tracking}, "
+        f'lang: "{target_lang}", overhang: true, cjk-latin-spacing: auto)'
+    )
+
+
 def leading_gap_em(pitch_ratio: float) -> float:
     """Typst ``par(leading:)`` gap for a target line-height ratio.
 
@@ -381,6 +398,7 @@ def solve_page_lock(
     target_lang: str = "zh",
     max_body_pt: float = 11.5,
     floor_pt: float = FLOOR_PT,
+    preferred_pt: float | None = None,
 ) -> tuple[float, float, float, float]:
     """Solve uniform font size and spacing parameters to fit blocks on 1 page.
 
@@ -392,6 +410,12 @@ def solve_page_lock(
     reported via :func:`page_overflow_at_floor` and allowed to run long rather
     than shrunk further.
 
+    ``preferred_pt`` is the document's body-group size (G4 Stage 3A). A page-lock
+    page is a *different placement strategy*, not a different style: it may
+    re-typeset the page, but it starts from the group's size and only goes below
+    it when the content genuinely cannot fit. Going below is reported by the
+    caller as a style-group exception, because it is one.
+
     Returns:
         (uniform_size_pt, leading_em, par_spacing_em, tracking_em)
     """
@@ -401,8 +425,9 @@ def solve_page_lock(
 
     target_capacity_h = _page_capacity(geometry)
 
-    # Binary search for size in [floor_pt, max_body_pt]
-    lo, hi = floor_pt, max_body_pt
+    # Binary search for size in [floor_pt, ceiling]
+    hi = max_body_pt if preferred_pt is None else min(max_body_pt, max(floor_pt, preferred_pt))
+    lo = floor_pt
     roomy = _estimated_height(
         geometry,
         blocks,
@@ -660,14 +685,22 @@ class PageLockedReflowRenderer:
             f"  margin: (top: {geom.margin_top}pt, bottom: {geom.margin_bottom}pt, left: {geom.margin_left}pt, right: {geom.margin_right}pt),",
             f"  columns: {geom.columns},",
             ")[",
-            f'  #set text(font: ({fonts_formatted}), size: {spec.uniform_size_pt}pt, lang: "{target_lang}", overhang: true, cjk-latin-spacing: auto)',
+            _text_set_line(
+                fonts_formatted,
+                spec.uniform_size_pt,
+                spec.tracking_em,
+                target_lang,
+            ),
             f'  #set par(justify: true, linebreaks: "optimized", '
             f"leading: {leading_gap_em(1.0 + spec.leading_em):.3f}em, "
             f"spacing: {spec.par_spacing_em}em)",
             "",
         ]
 
-        # In 2-column mode, sort blocks by column reading order (col 1 top-down, then col 2 top-down)
+        # In 2-column mode, sort blocks by column reading order (col 1 top-down, then col 2 top-down).
+        # In single-column mode, sort blocks top-down by -bbox.y1 when all blocks carry valid
+        # bounding boxes so extractor reading-order inversions (e.g., formula lead-ins or figure
+        # labels emitted out of vertical order) never invert the page layout.
         ordered_blocks = list(spec.blocks)
         if geom.columns == 2:
             x_mid = geom.page_w / 2.0
@@ -681,6 +714,15 @@ class PageLockedReflowRenderer:
                     )
                     else 1,
                     -(b.bbox.y1 if b.bbox else 0.0),
+                )
+            )
+        elif ordered_blocks and all(
+            b.bbox is not None and b.bbox.y1 > b.bbox.y0 for b in ordered_blocks
+        ):
+            ordered_blocks.sort(
+                key=lambda b: (
+                    -round(float(b.bbox.y1), 1) if b.bbox else 0.0,
+                    round(float(b.bbox.x0), 1) if b.bbox else 0.0,
                 )
             )
 

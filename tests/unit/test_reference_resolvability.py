@@ -208,6 +208,7 @@ _DOC_FLAG_ALLOWLIST = frozenset(
         "force-exclude",  # ruff/pre-commit
         "all-files",  # pre-commit
         "no-cache",  # pip/uv
+        "all-extras",  # uv
         "user",  # systemctl --user
     }
 )

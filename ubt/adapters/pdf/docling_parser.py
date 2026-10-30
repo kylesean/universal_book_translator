@@ -2095,6 +2095,7 @@ def vlm_fallback_missing_pages(
     allow_page_upload: bool | None = None,
     *,
     page_scope: Sequence[int] | None = None,
+    ocr_fallback: str | None = None,
 ) -> list[IRBlock]:
     """Transcribe missing pages or weak/mixed pages via vlm/ core.
 
@@ -2102,7 +2103,9 @@ def vlm_fallback_missing_pages(
     through so a non-contiguous choice is not widened to its enclosing range;
     see :func:`_pages_without_text`.
 
-    Four-tier fallback controlled by ``UBT_VLM_SCAN_FALLBACK``:
+    Four-tier fallback (``UBTConfig.ocr_fallback``, resolved through
+    ``AdapterRuntimeConfig``; ``ocr_fallback=None`` falls back to the
+    ``UBT_OCR_FALLBACK`` env for direct callers):
     - ``off`` (default): untouched blocks, 0 behavior change.
     - ``missing``: only transcribe 0-block pages (scanned/textless).
     - ``weak``: also upgrade pages with high formula debris (>= 0.15) or sparse text to VLM proofread.
@@ -2114,7 +2117,7 @@ def vlm_fallback_missing_pages(
         transcribe_page_to_blocks,
     )
 
-    mode = get_fallback_mode()
+    mode = get_fallback_mode(ocr_fallback)
     if mode == VlmFallbackMode.OFF:
         clean_ocr_mode = (ocr_mode or "").strip().lower()
         if (clean_ocr_mode and clean_ocr_mode not in ("off", "auto")) or (

@@ -24,6 +24,7 @@ embedded in a way that silently drops the mapping.
 from __future__ import annotations
 
 import io
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,7 @@ from ubt.adapters.pdf.cels_inject import (
     LineSite,
 )
 from ubt.adapters.pdf.strip_pdf_text import cast_instructions
+from ubt.core.layout import InlineRigidBox
 
 #: Glyph space of a PDF font: 1/1000 of an em.
 _EM = 1000.0
@@ -268,30 +270,52 @@ def solve_cid_fit(
     *,
     max_tracking_em: float = DEFAULT_MAX_TRACKING_EM,
     max_scale_loss: float = DEFAULT_MAX_SCALE_LOSS,
+    rigid_boxes: Sequence[InlineRigidBox] = (),
 ) -> HorizontalFit:
     """Fit ``text`` into ``available_pt`` by tracking first, then scaling.
 
     The same rule as :func:`ubt.adapters.pdf.cels_inject.solve_horizontal`, but
     the advances come from the embedded font's ``/W`` rather than a single-byte
-    ``/Widths`` table: a CJK glyph is a 2-byte code with its own width.
+    ``/Widths`` table: a CJK glyph is a 2-byte code with its own width. Rigid
+    boxes stay fixed and reserve advance budget upfront.
     """
-    natural = font.advance_pt(text, size_pt)
-    count = len(text)
-    if count == 0:
-        return HorizontalFit(1.0, 0.0, 0.0, True, 0.0)
-    if natural <= available_pt:
-        return HorizontalFit(1.0, 0.0, natural, True, 0.0)
+    rigid_width = sum(b.width_pt for b in rigid_boxes)
+    net_available = available_pt - rigid_width
     tracking_floor = -max_tracking_em * size_pt
+    count = len(text)
+
+    if net_available <= 0.0 and count > 0:
+        return HorizontalFit(
+            horizontal_scale=round(1.0 - max_scale_loss, 4),
+            char_spacing=round(tracking_floor, 4),
+            width_pt=round(rigid_width, 3),
+            fits=False,
+            deficit_pt=round(abs(net_available), 3),
+        )
+
+    natural = font.advance_pt(text, size_pt)
+    if count == 0:
+        return HorizontalFit(
+            1.0,
+            0.0,
+            round(rigid_width, 3),
+            rigid_width <= available_pt,
+            max(0.0, round(rigid_width - available_pt, 3)),
+        )
+    if natural <= net_available:
+        return HorizontalFit(1.0, 0.0, round(natural + rigid_width, 3), True, 0.0)
+
     steps = max(1, int(round(max_scale_loss / 0.005)))
     for step in range(steps + 1):
         scale = 1.0 - step * 0.005
-        needed = (available_pt / scale - natural) / count
+        needed = (net_available / scale - natural) / count
         if needed < tracking_floor:
             continue
-        width = scale * (natural + count * needed)
+        width = scale * (natural + count * needed) + rigid_width
         return HorizontalFit(round(scale, 4), round(needed, 4), round(width, 3), True)
+
     scale = 1.0 - max_scale_loss
-    width = scale * (natural + count * tracking_floor)
+    width = scale * (natural + count * tracking_floor) + rigid_width
     return HorizontalFit(
         horizontal_scale=round(scale, 4),
         char_spacing=round(tracking_floor, 4),

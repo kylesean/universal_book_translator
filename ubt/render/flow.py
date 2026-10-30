@@ -197,15 +197,44 @@ def approximate_measure(
 ) -> Measure:
     """Return an approximate geometric typesetter measurement closure.
 
-    Useful for fast pre-flight flow decisions or pure tests.
+    Useful for fast pre-flight flow decisions or pure tests. Accounts for
+    ASCII vs CJK character advance when ``cjk_aspect`` is left at its default,
+    and treats LaTeX math spans (``$...$``) by their rendered symbol advance
+    rather than raw command string length so inline formulas do not skew multi-box
+    flow splits.
     """
+
+    def _effective_glyphs(text: str) -> float:
+        total = 0.0
+        cursor = 0
+        for m in _ATOMIC_SPAN_RE.finditer(text):
+            if m.start() > cursor:
+                plain = text[cursor : m.start()]
+                ascii_cnt = sum(1 for c in plain if ord(c) < 128)
+                total += (len(plain) - ascii_cnt) * cjk_aspect + ascii_cnt * 0.55
+            span = m.group(0)
+            if span.startswith("$"):
+                inner = span.strip("$").strip()
+                # Strip LaTeX macro names (\text, \psi, \frac, braces) to estimate
+                # rendered math advance, plus 1.0em of math padding around the span.
+                cleaned = re.sub(r"\\[A-Za-z]+", "M", inner)
+                cleaned = re.sub(r"[{}\s_^\[\]]+", "", cleaned)
+                total += max(1.5, len(cleaned) * 0.65 + 0.8)
+            else:
+                total += len(span) * 0.6
+            cursor = m.end()
+        if cursor < len(text):
+            plain = text[cursor:]
+            ascii_cnt = sum(1 for c in plain if ord(c) < 128)
+            total += (len(plain) - ascii_cnt) * cjk_aspect + ascii_cnt * 0.55
+        return max(1.0, total)
 
     def _measure(text: str, width_pt: float) -> float:
         if not text or width_pt <= 0:
             return 0.0
-        eff_glyph_w = font_size_pt * cjk_aspect
+        eff_glyph_w = max(1.0, font_size_pt)
         per_line = max(1.0, width_pt / eff_glyph_w)
-        lines = max(1, math.ceil(len(text) / per_line))
+        lines = max(1, math.ceil(_effective_glyphs(text) / per_line))
         return float(lines) * leading_pt
 
     return _measure

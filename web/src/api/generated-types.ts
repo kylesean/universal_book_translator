@@ -1413,7 +1413,7 @@ export interface components {
              * Ocr Mode
              * @description OCR engine the job will use (affects the vision line)
              */
-            ocr_mode?: ("auto" | "local" | "vlm" | "off") | null;
+            ocr_mode?: ("off" | "auto" | "local" | "cloud") | null;
             /**
              * Visual Judge Enabled
              * @description Quote the VLM visual judge over rendered pages
@@ -1740,7 +1740,7 @@ export interface components {
              * Ocr Mode
              * @description OCR engine (auto, local, vlm, off)
              */
-            ocr_mode?: ("auto" | "local" | "vlm" | "off") | null;
+            ocr_mode?: ("off" | "auto" | "local" | "cloud") | null;
             /**
              * Domain
              * @description Domain descriptor used for glossary and chrome hints

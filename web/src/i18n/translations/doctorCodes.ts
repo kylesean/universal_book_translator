@@ -114,12 +114,13 @@ export const doctorCodesZh: DoctorCodeTables = {
       '自动模式需要高精度版面解析组件，但当前未安装；PDF 会退回基础解析，表格、图与公式可能丢失',
     'pdf_engine.registered': '解析方式：{engine}',
     'pdf_engine.unregistered': '「{engine}」不是可用的解析方式',
+    'ocr_engine.vision': '本地视觉端点就绪（零外发）',
     'ocr_engine.sidecar': '本地 OCR 服务可用',
     'ocr_engine.rapidocr': '本地 OCR 可用',
     'ocr_engine.rapidocr_no_backend':
       'OCR 组件不完整，扫描版 PDF 暂时无法识别',
-    'ocr_engine.vlm_ok': 'vlm 外发已启用',
-    'ocr_engine.vlm_blocked': 'ocr_mode="vlm" 但 allow_page_upload=False — 扫描页无法外发',
+    'ocr_engine.vlm_ok': '云端视觉外发已启用',
+    'ocr_engine.vlm_blocked': 'ocr_mode="cloud" 但 allow_page_upload=False — 扫描页无法外发',
     'ocr_engine.none':
       '没有可用的本地 OCR；扫描版 PDF 将无法处理',
     'ocr_engine.off': 'OCR 已关闭',

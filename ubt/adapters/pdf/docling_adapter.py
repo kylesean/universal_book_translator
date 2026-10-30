@@ -314,6 +314,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         ocr_endpoint: str | None = None,
         ocr_api_key: str | None = None,
         ocr_model: str | None = None,
+        ocr_fallback: str = "off",
         formula_enrichment: str = "auto",
         docling_device: str = "auto",
         formula_crop_margin: float = 0.08,
@@ -326,6 +327,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         self.ocr_endpoint = ocr_endpoint
         self.ocr_api_key = ocr_api_key
         self.ocr_model = ocr_model
+        self.ocr_fallback = ocr_fallback
         self.formula_enrichment = formula_enrichment
         self.docling_device = docling_device
         self.formula_crop_margin = formula_crop_margin
@@ -349,6 +351,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             self.ocr_endpoint = runtime_config.ocr_endpoint
         if runtime_config.ocr_api_key:
             self.ocr_api_key = runtime_config.ocr_api_key
+        self.ocr_fallback = runtime_config.ocr_fallback
         if runtime_config.ocr_model:
             self.ocr_model = runtime_config.ocr_model
         self.formula_enrichment = runtime_config.formula_enrichment
@@ -375,6 +378,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         self._renderer.pdf_optimize_profile = getattr(
             runtime_config, "pdf_optimize_profile", "lossless"
         )
+        self._renderer.enable_cels = getattr(runtime_config, "enable_cels", True)
         # The analyze cache (content-addressed cache layer): the Docling layout+formula pass
         # is a pure function of the file, page range, enrichment policy and
         # parser code, so a resumed or re-run job reuses the extraction.
@@ -416,7 +420,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         page_range: tuple[int, int] | None,
         page_scope: Sequence[int] | None = None,
     ) -> list[IRBlock]:
-        """Textless-page VLM fallback (default OFF via UBT_VLM_SCAN_FALLBACK)."""
+        """Textless/weak-page VLM fallback (tier from UBTConfig.ocr_fallback, default off)."""
         return await asyncio.to_thread(
             self._vlm_fallback_missing_pages,
             path,
@@ -428,6 +432,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             page_range,
             self.allow_page_upload,
             page_scope=page_scope,
+            ocr_fallback=self.ocr_fallback,
         )
 
     def _extract_blocks_sync(
@@ -500,6 +505,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         allow_page_upload: bool | None = None,
         *,
         page_scope: Sequence[int] | None = None,
+        ocr_fallback: str | None = None,
     ) -> list[IRBlock]:
         """Transcribe missing/weak pages via vlm/ core (delegates to docling_parser)."""
         return vlm_fallback_missing_pages(
@@ -512,6 +518,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             page_range,
             allow_page_upload,
             page_scope=page_scope,
+            ocr_fallback=ocr_fallback,
         )
 
     def _resolve_formula_enrichment(self, path: Path | None = None) -> bool:

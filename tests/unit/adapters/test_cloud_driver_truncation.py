@@ -8,16 +8,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PIL import Image
 
-from ubt.adapters.pdf.vlm.drivers.cloud_driver import DEFAULT_OPENAI_ENDPOINT, CloudOcrDriver
+from ubt.adapters.pdf.vlm.drivers.cloud_driver import DEFAULT_OPENAI_ENDPOINT, VisionEndpointDriver
 
 pytestmark = pytest.mark.fast
 
 
-def _driver() -> CloudOcrDriver:
-    return CloudOcrDriver(
+def _driver() -> VisionEndpointDriver:
+    return VisionEndpointDriver(
         endpoint="https://api.openai.com/v1",
         api_key="k",
-        provider="vlm",
         model="gpt-4o-mini",
     )
 
@@ -77,12 +76,12 @@ def test_a_complete_ocr_response_is_not_flagged(caplog: pytest.LogCaptureFixture
 
 
 def test_cloud_driver_no_ambient_openai_scraping(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify CloudOcrDriver never scrapes foreign OPENAI_API_KEY or OPENAI_BASE_URL."""
+    """Verify VisionEndpointDriver never scrapes foreign OPENAI_API_KEY or OPENAI_BASE_URL."""
     monkeypatch.setenv("OPENAI_API_KEY", "ambient-stolen-key")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://ambient-stolen.endpoint.com")
     monkeypatch.delenv("UBT_OCR_API_KEY", raising=False)
     monkeypatch.delenv("UBT_OCR_ENDPOINT", raising=False)
 
-    driver = CloudOcrDriver(model="test-vision-model")
+    driver = VisionEndpointDriver(model="test-vision-model")
     assert driver.api_key is None
     assert driver.endpoint == DEFAULT_OPENAI_ENDPOINT.rstrip("/")

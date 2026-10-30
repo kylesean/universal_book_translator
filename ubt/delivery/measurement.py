@@ -14,7 +14,7 @@ unit tests and with the Typst probe once it lands.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from hashlib import sha256
 from typing import Protocol, runtime_checkable
 
@@ -75,6 +75,16 @@ class MeasurementError(RuntimeError):
     """A real measurement could not be produced (compiler/font/probe failure)."""
 
 
+class MeasurementRequest(BaseModel):
+    """One block measurement request for single or batched compilation."""
+
+    model_config = ConfigDict(frozen=True)
+
+    text: str
+    style: MeasurementStyle
+    width_pt: float = Field(gt=0.0)
+
+
 @runtime_checkable
 class MeasurementService(Protocol):
     """The only interface layout code may use for fit decisions."""
@@ -86,8 +96,14 @@ class MeasurementService(Protocol):
         width_pt: float,
     ) -> MeasuredBlock: ...
 
+    def measure_many(
+        self,
+        requests: Sequence[MeasurementRequest],
+    ) -> list[MeasuredBlock]: ...
+
 
 MeasureFn = Callable[[str, MeasurementStyle, float], MeasuredBlock]
+BatchMeasureFn = Callable[[Sequence[MeasurementRequest]], Sequence[MeasuredBlock]]
 
 
 def measurement_cache_key(text: str, style: MeasurementStyle, width_pt: float) -> str:
@@ -110,8 +126,14 @@ class CachedMeasurementService:
     shrink a font locally.
     """
 
-    def __init__(self, delegate: MeasureFn) -> None:
+    def __init__(
+        self,
+        delegate: MeasureFn,
+        *,
+        batch_delegate: BatchMeasureFn | None = None,
+    ) -> None:
         self._delegate = delegate
+        self._batch_delegate = batch_delegate
         self._cache: dict[str, MeasuredBlock] = {}
 
     @property
@@ -138,3 +160,38 @@ class CachedMeasurementService:
             measured = measured.model_copy(update={"measurement_id": key})
         self._cache[key] = measured
         return measured
+
+    def measure_many(
+        self,
+        requests: Sequence[MeasurementRequest],
+    ) -> list[MeasuredBlock]:
+        """Measure a batch of requests, compiling uncached items in one delegate call."""
+        if not requests:
+            return []
+        keys: list[str] = []
+        uncached_by_key: dict[str, MeasurementRequest] = {}
+        for req in requests:
+            if req.width_pt <= 0.0:
+                raise ValueError(f"width_pt must be positive, got {req.width_pt!r}")
+            key = measurement_cache_key(req.text, req.style, req.width_pt)
+            keys.append(key)
+            if key not in self._cache and key not in uncached_by_key:
+                uncached_by_key[key] = req
+
+        if uncached_by_key:
+            unique_keys = list(uncached_by_key.keys())
+            unique_reqs = [uncached_by_key[k] for k in unique_keys]
+            if self._batch_delegate is not None:
+                batch_results = self._batch_delegate(unique_reqs)
+                for key, measured in zip(unique_keys, batch_results, strict=True):
+                    if measured.measurement_id != key:
+                        measured = measured.model_copy(update={"measurement_id": key})
+                    self._cache[key] = measured
+            else:
+                for key, req in zip(unique_keys, unique_reqs, strict=True):
+                    measured = self._delegate(req.text, req.style, req.width_pt)
+                    if measured.measurement_id != key:
+                        measured = measured.model_copy(update={"measurement_id": key})
+                    self._cache[key] = measured
+
+        return [self._cache[k] for k in keys]

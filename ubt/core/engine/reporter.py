@@ -461,10 +461,17 @@ def build_quality_report(
     # skip flags as fail-closed made ``render_coverage`` read 0.0 on the 26-page
     # replay while all 105 translatable blocks had shipped.
     fail_closed_blocks, preserved_flags, _skip_verdict = summarize_render_skips(flag_counts)
-    preserved_blocks = max(
-        preserved_flags,
-        sum(1 for b in all_blocks if b.skip_translate and b.status is not BlockStatus.FAILED),
+    preserved_blocks = sum(
+        1
+        for b in all_blocks
+        if b.status is not BlockStatus.FAILED
+        and (
+            b.skip_translate
+            or any(_skip_family(flag) in PRESERVED_SKIP_FAMILIES for flag in b.error_flags)
+        )
     )
+    if preserved_blocks == 0 and preserved_flags > 0:
+        preserved_blocks = preserved_flags
     skipped_blocks = fail_closed_blocks
     skip_families: dict[str, int] = {}
     for flag, count in flag_counts.items():

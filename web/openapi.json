@@ -5111,10 +5111,10 @@
               {
                 "type": "string",
                 "enum": [
+                  "off",
                   "auto",
                   "local",
-                  "vlm",
-                  "off"
+                  "cloud"
                 ]
               },
               {
@@ -5850,10 +5850,10 @@
               {
                 "type": "string",
                 "enum": [
+                  "off",
                   "auto",
                   "local",
-                  "vlm",
-                  "off"
+                  "cloud"
                 ]
               },
               {

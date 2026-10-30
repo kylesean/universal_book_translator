@@ -790,6 +790,30 @@ def re_export_cmd(
             show_default=False,
         ),
     ] = None,
+    allow_degrade: Annotated[
+        bool | None,
+        typer.Option(
+            "--allow-degrade/--no-allow-degrade",
+            help="Allow degrading an ineligible faithful request to readable during re-export",
+            show_default=False,
+        ),
+    ] = None,
+    allow_major: Annotated[
+        bool | None,
+        typer.Option(
+            "--allow-major/--no-allow-major",
+            help="Permit delivery when the artifact contract reports major findings with 0 criticals",
+            show_default=False,
+        ),
+    ] = None,
+    enable_cels: Annotated[
+        bool | None,
+        typer.Option(
+            "--enable-cels/--no-enable-cels",
+            help="Enable CELS layout synthesis (pass --no-enable-cels to rollback to legacy 2D packing)",
+            show_default=False,
+        ),
+    ] = None,
 ) -> None:
     """Re-render a finished job's deliverable from its ledger (human-edit re-export)."""
     resolve_fn = resolve_db_dir()
@@ -805,9 +829,18 @@ def re_export_cmd(
 
     from ubt.core.config import UBTConfig
     from ubt.core.engine.re_export import ReExportError, re_export_job
-    from ubt.core.exceptions import LedgerWriterLockConflictError
+    from ubt.core.exceptions import IntegrityViolationError, LedgerWriterLockConflictError
 
     config = UBTConfig.from_env()
+    updates: dict[str, object] = {}
+    if allow_degrade is not None:
+        updates["allow_degrade"] = allow_degrade
+    if allow_major is not None:
+        updates["allow_major"] = allow_major
+    if enable_cels is not None:
+        updates["enable_cels"] = enable_cels
+    if updates:
+        config = config.model_copy(update=updates)
     try:
         event = asyncio.run(
             re_export_job(
@@ -824,7 +857,7 @@ def re_export_cmd(
             f"refusing to re-export concurrently.[/] {escape(str(exc))}"
         )
         raise typer.Exit(code=1) from exc
-    except ReExportError as exc:
+    except (ReExportError, IntegrityViolationError) as exc:
         console.print(f"[bold red]Re-export failed:[/] {escape(str(exc))}")
         raise typer.Exit(code=1) from exc
 

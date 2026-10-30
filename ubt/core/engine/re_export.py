@@ -105,6 +105,18 @@ def _manifest_from_ledger(ledger: SQLiteJobLedger, job_id: str) -> BookManifest:
                 "is_page_slice_epub",
                 "page_kinds",
                 "typst_version",
+                "delivery_mode",
+                "delivery_plan",
+                "delivery_mode_requested",
+                "delivery_mode_effective",
+                "delivery_mode_legacy",
+                "document_mode",
+                "has_scan",
+                "page_count",
+                "confirmed_font_damage_pages",
+                "font_damage_pages",
+                "document_style_group",
+                "document_style_profile",
             }
         },
         run=run,
@@ -253,7 +265,12 @@ def _default_collaborators(
     return orchestrator.router, orchestrator.qe_runner
 
 
-def _apply_delivery_override(manifest: BookManifest, requested: str | None) -> str | None:
+def _apply_delivery_override(
+    manifest: BookManifest,
+    requested: str | None,
+    *,
+    allow_degrade: bool = False,
+) -> str | None:
     """Re-target one re-export at another delivery contract, in place.
 
     Writes the same metadata keys the pipeline writes before a live run
@@ -269,15 +286,60 @@ def _apply_delivery_override(manifest: BookManifest, requested: str | None) -> s
     """
     if requested is None:
         return None
+    from ubt.core.ports import classify_pdf_structure, probe_pdf_pages
     from ubt.delivery.planning import plan_for_document
 
     metadata = dict(manifest.metadata or {})
+    source_path = Path(manifest.source_path) if manifest.source_path else Path()
+    is_pdf = source_path.suffix.lower() == ".pdf"
+
+    has_scan = bool(metadata.get("has_scan", False))
+    page_count = int(metadata.get("page_count") or 0)
+    raw_damage = metadata.get("confirmed_font_damage_pages", metadata.get("font_damage_pages"))
+    if isinstance(raw_damage, list):
+        font_damage_pages = len(raw_damage)
+    elif isinstance(raw_damage, int):
+        font_damage_pages = raw_damage
+    else:
+        font_damage_pages = 0
+
+    multicolumn_page_share = float(metadata.get("multicolumn_page_share") or 0.0)
+    structural_page_share = float(metadata.get("structural_page_share") or 0.0)
+    formula_heavy = bool(metadata.get("formula_heavy", False))
+
+    if (
+        is_pdf
+        and source_path.exists()
+        and (
+            requested in ("faithful", "auto")
+            or ("has_scan" not in metadata and "confirmed_font_damage_pages" not in metadata)
+        )
+    ):
+        try:
+            facts = classify_pdf_structure(source_path)
+            has_scan = bool(facts.has_scan)
+            font_damage_pages = int(facts.confirmed_font_damage_pages)
+            multicolumn_page_share = float(facts.multicolumn_page_share)
+            structural_page_share = float(facts.structural_page_share)
+            formula_heavy = bool(facts.formula_heavy)
+            if page_count <= 0 and font_damage_pages > 0:
+                page_count = probe_pdf_pages(source_path)[0]
+        except Exception as exc:  # noqa: BLE001 - census fallback stays fail-closed for faithful
+            logger.debug("Re-export delivery census unavailable for %s: %s", source_path, exc)
+            if requested == "faithful" and font_damage_pages == 0:
+                font_damage_pages = 1
+
     decision = plan_for_document(
         requested,
         document_mode=str(metadata.get("document_mode") or ""),
-        is_pdf=Path(manifest.source_path).suffix.lower() == ".pdf",
-        has_scan=bool(metadata.get("has_scan", False)),
-        page_count=int(metadata.get("page_count") or 0),
+        is_pdf=is_pdf,
+        has_scan=has_scan,
+        font_damage_pages=font_damage_pages,
+        page_count=page_count,
+        multicolumn_page_share=multicolumn_page_share,
+        structural_page_share=structural_page_share,
+        formula_heavy=formula_heavy,
+        allow_degrade=allow_degrade,
     )
     if decision.effective_mode is None:
         raise ReExportError(
@@ -351,7 +413,11 @@ async def re_export_job(
         # output path must fail with its own reason rather than a "no draft
         # model" error from an unnecessary provider construction.
         manifest = _manifest_from_ledger(ledger, job_id)
-        delivery_mode = _apply_delivery_override(manifest, delivery)
+        delivery_mode = _apply_delivery_override(
+            manifest,
+            delivery,
+            allow_degrade=bool(getattr(config, "allow_degrade", False)),
+        )
         source_path = Path(manifest.source_path) if manifest.source_path else None
         if source_path is None or not source_path.exists():
             raise ReExportError(

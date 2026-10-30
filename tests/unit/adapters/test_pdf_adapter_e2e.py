@@ -24,6 +24,7 @@ with the corpus gate. It is the regression net under the PDF *ingest* half.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 from collections import Counter
 from pathlib import Path
 
@@ -82,6 +83,8 @@ def test_auto_routes_to_docling_even_for_single_column_prose(tmp_path: Path) -> 
     ``pdfium`` remains available explicitly (``pdf_engine="pdfium"``) and is what
     the ``preview``/``fast`` presets select.
     """
+    if importlib.util.find_spec("docling") is None:
+        pytest.skip("docling is not installed; the refusal path is pinned separately")
     pdf = write_text_pdf(tmp_path / "single.pdf", [_PAGE_ONE])
     assert isinstance(get_adapter_for_path(pdf, pdf_engine="auto"), DoclingPDFAdapter)
     assert isinstance(get_adapter_for_path(pdf, pdf_engine="pdfium"), PDFiumAdapter)

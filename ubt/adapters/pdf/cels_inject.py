@@ -51,7 +51,7 @@ from typing import Any
 import pikepdf
 
 from ubt.adapters.pdf.strip_pdf_text import cast_instructions
-from ubt.core.layout import Box
+from ubt.core.layout import Box, InlineRigidBox
 
 #: A 3x2 affine transform, PDF's row-vector convention: ``p' = p · M``.
 Matrix = tuple[float, float, float, float, float, float]
@@ -160,13 +160,13 @@ def advance_width(
     horizontal_scale: float = 1.0,
     char_spacing: float = 0.0,
     word_spacing: float = 0.0,
+    rigid_boxes: Sequence[InlineRigidBox] = (),
 ) -> float:
     """Rendered advance of ``text`` under the PDF displacement formula.
 
-    ``width = Th · (Σ w0·Tfs + n·Tc + n_spaces·Tw)`` in the spec's terms, which
-    is why ``Tc`` is inside the ``Tz`` multiplication: horizontal scaling shrinks
-    the spacing too, and a solver that forgets it under-predicts every
-    compressed line.
+    ``width = Th · (Σ w0·Tfs + n·Tc + n_spaces·Tw) + Σ W_rigid`` in the spec's
+    terms, which is why ``Tc`` is inside the ``Tz`` multiplication: horizontal
+    scaling shrinks the spacing too, while rigid boxes stay fixed.
     """
     raw = text.encode("ascii")
     total = char_spacing * len(raw)
@@ -174,7 +174,9 @@ def advance_width(
         total += metrics.advance_em(code) * size_pt
         if code == 0x20:
             total += word_spacing
-    return total * horizontal_scale
+    text_width = total * horizontal_scale
+    rigid_width = sum(b.width_pt for b in rigid_boxes)
+    return text_width + rigid_width
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +202,7 @@ def solve_horizontal(
     max_tracking_em: float = DEFAULT_MAX_TRACKING_EM,
     max_scale_loss: float = DEFAULT_MAX_SCALE_LOSS,
     word_spacing: float = 0.0,
+    rigid_boxes: Sequence[InlineRigidBox] = (),
 ) -> HorizontalFit:
     """Fit ``text`` into ``available_pt`` by tracking first, then scaling.
 
@@ -208,24 +211,37 @@ def solve_horizontal(
     ``chapter-3.pdf`` p12. A caller that must keep ink inside a column therefore
     reserves that pad itself instead of letting the solver assume the bearing
     away.
-
-    Returns the *least distorted* feasible combination, and a deficit when
-    nothing in bounds fits — never a silently truncated line.
     """
-    natural = advance_width(text, metrics, size_pt, word_spacing=word_spacing)
-    count = len(text.encode("ascii"))
-    if count == 0:
-        return HorizontalFit(1.0, 0.0, 0.0, True, 0.0)
-    if natural <= available_pt:
-        return HorizontalFit(1.0, 0.0, natural, True, 0.0)
-
+    rigid_width = sum(b.width_pt for b in rigid_boxes)
+    net_available = available_pt - rigid_width
     tracking_floor = -max_tracking_em * size_pt
+    count = len(text.encode("ascii"))
+
+    if net_available <= 0.0 and count > 0:
+        return HorizontalFit(
+            horizontal_scale=round(1.0 - max_scale_loss, 4),
+            char_spacing=round(tracking_floor, 4),
+            width_pt=round(rigid_width, 3),
+            fits=False,
+            deficit_pt=round(abs(net_available), 3),
+        )
+
+    natural = advance_width(text, metrics, size_pt, word_spacing=word_spacing)
+    if count == 0:
+        return HorizontalFit(
+            1.0,
+            0.0,
+            round(rigid_width, 3),
+            rigid_width <= available_pt,
+            max(0.0, round(rigid_width - available_pt, 3)),
+        )
+    if natural <= net_available:
+        return HorizontalFit(1.0, 0.0, round(natural + rigid_width, 3), True, 0.0)
+
     steps = max(1, int(round(max_scale_loss / _SCALE_STEP)))
     for step in range(steps + 1):
         scale = 1.0 - step * _SCALE_STEP
-        # width = scale·(natural + n·Tc) = available  →  Tc is analytic, so the
-        # grid only has to enumerate the scale, not both axes.
-        needed = (available_pt / scale - natural) / count
+        needed = (net_available / scale - natural) / count
         if needed < tracking_floor:
             continue
         width = advance_width(
@@ -235,6 +251,7 @@ def solve_horizontal(
             horizontal_scale=scale,
             char_spacing=needed,
             word_spacing=word_spacing,
+            rigid_boxes=rigid_boxes,
         )
         return HorizontalFit(round(scale, 4), round(needed, 4), round(width, 3), True)
 
@@ -247,6 +264,7 @@ def solve_horizontal(
         horizontal_scale=scale,
         char_spacing=tracking,
         word_spacing=word_spacing,
+        rigid_boxes=rigid_boxes,
     )
     return HorizontalFit(
         horizontal_scale=round(scale, 4),

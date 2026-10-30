@@ -20,9 +20,10 @@ No PyPI release yet — install from a checkout:
 ```bash
 git clone https://github.com/kylesean/universal_book_translator.git
 cd universal_book_translator
-pip install .                                  # users (Python 3.12+)
+pip install .                                  # users (Python 3.12+; docling semantic PDF engine included)
 pip install '.[mcp]'                           # users who want the MCP server
-uv sync --extra dev                            # development
+pip install '.[ocr]'                           # scanned-book OCR (rapidocr measured-box engine)
+uv sync --all-extras                           # development (all extras: dev, ocr, cels, …)
 ```
 
 ### Docker Container (Out-of-the-Box)
@@ -61,7 +62,7 @@ Set the credential and the models. Every config-model setting has one canonical
 each one; a provider block in `ubt.toml` / `~/.config/ubt/config.toml` can
 supply the same values instead. A few process-level switches
 (`UBT_OUTPUT_DIR`, `UBT_ALLOW_NO_AUTH`, `UBT_UI_LANG`, `UBT_LOG_LEVEL`,
-`UBT_PDF_STREAM_CHUNK_SIZE`, `UBT_VLM_DRIVER`) are read directly and are not
+`UBT_PDF_STREAM_CHUNK_SIZE`) are read directly and are not
 part of that table.
 
 ```bash

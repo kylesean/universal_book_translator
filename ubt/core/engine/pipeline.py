@@ -167,10 +167,10 @@ def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryD
     """
     is_pdf = input_path.suffix.lower() == ".pdf"
     requested = str(getattr(config, "delivery_mode", "facsimile") or "facsimile")
-    # Phase 0 only needs the census to decide a *new* faithful request. Legacy
-    # facsimile/page_locked and readable/auto (paper/book -> readable) do not
-    # consult it, so they must not pay for a full-document profile pass.
-    needs_census = requested == "faithful" and is_pdf
+    # Phase 0/1 structure census runs for new ``faithful`` and ``auto`` PDF
+    # requests so ``DeliverySignals`` (layout_complexity, text_trust, has_scan)
+    # reflect measured PDF structure rather than hardcoded defaults.
+    needs_census = requested in ("faithful", "auto") and is_pdf
     facts: PdfStructureFacts | None = None
     page_count = 0
     if needs_census:
@@ -194,7 +194,7 @@ def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryD
         font_damage_pages=(
             int(facts.confirmed_font_damage_pages)
             if facts is not None
-            else (1 if needs_census and is_pdf else 0)
+            else (1 if requested == "faithful" and is_pdf else 0)
         ),
         page_count=page_count,
         multicolumn_page_share=(float(facts.multicolumn_page_share) if facts is not None else 0.0),

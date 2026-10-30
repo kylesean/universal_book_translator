@@ -153,6 +153,23 @@ class ColumnTrack:
 
 
 @dataclass(frozen=True, slots=True)
+class InlineRigidBox:
+    """Inline rigid obstacle (formula, superscript, unshrinkable unit).
+
+    Design: ``docs/design/adaptive_delivery_prd.md`` §8.2 & §1194. Resolves GAP-14.
+    An unshrinkable rigid box embedded inside an elastic text line. It does not
+    scale with font size or tracking (Tz / Tc), and in Stage 5 is repositioned
+    via Form XObject translation: ``q 1 0 0 1 x y cm /Fm Do Q``.
+    """
+
+    token_id: str
+    width_pt: float
+    height_pt: float
+    baseline_offset_pt: float = 0.0
+    xobject_ref: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class PinnedObstacle:
     """Something CELS may move around but never overwrite.
 
@@ -524,6 +541,7 @@ __all__ = [
     "GUTTER_MIN_VERTICAL_OVERLAP",
     "GUTTER_MIN_WIDTH_PT",
     "GutterCandidate",
+    "InlineRigidBox",
     "MAX_TRACKS",
     "PROFILE_BIN_PT",
     "PROFILE_BLOCK_SHARE",

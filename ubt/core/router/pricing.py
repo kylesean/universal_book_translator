@@ -20,7 +20,6 @@ publish one. Models without a published cached rate pay the full input price.
 
 from __future__ import annotations
 
-import ipaddress
 import logging
 import os
 import re
@@ -31,6 +30,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+
+from ubt.core.endpoint_locality import endpoint_on_this_machine
 
 logger = logging.getLogger(__name__)
 
@@ -271,10 +272,6 @@ MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
 #: paste as a client target; the ``*.internal`` names are the Docker/Podman
 #: aliases for the host. Anything else non-loopback — including a private LAN
 #: address — is NOT assumed free: see ``UBT_LOCAL_ENDPOINTS``.
-_LOCAL_HOSTNAMES = frozenset(
-    {"localhost", "0.0.0.0", "host.docker.internal", "host.containers.internal"}
-)
-
 #: Comma/``os.pathsep`` separated extra hosts the operator declares self-hosted
 #: (a LAN inference box). Read from the environment because this decision is
 #: made deep inside pricing, where no config object is in scope.
@@ -363,12 +360,15 @@ def billing_enabled_for_local_endpoints() -> bool:
 
 
 def endpoint_is_local(base_url: str | None) -> bool:
-    """True when ``base_url`` names an inference endpoint on this machine.
+    """True when ``base_url`` names an endpoint free of provider bills.
 
-    Loopback (any ``127.0.0.0/8`` or ``::1`` literal), the container-host
-    aliases and anything under ``.localhost`` qualify by default. A self-hosted
-    box elsewhere on the LAN qualifies only once declared in
-    ``UBT_LOCAL_ENDPOINTS``: guessing "a private address is free" would silently
+    Billing-local composes the machine boundary
+    (:func:`endpoint_on_this_machine` — loopback and the container-host
+    aliases only) with the operator's declarations: ``UBT_LOCAL_ENDPOINTS``
+    admits a self-hosted LAN box, ``endpoint_is_free`` honors declared-free
+    endpoints. The composition is deliberate: "free" and "on this machine"
+    are different questions, and the privacy gate must never inherit the
+    billing exemptions. Guessing "a private address is free" would silently
     zero the bill of a paid gateway that happens to live on the LAN, and a
     model's name is never evidence either way.
     """
@@ -376,18 +376,10 @@ def endpoint_is_local(base_url: str | None) -> bool:
         return False
     if endpoint_is_free(base_url):
         return True
+    if endpoint_on_this_machine(base_url):
+        return True
     host = (urlsplit(base_url.strip()).hostname or "").lower()
-    if not host:
-        return False
-    if host in _LOCAL_HOSTNAMES or host.endswith(".localhost"):
-        return True
-    if host in _declared_local_hostnames():
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        # Not an IP literal and not a name we were told to trust.
-        return False
+    return host in _declared_local_hostnames()
 
 
 def model_endpoint(

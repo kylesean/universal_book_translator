@@ -20,10 +20,10 @@ _CITE_BRACKET_RE = re.compile(
     r"\\?\[\s*([A-Za-z0-9_\-\+]+(?:\s*(?:,\s*|\s*[-–—]\s*)[A-Za-z0-9_\-\+]+)*)\s*\\?\]"
 )
 
-#: Section numbers: 1. Introduction, 2.3 Methodology, Chapter 4, Section 2
+#: Section numbers: 1. Introduction, 2.3 Methodology, Chapter 4, Section 2, A.1 Continuous
 _HEADING_NUMBER_RE = re.compile(
-    r"^(?:(?:chapter|chap\.|section|sec\.|appendix|附录|第)\s*(\d+(?:\.\d+)*|[A-Z])(?:\s*(?:章|节|[\.\-–—:]))?|"
-    r"(\d+(?:\.\d+)+)(?:\s*[\.\-–—:]\s*|\s+)|"
+    r"^(?:(?:chapter|chap\.|section|sec\.|appendix|附录|第)\s*([A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*)(?:\s*(?:章|节|[\.\-–—:]))?|"
+    r"([A-Za-z0-9]+(?:\.[A-Za-z0-9]+)+)(?:\s*[\.\-–—:]\s*|\s+)|"
     r"(\d+|[IVXLCDM]+|[A-Z])\s*[\.\-–—:])",
     re.IGNORECASE,
 )
@@ -53,7 +53,7 @@ _BIB_ITEM_STARTER_RE = re.compile(
 
 #: Cross-reference mentions in prose:
 _PROSE_SECTION_REF_RE = re.compile(
-    r"\b(?:(?:see\s+)?(?:section|sec\.|chapter|chap\.|appendix)\s+(\d+(?:\.\d+)*|[A-Z]))|"
+    r"\b(?:(?:see\s+)?(?:section|sec\.|chapter|chap\.|appendix)\s+([A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*|\d+|[A-Z]))|"
     r"(?:第\s*(\d+(?:\.\d+)*)\s*(?:章|节)|(?:参见|见)?(?:章节|小节|附录)\s*(\d+(?:\.\d+)*|[A-Z]))",
     re.IGNORECASE,
 )

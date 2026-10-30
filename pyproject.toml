@@ -51,6 +51,13 @@ dependencies = [
     "pydantic>=2.7.0",
     "pydantic-settings>=2.2.0",
     "httpx[socks]>=0.27.0",
+    # PDF translation is the product's primary scenario and pdf_engine='auto'
+    # routes every PDF to the docling semantic engine, so the engine belongs
+    # in the base set: a bare install that silently degraded its main scenario
+    # to the geometric pdfium reader (tables/figures/formulas omitted) was a
+    # packaging contradiction. The [pdf]/[academic] extras keep the pin for
+    # older install commands; they dedupe against this entry.
+    "docling>=2.136.0",
     "beautifulsoup4>=4.12.0",
     "typer>=0.12.0",
     "rich>=13.7.0",

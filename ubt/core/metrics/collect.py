@@ -96,7 +96,9 @@ def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None 
         "term_fuzzy_precision": terminology.fuzzy_term_precision,
         "term_recall": terminology.term_recall,
         "render_skip_rate": _div(coverage.fail_closed_blocks, total_blocks),
-        "render_preserved_rate": _div(coverage.preserved_blocks, total_blocks),
+        "render_preserved_rate": _div(
+            coverage.preserved_blocks, total_blocks + coverage.preserved_blocks
+        ),
         "placeholder_retention": report.placeholder.retention_rate,
         "pass_rate": report.summary.pass_rate,
         "avg_qe": report.score_metrics.avg_qe,

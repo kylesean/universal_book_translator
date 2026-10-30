@@ -9,7 +9,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
+### Added
+
+- **Adaptive Delivery Engine & CELS Layout Synthesis (Gates G0–G5)**:
+  - Delivered Constraint-Enforced Layout Synthesis (CELS) integrating multi-column track detection (Stage 1), style group font sizing (Stage 2), Cassowary linear coordinate relaxation (Stage 3B), and controlled container repair (Stage 4).
+  - Added rollback safety switch `enable_cels` (CLI `--enable-cels / --no-enable-cels`, env `UBT_ENABLE_CELS`), enabling zero-downtime rollback to legacy 2D packing facsimile rendering.
+  - Added inline rigid formula follower (`ubt/adapters/pdf/cels_formula.py`) supporting Form XObject translation tracking with zero baseline drift (<0.5pt).
+  - Hardened Typst publication renderer (`ubt/render/typst/document_renderer.py`): added `_emitted_anchors` set deduplication preventing fatal duplicate label collisions, enabled prefix-tolerant figure and table caption anchor detection, and eliminated dangling page references in reflow typesetting.
+
 ### Changed
+
+- **docling moved into the base dependency set, and `pdf_engine='auto'` with a
+  missing docling now refuses the job instead of degrading.** PDF translation
+  is the product's primary scenario, and `auto` routes *every* PDF to the
+  docling semantic engine — yet docling lived in the optional `[pdf]` extra,
+  so a bare `uv sync` (or any re-sync without extras) shipped an environment
+  whose default PDF path fell back to the geometric pdfium reader: the job
+  completed "successfully" with every table, figure and formula silently
+  omitted, the warning visible only in server logs the web console never
+  shows. One such re-sync did exactly this to a live machine. The base set
+  already carried pdf-oxide, pypdfium2 and pikepdf — the PDF skeleton without
+  its brain — so the brain joins it; `[pdf]`/`[academic]` keep the pin for
+  older install commands and dedupe harmlessly. The factory's auto fallback
+  branch is replaced by the same `OptionalDependencyError` the explicit
+  `docling` request already raised, with the repair command in the message
+  (`uv sync --all-extras`): a broken environment stops the job at the factory,
+  rather than shipping a residue book under a job id a later fixed run would
+  resume into. README install commands updated to match
+  (`uv sync --all-extras` for development, `.[ocr]` documented for
+  scanned-book OCR).
+
+
+- **The OCR mode vocabulary is four words, and locality — not a driver's
+  name — is the egress gate's only primitive.** The old surface was a mode
+  string (`OcrMode = auto|local|vlm|off`) times six registry names
+  (`sidecar`/`http`, `vlm`/`openai_vision`, `rapidocr`,
+  `unlimited-ocr2`) times three config channels (`UBTConfig` fields, the
+  `UBT_OCR_*` env ladder, and a driver-picking `UBT_VLM_DRIVER`), with the
+  vision-vs-REST wire protocol decided by sniffing the endpoint URL — that
+  heuristic written twice, once in the registry and once mirrored inside
+  `CloudOcrDriver`. None of it survives. The vocabulary is now
+  `off | auto | local | cloud`; driver names are internal wiring;
+  `UBT_VLM_DRIVER` and the `vlm`/`http`/`openai_vision` aliases are gone;
+  the generic cloud-REST OCR path (Baidu/Azure/Tencent payload shapes) is
+  deleted — the sidecar contract is the sanctioned gateway for that, and
+  `CloudOcrDriver` is now `VisionEndpointDriver`, one class speaking the one
+  protocol that matters (OpenAI-compatible vision chat, which llama-server,
+  SGLang, vLLM and Ollama all serve). The machine-boundary predicate lives
+  once, in `ubt/core/endpoint_locality.py` (`endpoint_on_this_machine`);
+  pricing's billing-local check composes it with the declared-box policy
+  instead of keeping its own copy, and the old registry's `is_private`
+  clause — which counted a LAN box as "local" for the privacy gate — is
+  gone with it: a page sent to another machine HAS left this one. The gate
+  itself is one function (`registry.assert_page_egress_allowed`), which
+  closes the hole where a custom-registered driver silently bypassed the
+  check (they now declare `local=` at registration). The payoff a local
+  vision endpoint buys: `ocr_mode='local'` + a localhost endpoint +
+  `UBT_OCR_MODEL` needs **no** `UBT_ALLOW_PAGE_UPLOAD` — a 0.8B doc-parsing
+  model (Xiaomi-OCR-0 via llama-swap) now serves scans without shipping a
+  single page image out. The secret `UBT_VLM_SCAN_FALLBACK` env is now a
+  real config field (`ocr_fallback: off|missing|weak|all`), threaded
+  through `AdapterRuntimeConfig` instead of re-read from the environment
+  inside the parser. The visual judge's fallback shares the same endpoint:
+  with `visual_judge_enabled` and no judge model, T2 runs against the OCR
+  vision server through the same egress choke point.
+
 
 - **TM reads leave the writer's lock.** Every lookup — two per drafted block —
   took the process-wide `threading.Lock`, and the fuzzy path held it across the

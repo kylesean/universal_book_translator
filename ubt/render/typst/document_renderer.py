@@ -1674,6 +1674,73 @@ def _raw_block_markup(text: str, container_width_pt: float = 470.0) -> str:
     return repair_code_block_markup(text, container_width_pt=container_width_pt)
 
 
+def _normalize_single_column_page_order(blocks: Sequence[IRBlock]) -> list[IRBlock]:
+    """Repair intra-page vertical reading-order inversions on single-column pages.
+
+    On single-column pages (where no two blocks sit side-by-side in separate
+    horizontal columns on the same vertical band), physical top-to-bottom order
+    (descending ``bbox.y1``) is the ground-truth reading order. Layout predictors
+    occasionally emit short left-aligned formula lead-ins ("where q_H is equal to:"),
+    indented display equations, or ``FIG. N`` labels out of vertical order on a page.
+    Sorting each contiguous single-column page run by ``(-bbox.y1, bbox.x0, index)``
+    restores the true reading order without disturbing multi-column pages or
+    synthetic blocks that carry no physical coordinates.
+    """
+    out: list[IRBlock] = []
+    idx = 0
+    total = len(blocks)
+    while idx < total:
+        blk = blocks[idx]
+        bb = blk.bbox
+        if bb is None or bb.page <= 0 or bb.y1 <= bb.y0 or bb.x1 <= bb.x0:
+            out.append(blk)
+            idx += 1
+            continue
+        page_no = bb.page
+        run: list[tuple[int, IRBlock]] = []
+        while idx < total:
+            cand = blocks[idx]
+            cbb = cand.bbox
+            if cbb is None or cbb.page != page_no or cbb.y1 <= cbb.y0 or cbb.x1 <= cbb.x0:
+                break
+            run.append((idx, cand))
+            idx += 1
+        if len(run) <= 1:
+            out.extend(b for _, b in run)
+            continue
+        # Check if any two blocks on this page sit side-by-side (horizontally
+        # disjoint while vertically overlapping), which indicates a multi-column
+        # or side-by-side layout where extractor column order must be preserved.
+        side_by_side = False
+        for i in range(len(run)):
+            b1 = run[i][1].bbox
+            if b1 is None:
+                continue
+            for j in range(i + 1, len(run)):
+                b2 = run[j][1].bbox
+                if b2 is None:
+                    continue
+                x_overlap = min(float(b1.x1), float(b2.x1)) - max(float(b1.x0), float(b2.x0))
+                y_overlap = min(float(b1.y1), float(b2.y1)) - max(float(b1.y0), float(b2.y0))
+                if x_overlap <= 2.0 and y_overlap > 2.0:
+                    side_by_side = True
+                    break
+            if side_by_side:
+                break
+        if side_by_side:
+            out.extend(b for _, b in run)
+        else:
+            run.sort(
+                key=lambda item: (
+                    -round(float(item[1].bbox.y1), 1) if item[1].bbox else 0.0,
+                    round(float(item[1].bbox.x0), 1) if item[1].bbox else 0.0,
+                    item[0],
+                )
+            )
+            out.extend(b for _, b in run)
+    return out
+
+
 class TypstDocumentRenderer:
     """Build a Typst document from IRBlocks and compile it to PDF.
 
@@ -2058,6 +2125,9 @@ class TypstDocumentRenderer:
         #: the topology still resolves citations to it. Measured on the 26-page
         #: readable replay: ``bib-24`` and ``fig-3-1``.
         self._unemitted_anchors: set[str] = set()
+        #: Anchors that have been emitted into the document markup. A label can only
+        #: appear once in Typst; this set prevents duplicate label definitions.
+        self._emitted_anchors: set[str] = set()
         #: Per-table reconstruction outcomes, drained by the PDF adapter into
         #: ``last_render_reconstructions`` so the delivery contract can record a
         #: rebuilt table as ``RECONSTRUCTED`` (verified or corrupt) instead of
@@ -2228,6 +2298,7 @@ class TypstDocumentRenderer:
         """
         self.stats = ReflowStats()
         build_dir.mkdir(parents=True, exist_ok=True)
+        blocks = _normalize_single_column_page_order(blocks)
 
         if (
             getattr(self, "style_profile", None) is None
@@ -2285,15 +2356,14 @@ class TypstDocumentRenderer:
         from ubt.core.references.linker import build_citation_topology
 
         self.citation_topology = build_citation_topology(blocks)
-        # A block that ships verbatim emits no label, so every anchor it owns is
-        # unreachable. Linking to one aborts the compile (see
-        # ``_unemitted_anchors``), and the reader would rather have the sentence
-        # without a hyperlink than no book at all.
-        preserved_block_ids = {b.id for b in blocks if b.skip_translate}
+        self._emitted_anchors = set()
+        # A block missing from the document run emits no label, so every anchor it owns
+        # is unreachable. Linking to one aborts the compile (see ``_unemitted_anchors``).
+        doc_block_ids = {b.id for b in blocks}
         self._unemitted_anchors = {
             anchor.anchor_id
             for anchor in self.citation_topology.anchors.values()
-            if anchor.block_id in preserved_block_ids
+            if anchor.block_id and anchor.block_id not in doc_block_ids
         }
         body: list[str] = []
 
@@ -2491,11 +2561,19 @@ class TypstDocumentRenderer:
                     m_sec = _HEADING_NUMBER_RE.match(text) or _HEADING_NUMBER_RE.match(
                         block.source_text or ""
                     )
+                    aid = None
                     if m_sec:
                         sec_key = (m_sec.group(1) or m_sec.group(2) or m_sec.group(3)).lower()
                         if (ReferenceKind.HEADING, sec_key) in topology.key_to_anchor:
                             aid = topology.key_to_anchor[(ReferenceKind.HEADING, sec_key)]
-                            anchor_suffix = f" <{aid}>"
+                    if not aid:
+                        for anchor in topology.anchors.values():
+                            if anchor.block_id == block.id and anchor.kind == ReferenceKind.HEADING:
+                                aid = anchor.anchor_id
+                                break
+                    if aid and aid not in self._emitted_anchors:
+                        self._emitted_anchors.add(aid)
+                        anchor_suffix = f" <{aid}>"
 
                 if level == 1 and getattr(self, "enable_notes", False):
                     from ubt.core.notes.manager import render_endnote_section_typst
@@ -2677,17 +2755,35 @@ class TypstDocumentRenderer:
 
                 topology = getattr(self, "citation_topology", None)
                 if topology is not None:
-                    from ubt.core.references.extractor import _TABLE_CAPTION_RE
+                    from ubt.core.references.extractor import (
+                        _PROSE_TABLE_REF_RE,
+                        _TABLE_CAPTION_RE,
+                    )
                     from ubt.core.references.models import ReferenceKind
 
-                    m_tbl = _TABLE_CAPTION_RE.search(source_text) or _TABLE_CAPTION_RE.search(
-                        target_text
+                    m_tbl = (
+                        _TABLE_CAPTION_RE.search(source_text)
+                        or _TABLE_CAPTION_RE.search(target_text)
+                        or _PROSE_TABLE_REF_RE.search(source_text)
+                        or _PROSE_TABLE_REF_RE.search(target_text)
                     )
+                    aid = None
                     if m_tbl:
-                        tbl_key = m_tbl.group(1).lower()
+                        tbl_key = (
+                            m_tbl.group(1)
+                            or (m_tbl.group(2) if len(m_tbl.groups()) >= 2 else None)
+                            or ""
+                        ).lower()
                         if (ReferenceKind.TABLE, tbl_key) in topology.key_to_anchor:
                             aid = topology.key_to_anchor[(ReferenceKind.TABLE, tbl_key)]
-                            markup = f"{markup} <{aid}>"
+                    if not aid:
+                        for anchor in topology.anchors.values():
+                            if anchor.block_id == block.id and anchor.kind == ReferenceKind.TABLE:
+                                aid = anchor.anchor_id
+                                break
+                    if aid and aid not in self._emitted_anchors:
+                        self._emitted_anchors.add(aid)
+                        markup = f"{markup} <{aid}>"
 
                 # A bilingual pair whose target fell back to the source grid
                 # would show the same grid twice; pair only a genuine
@@ -2745,11 +2841,22 @@ class TypstDocumentRenderer:
                         from ubt.core.references.models import ReferenceKind
 
                         m_eq = _EQUATION_LABEL_RE.search(source) or _EQUATION_LABEL_RE.search(text)
+                        aid = None
                         if m_eq:
                             eq_key = (m_eq.group(1) or m_eq.group(2)).lower()
                             if (ReferenceKind.EQUATION, eq_key) in topology.key_to_anchor:
                                 aid = topology.key_to_anchor[(ReferenceKind.EQUATION, eq_key)]
-                                formula_markup = f"{formula_markup} <{aid}>"
+                        if not aid:
+                            for anchor in topology.anchors.values():
+                                if (
+                                    anchor.block_id == block.id
+                                    and anchor.kind == ReferenceKind.EQUATION
+                                ):
+                                    aid = anchor.anchor_id
+                                    break
+                        if aid and aid not in self._emitted_anchors:
+                            self._emitted_anchors.add(aid)
+                            formula_markup = f"{formula_markup} <{aid}>"
 
                     body.append(formula_markup)
                     self.stats.formulas += 1
@@ -2820,7 +2927,24 @@ class TypstDocumentRenderer:
                 flush_figure()
                 kept = (block.source_text or "").strip()
                 if kept:
-                    body.append(_raw_block_markup(kept, container_width_pt=self._table_width_pt()))
+                    code_anchor_prefix = ""
+                    topology = getattr(self, "citation_topology", None)
+                    if topology is not None:
+                        from ubt.core.references.models import ReferenceKind
+
+                        for anchor in topology.anchors.values():
+                            if (
+                                anchor.block_id == block.id
+                                and anchor.kind != ReferenceKind.PAGE
+                                and anchor.anchor_id not in self._emitted_anchors
+                            ):
+                                self._emitted_anchors.add(anchor.anchor_id)
+                                code_anchor_prefix = (
+                                    f"[#metadata(()) <{anchor.anchor_id}>] {code_anchor_prefix}"
+                                )
+                    body.append(
+                        f"{code_anchor_prefix}{_raw_block_markup(kept, container_width_pt=self._table_width_pt())}"
+                    )
                     self.stats.blocks_rendered += 1
                 continue
 
@@ -2841,11 +2965,22 @@ class TypstDocumentRenderer:
                         from ubt.core.references.models import ReferenceKind
 
                         m_bib = _BIB_ITEM_STARTER_RE.match(kept)
+                        aid = None
                         if m_bib:
                             bib_key = (m_bib.group(1) or m_bib.group(2)).lower()
                             if (ReferenceKind.BIBLIOGRAPHY, bib_key) in topology.key_to_anchor:
                                 aid = topology.key_to_anchor[(ReferenceKind.BIBLIOGRAPHY, bib_key)]
-                                anchor_prefix = f"[#metadata(()) <{aid}>] "
+                        if not aid:
+                            for anchor in topology.anchors.values():
+                                if (
+                                    anchor.block_id == block.id
+                                    and anchor.kind != ReferenceKind.PAGE
+                                ):
+                                    aid = anchor.anchor_id
+                                    break
+                        if aid and aid not in self._emitted_anchors:
+                            self._emitted_anchors.add(aid)
+                            anchor_prefix = f"[#metadata(()) <{aid}>] "
 
                     body.append(f"{anchor_prefix}{self._prose(kept)}")
                     self.stats.blocks_rendered += 1
@@ -2922,6 +3057,18 @@ class TypstDocumentRenderer:
                     continue
 
             rendered_prose = self._prose(text, block_runs(block))
+            topology = getattr(self, "citation_topology", None)
+            if topology is not None:
+                from ubt.core.references.models import ReferenceKind
+
+                for anchor in topology.anchors.values():
+                    if (
+                        anchor.block_id == block.id
+                        and anchor.kind != ReferenceKind.PAGE
+                        and anchor.anchor_id not in self._emitted_anchors
+                    ):
+                        self._emitted_anchors.add(anchor.anchor_id)
+                        rendered_prose = f"[#metadata(()) <{anchor.anchor_id}>] {rendered_prose}"
             if getattr(self, "enable_notes", False):
                 from ubt.core.notes.manager import (
                     inject_endnote_links_into_text,
@@ -3039,9 +3186,24 @@ class TypstDocumentRenderer:
 
     def _list_item_markup(self, block: IRBlock) -> str:
         """One list item's body, as Typst content (no surrounding brackets)."""
+        anchor_prefix = ""
+        skip_anchors: set[str] = set()
+        topology = getattr(self, "citation_topology", None)
+        if topology is not None:
+            from ubt.core.references.models import ReferenceKind
+
+            for anchor in topology.anchors.values():
+                if (
+                    anchor.block_id == block.id
+                    and anchor.kind != ReferenceKind.PAGE
+                    and anchor.anchor_id not in self._emitted_anchors
+                ):
+                    self._emitted_anchors.add(anchor.anchor_id)
+                    anchor_prefix = f"[#metadata(()) <{anchor.anchor_id}>] {anchor_prefix}"
+                    skip_anchors.add(anchor.anchor_id)
         if _keeps_source(block):
-            return self._prose((block.source_text or "").strip())
-        return self._maybe_pair(block, self._prose(_block_text(block), block_runs(block)))
+            return f"{anchor_prefix}{self._prose((block.source_text or '').strip(), skip_anchors=skip_anchors or None)}"
+        return f"{anchor_prefix}{self._maybe_pair(block, self._prose(_block_text(block), block_runs(block), skip_anchors=skip_anchors or None))}"
 
     def _figure_markup(self, figure: _Figure, build_dir: Path) -> str:
         """The ``#figure(...)`` call for one image, with its caption if any."""
@@ -3068,16 +3230,38 @@ class TypstDocumentRenderer:
         anchor_suffix = ""
         aid: str | None = None
         topology = getattr(self, "citation_topology", None)
-        if topology is not None and figure.caption:
-            from ubt.core.references.extractor import _FIGURE_CAPTION_RE
+        if topology is not None:
+            from ubt.core.references.extractor import (
+                _FIGURE_CAPTION_RE,
+                _PROSE_FIGURE_REF_RE,
+            )
             from ubt.core.references.models import ReferenceKind
 
-            m_fig = _FIGURE_CAPTION_RE.search(figure.caption)
+            m_fig = None
+            if figure.caption:
+                m_fig = _FIGURE_CAPTION_RE.search(figure.caption) or _PROSE_FIGURE_REF_RE.search(
+                    figure.caption
+                )
             if m_fig:
-                fig_key = m_fig.group(1).lower()
+                fig_key = (
+                    m_fig.group(1) or (m_fig.group(2) if len(m_fig.groups()) >= 2 else None) or ""
+                ).lower()
                 if (ReferenceKind.FIGURE, fig_key) in topology.key_to_anchor:
-                    aid = topology.key_to_anchor[(ReferenceKind.FIGURE, fig_key)]
-                    anchor_suffix = f" <{aid}>"
+                    cand_aid = topology.key_to_anchor[(ReferenceKind.FIGURE, fig_key)]
+                    if cand_aid not in self._emitted_anchors:
+                        aid = cand_aid
+            if not aid and figure.block_id:
+                for anchor in topology.anchors.values():
+                    if (
+                        anchor.block_id == figure.block_id
+                        and anchor.kind == ReferenceKind.FIGURE
+                        and anchor.anchor_id not in self._emitted_anchors
+                    ):
+                        aid = anchor.anchor_id
+                        break
+            if aid:
+                self._emitted_anchors.add(aid)
+                anchor_suffix = f" <{aid}>"
 
         scope_extra = ', scope: "parent", placement: auto' if span_full else ""
         if figure.caption:
@@ -3169,14 +3353,22 @@ class TypstDocumentRenderer:
         anchor_id = ""
         topology = getattr(self, "citation_topology", None)
         if topology is not None and caption:
-            from ubt.core.references.extractor import _FIGURE_CAPTION_RE
+            from ubt.core.references.extractor import (
+                _FIGURE_CAPTION_RE,
+                _PROSE_FIGURE_REF_RE,
+            )
             from ubt.core.references.models import ReferenceKind
 
-            m_fig = _FIGURE_CAPTION_RE.search(caption)
+            m_fig = _FIGURE_CAPTION_RE.search(caption) or _PROSE_FIGURE_REF_RE.search(caption)
             if m_fig:
-                fig_key = m_fig.group(1).lower()
+                fig_key = (
+                    m_fig.group(1) or (m_fig.group(2) if len(m_fig.groups()) >= 2 else None) or ""
+                ).lower()
                 if (ReferenceKind.FIGURE, fig_key) in topology.key_to_anchor:
-                    anchor_id = topology.key_to_anchor[(ReferenceKind.FIGURE, fig_key)]
+                    cand_aid = topology.key_to_anchor[(ReferenceKind.FIGURE, fig_key)]
+                    if cand_aid not in self._emitted_anchors:
+                        anchor_id = cand_aid
+                        self._emitted_anchors.add(anchor_id)
 
         panel = FigurePanel(
             panel_id=f"fig-panel-{len(self.stats.assets_missing) + self.stats.figures}",

@@ -172,6 +172,8 @@ def _text_boxes_for_page(page_no: int, textpage: object) -> list[ContractTextBox
         text = (textpage.get_text_bounded(x0, y0, x1, y1) or "").strip()  # type: ignore[attr-defined]
         if len(_normalise_text(text)) < _MIN_BOX_CHARS:
             continue
+        line_count = max(1, sum(1 for ln in text.splitlines() if ln.strip()))
+        line_height_pt = (float(y1) - float(y0)) / line_count
         boxes.append(
             ContractTextBox(
                 page=page_no,
@@ -179,7 +181,7 @@ def _text_boxes_for_page(page_no: int, textpage: object) -> list[ContractTextBox
                 y0=float(y0),
                 x1=float(x1),
                 y1=float(y1),
-                font_size_pt=float(y1) - float(y0),
+                font_size_pt=round(line_height_pt, 2),
                 text=text,
             )
         )

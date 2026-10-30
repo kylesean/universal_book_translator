@@ -1,13 +1,18 @@
-"""Zero-AGPL pluggable Cloud & Vision LLM OCR Driver.
+"""OpenAI-compatible vision-endpoint OCR driver.
 
-Connects UBT to public cloud OCR APIs (e.g. Baidu, Tencent, Aliyun, Azure)
-and OpenAI-compatible Vision LLMs (e.g. Qwen-VL, GPT-4o-mini, DeepSeek-VL, Claude).
+One wire protocol, one class: POST the page image as a base64 data URL to
+``{endpoint}/chat/completions`` and read the lines back. Every modern
+inference server speaks this contract — llama-server/llama-swap, SGLang,
+vLLM, Ollama on localhost, or a hosted VLM — so locality, not the driver,
+decides privacy: the same class serves ``ocr_mode='local'`` (a localhost
+endpoint, no egress) and ``ocr_mode='cloud'`` (a remote endpoint, gated by
+``UBT_ALLOW_PAGE_UPLOAD``).
 
-Features:
-- OpenAI Vision compatibility: sends base64 data URL to chat completions.
-- Public Cloud REST API compatibility: normalizes Baidu, Azure, Tencent, or standard REST payloads.
-- BBox normalization via PageBBoxResolver.
-- Seamless fallback for environments without local GPU or Docker.
+Like every LLM-VLM driver, ``measured_boxes=False``: the model emits text in
+reading order and no trustworthy coordinates. The anchoring layer refuses it
+in recognition mode (a true scan cannot be transcribed by a text-only
+witness) and uses it in proofread mode (pages that already have a text
+layer, where the driver's job is cross-checking the stronger pdfium witness).
 """
 
 from __future__ import annotations
@@ -20,7 +25,6 @@ from typing import Any
 
 import httpx
 
-from ubt.adapters.pdf.coordinate_resolver import PageBBoxResolver, undo_page_rotation
 from ubt.adapters.pdf.vlm.types import PageTranscript, VlmLine
 
 logger = logging.getLogger(__name__)
@@ -38,10 +42,6 @@ def _record_ocr_usage(model: str, usage: Any) -> None:
 
     A response with no ``usage`` block is booked as *unmeasured* rather than as
     zero tokens, so the cost reports as unknown instead of a fake $0.00.
-
-    Scope note: only the vision-LLM path is metered here. The cloud-REST path
-    (Baidu/Azure/Tencent) returns no token counts at all and has no price-table
-    entry, so it cannot be sized; it stays unpriced rather than being guessed.
     """
     from ubt.core.router.provider import _extract_cached_tokens, record_external_usage
 
@@ -60,16 +60,15 @@ def _record_ocr_usage(model: str, usage: Any) -> None:
         record_external_usage(model, measured=False)
 
 
-class CloudOcrDriver:
-    """Universal cloud OCR driver supporting both Vision LLMs and Cloud REST APIs."""
+class VisionEndpointDriver:
+    """OCR over an OpenAI-compatible vision chat endpoint (local or remote)."""
 
-    name = "cloud"
+    name = "vision"
 
     def __init__(
         self,
         endpoint: str | None = None,
         api_key: str | None = None,
-        provider: str = "auto",
         model: str | None = None,
         timeout: float = 60.0,
         extra_headers: dict[str, str] | None = None,
@@ -78,36 +77,20 @@ class CloudOcrDriver:
             endpoint or os.environ.get("UBT_OCR_ENDPOINT") or DEFAULT_OPENAI_ENDPOINT
         ).rstrip("/")
         self.api_key = api_key or os.environ.get("UBT_OCR_API_KEY")
-        self.provider = provider or os.environ.get("UBT_OCR_PROVIDER", "auto")
         self.timeout = timeout
         self.extra_headers = dict(extra_headers or {})
-        # Determine whether this driver yields measured boxes or vision text.
-        # An explicit provider is authoritative; only "auto" falls back to
-        # endpoint heuristics. Otherwise `--ocr cloud` against a default /
-        # OpenAI-looking endpoint was silently treated as a vision LLM, which
-        # returns no measured boxes and so cannot transcribe a scanned page.
-        provider_kind = (self.provider or "auto").strip().lower()
-        explicit_vision = provider_kind in ("vlm", "openai_vision")
-        self._vision_llm = explicit_vision or (
-            provider_kind == "auto"
-            and (
-                "/chat/completions" in self.endpoint
-                or "api.openai.com" in self.endpoint
-                or "api.deepseek.com" in self.endpoint
-            )
-        )
-        self.measured_boxes = not self._vision_llm
-        # No vendor default: the vision route must be told which model to bill,
-        # and the cloud-REST route sends no model field at all. Fail closed here
-        # rather than ship ``"model": ""`` (or a model nobody chose).
+        self.measured_boxes = False
+        # No vendor default: the vision route must be told which model to call
+        # (and, on a multi-model gateway like llama-swap, *which model to
+        # route to*). Fail closed here rather than ship ``"model": ""``.
         self.model = (model or os.environ.get("UBT_OCR_MODEL") or "").strip()
-        if self._vision_llm and not self.model:
+        if not self.model:
             raise ValueError(
-                "Vision OCR needs an explicit model: this channel no longer falls "
+                "Vision OCR needs an explicit model: this channel does not fall "
                 "back to a vendor default. Set UBT_OCR_MODEL (or ocr_model in the "
-                "run config) to the vision model whose tokens the run will bill; "
-                "choose a local engine (UBT_OCR_MODE=local) or set "
-                "UBT_OCR_MODE=off to skip OCR instead."
+                "run config) to the vision model the endpoint should serve; "
+                "choose a measured-box engine (ocr_mode='local' with rapidocr or "
+                "a sidecar) or set ocr_mode='off' to skip OCR instead."
             )
 
     def recognize(
@@ -118,7 +101,7 @@ class CloudOcrDriver:
         rotation: int = 0,
         origin_pt: tuple[float, float] = (0.0, 0.0),
     ) -> PageTranscript:
-        """Route to Vision LLM or Cloud REST API based on provider."""
+        """Transcribe one rendered page image via the vision chat endpoint."""
         # Convert PIL image to JPEG bytes
         buf = io.BytesIO()
         if hasattr(image, "convert"):
@@ -128,16 +111,9 @@ class CloudOcrDriver:
             image.save(buf, format="JPEG", quality=85)
         else:
             raise TypeError(f"Expected PIL Image, got {type(image)}")
-        img_bytes = buf.getvalue()
+        return self._transcribe(buf.getvalue())
 
-        if self._vision_llm:
-            return self._recognize_via_vision_llm(img_bytes)
-        return self._recognize_via_cloud_rest(
-            img_bytes, image, page_size_pt, scale, rotation, origin_pt=origin_pt
-        )
-
-    def _recognize_via_vision_llm(self, img_bytes: bytes) -> PageTranscript:
-        """Transcribe text using OpenAI-compatible multimodal vision endpoint."""
+    def _transcribe(self, img_bytes: bytes) -> PageTranscript:
         b64_str = base64.b64encode(img_bytes).decode("utf-8")
         data_uri = f"data:image/jpeg;base64,{b64_str}"
 
@@ -219,125 +195,4 @@ class CloudOcrDriver:
             engine=f"vlm:{self.model}",
             measured_boxes=False,
             truncated=truncated,
-        )
-
-    def _recognize_via_cloud_rest(
-        self,
-        img_bytes: bytes,
-        image: Any,
-        page_size_pt: tuple[float, float],
-        scale: float,
-        rotation: int = 0,
-        origin_pt: tuple[float, float] = (0.0, 0.0),
-    ) -> PageTranscript:
-        """Call standard cloud OCR endpoint and parse returned lines + bounding boxes."""
-        headers: dict[str, str] = {}
-        if self.extra_headers:
-            headers.update(self.extra_headers)
-        if self.api_key and "Authorization" not in headers:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        img_w = float(getattr(image, "width", page_size_pt[0] * scale))
-        img_h = float(getattr(image, "height", page_size_pt[1] * scale))
-
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                files = {"file": ("page.jpg", img_bytes, "image/jpeg")}
-                resp = client.post(self.endpoint, files=files, headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-        except Exception as exc:
-            raise RuntimeError(f"Cloud OCR request failed at {self.endpoint}: {exc}") from exc
-
-        # Flexible parsing of varied cloud OCR shapes (standard / Baidu / Tencent / Azure)
-        resolver = PageBBoxResolver(
-            page_width=page_size_pt[0],
-            page_height=page_size_pt[1],
-            image_width=img_w,
-            image_height=img_h,
-            # The endpoint read the rendered (displayed) page, so its boxes are
-            # in the display frame; undo the page's /Rotate to land in the
-            # unrotated user-space frame block geometry and masks live in.
-            rotation=undo_page_rotation(rotation),
-            origin_x=origin_pt[0],
-            origin_y=origin_pt[1],
-        )
-
-        vlm_lines: list[VlmLine] = []
-
-        # 1. Standard format: {"lines": [{"text": ..., "box": ...}]}
-        if "lines" in data and isinstance(data["lines"], list):
-            coord_system = data.get("coord_system")
-            if not coord_system:
-                # Decide the space once for the whole page: a per-box ``auto``
-                # misreads a normalized-1000 box that fits inside the page as
-                # native points, misplacing it by a factor.
-                coord_system = PageBBoxResolver.infer_coord_system(
-                    [item.get("box") or item.get("bbox") for item in data["lines"]],
-                    page_size_pt[0],
-                    page_size_pt[1],
-                    img_w,
-                    img_h,
-                )
-            for item in data["lines"]:
-                text = str(item.get("text", "")).strip()
-                if not text:
-                    continue
-                raw_box = item.get("box") or item.get("bbox")
-                box = resolver.resolve_bbox(raw_box, coord_system=coord_system) if raw_box else None
-                vlm_lines.append(
-                    VlmLine(
-                        text=text,
-                        confidence=float(item.get("confidence", 1.0)),
-                        measured_box=box,
-                    )
-                )
-
-        # 2. Baidu format: {"words_result": [{"words": ..., "location": {"left": ..., "top": ..., "width": ..., "height": ...}}]}
-        elif "words_result" in data and isinstance(data["words_result"], list):
-            for item in data["words_result"]:
-                text = str(item.get("words", "")).strip()
-                if not text:
-                    continue
-                loc = item.get("location") or {}
-                left, t, w, h = (
-                    loc.get("left", 0),
-                    loc.get("top", 0),
-                    loc.get("width", 0),
-                    loc.get("height", 0),
-                )
-                raw_box = (left, t, left + w, t + h)
-                box = resolver.resolve_bbox(raw_box, coord_system="image_pixel", origin="top-left")
-                vlm_lines.append(VlmLine(text=text, confidence=1.0, measured_box=box))
-
-        # 3. Azure format: {"readResults": [{"lines": [{"text": ..., "boundingBox": [...]}]}]}
-        elif "readResults" in data:
-            results = data.get("readResults", [])
-            for page_res in results:
-                for ln in page_res.get("lines", []):
-                    text = str(ln.get("text", "")).strip()
-                    if not text:
-                        continue
-                    pts = ln.get("boundingBox", [])
-                    box = None
-                    if len(pts) >= 8:
-                        xs = [pts[i] for i in range(0, 8, 2)]
-                        ys = [pts[i] for i in range(1, 8, 2)]
-                        raw_box = (min(xs), min(ys), max(xs), max(ys))
-                        box = resolver.resolve_bbox(
-                            raw_box, coord_system="image_pixel", origin="top-left"
-                        )
-                    vlm_lines.append(VlmLine(text=text, confidence=1.0, measured_box=box))
-
-        else:
-            # Flat text fallback
-            raw_text = str(data.get("text") or data.get("result") or "")
-            for ln in raw_text.splitlines():
-                if ln.strip():
-                    vlm_lines.append(VlmLine(text=ln.strip(), confidence=1.0, measured_box=None))
-
-        return PageTranscript(
-            lines=tuple(vlm_lines),
-            engine=f"cloud:{self.endpoint}",
-            measured_boxes=any(line.measured_box is not None for line in vlm_lines),
         )
