@@ -92,7 +92,10 @@ class PageGeometry:
     margin_right: float
     columns: int = 1
     column_gutter_pt: float = 14.0
-    theme_color_hex: str = "#0078ae"
+    #: Neutral black: a page whose headings measure no color ships black
+    #: headings. A brand accent here recolored a black-heading paper blue on the
+    #: ATC'25 replay; the accent is for callers that measured one, not a default.
+    theme_color_hex: str = "#000000"
 
 
 @dataclass(slots=True)
@@ -156,7 +159,7 @@ def extract_page_geometry(
     blocks: Sequence[IRBlock],
     *,
     default_margin: float = 36.0,
-    default_theme_color: str = "#0078ae",
+    default_theme_color: str = "#000000",
 ) -> PageGeometry:
     """Extract and clone physical geometry, margins, columns, and primary theme color from page blocks."""
     bboxes = [

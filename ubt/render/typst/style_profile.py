@@ -15,7 +15,14 @@ from typing import Any
 
 from ubt.core.ir.models import BlockType, IRBlock
 
-DEFAULT_PRIMARY_HEADING_HEX = "#0078ae"
+#: Fallback heading color for a document whose headings measure *no* color:
+#: every heading carried black (or carried no style at all). Neutral black is
+#: the only honest reading of that measurement — painting such headings a brand
+#: accent recolors a document whose own headings are black, which is exactly
+#: what shipped on the ATC'25 replay (every section heading came out branded
+#: blue on a paper whose headings are black). The accent stays available to
+#: callers that measure a real color; it is not a default anymore.
+DEFAULT_PRIMARY_HEADING_HEX = "#000000"
 _BLACK_HEX_SET = {"#000000", "#000", "#00000000", "black", "#111111", "#222222"}
 
 

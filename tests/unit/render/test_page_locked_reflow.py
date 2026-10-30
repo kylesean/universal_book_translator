@@ -103,7 +103,8 @@ def test_extract_page_geometry_empty_blocks() -> None:
     assert geom.margin_left == 36.0
     assert geom.margin_right == 36.0
     assert geom.columns == 1
-    assert geom.theme_color_hex == "#0078ae"
+    # No measured color: the neutral fallback, never a brand accent.
+    assert geom.theme_color_hex == "#000000"
 
 
 def test_solve_page_lock_roomy() -> None:

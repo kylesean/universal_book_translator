@@ -101,6 +101,17 @@ def test_extract_document_style_profile_monochrome() -> None:
     assert profile.primary_heading_hex == DEFAULT_PRIMARY_HEADING_HEX
 
 
+def test_the_no_color_fallback_is_neutral_black() -> None:
+    """A document whose headings measure no color ships black headings.
+
+    The fallback used to be a brand accent: the ATC'25 replay measured zero
+    colored headings on a paper whose headings are black, and every section
+    title came out painted blue. An unmeasured color must resolve to the
+    source's own neutral, never to a decoration.
+    """
+    assert DEFAULT_PRIMARY_HEADING_HEX == "#000000"
+
+
 def test_academic_preamble_clones_heading_color() -> None:
     preamble_uncolored = academic_preamble(target_lang="zh", columns=1)
     assert "fill: rgb(" not in preamble_uncolored
