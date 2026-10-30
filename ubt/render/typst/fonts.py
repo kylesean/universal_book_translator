@@ -100,6 +100,26 @@ BUNDLED_FONTS: tuple[BundledFont, ...] = (
         license="OFL-1.1",
         scripts=("hans", "hant", "cjk"),
     ),
+    # The bold faces. The renderer asks for weight "bold" on every heading and
+    # run-in label, and under an isolated compile (no system fonts) a set of
+    # regular-only faces resolved every one of them as regular: the ATC'25
+    # replay shipped headings with no weight contrast at all. Same family name
+    # as the regular face on purpose — Typst merges the weights under one
+    # family, which is what lets `weight: "bold"` resolve.
+    BundledFont(
+        filename="NotoSerifCJKsc-Bold-subset.otf",
+        family="Noto Serif CJK SC",
+        sha256="e619986a2269b018377ec25ba6f09fa8e0b8033972ce64f8e0d4c233ea09680a",
+        license="OFL-1.1",
+        scripts=("hans", "hant", "cjk"),
+    ),
+    BundledFont(
+        filename="NotoSansCJKsc-Bold-subset.otf",
+        family="Noto Sans CJK SC",
+        sha256="f9b7f67603fb59ab9cdcbbd34ddc164904c41da1043a3acfcb2f44be65aac61c",
+        license="OFL-1.1",
+        scripts=("hans", "hant", "cjk"),
+    ),
     BundledFont(
         filename="NotoSerif-Regular.ttf",
         family="Noto Serif",

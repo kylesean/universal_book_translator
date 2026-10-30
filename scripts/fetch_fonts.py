@@ -156,6 +156,22 @@ KANA_HANGUL_UNICODES = ",".join(
 #: book needs. Keeping ``*`` cost 2.4× the bytes for features no delivery uses.
 SUBSET_LAYOUT = "kern,liga,vert,vrt2,halt,palt"
 
+#: Filename prefixes the recipes in :func:`_obtain` dispatch on, in branch
+#: order. Declared as data so a test can pin "every manifest entry has a
+#: recipe" instead of discovering the gap on a networked machine at fetch time.
+#: Keep in sync with the branches below when a face is added.
+RECIPE_PREFIXES: tuple[str, ...] = (
+    "NotoSerifCJKjp",
+    "NotoSerifCJKkr",
+    "NotoSerifCJK",
+    "NotoSansCJK",
+    "NotoNaskhArabic",
+    "NotoSerifHebrew",
+    "NotoSerifThai",
+    "NotoSerifDevanagari",
+    "NotoSerif-Regular",
+)
+
 
 def _download(url: str, dest: Path, *, timeout: int = 180) -> None:
     print(f"  ↓ {url}")
@@ -236,21 +252,24 @@ def _obtain(filename: str, dest: Path) -> None:
             # The zip carries every weight; taking the first ``*.otf`` picked
             # SemiBold on this release (measured: the delivered family name came
             # out "Noto Serif CJK SC SemiBold"). The weight is part of the
-            # contract, so it is named.
-            regular = [p for p in work.rglob("*.otf") if p.stem.endswith("-Regular")]
-            if not regular:
-                raise SystemExit("no *-Regular face in the Noto Serif CJK zip")
-            _subset(regular[0], dest)
+            # contract, so it is named — the manifest filename carries it
+            # ("...-Bold-..." vs "...-Regular-...").
+            weight = "Bold" if "-Bold-" in filename else "Regular"
+            faces = [p for p in work.rglob("*.otf") if p.stem.endswith(f"-{weight}")]
+            if not faces:
+                raise SystemExit(f"no *-{weight} face in the Noto Serif CJK zip")
+            _subset(faces[0], dest)
         elif filename.startswith("NotoSansCJK"):
             archive = work / "noto-sans.zip"
             _download(NOTO_SANS_URL, archive)
             shutil.unpack_archive(str(archive), str(work))
             # Same trap as the Serif zip: every weight is present and rglob
             # order is not weight order. Name the weight.
-            regular = [p for p in work.rglob("*.otf") if p.stem.endswith("-Regular")]
-            if not regular:
-                raise SystemExit("no *-Regular face in the Noto Sans CJK zip")
-            _subset(regular[0], dest)
+            weight = "Bold" if "-Bold-" in filename else "Regular"
+            faces = [p for p in work.rglob("*.otf") if p.stem.endswith(f"-{weight}")]
+            if not faces:
+                raise SystemExit(f"no *-{weight} face in the Noto Sans CJK zip")
+            _subset(faces[0], dest)
         elif filename.startswith("NotoNaskhArabic"):
             archive = work / "naskh.zip"
             _download(NOTO_NASKH_ARABIC_URL, archive)

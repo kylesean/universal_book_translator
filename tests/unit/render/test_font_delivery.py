@@ -411,3 +411,31 @@ def test_the_regional_faces_own_their_script_tokens() -> None:
             owners.setdefault(script, []).append(face.family)
     for script in ("jpan", "kore", "arabic", "hebrew"):
         assert len(owners.get(script, [])) == 1, f"{script} has {owners.get(script)}"
+
+
+def test_the_bundled_cjk_families_have_bold_faces() -> None:
+    """The renderer asks for weight "bold" on every heading and run-in label.
+
+    Under an isolated compile a regular-only set resolved all of them as
+    regular: the ATC'25 replay shipped headings with no weight contrast at
+    all, because Typst had no bold face of the declared family to pick. The
+    default stack (``page_locked_renderer.DEFAULT_FONT_STACK``) leads with
+    "Noto Serif CJK SC" and the facsimile preamble names "Noto Sans CJK SC"
+    beside it, so both bundled CJK families must carry a bold face.
+    """
+    bold_families = {face.family for face in BUNDLED_FONTS if "-Bold-" in face.filename}
+    assert "Noto Serif CJK SC" in bold_families
+    assert "Noto Sans CJK SC" in bold_families
+
+
+def test_every_declared_face_has_a_fetch_recipe() -> None:
+    """A manifest entry without a download recipe fails only at fetch time, on
+    a networked machine, mid-release. The prefix table in the fetch script is
+    data precisely so this contract can be pinned here."""
+    from scripts.fetch_fonts import RECIPE_PREFIXES
+
+    for face in BUNDLED_FONTS:
+        assert any(face.filename.startswith(prefix) for prefix in RECIPE_PREFIXES), (
+            f"{face.filename} matches no download recipe prefix; add a branch "
+            "to scripts/fetch_fonts.py before shipping the manifest entry"
+        )
