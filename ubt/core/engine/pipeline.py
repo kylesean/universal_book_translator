@@ -166,7 +166,7 @@ def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryD
     MeasurementService replaces the provisional signal with a real solve.
     """
     is_pdf = input_path.suffix.lower() == ".pdf"
-    requested = str(getattr(config, "delivery_mode", "facsimile") or "facsimile")
+    requested = str(getattr(config, "delivery_mode", "auto") or "auto")
     # Phase 0/1 structure census runs for new ``faithful`` and ``auto`` PDF
     # requests so ``DeliverySignals`` (layout_complexity, text_trust, has_scan)
     # reflect measured PDF structure rather than hardcoded defaults.
