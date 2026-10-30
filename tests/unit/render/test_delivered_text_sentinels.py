@@ -268,3 +268,28 @@ class TestStrayHtmlTagsNeverReachThePage:
     def test_diagnostics_still_see_the_raw_surface(self) -> None:
         block = _block(target="RustyHermit-MPK [59]</span> 利用 Intel MPK。")
         assert "</span>" in delivered_text(block, sanitize_sentinels=False)
+
+
+class TestDegradedListMarkersAreTypedAsBullets:
+    """The source's filled bullet arrives from extraction as a middle dot
+    ("· Redis. We use ..."), and the model copies it verbatim into its
+    translation — often dropping the space ("·Redis。"). The reader gets a
+    shrunken dot glued to the first word where the source had a bullet. For
+    list-shaped blocks the marker is furniture: normalize it."""
+
+    def test_a_degraded_marker_is_normalized(self) -> None:
+        block = _block(
+            kind=BlockType.LIST_ITEM,
+            target="·Redis。我们使用官方的 Redis 基准测试工具 [53]。",
+        )
+        assert delivered_text(block) == "• Redis。我们使用官方的 Redis 基准测试工具 [53]。"
+
+    def test_an_already_clean_marker_keeps_its_space(self) -> None:
+        block = _block(kind=BlockType.LIST_ITEM, target="• 已有空格的条目。")
+        assert delivered_text(block) == "• 已有空格的条目。"
+
+    def test_prose_middle_dot_survives(self) -> None:
+        """A middle dot between clauses is a legitimate typographic character:
+        only list-shaped blocks get the normalization."""
+        block = _block(kind=BlockType.NARRATIVE, target="条目一 · 条目二 · 条目三。")
+        assert delivered_text(block) == "条目一 · 条目二 · 条目三。"

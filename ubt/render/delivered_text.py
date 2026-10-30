@@ -186,6 +186,28 @@ def strip_stray_html_tags(text: str) -> str:
     return _STRAY_HTML_TAG_RE.sub("", text)
 
 
+#: A list marker the extractor degraded. The source PDF's filled bullet arrives
+#: as a middle dot — the ATC'25 replay's list items extracted as
+#: ``· Redis. We use ...`` — and a model copies the marker verbatim into its
+#: translation, often dropping the space after it (``·Redis。``). The reader
+#: gets a shrunken dot glued to the first word where the source had a bullet.
+#: The marker is furniture, not content: for list-shaped blocks it is
+#: normalized to a real bullet plus a separating space. Prose in other block
+#: types keeps its middle dots — a ``·`` between clauses is a legitimate
+#: typographic character.
+_LIST_ITEM_TYPE = "list_item"
+_LIST_MARKER_RE = re.compile(r"^\s*[·•・]\s*")
+
+
+def normalize_list_marker(block_type: object, text: str) -> str:
+    """Retype a degraded list marker as a proper bullet (list blocks only)."""
+    if str(getattr(block_type, "value", block_type) or "") != _LIST_ITEM_TYPE:
+        return text
+    if not text:
+        return text
+    return _LIST_MARKER_RE.sub("• ", text, count=1)
+
+
 def delivered_text(block: IRBlock, *, sanitize_sentinels: bool = True) -> str:
     """The text to render for a block: its translation, else its draft, else source.
 
@@ -212,7 +234,9 @@ def delivered_text(block: IRBlock, *, sanitize_sentinels: bool = True) -> str:
     raw = _delivered_surface(block)
     if not sanitize_sentinels:
         return raw
-    return strip_stray_html_tags(strip_pipeline_sentinels(raw))
+    return normalize_list_marker(
+        block.block_type, strip_stray_html_tags(strip_pipeline_sentinels(raw))
+    )
 
 
 def _delivered_surface(block: IRBlock) -> str:
