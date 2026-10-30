@@ -37,6 +37,7 @@ passes one whole-page rect, which is explicit and greppable.
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,11 +76,10 @@ _SHOW_OPS: frozenset[str] = frozenset({"Tj", "TJ", "'", '"'})
 #: text; padding the right edge would instead swallow the first glyph of a
 #: neighbouring block. Keep rects are tested first and win, so a keep block
 #: adjacent to a translated one is unaffected.
-PEN_PAD_EM: float = 0.08
+PEN_PAD_EM: float = 0.10
 #: Floor for :data:`PEN_PAD_EM`. A producer that reports no usable ``Tf`` size
 #: (or reports ``1.0``) would otherwise get no padding at all. Also bounds the
-#: 9pt body case, where ``0.08 · 9 = 0.72pt`` is thinner than the 0.75pt the
-#: absolute-pad sweep found sufficient.
+#: 9pt body case, where ``0.10 · 9 = 0.90pt`` is padded up to 0.75pt.
 MIN_PEN_PAD_PT: float = 0.75
 
 
@@ -143,6 +143,15 @@ def _device_origin(text_matrix: Matrix, ctm: Matrix) -> tuple[float, float]:
     """Page-space position of the text origin: text matrix then CTM."""
     dev = _compose(text_matrix, ctm)
     return dev[4], dev[5]
+
+
+def _effective_font_size(font_size: float, text_matrix: Matrix, ctm: Matrix) -> float:
+    """Page-space font size: ``Tf`` nominal size scaled by ``text_matrix ∘ ctm``."""
+    dev = _compose(text_matrix, ctm)
+    scale = math.hypot(dev[0], dev[1])
+    if font_size > 0.0:
+        return font_size * scale if scale > 0.0 else font_size
+    return scale if scale > 1.0 else 0.0
 
 
 def _rects_for_page(
@@ -261,6 +270,9 @@ def _rewrite_instructions(
     instructions: Sequence[Any],
     erase: Sequence[BoxRect] | None,
     keep: Sequence[BoxRect] | None,
+    *,
+    initial_ctm: Matrix = _IDENTITY,
+    form_invocations: list[tuple[str, Matrix]] | None = None,
 ) -> list[Any]:
     """Walk one parsed content stream, blanking the show operators inside ``erase``.
 
@@ -270,9 +282,15 @@ def _rewrite_instructions(
     a non-UTF-8 operator byte parses fine and then raises ``UnicodeDecodeError``
     on the first ``str(operator)``, which is exactly the case that used to be
     lost.
+
+    ``initial_ctm`` is the CTM in force when this stream begins: identity for a
+    page's top-level stream, ``form /Matrix ∘ CTM at Do`` for a Form XObject's
+    stream (see :func:`_strip_one_form`). ``form_invocations``, when given,
+    collects every ``(xobject name, CTM at Do)`` this stream invokes, so the
+    caller can descend into forms with the correct page-space geometry.
     """
     out: list[Any] = []
-    ctm: Matrix = _IDENTITY
+    ctm: Matrix = initial_ctm
     saved_ctm: list[Matrix] = []
     text_matrix: Matrix = _IDENTITY
     line_matrix: Matrix = _IDENTITY
@@ -298,6 +316,11 @@ def _rewrite_instructions(
                 ctm = saved_ctm.pop()
         elif op == "cm" and len(operands) >= 6:
             ctm = _compose(_matrix_from(operands), ctm)
+        elif op == "Do" and form_invocations is not None and operands:
+            # The named XObject's stream runs in ``form /Matrix ∘ CTM here``;
+            # recording the CTM now (Do does not modify it) lets the caller
+            # descend with page-space geometry instead of form-local guesses.
+            form_invocations.append((str(operands[0]), ctm))
         elif op == "BT":
             text_matrix = line_matrix = _IDENTITY
             line_x, line_y = _device_origin(text_matrix, ctm)
@@ -333,9 +356,11 @@ def _rewrite_instructions(
             text_matrix = line_matrix
             line_x, line_y = _device_origin(text_matrix, ctm)
 
-        if op in _SHOW_OPS and not _keep_point(line_x, line_y, erase, keep, font_size=font_size):
-            out.append((_blank_strings(operands), operator))
-            continue
+        if op in _SHOW_OPS:
+            eff_size = _effective_font_size(font_size, text_matrix, ctm)
+            if not _keep_point(line_x, line_y, erase, keep, font_size=eff_size):
+                out.append((_blank_strings(operands), operator))
+                continue
         out.append((operands, operator))
 
     return out
@@ -347,6 +372,7 @@ def strip_stream_text(
     erase_rects: Sequence[BoxRect] | None = None,
     keep_rects: Sequence[BoxRect] | None = None,
     page_index: int | None = None,
+    form_invocations: list[tuple[str, Matrix]] | None = None,
 ) -> bytes:
     """Rewrite one content stream, blanking the text lines inside ``erase_rects``.
 
@@ -364,7 +390,7 @@ def strip_stream_text(
 
     try:
         instructions = cast_instructions(pikepdf.parse_content_stream(content_obj))
-        out = _rewrite_instructions(instructions, erase, keep)
+        out = _rewrite_instructions(instructions, erase, keep, form_invocations=form_invocations)
         return pikepdf.unparse_content_stream(out)
     except Exception as exc:
         logger.warning(
@@ -439,6 +465,201 @@ def strip_form_xobjects_recursive(
     return visited
 
 
+_FORM_COPIED_KEYS = ("/Type", "/Subtype", "/BBox", "/Matrix", "/Group", "/Name", "/StructParents")
+
+
+def _strip_one_form(
+    src_pdf: pikepdf.Pdf,
+    form: pikepdf.Stream,
+    erase: Sequence[BoxRect] | None,
+    keep: Sequence[BoxRect] | None,
+    *,
+    initial_ctm: Matrix,
+    page_index: int | None,
+    depth: int = 0,
+    max_depth: int = 5,
+) -> pikepdf.Stream | None:
+    """Rewrite a *copy* of one Form XObject's stream under page-space rects.
+
+    The form's text positions are mapped into page space through
+    ``form /Matrix ∘ initial_ctm`` (the CTM in force at its ``Do`` call), so the
+    same erase/keep rects that classify top-level lines classify the form's
+    lines correctly. Text whose page-space pen position falls inside an erase
+    rect is blanked — which is exactly the text a translated block owns — while
+    figure labels outside every erase rect survive, and keep rects win as
+    always.
+
+    Nested forms are descended with their own composed CTMs. Returns a
+    replacement Stream when anything in the subtree changed (copy-on-write: the
+    original object is never mutated, so a form shared with another page is
+    unaffected), else ``None``.
+    """
+    if depth > max_depth:
+        return None
+    raw = _content_bytes(form)
+    if not raw:
+        return None
+    matrix_val = form.get("/Matrix")
+    form_matrix = _IDENTITY
+    if matrix_val is not None:
+        try:
+            form_matrix = _matrix_from(list(matrix_val))
+        except (TypeError, ValueError):
+            form_matrix = _IDENTITY
+    start_ctm = _compose(form_matrix, initial_ctm)
+
+    try:
+        instructions = cast_instructions(pikepdf.parse_content_stream(form))
+    except Exception as exc:
+        logger.debug("Could not parse a Form XObject (%s); keeping it intact", exc)
+        return None
+
+    nested: list[tuple[str, Matrix]] = []
+    out = _rewrite_instructions(
+        instructions,
+        erase,
+        keep,
+        initial_ctm=start_ctm,
+        form_invocations=nested,
+    )
+
+    child_resources = form.get("/Resources")
+    child_replacements: dict[str, pikepdf.Stream] = {}
+    child_xobjects: pikepdf.Dictionary | None = None
+    if nested and isinstance(child_resources, pikepdf.Dictionary):
+        candidate = child_resources.get("/XObject")
+        if isinstance(candidate, pikepdf.Dictionary):
+            child_xobjects = candidate
+            seen: set[tuple[int, int]] = set()
+            for name, ctm_at_do in nested:
+                value = candidate.get(name)
+                child = _deref(value)
+                if not isinstance(child, pikepdf.Stream):
+                    continue
+                if child.get("/Subtype") != pikepdf.Name("/Form"):
+                    continue
+                key = child.objgen
+                if key in seen:
+                    continue
+                seen.add(key)
+                replacement = _strip_one_form(
+                    src_pdf,
+                    child,
+                    erase,
+                    keep,
+                    initial_ctm=ctm_at_do,
+                    page_index=page_index,
+                    depth=depth + 1,
+                    max_depth=max_depth,
+                )
+                if replacement is not None:
+                    child_replacements[str(name)] = replacement
+
+    new_bytes = pikepdf.unparse_content_stream(out)
+    if new_bytes == raw and not child_replacements:
+        return None
+
+    replacement = src_pdf.make_stream(new_bytes)
+    for copied_key in _FORM_COPIED_KEYS:
+        value = form.get(copied_key)
+        if value is not None:
+            replacement[copied_key] = value
+    if child_replacements and child_xobjects is not None:
+        new_xobjects = pikepdf.Dictionary({str(k): v for k, v in child_xobjects.items()})
+        for name, stream in child_replacements.items():
+            new_xobjects[name] = stream
+        res_items = (
+            {str(k): v for k, v in child_resources.items()}
+            if isinstance(child_resources, pikepdf.Dictionary)
+            else {}
+        )
+        new_resources = pikepdf.Dictionary(res_items)
+        new_resources["/XObject"] = new_xobjects
+        replacement["/Resources"] = new_resources
+    elif child_resources is not None:
+        replacement["/Resources"] = child_resources
+    return replacement
+
+
+def _strip_page_forms(
+    page: pikepdf.Page,
+    src_pdf: pikepdf.Pdf,
+    *,
+    erase_rects: Sequence[BoxRect] | None,
+    keep_rects: Sequence[BoxRect] | None,
+    page_index: int | None,
+    invocations: Sequence[tuple[str, Matrix]] | None = None,
+) -> None:
+    """Blank, inside the Form XObjects this page invokes, the text a translation replaces.
+
+    Producers bury real body text in forms (measured on ``atc25-peng-yuke.pdf``
+    p1: the entire proceedings notice — "This paper is included …", the dates,
+    the ISBN — lives in one ``/Fm0``), and the renderer still places a
+    translation over that region: the source survives *under* its translation.
+    The old ``descend_forms`` path tested page-space rects against form-local
+    coordinates, which is the wrong geometry for any placed form, so descent
+    stayed off by default and the text leaked.
+
+    This walks the page stream (or uses ``invocations`` already collected during
+    the top-level stream rewrite), records each ``Do``'s CTM, rewrites the invoked
+    forms with the composed transform, and installs the replacements through a
+    cloned ``/Resources`` — a form shared with other pages keeps its original
+    bytes there.
+    """
+    resources = page.get("/Resources")
+    if not isinstance(resources, pikepdf.Dictionary):
+        return
+    if invocations is None:
+        try:
+            instructions = cast_instructions(pikepdf.parse_content_stream(page))
+        except Exception as exc:
+            logger.debug("Could not parse a page stream for form descent (%s)", exc)
+            return
+        collected: list[tuple[str, Matrix]] = []
+        _rewrite_instructions(instructions, None, None, form_invocations=collected)
+        invocations = collected
+    if not invocations:
+        return
+
+    xobjects = resources.get("/XObject")
+    if not isinstance(xobjects, pikepdf.Dictionary):
+        return
+
+    replacements: dict[str, pikepdf.Stream] = {}
+    seen: set[tuple[int, int]] = set()
+    for name, ctm_at_do in invocations:
+        value = xobjects.get(name)
+        form = _deref(value)
+        if not isinstance(form, pikepdf.Stream):
+            continue
+        if form.get("/Subtype") != pikepdf.Name("/Form"):
+            continue
+        key = form.objgen
+        if key in seen:
+            continue
+        seen.add(key)
+        replacement = _strip_one_form(
+            src_pdf,
+            form,
+            _rects_for_page(erase_rects, page_index),
+            _rects_for_page(keep_rects, page_index),
+            initial_ctm=ctm_at_do,
+            page_index=page_index,
+        )
+        if replacement is not None:
+            replacements[name] = replacement
+
+    if not replacements:
+        return
+
+    new_xobjects = pikepdf.Dictionary({str(k): v for k, v in xobjects.items()})
+    for name, stream in replacements.items():
+        new_xobjects[name] = stream
+    new_resources = pikepdf.Dictionary({str(k): v for k, v in resources.items()})
+    new_resources["/XObject"] = new_xobjects
+    page.Resources = new_resources
+
+
 def strip_text_streams(
     src_pdf: Path | str,
     dst_pdf: Path | str,
@@ -476,18 +697,25 @@ def strip_text_streams(
             erase_r = erase_map.get(pno)
             keep_r = keep_map.get(pno)
 
-            raw = strip_stream_text(page, erase_rects=erase_r, keep_rects=keep_r, page_index=pno)
+            invocations: list[tuple[str, Matrix]] | None = [] if descend_forms else None
+            raw = strip_stream_text(
+                page,
+                erase_rects=erase_r,
+                keep_rects=keep_r,
+                page_index=pno,
+                form_invocations=invocations,
+            )
             page.Contents = src.make_stream(raw)
 
             if descend_forms:
-                resources = page.get("/Resources")
-                if isinstance(resources, pikepdf.Dictionary):
-                    strip_form_xobjects_recursive(
-                        resources,
-                        erase_rects=erase_r,
-                        keep_rects=keep_r,
-                        page_index=pno,
-                    )
+                _strip_page_forms(
+                    page,
+                    src,
+                    erase_rects=erase_r,
+                    keep_rects=keep_r,
+                    page_index=pno,
+                    invocations=invocations,
+                )
 
             out.pages.append(page)
 

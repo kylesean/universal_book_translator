@@ -80,8 +80,18 @@ QeEngine = Literal["heuristic", "tiered"]
 #: source is impossible (it changes the page count). ``auto`` lets the advisor
 #: pick from the document's structure.
 DualMode = Literal["mono", "dual", "auto"]
-#: Document delivery channel: 'reflow' (responsive Typst reflow), 'facsimile' (1:1 visual canvas isomorphism), or 'page_locked' (1:1 style-cloned reflow).
-DeliveryMode = Literal["reflow", "facsimile", "page_locked"]
+#: Document delivery request. ``auto`` routes by measured feasibility;
+#: ``readable`` reflows; ``faithful`` keeps the source page geometry. The three
+#: legacy values remain accepted for one release and are mapped by
+#: ``ubt.delivery.contracts.legacy_delivery_contract``.
+DeliveryMode = Literal[
+    "auto",
+    "readable",
+    "faithful",
+    "reflow",
+    "facsimile",
+    "page_locked",
+]
 
 #: What the export stage does when a block's text cannot be placed (a layout
 #: spill). ``error`` fails the delivery contract; the other three downgrade it
@@ -489,20 +499,21 @@ class TypstConfig(BaseModel):
     toc_mode: TocMode = "auto"
     enable_layout_auto_heal: bool = True
     layout_auto_heal_max_passes: int = 2
-    #: How a PDF target is delivered. ``facsimile`` (the default) rebuilds the
-    #: page on top of the source's own stripped vector background, keeping the
-    #: book's trim size, margins, columns and colour — a translated book that
-    #: still looks like the book. ``reflow`` is the generic A4/typeset layout
-    #: and remains available explicitly (``--delivery-mode reflow``);
-    #: ``page_locked`` clones geometry but reflows the text inside it.
+    #: How a PDF target is delivered. ``auto`` (the default) routes by document
+    #: class and measured facts: paper/book -> readable, layout-sensitive
+    #: documents -> faithful only when eligible. ``readable`` forces reflow;
+    #: ``faithful`` keeps the source page geometry. Legacy ``reflow`` /
+    #: ``facsimile`` / ``page_locked`` remain accepted for one release and are
+    #: mapped by ``ubt.delivery.contracts.legacy_delivery_contract``.
     #:
-    #: The default is ``facsimile`` because reflow is the *fallback*, not the
-    #: product: an isomorphic artefact is what D13 commissioned, and a default
-    #: that has to be discovered via ``--facsimile`` meant most runs never
-    #: produced one. Inputs without a source PDF (EPUB/DOCX/MD/HTML) cannot be
-    #: facsimiled at all — the renderer degrades to reflow with an INFO line
-    #: naming the reason, see ``DoclingRenderStrategy._render_facsimile``.
-    delivery_mode: DeliveryMode = "facsimile"
+    #: Inputs without a source PDF (EPUB/DOCX/MD/HTML) can never be faithful;
+    #: they route to readable and reflow.
+    delivery_mode: DeliveryMode = "auto"
+    #: Only meaningful for a new ``faithful`` request (or ``auto`` resolving to
+    #: faithful): when eligibility fails, re-route the whole book to readable
+    #: instead of refusing the run. Legacy ``facsimile``/``page_locked`` are
+    #: grandfathered and do not consult this flag.
+    allow_degrade: bool = False
     enable_pdf_optimization: bool = True
     pdf_optimize_profile: Literal["lossless", "ebook", "screen"] = "lossless"
     enable_dynamic_routing: bool = False
@@ -536,6 +547,12 @@ class QualityConfig(BaseModel):
     visual_sample_pages: int = Field(default=6, ge=0, le=50)
     visual_max_vlm_pages: int = Field(default=3, ge=0, le=10)
     visual_blocking_gate_enabled: bool = False
+    #: VLM judge FAIL is advisory by default: the judge samples a handful of
+    #: pages, so a model false positive must not refuse a whole book. Set this
+    #: true to make a sampled VLM FAIL blocking for short documents (within
+    #: ``QA_FULL_GATE_MAX_PAGES``); long books keep the finding as needs-human
+    #: because the sample is not representative.
+    visual_vlm_blocking_enabled: bool = False
     deterministic_glossary_long_route: bool = False
     export_min_completion_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
 
@@ -1133,6 +1150,11 @@ class UBTConfig(BaseSettings):
     # CRITICAL visual findings are detected; default false keeps the visual report
     # + NEEDS_HUMAN quarantine without blocking long doc delivery.
     visual_blocking_gate_enabled: bool = False
+    #: VLM FAIL is major and advisory by default. This opts into blocking a
+    #: short document (<= ``QA_FULL_GATE_MAX_PAGES``) when a sampled page fails
+    #: the VLM judge; long books keep it as needs-human because the sample is
+    #: not representative. Mirrored on the flat surface for CLI/REST/MCP.
+    visual_vlm_blocking_enabled: bool = False
     # -- deterministic glossary enforcement on the long route ----------------
     # The export-time literal term substitution (word-boundary + protected-span
     # + compound + jieba fail-closed guards, see glossary_enforcer.py) is
@@ -1304,12 +1326,14 @@ class UBTConfig(BaseSettings):
     # breaking long display formulas across lines.
     enable_layout_auto_heal: bool = True
     layout_auto_heal_max_passes: int = 2
-    #: See ``TypstConfig.delivery_mode``: facsimile is the default delivery for a
-    #: PDF target, reflow is the explicit fallback. Mirrored here because
-    #: ``UBTConfig`` is the flat surface the CLI/REST/MCP resolve against, and the
-    #: two definitions must not disagree — a default that differs by entry surface
-    #: is a bug no test can see.
-    delivery_mode: DeliveryMode = "facsimile"
+    #: See ``TypstConfig.delivery_mode``: ``auto`` is the default delivery
+    #: request. Mirrored here because ``UBTConfig`` is the flat surface the
+    #: CLI/REST/MCP resolve against, and the two definitions must not disagree —
+    #: a default that differs by entry surface is a bug no test can see.
+    delivery_mode: DeliveryMode = "auto"
+    #: See ``TypstConfig.allow_degrade``. Mirrored on the flat surface so CLI,
+    #: REST and MCP resolve the same field.
+    allow_degrade: bool = False
     enable_pdf_optimization: bool = True
     pdf_optimize_profile: Literal["lossless", "ebook", "screen"] = "lossless"
     enable_dynamic_routing: bool = False

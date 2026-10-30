@@ -43,7 +43,7 @@ from ubt.core.exceptions import LedgerWriterLeaseLostError, UnsupportedDocumentF
 from ubt.core.ir.models import BookManifest, ChapterMeta
 from ubt.core.ir.render_plan import RenderPlan
 from ubt.core.ir.run_metadata import RunMetadata
-from ubt.core.ports import resolve_adapter
+from ubt.core.ports import adapter_runtime_config, apply_runtime_config, resolve_adapter
 from ubt.core.qe.fast_pass import FastPassFilter
 
 if TYPE_CHECKING:
@@ -253,6 +253,46 @@ def _default_collaborators(
     return orchestrator.router, orchestrator.qe_runner
 
 
+def _apply_delivery_override(manifest: BookManifest, requested: str | None) -> str | None:
+    """Re-target one re-export at another delivery contract, in place.
+
+    Writes the same metadata keys the pipeline writes before a live run
+    (``delivery_mode``, ``delivery_plan``, requested/effective/legacy), so the
+    renderer and the artifact contract read one plan instead of each guessing.
+    Returns the effective legacy render mode, or ``None`` when no override was
+    requested.
+
+    ``plan_for_document`` is the same resolver the pipeline uses, so a request
+    the router would refuse ("faithful is not feasible for this document")
+    refuses here too — a replay must not be able to promise something a live run
+    would not.
+    """
+    if requested is None:
+        return None
+    from ubt.delivery.planning import plan_for_document
+
+    metadata = dict(manifest.metadata or {})
+    decision = plan_for_document(
+        requested,
+        document_mode=str(metadata.get("document_mode") or ""),
+        is_pdf=Path(manifest.source_path).suffix.lower() == ".pdf",
+        has_scan=bool(metadata.get("has_scan", False)),
+        page_count=int(metadata.get("page_count") or 0),
+    )
+    if decision.effective_mode is None:
+        raise ReExportError(
+            f"delivery request {requested!r} is not feasible for job {manifest.doc_id}; "
+            "the renderer has no contract it could honour"
+        )
+    metadata["delivery_mode"] = decision.effective_mode
+    metadata["delivery_plan"] = decision.plan.to_manifest()
+    metadata["delivery_mode_requested"] = requested
+    metadata["delivery_mode_effective"] = decision.effective_mode
+    metadata["delivery_mode_legacy"] = decision.legacy
+    manifest.metadata = metadata
+    return decision.effective_mode
+
+
 async def re_export_job(
     *,
     db_path: Path,
@@ -261,6 +301,7 @@ async def re_export_job(
     config: UBTConfig,
     router: ModelRouter | None = None,
     qe_runner: BaseQERunner | None = None,
+    delivery: str | None = None,
 ) -> TranslationProgressEvent:
     """Re-render a finished job's deliverable from its current ledger text.
 
@@ -269,6 +310,14 @@ async def re_export_job(
     — the file the customer downloads is the one that gains the human edits.
     Returns the terminal export event (its ``artifact_path`` names the written
     file).
+
+    ``delivery`` re-renders the same translations under a different contract
+    (``auto``/``readable``/``faithful``) without calling a model. It exists so
+    G1 can compare the two paths on one ledger — a readable replay of a faithful
+    job — instead of paying for a second translation run just to change the
+    renderer. The override is resolved through the same
+    :func:`ubt.delivery.planning.plan_for_document` the pipeline uses, so an
+    infeasible request fails here exactly as it would fail before a live run.
 
     ``router``/``qe_runner`` are optional: when omitted, the orchestrator's own
     defaults are built from ``config`` (the same provider the run used). A
@@ -302,6 +351,7 @@ async def re_export_job(
         # output path must fail with its own reason rather than a "no draft
         # model" error from an unnecessary provider construction.
         manifest = _manifest_from_ledger(ledger, job_id)
+        delivery_mode = _apply_delivery_override(manifest, delivery)
         source_path = Path(manifest.source_path) if manifest.source_path else None
         if source_path is None or not source_path.exists():
             raise ReExportError(
@@ -342,6 +392,29 @@ async def re_export_job(
         # usage sink), so a paid judge here would spend invisibly to every
         # budget surface.
         export_config = config.model_copy(update={"visual_judge_enabled": False})
+        if delivery_mode is not None:
+            # The adapter's renderer reads ``config.typst.delivery_mode``; the
+            # manifest metadata alone would leave it on the original mode.
+            export_config = export_config.model_copy(
+                update={
+                    "typst": export_config.typst.model_copy(update={"delivery_mode": delivery_mode})
+                }
+            )
+        # The runtime config must be applied here too, not only at live-run
+        # start: without it the adapter keeps its constructor fallback
+        # (``facsimile``), so a ``readable`` replay re-rendered page-locked and
+        # the artifact contract audited a contract the file was not rendered
+        # under. ``delivery_mode`` is the ledger's or ``--delivery``'s effective
+        # mode; when a ledger predates the delivery plan and records nothing, the
+        # override is skipped and the adapter's own default stands — the
+        # renderer still writes the mode it actually used into
+        # ``manifest.metadata`` for the contract to read.
+        recorded_mode = str((manifest.metadata or {}).get("delivery_mode") or "")
+        if delivery_mode is not None or recorded_mode:
+            apply_runtime_config(
+                adapter,
+                adapter_runtime_config(export_config, delivery_mode=delivery_mode or recorded_mode),
+            )
         render_plan = _render_plan_from_ledger(ledger, job_id)
         services = _build_services(export_config, router, qe_runner, manifest)
         # Created before the ctx so the export stage's own boundary checks can

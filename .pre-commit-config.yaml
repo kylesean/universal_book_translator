@@ -1,7 +1,8 @@
 # Local quality gates: lint/format on every commit, types + fast tests on push.
 # Remote CI (`.github/workflows/ci.yml`) repeats these gates on main pushes and
 # PRs and additionally runs the slow tier (synthetic PDF render e2e) with a
-# checksum-pinned typst — see docs/guides/CI_AND_QUALITY_GATES.md for the plan.
+# checksum-pinned typst. CI deliberately stays Linux-only / single-Python until
+# each wider job can be kept green; widening is per job, never in bulk.
 #
 #   uv sync --extra dev          # provides pre-commit, ruff, mypy, pytest
 #   uv run pre-commit install    # installs both the pre-commit and pre-push hooks
@@ -31,10 +32,14 @@ repos:
         entry: uv run ruff format --force-exclude
         language: system
         # markdown: ruff formats Python code blocks inside .md files, and CI's
-        # `ruff format --check` runs over the whole tree — docs/guides/*.md
-        # included. Without markdown here, a docs-only commit passed this hook
-        # and failed CI on the same tree; that gap kept every CI run since
-        # Oct 23 red while the local gates stayed green.
+        # `ruff format --check` runs over the whole tracked tree — the versioned
+        # docs (README.md, ARCHITECTURE.md, GLOSSARY.md, CHANGELOG.md,
+        # scripts/README.md, web/*.md) included. Without markdown here, a
+        # docs-only commit passed this hook and failed CI on the same tree; that
+        # gap kept every CI run since Oct 23 red while the local gates stayed
+        # green. (`docs/` itself is un-versioned, so its notes are only checked
+        # when they are also tracked -- see ARCHITECTURE.md, "Docs are not in the
+        # repo".)
         types_or: [python, pyi, markdown]
         require_serial: true
 
@@ -50,8 +55,9 @@ repos:
         always_run: true
         stages: [pre-push]
 
-      # The fast tier is the inner-loop contract: pure-logic units that must
-      # stay green before a push (docs/guides/TESTING_STRATEGY.md). Whole-tree
+      # The fast tier is the inner-loop contract: offline, pure-logic units that
+      # must stay green before a push (a single-snippet Typst compile is allowed
+      # there; a full-document render or a long-running subprocess is not). Whole-tree
       # (pass_filenames off) so a clean changed-file set cannot hide a break in
       # an untouched test. `-m fast` overrides the `-m 'not slow and not
       # legacy_drift'` in addopts.

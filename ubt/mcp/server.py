@@ -556,6 +556,8 @@ async def ubt_translate_book(
     # UBT_EXEC_MODE / UBT_FORMULA_MODE environment (same convention as the CLI).
     pdf_engine: str | None = None,
     dual_mode: str | None = None,
+    delivery_mode: str | None = None,
+    allow_degrade: bool | None = None,
     db_dir: str | None = None,
     preset: str | None = None,
     glossary: str | None = None,
@@ -611,6 +613,8 @@ async def ubt_translate_book(
         "repair_model": repair_model,
         "pdf_engine": pdf_engine,
         "dual_mode": dual_mode,
+        "delivery_mode": delivery_mode,
+        "allow_degrade": allow_degrade,
         "preset": preset,
         "glossary": str(_resolve_input(glossary)) if glossary else None,
         "pages": pages,

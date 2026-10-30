@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ubt.api.provider_editor import ProviderEditModel
 from ubt.core.config import (
+    DeliveryMode,
     DualMode,
     OcrMode,
     PdfEngine,
@@ -113,6 +114,20 @@ class JobSubmitRequest(BaseModel):
     dual_mode: DualMode | None = Field(
         default=None,
         description="What the reader receives (dual, mono, auto)",
+    )
+    delivery_mode: DeliveryMode | None = Field(
+        default=None,
+        description=(
+            "PDF delivery contract: auto, readable or faithful; legacy reflow/"
+            "facsimile/page_locked are accepted for one release"
+        ),
+    )
+    allow_degrade: bool | None = Field(
+        default=None,
+        description=(
+            "When a new faithful request is ineligible, re-route to readable "
+            "instead of refusing the run (legacy modes are grandfathered)"
+        ),
     )
     pages: str | None = Field(default=None, description="Page range filter (e.g. 1-10)")
 

@@ -478,7 +478,7 @@ async def run_triage_stage(
                 }
             )
 
-    await asyncio.to_thread(ledger.save_checkpoints_batch, updates)
+    await asyncio.to_thread(ledger.save_checkpoints_batch, updates, allow_terminal_override=True)
     logger.info(
         "MQM triage for job %s: %d candidates -> %d critical-resolved, %d blocked-human, "
         "%d needs-human, %d auto-passed",

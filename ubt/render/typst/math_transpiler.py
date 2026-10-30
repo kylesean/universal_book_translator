@@ -852,7 +852,44 @@ _LATEX_TO_UNICODE_FALLBACK: dict[str, str] = {
     "rbrace": "}",
     "lbrack": "[",
     "rbrack": "]",
+    # Named functions the transpiler converts (they are in
+    # ``_TYPST_MATH_WORDS``) but that had no Unicode spelling here, so a
+    # function-name leak on a *fallback* path degraded to ``⟨math⟩`` instead of
+    # the plain word the reader expects: ``\ln\beta`` came out
+    # ``⟨math⟩β``. ``ln`` is not a symbol, it is the word "ln", and the word is
+    # the readable degradation.
+    "ln": "ln",
+    "log": "log",
+    "lg": "lg",
+    "exp": "exp",
+    "sin": "sin",
+    "cos": "cos",
+    "tan": "tan",
+    "arcsin": "arcsin",
+    "arccos": "arccos",
+    "arctan": "arctan",
+    "sinh": "sinh",
+    "cosh": "cosh",
+    "tanh": "tanh",
+    "min": "min",
+    "max": "max",
+    "sup": "sup",
+    "inf": "inf",
+    "lim": "lim",
+    "det": "det",
+    "gcd": "gcd",
 }
+
+
+def unicode_math_macro(name: str) -> str | None:
+    """The readable Unicode spelling of one LaTeX command name, or ``None``.
+
+    ``None`` means "not a math command this pipeline knows": the caller must
+    leave the text alone. That distinction is the whole contract — a renderer
+    that rewrote every ``\\word`` into a placeholder would corrupt a Windows
+    path (``C:\\Users\\kyle``) or a literal ``\\n`` escape in prose.
+    """
+    return _LATEX_TO_UNICODE_FALLBACK.get(name)
 
 
 def _convert_fractions_to_slash(text: str) -> str:

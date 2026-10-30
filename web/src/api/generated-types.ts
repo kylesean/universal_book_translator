@@ -1657,6 +1657,16 @@ export interface components {
              */
             dual_mode?: ("mono" | "dual" | "auto") | null;
             /**
+             * Delivery Mode
+             * @description PDF delivery contract: auto, readable or faithful; legacy reflow/facsimile/page_locked are accepted for one release
+             */
+            delivery_mode?: ("auto" | "readable" | "faithful" | "reflow" | "facsimile" | "page_locked") | null;
+            /**
+             * Allow Degrade
+             * @description When a new faithful request is ineligible, re-route to readable instead of refusing the run (legacy modes are grandfathered)
+             */
+            allow_degrade?: boolean | null;
+            /**
              * Pages
              * @description Page range filter (e.g. 1-10)
              */

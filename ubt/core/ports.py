@@ -93,15 +93,43 @@ class AdapterRuntimeConfig:
     #: Enable adaptive layout auto-healing pass during Typst publication render.
     enable_layout_auto_heal: bool = True
     layout_auto_heal_max_passes: int = 2
-    #: PDF delivery channel. ``facsimile`` (default) keeps the source page's own
-    #: layout; ``reflow`` rebuilds on a generic A4; ``page_locked`` clones the
-    #: geometry and reflows the text inside it. Mirrors
-    #: ``UBTConfig.delivery_mode`` — see the comment there for why the default
-    #: moved off ``reflow``.
+    #: PDF delivery channel. The pipeline passes the effective router decision;
+    #: this dataclass default is the adapter's legacy fallback for direct callers
+    #: that do not run the delivery preflight.
     delivery_mode: str = "facsimile"
     #: Enable PDF size miniaturization and lossless stream compression.
     enable_pdf_optimization: bool = True
     pdf_optimize_profile: str = "lossless"
+
+
+def adapter_runtime_config(config: Any, *, delivery_mode: str) -> AdapterRuntimeConfig:
+    """Build the adapter runtime config from the engine config.
+
+    One factory because there are two callers that must agree: the live pipeline
+    at run start, and the re-export that re-renders from a ledger. Before this
+    existed, a re-export never applied the runtime config at all and the adapter
+    kept its constructor fallback (``facsimile``), so a ``readable`` replay
+    silently rendered page-locked and reported the wrong contract.
+    """
+    return AdapterRuntimeConfig(
+        ocr_mode=config.ocr_mode,
+        ocr_endpoint=config.ocr_endpoint,
+        ocr_api_key=config.ocr_api_key.get_secret_value(),
+        ocr_model=config.ocr_model,
+        formula_enrichment=config.formula_enrichment,
+        docling_device=config.docling_device,
+        formula_crop_margin=config.formula_crop_margin,
+        toc_mode=config.toc_mode,
+        font_family=config.font_family,
+        allow_page_upload=config.allow_page_upload,
+        cache_dir=str(config.cache_dir) if config.cache_enabled else "",
+        docling_isolate_process=config.docling_isolate_process,
+        enable_layout_auto_heal=config.enable_layout_auto_heal,
+        layout_auto_heal_max_passes=config.layout_auto_heal_max_passes,
+        delivery_mode=delivery_mode,
+        enable_pdf_optimization=config.enable_pdf_optimization,
+        pdf_optimize_profile=config.pdf_optimize_profile,
+    )
 
 
 def apply_runtime_config(adapter: Any, runtime_config: AdapterRuntimeConfig) -> None:
@@ -261,15 +289,29 @@ def flag_font_encoding_damage(blocks: list[Any], verdicts: Any) -> list[Any]:
     return cast("list[Any]", annotate_blocks(blocks, verdicts))
 
 
-def blocking_gate_tripped(findings: Any, total_pages: int, enabled: bool) -> list[Any]:
+def blocking_gate_tripped(
+    findings: Any,
+    total_pages: int,
+    enabled: bool,
+    *,
+    vlm_blocking_enabled: bool = False,
+) -> list[Any]:
     """Opt-in blocking gate.
 
     Returns the CRITICAL findings that refuse export for short docs when
-    enabled; otherwise []. Duck-typed over findings (severity/code/page).
+    enabled, plus a sampled VLM FAIL only when the separate VLM opt-in is on.
+    Duck-typed over findings (severity/code/page).
     """
     from ubt.adapters.pdf.visual_gate import blocking_gate_tripped as _tripped
 
-    return list(_tripped(findings, total_pages, enabled))
+    return list(
+        _tripped(
+            findings,
+            total_pages,
+            enabled,
+            vlm_blocking_enabled=vlm_blocking_enabled,
+        )
+    )
 
 
 def is_fast_lane_eligible(input_path: Path) -> bool:
@@ -363,6 +405,13 @@ def probe_pdf_pages(input_path: Path) -> tuple[int, int]:
     from ubt.adapters.pdf.short_doc import probe_pdf_pages as _probe
 
     return _probe(input_path)
+
+
+def pdf_page_count(input_path: Path) -> int:
+    """Return the source PDF's page count through the adapter bridge."""
+    from ubt.adapters.pdf import pdf_struct
+
+    return pdf_struct.page_count(input_path)
 
 
 @dataclass(frozen=True)
@@ -499,6 +548,32 @@ def resolve_font_for_render(
     # adapter import is deferred to keep this module free of a hard dependency
     # on the PDF stack, not because the type was unknown.
     return _resolve(target_lang, font_override=font_override)
+
+
+def read_delivery_evidence(
+    rendered_path: Path,
+    *,
+    contract: str,
+    blocks: Sequence[Any],
+    expected_page_count: int | None = None,
+    missing_assets: Sequence[str] = (),
+    overflow_records: Sequence[Any] = (),
+    style_samples: Sequence[Any] = (),
+    read_geometry: bool = True,
+) -> Any:
+    """Read a delivered PDF into the delivery contract's evidence shape."""
+    from ubt.adapters.pdf.delivery_evidence import read_artifact_evidence
+
+    return read_artifact_evidence(
+        rendered_path,
+        contract=contract,
+        blocks=blocks,
+        expected_page_count=expected_page_count,
+        missing_assets=missing_assets,
+        overflow_records=overflow_records,
+        style_samples=style_samples,
+        read_geometry=read_geometry,
+    )
 
 
 def check_artifact(

@@ -57,6 +57,41 @@ capability.
 - Both run as gates: a pre-push hook and a CI step
   (`.pre-commit-config.yaml`, `.github/workflows/ci.yml`).
 
+## Docs are not in the repo
+
+`docs/` — the two RFCs, the guides, the adaptive-delivery PRD and its four
+execution documents — is gitignored on purpose. Each file describes one HEAD and
+is rewritten by the next audit round, so versioning them made a stale design note
+indistinguishable from a current specification.
+
+Two rules follow, and `tests/unit/test_doc_authority.py` enforces both:
+
+1. **A `docs/...§N` reference inside a comment or docstring is a citation, not a
+   link.** It names where a decision was recorded. The reason that governs the
+   code must be in the comment itself, because the reader in a fresh clone cannot
+   open the note. A comment whose meaning lives only in `docs/` is a bug: the
+   `pdf_engine` and `docling_device` field comments, the `PROBE_MIN_SIGNAL_PAGES`
+   rationale, and the `QualityReport` docstring all carry their own argument for
+   exactly this reason.
+2. **A reference to any other path is an instruction, so it must resolve.**
+   The marker-quarantine comment in `pyproject.toml` sent readers to an
+   agent-instructions file that had never existed in this repo, and the corpus
+   harness docstring sent them to a corpus note that had just been deleted. Both
+   shipped green: `scripts/check_doc_refs.py` walks only the Markdown files under
+   `docs/`, and its pattern matches only `<file>.py:<line>`, so a `.md` target
+   cited from `pyproject.toml` or a code comment is outside its grammar. The new
+   test is a *test* rather than a script for that reason — a script has to be
+   remembered, and both dead pointers were written by people who had just run it
+   green.
+
+What *is* versioned is the root set — `README.md`, `ARCHITECTURE.md`,
+`GLOSSARY.md`, `SEMANTIC_JUDGE.md`, `CHANGELOG.md`, `scripts/README.md`,
+`web/README.md`, `web/DESIGN.md`, `deploy/docker/README.md` — plus each module's
+own docstring. That is the documentation a reviewer and CI can actually read.
+`CHANGELOG.md` is exempt from the link check: an entry cites the tree it
+describes, and rewriting history to satisfy a present-day check falsifies it (the
+same reasoning keeps `check_doc_refs.py` out of `docs/archive` and `docs/reviews`).
+
 ## Sanctioned duplication
 
 Four places in the tree carry *deliberate* near-duplicate code. They are

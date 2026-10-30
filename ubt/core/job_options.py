@@ -755,6 +755,7 @@ SidecarKind = Literal[
     "metrics.json",
     "visual_report.json",
     "contract.json",
+    "delivery_contract.json",
 ]
 
 
@@ -919,6 +920,7 @@ RUN_REPORT_KINDS: tuple[SidecarKind, ...] = (
     "metrics.json",
     "visual_report.json",
     "contract.json",
+    "delivery_contract.json",
 )
 
 
@@ -972,10 +974,14 @@ def delivery_verdict_from_blocks(
 
 
 def delivery_verdict_from_summary(summary: Mapping[str, Any]) -> DeliveryVerdictState:
-    """The verdict for a quality-report summary dict (the CLI's input shape)."""
+    """The verdict for a quality-report summary dict or ledger stats snapshot."""
     return delivery_verdict_from_blocks(
-        failed_blocks=int(summary.get("failed_blocks", 0) or 0),
-        blocked_human_blocks=int(summary.get("blocked_human_blocks", 0) or 0),
-        needs_human_blocks=int(summary.get("needs_human_blocks", 0) or 0),
-        completed_blocks=int(summary.get("completed_blocks", 0) or 0),
+        failed_blocks=int(summary.get("failed_blocks", summary.get("failed", 0)) or 0),
+        blocked_human_blocks=int(
+            summary.get("blocked_human_blocks", summary.get("blocked_human", 0)) or 0
+        ),
+        needs_human_blocks=int(
+            summary.get("needs_human_blocks", summary.get("needs_human", 0)) or 0
+        ),
+        completed_blocks=int(summary.get("completed_blocks", summary.get("completed", 0)) or 0),
     )

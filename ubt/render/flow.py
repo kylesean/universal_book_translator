@@ -19,6 +19,7 @@ overflow there is the caller's to handle, not something to silently drop.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -27,6 +28,11 @@ from ubt.model.span import PhysicalBox
 
 #: ``measure(text, width_pt) -> height_pt``; larger than any box means "does not fit".
 Measure = Callable[[str, float], float]
+
+#: Inline math (``$...$`` / ``$$...$$``) and pipeline bracket markers (``⟦...⟧``)
+#: are atomic tokens: splitting inside one leaves both boxes with unbalanced
+#: delimiters and corrupts the formula or emphasis span at render time.
+_ATOMIC_SPAN_RE = re.compile(r"\$\$[\s\S]+?\$\$|\$[^$\n]+?\$|⟦[^⟧\n]+⟧")
 
 #: A break is preferred *after* one of these (sentence/clause enders, closers).
 #: The colons are here because a subtitle break belongs *after* the colon -- the
@@ -53,11 +59,22 @@ class FlowPlacement:
     text: str
 
 
+def _filter_atomic_cuts(text: str, cuts: set[int]) -> list[int]:
+    """Filter out cut offsets that fall strictly inside an atomic math or marker span."""
+    spans = [(m.start(), m.end()) for m in _ATOMIC_SPAN_RE.finditer(text)]
+    return sorted(
+        cut
+        for cut in cuts
+        if 0 < cut < len(text) and not any(start < cut < end for start, end in spans)
+    )
+
+
 def _candidate_cuts(text: str) -> list[int]:
     """Character offsets a break may land on, in ascending order.
 
     Sentence punctuation and word spaces; positions 0 and ``len(text)`` are not
-    cuts (they are "all" or "nothing").
+    cuts (they are "all" or "nothing"), and offsets inside ``$...$`` or ``⟦...⟧``
+    spans are excluded so an inline formula is never split across two boxes.
     """
     cuts: set[int] = set()
     for index, char in enumerate(text):
@@ -65,7 +82,7 @@ def _candidate_cuts(text: str) -> list[int]:
             cuts.add(index + 1)
         elif char in _BREAK_BEFORE or char.isspace():
             cuts.add(index)
-    return sorted(cut for cut in cuts if 0 < cut < len(text))
+    return _filter_atomic_cuts(text, cuts)
 
 
 def _cjk_candidate_cuts(text: str) -> list[int]:
@@ -95,7 +112,7 @@ def _cjk_candidate_cuts(text: str) -> list[int]:
         if not (is_cjk_char(before) or is_cjk_char(after)):
             continue
         cuts.add(index)
-    return sorted(cuts)
+    return _filter_atomic_cuts(text, cuts)
 
 
 def _fits(text: str, box: PhysicalBox, measure: Measure) -> bool:

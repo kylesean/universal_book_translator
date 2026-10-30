@@ -183,31 +183,38 @@ class RepairLoop:
         """Whether a rewritten candidate can be *checked* against these flags.
 
         True when at least one flag is produced by a deterministic check that
-        ``FastPassFilter.evaluate`` re-runs on any candidate: the repetition,
-        dropped-table, empty-target, echo and numeric-fidelity defects all have
-        an evaluator, so "no span" does not make them unverifiable -- the
-        annotation step simply has no *location* to point at, while the
-        acceptance step can still confirm or refute the defect by re-reading the
-        rewrite.
+        can be re-run on any candidate: structural invariants (repetition,
+        dropped-table, empty-target, echo, numeric-fidelity) as well as glossary
+        consistency and terminology constraints. For these defects, "no span"
+        does not make them unverifiable -- the annotation step simply has no
+        exact location to point at, while the acceptance step can still confirm
+        or refute the defect closed-loop by re-reading the rewrite.
 
         False when every flag is a lifecycle note with no evaluator (a bare
         "repair failed" remark): there is nothing to compare a rewrite against,
         so paying for one would replace a translation nobody objected to with
         one nobody checked.
         """
-        from ubt.core.qe.defect_taxonomy import REPAIR_ERROR_PREFIX, has_structural_defect
+        from ubt.core.qe.defect_taxonomy import (
+            CONSTRAINT_PREFIX,
+            REPAIR_ERROR_PREFIX,
+            has_structural_defect,
+        )
 
-        # A provider/lifecycle failure ("Repair error: 500", "repair failed")
-        # also reads as structural in the taxonomy -- that is what keeps it out
-        # of the auto-pass path -- but it is *about the call*, not the text, so
-        # no candidate can be checked against it. Strip those first.
         _LIFECYCLE = (REPAIR_ERROR_PREFIX, "repair_unverifiable", "repair_structural_failure")
         quality_flags = [f for f in error_flags if not any(m in f for m in _LIFECYCLE)]
-        # ``has_structural_defect`` rather than a local table scan: it also
-        # honours a structured flag's declared severity, so a writer that
-        # adopts ``format_defect_flag`` is recheckable without being added to
-        # the marker table (whose entries are prose fragments it has none of).
-        return has_structural_defect(quality_flags)
+        if not quality_flags:
+            return False
+        if has_structural_defect(quality_flags):
+            return True
+        # Glossary drift and terminology constraints have a deterministic validator:
+        # any candidate rewrite can be verified against them closed-loop.
+        return any(
+            "Glossary term violation" in f
+            or f.startswith("glossary_")
+            or f.startswith(CONSTRAINT_PREFIX)
+            for f in quality_flags
+        )
 
     def _record_unrepairable_no_span(self, block: IRBlock, draft_text: str) -> None:
         """Close a repair attempt the span annotator could not localise.

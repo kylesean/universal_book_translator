@@ -74,7 +74,7 @@ def render_figure_grid_typst(
     )
 
     anchor_suffix = f" <{panel.anchor_id}>" if panel.anchor_id else ""
-    scope_arg = ', scope: "parent"' if panel.span_full_width else ""
+    scope_arg = ', scope: "parent", placement: auto' if panel.span_full_width else ""
 
     if panel.main_caption:
         rendered_main = render_p(panel.main_caption)

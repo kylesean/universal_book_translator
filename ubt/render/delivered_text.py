@@ -87,7 +87,70 @@ def is_failed_draft(text: str) -> bool:
     return mark_class(text) == _FAILED_DRAFT_CLASS
 
 
-def delivered_text(block: IRBlock) -> str:
+#: A masker placeholder that survived its restore pass: the five token
+#: families :mod:`ubt.segment.placeholders` issues (email / code / math / soup /
+#: citation). Shape mirrors ``artifact_guard._SENTINEL_PREFIXES`` — one regex
+#: rather than a per-family list, so a masker rename fails the parity test
+#: instead of leaking silently.
+#:
+#: Not ``ubt.render.typst.artifact_guard.has_sentinel`` itself: that is a render
+#: -layer predicate and ``ubt.render.typst`` imports *this* module, so importing
+#: it back would be a cycle. The emphasis families (``⟦B⟧``, ``⟦I⟧``,
+#: ``⟦SEMANTIC_BREAK⟧``) are deliberately excluded here — they carry meaning the
+#: renderer still needs (``parse_emphasis`` turns them into bold runs, and the
+#: bifurcation token splits a block), so blanking them would destroy content
+#: rather than hide machinery. Only a masker token is proven machinery: its
+#: checksum was the restore's own integrity test, and a refusal to substitute it
+#: means the protected span is *not available*, not that it is unimportant.
+#:
+#: The delimiter alternatives include the LaTeX bracket macros. A model rewrote
+#: ``⟦SOUP_MASK_0001-2a3⟧`` as ``$\\llbracket SOUP\\_MASK\\_0001-2a3
+#: \\rrbracket$`` in 26-page replay block ``b0058``: the token itself is
+#: unchanged, but ``[⟦\[【]`` never matched ``\\llbracket``, so the stripper
+#: returned the text untouched and Typst rendered the macros back into the
+#: ⟦ ⟧ glyphs the artifact contract (rightly) calls a ``placeholder_leak``. The
+#: optional surrounding ``$`` is swallowed with the token because the
+#: replacement is prose, not math — leaving the dollars behind would make Typst
+#: parse the placeholder as a math variable.
+_PIPELINE_SENTINEL_RE = re.compile(
+    r"\$?\s*(?:[⟦\[【]|\\llbracket)"
+    r"\s*(?:[A-Za-z]+(?:\\?_)+)?MASK(?:\\?_)+\d{1,6}"
+    r"(?:-?(?:\\?_)?[0-9A-Za-z]{1,6})?"
+    r"[^\n⟧】\]]{0,40}?"
+    r"(?:[⟧】\]]|\\rrbracket)\s*\$?",
+    re.IGNORECASE,
+)
+
+#: What a reader gets in place of an unrestorable span: a neutral bracketed
+#: marker, the same convention :func:`ubt.render.typst.math_transpiler.clean_math_fallback_text`
+#: uses for an uncompilable formula (``⟨math⟩``). Deliberately not a sentence in
+#: any one language — the pipeline is multilingual and this ships in the target.
+SENTINEL_PLACEHOLDER = "⟨missing⟩"
+
+
+def strip_pipeline_sentinels(text: str) -> str:
+    """Replace any leaked masker token with :data:`SENTINEL_PLACEHOLDER`.
+
+    The restore pass verifies a masked token's checksum before substituting the
+    span it protects. When the checksum does not match it refuses — correctly,
+    because restoring anyway could put the *wrong* formula in the sentence — and
+    leaves the token in the draft. Nothing downstream removed it, so
+    ``⟦SOUP_MASK_0001-f2d⟧`` was measured in the delivered PDF's text layer and
+    in its HTML, EPUB and XLIFF companions: internal machinery printed in the
+    book the reader paid for.
+
+    The token is not content the reader is owed (its span was never
+    recoverable), but the *sentence* around it is, so the token is replaced
+    rather than the block dropped — and the block keeps its ``sentinel_leaked``
+    and ``soup_token_corrupt`` flags, so the loss stays attributable and lands in
+    the post-edit queue.
+    """
+    if not text or not _PIPELINE_SENTINEL_RE.search(text):
+        return text
+    return _PIPELINE_SENTINEL_RE.sub(SENTINEL_PLACEHOLDER, text)
+
+
+def delivered_text(block: IRBlock, *, sanitize_sentinels: bool = True) -> str:
     """The text to render for a block: its translation, else its draft, else source.
 
     Two wrappers can arrive in ``target_text`` and they mean opposite things:
@@ -103,7 +166,19 @@ def delivered_text(block: IRBlock) -> str:
 
     A block with no target and no draft is *not* silently dropped — the reader
     gets the source sentence.
+
+    ``sanitize_sentinels=False`` returns the surface *as the pipeline wrote it*,
+    with any leaked masker token intact. Render-layer diagnostics must use it:
+    the default substitution is what stops the token reaching the page, so a
+    check built on the sanitized text would stop reporting a leak at exactly the
+    moment the leak happened.
     """
+    raw = _delivered_surface(block)
+    return strip_pipeline_sentinels(raw) if sanitize_sentinels else raw
+
+
+def _delivered_surface(block: IRBlock) -> str:
+    """The delivered text before sentinel substitution — see :func:`delivered_text`."""
     target = (block.target_text or "").strip()
     if target and not is_placeholder(target):
         if is_failed_draft(target) or is_any_mark(target):

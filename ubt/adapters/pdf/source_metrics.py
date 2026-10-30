@@ -82,12 +82,50 @@ def body_lines(lines: Sequence[object], page_h: float) -> list[object]:
     ]
 
 
-def _reported_sizes(lines: Sequence[object]) -> list[float]:
-    return [
-        float(line.font_size)  # type: ignore[attr-defined]
-        for line in lines
-        if float(getattr(line, "font_size", 0.0)) >= MIN_PLAUSIBLE_SIZE_PT
-    ]
+#: The ink-height / reported-size band a genuine body line falls in. On the
+#: reference page a 9pt body line inks an 8.9pt box (ratio ~0.99) and an 8.9pt
+#: line ~1.0; the band is wide because ascender/descender content varies.
+#: Measured across 26 pages of ``chapter-3.pdf``, applying this filter changed
+#: exactly one page (see :func:`source_body_size`), so it is not a global
+#: behaviour change -- it is a guard against one specific producer artefact.
+MIN_INK_TO_SIZE_RATIO: float = 0.85
+MAX_INK_TO_SIZE_RATIO: float = 1.15
+
+
+def _body_size_from_reported(lines: Sequence[object]) -> float | None:
+    """The modal reported size, over lines whose ink box *agrees* with it.
+
+    ``font_size`` is the nominal em and pdfium normally reports it correctly.
+    On a subset-CFF / damaged-encoding page it is not trustworthy per line: a
+    math derivation page reported 5.3–6.2 for equation lines that ink an 8.0–9.3
+    box, i.e. the producer's nominal size was ~40% below the glyphs it actually
+    drew. Taking the plain mode then measured a 6.2pt body on a page whose text
+    is unmistakably 8.9–9pt, and ``solve_page_2d``'s ceiling
+    (``6.2 * 1.10 = 6.82``) fell below ``FLOOR_PT`` (7.5) -- a page that cannot
+    satisfy its own budget, which is what forced it out of the facsimile channel.
+
+    A line whose ink height and reported size disagree is a math glyph, a
+    fraction, or a rotated label, not body prose, so it is excluded before the
+    mode. The *body* face is self-consistent by construction: its ink box is
+    its em.
+    """
+    consistent: list[float] = []
+    for line in lines:
+        size = float(getattr(line, "font_size", 0.0))
+        height = float(line.rect[3] - line.rect[1])  # type: ignore[attr-defined]
+        if size < MIN_PLAUSIBLE_SIZE_PT or height <= 0.0:
+            continue
+        if MIN_INK_TO_SIZE_RATIO <= height / size <= MAX_INK_TO_SIZE_RATIO:
+            consistent.append(size)
+    if not consistent:
+        return None
+    try:
+        measured = float(statistics.mode([round(size, 1) for size in consistent]))
+    except statistics.StatisticsError:  # pragma: no cover - tie between modes
+        measured = float(statistics.median(consistent))
+    if MIN_BODY_SIZE_PT <= measured <= MAX_BODY_SIZE_PT:
+        return round(measured, 2)
+    return None
 
 
 def source_body_size(lines: Sequence[object], default: float = 9.0) -> float:
@@ -96,18 +134,15 @@ def source_body_size(lines: Sequence[object], default: float = 9.0) -> float:
     ``lines`` should already be filtered by :func:`body_lines`; passing the
     whole page lets a running head's size dominate the mode.
 
-    Prefers the size the producer reported (mode of the line sizes, which is the
-    body rather than a heading); falls back to the mode of the ink heights
-    scaled by :data:`INK_TO_EM_RATIO` when the producer reported none.
+    Prefers the size the producer reported -- but only over lines whose ink box
+    agrees with it (see :func:`_body_size_from_reported`), so a math-heavy page
+    cannot measure its body at its equations' nominal size; falls back to the
+    mode of the ink heights scaled by :data:`INK_TO_EM_RATIO` when the producer
+    reported nothing usable.
     """
-    sizes = _reported_sizes(lines)
-    if sizes:
-        try:
-            measured = float(statistics.mode([round(size, 1) for size in sizes]))
-        except statistics.StatisticsError:  # pragma: no cover - tie between modes
-            measured = float(statistics.median(sizes))
-        if MIN_BODY_SIZE_PT <= measured <= MAX_BODY_SIZE_PT:
-            return round(measured, 2)
+    reported = _body_size_from_reported(lines)
+    if reported is not None:
+        return reported
 
     heights = [
         round(line.rect[3] - line.rect[1], 1)  # type: ignore[attr-defined]

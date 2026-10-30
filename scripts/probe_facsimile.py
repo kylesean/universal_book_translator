@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""Feasibility probe for the 1:1 facsimile delivery channel (Track A).
+"""Cheap feasibility prefilter for the `faithful` delivery contract.
 
-Answers, for a real PDF, the only question that decides whether facsimile is
-viable for it: **can this page's translation be set at one uniform size inside
-the source geometry, and how big can that size be?**
+Answers, for a real PDF, one question that gates the `faithful` contract:
+**can this page's translation be set at one uniform size inside the source
+geometry, and how big can that size be?** It is a prefilter, not the delivery
+acceptance criterion: the v3.0 PRD requires artifact-level measurement before
+a `faithful` page may ship (docs/design/adaptive_delivery_prd.md §7.3, §8.1).
 
 That question has a clean answer because English→Chinese is *compression*, not
 expansion: one Han glyph costs ~3.5 Latin characters of source text but is one
 em wide, so the target needs roughly half the source's area. Measured on the
 five corpus documents, 91–100% of paragraphs fit their source box at the source
-size — which is why this channel needs a binary search and not a layout solver
-(see ``docs/design/inplace_delivery.md`` §3.2, §5.3).
+size. This probe is therefore a **prefilter**: it can rule a page out cheaply,
+but the production solver must still measure real Typst layout before it
+decides `faithful` is deliverable (see
+``docs/design/adaptive_delivery_prd.md`` §7.3, §8.1, §10.2).
 
-Two numbers per page come out of the probe, and they are the acceptance
-criteria for Phase 1. The probe can measure either of two constraint models
-(``--mode``), and the difference between them is the measured value of the
-design doc's Layer-2 "vertical glue chain":
+Two numbers per page come out of the probe; they are prefilter evidence, not
+the delivery acceptance criterion. The probe can measure either of two
+constraint models (``--mode``), and the difference between them is the measured
+value of the faithful engine's "vertical glue chain":
 
 ``pinned``  Every paragraph's translation must fit its own source box. Blank
             space between paragraphs is untouchable. This was v1.0's model.
@@ -32,8 +36,8 @@ design doc's Layer-2 "vertical glue chain":
                  look like a ransom note (its own docs admit "No global page
                  information consideration, inconsistent text sizes").
 ``fits``         False when even the readability floor cannot hold the page;
-                 such a page must fall back to the reflow channel, never ship
-                 at 4pt.
+                 such a page is ineligible for `faithful` and must route to
+                 `readable`, never ship at 4pt.
 
 Nothing here renders, translates, or calls a model — it is pure geometry over
 the source PDF, so it is safe to run on any document before paying for a job.
@@ -369,7 +373,8 @@ def probe_page(
 
     paragraphs = [rec for records, _ in columns_paras for rec in records]
     # Area the target wants over the area the source used, at the source size.
-    # This is the "how much room is left over" number the design doc quotes.
+    # This is the "how much room is left over" number the v2.1 design doc
+    # quoted. It is a prefilter statistic, not a delivery acceptance criterion.
     src_area = sum(rec["w"] * rec["n"] * source_leading for rec in paragraphs)
     target_area = sum(rec["w"] * needed(rec, source_size) for rec in paragraphs)
     fill = target_area / src_area if src_area > 0 else 0.0

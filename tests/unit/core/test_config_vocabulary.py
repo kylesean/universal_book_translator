@@ -16,9 +16,11 @@ These tests pin the current state of both so a future edit has to be deliberate.
 
 from __future__ import annotations
 
+from typing import get_args
+
 import pytest
 
-from ubt.core.config import SpillPolicy, UBTConfig
+from ubt.core.config import DeliveryMode, SpillPolicy, UBTConfig
 from ubt.core.providers import PROVIDER_ALLOWED_KEYS
 
 pytestmark = pytest.mark.fast
@@ -70,6 +72,29 @@ def test_the_provider_allow_list_cannot_reach_secrets_or_unrelated_knobs() -> No
     a ``[providers.*]`` block.
     """
     assert "service_api_key" not in PROVIDER_ALLOWED_KEYS
+
+
+def test_delivery_mode_has_target_and_legacy_vocabulary() -> None:
+    """Phase 0 accepts both vocabularies; the default stays facsimile until G1.
+
+    ``auto``/``readable``/``faithful`` are the target contract words. The old
+    three remain for stored jobs and one-release compatibility. A missing value
+    here is a CLI/API surface that silently rejects a valid mode.
+    """
+    assert set(get_args(DeliveryMode)) == {
+        "auto",
+        "readable",
+        "faithful",
+        "reflow",
+        "facsimile",
+        "page_locked",
+    }
+    config = UBTConfig()
+    # G1 default switch: auto routes paper/book to readable; layout-sensitive
+    # documents still need an explicit faithful request/eligibility.
+    assert config.delivery_mode == "auto"
+    assert config.allow_degrade is False
+    assert UBTConfig(delivery_mode="auto").delivery_mode == "auto"
 
 
 def test_spill_policy_is_a_closed_vocabulary() -> None:

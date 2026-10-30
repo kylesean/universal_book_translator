@@ -41,6 +41,14 @@ _SKIP_PREFIXES = ("render_skip:",)
 #: Skip reasons naming decorative chrome, not a meaning-bearing asset. Reused
 #: from the artifact-parity vocabulary so the two gates cannot drift.
 _DECORATIVE_SKIP_REASONS = frozenset({"decorative_banner", "cover_asset_missing"})
+#: Skip reasons that mean the asset's ink is carried by the delivery's
+#: background layer (the facsimile channel keeps formulas/figures as untouched
+#: source ink under the translation, and protects their boxes in the strip
+#: plan). The block still carries a ``render_skip:`` flag, but the asset is the
+#: opposite of missing: recording it MISSING produced 94 phantom errors — one
+#: per figure and formula — on a real chapter where every figure was visible
+#: in the delivered PDF.
+_PRESERVED_OPAQUE_SKIP_REASONS = frozenset({"facsimile_preserved_opaque"})
 
 
 def _region(block: IRBlock) -> SourceRegion | None:
@@ -177,6 +185,13 @@ def _asset_node(
     if reasons & _DECORATIVE_SKIP_REASONS:
         integrity = AssetIntegrity.DROPPED
         detail = "intentional:" + ",".join(sorted(reasons & _DECORATIVE_SKIP_REASONS))
+    elif reasons & _PRESERVED_OPAQUE_SKIP_REASONS:
+        # Facsimile background preservation is *carried*, not lost: the strip
+        # plan protects the asset's box and the delivered page draws the
+        # source ink. Classifying it MISSING made every preserved formula and
+        # figure an ERROR at the contract.
+        integrity = AssetIntegrity.PRESERVED_OPAQUE
+        detail = ""
     elif flags:
         integrity = AssetIntegrity.MISSING
         detail = f"render:{_skip_reason(flags[0])}"

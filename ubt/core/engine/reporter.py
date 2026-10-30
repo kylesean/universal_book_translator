@@ -140,7 +140,10 @@ class ReportRenderCoverage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     rendered_blocks: int  # completed blocks (== summary.completed); see fail_closed_blocks
-    skipped_blocks: int  # render_skip:* occurrences (all fail-closed; see fail_closed_blocks)
+    #: ``render_skip:`` occurrences that lost a translation. By-design keeps
+    #: (``skip_translate``, ``facsimile_preserved_opaque``) are **not** here; they
+    #: are counted in ``preserved_blocks``.
+    skipped_blocks: int
     fail_closed_blocks: int = 0  # source left visible; a translation could not be placed
     preserved_blocks: int = 0  # skip_translate keeps: shipped in the source by design
     render_coverage: float  # completed / total; 1.0 when every block completed
@@ -452,13 +455,15 @@ def build_quality_report(
 
     # Render delivery audit. ``fail_closed`` counts translations the renderer
     # could not place; ``preserved`` counts blocks the run deliberately ships in
-    # the source language. The latter is ``skip_translate`` (bibliography entry,
-    # affiliation, page chrome) — **not** a skip flag. It used to be read from an
-    # "intentional skip" whitelist that no producer ever wrote, which is why the
-    # KPI was permanently zero while real preserved blocks went uncounted.
-    fail_closed_blocks, _unused_preserved, _skip_verdict = summarize_render_skips(flag_counts)
-    preserved_blocks = sum(
-        1 for b in all_blocks if b.skip_translate and b.status is not BlockStatus.FAILED
+    # the source language. A preserved block carries *both* ``skip_translate``
+    # and a ``render_skip:`` flag (the renderer records every skip it made), so
+    # the two categories have to be separated by reason family — counting all
+    # skip flags as fail-closed made ``render_coverage`` read 0.0 on the 26-page
+    # replay while all 105 translatable blocks had shipped.
+    fail_closed_blocks, preserved_flags, _skip_verdict = summarize_render_skips(flag_counts)
+    preserved_blocks = max(
+        preserved_flags,
+        sum(1 for b in all_blocks if b.skip_translate and b.status is not BlockStatus.FAILED),
     )
     skipped_blocks = fail_closed_blocks
     skip_families: dict[str, int] = {}
@@ -472,11 +477,13 @@ def build_quality_report(
     # fail-closed render skip KEEPS that status, so those blocks were counted as
     # rendered AND as fail-closed — making rendered+fail_closed exceed the total.
     # Count only completed blocks that were not fail-closed skipped; a
-    # preserved skip sits on a chrome/non-prose block that was never completed.
+    # preserved skip sits on a chrome/non-prose block that was never completed
+    # and must not be subtracted from the translatable population either.
     fail_closed_completed = sum(
         1
         for b in all_blocks
-        if b.status in (BlockStatus.MTQE_PASSED, BlockStatus.REPAIRED)
+        if not b.skip_translate
+        and b.status in (BlockStatus.MTQE_PASSED, BlockStatus.REPAIRED)
         and any(_is_fail_closed_skip_flag(flag) for flag in b.error_flags)
     )
     rendered_blocks = max(0, completed - fail_closed_completed)
@@ -635,6 +642,23 @@ def build_quality_report(
 #: The prefix the export stage uses for fail-closed render skips.
 RENDER_SKIP_PREFIXES = ("render_skip:",)
 
+#: Render-skip reasons that mean "this block ships in the source **by design**",
+#: not "a translation could not be placed". The renderer emits one on every
+#: non-translatable block, so booking them as fail-closed made
+#: ``render_coverage`` read ``0.0`` on the 26-page replay while every translatable
+#: block had shipped (2026-10-30: rendered 0, skipped 146, preserved 146).
+#:
+#: * ``skip_translate`` — policy keep (bibliography entry, short label, page
+#:   chrome); the block never had a translation to lose.
+#: * ``facsimile_preserved_opaque`` — the facsimile channel carries the formula/
+#:   figure ink in the background layer and protects its box in the strip plan;
+#:   the asset is the opposite of missing, which is why
+#:   :mod:`ubt.core.content.adapt` already treats this reason as preserved.
+#:
+#: Names mirror the producers in ``ubt.adapters.pdf.docling_render`` and
+#: ``ubt.core.content.adapt``; a rename must update all three.
+PRESERVED_SKIP_FAMILIES = frozenset({"skip_translate", "facsimile_preserved_opaque"})
+
 
 def _skip_reason(flag: str) -> str | None:
     for prefix in RENDER_SKIP_PREFIXES:
@@ -643,14 +667,23 @@ def _skip_reason(flag: str) -> str | None:
     return None
 
 
-def _is_fail_closed_skip_flag(flag: str) -> bool:
-    """True when ``flag`` is a render skip.
+def _skip_family(flag: str) -> str | None:
+    """The family of a ``render_skip:`` flag, without its fit parameters."""
+    reason = _skip_reason(flag)
+    if reason is None:
+        return None
+    return reason.split("(", 1)[0].strip() or None
 
-    Every ``render_skip:`` is fail-closed now: the intentional-keep families
-    never had a producer and were removed, so the answer is simply "is this a
-    render skip at all".
+
+def _is_fail_closed_skip_flag(flag: str) -> bool:
+    """True when ``flag`` is a render skip that *lost* a translation.
+
+    A preserved family (policy keep, opaque background ink) is a render skip too,
+    but nothing was lost, so it must not count against coverage or inflate
+    ``fail_closed_blocks``.
     """
-    return _skip_reason(flag) is not None
+    family = _skip_family(flag)
+    return family is not None and family not in PRESERVED_SKIP_FAMILIES
 
 
 def summarize_render_skips(defect_flags: dict[str, int]) -> tuple[int, int, str]:
@@ -660,24 +693,29 @@ def summarize_render_skips(defect_flags: dict[str, int]) -> tuple[int, int, str]
     parenthesized fit params (``overflow(base=10.0)`` -> ``overflow``) so per-size
     variants do not fragment the audit.
 
-    ``preserved`` is always 0 now: the intentional-keep families
-    (chrome/non-prose/policy/footer) had no producer and were removed, so every
-    render skip is fail-closed and counts against coverage. The field stays in
-    the return type and in ``RenderCoverage`` because a *deliberate* source keep
-    is still a real category — it is expressed as ``skip_translate`` and shows up
-    in the contract as ``VERBATIM``, not as a skip flag.
+    ``preserved`` counts the by-design keeps listed in
+    :data:`PRESERVED_SKIP_FAMILIES`; those blocks are also counted from the
+    blocks themselves (``skip_translate``), so the caller treats this as a
+    cross-check rather than the primary count.
     """
     fail_closed_families: dict[str, int] = {}
+    preserved_families: dict[str, int] = {}
     for flag, count in defect_flags.items():
-        reason = _skip_reason(flag)
-        if reason is None:
+        family = _skip_family(flag)
+        if family is None:
             continue
-        family = reason.split("(", 1)[0].strip() or reason
-        fail_closed_families[family] = fail_closed_families.get(family, 0) + count
+        bucket = preserved_families if family in PRESERVED_SKIP_FAMILIES else fail_closed_families
+        bucket[family] = bucket.get(family, 0) + count
     fail_closed = sum(fail_closed_families.values())
+    preserved = sum(preserved_families.values())
     if fail_closed:
         detail = ", ".join(f"{fam}×{n}" for fam, n in sorted(fail_closed_families.items()))
-        return fail_closed, 0, f"{detail} — review required"
+        kept = sum(preserved_families.values())
+        suffix = f"; {kept} by-design keep(s) excluded" if kept else ""
+        return fail_closed, preserved, f"{detail} — review required{suffix}"
+    if preserved:
+        detail = ", ".join(f"{fam}×{n}" for fam, n in sorted(preserved_families.items()))
+        return 0, preserved, f"No lost translations; by-design keeps: {detail}"
     return 0, 0, "No source-visible skips recorded"
 
 

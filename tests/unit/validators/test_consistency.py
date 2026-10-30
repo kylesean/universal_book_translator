@@ -13,6 +13,7 @@ import pytest
 from ubt.core.language_profile import ZH
 from ubt.core.validators.base import ValidationResult
 from ubt.core.validators.consistency import (
+    _EN_DEGREE_WORDS,
     GlossaryConsistencyValidator,
     NumericConsistencyValidator,
     _cn_compound_runs,
@@ -826,3 +827,76 @@ def test_a_real_spaced_decimal_still_collapses() -> None:
     assert res.is_valid, res.message
     res = _check("the dose was 19 . 6 mg per batch", "每批剂量为 19 mg")
     assert not res.is_valid
+
+
+# --------------------------------------------------------------------------- #
+# Polynomial-degree adjectives state a numeral with no digit and no number word
+#
+# Measured on a real 26-page BSIM-CMG chapter (``chapter-3.pdf``, draft+repair
+# both on the local ``gemma4-e4b``): 5 of its 7 numeric-fidelity quarantines
+# were the model writing the only correct Chinese for "quartic"/"quadratic" --
+# "四次修正迭代" / "二次模型" -- and the invention check reading that 四/二 as a
+# fabricated 4/2. The authorization is value-wise from the source, exactly like
+# the number-word and dual-determiner tables above.
+
+
+@pytest.mark.parametrize(
+    ("src", "tgt"),
+    [
+        # b0177 -- a heading with no digits at all in the source.
+        (
+            "A.2 Quartic modified iteration: Implementation and evaluation",
+            "A.2 四次修正迭代：实现与评估",
+        ),
+        # b0209 -- the same term inside a numbered step (the 5 is the source's).
+        (
+            "5. Update B0 to B1 using a quartic modified iteration:",
+            "5. 使用四次修正迭代将 B0 更新至 B1：",
+        ),
+        # b0112 -- "quadratic" is the standard name of the long-channel model.
+        (
+            "Eqs. (3.30), (3.31) are the very well-known equations from the "
+            "quadratic model for conventional long-channel CMOS MOSFETs.",
+            "公式 (3.30) 和 (3.31) 是用于传统长沟道 CMOS MOSFET 的二次模型中非常著名的方程。",
+        ),
+        # b0142 -- one block where both degrees appear and both are translated.
+        (
+            "quadratic convergence and a quartic modified iteration over the system",
+            "二次收敛性以及对该系统的四次修正迭代",
+        ),
+    ],
+)
+def test_a_degree_adjective_authorizes_its_numeral(src: str, tgt: str) -> None:
+    res = _check(src, tgt)
+    assert res.is_valid, res.message
+
+
+@pytest.mark.parametrize("word,value", [("cubic", "3"), ("quintic", "5"), ("biquadratic", "4")])
+def test_the_other_degree_words_authorize_their_own_value(word: str, value: str) -> None:
+    res = _check(f"the {word} iteration converges", f"该{value}次迭代会收敛")
+    assert res.is_valid, res.message
+
+
+def test_linear_is_deliberately_not_a_degree_authorization() -> None:
+    """``linear`` translates as 线性 far more often than as 一次方程.
+
+    Authorizing '1' from it would exempt every invented 1 in the block, costing
+    more rigour than the false positive it removes. The word is deliberately
+    absent from ``_EN_DEGREE_WORDS``.
+    """
+    assert "linear" not in _EN_DEGREE_WORDS
+    res = _check("the linear system is solved", "该线性系统被求解，需要 1 次额外迭代")
+    assert not res.is_valid, res.message
+
+
+def test_a_degree_word_does_not_authorize_an_unrelated_number() -> None:
+    """Authorization is value-wise: 'quartic' licenses 4 and nothing else."""
+    res = _check("A quartic modified iteration", "四次修正迭代需要 7 步")
+    assert not res.is_valid, res.message
+    assert "7" in (res.message or "")
+
+
+def test_the_degree_rule_does_not_weaken_the_lost_number_direction() -> None:
+    """A number the source states as a digit is still required in the target."""
+    res = _check("a quartic iteration over 12 steps", "四次迭代在 8 步上完成")
+    assert not res.is_valid, res.message

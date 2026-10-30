@@ -336,7 +336,7 @@ def _resolve_delivery_mode(
     """Turn the three delivery flags into one ``delivery_mode`` value.
 
     ``None`` is returned when the user expressed no preference, which lets the
-    resolved config default decide — now ``facsimile``. The ``--facsimile`` flag
+    resolved config default decide — now ``auto``. The ``--facsimile`` flag
     used to default to ``False`` and be read as "not requested", so the CLI
     pinned ``reflow`` for every run that did not pass it and the config field was
     unreachable from the command line.
@@ -344,7 +344,9 @@ def _resolve_delivery_mode(
     Precedence, most explicit first:
     ``--delivery-mode <value>`` > ``--page-locked`` > ``--facsimile/--no-facsimile``
     > unset (config default). ``--no-facsimile`` means "reflow" and is how a user
-    opts out of the new default.
+    opts out of the old facsimile default. New values ``auto``/``readable``/
+    ``faithful`` pass through unchanged; the pipeline resolves them through the
+    delivery router.
     """
     if delivery_mode:
         return delivery_mode
@@ -663,7 +665,7 @@ def translate(
         bool | None,
         typer.Option(
             "--facsimile/--no-facsimile",
-            help="1:1 facsimile delivery channel (in-place canvas isomorphism over the stripped vector background). On by default for PDF; --no-facsimile forces the generic reflow layout",
+            help="Legacy 1:1 facsimile delivery channel (in-place canvas isomorphism over the stripped vector background). The default is auto/readable for paper and book profiles; --facsimile forces the legacy faithful renderer",
             show_default=False,
         ),
     ] = None,
@@ -678,7 +680,24 @@ def translate(
         str | None,
         typer.Option(
             "--delivery-mode",
-            help="PDF delivery mode: 'reflow' for responsive flow, 'facsimile' for 1:1 in-place canvas isomorphism, or 'page_locked' for 1:1 style-cloned reflow",
+            "--delivery",
+            help=(
+                "PDF delivery mode: 'auto' routes by measured feasibility, "
+                "'readable' reflows, 'faithful' keeps source page geometry; "
+                "legacy 'reflow', 'facsimile' and 'page_locked' remain accepted"
+            ),
+            show_default=False,
+        ),
+    ] = None,
+    allow_degrade: Annotated[
+        bool | None,
+        typer.Option(
+            "--allow-degrade/--no-allow-degrade",
+            help=(
+                "When a new 'faithful' request is not eligible, re-route the whole "
+                "book to readable instead of refusing the run. Legacy facsimile/"
+                "page_locked modes are grandfathered by compatibility"
+            ),
             show_default=False,
         ),
     ] = None,
@@ -823,6 +842,7 @@ def translate(
         "delivery_mode": _resolve_delivery_mode(
             facsimile=facsimile, page_locked=page_locked, delivery_mode=delivery_mode
         ),
+        "allow_degrade": allow_degrade,
         "enable_dynamic_routing": dynamic_routing,
         "flagship_model": flagship_model,
         "budget_model": budget_model,

@@ -1,8 +1,10 @@
 """The 1:1 facsimile probe: its two constraint models and the geometry they read.
 
 The probe decides whether a source page can be delivered 1:1 — same page, same
-columns, one uniform body size — and it is the producer of every number the
-design doc quotes (``docs/design/inplace_delivery.md`` §3.1, §5.3.1, E.5). A
+columns, one uniform body size — and it is the historical producer of the
+numbers quoted by the v2.1 design doc. The v3.0 PRD demotes it to a cheap
+prefilter; final acceptance is measured on the compiled artifact
+(``docs/design/adaptive_delivery_prd.md`` §7.3, §8.1, §10.2, Appendix C). A
 silent regression here would not fail any pipeline gate: it would quietly
 change what the channel is believed to be capable of.
 

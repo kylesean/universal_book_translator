@@ -108,11 +108,9 @@ class _PDFRenderStackMixin:
     ) -> None:
         self.allow_page_upload = False
         self._font_family = None
-        # Mirrors ``DoclingRenderStrategy``'s own default and
-        # ``UBTConfig.delivery_mode``: one value, three places, and the resolution
-        # below keeps them in step. ``apply_config`` overwrites this from the
-        # resolved config; the literal only decides what a bare adapter (a test,
-        # a script) does before any config is applied.
+        # Bare adapter default for tests/scripts; the pipeline passes the
+        # effective delivery decision through ``apply_config``. A direct caller
+        # that never applies config keeps the legacy facsimile renderer.
         self.delivery_mode = "facsimile"
         self.last_render_skips = []
         self.last_render_flags: list[tuple[str, str]] = []

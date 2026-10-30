@@ -262,6 +262,28 @@ def _math_term_variants(term: str) -> list[str]:
         vars.append(f"{m_sub.group(1)}_{{{m_sub.group(2).lower()}}}")
         vars.append(f"{m_sub.group(1)}_{{{m_sub.group(2).upper()}}}")
         vars.append(f"{m_sub.group(1)}_{m_sub.group(2).lower()}")
+        # An all-caps glued subscript (``VTH`` = threshold voltage V_TH) is
+        # conventionally rendered with the subscript capitals intact. Only that
+        # case gains the unpreserved-case form, so a lower-case tail (``Vch``)
+        # keeps producing exactly the three variants its test pins.
+        if m_sub.group(2).isupper():
+            vars.append(f"{m_sub.group(1)}_{m_sub.group(2)}")
+    # Two-letter physics pairs the extractor keeps glued (``kB`` = Boltzmann
+    # constant k_B, ``kBT`` = k_B T): the draft renders them as LaTeX
+    # subscripts ($k_B$, $k_{B}$) that no whole-token scan can connect.
+    m_pair = re.match(r"^([a-z])([A-Z])$", term)
+    if m_pair:
+        vars.append(f"{m_pair.group(1)}_{{{m_pair.group(2)}}}")
+        vars.append(f"{m_pair.group(1)}_{m_pair.group(2)}")
+    # Glued subscript pair the extractor lower-cased asymmetrically
+    # (``dQinv`` = derivative of Q_inv): the source itself prints the
+    # subscript form, the draft renders it as LaTeX \frac{dV_{ch}}{dQ_{inv}}.
+    # Accept the inner variable's subscripted renderings as the term itself.
+    m_glued = re.match(r"^[a-z]([A-Z][a-z0-9]*)$", term)
+    if m_glued and len(m_glued.group(1)) >= 2:
+        inner = m_glued.group(1)
+        vars.append(f"{inner[0]}_{{{inner[1:].lower()}}}")
+        vars.append(f"{inner[0]}_{inner[1:].lower()}")
     return vars
 
 
@@ -277,12 +299,16 @@ def _match_term_surfaces(term: str, target: str, source: str = "") -> list[str] 
     if re.search(rf"{_STRICT_LB}{esc}{_STRICT_RB}", target):
         return [term]
 
-    # Universal cross-domain acronyms & translatable terms (e.g. NLP -> 自然语言处理, CPU -> 处理器)
+    # Universal cross-domain acronyms & translatable terms (e.g. NLP -> 自然语言处理, CPU -> 处理器).
+    # Match with strict token boundaries: a bare substring test lets a singular
+    # entry ("FinFET") verify against the plural in the target ("FinFETs") and
+    # short-circuit before the plural/singular variants below are consulted,
+    # reporting the wrong surface.
     known_surfaces = find_translatable_surfaces(term)
     if known_surfaces:
         for cand in known_surfaces:
-            if cand in target or re.search(
-                rf"{_STRICT_LB}{re.escape(cand)}{_STRICT_RB}", target, re.IGNORECASE
+            if re.search(rf"{_STRICT_LB}{re.escape(cand)}{_STRICT_RB}", target, re.IGNORECASE) or (
+                not cand.isascii() and cand in target
             ):
                 return [cand]
 

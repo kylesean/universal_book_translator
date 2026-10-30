@@ -5639,6 +5639,38 @@
             "title": "Dual Mode",
             "description": "What the reader receives (dual, mono, auto)"
           },
+          "delivery_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "readable",
+                  "faithful",
+                  "reflow",
+                  "facsimile",
+                  "page_locked"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery Mode",
+            "description": "PDF delivery contract: auto, readable or faithful; legacy reflow/facsimile/page_locked are accepted for one release"
+          },
+          "allow_degrade": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Degrade",
+            "description": "When a new faithful request is ineligible, re-route to readable instead of refusing the run (legacy modes are grandfathered)"
+          },
           "pages": {
             "anyOf": [
               {

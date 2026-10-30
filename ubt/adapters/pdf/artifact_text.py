@@ -176,9 +176,52 @@ def _present(expected: str, tokens: frozenset[str]) -> bool:
 #: match) while still fitting inside one rendered line.
 _LOCATE_FRAGMENT = 16
 
+#: Shortest prose run that counts as evidence, and the floor below which a
+#: block's runs are not worth a substring claim at all.
+#:
+#: Two numbers, because they answer two questions. ``_LOCATE_FRAGMENT`` (16) is
+#: what makes a *whole-string* window proof: a 16-character CJK run is beyond
+#: coincidence. A formula-interrupted block rarely has a prose run that long, so
+#: the claim is restated as a **conjunction**: every run of ``_PROSE_RUN_MIN``
+#: (8) characters or more must appear. Eight characters is still ~10^-25 for a
+#: random match, and requiring ALL of them rather than ANY removes the false-pass
+#: risk of one generic fragment ("由以下式表示") matching some other sentence —
+#: a lost paragraph can satisfy one run by luck, not all of them.
+#:
+#: A block whose prose runs are ALL shorter than 8 characters gets no substring
+#: claim (it cannot be proven this way) and falls back to the token check, which
+#: is already documented as the weaker claim.
+_PROSE_RUN_MIN = 8
+
+
+def _prose_runs(expected: str) -> list[str]:
+    r"""The block's non-math runs, whitespace-stripped, in document order.
+
+    Why the contiguous probe needs this at all: a translated technical block is
+    prose *interrupted by formulas*, and a correctly rendered page does not carry
+    the formula's source characters. ``$\psi_s$`` in the ledger draws as
+    ``𝜓𝑠`` — Unicode-math codepoints — so every 16-character window straddling
+    the formula misses, and the audit reported a paragraph that was plainly on
+    the page as missing. Measured on the controlled ``chapter-3.pdf`` re-export:
+    5 of 155 realizations flagged missing (``b0039``, ``b0087``, ``b0147``,
+    ``b0169``, ``b0180``), all five narrative blocks whose middle is a formula,
+    with their prose visibly present in the PDF's text layer.
+
+    That dependency was latent until the render boundary started transpiling
+    math: with the LaTeX escaped as literal ``\psi`` text, the source characters
+    *were* in the text layer and the whole-string probe happened to hit. So the
+    check was silently depending on the very defect it should have been catching.
+    """
+    from ubt.render.typst.document_renderer import prose_fragments
+
+    # Lazy import: the adapters layer must not add a runtime edge into the
+    # compiler package, for the same reason ``dropped_page_furniture`` is
+    # imported inside ``check_artifact``.
+    return [run for run in prose_fragments(expected) if len(run) >= _PROSE_RUN_MIN]
+
 
 def _probes_of(expected: str) -> list[str]:
-    """Contiguous fragments to try, most distinctive first.
+    r"""Contiguous fragments to try, most distinctive first.
 
     One fragment is not enough. Three measured cases on job ``web_mvnvgck2``
     defeat a single mid-block probe:
@@ -213,6 +256,59 @@ def _probes_of(expected: str) -> list[str]:
             seen.add(fragment)
             probes.append(fragment)
     return probes
+
+
+def _contains_math(expected: str) -> bool:
+    """Whether ``expected`` carries a ``$…$`` formula the renderer will typeset.
+
+    Distinguishes the two ways a block can fail to be located. A block with no
+    math has a whole-string contiguous probe available, so a miss is evidence of
+    loss. A block whose prose is interrupted by a formula has no such probe — its
+    characters *legitimately* differ between ledger and page — so the same miss
+    is not evidence, and the check must fall back to its weaker claim instead of
+    calling the paragraph lost.
+    """
+    from ubt.render.typst.document_renderer import math_fragments
+
+    return bool(math_fragments(expected))
+
+
+def _present_on_one_page(expected: str, pages: Sequence[frozenset[str]]) -> bool:
+    """Whether some single page carries enough of ``expected``'s tokens.
+
+    Page-scoped, deliberately, rather than against the joined book. The whole-book
+    set is what made the old check blind: every common ideograph of a lost
+    paragraph sits in the remaining pages, so overlap stayed ~1.0 and reported
+    presence for text that was gone. Asking one page to hold the block is a far
+    stronger claim — a paragraph's tokens are locally dense and globally common.
+    """
+    wanted = _tokenize(expected)
+    if not wanted:
+        return True
+    return any(
+        sum(1 for token in wanted if token in page) / len(wanted) >= _MIN_OVERLAP for page in pages
+    )
+
+
+def _locate_prose(expected: str, page_texts: Sequence[str]) -> int:
+    """The 1-based page carrying EVERY distinctive prose run of ``expected``.
+
+    The formula-aware companion to :func:`_locate`, and deliberately stricter:
+    one whole-string window is accepted as proof, but prose runs must *all* land
+    on the same page, precisely because each run is shorter and so individually
+    weaker. See :func:`_prose_runs` for why whole-string windows are unavailable
+    on a block whose middle is typeset math.
+
+    Returns 0 when the block has no run long enough to claim (under
+    ``_PROSE_RUN_MIN``), when the runs disagree on a page, or when none is found.
+    """
+    runs = _prose_runs(expected)
+    if not runs:
+        return 0
+    for index, text in enumerate(page_texts, 1):
+        if all(run in text for run in runs):
+            return index
+    return 0
 
 
 def _substring_of(expected: str) -> str | None:
@@ -321,7 +417,6 @@ def check_artifact(
     # notice text that really is absent. See :func:`_locate`.
     page_texts = ["".join(chunk.split()) for chunk in _read_page_texts(Path(artifact_pdf))]
     pages = page_tokens(Path(artifact_pdf))
-    whole_book = frozenset().union(*pages) if pages else frozenset()
     checks: list[ElementCheck] = []
     for block in blocks:
         if block.block_type in (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE):
@@ -330,13 +425,28 @@ def check_artifact(
             continue
         expected = _normalize(_expected(block, translations))
         page_number = block.bbox.page if block.bbox is not None else 0
-        located = _locate(expected, page_texts)
+        located = _locate(expected, page_texts) or _locate_prose(expected, page_texts)
         if located:
             present = True
-        elif _substring_of(expected) is None:
-            # Too short for a contiguous probe: the token check is all that is
-            # available, and it is honest about being a weaker claim.
-            present = _present(expected, whole_book)
+        elif _substring_of(expected) is None or (
+            _contains_math(expected) and not _prose_runs(expected)
+        ):
+            # No contiguous claim is available for this block, so the token check
+            # is all that is left and it is honest about being a weaker claim:
+            #
+            # * too short to yield a 16-character run at all (a one-word heading,
+            #   a caption fragment), where an exact run would be coincidence; or
+            # * it carries a formula whose prose is broken into runs too short to
+            #   prove anything contiguously — ``其中 $v_o$ 和 $q_t$ 由以下式表示：``
+            #   has a longest prose run of 6 characters. Neither the whole-string
+            #   windows nor the run conjunction can locate it, yet its text is
+            #   demonstrably on the page, so claiming it MISSING would be a false
+            #   failure of the audit rather than of the render.
+            #
+            # Page-scoped, not against the joined book: the whole-book set is what
+            # made the old check blind, since every common ideograph of a lost
+            # paragraph sits somewhere in the remaining pages.
+            present = _present_on_one_page(expected, pages)
         else:
             present = False
         checks.append(

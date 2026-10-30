@@ -97,11 +97,14 @@ def _init_transitions() -> tuple[
                 BlockStatus.FAILED,  # Rejected by human
             }
         ),
-        # FAILED: unrecoverable failure (terminal)
+        # FAILED: unrecoverable failure (terminal unless triaged or human PE acts)
         BlockStatus.FAILED: frozenset(
             {
                 BlockStatus.FAILED,  # idempotent
-                # Note: With allow_override=True, FAILED can transition to REPAIR_PENDING (triage) or PENDING (reset)
+                BlockStatus.NEEDS_HUMAN,  # MQM triage major defect requiring post-edit
+                BlockStatus.BLOCKED_HUMAN,  # MQM triage critical defect
+                BlockStatus.REPAIRED,  # Human PE post-edit or triage resolved
+                BlockStatus.MTQE_PASSED,  # Human override or minor auto-pass
             }
         ),
     }

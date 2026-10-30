@@ -1042,6 +1042,36 @@ _EN_NUMBER_PLURALS: dict[str, str] = {
 #: read as invented (arXiv 2101.03961 b0233). They authorize '2' and nothing
 #: else, so a genuinely wrong number is still caught.
 _EN_DUAL_DETERMINERS: tuple[str, ...] = ("both", "either", "neither", "pair", "twice")
+#: Polynomial-degree adjectives: the ordinary English way to state a degree, with
+#: no digit and no number word. Chinese writes that degree as a numeral, so
+#: 'quartic modified iteration' -> '四次修正迭代' is the *only* faithful rendering
+#: -- and the invention check read it as fabricating a 4. Measured on a real
+#: 26-page BSIM-CMG chapter: 5 of 7 numeric-fidelity failures were exactly this
+#: (b0050/b0177/b0178/b0209 for 'quartic', b0112 for 'quadratic', whose
+#: '二次模型' is the standard term for the long-channel MOSFET model).
+#: 'linear' is deliberately absent: it is the most common word in technical text
+#: and its numeral reading ('一次方程') is the exception, not the rule -- it
+#: usually translates as '线性'. Authorising '1' from it would exempt every
+#: genuine fabricated 1 in the block, which is a loss of rigour far larger than
+#: the false positive it would remove.
+_EN_DEGREE_WORDS: dict[str, str] = {
+    "quadratic": "2",
+    "cubic": "3",
+    "quartic": "4",
+    "biquadratic": "4",
+    "quintic": "5",
+    "sextic": "6",
+    "heptic": "7",
+    "octic": "8",
+    "nonic": "9",
+    "decic": "10",
+}
+#: Any degree adjective, longest-first so 'biquadratic' is not shadowed by the
+#: 'quadratic' that lives inside it.
+_EN_DEGREE_RE = re.compile(
+    r"\b(" + "|".join(sorted(_EN_DEGREE_WORDS, key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
 #: Any single number word, longest-first so the alternation is not shadowed.
 _EN_NUMBER_WORD_RE = re.compile(
     r"\b("
@@ -1244,6 +1274,10 @@ def _invented_target_numbers(
     # 'both'/'either'/'neither' state a quantity of two without a number word.
     if re.search(r"\b(" + "|".join(_EN_DUAL_DETERMINERS) + r")\b", source_view, re.IGNORECASE):
         authorized.add("2")
+    # A degree adjective ('quartic', 'quadratic') states a numeral the same way.
+    for match in _EN_DEGREE_RE.finditer(source_view):
+        authorized.add(_EN_DEGREE_WORDS[match.group(1).lower()])
+        authorized.add(_zero_fold(_EN_DEGREE_WORDS[match.group(1).lower()]))
     for match in _EN_NUMBER_PHRASE_RE.finditer(source_view):
         for value in _en_number_phrase_value(match.group(0)):
             authorized.add(str(value))

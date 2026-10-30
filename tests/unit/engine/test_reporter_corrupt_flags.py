@@ -34,14 +34,15 @@ def test_parse_corrupt_count_ignores_unrelated_flags() -> None:
     assert _parse_corrupt_count("html_attr_mismatch missing=[1] mismatched=[2]") == 0
 
 
-def test_every_render_skip_is_fail_closed() -> None:
-    """The report splits skips into fail-closed vs preserved; only the first exists.
+def test_render_skips_split_into_fail_closed_and_preserved() -> None:
+    """``preserved`` used to be read from a whitelist no producer wrote.
 
-    ``preserved`` used to be read from an "intentional skip" whitelist that no
-    producer ever wrote. Its real meaning is ``skip_translate`` (a block shipped
-    in the source by design), which is counted from the blocks themselves — see
-    ``build_quality_report``. A ``render_skip:`` is always a translation the
-    renderer could not place.
+    The truth is the opposite: the renderer emits a ``render_skip:`` flag on
+    *every* skip it makes, including the by-design keeps (``skip_translate`` on
+    bibliography entries and page chrome, ``facsimile_preserved_opaque`` on the
+    background-layer formula/figure ink). Booking those as fail-closed made
+    ``render_coverage`` read 0.0 on the 26-page replay while all 105 translatable
+    blocks had shipped.
     """
     from ubt.core.engine.reporter import summarize_render_skips
 
@@ -54,3 +55,14 @@ def test_every_render_skip_is_fail_closed() -> None:
     assert "review required" in verdict
     # Families strip fit parameters so per-size variants do not fragment the audit.
     assert "asset_not_found×1" in verdict
+
+    # A by-design keep did not lose a translation: it must not inflate the
+    # fail-closed count. On the 26-page replay every non-translatable block
+    # carried one of these, and counting them made render_coverage read 0.0
+    # while all 105 translatable blocks had shipped.
+    fail_closed, preserved, verdict = summarize_render_skips(
+        {"render_skip:skip_translate": 61, "render_skip:facsimile_preserved_opaque": 85}
+    )
+    assert (fail_closed, preserved) == (0, 146)
+    assert "No lost translations" in verdict
+    assert "keeps" in verdict

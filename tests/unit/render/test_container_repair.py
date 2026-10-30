@@ -8,12 +8,18 @@ import pytest
 
 from ubt.core.ir.models import BlockType, IRBlock, make_element
 from ubt.render.typst.container_repair import (
+    ContainerFitSpec,
+    compute_container_char_budget,
+    concise_rewrite_heuristic,
     effective_char_width,
+    extract_locked_numbers,
     fit_code_block,
     inject_soft_breaks,
     measure_line_width,
+    repair_bottleneck_containers,
     repair_code_block_markup,
     smart_wrap_code_line,
+    verify_concise_candidate,
 )
 from ubt.render.typst.document_renderer import TypstDocumentRenderer
 
@@ -137,3 +143,104 @@ def test_document_renderer_code_block_integration(tmp_path: Path) -> None:
     assert stats.blocks_rendered == 1
     assert 'raw("' in source
     assert "#block(fill: luma(245)" in source
+
+
+def test_compute_container_char_budget() -> None:
+    # 100pt container, 1 line, floor 7.5pt:
+    # ZH (alpha=1.0) -> floor(100 / 7.5) = 13 chars
+    assert compute_container_char_budget(100.0, max_lines=1, floor_pt=7.5, target_lang="zh") == 13
+    # 2 lines -> 26 chars
+    assert compute_container_char_budget(100.0, max_lines=2, floor_pt=7.5, target_lang="zh") == 26
+    # EN (alpha=0.48) -> floor(100 / (0.48 * 7.5)) = floor(100 / 3.6) = 27 chars
+    assert compute_container_char_budget(100.0, max_lines=1, floor_pt=7.5, target_lang="en") == 27
+
+
+def test_extract_locked_numbers() -> None:
+    text = "在 2026 年，模型精度提高了 15.5%，达到 98.2% 的准确率（测试集共 1000 样本）。"
+    nums = extract_locked_numbers(text)
+    assert nums == ["2026", "15.5%", "98.2%", "1000"]
+
+
+def test_verify_concise_candidate_wmt26_rules() -> None:
+    spec = ContainerFitSpec(
+        seg_id="b1",
+        current_translation="在 2026 年，我们可以看到，注意力机制对于提高 98.5% 的精度至关重要。",
+        max_target_chars=30,
+        locked_glossary_terms=["注意力机制"],
+        locked_numbers=["2026", "98.5%"],
+    )
+
+    # 1. Valid concise candidate within budget and keeping all locked terms
+    good_cand = "2026年，注意力机制使精度达98.5%。"
+    assert len(good_cand) <= 30
+    assert verify_concise_candidate(spec, good_cand) is True
+
+    # 2. Exceeds budget -> rejected
+    long_cand = "在2026年这一时期内，注意力机制对全面提升系统98.5%的准确度具有关键意义。"
+    assert len(long_cand) > 30
+    assert verify_concise_candidate(spec, long_cand) is False
+
+    # 3. Missing locked glossary term -> rejected
+    missing_term = "2026年，该机制使精度达到98.5%。"
+    assert verify_concise_candidate(spec, missing_term) is False
+
+    # 4. Missing or corrupted locked number -> rejected
+    corrupt_num = "2026年，注意力机制使精度达98%。"
+    assert verify_concise_candidate(spec, corrupt_num) is False
+
+
+def test_verify_concise_candidate_math_and_sentinels() -> None:
+    spec = ContainerFitSpec(
+        seg_id="b2",
+        current_translation="根据公式 $E = m c^2$ 与标记 ⟦sentinel_001⟧，可以计算能量。",
+        max_target_chars=40,
+        locked_glossary_terms=[],
+        locked_numbers=[],
+    )
+
+    # Valid candidate keeping inline math and sentinel
+    good_cand = "据公式 $E = m c^2$ 与 ⟦sentinel_001⟧ 计算能量。"
+    assert verify_concise_candidate(spec, good_cand) is True
+
+    # Broken math span -> rejected
+    bad_math = "据公式 $E = mc$ 与 ⟦sentinel_001⟧ 计算能量。"
+    assert verify_concise_candidate(spec, bad_math) is False
+
+    # Dropped sentinel -> rejected
+    bad_sentinel = "据公式 $E = m c^2$ 可以计算能量。"
+    assert verify_concise_candidate(spec, bad_sentinel) is False
+
+
+def test_concise_rewrite_heuristic() -> None:
+    text = "我们可以看到，由于这个原因，可以通过使用自注意力机制进行计算分析。"
+    budget = 20
+    condensed = concise_rewrite_heuristic(
+        text,
+        budget,
+        locked_terms=["自注意力机制"],
+        locked_numbers=[],
+        target_lang="zh",
+    )
+    # Should replace "我们可以看到，", "由于这个原因，", "可以通过使用", "进行计算分析"
+    assert "自注意力机制" in condensed
+    assert len(condensed) < len(text)
+    assert "可以通过使用" not in condensed
+
+
+def test_repair_bottleneck_containers() -> None:
+    specs = [
+        ContainerFitSpec(
+            seg_id="seg1",
+            current_translation="我们可以看到，由于这个原因，系统提升了 42% 的吞吐量。",
+            max_target_chars=25,
+            locked_glossary_terms=["系统"],
+            locked_numbers=["42%"],
+        ),
+    ]
+
+    repaired = repair_bottleneck_containers(specs)
+    assert "seg1" in repaired
+    rep_text = repaired["seg1"]
+    assert len(rep_text) <= 25
+    assert "系统" in rep_text
+    assert "42%" in rep_text

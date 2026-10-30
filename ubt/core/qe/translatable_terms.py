@@ -259,6 +259,21 @@ UNIVERSAL_TRANSLATABLE_TERMS: Final[dict[str, tuple[str, ...]]] = {
     "cdc": ("疾病控制与预防中心", "CDC"),
     "eu": ("欧盟", "EU"),
     "un": ("联合国", "UN"),
+    # -------------------------------------------------------------------------
+    # Semiconductor device physics (book-grade domain vocabulary; measured on a
+    # BSIM-CMG chapter where every correct translation of FinFETs as
+    # 鳍式场效应晶体管 was quarantined as an omission — 15/22 failures on that
+    # chapter were this single false-positive family)
+    # -------------------------------------------------------------------------
+    "finfet": ("鳍式场效应晶体管", "鳍式场效应晶体管", "FinFET"),
+    "finfets": ("鳍式场效应晶体管", "FinFET"),
+    "mosfet": ("金属氧化物半导体场效应晶体管", "MOSFET"),
+    "mosfets": ("金属氧化物半导体场效应晶体管", "MOSFET"),
+    "jfet": ("结型场效应晶体管", "JFET"),
+    "igbt": ("绝缘栅双极型晶体管", "IGBT"),
+    "gaa": ("全环绕栅极", "GAA"),
+    "soi": ("绝缘体上硅", "SOI"),
+    "cmos": ("互补金属氧化物半导体", "CMOS"),
     # Special attested glued forms from production arXiv corpuses
     "ext4formatted": ("ext4", "格式化", "ext4格式化", "ext4 formatted"),
 }

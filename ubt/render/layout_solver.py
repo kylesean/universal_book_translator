@@ -42,12 +42,39 @@ def estimate_needed_height(
     """Estimated vertical height (pt) this record's text occupies at size and em_ratio."""
     w = float(record.get("w", 0.0))
     if w <= 0.0:
-        return float(record.get("n", 1)) * em_ratio * size
-    eff_glyph_w = size * max(0.85, (1.0 + tracking_em)) * float(record.get("glyph_aspect", 1.0))
-    per_line = max(1.0, w / eff_glyph_w)
-    glyphs = float(record.get("glyphs", 0.0))
-    lines = max(1, math.ceil(glyphs / per_line))
+        lines = float(record.get("n", 1))
+    else:
+        aspect = float(record.get("glyph_aspect", 1.0))
+        eff_glyph_w = size * max(0.85, (1.0 + tracking_em)) * aspect
+        per_line = max(1.0, w / eff_glyph_w)
+        glyphs = float(record.get("glyphs", 0.0))
+        lines = max(1, math.ceil(glyphs / per_line))
+    # A single line has no internal inter-line leading gap; its height is strictly
+    # bounded by its font size. Multi-line blocks scale by em_ratio per line.
+    if lines <= 1:
+        return size * 1.0
     return float(lines) * em_ratio * size
+
+
+def _effective_limit(
+    records: Sequence[dict[str, Any]],
+    idx: int,
+    tol_pt: float = TOL_PT,
+) -> float:
+    """Vertical lower bound (pt) for ``records[idx]``, clamped by any preserved obstacle below it."""
+    rec = records[idx]
+    own_bot = float(rec["bot"])
+    limit = own_bot
+    for later in records[idx + 1 :]:
+        if float(later["top"]) < float(rec["top"]) - tol_pt:
+            limit = float(later["top"])
+            break
+    obstacle_top = rec.get("obstacle_top")
+    if obstacle_top is not None:
+        # Clamp vertical glue expansion at the top of any preserved figure/formula
+        # below this block, without shrinking the block's own original box.
+        limit = min(own_bot, max(limit, float(obstacle_top)))
+    return limit
 
 
 def fits_all(
@@ -60,12 +87,7 @@ def fits_all(
     """Check if all paragraphs fit within their vertical bounds across all columns."""
     for records in columns_records:
         for idx, rec in enumerate(records):
-            limit = float(rec["bot"])
-            # In vertical glue mode, the paragraph can expand into the gap before the next
-            for later in records[idx + 1 :]:
-                if float(later["top"]) < float(rec["top"]) - tol_pt:
-                    limit = float(later["top"])
-                    break
+            limit = _effective_limit(records, idx, tol_pt)
             needed = estimate_needed_height(rec, size, em_ratio, tracking_em)
             if float(rec["top"]) - needed < limit - tol_pt:
                 return False
@@ -78,8 +100,21 @@ def check_source_overlap(
 ) -> bool:
     """Return True if any column has source paragraphs whose bounding boxes overlap."""
     for records in columns_records:
-        for i in range(len(records) - 1):
-            if float(records[i]["bot"]) < float(records[i + 1]["top"]) - tol_pt:
+        if not records:
+            continue
+        sorted_records = sorted(records, key=lambda r: float(r["top"]), reverse=True)
+        for i in range(len(sorted_records) - 1):
+            r1 = sorted_records[i]
+            r2 = sorted_records[i + 1]
+            if float(r1["bot"]) < float(r2["top"]) - tol_pt:
+                # 2D Bounding Box collision: if both horizontal coordinates are present,
+                # side-by-side elements on the same horizontal band do not overlap.
+                if "x0" in r1 and "x1" in r1 and "x0" in r2 and "x1" in r2:
+                    x_overlap = min(float(r1["x1"]), float(r2["x1"])) - max(
+                        float(r1["x0"]), float(r2["x0"])
+                    )
+                    if x_overlap <= tol_pt:
+                        continue
                 return True
     return False
 
@@ -95,12 +130,20 @@ def resolve_local_overlaps(
     """
     if not records:
         return []
-    resolved: list[dict[str, Any]] = [dict(records[0])]
-    for nxt in records[1:]:
+    sorted_recs = sorted(records, key=lambda r: float(r["top"]), reverse=True)
+    resolved: list[dict[str, Any]] = [dict(sorted_recs[0])]
+    for nxt in sorted_recs[1:]:
         prev = resolved[-1]
         prev_bot = float(prev["bot"])
         nxt_top = float(nxt["top"])
         if prev_bot < nxt_top - 0.1:
+            if "x0" in prev and "x1" in prev and "x0" in nxt and "x1" in nxt:
+                x_overlap = min(float(prev["x1"]), float(nxt["x1"])) - max(
+                    float(prev["x0"]), float(nxt["x0"])
+                )
+                if x_overlap <= 0.5:
+                    resolved.append(dict(nxt))
+                    continue
             overlap = nxt_top - prev_bot
             if overlap <= max_merge_overlap_pt:
                 # Slight micro-overlap between adjacent paragraphs: align boundary to mid-point
@@ -125,11 +168,7 @@ def _find_bottlenecks(
     bottlenecks: list[str] = []
     for records in columns_records:
         for idx, rec in enumerate(records):
-            limit = float(rec["bot"])
-            for later in records[idx + 1 :]:
-                if float(later["top"]) < float(rec["top"]) - tol_pt:
-                    limit = float(later["top"])
-                    break
+            limit = _effective_limit(records, idx, tol_pt)
             needed = estimate_needed_height(rec, size, em_ratio, tracking_em)
             if float(rec["top"]) - needed < limit - tol_pt:
                 seg_id = str(rec.get("id") or f"col_{idx}")
@@ -162,7 +201,7 @@ def solve_page_2d(
     effective_cols = (
         [resolve_local_overlaps(col) for col in columns_records]
         if resolve_overlaps
-        else columns_records
+        else [sorted(col, key=lambda r: float(r["top"]), reverse=True) for col in columns_records]
     )
 
     overlapped = check_source_overlap(effective_cols, tol_pt=tol_pt)

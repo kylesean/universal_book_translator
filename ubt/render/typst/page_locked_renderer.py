@@ -17,8 +17,11 @@ cannot measure.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
+import re
+import shutil
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,6 +32,26 @@ from ubt.core.ir.models import BlockType, IRBlock
 from ubt.render.delivered_text import delivered_text
 from ubt.render.layout_solver import FLOOR_PT
 from ubt.render.typst.escape import typst_escape
+
+#: The bundled CJK face's own line height, in em, measured from a compiled
+#: artifact: a 20pt Noto Serif CJK SC paragraph with ``leading: 0em`` has a
+#: baseline pitch of 14.66pt (0.733em). Typst's ``par(leading:)`` is a *gap*
+#: added on top of that, while both solvers express a *pitch ratio*
+#: (``1.0 + leading_em``). Passing the ratio straight through shipped a 1.35
+#: intent as a 1.083 pitch, so every path converts through this term.
+FONT_LINE_HEIGHT_EM: float = 0.733
+
+
+def leading_gap_em(pitch_ratio: float) -> float:
+    """Typst ``par(leading:)`` gap for a target line-height ratio.
+
+    ``pitch_ratio`` is what the solvers optimise (1.35 = 1.35x the font size).
+    Typst adds the gap to the font's own line height, so the gap is
+    ``pitch_ratio - FONT_LINE_HEIGHT_EM``. Clamped at zero: a ratio below the
+    font's base cannot ask Typst for negative leading.
+    """
+    return max(0.0, float(pitch_ratio) - FONT_LINE_HEIGHT_EM)
+
 
 logger = logging.getLogger(__name__)
 
@@ -68,12 +91,58 @@ class PageLockedPageSpec:
     blocks: list[IRBlock] = field(default_factory=list)
 
 
+def _central_band_is_occupied(
+    bboxes: Sequence[Any],
+    page_w: float,
+    *,
+    band_pt: float = 12.0,
+    coverage: float = 0.40,
+) -> bool:
+    """Whether blocks cover enough of the page's central vertical band to rule out a gutter.
+
+    A two-column page has a vertical gutter: a band around the page midpoint
+    that no body block crosses. A single-column page has full-measure prose
+    across that band, even when its display formulas are centred and its short
+    labels sit on the left.
+
+    Counting ``x0 >= mid - 15`` as "right column" cannot tell those apart: a
+    centred formula starts near the midpoint and is counted as right-column
+    text, which is how ``chapter-3.pdf`` page 12 became two columns. Coverage
+    is the property a gutter actually has, so it is what this function tests.
+    """
+    if not bboxes or page_w <= 0:
+        return False
+    mid = page_w / 2.0
+    left, right = mid - band_pt, mid + band_pt
+    intervals: list[tuple[float, float]] = []
+    for bb in bboxes:
+        if float(bb.x1) <= left or float(bb.x0) >= right:
+            continue
+        lo = min(float(bb.y0), float(bb.y1))
+        hi = max(float(bb.y0), float(bb.y1))
+        if hi > lo:
+            intervals.append((lo, hi))
+    if not intervals:
+        return False
+    intervals.sort()
+    merged: list[tuple[float, float]] = []
+    for lo, hi in intervals:
+        if merged and lo <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+        else:
+            merged.append((lo, hi))
+    covered = sum(hi - lo for lo, hi in merged)
+    content_h = max(float(bb.y1) for bb in bboxes) - min(float(bb.y0) for bb in bboxes)
+    return content_h > 0 and covered / content_h >= coverage
+
+
 def extract_page_geometry(
     page_w: float,
     page_h: float,
     blocks: Sequence[IRBlock],
     *,
     default_margin: float = 36.0,
+    default_theme_color: str = "#0078ae",
 ) -> PageGeometry:
     """Extract and clone physical geometry, margins, columns, and primary theme color from page blocks."""
     bboxes = [
@@ -93,9 +162,10 @@ def extract_page_geometry(
     else:
         m_left = m_right = m_top = m_bottom = default_margin
 
-    # Column detection: check if blocks cleanly divide into left and right columns
+    # Column detection: a gutter is a band the body does not cross, not a
+    # count of boxes whose x0 happens to sit near the midpoint.
     columns = 1
-    if page_w >= 450.0 and len(bboxes) >= 4:
+    if page_w >= 450.0 and len(bboxes) >= 4 and not _central_band_is_occupied(bboxes, page_w):
         x_mid = page_w / 2.0
         left_count = 0
         right_count = 0
@@ -113,7 +183,7 @@ def extract_page_geometry(
             columns = 2
 
     # Primary Theme Color from heading style
-    theme_color = "#0078ae"
+    theme_color = default_theme_color
     for b in blocks:
         if b.block_type == BlockType.HEADING and b.style:
             c = getattr(b.style, "color_hex", None) or getattr(b.style, "text_color_hex", None)
@@ -143,6 +213,23 @@ def _content_width(geometry: PageGeometry) -> float:
     return (avail_w - (cols - 1) * geometry.column_gutter_pt) / cols
 
 
+def _block_measure(geometry: PageGeometry, block: IRBlock) -> float:
+    """The width one block was promised, in points.
+
+    The block's own source box, floored at 10pt and capped at the column measure.
+    A page-locked canvas paints each block at its source rectangle, so that
+    rectangle — not the abstract column — is the container a table has to fit:
+    the L1 canvas already hands ``render_table`` ``max(10.0, x1 - x0)`` for its
+    placements, and using the same measure here is what makes an exhibit lay out
+    identically whichever tier its page routed to. Blocks with no bbox fall back
+    to the column width.
+    """
+    if block.bbox is None:
+        return _content_width(geometry)
+    width = float(block.bbox.x1) - float(block.bbox.x0)
+    return min(max(10.0, width), _content_width(geometry))
+
+
 def _page_capacity(geometry: PageGeometry) -> float:
     """Estimated height budget for one page, after the 8% wrap headroom."""
     avail_h = geometry.page_h - geometry.margin_top - geometry.margin_bottom
@@ -169,6 +256,22 @@ def _block_height(
     txt = delivered_text(block).strip()
     if not txt:
         txt = block.source_text.strip()
+    if block.block_type is BlockType.IMAGE:
+        # An image block's "text" is the parser's asset *path*, never prose.
+        # In flow it is drawn from the extracted asset, so it reserves the
+        # height the source region occupied scaled to the column: pessimistic
+        # when the asset turns out unresolvable at markup time (and the block
+        # is dropped), and never optimistic about the floor -- which is exactly
+        # the error direction this model is allowed to have.
+        if block.bbox is None:
+            return 0.0
+        w = max(0.0, float(block.bbox.x1) - float(block.bbox.x0))
+        h = max(0.0, float(block.bbox.y1) - float(block.bbox.y0))
+        if w <= 0.0 or h <= 0.0:
+            return 0.0
+        drawn_w = min(w, col_w)
+        drawn_h = h * (drawn_w / w)
+        return drawn_h + spacing * size
     if not txt:
         return 0.0
 
@@ -181,7 +284,14 @@ def _block_height(
     if block.block_type == BlockType.FORMULA:
         return max(24.0, size * 2.0) + spacing * size
     if block.block_type == BlockType.TABLE:
-        return max(40.0, size * 4.0) + spacing * size
+        table_lines = [ln.strip() for ln in txt.splitlines() if ln.strip()]
+        row_count = sum(1 for ln in table_lines if not re.match(r"^\|?[\s\-:|]+\|?$", ln))
+        row_count = max(2, row_count)
+        row_h = size * (1.0 + leading) + 8.0
+        bbox_h = (
+            max(0.0, float(block.bbox.y1) - float(block.bbox.y0)) if block.bbox is not None else 0.0
+        )
+        return max(row_count * row_h + 12.0, bbox_h) + spacing * size
     return lines * size * (1.0 + leading) + spacing * size
 
 
@@ -352,11 +462,113 @@ def solve_page_lock(
     )
 
 
+def make_asset_copier(
+    build_dir: Path, assets_root: Path | None = None
+) -> Callable[[str], str | None]:
+    """Return a copier that places one extracted asset inside ``build_dir``.
+
+    The parser stores an asset's absolute cache path as the block's
+    ``source_text``; Typst addresses ``image()`` relative to the source file, so
+    the file has to be copied next to it. The name is content-addressed (the
+    same reasoning as the publish renderer's ``_copy_asset``: flat build
+    directories plus shared basenames silently overwrite each other), and any
+    unresolvable path yields ``None`` so the caller drops the block rather than
+    emitting an ``image()`` Typst will refuse to compile -- the original defect
+    here was printing the cache path as *prose* in the figure's place.
+
+    ``build_dir`` is created on demand. A caller that builds markup before the
+    render directory exists (a preflight, a preview, a test) would otherwise get
+    ``None`` for *every* asset and an artifact with no figures at all -- the
+    silent-loss failure this function exists to prevent, arriving through a
+    missing ``mkdir`` rather than a missing file.
+    """
+
+    def copy(asset_path: str) -> str | None:
+        if not asset_path:
+            return None
+        candidate = Path(asset_path)
+        if not (candidate.is_absolute() and candidate.exists()) and assets_root is not None:
+            rooted = assets_root / candidate.name
+            candidate = rooted if rooted.exists() else candidate
+        if not candidate.exists():
+            return None
+        try:
+            digest = hashlib.sha256(candidate.read_bytes()).hexdigest()[:16]
+        except OSError:
+            return None
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "-", candidate.stem).strip("-") or "asset"
+        suffix = re.sub(r"[^A-Za-z0-9.]+", "", candidate.suffix)[:10].lower()
+        target = build_dir / f"{stem}-{digest}{suffix}"
+        if target.exists():
+            return target.name
+        try:
+            build_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(candidate, target)
+        except OSError:
+            return None
+        return target.name
+
+    return copy
+
+
+def make_formula_cropper(
+    build_dir: Path, source_pdf: Path | None = None
+) -> Callable[[IRBlock], str | None]:
+    """Return a 300 DPI cropper that saves an uncompilable formula's source region into ``build_dir``.
+
+    When a display ``FORMULA`` block cannot be transpiled to Typst math (or is
+    rejected by ``TypstMathProbe``), degrading a multi-line equation or matrix
+    to flat Unicode strips its 2D layout. When the source PDF and the block's
+    bounding box are available, cropping the original equation at 300 DPI via
+    :func:`delivered_crop_pil` preserves exact mathematical fidelity (§8.9).
+    """
+
+    def crop(block: IRBlock) -> str | None:
+        if source_pdf is None or not source_pdf.exists():
+            return None
+        bbox = getattr(block, "bbox", None)
+        if bbox is None or getattr(bbox, "page", 0) < 1:
+            return None
+        w = float(bbox.x1) - float(bbox.x0)
+        h = float(bbox.y1) - float(bbox.y0)
+        if w < 8.0 or h < 4.0:
+            return None
+        safe_id = re.sub(r"[^A-Za-z0-9._-]+", "-", str(block.id)).strip("-") or "formula"
+        target = build_dir / f"formula-crop-{safe_id}-p{int(bbox.page)}.png"
+        if target.exists():
+            return target.name
+        try:
+            from ubt.adapters.pdf.visual_scalpel import FIGURE_ASSET_DPI, delivered_crop_pil
+
+            cropped = delivered_crop_pil(source_pdf, int(bbox.page), bbox, dpi=FIGURE_ASSET_DPI)
+            if getattr(cropped, "width", 0) < 4 or getattr(cropped, "height", 0) < 4:
+                return None
+            build_dir.mkdir(parents=True, exist_ok=True)
+            cropped.save(target)
+        except Exception as exc:
+            logger.debug("Formula raster fallback failed for %s: %s", block.id, exc)
+            return None
+        return target.name
+
+    return crop
+
+
 class PageLockedReflowRenderer:
     """Renders single or multi-page documents under the strict 1:1 page-locked reflow invariant."""
 
-    def __init__(self, font_stack: Sequence[str] | None = None) -> None:
+    def __init__(
+        self,
+        font_stack: Sequence[str] | None = None,
+        *,
+        math_gate: Callable[[str], bool] | None = None,
+    ) -> None:
         self.font_stack = tuple(font_stack) if font_stack else DEFAULT_FONT_STACK
+        #: The Typst compile gate for a transpiled math body — see
+        #: ``TypstDocumentRenderer.math_gate``. A body the transpiler accepts but
+        #: Typst rejects (``frac(a, )``) fails the *whole* document at one compile,
+        #: so an L2 page cannot emit a converted formula without this verdict.
+        #: ``None`` skips the gate, which is what a caller without a probe wants.
+        self._math_gate = math_gate
         #: Pages that did not fit one page at ``FLOOR_PT``, from the most recent
         #: ``render_document`` call: ``{page_no, expected_pages, actual_pages,
         #: deficit_pt, block_id}``. Empty on a clean render.
@@ -366,13 +578,78 @@ class PageLockedReflowRenderer:
         #: nobody reads is how the 6.8pt shrink passed review for so long.
         self.last_page_overflow: list[dict[str, Any]] = []
 
+    def _display_math_markup(
+        self,
+        block: IRBlock,
+        text: str,
+        *,
+        col_w: float | None = None,
+        formula_cropper: Callable[[IRBlock], str | None] | None = None,
+    ) -> str:
+        r"""Typst math for one ``FORMULA`` block, 300 DPI source crop, or readable Unicode.
+
+        The branch this replaces was ``f"  $ {typst_escape(txt)} $"``: escape the
+        LaTeX, then wrap the *escaped* text in math delimiters. That is broken in
+        both directions. Typst math mode has no escapes, so ``N_{ch}`` became
+        ``N\_\{ch\}`` and Typst read the backslash-escaped brace as a token,
+        failing the whole document — ``error: unknown variable: ch`` (reproduced
+        verbatim, not inferred). And an escape-only body is never math: a formula
+        that did survive came out as literal ``\psi\_1``.
+
+        So a formula block is transpiled, exactly as the reflow channel's
+        ``block_type == "formula"`` branch does. A body the transpiler cannot
+        convert, or that the compile gate rejects, first attempts a 300 DPI
+        source-PDF crop via ``formula_cropper`` (§8.9), and otherwise degrades
+        to readable Unicode rather than leaking command names.
+        """
+        from ubt.render.typst.document_renderer import escape_markup
+        from ubt.render.typst.math_transpiler import (
+            clean_math_fallback_text,
+            strip_math_delimiters,
+            typstify_math,
+        )
+
+        converted = typstify_math(strip_math_delimiters(text))
+        if converted is not None and self._math_gate is not None and not self._math_gate(converted):
+            converted = None
+        if converted:
+            return f"$ {converted} $"
+        if formula_cropper is not None:
+            crop_name = formula_cropper(block)
+            if crop_name:
+                bbox = getattr(block, "bbox", None)
+                raw_w = float(bbox.x1 - bbox.x0) if bbox is not None else (col_w or 240.0)
+                max_w = col_w if col_w is not None and col_w > 0 else raw_w
+                img_w = min(max(8.0, raw_w), max_w)
+                return f'#figure(image("{crop_name}", width: {img_w:.1f}pt), numbering: none)'
+        fallback = clean_math_fallback_text(text)
+        if fallback:
+            return escape_markup(fallback)
+        # Neither transpilable nor degradable: nothing readable is left, and a
+        # bare ``$ $`` is a compile error. The block id keeps this attributable --
+        # it is the same reason the reflow channel counts ``formulas_dropped``
+        # instead of failing silently.
+        logger.warning("Page-locked: formula block %s has no deliverable body", block.id)
+        return ""
+
     def build_page_markup(
         self,
         spec: PageLockedPageSpec,
         *,
         target_lang: str = "zh",
+        asset_copier: Callable[[str], str | None] | None = None,
+        formula_cropper: Callable[[IRBlock], str | None] | None = None,
     ) -> str:
-        """Render a single page's cloned geometry and content into an isolated Typst #page container."""
+        """Render a single page's cloned geometry and content into an isolated Typst #page container.
+
+        An L2 page reflows text in reading order, so it carries no full-page
+        stripped background (fixed-coordinate source ink under reflowed prose
+        would collide by construction). Figures are instead drawn in flow via
+        ``asset_copier``, which maps the extracted-asset path stored in
+        ``source_text`` to a build-relative file name; if no copier is given or
+        the file is missing, the figure block is dropped rather than printing its
+        cache path as prose.
+        """
         geom = spec.geometry
         fonts_formatted = ", ".join(f'"{f}"' for f in self.font_stack)
 
@@ -384,7 +661,9 @@ class PageLockedReflowRenderer:
             f"  columns: {geom.columns},",
             ")[",
             f'  #set text(font: ({fonts_formatted}), size: {spec.uniform_size_pt}pt, lang: "{target_lang}", overhang: true, cjk-latin-spacing: auto)',
-            f'  #set par(justify: true, linebreaks: "optimized", leading: {spec.leading_em}em, spacing: {spec.par_spacing_em}em)',
+            f'  #set par(justify: true, linebreaks: "optimized", '
+            f"leading: {leading_gap_em(1.0 + spec.leading_em):.3f}em, "
+            f"spacing: {spec.par_spacing_em}em)",
             "",
         ]
 
@@ -406,11 +685,53 @@ class PageLockedReflowRenderer:
             )
 
         for b in ordered_blocks:
+            # An image block's text is the asset *path* the parser stored
+            # (``source_text=str(asset_path)``), never reader-visible prose.
+            # L2 pages reflow without a background layer, so the figure is drawn
+            # in flow from the extracted asset at its source width; if no copier
+            # or file is available, the block is dropped rather than typesetting
+            # ``/home/<user>/.cache/...png`` as prose.
+            if b.block_type is BlockType.IMAGE:
+                if asset_copier is None:
+                    continue
+                name = asset_copier(b.source_text)
+                if not name:
+                    continue
+                img_w = (b.bbox.x1 - b.bbox.x0) if b.bbox else _content_width(geom)
+                img_w = min(max(1.0, img_w), _content_width(geom))
+                lines.append(f'  #figure(image("{name}", width: {img_w:.1f}pt), numbering: none)')
+                lines.append("")
+                continue
             txt = delivered_text(b).strip()
             if not txt:
                 txt = b.source_text.strip()
             if not txt:
                 continue
+
+            # ``render_prose`` is the reflow channel's one owner of "escape the
+            # prose, transpile the ``$…$``": the escaped route below and this one
+            # must not be chosen by hand per branch, or a span that lands in the
+            # wrong half ships its LaTeX source to the reader.
+            #
+            # A function-local import: ``document_renderer`` is the heavier module
+            # (it pulls the table compiler, page trim and inline spans) and the
+            # facsimile renderer reaches this class from it, so a top-level edge
+            # here would put an import cycle one refactor away. Same reason
+            # ``facsimile_renderer._placement_content`` imports ``render_table``
+            # lazily.
+            #
+            # THE DELIVERY BUG THIS FIXES: a translated page of a technical book
+            # carries inline math the model wrote as LaTeX, and this branch used
+            # to run ``typst_escape`` over the WHOLE block -- a route with no math
+            # branch at all. ``$`` and ``_`` are both in the escape set, so
+            # ``$\psi_1$`` shipped as the literal ``\$\\psi\_1\$``: measured on a
+            # 26-page BSIM-CMG chapter, 265 escaped ``\$`` across 44 lines and
+            # 93 raw LaTeX macro leaks (``\text`` 35, ``\beta`` 33, ``\psi`` 16,
+            # ``\mu`` 4, ``\frac`` 3, ``\epsilon`` 2) in a file billed as a
+            # finished translation. Escaping is correct for prose punctuation and
+            # catastrophic for a formula, which is exactly the distinction
+            # ``render_prose`` was written to make.
+            from ubt.render.typst.document_renderer import render_prose, render_table
 
             escaped = typst_escape(txt)
 
@@ -418,13 +739,49 @@ class PageLockedReflowRenderer:
                 lvl = getattr(b.element, "level", 1) if hasattr(b, "element") else 1
                 size_em = "1.25em" if lvl <= 1 else "1.10em"
                 lines.append(
-                    f'  #block(above: 0.8em, below: 0.5em)[#text(weight: "bold", size: {size_em}, fill: rgb("{geom.theme_color_hex}"))[{escaped}]]'
+                    f'  #block(above: 0.8em, below: 0.5em)[#text(weight: "bold", size: {size_em}, fill: rgb("{geom.theme_color_hex}"))[{render_prose(txt, is_math_ok=self._math_gate)}]]'
                 )
             elif b.block_type == BlockType.LIST_ITEM:
-                lines.append(f"  - {escaped}")
+                lines.append(f"  - {render_prose(txt, is_math_ok=self._math_gate)}")
+            elif b.block_type == BlockType.TABLE:
+                # A Markdown grid must be typeset, not printed: escaped, its pipes
+                # and dashes are literal text.
+                #
+                # ``page_columns=1`` deliberately, even on a two-column page, and
+                # the container is the *column* the block was solved into. With
+                # ``page_columns=geom.columns``, ``render_table``'s full-page
+                # promotion (``page_columns > 1 and too_wide``) re-lays a wide grid
+                # across the whole page measure, which on a page-locked canvas
+                # paints over the neighbouring column -- the block's own box is
+                # what the reader was promised. The L1 canvas already passes
+                # ``page_columns=1`` for the same reason (``_placement_content``);
+                # matching it means the same grid lays out the same way whichever
+                # tier its page routed to.
+                col_w = _block_measure(geom, b)
+                table_markup = render_table(
+                    txt,
+                    is_math_ok=self._math_gate,
+                    page_columns=1,
+                    content_width_pt=col_w,
+                    target_lang=target_lang,
+                )
+                if table_markup:
+                    lines.append(f"  {table_markup}")
+                else:
+                    # An unparseable grid degrades to escaped text rather than
+                    # vanishing: a table the compiler cannot lay out is still
+                    # content the reader needs. Same rule as the L1 canvas.
+                    logger.warning(
+                        "Page-locked: block %s looked like a table but did not parse; delivering it as text",
+                        b.id,
+                    )
+                    lines.append(f"  {escaped}")
+                    lines.append("")
             elif b.block_type == BlockType.FORMULA:
-                # Math formula
-                lines.append(f"  $ {escaped} $")
+                col_w = _block_measure(geom, b)
+                lines.append(
+                    f"  {self._display_math_markup(b, txt, col_w=col_w, formula_cropper=formula_cropper)}"
+                )
             elif b.block_type == BlockType.CODE:
                 from ubt.render.typst.container_repair import repair_code_block_markup
 
@@ -437,7 +794,7 @@ class PageLockedReflowRenderer:
                 code_mk = repair_code_block_markup(txt, container_width_pt=col_w)
                 lines.append(f"  {code_mk}")
             else:
-                lines.append(f"  {escaped}")
+                lines.append(f"  {render_prose(txt, is_math_ok=self._math_gate)}")
                 lines.append("")
 
         lines.append("]")
@@ -449,6 +806,8 @@ class PageLockedReflowRenderer:
         pages: Sequence[PageLockedPageSpec],
         *,
         target_lang: str = "zh",
+        asset_copier: Callable[[str], str | None] | None = None,
+        formula_cropper: Callable[[IRBlock], str | None] | None = None,
     ) -> str:
         """Construct a complete multi-page document consisting strictly of page-locked pages."""
         lines: list[str] = [
@@ -456,7 +815,14 @@ class PageLockedReflowRenderer:
             "",
         ]
         for spec in pages:
-            lines.append(self.build_page_markup(spec, target_lang=target_lang))
+            lines.append(
+                self.build_page_markup(
+                    spec,
+                    target_lang=target_lang,
+                    asset_copier=asset_copier,
+                    formula_cropper=formula_cropper,
+                )
+            )
         return "\n".join(lines)
 
     def render_document(
@@ -466,13 +832,20 @@ class PageLockedReflowRenderer:
         build_dir: Path,
         *,
         target_lang: str = "zh",
+        asset_copier: Callable[[str], str | None] | None = None,
+        formula_cropper: Callable[[IRBlock], str | None] | None = None,
         compile_fn: Callable[[str, str, str], tuple[bool, str]] | None = None,
     ) -> Path:
         """Compile page-locked pages into output PDF and verify strict 1:1 page-count conservation."""
         build_dir.mkdir(parents=True, exist_ok=True)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        markup = self.build_document_markup(pages, target_lang=target_lang)
+        markup = self.build_document_markup(
+            pages,
+            target_lang=target_lang,
+            asset_copier=asset_copier,
+            formula_cropper=formula_cropper,
+        )
         typ_path = build_dir / "page_locked.typ"
         typ_path.write_text(markup, encoding="utf-8")
 
@@ -570,6 +943,8 @@ __all__ = [
     "PageLockedPageSpec",
     "PageLockedReflowRenderer",
     "extract_page_geometry",
+    "make_asset_copier",
+    "make_formula_cropper",
     "page_overflow_at_floor",
     "solve_page_lock",
 ]

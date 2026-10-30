@@ -38,7 +38,7 @@ docker run -d -p 8000:8000 -v $(pwd)/data:/data universal-book-translator:latest
 ```
 
 The Web Console and REST API will be available immediately at `http://localhost:8000`.
-See [`deploy/docker/README.md`](file:///home/kyle/Projects/python/universal_book_translator/deploy/docker/README.md) for complete container options.
+See [`deploy/docker/README.md`](deploy/docker/README.md) for complete container options.
 
 ### Sample Book & Verification Runner
 
@@ -47,7 +47,7 @@ To verify the complete ingestion, container fit, and Typst rendering pipeline of
 ```bash
 uv run python scripts/verify_sample_book.py
 ```
-This runs against [`examples/sample_book/deep_learning_primer.md`](file:///home/kyle/Projects/python/universal_book_translator/examples/sample_book/deep_learning_primer.md) and compiles a validated PDF with zero margin spills.
+This runs against [`examples/sample_book/deep_learning_primer.md`](examples/sample_book/deep_learning_primer.md) and compiles a validated PDF with zero margin spills.
 
 Extras: `pdf` (Docling), `ocr` / `academic` (RapidOCR + ONNX runtime), `mcp`
 (the MCP server). PDF output needs the `typst` compiler on
@@ -245,6 +245,10 @@ Measured against the current implementation, not aspirational:
   standards-complete (no TBX/SRX), so hand-off to external CAT tooling is
   limited.
 
-Design notes and guides are maintained in the working tree under `docs/`, which
-is intentionally unversioned (gitignored) — a clone carries the code and tests
-only, not those notes.
+Design notes, RFCs and the adaptive-delivery PRD are maintained in the working
+tree under `docs/`, which is intentionally unversioned (gitignored) — a clone
+carries the code and tests only, not those notes. So a `docs/...` citation inside
+a code comment is a **citation**, not a link: it names where a decision was
+recorded. The reason that governs the code is written in the comment itself,
+because you cannot open the note from a clone. Policy and the full convention:
+`ARCHITECTURE.md`, "Docs are not in the repo".

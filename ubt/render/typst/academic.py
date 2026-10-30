@@ -201,6 +201,7 @@ def academic_preamble(
     paper_title: str = "",
     columns: int = 1,
     page_size: str | None = None,
+    heading_color_hex: str | None = None,
 ) -> str:
     """Generate the Typst preamble for an academic paper (single or dual column).
 
@@ -299,6 +300,8 @@ def academic_preamble(
         else f"#set par(justify: true, leading: 0.75em, spacing: 0.85em{indent_rule})"
     )
 
+    h_fill = f', fill: rgb("{heading_color_hex}")' if heading_color_hex else ""
+
     lines = [
         "#set page(",
         size_str,
@@ -311,12 +314,12 @@ def academic_preamble(
         par_rules,
         "#show heading.where(level: 1): it => [",
         "  #v(0.5em)",
-        f'  #block(text(size: 13pt, weight: "bold", font: ({cjk_first}))[#it.body])',
+        f'  #block(text(size: 13pt, weight: "bold"{h_fill}, font: ({cjk_first}))[#it.body])',
         "  #v(0.25em)",
         "]",
         "#show heading.where(level: 2): it => [",
         "  #v(0.35em)",
-        f'  #block(text(size: 11pt, weight: "bold", font: ({cjk_first}))[#it.body])',
+        f'  #block(text(size: 11pt, weight: "bold"{h_fill}, font: ({cjk_first}))[#it.body])',
         "  #v(0.2em)",
         "]",
         "#show figure.caption: it => block(text(size: 8.5pt, fill: luma(60))[#it.body])",
@@ -330,6 +333,7 @@ def academic_title_banner(
     authors: Sequence[str] = (),
     columns: int = 1,
     lang: str = "zh",
+    title_color_hex: str | None = None,
 ) -> str:
     """Emit a title, author, and abstract block for an academic paper."""
     if not title:
@@ -345,10 +349,11 @@ def academic_title_banner(
     else:
         parts.append("#block(width: 100%)[")
 
+    title_fill = f', fill: rgb("{title_color_hex}")' if title_color_hex else ""
     parts.extend(
         [
             "  #align(center)[",
-            f'    #text(size: 16pt, weight: "bold")[{escaped_title}]\\',
+            f'    #text(size: 16pt, weight: "bold"{title_fill})[{escaped_title}]\\',
         ]
     )
 

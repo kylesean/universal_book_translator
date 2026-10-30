@@ -268,7 +268,11 @@ def test_build_page_markup() -> None:
     assert "height: 842.0pt" in markup
     assert "columns: 2" in markup
     assert "size: 9.5pt" in markup
-    assert "leading: 0.33em" in markup
+    # ``leading_em`` is a pitch ratio (1.33 = 1.33x the font size); Typst's
+    # ``par(leading:)`` is a gap on top of the font's own 0.733em line height,
+    # so the emitted value is 1.33 - 0.733 = 0.597, not 0.33. Asserting the
+    # ratio here is what shipped a 1.08 pitch while the solver believed 1.33.
+    assert "leading: 0.597em" in markup
     assert "Quantum Field Theory" in markup
     assert "Introduction to particle physics." in markup
     assert 'fill: rgb("#0078ae")' in markup

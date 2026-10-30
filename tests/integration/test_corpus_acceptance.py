@@ -1,11 +1,13 @@
 """The corpus acceptance harnesses, wired into the ``slow`` tier.
 
 ``scripts/shadow_*.py`` are CLI acceptance harnesses the ``fast`` tier cannot
-carry: they read the real corpus PDFs (gitignored, see ``corpus/README.md``)
-and run parser/render subprocesses. The strategy doc parks them in the
-``slow``/``legacy_drift`` tiers; this module is that parking spot -- each
-harness runs in a subprocess (principle 5: a harness that wedges must not
-wedge the session) and must exit 0. The final test runs the corpus gate
+carry: they read the real corpus PDFs (gitignored -- only the baselines under
+``corpus/baseline/`` and the thresholds in ``corpus/cases.json`` are tracked)
+and run parser/render subprocesses. The tier rule parks them here: ``fast`` has
+to stay offline and cheap enough to run on every edit, so anything that spawns a
+renderer belongs to ``slow``/``legacy_drift``. This module is that parking spot
+-- each harness runs in a subprocess, because a harness that wedges must not
+wedge the session, and must exit 0. The final test runs the corpus gate
 itself, ``ubt verify --run``: the real pipeline over every document, each
 delivery contract reconciled against its ``cases.json`` thresholds.
 

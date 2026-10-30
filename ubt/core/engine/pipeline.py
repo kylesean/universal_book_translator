@@ -57,9 +57,12 @@ from ubt.core.policy.adaptive_policy import (
     resolve_adaptive_policy,
 )
 from ubt.core.ports import (
-    AdapterRuntimeConfig,
     DocumentAdapter,
+    PdfStructureFacts,
+    adapter_runtime_config,
     apply_runtime_config,
+    classify_pdf_structure,
+    probe_pdf_pages,
     resolve_adapter,
 )
 from ubt.core.qe.base import BaseQERunner
@@ -67,6 +70,7 @@ from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.qe.heuristic import HeuristicQERunner
 from ubt.core.router.pricing import price_is_known
 from ubt.core.router.provider import create_model_provider
+from ubt.delivery import DeliveryDecision, DeliveryInfeasibleError, plan_for_document
 
 if TYPE_CHECKING:
     from ubt.core.qe.llm_judge import JudgeFn
@@ -152,6 +156,52 @@ _ENGINE_SIGNATURE_FIELDS: tuple[tuple[str, str], ...] = (
     ("exec_mode", "em"),
     ("formula_enrichment", "fe"),
 )
+
+
+def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryDecision:
+    """Resolve the requested delivery mode from the Phase 0 structure census.
+
+    This is intentionally a preflight, not a page-lock proof: a clean native
+    PDF is provisionally feasible and a scan/font-damaged page is vetoed. G2's
+    MeasurementService replaces the provisional signal with a real solve.
+    """
+    is_pdf = input_path.suffix.lower() == ".pdf"
+    requested = str(getattr(config, "delivery_mode", "facsimile") or "facsimile")
+    # Phase 0 only needs the census to decide a *new* faithful request. Legacy
+    # facsimile/page_locked and readable/auto (paper/book -> readable) do not
+    # consult it, so they must not pay for a full-document profile pass.
+    needs_census = requested == "faithful" and is_pdf
+    facts: PdfStructureFacts | None = None
+    page_count = 0
+    if needs_census:
+        try:
+            facts = classify_pdf_structure(input_path)
+        except Exception as exc:  # noqa: BLE001 - a census failure lowers, not kills, the run
+            logger.debug("Delivery plan: structure census unavailable for %s: %s", input_path, exc)
+        if facts is not None and facts.confirmed_font_damage_pages > 0:
+            try:
+                page_count = probe_pdf_pages(input_path)[0]
+            except Exception as exc:  # noqa: BLE001 - unmeasured page count becomes text_trust=0
+                logger.debug("Delivery plan: page count unavailable for %s: %s", input_path, exc)
+    return plan_for_document(
+        requested,
+        document_mode=str(getattr(config, "document_mode", "auto") or "auto"),
+        is_pdf=is_pdf,
+        has_scan=bool(facts.has_scan) if facts is not None else False,
+        # A PDF whose census could not run is not a clean native source. Treat
+        # it as damaged (text_trust -> 0, page_lock_feasible -> false) so a new
+        # ``faithful`` request fails closed; legacy modes stay grandfathered.
+        font_damage_pages=(
+            int(facts.confirmed_font_damage_pages)
+            if facts is not None
+            else (1 if needs_census and is_pdf else 0)
+        ),
+        page_count=page_count,
+        multicolumn_page_share=(float(facts.multicolumn_page_share) if facts is not None else 0.0),
+        structural_page_share=(float(facts.structural_page_share) if facts is not None else 0.0),
+        formula_heavy=bool(facts.formula_heavy) if facts is not None else False,
+        allow_degrade=bool(getattr(config, "allow_degrade", False)),
+    )
 
 
 def degraded_pdf_engine(config: Any, manifest_metadata: dict[str, Any] | None) -> str | None:
@@ -1016,34 +1066,30 @@ class PipelineOrchestrator:
                     f"{out_suffix.lstrip('.')}. Drop --output (the default keeps the "
                     f"input format) or choose one of {wanted}."
                 )
+        # Resolve the delivery contract before any model call. An infeasible new
+        # ``faithful`` request fails here, not after spending the book.
+        delivery = resolve_delivery_for_input(self.config, input_path)
+        if delivery.effective_mode is None:
+            reasons = "; ".join(delivery.plan.reasons) or "no eligible contract"
+            raise DeliveryInfeasibleError(
+                f"Delivery request {self.config.delivery_mode!r} is not feasible for "
+                f"{input_path.name}: {reasons}. Use --delivery readable or --allow-degrade."
+            )
+
         # Hand the engine-level runtime knobs to the adapter through its SPI
         # hook: the pipeline resolves the config once and the adapter that owns
         # each field (the Docling PDF family) applies the subset it consumes, so
         # no per-field branch is added here when a config field grows.
         apply_runtime_config(
             adapter,
-            AdapterRuntimeConfig(
-                ocr_mode=self.config.ocr_mode,
-                ocr_endpoint=self.config.ocr_endpoint,
-                ocr_api_key=self.config.ocr_api_key.get_secret_value(),
-                ocr_model=self.config.ocr_model,
-                formula_enrichment=self.config.formula_enrichment,
-                docling_device=self.config.docling_device,
-                formula_crop_margin=self.config.formula_crop_margin,
-                toc_mode=self.config.toc_mode,
-                font_family=self.config.font_family,
-                allow_page_upload=self.config.allow_page_upload,
-                cache_dir=str(self.config.cache_dir) if self.config.cache_enabled else "",
-                docling_isolate_process=self.config.docling_isolate_process,
-                enable_layout_auto_heal=self.config.enable_layout_auto_heal,
-                layout_auto_heal_max_passes=self.config.layout_auto_heal_max_passes,
-                delivery_mode=self.config.delivery_mode,
-                enable_pdf_optimization=self.config.enable_pdf_optimization,
-                pdf_optimize_profile=self.config.pdf_optimize_profile,
-            ),
+            adapter_runtime_config(self.config, delivery_mode=delivery.effective_mode),
         )
 
         manifest = await adapter.extract_manifest(input_path)
+        manifest.metadata["delivery_plan"] = delivery.plan.to_manifest()
+        manifest.metadata["delivery_mode_requested"] = self.config.delivery_mode
+        manifest.metadata["delivery_mode_effective"] = delivery.effective_mode
+        manifest.metadata["delivery_mode_legacy"] = delivery.legacy
         if source_lang:
             manifest.source_lang = source_lang
         else:

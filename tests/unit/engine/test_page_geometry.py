@@ -1,8 +1,8 @@
 """``page_geometry``: an additive table, and the guarantee that it costs nothing.
 
-The design doc originally proposed this as a ``blocks.geometry_json`` column and
-accepted a ``--fresh`` for it. Both halves were wrong, and these tests pin the
-correction rather than the conclusion:
+The v2.1 design doc originally proposed this as a ``blocks.geometry_json``
+column and accepted a ``--fresh`` for it. Both halves were wrong, and these
+tests pin the correction rather than the conclusion:
 
 * **Page-level, not block-level.** One page carries ~20 blocks; a per-block
   column stores the same page's facts 20 times and makes one page's update a

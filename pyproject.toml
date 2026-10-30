@@ -74,6 +74,12 @@ dependencies = [
     "pillow>=12.3.0",
     "pikepdf>=10.13.0.post1",
     "pylatexenc>=2.10",
+    # ``ubt/cli/commands/doctor_deep.py`` imports it at module scope (process
+    # memory/CPU sampling for the deep doctor report), so it is a runtime
+    # dependency and not just a test helper. It was previously reaching the
+    # environment through an unrelated extra, which made `ubt doctor --deep`
+    # and the fast test tier fail on a clean ``uv sync --extra dev``.
+    "psutil>=5.9",
     # Last-resort charset detection for source files with neither a BOM nor a
     # declared encoding (GBK/Shift-JIS Markdown, .txt). See adapters/base.py
     # decode_markup; without it those bytes decode to U+FFFD before any sniffer
@@ -129,8 +135,11 @@ dev = [
     "pypdf>=4.0.0",
     # Runs the local git hooks in `.pre-commit-config.yaml` (lint/format on
     # commit, types + fast tests on push). This is the gate while remote CI is
-    # intentionally disabled during private rapid iteration; the phased rollout
-    # and activation triggers live in docs/guides/CI_AND_QUALITY_GATES.md.
+    # held minimal on purpose: CI must repeat a gate that already passes locally,
+    # never be the first place it runs. Extra jobs (Windows/macOS matrix, the
+    # `pdf` extra, nightly real-model runs) are added one at a time, and only
+    # once each can stay green — a job that is red by design teaches everyone to
+    # ignore the gate.
     "pre-commit>=4.0.0",
 ]
 # Agent entry point: MCP stdio server (Cursor/Codex call ubt_* tools).
@@ -159,6 +168,26 @@ academic = [
     "rapidocr>=3.9.0",
     "onnxruntime>=1.29.0",
     "numpy>=1.26.0",
+]
+# CELS (faithful 1:1 in-place reflow) Phase 2 only. ``kiwisolver`` is the
+# Cassowary incremental simplex matplotlib has shipped for a decade: CELS
+# Stage 3B hands it the *vertical* degrees of freedom (block y, paragraph gap,
+# deficit lean) only after Stage 3A has fixed line count, size, tracking and
+# horizontal scale with real measurement. A hand-written simplex was rejected
+# for the usual reason -- degeneracy/cycling/bug surface -- and heavier
+# alternatives (scipy linprog, z3) buy nothing at this size.
+#
+# License: Modified BSD (Nucleic Development Team, PyPI classifier
+# "License :: OSI Approved :: BSD License"), compatible with this project's MIT.
+# Optional rather than default because the readable path never touches it and
+# it is a C++ extension: default installs must not acquire a compile fallback.
+cels = [
+    "kiwisolver>=1.4.0",
+    # Subsetting the target font is part of CELS Stage 5: the corpus fonts are
+    # single-byte Type1 with no /ToUnicode, so a CJK translation needs an
+    # embedded, subsetted font with its own ToUnicode CMap (AD-018). Pure Python
+    # and MIT-licensed; ``fontTools.subset`` is the only API used.
+    "fonttools>=4.50.0",
 ]
 # QE dependency note: Neural CometKiwi (CC-BY-NC-SA-4.0 non-commercial) has been
 # retired from default extras to ensure 100% commercial license compliance.
@@ -254,8 +283,7 @@ python_files = ["test_*.py"]
 # Default loop runs the fast subset; heavy integration/baselines opt in via
 # `pytest -o addopts=""` (everything) or `-m slow` (slow only). Remote CI
 # (.github/workflows/ci.yml) runs the fast tier everywhere and the slow tier
-# with a checksum-pinned typst; the local git hooks stay the inner-loop gate
-# (see docs/guides/CI_AND_QUALITY_GATES.md).
+# with a checksum-pinned typst; the local git hooks stay the inner-loop gate.
 #
 # Both CI pytest steps pass an explicit `-m`, which REPLACES this filter rather
 # than narrowing it, so the tiers a gate runs are exactly `fast` and `slow`.
@@ -269,13 +297,13 @@ python_files = ["test_*.py"]
 addopts = "-m 'not slow and not legacy_drift' --timeout=600"
 markers = [
     "network: marks tests that require network access (e.g. Docling HuggingFace model downloads)",
-    "slow: marks tests that spawn a heavy *long-running* subprocess or a render A/B comparison (full-document typst renders, pandoc, pdftoppm, `python -m ubt` end-to-end); deselect with -m 'not slow'. Short single-snippet typst compiles are allowed in `fast` when CI installs typst before the tier — see docs/guides/TESTING_STRATEGY.md",
+    "slow: marks tests that spawn a heavy *long-running* subprocess or a render A/B comparison (full-document typst renders, pandoc, pdftoppm, `python -m ubt` end-to-end); deselect with -m 'not slow'. Short single-snippet typst compiles are allowed in `fast` when CI installs typst before the tier. The tier rule: fast = offline and cheap enough to run on every edit, slow = a long-running subprocess or a render A/B, network = needs outbound access",
     "fast: offline unit tests cheap enough for the per-edit inner loop (a single-snippet typst compile is allowed; CI installs typst before this tier); `pytest -m fast` runs the whole tier in about a minute",
-    # AGENTS.md §2: a legacy check that blocks work and costs more than 15 min of
-    # archaeology moves here instead of being deleted or left red. Quarantine is not
-    # amnesty — the full local suite (and the stage-1 CI job once activated,
-    # docs/guides/CI_AND_QUALITY_GATES.md) runs it via `-o addopts=""`, and every
-    # use must name what it is waiting on in the marker's reason argument.
+    # A legacy check that blocks work and costs more than 15 min of archaeology
+    # moves here instead of being deleted or left red. Quarantine is not amnesty —
+    # the full local suite (and the stage-1 CI job once activated) runs it via
+    # `-o addopts=""`, and every use must name what it is waiting on in the
+    # marker's reason argument.
     "legacy_drift: quarantined legacy check, deselected from the inner loop but still run in full runs",
 ]
 filterwarnings = [

@@ -10,7 +10,7 @@ pagination and geometry, this covers the same code path deterministically in CI.
 
 Why ``slow`` and not ``fast``: every PDF render path shells out to the external
 ``typst`` compiler -- a heavy subprocess, per
-``docs/guides/TESTING_STRATEGY.md`` -- so it cannot be in the inner loop. CI
+the project testing strategy -- so it cannot be in the inner loop. CI
 installs a checksum-pinned ``typst`` and runs the slow tier (``pytest -m slow``);
 locally the module skips when ``typst`` is absent. The pure-Python ingest half
 runs in the ``fast`` tier instead (``tests/unit/adapters/test_pdf_adapter_e2e.py``).

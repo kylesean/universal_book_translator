@@ -316,14 +316,7 @@ def canvas_page_pairs(typ_text: str) -> dict[int, int] | None:
     **Why the source and not the PDF.** The delivered PDF does not record which
     page was drawn over which background; only the markup does. A page that
     solved to L2 is reflowed from the IR and embeds nothing, so pairing it with
-    the same-numbered background page compares two unrelated pages. On a dry run
-    of ``chapter-3.pdf`` 7 of 26 pages were L2, and 5 of them were reported as
-    36–59% "ink collision" purely from that mismatch.
-
-    Pages are counted by ``#page(`` at the start of a line, which is the only
-    form the renderer emits (a ``#page`` nested inside a block would be a
-    different document). A page whose ``#page(`` line carries no background
-    image is an L2 page and is simply absent from the returned map.
+    the same-numbered background page compares two unrelated pages.
     """
     if "#page(" not in typ_text:
         return None
@@ -338,6 +331,32 @@ def canvas_page_pairs(typ_text: str) -> dict[int, int] | None:
         if match is not None:
             pairs[page_no] = int(match.group(1))
     return pairs or None
+
+
+_CANVAS_BBOX_RE = re.compile(r"//\s*bbox:\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)")
+
+
+def canvas_page_rois(
+    typ_text: str,
+) -> dict[int, list[tuple[float, float, float, float]]]:
+    """Artifact page -> list of (dx, dy, width, height) in pt for placed canvas blocks."""
+    if "#page(" not in typ_text:
+        return {}
+    page_rois: dict[int, list[tuple[float, float, float, float]]] = {}
+    page_no = 0
+    parts = re.split(r"(?m)^(?=[ \t]*#page\()", typ_text)
+    for part in parts:
+        stripped = part.lstrip()
+        if not stripped.startswith("#page("):
+            continue
+        page_no += 1
+        bboxes = [
+            (float(m[0]), float(m[1]), float(m[2]), float(m[3]))
+            for m in _CANVAS_BBOX_RE.findall(stripped)
+        ]
+        if bboxes:
+            page_rois[page_no] = bboxes
+    return page_rois
 
 
 def pdf_page_count(pdf_path: Path) -> int:
@@ -1021,12 +1040,19 @@ def blocking_gate_tripped(
     findings: Sequence[VisualFinding],
     total_pages: int,
     enabled: bool,
+    *,
+    vlm_blocking_enabled: bool = False,
 ) -> list[VisualFinding]:
     """Blocking gate (opt-in, short docs only).
 
     Returns the CRITICAL findings that refuse export when ``enabled`` and
     the document is within ``QA_FULL_GATE_MAX_PAGES``; otherwise []. MAJOR
-    findings never block (warn-only). Pure function, unit-tested.
+    findings never block (warn-only), with one explicit exception:
+    ``vlm_visual_fail`` blocks a short document when
+    ``vlm_blocking_enabled`` is set. The VLM judge samples a few pages, so it
+    is advisory by default; an operator who enables it accepts that a sampled
+    failure refuses the whole short artifact. Long books keep it as
+    needs-human because the sample is not representative.
 
     An unreadable rendered PDF (``total_pages < 0``, the
     ``pdf_page_count`` sentinel) fails closed regardless of ``enabled`` and
@@ -1062,6 +1088,12 @@ def blocking_gate_tripped(
     ]
     if always_fail:
         return always_fail
+    if (
+        vlm_blocking_enabled
+        and 0 < total_pages <= QA_FULL_GATE_MAX_PAGES
+        and any(getattr(f, "code", "") == "vlm_visual_fail" for f in findings)
+    ):
+        return [f for f in findings if getattr(f, "code", "") == "vlm_visual_fail"]
     if not enabled or total_pages == 0 or total_pages > QA_FULL_GATE_MAX_PAGES:
         return []
     return [f for f in findings if getattr(f, "severity", "") == "critical"]
@@ -1234,18 +1266,20 @@ def text_occlusion_findings(
 #    pages nothing had been drawn on. ``CANVAS_PAIR_IDENTITY_MIN`` is the guard,
 #    and :func:`canvas_page_pairs` supplies the map.
 #
-# **Warn-only, by decision.** The design doc's §9 proposed auto-downgrading a
-# tripped page from L1 to L2 and recompiling. That needs a per-page re-render, a
-# page splice, and a second page-count reconciliation — a large machine whose
-# failure mode is a book that renders twice and still ships the collision. The
-# gate therefore reports ``canvas_ink_collision`` (MAJOR) per page with the
-# measured ratio, and the corpus run is what decides whether it is ever promoted
-# to a fail-closed code. A warning nobody has ever seen fire is not a gate; a
-# measured baseline on five real books is what makes promotion defensible.
+# **Warn-only here, fail-closed above.** This detector still reports
+# ``canvas_ink_collision`` (MAJOR) per page with the measured ratio rather than
+# re-rendering mid-flight. The v3.0 PRD (``docs/design/adaptive_delivery_prd.md``
+# §9) makes the *delivery* contract fail-closed: a critical finding blocks
+# export, and a major one blocks unless the caller explicitly opts in. Keeping
+# the measurement warn-only and the gate fail-closed separates "what happened"
+# from "may this ship" — the old design conflated them and shipped broken
+# pages.
 
 #: Share of a page's translated-text pixels that may sit on pre-existing ink
-#: before the page is reported. 3% is the design doc's number, and it is
-#: deliberately generous: a translated caption legitimately sits inside a figure
+#: before the page is reported. 3% is the v2.1 design doc's number, retained as
+#: a measurement baseline; the v3.0 PRD makes the delivery gate fail-closed, so
+#: this threshold decides when a page is *reported*, not whether it may ship.
+#: It is deliberately generous: a translated caption legitimately sits inside a figure
 #: box, a formula's own delimiters sit near its rule, and a page-furniture line
 #: can run under a short heading. What it is NOT generous enough to hide is a
 #: body line lying along a table rule, which reads far higher.
@@ -1425,6 +1459,9 @@ def canvas_page_pair_identity(background_png: Path, final_png: Path) -> float | 
 def canvas_ink_collision_ratio(
     background_png: Path,
     final_png: Path,
+    *,
+    rois: Sequence[tuple[float, float, float, float]] | None = None,
+    dpi: int = DEFAULT_DPI,
 ) -> tuple[float, int, int] | None:
     """Measure ``(ratio, text_pixels, collided_pixels)`` for one page pair.
 
@@ -1507,6 +1544,29 @@ def canvas_ink_collision_ratio(
     added = ImageChops.subtract(background, final)
     mask = added.point(lambda value: 255 if value > CANVAS_TEXT_DIFF_THRESHOLD else 0)
 
+    # When block-level ROIs are known, restrict inspection strictly to the regions
+    # where translated text was actually placed: unstripped background content
+    # (such as untranslated references or figures) in other regions cannot collide
+    # with translation and must not trigger false positives due to rasterization shifts.
+    if rois:
+        from PIL import ImageDraw
+
+        roi_mask = Image.new("L", background.size, 0)
+        draw = ImageDraw.Draw(roi_mask)
+        scale = dpi / 72.0
+        pad = 8.0 * scale
+        for r_dx, r_dy, r_w, r_h in rois:
+            draw.rectangle(
+                [
+                    r_dx * scale - pad,
+                    r_dy * scale - pad,
+                    (r_dx + r_w) * scale + pad,
+                    (r_dy + r_h) * scale + pad,
+                ],
+                fill=255,
+            )
+        mask = ImageChops.multiply(mask, roi_mask)
+
     page_pixels = background.size[0] * background.size[1]
     raw_pixels = mask.histogram()[255]
     if raw_pixels < CANVAS_MIN_TEXT_PIXELS or raw_pixels < CANVAS_MIN_TEXT_SHARE * page_pixels:
@@ -1537,6 +1597,8 @@ def canvas_ink_collision_pages(
     final_pngs: Mapping[int, Path],
     *,
     page_pairs: Mapping[int, int] | None = None,
+    page_rois: Mapping[int, Sequence[tuple[float, float, float, float]]] | None = None,
+    dpi: int = DEFAULT_DPI,
 ) -> list[InkCollisionPage]:
     """Measure every page the caller says is on the canvas, in artifact page order.
 
@@ -1577,7 +1639,8 @@ def canvas_ink_collision_pages(
                 "unmeasurable" if identity is None else f"{identity:.3f}",
             )
             continue
-        result = canvas_ink_collision_ratio(background_png, final_png)
+        rois = page_rois.get(artifact_page) if page_rois is not None else None
+        result = canvas_ink_collision_ratio(background_png, final_png, rois=rois, dpi=dpi)
         if result is None:
             continue
         ratio, text_pixels, collided = result
@@ -1648,6 +1711,48 @@ def canvas_ink_collision_findings(
         canvas_ink_collision_pages(background_pngs, final_pngs),
         ratio_threshold=ratio_threshold,
     )
+
+
+def detect_colliding_l1_pages(
+    bg_pdf: Path,
+    final_pdf: Path,
+    l1_pages: Sequence[int],
+    *,
+    page_rois: Mapping[int, Sequence[tuple[float, float, float, float]]] | None = None,
+    dpi: int = DEFAULT_DPI,
+    ratio_threshold: float = CANVAS_COLLISION_RATIO,
+) -> dict[int, float]:
+    """Return ``{page_no: collision_ratio}`` for L1 pages whose ink collision exceeds ``ratio_threshold``.
+
+    Used during ``_render_facsimile`` so any L1 page whose translated text
+    collides with unstripped background rules, vector diagrams, or residual ink
+    is automatically rerouted to Tier L2 (Page-Locked Reflow) before the
+    artifact ships (§9.1).
+    """
+    pages = sorted({int(p) for p in l1_pages if int(p) >= 1})
+    if not pages or not bg_pdf.exists() or not final_pdf.exists():
+        return {}
+    try:
+        with tempfile.TemporaryDirectory(prefix="ubt_l1_collision_") as tmp_dir:
+            root = Path(tmp_dir)
+            bg_pngs = render_pages_to_png(bg_pdf, pages, dpi=dpi, work_dir=root / "bg")
+            if not bg_pngs:
+                return {}
+            final_pngs = render_pages_to_png(final_pdf, pages, dpi=dpi, work_dir=root / "fg")
+            if not final_pngs:
+                return {}
+            pairs = {p: p for p in pages if p in bg_pngs and p in final_pngs}
+            if not pairs:
+                return {}
+            measured = canvas_ink_collision_pages(
+                bg_pngs, final_pngs, page_pairs=pairs, page_rois=page_rois, dpi=dpi
+            )
+            return {
+                item.page: round(item.ratio, 4) for item in measured if item.ratio > ratio_threshold
+            }
+    except Exception as exc:
+        logger.debug("L1 ink collision pre-check skipped: %s", exc)
+        return {}
 
 
 def _tier_coverage(
@@ -1781,14 +1886,14 @@ async def run_visual_gate(
 ) -> VisualGateResult:
     """Run T0+T1 always, pixel+T2 only when tools/judge are available.
 
-    ``canvas_background_pdf`` turns on the L1 facsimile tier (§9 of
-    ``docs/design/inplace_delivery.md``): the stripped background the facsimile
-    renderer drew under the translation. When given, every sampled page is
-    rasterised a second time from it and the two rasters are diffed to measure
-    how much of the translated text landed on pre-existing ink. When omitted the
-    tier is skipped and the report says so — it is the only way to measure the
-    facsimile channel's own failure mode, and "no background was supplied" must
-    not read as "measured clean".
+    ``canvas_background_pdf`` turns on the canvas strategy of the ``faithful``
+    contract (§5.5 and §9 of ``docs/design/adaptive_delivery_prd.md``): the
+    stripped background the canvas renderer drew under the translation. When
+    given, every sampled page is rasterised a second time from it and the two
+    rasters are diffed to measure how much of the translated text landed on
+    pre-existing ink. When omitted the tier is skipped and the report says so —
+    it is the only way to measure the canvas strategy's own failure mode, and
+    "no background was supplied" must not read as "measured clean".
     """
     if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
         return VisualGateResult(passed=True, skipped_reason="not a rendered pdf")
@@ -1943,6 +2048,7 @@ async def run_visual_gate(
         # itself the finding, and silently reporting "no collisions" from an
         # empty comparison is the failure mode this whole section exists to end.
         canvas_pairs = canvas_page_pairs(typ_text) if typ_text is not None else None
+        canvas_rois = canvas_page_rois(typ_text) if typ_text is not None else None
         if canvas_background_pdf is None:
             skip_notes.append("no stripped background supplied; canvas ink-collision check skipped")
         elif canvas_pairs is None:
@@ -1988,6 +2094,8 @@ async def run_visual_gate(
                     bg_pngs,
                     pngs,
                     page_pairs=sampled_pairs,
+                    page_rois=canvas_rois,
+                    dpi=dpi,
                 )
                 findings.extend(_collision_findings(canvas_pages))
                 if not canvas_pages:

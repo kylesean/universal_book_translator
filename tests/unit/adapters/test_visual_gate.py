@@ -213,6 +213,41 @@ def test_a_blank_page_fails_closed_even_when_disabled() -> None:
     assert blocking_gate_tripped([other], total_pages=3, enabled=False) == []
 
 
+def test_vlm_fail_is_advisory_by_default() -> None:
+    """The VLM judge samples pages; a model FAIL must not refuse the book by default."""
+    from ubt.adapters.pdf.visual_gate import blocking_gate_tripped
+
+    fail = _finding("major", code="vlm_visual_fail")
+    assert blocking_gate_tripped([fail], total_pages=10, enabled=True) == []
+    assert blocking_gate_tripped([fail], total_pages=10, enabled=False) == []
+
+
+def test_vlm_fail_blocks_a_short_document_when_explicitly_enabled() -> None:
+    from ubt.adapters.pdf.visual_gate import blocking_gate_tripped
+
+    fail = _finding("major", code="vlm_visual_fail")
+    assert blocking_gate_tripped(
+        [fail], total_pages=10, enabled=False, vlm_blocking_enabled=True
+    ) == [fail]
+
+
+def test_vlm_fail_does_not_block_a_long_book() -> None:
+    """A sampled VLM FAIL is not representative of a long book."""
+    from ubt.adapters.pdf.visual_gate import blocking_gate_tripped
+    from ubt.core.policy.layout_policy import QA_FULL_GATE_MAX_PAGES
+
+    fail = _finding("major", code="vlm_visual_fail")
+    assert (
+        blocking_gate_tripped(
+            [fail],
+            total_pages=QA_FULL_GATE_MAX_PAGES + 1,
+            enabled=False,
+            vlm_blocking_enabled=True,
+        )
+        == []
+    )
+
+
 # --------------------------------------------------------------------------- #
 # What counts as a blank page.
 #

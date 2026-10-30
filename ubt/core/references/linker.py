@@ -27,8 +27,24 @@ from ubt.core.references.models import (
 )
 
 #: Delimiters where hyperlink injection must be skipped
+#:
+#: The last alternative protects a Typst call *with* a content body
+#: (``#text(fill: rgb("#00699d"))[1]``, ``#strong[x]``). Without it the ``[1]``
+#: inside the body looked like prose to the citation regex, which replaced it
+#: with ``#link(<bib-1>)[[1]]`` and consumed the body's own brackets — leaving
+#: ``#text(fill: …)#link(…)``, a call with no body. Typst rejects that with
+#: ``missing argument: body`` and the whole page-locked render aborts (26-page
+#: replay, block ``pdf_main#b0004``, whose citation is a blue inline run). The
+#: body class allows any non-bracket character so a nested call such as
+#: ``rgb("#00699d")`` inside the arguments still matches.
 _PROTECTED_SPAN_RE = re.compile(
-    r"(?:\$[^\$]+\$)|(?:`[^`]+`)|(?:#link\([^)]+\)\[[^\]]+\])|(?:<mark[^>]*>.*?</mark>)|(?:<a\s+[^>]*>.*?</a>)|(?:\[[^\]]+\]\([^)]+\))",
+    r"(?:\$[^\$]+\$)"
+    r"|(?:`[^`]+`)"
+    r"|(?:#link\([^)]+\)\[[^\]]+\])"
+    r"|(?:#\w+(?:\([^\[\]]*?\))?\[[^\[\]]*\])"
+    r"|(?:<mark[^>]*>.*?</mark>)"
+    r"|(?:<a\s+[^>]*>.*?</a>)"
+    r"|(?:\[[^\]]+\]\([^)]+\))",
     re.DOTALL,
 )
 

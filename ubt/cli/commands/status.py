@@ -779,6 +779,17 @@ def re_export_cmd(
             show_default=False,
         ),
     ] = None,
+    delivery: Annotated[
+        str | None,
+        typer.Option(
+            "--delivery",
+            help=(
+                "Re-render under a different delivery contract (auto/readable/faithful) "
+                "without calling a model. Omit to keep the mode the run used."
+            ),
+            show_default=False,
+        ),
+    ] = None,
 ) -> None:
     """Re-render a finished job's deliverable from its ledger (human-edit re-export)."""
     resolve_fn = resolve_db_dir()
@@ -804,6 +815,7 @@ def re_export_cmd(
                 job_id=job_id,
                 output_path=output,
                 config=config,
+                delivery=delivery,
             )
         )
     except LedgerWriterLockConflictError as exc:

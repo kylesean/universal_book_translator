@@ -1,8 +1,10 @@
 # scripts/
 
-Operator tooling. **Automated verification lives in `tests/`** (see
-`docs/guides/TESTING_STRATEGY.md`); everything here is run by hand or by the
-slow test tier, never collected by pytest (`testpaths = ["tests"]`).
+Operator tooling. **Automated verification lives in `tests/`** — the tier rule
+there is `fast` = offline and cheap enough to run on every edit, `slow` = a
+long-running subprocess or a render A/B, `network` = needs outbound access.
+Everything here is run by hand or by the slow tier, never collected by pytest
+(`testpaths = ["tests"]`).
 
 ## Slow-tier corpus harness (kept)
 
@@ -21,16 +23,33 @@ It takes `--corpus corpus` (default) and exits 0 on pass.
 - `cost_benchmark.py` — writes `docs/benchmarks/` (see that README).
 - `knob_sweep.py`, `biou_score.py` — experiment/benchmark harnesses for
   tuning runs.
-- `probe_facsimile.py` — feasibility probe for the 1:1 facsimile delivery
-  channel (design: `docs/design/inplace_delivery.md`). For a source PDF it
-  reports, per page, the largest single body size at which every paragraph
-  still fits its source box — the acceptance number for that channel. Pure
-  geometry: no render, no model, no ledger, so it is safe to run before paying
-  for a job. `--json` for machine reading, `--summary` to skip the page table.
+- `probe_facsimile.py` — cheap feasibility prefilter for the `faithful`
+  delivery contract (design: `docs/design/adaptive_delivery_prd.md`). For a
+  source PDF it reports, per page, the largest single body size at which every
+  paragraph still fits its source box. Pure geometry: no render, no model, no
+  ledger, so it is safe to run before paying for a job. It is not the delivery
+  acceptance criterion; the PRD requires artifact-level measurement.
+  `--json` for machine reading, `--summary` to skip the page table.
 - `diagnose_spills.py` — Typst layout spill and physical overflow diagnostic tool.
   Deterministic geometry scanner over rendered PDF artifacts to detect margin
   breaches, multi-column gutter overruns, table/formula clipping, and type collapse;
   emits 2D spatial terminal heatmaps, structured JSON, and actionable fix advice.
+- `calibrate_measurement.py` — G2 Typst MeasurementService calibration: compiles one
+  block with the requested width/style and reports real height, line boxes and
+  overflow. Zero model tokens; use it to spot-check a font/width before changing
+  the layout solver.
+- `cels_spike.py` — G3 CELS feasibility probe on real pages: Stage 1 column
+  detection (with every refused gutter and its reason) plus Stage 5 content-stream
+  injection arms (`Tc`, forced `Tz`, `TL`+`T*` twin). Verifies the rewritten PDF by
+  re-extracting text and char boxes with PDFium, counting graphics operators, and
+  diffing full-page rasters; writes `evidence.json` to the given out dir. Zero
+  model tokens; the go/no-go report cites its output.
+- `cels_cjk_spike.py` — G3 Stage 5 font pipeline (AD-018): subsets a CJK TrueType
+  font with `fontTools`, embeds it as `/Type0` + `/Identity-H` with a generated
+  `/ToUnicode` CMap, writes a Chinese sentence at the original line position, and
+  verifies with PDFium that the text extracts verbatim, stays inside the column,
+  and changes no pixel outside the rewritten line. Requires a glyf-based CJK font
+  (`--font`), e.g. `MapleMono-NF-CN-Regular.ttf`.
 - `run_corpus_benchmark.py` — multi-scenario automated corpus benchmark runner
   and quality/cost/spill dashboard. Evaluates cases from `corpus/cases.json`
   across delivery contract integrity, physical layout spills, MTQE scores, and

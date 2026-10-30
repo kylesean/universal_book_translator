@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,9 +24,25 @@ from ubt.core.ir.models import BlockType, BookManifest, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
 
 if TYPE_CHECKING:
-    pass
+    from ubt.model.span import PhysicalBox
 
 logger = logging.getLogger(__name__)
+
+
+def _physical_box_region(pbox: PhysicalBox, page_width: float) -> tuple[int, int]:
+    """The ``(page, column)`` region one physical box belongs to.
+
+    ``page_width`` is a parameter, not a closed-over loop variable. The caller
+    walks pages inside a loop, so a nested definition that captured ``pw`` would
+    bind whatever width the loop last happened to hold -- and the column test
+    (``w > 0.65 * page_width``) is a comparison against *this* page's measure.
+    A box wider than 65% of the measure spans the gutter by construction, and so
+    does one whose midpoint sits left of it; both are the left column.
+    """
+    bw = pbox.bbox[2] - pbox.bbox[0]
+    bmid = (pbox.bbox[0] + pbox.bbox[2]) / 2.0
+    bcol = 0 if bw > 0.65 * page_width or bmid < page_width * 0.50 else 1
+    return (int(pbox.page), bcol)
 
 
 def record_toolchain_versions(manifest: BookManifest) -> None:
@@ -197,28 +214,56 @@ def _facsimile_strip_plan(
     """
     erase: dict[int, list[BoxRect]] = {}
     keep: dict[int, list[BoxRect]] = {}
+    seen_rects: set[tuple[bool, int, float, float, float, float]] = set()
+
+    def _add_rect(is_keep: bool, page_no: int, x0: float, y0: float, x1: float, y1: float) -> None:
+        if page_no < 1 or page_no > total_pages:
+            return
+        rect = BoxRect(page_index=page_no, x0=x0, y0=y0, x1=x1, y1=y1)
+        if rect.width <= 0 or rect.height <= 0:
+            return
+        key = (is_keep, page_no, round(x0, 3), round(y0, 3), round(x1, 3), round(y1, 3))
+        if key in seen_rects:
+            return
+        seen_rects.add(key)
+        target = keep if is_keep else erase
+        target.setdefault(page_no, []).append(rect)
 
     for pno, page_blocks in blocks_by_page.items():
         for b in page_blocks:
-            if b.bbox is None or b.bbox.page != pno:
-                continue
-            rect = BoxRect(
-                page_index=pno,
-                x0=float(b.bbox.x0),
-                y0=float(b.bbox.y0),
-                x1=float(b.bbox.x1),
-                y1=float(b.bbox.y1),
-            )
-            if rect.width <= 0 or rect.height <= 0:
+            if b.bbox is None:
                 continue
             keeps_source = b.skip_translate or b.block_type in (
                 BlockType.FORMULA,
                 BlockType.IMAGE,
             )
-            if keeps_source:
-                keep.setdefault(pno, []).append(rect)
-            else:
-                erase.setdefault(pno, []).append(rect)
+            prov = getattr(b, "provenance", None)
+            phys_boxes = getattr(prov, "physical_boxes", None) if prov is not None else None
+            if phys_boxes and len(phys_boxes) > 1:
+                from ubt.model.span import boxes_from_provenance
+
+                for pbox in boxes_from_provenance(phys_boxes):
+                    if pbox.page == pno or b.bbox.page == pno:
+                        _add_rect(
+                            keeps_source,
+                            int(pbox.page),
+                            float(pbox.bbox[0]),
+                            float(pbox.bbox[1]),
+                            float(pbox.bbox[2]),
+                            float(pbox.bbox[3]),
+                        )
+                continue
+
+            if b.bbox.page != pno:
+                continue
+            _add_rect(
+                keeps_source,
+                pno,
+                float(b.bbox.x0),
+                float(b.bbox.y0),
+                float(b.bbox.x1),
+                float(b.bbox.y1),
+            )
 
     # No furniture bands are added here. See the docstring: a blanket
     # ``[0, 0.08·H]`` / ``[0.92·H, H]`` keep rect protects nothing (unowned text
@@ -366,10 +411,21 @@ class DoclingRenderStrategy:
         # One object rather than four floats: the page that gets emitted and the
         # page the layout audit judges must be the same page, and passing the
         # size and the margins separately is what lets them drift.
+        raw_src = str(
+            getattr(manifest, "source_path", "")
+            or manifest.metadata.get("source_path", "")
+            or manifest.metadata.get("input_path", "")
+            or ""
+        )
+        source_pdf_path = Path(raw_src) if raw_src else None
         page_setup = resolved_page_setup(
-            measure_trim(getattr(manifest, "source_path", "") or None),
+            measure_trim(raw_src or None),
             columns=columns,
         )
+        from ubt.render.typst.style_profile import extract_document_style_profile
+
+        style_profile = extract_document_style_profile(blocks, source_path=source_pdf_path)
+        manifest.metadata["document_style_profile"] = style_profile.to_metadata_dict()
         renderer = TypstDocumentRenderer(
             assets_root=assets_root,
             bilingual=bilingual,
@@ -386,6 +442,8 @@ class DoclingRenderStrategy:
             abstract=manifest.metadata.get("abstract", "") if is_academic else "",
             toc_mode=getattr(self, "toc_mode", "auto"),
             page_setup=page_setup,
+            source_pdf=source_pdf_path,
+            style_profile=style_profile,
         )
         source, stats = renderer.build_source(blocks, build_dir, target_lang)
         typ_path = build_dir / "main.typ"
@@ -425,6 +483,7 @@ class DoclingRenderStrategy:
                     abstract=manifest.metadata.get("abstract", "") if is_academic else "",
                     toc_mode=getattr(self, "toc_mode", "auto"),
                     page_setup=page_setup,
+                    source_pdf=source_pdf_path,
                     **overrides,
                 )
 
@@ -499,6 +558,7 @@ class DoclingRenderStrategy:
         from ubt.render.delivered_text import delivered_text
         from ubt.render.flow import approximate_measure, solve_flow
         from ubt.render.layout_solver import solve_page_2d
+        from ubt.render.typst.artifact_guard import has_sentinel
         from ubt.render.typst.facsimile_renderer import (
             FacsimileBlockPlacement,
             FacsimilePageSpec,
@@ -508,6 +568,8 @@ class DoclingRenderStrategy:
             PageLockedPageSpec,
             PageLockedReflowRenderer,
             extract_page_geometry,
+            make_asset_copier,
+            make_formula_cropper,
             solve_page_lock,
         )
 
@@ -523,10 +585,11 @@ class DoclingRenderStrategy:
         # background it draws under the translation comes from source page N.
         # Without one there is no page to be isomorphic to, so degrade to reflow
         # and say why. Deliberately INFO, not a warning and not an error: the
-        # delivery_mode default is now ``facsimile`` (see
-        # ``UBTConfig.delivery_mode``), so "no source PDF" is the ordinary case
-        # for a resumed job whose source moved, not a defect. Raising here would
-        # make the new default break every run that used to work.
+        # pipeline passes the effective delivery decision, and a bare strategy
+        # defaults to facsimile for tests/scripts, so "no source PDF" is the
+        # ordinary case for a resumed job whose source moved, not a defect.
+        # Raising here would make the legacy default break every run that used
+        # to work.
         #
         # ``manifest.metadata["delivery_mode"]`` is rewritten to the mode that
         # actually ran: a report claiming ``facsimile`` over a reflow artefact is
@@ -558,13 +621,31 @@ class DoclingRenderStrategy:
                 page_dims.append((pw, ph))
 
         blocks_by_page: dict[int, list[IRBlock]] = {}
+        render_flags: list[tuple[str, str]] = []
         for b in blocks:
-            p = 0
-            if b.bbox and b.bbox.page > 0:
-                p = b.bbox.page
-            elif hasattr(b.element, "span") and b.element.span and b.element.span.page > 0:
-                p = b.element.span.page
-            if p > 0:
+            if not b.skip_translate and has_sentinel(delivered_text(b, sanitize_sentinels=False)):
+                render_flags.append((b.id, "sentinel_leaked"))
+
+            pages_for_block: list[int] = []
+            if (
+                b.provenance
+                and b.provenance.physical_boxes
+                and len(b.provenance.physical_boxes) > 1
+            ):
+                from ubt.model.span import boxes_from_provenance
+
+                for pbox in boxes_from_provenance(b.provenance.physical_boxes):
+                    if pbox.page > 0 and pbox.page not in pages_for_block:
+                        pages_for_block.append(pbox.page)
+            if not pages_for_block:
+                p = 0
+                if b.bbox and b.bbox.page > 0:
+                    p = b.bbox.page
+                elif hasattr(b.element, "span") and b.element.span and b.element.span.page > 0:
+                    p = b.element.span.page
+                if p > 0:
+                    pages_for_block.append(p)
+            for p in pages_for_block:
                 blocks_by_page.setdefault(p, []).append(b)
 
         # 2. Decide what the background layer keeps and what the translation
@@ -583,6 +664,7 @@ class DoclingRenderStrategy:
                     bg_stripped,
                     per_page_erase_rects=erase_rects,
                     per_page_keep_rects=keep_rects,
+                    descend_forms=True,
                 )
             except Exception as exc:
                 logger.warning(
@@ -599,6 +681,21 @@ class DoclingRenderStrategy:
         # Reset every render: geometry describes *this* artifact, and a stale
         # page count from a previous run would be reported as this page's.
         page_geometry: list[dict[str, Any]] = []
+        preserved_by_page: dict[int, list[IRBlock]] = {}
+
+        font_stack = self._font_stack_for(target_lang)
+        # Both channels can hold L2 page-locked pages, and neither gives them a
+        # background layer to inherit artwork from. The copier resolves the
+        # extracted asset file the parser recorded as ``source_text`` into a
+        # build-relative name so ``image()`` can address it.
+        asset_copier = make_asset_copier(build_dir, self._assets_root(manifest))
+        formula_cropper = make_formula_cropper(build_dir, source_path)
+        from ubt.render.typst.style_profile import extract_document_style_profile
+
+        style_profile = extract_document_style_profile(
+            blocks, source_path=source_path, page_dims=page_dims
+        )
+        manifest.metadata["document_style_profile"] = style_profile.to_metadata_dict()
 
         for pno in range(1, total_pages + 1):
             pw, ph = page_dims[pno - 1] if pno <= len(page_dims) else (595.0, 842.0)
@@ -610,6 +707,8 @@ class DoclingRenderStrategy:
             source_leading_pt = metrics.leading_pt if metrics else source_size_pt * 1.333
 
             records_by_column: dict[int, list[dict[str, Any]]] = {}
+            obstacles_by_column: dict[int, list[float]] = {}
+            page_preserved: list[IRBlock] = []
 
             for b in page_blocks:
                 if not b.bbox:
@@ -629,7 +728,11 @@ class DoclingRenderStrategy:
                     if b.style
                     else None
                 )
-                color = style_color if style_color else ("#0078ae" if is_hdr else "#000000")
+                color = (
+                    style_color
+                    if style_color
+                    else (style_profile.primary_heading_hex if is_hdr else "#000000")
+                )
                 is_bold = getattr(b.style, "is_bold", False) if b.style else False
                 weight = "bold" if is_hdr or is_bold else "regular"
                 block_size = _block_font_size(b, is_hdr=is_hdr, body_size=source_size_pt)
@@ -641,61 +744,166 @@ class DoclingRenderStrategy:
                     BlockType.IMAGE,
                 )
                 if skip_render:
-                    skipped.append((b.id, "facsimile_preserved_opaque"))
-
-                # Column bucket for the 2D solver: a left-column paragraph must
-                # not be bounded by where the right column happens to start.
-                column = 0 if w > 0.65 * pw or b.bbox.x0 < pw * 0.55 else 1
-                records_by_column.setdefault(column, []).append(
-                    {
-                        "id": b.id,
-                        "top": b.bbox.y1,
-                        "bot": b.bbox.y0,
-                        "w": w,
-                        "n": max(1, round(h / source_leading_pt)),
-                        "glyphs": len(target_content.strip()),
-                    }
-                )
-
-                if skip_render:
+                    # The background layer carries this block's ink; it draws no
+                    # translated text and must not enter the 2D solver's column
+                    # records as a text box. However, its top edge IS a vertical
+                    # obstacle for any translated prose box above it in the same
+                    # column (or full-width across both columns), so the solver's
+                    # vertical glue must clamp at ``b.bbox.y1``.
+                    page_preserved.append(b)
+                    if b.bbox.page == pno:
+                        obs_top = float(b.bbox.y1)
+                        if w > 0.65 * pw:
+                            obstacles_by_column.setdefault(0, []).append(obs_top)
+                            obstacles_by_column.setdefault(1, []).append(obs_top)
+                        else:
+                            obs_mid_x = (b.bbox.x0 + b.bbox.x1) / 2.0
+                            obs_col = 0 if obs_mid_x < pw * 0.50 else 1
+                            obstacles_by_column.setdefault(obs_col, []).append(obs_top)
                     continue
 
-                # If block has multiple continuation boxes across columns/pages, flow across them
+                bx0 = float(b.bbox.x0)
+                by0 = float(b.bbox.y0)
+                bx1 = float(b.bbox.x1)
+                by1 = float(b.bbox.y1)
+
+                # Multi-region flow handling:
+                # If a block spans multiple disjoint regions (different columns or different pages),
+                # flow text across those region containers. If all physical boxes are in the same
+                # column on the same page, they are consecutive lines within a single block and
+                # must not be split into line-by-line fragments.
                 if (
                     b.provenance
                     and b.provenance.physical_boxes
                     and len(b.provenance.physical_boxes) > 1
                 ):
-                    from ubt.model.span import boxes_from_provenance
+                    from ubt.model.span import PhysicalBox, boxes_from_provenance
 
-                    boxes = boxes_from_provenance(b.provenance.physical_boxes)
-                    page_boxes = [box for box in boxes if box.page == pno]
-                    if len(page_boxes) > 1:
-                        measure = approximate_measure(
-                            font_size_pt=block_size or source_size_pt,
-                            leading_pt=source_leading_pt,
-                        )
-                        flowed = solve_flow(target_content, page_boxes, measure)
-                        for fl_idx, fl_pl in enumerate(flowed):
-                            if not fl_pl.text.strip():
-                                continue
-                            placements.append(
-                                FacsimileBlockPlacement(
-                                    block_id=f"{b.id}_flow_{fl_idx}",
-                                    page=pno,
-                                    x0=fl_pl.box.bbox[0],
-                                    y0=fl_pl.box.bbox[1],
-                                    x1=fl_pl.box.bbox[2],
-                                    y1=fl_pl.box.bbox[3],
-                                    text=fl_pl.text,
-                                    is_heading=is_hdr,
-                                    heading_level=getattr(b.element, "level", 1) if is_hdr else 1,
-                                    text_color_hex=color,
-                                    font_weight=weight,
-                                    font_size_pt=block_size,
+                    raw_boxes = boxes_from_provenance(b.provenance.physical_boxes)
+
+                    distinct_regions = {_physical_box_region(bx, pw) for bx in raw_boxes}
+                    if len(distinct_regions) > 1:
+                        grouped_boxes: list[PhysicalBox] = []
+                        curr_reg = None
+                        curr_page = 0
+                        ux0, uy0, ux1, uy1 = 0.0, 0.0, 0.0, 0.0
+                        for bx in raw_boxes:
+                            reg = _physical_box_region(bx, pw)
+                            if reg != curr_reg:
+                                if curr_reg is not None:
+                                    grouped_boxes.append(
+                                        PhysicalBox.of(curr_page, (ux0, uy0, ux1, uy1))
+                                    )
+                                curr_reg = reg
+                                curr_page = int(bx.page)
+                                ux0, uy0, ux1, uy1 = (
+                                    float(bx.bbox[0]),
+                                    float(bx.bbox[1]),
+                                    float(bx.bbox[2]),
+                                    float(bx.bbox[3]),
                                 )
+                            else:
+                                ux0 = min(ux0, float(bx.bbox[0]))
+                                uy0 = min(uy0, float(bx.bbox[1]))
+                                ux1 = max(ux1, float(bx.bbox[2]))
+                                uy1 = max(uy1, float(bx.bbox[3]))
+                        if curr_reg is not None:
+                            grouped_boxes.append(PhysicalBox.of(curr_page, (ux0, uy0, ux1, uy1)))
+
+                        if any(gbox.page == pno for gbox in grouped_boxes):
+                            measure = approximate_measure(
+                                font_size_pt=block_size or source_size_pt,
+                                leading_pt=source_leading_pt,
                             )
-                        continue
+                            flowed = solve_flow(target_content, grouped_boxes, measure)
+                            for fl_idx, fl_pl in enumerate(flowed):
+                                if fl_pl.box.page != pno or not fl_pl.text.strip():
+                                    continue
+                                fl_x0, fl_y0, fl_x1, fl_y1 = fl_pl.box.bbox
+                                fl_w = max(0.0, fl_x1 - fl_x0)
+                                fl_h = max(0.0, fl_y1 - fl_y0)
+                                if fl_w <= 0 or fl_h <= 0:
+                                    continue
+                                fl_mid_x = (fl_x0 + fl_x1) / 2.0
+                                fl_col = 0 if fl_w > 0.65 * pw or fl_mid_x < pw * 0.50 else 1
+                                fl_ascii = sum(1 for c in fl_pl.text if ord(c) < 128)
+                                fl_aspect = (len(fl_pl.text) - fl_ascii + fl_ascii * 0.50) / max(
+                                    1, len(fl_pl.text)
+                                )
+                                records_by_column.setdefault(fl_col, []).append(
+                                    {
+                                        "id": f"{b.id}_flow_{fl_idx}",
+                                        "top": fl_y1,
+                                        "bot": fl_y0,
+                                        "w": fl_w,
+                                        "x0": fl_x0,
+                                        "x1": fl_x1,
+                                        "n": max(1, round(fl_h / source_leading_pt)),
+                                        "glyphs": len(fl_pl.text.strip()),
+                                        "glyph_aspect": fl_aspect,
+                                    }
+                                )
+                                placements.append(
+                                    FacsimileBlockPlacement(
+                                        block_id=f"{b.id}_flow_{fl_idx}",
+                                        page=pno,
+                                        x0=fl_x0,
+                                        y0=fl_y0,
+                                        x1=fl_x1,
+                                        y1=fl_y1,
+                                        text=fl_pl.text,
+                                        is_heading=is_hdr,
+                                        heading_level=getattr(b.element, "level", 1)
+                                        if is_hdr
+                                        else 1,
+                                        text_color_hex=color,
+                                        font_weight=weight,
+                                        font_size_pt=block_size,
+                                    )
+                                )
+                            continue
+                    else:
+                        same_page_boxes = [bx for bx in raw_boxes if bx.page == pno]
+                        if same_page_boxes:
+                            bx0 = min(float(bx.bbox[0]) for bx in same_page_boxes)
+                            by0 = min(float(bx.bbox[1]) for bx in same_page_boxes)
+                            bx1 = max(float(bx.bbox[2]) for bx in same_page_boxes)
+                            by1 = max(float(bx.bbox[3]) for bx in same_page_boxes)
+                            w = max(0.0, bx1 - bx0)
+                            h = max(0.0, by1 - by0)
+
+                # Heading font size scaling: ensure multi-line heading fits in its allocated vertical box
+                if is_hdr and block_size:
+                    glyphs = len(target_content.strip())
+                    needed_lines = math.ceil((glyphs * block_size) / max(10.0, w))
+                    needed_h = needed_lines * block_size * 1.25
+                    if needed_h > h + 2.0:
+                        fitted_size = math.sqrt((w * h) / (max(1, glyphs) * 1.25))
+                        block_size = max(
+                            source_size_pt * 1.1, min(block_size, round(fitted_size, 2))
+                        )
+
+                # Column bucket for the 2D solver: a left-column paragraph must
+                # not be bounded by where the right column happens to start.
+                mid_x = (bx0 + bx1) / 2.0
+                column = 0 if w > 0.65 * pw or mid_x < pw * 0.50 else 1
+                ascii_count = sum(1 for c in target_content if ord(c) < 128)
+                glyph_aspect = (len(target_content) - ascii_count + ascii_count * 0.50) / max(
+                    1, len(target_content)
+                )
+                records_by_column.setdefault(column, []).append(
+                    {
+                        "id": b.id,
+                        "top": by1,
+                        "bot": by0,
+                        "w": w,
+                        "x0": bx0,
+                        "x1": bx1,
+                        "n": max(1, round(h / source_leading_pt)),
+                        "glyphs": len(target_content.strip()),
+                        "glyph_aspect": glyph_aspect,
+                    }
+                )
 
                 is_table = b.block_type == BlockType.TABLE
                 if is_table:
@@ -709,10 +917,10 @@ class DoclingRenderStrategy:
                     FacsimileBlockPlacement(
                         block_id=b.id,
                         page=pno,
-                        x0=b.bbox.x0,
-                        y0=b.bbox.y0,
-                        x1=b.bbox.x1,
-                        y1=b.bbox.y1,
+                        x0=bx0,
+                        y0=by0,
+                        x1=bx1,
+                        y1=by1,
                         text=target_content,
                         is_heading=is_hdr,
                         heading_level=getattr(b.element, "level", 1) if is_hdr else 1,
@@ -724,12 +932,97 @@ class DoclingRenderStrategy:
                     )
                 )
 
-            columns = [records_by_column[k] for k in sorted(records_by_column)] or [[]]
+            for col_idx, col_recs in records_by_column.items():
+                col_obstacles = obstacles_by_column.get(col_idx, [])
+                if not col_obstacles:
+                    continue
+                for rec in col_recs:
+                    below_obs = [
+                        obs_top for obs_top in col_obstacles if obs_top <= float(rec["bot"]) + 2.0
+                    ]
+                    if below_obs:
+                        rec["obstacle_top"] = max(below_obs)
+
+            columns = [
+                sorted(records_by_column[k], key=lambda r: float(r["top"]), reverse=True)
+                for k in sorted(records_by_column)
+            ] or [[]]
             sol = solve_page_2d(
                 columns,
                 source_size_pt=source_size_pt,
                 source_leading_pt=source_leading_pt,
             )
+
+            # If layout failed to fit due to only 1-2 bottleneck containers (and no source overlap),
+            # attempt controlled concise repair before falling back to L2
+            # (docs/design/adaptive_delivery_prd.md §8.6; old §6.2).
+            if (
+                not is_pure_page_locked
+                and not sol.fits
+                and not sol.source_overlap
+                and 1 <= len(sol.bottleneck_seg_ids) <= 2
+            ):
+                import dataclasses
+
+                from ubt.render.typst.container_repair import (
+                    ContainerFitSpec,
+                    compute_container_char_budget,
+                    extract_locked_numbers,
+                    repair_bottleneck_containers,
+                )
+
+                rec_by_id = {str(r.get("id")): r for col in columns for r in col if r.get("id")}
+                placement_by_id = {plc.block_id: plc for plc in placements}
+
+                fit_specs: list[ContainerFitSpec] = []
+                for b_id in sol.bottleneck_seg_ids:
+                    r = rec_by_id.get(b_id)
+                    plc = placement_by_id.get(b_id)
+                    if not r or not plc:
+                        continue
+                    budget = compute_container_char_budget(
+                        container_width_pt=float(r["w"]),
+                        max_lines=max(1, int(r.get("n", 1))),
+                        floor_pt=7.5,
+                        target_lang=target_lang,
+                    )
+                    nums = extract_locked_numbers(plc.text)
+                    fit_specs.append(
+                        ContainerFitSpec(
+                            seg_id=b_id,
+                            current_translation=plc.text,
+                            max_target_chars=budget,
+                            locked_numbers=nums,
+                        )
+                    )
+
+                if fit_specs:
+                    repaired_texts = repair_bottleneck_containers(
+                        fit_specs,
+                        rewriter=getattr(self, "container_concise_rewriter", None),
+                    )
+                    if repaired_texts:
+                        for rep_id, rep_text in repaired_texts.items():
+                            if rep_id in rec_by_id:
+                                rec_by_id[rep_id]["glyphs"] = len(rep_text.strip())
+                        placements = [
+                            dataclasses.replace(plc_item, text=repaired_texts[plc_item.block_id])
+                            if plc_item.block_id in repaired_texts
+                            else plc_item
+                            for plc_item in placements
+                        ]
+                        sol = solve_page_2d(
+                            columns,
+                            source_size_pt=source_size_pt,
+                            source_leading_pt=source_leading_pt,
+                        )
+                        for rep_id in repaired_texts:
+                            render_flags.append((rep_id, "container_fit_repaired"))
+                        repaired_meta = manifest.metadata.setdefault(
+                            "container_fit_repaired_segments", []
+                        )
+                        if isinstance(repaired_meta, list):
+                            repaired_meta.extend(repaired_texts.keys())
 
             use_l2 = (
                 is_pure_page_locked
@@ -738,8 +1031,22 @@ class DoclingRenderStrategy:
                 or (not sol.fits and sol.uniform_size_pt <= 7.5)
             )
 
+            preserved_by_page[pno] = list(page_preserved)
             if use_l2:
-                geom = extract_page_geometry(pw, ph, page_blocks)
+                for pb in page_preserved:
+                    if pb.block_type == BlockType.IMAGE:
+                        rel_asset = (
+                            asset_copier(pb.source_text.strip())
+                            if pb.source_text and pb.source_text.strip()
+                            else None
+                        )
+                        if not rel_asset:
+                            skipped.append((pb.id, "asset_not_found"))
+                    elif pb.skip_translate:
+                        skipped.append((pb.id, "skip_translate"))
+                geom = extract_page_geometry(
+                    pw, ph, page_blocks, default_theme_color=style_profile.primary_heading_hex
+                )
                 l2_size, l2_leading, l2_spacing, l2_tracking = solve_page_lock(
                     geom, page_blocks, target_lang=target_lang
                 )
@@ -780,6 +1087,8 @@ class DoclingRenderStrategy:
                     }
                 )
             else:
+                for pb in page_preserved:
+                    skipped.append((pb.id, "facsimile_preserved_opaque"))
                 pages_spec.append(
                     FacsimilePageSpec(
                         page_no=pno,
@@ -807,27 +1116,169 @@ class DoclingRenderStrategy:
                     }
                 )
 
-        font_stack = self._font_stack_for(target_lang)
+        # The transpile gate, same contract as ``_render_publish_sync`` above:
+        # both facsimile channels now route their text through ``render_prose``,
+        # which converts a model's LaTeX ``$…$`` span into Typst math. Typst
+        # compiles this document in ONE invocation, so a body the transpiler
+        # accepts but Typst rejects (``\frac{a}{}`` -> ``frac(a, )``) takes every
+        # page with it. The probe answers at emission time so the span degrades to
+        # readable Unicode instead.
+        #
+        # Built here rather than reused from ``_render_publish_sync`` because that
+        # probe is local to a different channel's scope: the facade's two render
+        # paths never see each other's cache.
+        #
+        # Pre-warmed in one batched call: an un-warmed body pays a ~0.7s Typst
+        # startup per span, and this document shape is math-dense by nature (the
+        # measured 26-page BSIM-CMG chapter carries 86 distinct inline bodies).
+        # Bodies come from every block the L2 pages would gate AND every L1
+        # placement's text, because a placement is a *flowed* fragment of a block
+        # and a table's cells are only ever gated at the string level.
+        from ubt.adapters.pdf.typst_math_probe import TypstMathProbe
+        from ubt.render.typst.document_renderer import (
+            math_bodies_for_blocks,
+            math_bodies_for_prose,
+        )
+
+        math_probe = TypstMathProbe()
+        pending_bodies = math_bodies_for_blocks(blocks)
+        for spec in pages_spec:
+            for pl in spec.placements:
+                pending_bodies.extend(math_bodies_for_prose(pl.text))
+        math_probe.check_many(pending_bodies)
 
         if is_pure_page_locked:
-            l2_renderer = PageLockedReflowRenderer(font_stack=font_stack)
+            l2_renderer = PageLockedReflowRenderer(
+                font_stack=font_stack, math_gate=math_probe.check
+            )
             l2_pages = [p.l2_spec for p in pages_spec if p.l2_spec is not None]
             l2_renderer.render_document(
                 l2_pages,
                 output_path,
                 build_dir,
                 target_lang=target_lang,
+                asset_copier=asset_copier,
+                formula_cropper=formula_cropper,
             )
             manifest.metadata["delivery_mode"] = "page_locked"
         else:
-            renderer = FacsimileRenderer(font_stack=font_stack)
+            renderer = FacsimileRenderer(font_stack=font_stack, math_gate=math_probe.check)
             renderer.render_document(
                 pages_spec,
                 bg_stripped,
                 output_path,
                 build_dir,
                 target_lang=target_lang,
+                asset_copier=asset_copier,
+                formula_cropper=formula_cropper,
             )
+            # §8.8 / §9.1: Single-page automatic L1 -> L2 reroute on ink collision.
+            # When an L1 page's translated text lands on unstripped background
+            # rules, vector diagrams, or residual ink above CANVAS_COLLISION_RATIO,
+            # upgrade only the colliding page(s) to L2 page-locked reflow and
+            # recompile once before the artifact ships.
+            l1_candidate_pages = [
+                spec.page_no for spec in pages_spec if spec.tier == "L1" and spec.placements
+            ]
+            if l1_candidate_pages and output_path.exists() and bg_stripped.exists():
+                from ubt.adapters.pdf.visual_gate import detect_colliding_l1_pages
+
+                l1_rois = {
+                    spec.page_no: [
+                        (
+                            round(pl.x0, 2),
+                            round(spec.page_h - pl.y1, 2),
+                            round(max(10.0, pl.x1 - pl.x0), 2),
+                            round(max(10.0, pl.y1 - pl.y0), 2),
+                        )
+                        for pl in spec.placements
+                        if not pl.skip_render and pl.text.strip()
+                    ]
+                    for spec in pages_spec
+                    if spec.tier == "L1"
+                }
+
+                colliding = await asyncio.to_thread(
+                    detect_colliding_l1_pages,
+                    bg_stripped,
+                    output_path,
+                    l1_candidate_pages,
+                    page_rois=l1_rois,
+                )
+                if colliding:
+                    logger.warning(
+                        "L1 ink collision detected on pages %s; auto-rerouting to Tier L2 page-locked reflow",
+                        {p: f"{r:.1%}" for p, r in sorted(colliding.items())},
+                    )
+                    for pno in sorted(colliding):
+                        idx = pno - 1
+                        if idx < 0 or idx >= len(pages_spec):
+                            continue
+                        old_spec = pages_spec[idx]
+                        page_blocks = blocks_by_page.get(pno, [])
+                        pw, ph = old_spec.page_w, old_spec.page_h
+                        geom = extract_page_geometry(
+                            pw,
+                            ph,
+                            page_blocks,
+                            default_theme_color=style_profile.primary_heading_hex,
+                        )
+                        l2_size, l2_leading, l2_spacing, l2_tracking = solve_page_lock(
+                            geom, page_blocks, target_lang=target_lang
+                        )
+                        l2_page = PageLockedPageSpec(
+                            page_no=pno,
+                            geometry=geom,
+                            uniform_size_pt=l2_size,
+                            leading_em=l2_leading,
+                            par_spacing_em=l2_spacing,
+                            tracking_em=l2_tracking,
+                            blocks=page_blocks,
+                        )
+                        pages_spec[idx] = FacsimilePageSpec(
+                            page_no=pno,
+                            page_w=pw,
+                            page_h=ph,
+                            uniform_size_pt=l2_size,
+                            leading_em=l2_leading,
+                            tracking_em=l2_tracking,
+                            placements=old_spec.placements,
+                            tier="L2",
+                            l2_spec=l2_page,
+                        )
+                        if idx < len(page_geometry):
+                            page_geometry[idx].update(
+                                {
+                                    "delivered_size_pt": round(l2_size, 3),
+                                    "delivered_leading_em": round(l2_leading, 4),
+                                    "tracking_em": round(l2_tracking, 4),
+                                    "tier": "L2",
+                                }
+                            )
+                        for pb in preserved_by_page.get(pno, []):
+                            pair_opaque = (pb.id, "facsimile_preserved_opaque")
+                            if pair_opaque in skipped:
+                                skipped.remove(pair_opaque)
+                            if pb.skip_translate:
+                                skipped.append((pb.id, "skip_translate"))
+                            elif pb.block_type == BlockType.IMAGE:
+                                rel_asset = (
+                                    asset_copier(pb.source_text.strip())
+                                    if pb.source_text and pb.source_text.strip()
+                                    else None
+                                )
+                                if not rel_asset:
+                                    skipped.append((pb.id, "asset_not_found"))
+                    renderer.render_document(
+                        pages_spec,
+                        bg_stripped,
+                        output_path,
+                        build_dir,
+                        target_lang=target_lang,
+                        asset_copier=asset_copier,
+                        formula_cropper=formula_cropper,
+                    )
+                    manifest.metadata["l1_ink_collision_rerouted_pages"] = sorted(colliding)
             manifest.metadata["delivery_mode"] = "facsimile"
             # Hand the stripped background to the visual gate. Without it the
             # ink-collision tier cannot run, and "the L1 channel was verified"
@@ -849,7 +1300,7 @@ class DoclingRenderStrategy:
         # raise ASSET_MISSING / ASSET_*_RECONSTRUCTION. The facsimile path used to
         # report all three empty, which made those violation kinds unreachable.
         self.last_render_skips = skipped
-        self.last_render_flags = []
+        self.last_render_flags = render_flags
         self.last_render_reconstructions = reconstructions
         self.last_page_geometry = page_geometry
 

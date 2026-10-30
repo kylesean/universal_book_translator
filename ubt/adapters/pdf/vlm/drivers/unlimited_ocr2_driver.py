@@ -78,8 +78,8 @@ class UnlimitedOcr2Driver:
             raise RuntimeError(
                 "unlimited-ocr2 needs the path to a patched-llama.cpp GGUF model "
                 "directory: set UBT_UNLIMITED_OCR2_MODEL to the directory "
-                "containing model.gguf and mmproj.gguf (see docs/guides/"
-                "OCR_DRIVERS.md), or choose a different driver (rapidocr, sidecar, vlm)."
+                "containing model.gguf and mmproj.gguf, or choose a different "
+                "driver (rapidocr, sidecar, vlm)."
             )
         from ubt.core.env import subprocess_env
 

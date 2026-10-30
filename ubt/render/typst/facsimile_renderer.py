@@ -18,13 +18,19 @@ import shutil
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from ubt.core.exceptions import DocumentParseError
-from ubt.render.typst.escape import typst_escape
-from ubt.render.typst.page_locked_renderer import PageLockedPageSpec, PageLockedReflowRenderer
+from ubt.render.typst.page_locked_renderer import (
+    PageLockedPageSpec,
+    PageLockedReflowRenderer,
+    leading_gap_em,
+)
 
 logger = logging.getLogger(__name__)
 
+#: ``par(leading:)`` conversion lives in ``page_locked_renderer`` so both
+#: renderers share one measurement; importing it keeps the two from drifting.
 DEFAULT_FONT_STACK: tuple[str, ...] = (
     "Noto Serif CJK SC",
     "Source Han Serif SC",
@@ -107,8 +113,19 @@ def _normalise_weight(font_weight: str, *, is_heading: bool, bold: bool) -> str:
 class FacsimileRenderer:
     """Produces and compiles 1:1 facsimile Typst documents."""
 
-    def __init__(self, font_stack: Sequence[str] | None = None) -> None:
+    def __init__(
+        self,
+        font_stack: Sequence[str] | None = None,
+        *,
+        math_gate: Callable[[str], bool] | None = None,
+    ) -> None:
         self.font_stack = tuple(font_stack) if font_stack else DEFAULT_FONT_STACK
+        #: The Typst compile gate for a transpiled math body, forwarded to the L2
+        #: pages it owns. A body the transpiler accepts but Typst rejects (
+        #: ``frac(a, )``) fails the whole document at the single compile below, so
+        #: gating here is what keeps one malformed formula from costing every
+        #: page. ``None`` skips the gate (tests, and callers with no probe).
+        self._math_gate = math_gate
 
     def _placement_content(
         self,
@@ -123,6 +140,7 @@ class FacsimileRenderer:
 
             table_markup = render_table(
                 pl.text,
+                is_math_ok=self._math_gate,
                 page_columns=1,
                 content_width_pt=width_pt,
                 target_lang=target_lang,
@@ -142,7 +160,25 @@ class FacsimileRenderer:
 
             return repair_code_block_markup(pl.text.strip(), container_width_pt=width_pt)
 
-        escaped = typst_escape(pl.text.strip())
+        # Same rule as the L2 branch it mirrors: the canvas is not exempt from
+        # LaTeX leaking. ``typst_escape`` alone put ``\$\\psi(x, y)\$`` on the page
+        # for a translated paragraph of a BSIM-CMG chapter (page 5 of the measured
+        # run, an L1 page), because ``$`` and ``_`` are both in the escape set and
+        # this branch had no math handling. ``render_prose`` escapes the prose and
+        # transpiles only a span ``_is_math_span`` recognises, so the formula
+        # becomes real math and a stray ``$`` stays a literal character.
+        #
+        # A function-local import: ``document_renderer`` pulls the table compiler,
+        # page trim and inline spans, and this module's L2 pages come from
+        # ``page_locked_renderer``, which now delegates prose to this same module.
+        # Keeping the edge lazy is what stops the two files forming a cycle.
+        from ubt.render.typst.document_renderer import render_prose
+
+        text = pl.text.strip()
+        # ``render_prose`` covers the whole escape set this branch needs: the
+        # mid-line structural characters and the line-initial ``=``/``-``/``N.``
+        # markers (verified: ``"= 5 and $\\psi_1$ ok"`` -> ``"\\= 5 and $psi_1$ ok"``).
+        escaped = render_prose(text, is_math_ok=self._math_gate)
         size = f"size: {pl.font_size_pt}pt, " if pl.font_size_pt else ""
 
         if pl.is_heading:
@@ -165,8 +201,18 @@ class FacsimileRenderer:
         bg_pdf_filename: str,
         *,
         target_lang: str = "zh",
+        asset_copier: Callable[[str], str | None] | None = None,
+        formula_cropper: Callable[[Any], str | None] | None = None,
     ) -> str:
-        """Generate Typst markup placing translated blocks on top of the stripped background."""
+        """Generate Typst markup placing translated blocks on top of the stripped background.
+
+        ``asset_copier`` and ``formula_cropper`` are forwarded to the L2 pages
+        only. L1 pages do not need them: their figures and formulas are source
+        ink carried by the stripped background layer. L2 pages get no background
+        (they reflow), so without a copier their artwork is dropped and -- before
+        the IMAGE branch existed -- its extracted asset *path* was typeset as
+        prose in its place.
+        """
         fonts_formatted = ", ".join(f'"{f}"' for f in self.font_stack)
         lines: list[str] = [
             "// Universal Book Translator - 1:1 Facsimile Canvas Document",
@@ -174,10 +220,27 @@ class FacsimileRenderer:
             "",
         ]
 
-        l2_renderer = PageLockedReflowRenderer(font_stack=self.font_stack)
+        l2_renderer = PageLockedReflowRenderer(
+            font_stack=self.font_stack, math_gate=self._math_gate
+        )
         for p in pages:
             if p.tier == "L2" and p.l2_spec is not None:
-                lines.append(l2_renderer.build_page_markup(p.l2_spec, target_lang=target_lang))
+                # An L2 page carries NO stripped background: it re-flows text in
+                # reading order, and absolute source ink under a re-flowed page
+                # is an ink collision by construction. Its figures and formulas
+                # therefore have to be *drawn* -- re-laid in the flow from the
+                # extracted assets, exactly as the reflow channel does -- or
+                # routing a page to L2 drops all of its artwork (measured: 94
+                # assets on a 26-page chapter, and their cache paths typeset as
+                # prose in their place).
+                lines.append(
+                    l2_renderer.build_page_markup(
+                        p.l2_spec,
+                        target_lang=target_lang,
+                        asset_copier=asset_copier,
+                        formula_cropper=formula_cropper,
+                    )
+                )
                 continue
 
             lines.append(
@@ -185,8 +248,13 @@ class FacsimileRenderer:
                 f'background: image("{bg_pdf_filename}", page: {p.page_no}, width: 100%, height: 100%))['
             )
             lines.append(f"  #set text(size: {p.uniform_size_pt}pt)")
+            # ``p.leading_em`` is a *ratio* (solver contract); Typst wants the
+            # *gap* on top of the font's own line height. Without the
+            # subtraction a 1.35 line height arrives as ~1.08 and captions
+            # overlap.
+            leading_gap = leading_gap_em(1.0 + p.leading_em)
             lines.append(
-                f'  #set par(justify: true, linebreaks: "optimized", leading: {p.leading_em}em)'
+                f'  #set par(justify: true, linebreaks: "optimized", leading: {leading_gap:.3f}em)'
             )
 
             for pl in p.placements:
@@ -196,11 +264,14 @@ class FacsimileRenderer:
                 dx = round(pl.x0, 2)
                 dy = round(p.page_h - pl.y1, 2)
                 width = round(max(10.0, pl.x1 - pl.x0), 2)
+                height = round(max(10.0, pl.y1 - pl.y0), 2)
 
                 content = self._placement_content(pl, width_pt=width, target_lang=target_lang)
 
+                lines.append(f"  // bbox: {dx} {dy} {width} {height}")
                 lines.append(
-                    f"  #place(top + left, dx: {dx}pt, dy: {dy}pt, block(width: {width}pt)[\n"
+                    f"  #place(top + left, dx: {dx}pt, dy: {dy}pt, "
+                    f"block(width: {width}pt, height: {height}pt, clip: true)[\n"
                     f"    {content}\n"
                     f"  ])"
                 )
@@ -218,6 +289,8 @@ class FacsimileRenderer:
         build_dir: Path,
         *,
         target_lang: str = "zh",
+        asset_copier: Callable[[str], str | None] | None = None,
+        formula_cropper: Callable[[Any], str | None] | None = None,
         compile_fn: Callable[[str, str, str], tuple[bool, str]] | None = None,
     ) -> Path:
         """Compile the facsimile pages into the final output PDF."""
@@ -228,7 +301,13 @@ class FacsimileRenderer:
         if bg_pdf_path.resolve() != local_bg.resolve():
             shutil.copyfile(bg_pdf_path, local_bg)
 
-        markup = self.build_markup(pages, local_bg.name, target_lang=target_lang)
+        markup = self.build_markup(
+            pages,
+            local_bg.name,
+            target_lang=target_lang,
+            asset_copier=asset_copier,
+            formula_cropper=formula_cropper,
+        )
         typ_path = build_dir / "facsimile.typ"
         typ_path.write_text(markup, encoding="utf-8")
 

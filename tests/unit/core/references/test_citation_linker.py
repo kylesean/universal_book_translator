@@ -262,6 +262,49 @@ def test_inject_hyperlinks_protects_code_and_math() -> None:
     assert "`code [1]`" in linked
 
 
+def test_inject_hyperlinks_does_not_steal_a_style_wrapper_body() -> None:
+    """A citation inside a styled run must not lose the run's content block.
+
+    The renderer wraps a coloured citation run as
+    ``#text(fill: rgb("#00699d"))[1]`` before links are injected. The citation
+    regex used to see the body's ``[1]`` as prose, replace it with
+    ``#link(<bib-1>)[[1]]`` and consume the body's brackets, leaving
+    ``#text(fill: …)#link(…)`` — a Typst call with no body
+    (``missing argument: body``) that aborted the whole page-locked render on
+    26-page replay block ``pdf_main#b0004``.
+    """
+    blocks = [
+        _make_block(
+            "h_bib",
+            Heading(id="h_bib", spine_index=0, span=Span(page=5), level=1, text="References"),
+        ),
+        _make_block("b1", Paragraph(id="b1", spine_index=1, span=Span(page=5), text="[1] Ref 1")),
+    ]
+    topology = build_citation_topology(blocks)
+    text = r'数值方法 \[#text(fill: rgb("#00699d"))[1]/**/\]。'
+
+    linked = inject_hyperlinks(text, topology, target_format="typst")
+
+    assert '#text(fill: rgb("#00699d"))[1]' in linked
+    assert "#text(fill: rgb(" + '"#00699d"))#link' not in linked
+    assert "\\[#text(fill:" in linked, "the escaped bracket that opens the span survives"
+
+
+def test_inject_hyperlinks_still_links_plain_prose_citations() -> None:
+    blocks = [
+        _make_block(
+            "h_bib",
+            Heading(id="h_bib", spine_index=0, span=Span(page=5), level=1, text="References"),
+        ),
+        _make_block("b1", Paragraph(id="b1", spine_index=1, span=Span(page=5), text="[1] Ref 1")),
+    ]
+    topology = build_citation_topology(blocks)
+
+    linked = inject_hyperlinks("见文献 [1]。", topology, target_format="typst")
+
+    assert "#link(<bib-1>)[[1]]" in linked
+
+
 def test_typst_document_renderer_emits_anchors_and_links(tmp_path: Path) -> None:
     blocks = [
         _make_block(

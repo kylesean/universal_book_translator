@@ -1,7 +1,7 @@
 """The P2 end-to-end smoke: a rehearsal run delivers a book with zero tokens.
 
 This is the pipeline's own smoke gate (the end-to-end rehearsal
-``docs/guides/TESTING_STRATEGY.md`` §4's slow-layer note describes):
+the project testing strategy's slow-layer note describes):
 ``create_dry_run_orchestrator`` assembles the *real* orchestrator -- the echo
 provider, mock QE, and the real MarkdownAdapter -- and the whole staged plan
 runs against a synthetic two-chapter book on disk. Nothing is stubbed inside the

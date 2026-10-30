@@ -52,6 +52,7 @@ from ubt.render.typst.math_transpiler import (
     clean_math_fallback_text,
     strip_math_delimiters,
     typstify_math,
+    unicode_math_macro,
 )
 
 if TYPE_CHECKING:
@@ -62,6 +63,7 @@ if TYPE_CHECKING:
     from ubt.core.ir.models import InlineRun, IRBlock
     from ubt.core.notes.models import FootnoteItem
     from ubt.render.typst.layout_diagnostics import PageLayoutSpec
+    from ubt.render.typst.style_profile import DocumentStyleProfile
 
 #: A display-math or inline-math span in the *source* text. Matched before
 #: escaping so the formula is transpiled rather than escaped into literal text.
@@ -117,14 +119,107 @@ def _is_math_span(span: str) -> bool:
     return _MATH_STRUCTURE_RE.search(inner) is not None
 
 
+def _math_segments(text: str) -> list[tuple[int, int, bool]]:
+    r"""Scan ``text`` into ``(start, end, is_math)`` segments, positional pairing.
+
+    ``_MATH_SPAN_RE`` pairs delimiters *positionally*: the first ``$`` opens, the
+    next closes. A stray delimiter therefore shifts every later pairing, and the
+    pair that lands across prose is rejected by :func:`_is_math_span` and escaped
+    as text. That misalignment is a known, measured cost (see
+    ``math_bodies_for_prose`` and the ``b0152`` note in
+    :mod:`ubt.render.typst.facsimile_renderer`), but re-pairing after a reject was
+    tried and REJECTED: it breaks the deliberately-pinned gold-corpus contract
+    ``test_a_stray_dollar_does_not_swallow_prose_into_math``, whose whole point is
+    that a rejected span must not be re-anchored into a new math span. The
+    escape hatch is :func:`_unicode_math_macros`, which cleans a leaked command
+    name in prose without ever switching the reader into math mode.
+
+    One rule lives here so the render walk, the styled-run filter and the
+    pre-warm collector cannot disagree about which characters are math: they all
+    consume these segments.
+    """
+    segments: list[tuple[int, int, bool]] = []
+    cursor = 0
+    for match in _MATH_SPAN_RE.finditer(text):
+        part = match.group(0)
+        if not _is_math_span(part):
+            continue
+        if match.start() > cursor:
+            segments.append((cursor, match.start(), False))
+        segments.append((match.start(), match.end(), True))
+        cursor = match.end()
+    if cursor < len(text):
+        segments.append((cursor, len(text), False))
+    return segments
+
+
 def _math_spans(text: str) -> list[tuple[int, int]]:
     """Character spans of ``text`` that are genuinely math.
 
     The one owner of "what counts as a formula", shared by the render walk and
     the styled-run filter, so a run can never be kept against a span the walk
-    would reject.
+    would reject. Both go through :func:`_math_segments`, which is what keeps the
+    re-pairing rule in exactly one place.
     """
-    return [(m.start(), m.end()) for m in _MATH_SPAN_RE.finditer(text) if _is_math_span(m.group(0))]
+    return [(start, end) for start, end, is_math in _math_segments(text) if is_math]
+
+
+def math_bodies_for_prose(text: str) -> list[str]:
+    """Every transpilable ``$…$`` body inside one prose string.
+
+    The text-level half of :func:`math_bodies_for_blocks`, separated because the
+    facsimile canvas gates *placements*, not blocks: a page's translated text has
+    already been flowed across continuation boxes, so the unit that reaches
+    :func:`render_prose` is a string. Keeping both channels in one collector is
+    what stops a pre-warm from missing the exact body a gate is later asked about
+    — an un-warmed body pays a full Typst startup (~0.7s) mid-render.
+
+    Spans holding a pipeline sentinel are skipped for the same reason as below:
+    :func:`render_prose` escapes those as prose, so gating them would buy a
+    verdict for a body that is never emitted.
+    """
+    bodies: list[str] = []
+    for start, end, is_math in _math_segments(text):
+        if not is_math:
+            continue
+        part = text[start:end]
+        inner = part[2:-2] if part.startswith("$$") else part[1:-1]
+        if has_sentinel(inner):
+            continue
+        converted = typstify_math(inner)
+        if converted:
+            bodies.append(converted)
+    return bodies
+
+
+def math_bodies_for_blocks(blocks: Sequence[IRBlock]) -> list[str]:
+    """Every transpilable math body a render of ``blocks`` would gate, in order.
+
+    ``$$…$$`` display bodies come from ``formula`` blocks and inline ``$…$`` spans
+    from text blocks; both are what a compile gate is asked about, so every
+    channel that gates math pre-warms from this one collector. A second,
+    hand-written copy of "which spans count" is how two channels end up with
+    different verdicts for the same formula.
+
+    Spans holding a pipeline sentinel are skipped: :func:`render_prose` refuses to
+    transpile those (the token is an artifact, not math), so gating them would
+    spend a compile verdict on a body that is never emitted.
+    """
+    bodies: list[str] = []
+    for block in blocks:
+        block_type = str(getattr(block.block_type, "value", block.block_type) or "")
+        if block_type == "formula":
+            text = _block_text(block)
+            if text:
+                converted = typstify_math(strip_math_delimiters(text))
+                if converted:
+                    bodies.append(converted)
+            continue
+        text = _block_text(block) if block_type not in ("image", "table") else ""
+        if not text:
+            continue
+        bodies.extend(math_bodies_for_prose(text))
+    return bodies
 
 
 #: A caption's opening marker (``Figure 1:``, ``图 1：``, ``Table 3.``). Used to
@@ -542,6 +637,77 @@ def _break_run_call_chains(segments: Sequence[str]) -> str:
 #: that a new masker can fall behind.
 
 
+_PROSE_MACRO_RE = re.compile(r"\\([A-Za-z]+)")
+
+
+def _clean_prose_math_macros(text: str) -> str:
+    r"""Degrade a leaked LaTeX command name in PROSE to its Unicode spelling.
+
+    Why prose needs this at all: :func:`_render_math_and_prose` pairs ``$``
+    positionally, so one stray delimiter shifts every pairing after it and the
+    real formulas land in the *prose* half of the split, where they are escaped
+    rather than transpiled. Measured on the controlled ``chapter-3.pdf`` run,
+    block ``pdf_main#b0152`` carries nine ``$`` (odd); the first candidate span
+    ran 65 characters of prose and was correctly rejected, and the four genuine
+    formulas behind it shipped as ``\beta``, ``\beta^2``, ``\ln\beta``,
+    ``\beta$`` — 5 raw macro leaks in a finished translation.
+
+    Re-pairing after a reject was tried and reverted: it recovers those four
+    formulas, but it deliberately breaks
+    ``test_a_stray_dollar_does_not_swallow_prose_into_math``, whose contract is
+    that a rejected span must never be re-anchored into math mode (that exact
+    re-anchoring lost alphafold2's whole document to ``unknown variable:
+    是一个序列``). Cleaning the command name is additive and keeps that safety
+    property: the reader gets ``β`` as literal text instead of ``\beta``, and no
+    character ever switches into math mode.
+
+    Only a name in :func:`~ubt.render.typst.math_transpiler.unicode_math_macro`
+    is touched, which is what makes this safe on real prose: ``C:\Users\kyle``
+    keeps its path because ``Users`` is not a known command, and an unknown
+    ``\unknowncmd`` is left alone rather than placeholdered — inside a *formula*
+    the ``⟨math⟩`` marker is honest, but in prose it would silently eat a word
+    the reader is owed.
+    """
+    if "\\" not in text:
+        return text
+
+    def _repl(match: re.Match[str]) -> str:
+        unicode_spelling = unicode_math_macro(match.group(1))
+        return unicode_spelling if unicode_spelling is not None else match.group(0)
+
+    return _PROSE_MACRO_RE.sub(_repl, text)
+
+
+def prose_fragments(text: str) -> list[str]:
+    r"""The non-math runs of ``text``, in order, whitespace stripped.
+
+    A public view of :func:`_math_segments` for callers that must compare a
+    source string against *what the page actually carries*. It exists for the
+    artifact presence check: a translated block whose middle is a formula is
+    drawn with Typst's Unicode-math glyphs (``$\psi_s$`` renders as ``𝜓𝑠``), so
+    a contiguous probe over the whole string can never match a correctly
+    rendered page. Probing the prose runs instead asks the right question — "did
+    this paragraph's words land on the page?" — and a genuinely lost block has no
+    run to hit either way.
+    """
+    return [
+        "".join(text[start:end].split())
+        for start, end, is_math in _math_segments(text)
+        if not is_math
+    ]
+
+
+def math_fragments(text: str) -> list[str]:
+    """The recognized math spans of ``text``, in order.
+
+    The counterpart to :func:`prose_fragments`, for callers that need to know
+    whether a string *contains* typeset math at all: a block with no math is
+    fully locatable by a contiguous probe over the whole string, and the audit
+    must not grant it a weaker claim than it can support.
+    """
+    return [text[start:end] for start, end, is_math in _math_segments(text) if is_math]
+
+
 def _render_math_and_prose(text: str, *, is_math_ok: Callable[[str], bool] | None = None) -> str:
     """Escape prose and transpile math spans, with no style handling.
 
@@ -572,7 +738,7 @@ def _render_math_and_prose(text: str, *, is_math_ok: Callable[[str], bool] | Non
                 # mode, and half-transpiling around it would leave the
                 # surrounding math in a shape the compiler also rejects. The
                 # inner text is used rather than ``clean_math_fallback_text``
-                # (which strips backslashes) so a transcribed ``\llbracket``
+                # (which strips backslashes) so a transcribed ``\\llbracket``
                 # remains visible instead of degrading to ``llbracket``.
                 out.append(escape_markup(inner))
                 continue
@@ -593,7 +759,9 @@ def _render_math_and_prose(text: str, *, is_math_ok: Callable[[str], bool] | Non
                     f"${converted}$" if converted else escape_markup(clean_math_fallback_text(part))
                 )
         else:
-            out.append(escape_markup(part))
+            # The prose half: escape, after degrading any LaTeX command name the
+            # positional pairing stranded here (see _clean_prose_math_macros).
+            out.append(escape_markup(_clean_prose_math_macros(part)))
     return "".join(out)
 
 
@@ -719,6 +887,8 @@ def render_table(
     table_uid: str = "",
     target_lang: str = "zh",
     continuation_config: object | None = None,
+    span_full_width: bool = False,
+    full_page_width_pt: float | None = None,
 ) -> str:
     """Render a Markdown table as a Typst ``#table`` with a three-line frame.
 
@@ -1064,14 +1234,20 @@ def render_table(
     )
     # Multi-page or tall tables (>18 rows) must not be wrapped in #place floats:
     # Typst floating blocks cannot break across page boundaries.
-    full_page = page_columns > 1 and too_wide and not is_multipage and len(rows) <= 18
+    full_page = (
+        page_columns > 1 and (too_wide or span_full_width) and not is_multipage and len(rows) <= 18
+    )
     landscape = allow_landscape and page_columns == 1 and columns >= _TABLE_MAX_COMFORTABLE_COLUMNS
     shrink = too_wide and not full_page and not landscape
 
     # When promoting to full-page float across dual columns, re-solve column widths
-    # against the full text width (493.2pt) rather than keeping the narrow 219.5pt column spec.
+    # against the full text width rather than keeping the narrow column spec.
     if full_page:
-        full_width_pt = _PAGE_TEXT_WIDTH_PT.get("academic_1col", _TABLE_DEFAULT_TEXT_WIDTH_PT)
+        full_width_pt = (
+            full_page_width_pt
+            if full_page_width_pt is not None
+            else _PAGE_TEXT_WIDTH_PT.get("academic_1col", _TABLE_DEFAULT_TEXT_WIDTH_PT)
+        )
         share_available_fp = max(
             full_width_pt - (columns - 1) * _TABLE_GUTTER_EM * TABLE_BASE_PT,
             1.0,
@@ -1099,6 +1275,11 @@ def render_table(
         table_scale_fp = (
             max(required_scale_fp, _TABLE_MIN_TEXT_SCALE) if required_scale_fp < 1.0 else 1.0
         )
+        if columns >= 8:
+            table_scale_fp = min(table_scale_fp, 7.5 / TABLE_BASE_PT)
+        elif columns >= 5:
+            table_scale_fp = min(table_scale_fp, 8.5 / TABLE_BASE_PT)
+        table_scale_fp = max(table_scale_fp, _TABLE_MIN_TEXT_SCALE)
         widths = _alloc_fp(table_scale_fp)
         column_spec = "(" + ", ".join(f"{w * slack_ratio:.1f}pt" for w in widths) + ")"
         table_scale = table_scale_fp
@@ -1185,7 +1366,7 @@ def render_table(
             )
 
     if full_page:
-        lines = ['#place(top + center, scope: "parent", float: true, rect(width: 98%)[']
+        lines = ['#place(top + center, scope: "parent", float: true, block(width: 100%)[']
         if emitted_scale < 1.0:
             lines.append(f"  #set text(size: {emitted_scale:.2f}em)")
         if start_anchor:
@@ -1423,7 +1604,7 @@ def _keeps_source(block: IRBlock) -> bool:
     return bool(block.skip_translate)
 
 
-def _block_text(block: IRBlock) -> str:
+def _block_text(block: IRBlock, *, sanitize_sentinels: bool = True) -> str:
     """The text to render for a block: its translation, its draft, else its source.
 
     Delegates to :func:`ubt.render.delivered_text.delivered_text` — the single
@@ -1431,11 +1612,15 @@ def _block_text(block: IRBlock) -> str:
     shared with the companion HTML and EPUB views. Both used to implement it
     separately, and the HTML view implemented only the first half.
 
+    ``sanitize_sentinels=False`` returns the surface before the masker-token
+    substitution; only the leak *diagnostic* wants that, because the text placed
+    on a page must never carry internal machinery.
+
     Named ``_block_text`` for the module's internal callers and for the
     cross-references in ``content.adapt`` / ``docling_crosscheck``; new code
     outside this module should call ``delivered_text`` directly.
     """
-    return delivered_text(block)
+    return delivered_text(block, sanitize_sentinels=sanitize_sentinels)
 
 
 #: Ordered list markers: ``1.``, ``1)``, ``(1)``, ``１．`` and the compound
@@ -1582,6 +1767,25 @@ class TypstDocumentRenderer:
             block_mm = block_mm * (1.0 - COLUMN_GUTTER_SHARE) / columns
         return block_mm / MM_PER_PT
 
+    def full_page_text_width_pt(self) -> float:
+        """Body text width in points if spanning across all columns (full page)."""
+        setup = self.page_setup_obj()
+        block_mm = max(0.0, setup.width_mm - 2 * self.margin_x_mm())
+        return block_mm / MM_PER_PT
+
+    def spans_dual_columns(self, width_pt: float | None) -> bool:
+        """Whether a block/figure/table should span across both columns in a multi-column layout.
+
+        Triggered when page has columns > 1 and width_pt > 0.60 * page_width_pt
+        (docs/design/adaptive_delivery_prd.md §8.3).
+        """
+        columns = max(1, int(getattr(self, "columns", 1) or 1))
+        if columns <= 1 or width_pt is None or width_pt <= 0:
+            return False
+        setup = self.page_setup_obj()
+        page_w_pt = setup.width_mm / MM_PER_PT
+        return width_pt > 0.60 * page_w_pt
+
     def layout_spec_for_audit(self) -> PageLayoutSpec:
         """The spec the layout audit should judge this render's output against.
 
@@ -1630,6 +1834,12 @@ class TypstDocumentRenderer:
         if getattr(self, "layout_template", "book") == "academic":
             from ubt.render.typst.academic import academic_preamble
 
+            prof = self.style_profile
+            h_color = (
+                prof.primary_heading_hex
+                if prof is not None and prof.has_colored_headings
+                else self.heading_color_hex
+            )
             ret = academic_preamble(
                 target_lang=target_lang,
                 font_stack=self.font_stack,
@@ -1645,6 +1855,7 @@ class TypstDocumentRenderer:
                     if self.page_setup_obj().measured
                     else None
                 ),
+                heading_color_hex=h_color,
             )
             if getattr(self, "enable_decor", False):
                 from ubt.core.decor.dropcap import TYPST_DROPCAP_MACRO
@@ -1768,8 +1979,14 @@ class TypstDocumentRenderer:
         enable_xref: bool = False,
         xref_config: object | None = None,
         page_setup: PageSetup | None = None,
+        source_pdf: Path | None = None,
+        style_profile: DocumentStyleProfile | None = None,
+        heading_color_hex: str | None = None,
     ) -> None:
         self.assets_root = Path(assets_root) if assets_root is not None else None
+        self.source_pdf = Path(source_pdf) if source_pdf is not None else None
+        self.style_profile = style_profile
+        self.heading_color_hex = heading_color_hex
         self.figure_width = figure_width
         self.bilingual = bilingual
         self.layout_template = layout_template
@@ -1833,6 +2050,14 @@ class TypstDocumentRenderer:
         #: degradation, which is a plain quality flag — never a
         #: ``render_skip:``, because the content did ship.
         self.last_render_flags: list[tuple[str, str]] = []
+        #: Anchors the document will never emit, so a ``#link(<id>)`` to one is a
+        #: dangling label and Typst refuses the whole compile (``label <id> does
+        #: not exist``). Filled in :meth:`build_source` from the blocks that ship
+        #: verbatim: a ``skip_translate`` bibliography entry or caption keeps its
+        #: source text, so its ``<bib-…>``/``<fig-…>`` label is never written, yet
+        #: the topology still resolves citations to it. Measured on the 26-page
+        #: readable replay: ``bib-24`` and ``fig-3-1``.
+        self._unemitted_anchors: set[str] = set()
         #: Per-table reconstruction outcomes, drained by the PDF adapter into
         #: ``last_render_reconstructions`` so the delivery contract can record a
         #: rebuilt table as ``RECONSTRUCTED`` (verified or corrupt) instead of
@@ -1850,6 +2075,21 @@ class TypstDocumentRenderer:
         #: independent parameters at first, which is how a page and the audit of
         #: that page end up disagreeing.
         self.page_setup = page_setup
+
+    def _crop_formula_fallback(self, block: IRBlock, build_dir: Path) -> str | None:
+        """Crop an uncompilable display formula from ``source_pdf`` at 300 DPI (§8.9)."""
+        if self.source_pdf is None or not self.source_pdf.exists():
+            return None
+        from ubt.render.typst.page_locked_renderer import make_formula_cropper
+
+        crop_name = make_formula_cropper(build_dir, self.source_pdf)(block)
+        if not crop_name:
+            return None
+        bbox = getattr(block, "bbox", None)
+        col_w = self.text_width_pt()
+        raw_w = float(bbox.x1 - bbox.x0) if bbox is not None else col_w
+        img_w = min(max(8.0, raw_w), col_w if col_w > 0 else raw_w)
+        return f'#figure(image("{crop_name}", width: {img_w:.1f}pt), numbering: none)'
 
     def _prose_for_block(self, block: IRBlock) -> Callable[[str], str]:
         """A ``Callable[[str], str]`` that renders prose in ``block``'s run context.
@@ -1891,12 +2131,13 @@ class TypstDocumentRenderer:
             from ubt.core.references.linker import inject_hyperlinks
 
             xref_cfg = getattr(self, "xref_config", None)
+            unreachable: set[str] = getattr(self, "_unemitted_anchors", set())
             rendered = inject_hyperlinks(
                 rendered,
                 topology,
                 target_format="typst",
                 config=xref_cfg,
-                skip_anchors=skip_anchors,
+                skip_anchors=(set(skip_anchors or ()) | unreachable) or None,
             )
         return rendered
 
@@ -1914,29 +2155,7 @@ class TypstDocumentRenderer:
         """
         if self._math_gate_many is None or self._math_gate is None:
             return
-        bodies: list[str] = []
-        for block in blocks:
-            block_type = str(getattr(block.block_type, "value", block.block_type) or "")
-            if block_type == "formula":
-                text = _block_text(block)
-                if text:
-                    converted = typstify_math(strip_math_delimiters(text))
-                    if converted:
-                        bodies.append(converted)
-                continue
-            text = _block_text(block) if block_type not in ("image", "table") else ""
-            if not text:
-                continue
-            for span in _MATH_SPAN_RE.finditer(text):
-                part = span.group(0)
-                if not _is_math_span(part):
-                    continue
-                inner = part[2:-2] if part.startswith("$$") else part[1:-1]
-                if has_sentinel(inner):
-                    continue
-                converted = typstify_math(inner)
-                if converted:
-                    bodies.append(converted)
+        bodies = math_bodies_for_blocks(blocks)
         if bodies:
             self._math_gate_many(bodies)
 
@@ -2010,6 +2229,14 @@ class TypstDocumentRenderer:
         self.stats = ReflowStats()
         build_dir.mkdir(parents=True, exist_ok=True)
 
+        if (
+            getattr(self, "style_profile", None) is None
+            and getattr(self, "heading_color_hex", None) is None
+        ):
+            from ubt.render.typst.style_profile import extract_document_style_profile
+
+            self.style_profile = extract_document_style_profile(blocks)
+
         if getattr(self, "enable_notes", False):
             from ubt.core.notes.extractor import extract_notes_topology
             from ubt.core.notes.models import NotesConfig
@@ -2058,6 +2285,16 @@ class TypstDocumentRenderer:
         from ubt.core.references.linker import build_citation_topology
 
         self.citation_topology = build_citation_topology(blocks)
+        # A block that ships verbatim emits no label, so every anchor it owns is
+        # unreachable. Linking to one aborts the compile (see
+        # ``_unemitted_anchors``), and the reader would rather have the sentence
+        # without a hyperlink than no book at all.
+        preserved_block_ids = {b.id for b in blocks if b.skip_translate}
+        self._unemitted_anchors = {
+            anchor.anchor_id
+            for anchor in self.citation_topology.anchors.values()
+            if anchor.block_id in preserved_block_ids
+        }
         body: list[str] = []
 
         if getattr(self, "enable_colophon", False) or getattr(self, "colophon", None) is not None:
@@ -2143,11 +2380,18 @@ class TypstDocumentRenderer:
         ):
             from ubt.render.typst.academic import academic_title_banner
 
+            prof = self.style_profile
+            h_color = (
+                prof.primary_heading_hex
+                if prof is not None and prof.has_colored_headings
+                else self.heading_color_hex
+            )
             banner = academic_title_banner(
                 title=self.paper_title,
                 abstract=getattr(self, "abstract", ""),
                 columns=getattr(self, "columns", 1),
                 lang=target_lang,
+                title_color_hex=h_color,
             )
             if banner:
                 # The banner *precedes* the TOC: a paper opens on its title.
@@ -2209,14 +2453,20 @@ class TypstDocumentRenderer:
                 continue
 
             # A block whose delivered text still carries a pipeline sentinel
-            # (``⟦SOUP_MASK…⟧``, ``⟦B⟧``, ``\\llbracket…``) had a restore pass that
-            # could not account for a span. The renderer escapes such a span as
-            # prose so the document still compiles, but the leak is a defect
-            # upstream: attribute it to the block so the quality report and the
-            # review verdict can see *which* block leaked rather than a silent
-            # count. Checked on the block's own delivered text, so it does not
-            # depend on which emit branch below runs.
-            if has_sentinel(_block_text(block)):
+            # (``⟦B⟧``, ``\\llbracket…``, or a masker token whose span the
+            # restore could not account for) had a restore pass that failed.
+            # The renderer escapes such a span as prose so the document still
+            # compiles, but the leak is a defect upstream: attribute it to the
+            # block so the quality report and the review verdict can see *which*
+            # block leaked rather than a silent count. Checked on the block's own
+            # delivered text, so it does not depend on which emit branch below runs.
+            #
+            # ``sanitize_sentinels=False`` is not an optimization here. The
+            # delivered surface *substitutes* a masker token with ``⟨missing⟩``,
+            # so testing the shipped text would find nothing and stop reporting
+            # precisely the defect this flag exists to surface. The masking is
+            # for the reader; the flag is for the operator, and both must survive.
+            if has_sentinel(_block_text(block, sanitize_sentinels=False)):
                 self.last_render_flags.append((block.id, "sentinel_leaked"))
 
             # A block the policy deliberately keeps in the source language (a
@@ -2339,6 +2589,9 @@ class TypstDocumentRenderer:
                 source_text = (block.source_text or "").strip()
                 table_width = self._table_width_pt()
                 is_multipage = bool(block.provenance and block.provenance.fused_block_ids)
+                tbl_w_pt = (block.bbox.x1 - block.bbox.x0) if block.bbox is not None else None
+                tbl_span_full = self.spans_dual_columns(tbl_w_pt)
+                full_page_w = self.full_page_text_width_pt()
                 source_markup = (
                     render_table(
                         source_text,
@@ -2351,6 +2604,8 @@ class TypstDocumentRenderer:
                         table_uid=f"src-{block.id}",
                         target_lang=target_lang,
                         continuation_config=getattr(self, "table_continuation_config", None),
+                        span_full_width=tbl_span_full,
+                        full_page_width_pt=full_page_w,
                     )
                     or None
                 )
@@ -2373,6 +2628,8 @@ class TypstDocumentRenderer:
                     table_uid=f"tgt-{block.id}",
                     target_lang=target_lang,
                     continuation_config=getattr(self, "table_continuation_config", None),
+                    span_full_width=tbl_span_full,
+                    full_page_width_pt=full_page_w,
                 )
                 fell_back = False
                 if not markup:
@@ -2512,6 +2769,19 @@ class TypstDocumentRenderer:
                         )
                     )
                 else:
+                    # §8.9: Before degrading a display formula to flat Unicode,
+                    # attempt a 300 DPI source-PDF crop when source_pdf and bbox
+                    # are available so complex multi-line equations keep their
+                    # 2D layout intact.
+                    crop_markup = self._crop_formula_fallback(block, build_dir)
+                    if crop_markup:
+                        body.append(crop_markup)
+                        self.stats.formulas += 1
+                        self.stats.blocks_rendered += 1
+                        self.stats.assets_copied += 1
+                        self.last_render_flags.append((block.id, "formula_raster_fallback"))
+                        continue
+
                     # A formula with no convertible body is content, not markup:
                     # dropping it removes an equation from the page with no
                     # trace. Degrade to readable Unicode and count it as a
@@ -2789,8 +3059,10 @@ class TypstDocumentRenderer:
         self.stats.figures += 1
         self.stats.blocks_rendered += 1
         width = self.figure_width
+        span_full = self.spans_dual_columns(figure.width_pt)
         if figure.width_pt is not None and 0 < figure.width_pt < _FIGURE_NATIVE_MAX_PT:
-            ratio = min(figure.width_pt / _FIGURE_REFERENCE_TEXT_WIDTH_PT, 1.0) * 100.0
+            ref_w = self.full_page_text_width_pt() if span_full else _FIGURE_REFERENCE_TEXT_WIDTH_PT
+            ratio = min(figure.width_pt / ref_w, 1.0) * 100.0
             width = f"{ratio:.1f}%"
 
         anchor_suffix = ""
@@ -2807,6 +3079,7 @@ class TypstDocumentRenderer:
                     aid = topology.key_to_anchor[(ReferenceKind.FIGURE, fig_key)]
                     anchor_suffix = f" <{aid}>"
 
+        scope_extra = ', scope: "parent", placement: auto' if span_full else ""
         if figure.caption:
             skip_s = {aid} if aid else None
             lines_fig = [
@@ -2814,10 +3087,13 @@ class TypstDocumentRenderer:
                 f'  image("{target.name}", width: {width}),',
                 f"  caption: [{self._prose(figure.caption, skip_anchors=skip_s)}],",
                 "  numbering: none,",
-                f"){anchor_suffix}",
             ]
+            if span_full:
+                lines_fig.append('  scope: "parent",')
+                lines_fig.append("  placement: auto,")
+            lines_fig.append(f"){anchor_suffix}")
             return "\n".join(lines_fig)
-        return f'#figure(image("{target.name}", width: {width}), numbering: none){anchor_suffix}'
+        return f'#figure(image("{target.name}", width: {width}), numbering: none{scope_extra}){anchor_suffix}'
 
     def _figure_grid_markup(
         self, figures: list[_Figure], build_dir: Path, caption: str = ""
@@ -2880,7 +3156,13 @@ class TypstDocumentRenderer:
 
         cols = calculate_grid_columns(len(subfigs), cfg.max_columns)
         span_full = any(
-            (sf.width_pt is not None and sf.width_pt >= cfg.max_full_width_threshold_pt)
+            (
+                sf.width_pt is not None
+                and (
+                    sf.width_pt >= cfg.max_full_width_threshold_pt
+                    or self.spans_dual_columns(sf.width_pt)
+                )
+            )
             for sf in subfigs
         )
 

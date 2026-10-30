@@ -42,7 +42,7 @@ from ubt.adapters.pdf.strip_pdf_text import (
     strip_stream_text,
     strip_text_streams,
 )
-from ubt.core.ir.models import BlockType, BoundingBox
+from ubt.core.ir.models import BlockType, BookManifest, BoundingBox, IRBlock, make_element
 from ubt.model.span import BBox, PhysicalBox
 from ubt.render.flow import (
     approximate_measure,
@@ -913,3 +913,450 @@ def test_facsimile_renderer_full_e2e_compile(tmp_path: Path) -> None:
         assert len(res.pages) == 2
         assert "/XObject" in res.pages[0].Resources
         assert "/XObject" in res.pages[1].Resources
+
+
+def test_solve_flow_protects_atomic_inline_math_and_markers() -> None:
+    """`solve_flow` must never split inline `$...$` or `⟦...⟧` across two boxes."""
+    from ubt.model.span import PhysicalBox
+    from ubt.render.flow import approximate_measure, solve_flow
+
+    box1 = PhysicalBox(
+        page=1,
+        bbox=(50.0, 400.0, 140.0, 415.0),
+        available_width=90.0,
+        available_height=15.0,
+    )
+    box2 = PhysicalBox(
+        page=1,
+        bbox=(50.0, 300.0, 250.0, 360.0),
+        available_width=200.0,
+        available_height=60.0,
+    )
+    measure = approximate_measure(font_size_pt=10.0, leading_pt=13.0)
+
+    text = "前置说明文字 $f(x, y) = a + b + c$ 后续说明文字以及 ⟦FIG_REF_01⟧ 结尾。"
+    placements = solve_flow(text, [box1, box2], measure)
+    assert len(placements) == 2
+    for pl in placements:
+        assert pl.text.count("$") % 2 == 0, f"Unbalanced '$' in box slice: {pl.text!r}"
+        assert pl.text.count("⟦") == pl.text.count("⟧"), (
+            f"Split sentinel marker in box slice: {pl.text!r}"
+        )
+    combined = "".join(pl.text for pl in placements)
+    assert "$f(x, y) = a + b + c$" in combined
+    assert "⟦FIG_REF_01⟧" in combined
+
+
+def test_solve_page_2d_clamps_vertical_glue_at_obstacle_top() -> None:
+    """A preserved figure/formula below a prose block must clamp its downward glue."""
+    from ubt.render.layout_solver import solve_page_2d
+
+    # Without obstacle_top, rec 0 can borrow the huge 200pt gap down to rec 1 (top=200).
+    col_free = [
+        {"id": "p1", "top": 500.0, "bot": 460.0, "w": 200.0, "n": 3, "glyphs": 120},
+        {"id": "p2", "top": 200.0, "bot": 150.0, "w": 200.0, "n": 4, "glyphs": 60},
+    ]
+    sol_free = solve_page_2d([col_free], source_size_pt=10.0, source_leading_pt=12.0)
+
+    # With a preserved figure at y1=458.0 right below p1, p1 cannot expand into [200, 458].
+    col_blocked = [
+        {
+            "id": "p1",
+            "top": 500.0,
+            "bot": 460.0,
+            "w": 200.0,
+            "n": 3,
+            "glyphs": 120,
+            "obstacle_top": 458.0,
+        },
+        {"id": "p2", "top": 200.0, "bot": 150.0, "w": 200.0, "n": 4, "glyphs": 60},
+    ]
+    sol_blocked = solve_page_2d([col_blocked], source_size_pt=10.0, source_leading_pt=12.0)
+
+    assert sol_blocked.uniform_size_pt < sol_free.uniform_size_pt, (
+        "Clamping vertical glue at obstacle_top must prevent p1 from borrowing "
+        "the preserved figure's vertical space"
+    )
+
+
+def test_strip_stream_text_uses_text_matrix_font_scale_for_pen_pad() -> None:
+    """When `/F1 1 Tf` is scaled by `16 0 0 16 x y Tm`, `PEN_PAD_EM` must scale by 16pt."""
+    pdf = pikepdf.Pdf.new()
+    page = pdf.add_blank_page(page_size=(400, 600))
+    # Pen sits at x=49.0, 1.0pt left of the erase rect's x0=50.0.
+    # With 1pt nominal Tf size, 0.08 * 1 = 0.08pt rightward pad only reaches 49.08 (misses 50.0).
+    # With true 16pt Tm scale, 0.08 * 16 = 1.28pt rightward pad reaches x=50.28 inside [50, 100].
+    page.Contents = pdf.make_stream(b"BT /F1 1 Tf 16 0 0 16 49.0 300.0 Tm (ScaledFontRun) Tj ET")
+    erase = [BoxRect(page_index=1, x0=50.0, y0=290.0, x1=100.0, y1=320.0)]
+    stripped = strip_stream_text(page, erase_rects=erase)
+    assert "ScaledFontRun" not in _texts_in(stripped)
+
+
+def test_strip_text_streams_descends_into_form_xobjects_with_copy_on_write(
+    tmp_path: Path,
+) -> None:
+    """`descend_forms=True` must strip Form XObject text and clone shared forms per page."""
+    src_pdf = tmp_path / "shared_form.pdf"
+    out_pdf = tmp_path / "shared_form_stripped.pdf"
+
+    pdf = pikepdf.Pdf.new()
+    form_stream = pdf.make_stream(
+        b"BT /F1 10 Tf 1 0 0 1 50 500 Tm (FormBodyText) Tj ET "
+        b"BT /F1 10 Tf 1 0 0 1 50 100 Tm (FormAxisLabel) Tj ET"
+    )
+    form_stream.Type = pikepdf.Name("/XObject")
+    form_stream.Subtype = pikepdf.Name("/Form")
+    form_stream.BBox = [0, 0, 400, 600]
+
+    p1 = pdf.add_blank_page(page_size=(400, 600))
+    p1.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Fm0=form_stream))
+    p1.Contents = pdf.make_stream(b"q /Fm0 Do Q")
+
+    p2 = pdf.add_blank_page(page_size=(400, 600))
+    p2.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Fm0=form_stream))
+    p2.Contents = pdf.make_stream(b"q /Fm0 Do Q")
+    pdf.save(src_pdf)
+
+    # Erase FormBodyText on page 1 only; page 2 has no erase rects so its shared Fm0
+    # must stay intact via copy-on-write.
+    erase = {1: [BoxRect(page_index=1, x0=40.0, y0=490.0, x1=250.0, y1=520.0)]}
+    keep = {1: [BoxRect(page_index=1, x0=40.0, y0=90.0, x1=250.0, y1=120.0)]}
+    strip_text_streams(
+        src_pdf,
+        out_pdf,
+        per_page_erase_rects=erase,
+        per_page_keep_rects=keep,
+        descend_forms=True,
+    )
+
+    with pikepdf.open(out_pdf) as res:
+        fm_p1 = res.pages[0].Resources.XObject["/Fm0"]
+        fm_p2 = res.pages[1].Resources.XObject["/Fm0"]
+        p1_texts = _texts_in(bytes(fm_p1.read_bytes()))
+        p2_texts = _texts_in(bytes(fm_p2.read_bytes()))
+        assert "FormBodyText" not in p1_texts
+        assert "FormAxisLabel" in p1_texts
+        assert "FormBodyText" in p2_texts
+
+
+def test_facsimile_strip_plan_erases_all_physical_boxes_of_continuation_block(
+    tmp_path: Path,
+) -> None:
+    """A fused multi-box block must emit erase rects for all its `physical_boxes`."""
+    from types import SimpleNamespace
+
+    b = _fake_block(
+        "cont_1",
+        page=1,
+        bbox=(50.0, 80.0, 260.0, 180.0),
+        block_type=BlockType.NARRATIVE,
+        skip_translate=False,
+    )
+    b.provenance = SimpleNamespace(
+        physical_boxes=[
+            {"page": 1, "bbox": [50.0, 80.0, 260.0, 180.0]},
+            {"page": 1, "bbox": [300.0, 480.0, 510.0, 580.0]},
+            {"page": 2, "bbox": [50.0, 500.0, 260.0, 580.0]},
+        ]
+    )
+    erase, _keep = _facsimile_strip_plan({1: [b], 2: [b]}, 2, _source_pdf(tmp_path))
+    assert len(erase[1]) == 2
+    assert len(erase[2]) == 1
+    assert (erase[1][1].x0, erase[1][1].x1) == (300.0, 510.0)
+    assert (erase[2][0].y0, erase[2][0].y1) == (500.0, 580.0)
+
+
+def test_l2_and_l3_uncompilable_formula_falls_back_to_300dpi_source_crop(
+    tmp_path: Path,
+) -> None:
+    """When a display FORMULA fails `math_gate`, L2 and L3 must crop its source bbox at 300 DPI."""
+    from ubt.core.ir.models import BoundingBox, IRBlock, make_element
+    from ubt.render.typst.document_renderer import TypstDocumentRenderer
+    from ubt.render.typst.page_locked_renderer import (
+        PageGeometry,
+        PageLockedPageSpec,
+        PageLockedReflowRenderer,
+        make_formula_cropper,
+    )
+
+    src_pdf = tmp_path / "eq_source.pdf"
+    pdf = pikepdf.Pdf.new()
+    page = pdf.add_blank_page(page_size=(400, 600))
+    # Draw visible dark vector ink inside the formula bbox (60, 280, 320, 340).
+    page.Contents = pdf.make_stream(b"0 0 0 rg 70 295 220 20 re f")
+    pdf.save(src_pdf)
+
+    eq_block = IRBlock(
+        element=make_element(
+            id="eq1",
+            spine_index=1,
+            block_type=BlockType.FORMULA,
+            source_text=r"$$\frac{a}{}$$",
+            bbox=BoundingBox(page=1, x0=60.0, y0=280.0, x1=320.0, y1=340.0),
+            skip_translate=True,
+        ),
+        target_text=r"$$\frac{a}{}$$",
+    )
+
+    # 1. Tier L2 (PageLockedReflowRenderer)
+    l2_build = tmp_path / "l2_build"
+    cropper = make_formula_cropper(l2_build, src_pdf)
+    l2_renderer = PageLockedReflowRenderer(math_gate=lambda _body: False)
+    l2_spec = PageLockedPageSpec(
+        page_no=1,
+        geometry=PageGeometry(
+            page_w=400.0,
+            page_h=600.0,
+            margin_top=36.0,
+            margin_bottom=36.0,
+            margin_left=36.0,
+            margin_right=36.0,
+        ),
+        uniform_size_pt=10.0,
+        leading_em=0.35,
+        par_spacing_em=0.65,
+        blocks=[eq_block],
+    )
+    l2_markup = l2_renderer.build_page_markup(l2_spec, formula_cropper=cropper)
+    assert 'image("formula-crop-eq1-p1.png"' in l2_markup
+    assert (l2_build / "formula-crop-eq1-p1.png").exists()
+
+    # 2. Tier L3 (TypstDocumentRenderer)
+    l3_build = tmp_path / "l3_build"
+    l3_renderer = TypstDocumentRenderer(
+        math_gate=lambda _body: False,
+        source_pdf=src_pdf,
+    )
+    l3_markup, stats = l3_renderer.build_source([eq_block], l3_build, "zh")
+    assert 'image("formula-crop-eq1-p1.png"' in l3_markup
+    assert (l3_build / "formula-crop-eq1-p1.png").exists()
+    assert stats.formulas == 1
+    assert ("eq1", "formula_raster_fallback") in l3_renderer.last_render_flags
+
+
+@pytest.mark.asyncio
+async def test_facsimile_auto_reroutes_colliding_l1_page_to_l2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When `detect_colliding_l1_pages` flags page 1, `_render_facsimile` must reroute page 1 to L2."""
+    from ubt.adapters.pdf import visual_gate
+    from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
+    from ubt.core.ir.models import BookManifest, BoundingBox, IRBlock, make_element
+
+    src_pdf = tmp_path / "two_page_src.pdf"
+    pdf = pikepdf.Pdf.new()
+    p1 = pdf.add_blank_page(page_size=(400, 600))
+    p1.Contents = pdf.make_stream(b"BT /F1 10 Tf 1 0 0 1 50 500 Tm (Hello p1) Tj ET")
+    p2 = pdf.add_blank_page(page_size=(400, 600))
+    p2.Contents = pdf.make_stream(b"BT /F1 10 Tf 1 0 0 1 50 500 Tm (Hello p2) Tj ET")
+    pdf.save(src_pdf)
+
+    blocks = [
+        IRBlock(
+            element=make_element(
+                id="b_p1",
+                spine_index=1,
+                block_type=BlockType.NARRATIVE,
+                source_text="Hello p1",
+                bbox=BoundingBox(page=1, x0=50.0, y0=480.0, x1=350.0, y1=530.0),
+            ),
+            target_text="第一页译文，模拟与底图残留线条发生碰撞。",
+        ),
+        IRBlock(
+            element=make_element(
+                id="b_p2",
+                spine_index=2,
+                block_type=BlockType.NARRATIVE,
+                source_text="Hello p2",
+                bbox=BoundingBox(page=2, x0=50.0, y0=480.0, x1=350.0, y1=530.0),
+            ),
+            target_text="第二页译文，底图干净无碰撞。",
+        ),
+    ]
+
+    rendered_tiers: list[list[str]] = []
+
+    def fake_render_doc(
+        self: FacsimileRenderer,
+        pages: list[FacsimilePageSpec],
+        bg_pdf_path: Path,
+        output_path: Path,
+        build_dir: Path,
+        **kwargs: object,
+    ) -> Path:
+        rendered_tiers.append([p.tier for p in pages])
+        output_path.write_bytes(src_pdf.read_bytes())
+        return output_path
+
+    monkeypatch.setattr(FacsimileRenderer, "render_document", fake_render_doc)
+    monkeypatch.setattr(
+        visual_gate,
+        "detect_colliding_l1_pages",
+        lambda bg_pdf, final_pdf, l1_pages, **_kw: {1: 0.085} if 1 in l1_pages else {},
+    )
+
+    strategy = DoclingRenderStrategy(delivery_mode="facsimile")
+    manifest = BookManifest(
+        doc_id="doc_col",
+        title="Collision Test",
+        source_path=str(src_pdf),
+        metadata={"source_path": str(src_pdf)},
+    )
+    out_pdf = tmp_path / "out_facsimile.pdf"
+    await strategy.render_blocks(manifest, blocks, "zh", out_pdf)
+
+    assert rendered_tiers == [["L1", "L1"], ["L2", "L1"]]
+    assert manifest.metadata.get("l1_ink_collision_rerouted_pages") == [1]
+    assert strategy.last_page_geometry[0]["tier"] == "L2"
+    assert strategy.last_page_geometry[1]["tier"] == "L1"
+
+
+def test_dual_column_wide_figure_spanning(tmp_path: Path) -> None:
+    """A wide figure (>60% page width) in dual-column layout must float with parent scope."""
+    from ubt.render.typst.document_renderer import TypstDocumentRenderer, _Figure
+
+    renderer = TypstDocumentRenderer(columns=2)
+    setup = renderer.page_setup_obj()
+    page_w_pt = setup.width_mm / 0.352778
+    wide_w = page_w_pt * 0.75
+    narrow_w = page_w_pt * 0.35
+
+    assert renderer.spans_dual_columns(wide_w) is True
+    assert renderer.spans_dual_columns(narrow_w) is False
+
+    # Create dummy image file in build_dir
+    build_dir = tmp_path / "build"
+    build_dir.mkdir(parents=True, exist_ok=True)
+    asset_file = tmp_path / "fig_wide.png"
+    asset_file.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDRfake")
+
+    fig_wide = _Figure(
+        asset=str(asset_file),
+        width_pt=wide_w,
+        block_id="fig1",
+        caption="Wide architecture schematic across dual columns",
+    )
+    markup = renderer._figure_markup(fig_wide, build_dir)
+    assert 'scope: "parent"' in markup
+    assert "placement: auto" in markup
+
+    fig_narrow = _Figure(
+        asset=str(asset_file),
+        width_pt=narrow_w,
+        block_id="fig2",
+        caption="Narrow single-column diagram",
+    )
+    markup_narrow = renderer._figure_markup(fig_narrow, build_dir)
+    assert 'scope: "parent"' not in markup_narrow
+
+
+def test_dual_column_wide_table_spanning() -> None:
+    """Wide dual-column tables must float with parent scope, clean block container, and adaptive font."""
+    from ubt.render.typst.document_renderer import render_table
+
+    table_md = (
+        "| Col1 | Col2 | Col3 | Col4 | Col5 | Col6 |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        "| A | B | C | D | E | F |\n"
+        "| 1 | 2 | 3 | 4 | 5 | 6 |\n"
+    )
+
+    # 1. 6 columns in dual-column layout -> promoted to full-page float
+    scale_out: list[float] = []
+    markup = render_table(
+        table_md,
+        page_columns=2,
+        span_full_width=True,
+        full_page_width_pt=493.2,
+        scale_out=scale_out,
+    )
+    assert '#place(top + center, scope: "parent", float: true, block(width: 100%)[' in markup
+    assert "rect(width: 98%)" not in markup
+    # 6 columns adapt font to <= 8.5pt / 10.5pt (~0.81)
+    assert scale_out and scale_out[0] <= 8.5 / 10.5 + 0.01
+
+
+@pytest.mark.asyncio
+async def test_render_facsimile_rescues_bottleneck_container(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When a 2D layout would fail solely due to a bottleneck segment, ContainerFitRepair rescues to L1."""
+    import pikepdf
+
+    from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
+    from ubt.core.ir.models import BoundingBox
+    from ubt.render.typst.facsimile_renderer import FacsimileRenderer
+
+    src_pdf = tmp_path / "src_rescue.pdf"
+    with pikepdf.Pdf.new() as pdf:
+        pdf.add_blank_page(page_size=(500, 700))
+        pdf.save(src_pdf)
+
+    # Paragraph that is verbose and slightly overflows the available height
+    verbose_text = (
+        "我们可以看到，由于这个原因，可以通过使用分布式共识算法进行系统优化与高吞吐处理。"
+    )
+    blocks = [
+        IRBlock(
+            element=make_element(
+                id="b_hdr",
+                spine_index=1,
+                block_type=BlockType.HEADING,
+                source_text="Header",
+                bbox=BoundingBox(page=1, x0=50.0, y0=620.0, x1=350.0, y1=650.0),
+            ),
+            target_text="第一章 架构",
+        ),
+        IRBlock(
+            element=make_element(
+                id="b_tight",
+                spine_index=2,
+                block_type=BlockType.NARRATIVE,
+                source_text="Tight container",
+                bbox=BoundingBox(page=1, x0=50.0, y0=580.0, x1=170.0, y1=600.0),
+            ),
+            target_text=verbose_text,
+        ),
+        IRBlock(
+            element=make_element(
+                id="b_next",
+                spine_index=3,
+                block_type=BlockType.NARRATIVE,
+                source_text="Next block",
+                bbox=BoundingBox(page=1, x0=50.0, y0=555.0, x1=350.0, y1=575.0),
+            ),
+            target_text="紧随其后的后续段落。",
+        ),
+    ]
+
+    rendered_pages: list[FacsimilePageSpec] = []
+
+    def fake_render_doc(
+        self: FacsimileRenderer,
+        pages: list[FacsimilePageSpec],
+        bg_pdf_path: Path,
+        output_path: Path,
+        build_dir: Path,
+        **kwargs: object,
+    ) -> Path:
+        rendered_pages.extend(pages)
+        output_path.write_bytes(src_pdf.read_bytes())
+        return output_path
+
+    monkeypatch.setattr(FacsimileRenderer, "render_document", fake_render_doc)
+
+    strategy = DoclingRenderStrategy(delivery_mode="facsimile")
+    manifest = BookManifest(
+        doc_id="doc_rescue",
+        title="Rescue Test",
+        source_path=str(src_pdf),
+        metadata={"source_path": str(src_pdf)},
+    )
+    out_pdf = tmp_path / "out_rescue.pdf"
+    await strategy.render_blocks(manifest, blocks, "zh", out_pdf)
+
+    # Repaired container should have allowed page to render as L1!
+    assert len(rendered_pages) == 1
+    assert rendered_pages[0].tier == "L1"
+    assert ("b_tight", "container_fit_repaired") in strategy.last_render_flags
+    assert "b_tight" in manifest.metadata.get("container_fit_repaired_segments", [])

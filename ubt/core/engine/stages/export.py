@@ -49,7 +49,9 @@ from ubt.core.ports import (
     get_last_render_reconstructions,
     get_last_render_skips,
     optimize_pdf_deliverable,
+    pdf_page_count,
 )
+from ubt.delivery import legacy_delivery_contract
 
 if TYPE_CHECKING:
     from ubt.adapters.pdf.artifact_text import ArtifactReport
@@ -690,9 +692,15 @@ def _enforce_blocking_gate(
     visual_report_path: Path | None,
     blocking_enabled: bool,
     *,
+    vlm_blocking_enabled: bool = False,
     rehearsal: bool = False,
 ) -> None:
-    """Refuse export on CRITICAL visual findings (opt-in), after persistence.
+    """Refuse export on blocking visual findings, after persistence.
+
+    Deterministic critical findings follow the existing opt-in/short-doc
+    policy. ``vlm_blocking_enabled`` is a separate opt-in: a sampled VLM
+    ``vlm_visual_fail`` blocks a short document, while long books keep it as
+    needs-human because the sample is not representative.
 
     Runs after the quality report is written so a refusal still leaves the
     ``*_quality_report.json`` / ``*_metrics.json`` audit trail beside the
@@ -716,7 +724,12 @@ def _enforce_blocking_gate(
             total_pages = int(stats.get("total_pages", 0))
         except (TypeError, ValueError):
             total_pages = 0
-    tripped = blocking_gate_tripped(getattr(gate, "findings", []), total_pages, blocking_enabled)
+    tripped = blocking_gate_tripped(
+        getattr(gate, "findings", []),
+        total_pages,
+        blocking_enabled,
+        vlm_blocking_enabled=vlm_blocking_enabled,
+    )
     if not tripped:
         return
     codes = sorted({str(getattr(f, "code", "defect")) for f in tripped})
@@ -1289,6 +1302,148 @@ def _write_epub_view(
             duration_ms=duration_ms,
             error=str(exc),
         )
+
+
+def _delivery_contract_evidence(
+    ctx: StageContext,
+    adapter: DocumentAdapter,
+    final_blocks: list[IRBlock],
+    rendered_path: Path,
+    delivery_contract: dict[str, Any] | None,
+) -> Any:
+    """Build artifact evidence for the delivery contract.
+
+    Reads the delivered PDF (text, boxes, page bounds) and the renderer's own
+    side channels. The contract is selected from the delivery mode that
+    actually produced this file: facsimile/page_locked promise a page-for-page
+    artifact, reflow does not.
+    """
+    from ubt.core.engine.delivery_contract import ContractBlock, OverflowRecord, StyleSample
+    from ubt.core.ports import read_delivery_evidence
+
+    mode = str(getattr(getattr(ctx.config, "typst", None), "delivery_mode", "") or "")
+    actual_mode = str((getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_mode", "") or "")
+    if actual_mode in ("reflow", "facsimile", "page_locked"):
+        # The renderer records what it actually shipped; a facsimile run that
+        # degraded to reflow must be QA'd as readable, not as faithful.
+        contract = legacy_delivery_contract(actual_mode).value
+    else:
+        plan = (getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_plan")
+        if isinstance(plan, dict) and str(plan.get("contract", "")) in ("readable", "faithful"):
+            contract = str(plan["contract"])
+        elif mode in ("facsimile", "page_locked"):
+            contract = "faithful"
+        else:
+            contract = "readable"
+
+    blocks: list[ContractBlock] = []
+    for block in final_blocks:
+        if block.skip_translate:
+            continue
+        if block.block_type in (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE):
+            continue
+        text = (block.target_text or "").strip()
+        if not text:
+            continue
+        page = int(block.bbox.page) if block.bbox is not None else 0
+        blocks.append(
+            ContractBlock(
+                block_id=block.id,
+                text=text,
+                page=page,
+                kind=str(block.block_type.value),
+                # A reflow may move a block to another page; a faithful page
+                # must keep it where the source put it.
+                allow_cross_page=contract == "readable",
+            )
+        )
+
+    expected_pages: int | None = None
+    if contract == "faithful":
+        source = str(getattr(ctx.manifest, "source_path", "") or "")
+        if source:
+            try:
+                expected_pages = pdf_page_count(Path(source))
+            except Exception as exc:  # noqa: BLE001 - a missing count is reported, not fatal
+                logger.debug("Delivery contract: source page count unavailable: %s", exc)
+
+    missing_assets: list[str] = []
+    if isinstance(delivery_contract, dict):
+        for violation in delivery_contract.get("violations", []):
+            if str(violation.get("kind", "")) == "asset_missing":
+                missing_assets.append(str(violation.get("node_id", "")))
+
+    overflow_records: list[OverflowRecord] = []
+    for page in getattr(adapter, "last_page_geometry", None) or []:
+        if page.get("fits") in (0, False):
+            overflow_records.append(
+                OverflowRecord(
+                    block_id=f"page:{page.get('page_no')}",
+                    page=int(page.get("page_no", 0) or 0),
+                    deficit_pt=0.0,
+                    reason="page_lock_overflow",
+                )
+            )
+
+    style_samples: list[StyleSample] = []
+    for page in getattr(adapter, "last_page_geometry", None) or []:
+        size = page.get("delivered_size_pt")
+        if isinstance(size, (int, float)) and size > 0:
+            style_samples.append(
+                StyleSample(page=int(page.get("page_no", 0) or 0), size_pt=float(size))
+            )
+
+    return read_delivery_evidence(
+        rendered_path,
+        contract=contract,
+        blocks=blocks,
+        expected_page_count=expected_pages,
+        missing_assets=missing_assets,
+        overflow_records=overflow_records,
+        style_samples=style_samples,
+        read_geometry=True,
+    )
+
+
+def _evaluate_delivery(
+    ctx: StageContext,
+    adapter: DocumentAdapter,
+    final_blocks: list[IRBlock],
+    rendered_path: Path,
+    delivery_contract: dict[str, Any] | None,
+) -> Any | None:
+    """Evaluate the artifact contract and write its sidecar.
+
+    The contract reads PDF text/geometry. A Markdown/EPUB/DOCX artifact has no
+    artifact text boxes to measure; it is not a failed PDF, it is out of scope.
+    Returning ``None`` keeps the caller from turning "not a PDF" into a
+    ``page_count`` critical.
+    """
+    if rendered_path.suffix.lower() != ".pdf":
+        return None
+    from ubt.core.engine.delivery_contract import evaluate_delivery_contract
+
+    evidence = _delivery_contract_evidence(
+        ctx, adapter, final_blocks, rendered_path, delivery_contract
+    )
+    report = evaluate_delivery_contract(evidence)
+    path = sidecar_path(rendered_path, "delivery_contract.json")
+    try:
+        atomic_write_text(
+            path,
+            json.dumps(report.to_payload(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.warning("Could not write delivery contract sidecar: %s", exc)
+    if not report.passed:
+        logger.warning(
+            "Delivery contract BLOCKED for job %s: %s; see %s",
+            ctx.job_id,
+            report.summary_line(),
+            path,
+        )
+    return report
 
 
 def _artifact_payload(report: ArtifactReport) -> dict[str, Any]:
@@ -1890,6 +2045,28 @@ async def run_export_stage(
         companion_artifacts=companion_summary_dict["results"],
     )
 
+    # Artifact-level delivery contract: eight invariants read from the PDF
+    # itself. Written after the reports so a refusal keeps its audit trail.
+    # Non-PDF deliverables are out of scope for the PDF geometry contract.
+    delivery_report = (
+        await asyncio.to_thread(
+            _evaluate_delivery,
+            ctx,
+            adapter,
+            final_blocks,
+            rendered_path,
+            delivery_contract,
+        )
+        if rendered_path.suffix.lower() == ".pdf"
+        else None
+    )
+    if delivery_report is not None and not delivery_report.passed and not ctx.is_mock_run:
+        raise IntegrityViolationError(
+            f"Export blocked for job {ctx.job_id}: delivery contract failed — "
+            f"{delivery_report.summary_line()}. See "
+            f"{sidecar_path(rendered_path, 'delivery_contract.json')}."
+        )
+
     # Enforce AFTER the reports are on disk so a refused job keeps its audit
     # trail, and downgrade to a warning for rehearsal (mock) runs — a mock
     # draft echoes source text, so the sparse-target finding would fail every
@@ -1899,6 +2076,7 @@ async def run_export_stage(
         gate,
         visual_report_path,
         visual_blocking_gate_enabled,
+        vlm_blocking_enabled=ctx.config.visual_vlm_blocking_enabled,
         rehearsal=ctx.is_mock_run,
     )
 
