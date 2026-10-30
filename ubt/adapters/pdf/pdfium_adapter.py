@@ -90,7 +90,8 @@ def _normalize_cropbox_origin(path: Path, blocks: list[IRBlock]) -> list[IRBlock
     if not crop_offsets:
         return blocks
 
-    from ubt.core.ir.models import Span, _replace_element
+    from ubt.core.ir.models import _replace_element
+    from ubt.model.span import Span
 
     for b in blocks:
         if not b.bbox or b.bbox.page not in crop_offsets:
@@ -98,8 +99,9 @@ def _normalize_cropbox_origin(path: Path, blocks: list[IRBlock]) -> list[IRBlock
         dx, dy = crop_offsets[b.bbox.page]
         if b.element and getattr(b.element, "span", None):
             span = b.element.span
-            if span and getattr(span, "bbox", None) and len(span.bbox) == 4:
-                sb = span.bbox
+            span_bbox = getattr(span, "bbox", None)
+            if span and span_bbox and len(span_bbox) == 4:
+                sb = span_bbox
                 new_span = Span(
                     page=span.page,
                     bbox=(sb[0] - dx, sb[1] - dy, sb[2] - dx, sb[3] - dy),

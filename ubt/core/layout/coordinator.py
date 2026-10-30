@@ -178,7 +178,7 @@ def solve_page_cels(
     solved_boxes_for_distortion: list[Box] = []
 
     for track in detection.tracks:
-        track_boxes = lines_by_track.get(track.index, [])
+        track_boxes = lines_by_track.get(track.index, ())
         track_blocks = [
             block_by_box_id[id(box)] for box in track_boxes if id(box) in block_by_box_id
         ]

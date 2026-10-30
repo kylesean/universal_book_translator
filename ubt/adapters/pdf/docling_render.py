@@ -1485,8 +1485,8 @@ class DoclingRenderStrategy:
 
         math_probe = TypstMathProbe()
         pending_bodies = math_bodies_for_blocks(blocks)
-        for spec in pages_spec:
-            for pl in spec.placements:
+        for page_spec in pages_spec:
+            for pl in page_spec.placements:
                 pending_bodies.extend(math_bodies_for_prose(pl.text))
         math_probe.check_many(pending_bodies)
 

@@ -106,7 +106,7 @@ def test_emit_line_with_rigids_generates_isolated_graphics_state(cjk_font: Path)
         xobject_ref="/FmMath",
     )
 
-    segments = ["漏极电流", rigid, "为正"]
+    segments: list[str | InlineRigidBox] = ["漏极电流", rigid, "为正"]
     ops = emit_line_with_rigids(
         line,
         segments,
@@ -159,7 +159,7 @@ def test_formula_follower_roundtrip_on_chapter3_page(cjk_font: Path, tmp_path: P
     font = embed_subset_font(pdf, font_path=cjk_font, text=chinese_prose)
     install_font(page, font, pdf)
 
-    segments = ["此处固定电荷由", rigid_formula, "给出"]
+    segments: list[str | InlineRigidBox] = ["此处固定电荷由", rigid_formula, "给出"]
 
     inject_mixed_cid_line(
         page,

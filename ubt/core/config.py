@@ -933,12 +933,6 @@ class UBTConfig(BaseSettings):
     # which model to call, and an empty value fails closed (see _check_invariants
     # and the vision driver) rather than silently billing a shipped model.
     ocr_model: str = ""
-    # Vision model for the OCR channel (env UBT_OCR_MODEL). Declared here so the
-    # spend pre-flight and the assessor can price the channel the driver
-    # actually bills against. No vendor default: the vision channel must be told
-    # which model to call, and an empty value fails closed (see _check_invariants
-    # and CloudOcrDriver) rather than silently billing a shipped model.
-    ocr_model: str = ""
     # Plain declarative field: env_prefix maps this to UBT_OCR_API_KEY only, so
     # neither the bare ``OCR_API_KEY`` nor a shared LLM key can reach it.
     ocr_api_key: SecretStr = SecretStr("")
