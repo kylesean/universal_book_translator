@@ -101,15 +101,17 @@ def run_full_suite(service: TypstMeasurementService, out_dir: Path) -> int:
         json.dumps(json_payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
-    # Generate Markdown report
+    # Generate Markdown report. Every conclusion below is computed from the
+    # run's own records: the report must be able to fail.
+    total_overflows = sum(int(stats["overflows"]) for stats in role_stats.values())
     lines: list[str] = [
         "# G2 MeasurementService 校准报告",
         "",
         f"- **生成时间**：{datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}",
         f"- **Typst 编译器版本**：{service.typst_version}",
-        f"- **测试用例总数**：{len(cases)} 条（4 角色 × 20 条）",
+        f"- **测试用例总数**：{len(cases)} 条（{len(role_stats)} 角色）",
         f"- **批处理耗时**：{duration_s:.3f} 秒（平均 {duration_s / len(cases) * 1000:.1f} ms/条）",
-        "- **溢出用例数**：0 条（100% 正常断行与对齐）",
+        f"- **溢出用例数**：{total_overflows} 条（共 {len(cases)} 条）",
         "",
         "## 1. 角色统计汇总",
         "",
@@ -119,19 +121,28 @@ def run_full_suite(service: TypstMeasurementService, out_dir: Path) -> int:
     for role, stats in role_stats.items():
         avg_l = stats["total_lines"] / stats["count"]
         avg_h = stats["total_height"] / stats["count"]
+        overflow_rate = stats["overflows"] / stats["count"] * 100
+        verdict = "PASS" if stats["overflows"] == 0 else "FAIL"
         lines.append(
-            f"| `{role}` | {stats['count']} | {avg_l:.1f} | {avg_h:.1f} | 0.0% | **PASS** |"
+            f"| `{role}` | {stats['count']} | {avg_l:.1f} | {avg_h:.1f} "
+            f"| {overflow_rate:.1f}% | **{verdict}** |"
         )
 
+    overflow_line = (
+        f"1. **断行健康**：{len(cases) - total_overflows}/{len(cases)} 条用例在容差内正常断行。"
+        if total_overflows == 0
+        else f"1. **断行健康**：{total_overflows}/{len(cases)} 条用例报告溢出，"
+        "明细见下表 overflow 列，对应角色判定为 FAIL。"
+    )
     lines.extend(
         [
             "",
-            "## 2. 测量真值与单调性检验结论",
+            "## 2. 本报告测量的结论",
             "",
-            "1. **单调性检验**：对正文与图注在 `1.0W`、`0.75W`、`0.5W` 宽度梯度下实测，行数严格单调非递减（$N_{0.5W} \\ge N_{0.75W} \\ge N_{1.0W}$），无反向跳行异常。",
-            "2. **批处理与单测等价性**：`measure_many` 多页单次编译与 `measure_block` 单块独立编译的实测高度偏差为 **0.0000pt**，完全等价。",
-            "3. **数学公式与特殊排版**：包含 `$I_{DS} = \\mu C_{ox} \\frac{W}{L}$` 等复杂内联 LaTeX 公式的用例真实渲染为排版符号，无源码泄漏，无测量崩溃。",
-            "4. **窄容器表头适应性**：35pt ~ 80pt 极限狭窄表头容器正常换行，真实测量高度准确反映单元格需求。",
+            overflow_line,
+            "2. **范围说明**：单调性、批处理与单块编译的等价性、公式不泄漏、窄容器适应性"
+            "不由本脚本测量；这些性质由单元测试套件"
+            "（`tests/unit/adapters/test_typst_measurement_calibration.py`）以断言形式持续验证。",
             "",
             "## 3. 详细校准数据明细",
             "",
