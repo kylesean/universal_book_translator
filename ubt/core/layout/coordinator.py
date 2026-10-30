@@ -157,9 +157,18 @@ def solve_page_cels(
         )
 
     # 1. Stage 1: Detect column tracks using horizontal projection profile
-    # Flowable text boxes determine column tracks; pinned blocks (figures, titles) are preserved
-    flowable_boxes = [b.box for b in blocks if not b.is_pinned]
-    explicit_pinned = [pin_from(b.box, kind="other") for b in blocks if b.is_pinned]
+    # Flowable text boxes determine column tracks; pinned blocks (figures, titles) are preserved.
+    # Spanning blocks (> 60% page width) cannot fit into a single column of a multi-column page
+    # and must be treated as pinned straddler obstacles so they do not poison column track detection.
+    flowable_boxes = [b.box for b in blocks if not b.is_pinned and b.box.width <= 0.60 * page_width]
+    spanning_pinned = [
+        pin_from(b.box, kind="straddler")
+        for b in blocks
+        if not b.is_pinned and b.box.width > 0.60 * page_width
+    ]
+    explicit_pinned = [
+        pin_from(b.box, kind="other") for b in blocks if b.is_pinned
+    ] + spanning_pinned
     detection = detect_columns(flowable_boxes, page_width=page_width, page_height=page_height)
 
     # 2. Assign lines to tracks and extract pinned straddler obstacles

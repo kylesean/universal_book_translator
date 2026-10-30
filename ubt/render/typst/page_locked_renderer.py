@@ -112,7 +112,7 @@ def _central_band_is_occupied(
     bboxes: Sequence[Any],
     page_w: float,
     *,
-    band_pt: float = 12.0,
+    band_pt: float = 6.0,
     coverage: float = 0.40,
 ) -> bool:
     """Whether blocks cover enough of the page's central vertical band to rule out a gutter.
@@ -121,11 +121,6 @@ def _central_band_is_occupied(
     that no body block crosses. A single-column page has full-measure prose
     across that band, even when its display formulas are centred and its short
     labels sit on the left.
-
-    Counting ``x0 >= mid - 15`` as "right column" cannot tell those apart: a
-    centred formula starts near the midpoint and is counted as right-column
-    text, which is how ``chapter-3.pdf`` page 12 became two columns. Coverage
-    is the property a gutter actually has, so it is what this function tests.
     """
     if not bboxes or page_w <= 0:
         return False
@@ -133,7 +128,14 @@ def _central_band_is_occupied(
     left, right = mid - band_pt, mid + band_pt
     intervals: list[tuple[float, float]] = []
     for bb in bboxes:
-        if float(bb.x1) <= left or float(bb.x0) >= right:
+        bx0 = float(bb.x0)
+        bx1 = float(bb.x1)
+        # A box occupies the central gutter if it substantially straddles the page midpoint.
+        # A box strictly to the left (bx1 <= mid) or strictly to the right (bx0 >= mid) is
+        # within its column and does not cross the gutter.
+        if bx1 <= mid or bx0 >= mid:
+            continue
+        if bx1 <= left or bx0 >= right:
             continue
         lo = min(float(bb.y0), float(bb.y1))
         hi = max(float(bb.y0), float(bb.y1))

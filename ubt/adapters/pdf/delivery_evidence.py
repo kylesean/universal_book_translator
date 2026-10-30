@@ -174,6 +174,7 @@ def _text_boxes_for_page(page_no: int, textpage: object) -> list[ContractTextBox
             continue
         line_count = max(1, sum(1 for ln in text.splitlines() if ln.strip()))
         line_height_pt = (float(y1) - float(y0)) / line_count
+        font_size = round(line_height_pt, 2) if line_height_pt >= 4.0 else None
         boxes.append(
             ContractTextBox(
                 page=page_no,
@@ -181,7 +182,7 @@ def _text_boxes_for_page(page_no: int, textpage: object) -> list[ContractTextBox
                 y0=float(y0),
                 x1=float(x1),
                 y1=float(y1),
-                font_size_pt=round(line_height_pt, 2),
+                font_size_pt=font_size,
                 text=text,
             )
         )

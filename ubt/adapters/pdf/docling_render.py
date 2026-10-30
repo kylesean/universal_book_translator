@@ -1095,7 +1095,10 @@ class DoclingRenderStrategy:
                     target_txt = pl.text.strip()
                     eff_size = pl.font_size_pt or body_group.size_pt
                     is_tbl = target_txt.startswith("|") or "\n|" in target_txt
-                    if target_txt and not pl.is_heading and not is_tbl:
+                    is_wide = pl_w > 0.60 * pw
+                    if pl.is_heading:
+                        needed_h = max(pl_h, eff_size * 1.25)
+                    elif target_txt and not is_tbl:
                         n_ascii = sum(1 for c in target_txt if ord(c) < 128)
                         aspect = (len(target_txt) - n_ascii + n_ascii * 0.50) / max(
                             1, len(target_txt)
@@ -1118,7 +1121,7 @@ class DoclingRenderStrategy:
                             text=pl.text,
                             source_font_size_pt=eff_size,
                             required_height_pt=needed_h,
-                            is_pinned=False,
+                            is_pinned=is_wide,
                         )
                     )
 
@@ -1294,10 +1297,10 @@ class DoclingRenderStrategy:
                 else False
             )
             cels_succeeded = cels_sol is not None and not cels_distortion_critical
-            use_l2 = (
-                is_pure_page_locked
-                or sol.source_overlap
-                or (not cels_succeeded if cels_sol is not None else not page_fit.fits)
+            use_l2 = is_pure_page_locked or (
+                not cels_succeeded
+                if cels_sol is not None
+                else (sol.source_overlap or not page_fit.fits)
             )
 
             if not use_l2 and cels_sol is not None and cels_sol.solved_blocks_by_id:
@@ -1318,6 +1321,13 @@ class DoclingRenderStrategy:
                     else:
                         relaxed_placements.append(pl)
                 placements = relaxed_placements
+                if cels_succeeded and cels_sol.total_deficit_pt <= 0.001:
+                    page_fits[pno] = FitReport(
+                        fits=True,
+                        deficit_pt=0.0,
+                        block_ids=(),
+                        reason="cels_fit",
+                    )
 
             preserved_by_page[pno] = list(page_preserved)
             if use_l2:
@@ -1434,10 +1444,10 @@ class DoclingRenderStrategy:
                         "delivered_leading_em": body_group.leading_em,
                         "tracking_em": round(body_group.tracking_em, 4),
                         "tier": "L1",
-                        "fits": bool(page_fit.fits),
+                        "fits": bool(page_fits[pno].fits),
                         "style_group_id": body_group.group_id,
                         "style_group_size_pt": round(body_group.size_pt, 3),
-                        "style_exception": not page_fit.fits,
+                        "style_exception": not page_fits[pno].fits,
                         **(
                             {
                                 "cels_distortion_score": round(cels_sol.distortion.score, 4),
@@ -1451,12 +1461,12 @@ class DoclingRenderStrategy:
                         ),
                     }
                 )
-                if not page_fit.fits:  # pragma: no cover - routed to L2 above
+                if not page_fits[pno].fits:
                     logger.warning(
                         "Page %s holds the body group only with %spt deficit; "
                         "recording it as a style exception",
                         pno,
-                        page_fit.deficit_pt,
+                        page_fits[pno].deficit_pt,
                     )
 
         # The transpile gate, same contract as ``_render_publish_sync`` above:
@@ -1566,6 +1576,15 @@ class DoclingRenderStrategy:
                             page_blocks,
                             default_theme_color=style_profile.primary_heading_hex,
                         )
+                        cels_tracks = (
+                            page_geometry[idx].get("cels_track_count", 0)
+                            if idx < len(page_geometry)
+                            else 0
+                        )
+                        if cels_tracks >= 2 and geom.columns < cels_tracks:
+                            import dataclasses
+
+                            geom = dataclasses.replace(geom, columns=cels_tracks)
                         l2_size, l2_leading, l2_spacing, l2_tracking = solve_page_lock(
                             geom,
                             page_blocks,
