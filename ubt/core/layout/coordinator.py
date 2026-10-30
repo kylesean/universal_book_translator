@@ -206,8 +206,10 @@ def solve_page_cels(
             for i, b in enumerate(track_blocks)
         ]
 
-        # Stage 3B: Cassowary Kiwi vertical solver
-        v_track = VerticalTrack(y_min_pt=printable_box.y0, y_max_pt=printable_box.y1)
+        # Stage 3B: Cassowary Kiwi vertical solver (envelope encompasses blocks and printable area)
+        track_y_min = min(printable_box.y0, min(b.box.y0 for b in track_blocks))
+        track_y_max = max(printable_box.y1, max(b.box.y1 for b in track_blocks))
+        v_track = VerticalTrack(y_min_pt=track_y_min, y_max_pt=track_y_max)
         solved_specs = solve_vertical(v_inputs, track=v_track, min_gap_pt=min_gap_pt)
 
         for i, spec in enumerate(solved_specs):

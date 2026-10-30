@@ -633,11 +633,17 @@ class DoclingRenderStrategy:
         build_dir.mkdir(parents=True, exist_ok=True)
 
         # 1. Group blocks by page, and collect the page's physical size.
+        page_crop_origins: dict[int, tuple[float, float]] = {}
         with pikepdf.open(source_path) as src_doc:
             total_pages = len(src_doc.pages)
             page_dims: list[tuple[float, float]] = []
-            for page in src_doc.pages:
+            for p_idx, page in enumerate(src_doc.pages, start=1):
                 box = page.CropBox if page.get("/CropBox") is not None else page.MediaBox
+                mb = page.MediaBox if page.get("/MediaBox") is not None else box
+                origin_x = float(box[0]) - float(mb[0])
+                origin_y = float(box[1]) - float(mb[1])
+                if abs(origin_x) > 1e-4 or abs(origin_y) > 1e-4:
+                    page_crop_origins[p_idx] = (origin_x, origin_y)
                 # ``box`` is a pikepdf Object whose items mypy types as opaque,
                 # so the subtraction is done on explicit floats rather than on
                 # the two Object operands.
@@ -836,6 +842,16 @@ class DoclingRenderStrategy:
                 by0 = float(b.bbox.y0)
                 bx1 = float(b.bbox.x1)
                 by1 = float(b.bbox.y1)
+                if pno in page_crop_origins:
+                    off_x, off_y = page_crop_origins[pno]
+                    # Defensive detection: if the block's coordinates still reside in
+                    # unnormalized MediaBox space (by1 exceeds page height by ~off_y),
+                    # translate into the CropBox frame.
+                    if by1 > ph + 0.5:
+                        bx0 -= off_x
+                        bx1 -= off_x
+                        by0 -= off_y
+                        by1 -= off_y
 
                 # Multi-region flow handling:
                 # If a block spans multiple disjoint regions (different columns or different pages),
@@ -1104,16 +1120,24 @@ class DoclingRenderStrategy:
                         x0=36.0, y0=36.0, x1=max(46.0, pw - 36.0), y1=max(46.0, ph - 36.0)
                     )
 
-                cels_sol = solve_page_cels(
-                    page_no=pno,
-                    blocks=cels_blocks,
-                    page_width=pw,
-                    page_height=ph,
-                    printable_box=printable_box,
-                    source_body_size_pt=source_size_pt,
-                    realized_body_size_pt=body_group.size_pt,
-                    target_lang=target_lang,
-                )
+                try:
+                    cels_sol = solve_page_cels(
+                        page_no=pno,
+                        blocks=cels_blocks,
+                        page_width=pw,
+                        page_height=ph,
+                        printable_box=printable_box,
+                        source_body_size_pt=source_size_pt,
+                        realized_body_size_pt=body_group.size_pt,
+                        target_lang=target_lang,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "CELS page %d layout solve failed: %s; falling back to standard placement",
+                        pno,
+                        exc,
+                    )
+                    cels_sol = None
 
             # If layout failed to fit due to bottleneck containers,
             # attempt controlled concise repair before falling back to L2
@@ -1210,16 +1234,23 @@ class DoclingRenderStrategy:
                             )
                             for b_cels in cels_blocks
                         ]
-                        cels_sol = solve_page_cels(
-                            page_no=pno,
-                            blocks=cels_blocks_repaired,
-                            page_width=pw,
-                            page_height=ph,
-                            printable_box=printable_box,
-                            source_body_size_pt=source_size_pt,
-                            realized_body_size_pt=body_group.size_pt,
-                            target_lang=target_lang,
-                        )
+                        try:
+                            cels_sol = solve_page_cels(
+                                page_no=pno,
+                                blocks=cels_blocks_repaired,
+                                page_width=pw,
+                                page_height=ph,
+                                printable_box=printable_box,
+                                source_body_size_pt=source_size_pt,
+                                realized_body_size_pt=body_group.size_pt,
+                                target_lang=target_lang,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "CELS page %d repair layout solve failed: %s; keeping previous solve",
+                                pno,
+                                exc,
+                            )
                         for rep_id in repaired_texts:
                             render_flags.append((rep_id, "container_fit_repaired"))
                         repaired_meta = manifest.metadata.setdefault(

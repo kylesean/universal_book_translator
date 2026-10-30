@@ -58,6 +58,77 @@ def _block_page_in_range(b: IRBlock, first: int, last: int) -> bool:
     return False
 
 
+def _normalize_cropbox_origin(path: Path, blocks: list[IRBlock]) -> list[IRBlock]:
+    """Translate block bounding boxes from MediaBox coordinates into CropBox coordinates.
+
+    pdfium's text page extraction reports coordinates in the PDF user space (MediaBox),
+    while rendering and typesetting (Typst #image(), Docling, and the visual scalpel)
+    clip to the visible CropBox with origin (0, 0).
+    On documents with non-zero CropBox origin (e.g. publisher print PDFs with bleed/margins),
+    subtracting the page's CropBox origin aligns geometric blocks with the rendered page.
+    """
+    import pypdfium2 as pdfium
+
+    try:
+        pdf = pdfium.PdfDocument(str(path))
+    except Exception:
+        return blocks
+
+    crop_offsets: dict[int, tuple[float, float]] = {}
+    try:
+        pages_to_check = {b.bbox.page for b in blocks if b.bbox and b.bbox.page > 0}
+        for p_no in pages_to_check:
+            if 1 <= p_no <= len(pdf):
+                page = pdf[p_no - 1]
+                cb = page.get_cropbox()
+                x0, y0 = float(cb[0]), float(cb[1])
+                if abs(x0) > 1e-4 or abs(y0) > 1e-4:
+                    crop_offsets[p_no] = (x0, y0)
+    finally:
+        pdf.close()
+
+    if not crop_offsets:
+        return blocks
+
+    from ubt.core.ir.models import Span, _replace_element
+
+    for b in blocks:
+        if not b.bbox or b.bbox.page not in crop_offsets:
+            continue
+        dx, dy = crop_offsets[b.bbox.page]
+        if b.element and getattr(b.element, "span", None):
+            span = b.element.span
+            if span and getattr(span, "bbox", None) and len(span.bbox) == 4:
+                sb = span.bbox
+                new_span = Span(
+                    page=span.page,
+                    bbox=(sb[0] - dx, sb[1] - dy, sb[2] - dx, sb[3] - dy),
+                )
+                b.element = _replace_element(b.element, span=new_span)
+        if b.provenance and getattr(b.provenance, "physical_boxes", None):
+            from ubt.model.span import PhysicalBox
+
+            new_phys = []
+            for pb in b.provenance.physical_boxes:
+                if isinstance(pb, PhysicalBox) and pb.page in crop_offsets:
+                    p_dx, p_dy = crop_offsets[pb.page]
+                    new_phys.append(
+                        PhysicalBox.of(
+                            pb.page,
+                            (
+                                pb.bbox[0] - p_dx,
+                                pb.bbox[1] - p_dy,
+                                pb.bbox[2] - p_dx,
+                                pb.bbox[3] - p_dy,
+                            ),
+                        )
+                    )
+                else:
+                    new_phys.append(pb)
+            b.provenance.physical_boxes = new_phys
+    return blocks
+
+
 def extract_blocks_with_pdfium(
     path: Path,
     page_range: tuple[int, int] | None = None,
@@ -89,6 +160,7 @@ def extract_blocks_with_pdfium(
 
         blocks = read_pdf_blocks(path, pages=pages)
         blocks = fuse_continuation_blocks(blocks)
+        blocks = _normalize_cropbox_origin(path, blocks)
         for index, block in enumerate(blocks, start=1):
             block.set_id(f"pdf_main#b{index:04d}")
             block.set_spine_index(index)

@@ -530,11 +530,11 @@ def solve_vertical(
     for block in ordered:
         if block.required_height_pt < 0 or block.source_height_pt < 0:
             raise ValueError(f"block {block.index} has a negative height")
-        if not (track.y_min_pt - 1e-9 <= block.source_top_pt <= track.y_max_pt + 1e-9):
-            raise ValueError(
-                f"block {block.index} source top {block.source_top_pt}pt is outside the track "
-                f"[{track.y_min_pt}, {track.y_max_pt}]"
-            )
+
+    # Clamp top values to track bounds so boundary jitter does not fail the solve
+    clamped_tops = [
+        max(track.y_min_pt, min(track.y_max_pt, block.source_top_pt)) for block in ordered
+    ]
 
     ks = _load_kiwisolver()
     solver = ks.Solver()
@@ -557,14 +557,13 @@ def solve_vertical(
         solver.addConstraint((top - bottom + deficit >= block.required_height_pt) | required)
         solver.addConstraint((deficit == 0) | strong)
         solver.addConstraint((top - bottom == block.source_height_pt) | medium)
-        solver.addConstraint((top == block.source_top_pt) | weak)
+        solver.addConstraint((top == clamped_tops[i]) | weak)
         if i > 0:
             previous_bottom = bottoms[i - 1]
             gap = previous_bottom - top
             solver.addConstraint((gap >= min_gap_pt) | required)
             source_gap = max(
-                (ordered[i - 1].source_top_pt - ordered[i - 1].source_height_pt)
-                - block.source_top_pt,
+                (clamped_tops[i - 1] - ordered[i - 1].source_height_pt) - clamped_tops[i],
                 min_gap_pt,
             )
             solver.addConstraint((gap == source_gap) | medium)

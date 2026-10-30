@@ -173,3 +173,51 @@ def test_resolver_and_scalpel_roundtrip_with_shifted_cropbox(tmp_path: Path) -> 
         assert probe == (255, 0, 0), probe
     finally:
         visual_scalpel._PAGE_CACHE = None
+
+
+def test_extract_blocks_with_pdfium_normalizes_cropbox_origin(tmp_path: Path) -> None:
+    """PDFium extraction translates block bounding boxes by the CropBox origin."""
+    from ubt.adapters.pdf.pdfium_adapter import extract_blocks_with_pdfium
+
+    pdf_path = tmp_path / "crop_normalize.pdf"
+    write_text_pdf(pdf_path, [("Hello Rust",)], width=400.0, height=400.0)
+    _page_with_cropbox(pdf_path, (50.0, 60.0, 350.0, 360.0))
+
+    blocks = extract_blocks_with_pdfium(pdf_path)
+    assert len(blocks) == 1
+    bbox = blocks[0].bbox
+    assert bbox is not None
+    # Prior to normalization, bbox sat in MediaBox coordinates (x >= 50, y >= 60).
+    # Normalized bbox must be relative to CropBox (0, 0), so x and y are shifted by (-50, -60).
+    assert bbox.x0 < 300.0
+    assert bbox.y0 < 300.0
+    assert bbox.x1 <= 300.0 + 1e-2
+    assert bbox.y1 <= 300.0 + 1e-2
+
+
+def test_vertical_solver_clamps_boundary_jitter_without_exception() -> None:
+    """Vertical solver tolerates blocks slightly exceeding track bounds without fatal ValueError."""
+    from ubt.core.layout.solver import VerticalBlockInput, VerticalTrack, solve_vertical
+
+    track = VerticalTrack(y_min_pt=50.0, y_max_pt=650.0)
+    # A block whose source_top is 655.0 (exceeds track.y_max_pt 650.0 by 5pt)
+    blocks = [
+        VerticalBlockInput(
+            index=0,
+            required_height_pt=30.0,
+            source_height_pt=30.0,
+            source_top_pt=655.0,
+        ),
+        VerticalBlockInput(
+            index=1,
+            required_height_pt=30.0,
+            source_height_pt=30.0,
+            source_top_pt=580.0,
+        ),
+    ]
+    # Must solve without raising ValueError:
+    specs = solve_vertical(blocks, track=track, min_gap_pt=2.0)
+    assert len(specs) == 2
+    assert specs[0].y_top_pt <= track.y_max_pt + 1e-4
+    assert specs[0].y_bottom_pt >= specs[1].y_top_pt + 2.0 - 1e-4
+    assert specs[1].y_bottom_pt >= track.y_min_pt - 1e-4
