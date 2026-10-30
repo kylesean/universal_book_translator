@@ -407,7 +407,7 @@ def test_keep_verbatim_pages_are_excluded_from_the_canvas_measurement() -> None:
 
     from ubt.adapters.pdf.visual_gate import translated_canvas_pages
 
-    def _block(page: int, *, target: str, source: str, skip: bool = False):
+    def _block(page: int | None, *, target: str, source: str, skip: bool = False) -> object:
         return SimpleNamespace(
             bbox=SimpleNamespace(page=page),
             target_text=target,

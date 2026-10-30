@@ -2323,20 +2323,26 @@ async def run_visual_gate(
                 # their overlay re-draws the source text on itself, and the
                 # measurement would report the font substitution's antialiasing
                 # as a collision (see :func:`translated_canvas_pages`). The
-                # exclusion is counted in ``stats`` so a report can show how
-                # many declared pages were measured and why the rest were not.
-                translated = translated_canvas_pages(blocks)
-                canvas_verbatim_excluded.extend(
-                    sorted(
-                        artifact_page
-                        for artifact_page, background_page in canvas_pairs.items()
-                        if artifact_page in sampled and artifact_page not in translated
+                # exclusion needs block-level knowledge: a caller that passes no
+                # blocks cannot say which pages are verbatim, so nothing is
+                # excluded there — the tier must not go inert just because the
+                # caller had no ledger at hand. When the exclusion applies it is
+                # counted in ``stats`` so a report can show how many declared
+                # pages were measured and why the rest were not.
+                translated = translated_canvas_pages(blocks) if blocks else None
+                if translated is not None:
+                    canvas_verbatim_excluded.extend(
+                        sorted(
+                            artifact_page
+                            for artifact_page, background_page in canvas_pairs.items()
+                            if artifact_page in sampled and artifact_page not in translated
+                        )
                     )
-                )
                 sampled_pairs = {
                     artifact_page: background_page
                     for artifact_page, background_page in canvas_pairs.items()
-                    if artifact_page in sampled and artifact_page in translated
+                    if artifact_page in sampled
+                    and (translated is None or artifact_page in translated)
                 }
                 canvas_pages = await asyncio.to_thread(
                     canvas_ink_collision_pages,
