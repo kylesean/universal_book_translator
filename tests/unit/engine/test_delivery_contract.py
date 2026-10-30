@@ -331,7 +331,7 @@ def test_every_placeholder_occurrence_is_reported() -> None:
 
     finding = next(f for f in report.findings if f.code == "placeholder_leak")
     assert finding.severity == "critical"
-    assert "3 placeholder/sentinel site(s)" in finding.message
+    assert "3 placeholder/sentinel or stray markup site(s)" in finding.message
     assert len(finding.occurrences) == 3
     assert "SOUP_MASK_0001-f2d" in finding.occurrences[0]
     assert "⟨missing⟩" in finding.occurrences[2]
@@ -339,6 +339,30 @@ def test_every_placeholder_occurrence_is_reported() -> None:
     assert payload["occurrence_count"] == 3
     assert isinstance(payload["occurrences"], list)
     assert len(payload["occurrences"]) == 3
+
+
+def test_a_stray_markup_tag_in_the_artifact_is_critical() -> None:
+    """A tag measured in the rendered artifact means the strip was bypassed.
+
+    The 18-page ATC'25 replay shipped ``RustyHermit-MPK [59]</span>`` nine
+    times: a model echoed a converter's link span straight into its
+    translation. The sanitizer deletes the tag before render, so the contract
+    only ever sees one when some path skipped the sanitizer — and that is
+    exactly when the page is printing machinery.
+    """
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b1", "完整译文。"),),
+            page_texts=(
+                "RustyHermit-MPK [59]</span>、CubicleOS [56]</span> 利用 Intel MPK 进行隔离。",
+            ),
+        )
+    )
+    assert not report.passed
+    finding = next(f for f in report.findings if f.code == "placeholder_leak")
+    assert finding.severity == "critical"
+    assert "2 placeholder/sentinel or stray markup site(s)" in finding.message
+    assert "</span>" in finding.occurrences[0]
 
 
 def test_a_clean_artifact_carries_no_occurrence_list() -> None:

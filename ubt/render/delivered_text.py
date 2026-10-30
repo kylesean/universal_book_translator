@@ -150,6 +150,42 @@ def strip_pipeline_sentinels(text: str) -> str:
     return _PIPELINE_SENTINEL_RE.sub(SENTINEL_PLACEHOLDER, text)
 
 
+#: A stray HTML formatting tag in delivered prose. A model that saw a converter's
+#: link spans in the source echoed the wrapper's closing tag into its
+#: translation: the 18-page ATC'25 replay shipped ``RustyHermit-MPK [59]</span>``
+#: to the page nine times across two blocks. The wrapper never existed in this
+#: pipeline's markup (the render layer is Typst, not HTML), so the tag is pure
+#: machinery: no content is owed for it, and unlike a masker token there is
+#: nothing to restore, so the tag is deleted outright rather than replaced with
+#: a marker.
+#:
+#: The list holds the multi-letter formatting tags a converter or a model
+#: plausibly echoes. Single-letter tags (``a``/``b``/``i``/``p``/``u``) are
+#: deliberately absent: ``x<a>y`` in a math-adjacent sentence is plausible prose
+#: and must survive, while ``<span>``/``<div>``/``<sub>`` sequences never carry
+#: meaning on their own.
+_STRAY_HTML_TAG_RE = re.compile(
+    r"</?(?:span|div|br|em|strong|sub|sup|small|code|font|mark)\b[^<>]*>",
+    re.IGNORECASE,
+)
+
+#: Public alias: the delivered-artifact contract detects the same family in the
+#: rendered PDF, so both sides must match on one definition rather than drift.
+STRAY_HTML_TAG_RE = _STRAY_HTML_TAG_RE
+
+
+def strip_stray_html_tags(text: str) -> str:
+    """Delete stray HTML formatting tags from delivered prose.
+
+    See :data:`_STRAY_HTML_TAG_RE` for the failure mode. Applied after the
+    sentinel strip: the sentinel rule replaces its token with a marker, and a
+    deletion running first inside a sentinel could corrupt that replacement.
+    """
+    if not text or "<" not in text:
+        return text
+    return _STRAY_HTML_TAG_RE.sub("", text)
+
+
 def delivered_text(block: IRBlock, *, sanitize_sentinels: bool = True) -> str:
     """The text to render for a block: its translation, else its draft, else source.
 
@@ -168,13 +204,15 @@ def delivered_text(block: IRBlock, *, sanitize_sentinels: bool = True) -> str:
     gets the source sentence.
 
     ``sanitize_sentinels=False`` returns the surface *as the pipeline wrote it*,
-    with any leaked masker token intact. Render-layer diagnostics must use it:
-    the default substitution is what stops the token reaching the page, so a
-    check built on the sanitized text would stop reporting a leak at exactly the
-    moment the leak happened.
+    with any leaked masker token and stray markup tag intact. Render-layer
+    diagnostics must use it: the default substitution is what stops the token
+    reaching the page, so a check built on the sanitized text would stop
+    reporting a leak at exactly the moment the leak happened.
     """
     raw = _delivered_surface(block)
-    return strip_pipeline_sentinels(raw) if sanitize_sentinels else raw
+    if not sanitize_sentinels:
+        return raw
+    return strip_stray_html_tags(strip_pipeline_sentinels(raw))
 
 
 def _delivered_surface(block: IRBlock) -> str:

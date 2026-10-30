@@ -231,3 +231,40 @@ class TestMeasuredRegression:
         assert "$k_B T/q$" in out
         assert "$V_{tm} \\ln(N_{ch}/n_i)$" in out
         assert "沟道掺杂浓度" in out
+
+
+class TestStrayHtmlTagsNeverReachThePage:
+    """A model that saw a converter's link spans echoed the closing tag into
+    its translation: the 18-page ATC'25 replay printed ``RustyHermit-MPK
+    [59]</span>`` nine times across two blocks. The tag is machinery — no
+    content is owed for it — so the delivered surface deletes it outright."""
+
+    MEASURED_TARGET = (
+        "内核内部的权限分离。RustyHermit-MPK [59]</span>、CubicleOS [56]</span> "
+        "和 KDPM [36]</span> 利用 Intel MPK 进行隔离。"
+    )
+
+    def test_the_measured_leak_is_deleted(self) -> None:
+        block = _block(block_id="pdf_main#b0220", target=self.MEASURED_TARGET)
+        out = delivered_text(block)
+        assert "</span>" not in out
+        assert "<span" not in out
+        # And the prose around the tags is untouched.
+        assert out == (
+            "内核内部的权限分离。RustyHermit-MPK [59]、CubicleOS [56] 和 KDPM [36] "
+            "利用 Intel MPK 进行隔离。"
+        )
+
+    def test_an_open_tag_with_attributes_is_deleted(self) -> None:
+        block = _block(target='<span class="cite">引用</span> 之后继续。')
+        assert delivered_text(block) == "引用 之后继续。"
+
+    def test_math_like_comparisons_survive(self) -> None:
+        """Single-letter tags (``a``/``b``/``i``) are not in the strip list:
+        ``x<a>y`` is plausible prose and must survive untouched."""
+        block = _block(target="当 x<a>y 成立时继续。")
+        assert delivered_text(block) == "当 x<a>y 成立时继续。"
+
+    def test_diagnostics_still_see_the_raw_surface(self) -> None:
+        block = _block(target="RustyHermit-MPK [59]</span> 利用 Intel MPK。")
+        assert "</span>" in delivered_text(block, sanitize_sentinels=False)

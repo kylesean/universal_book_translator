@@ -73,6 +73,14 @@ _STYLE_DRIFT_PT = DRIFT_TOLERANCE_PT
 
 _PLACEHOLDER_RE = re.compile(r"⟦|⟧|⟨missing⟩|SOUP_MASK|\[SENTINEL_|<v>|<m>")
 
+#: Stray HTML formatting tags in the artifact text. The delivered-text sanitizer
+#: (``ubt.render.delivered_text.STRAY_HTML_TAG_RE``) deletes these before render;
+#: a tag in the *rendered artifact* means that strip was bypassed — a model
+#: echoed a converter's link span straight into its translation and the page
+#: printed machinery. Same family as a sentinel leak, same severity. Imported
+#: lazily (see the engine's established lazy-import convention for ubt.render)
+#: so the detector cannot drift from the sanitizer's definition.
+
 #: Character-level detection (above) is what decides pass/fail — a lone bracket
 #: is already enough evidence that the machinery leaked. Reporting needs the
 #: opposite shape: *one entry per leak site*, not one per character, or
@@ -952,17 +960,24 @@ def _placeholder_context(joined: str, start: int, end: int, *, pad: int = 20) ->
 
 
 def _placeholder_findings(joined: str) -> list[ContractFinding]:
-    """Every leaked placeholder/sentinel, not just the first one.
+    """Every leaked placeholder/sentinel or stray markup tag, not just the first.
 
     The message names the count and the first site; ``occurrences`` carries one
     excerpt per site so a reviewer can work through them without re-running the
     export after each single repair (AD-022).
+
+    Stray HTML formatting tags sit in the same family: the sanitizer deletes
+    them before render, so a tag measured in the artifact is a bypass, and the
+    page printed machinery the reader paid not to see.
     """
-    if _PLACEHOLDER_RE.search(joined) is None:
-        return []
+    from ubt.render.delivered_text import STRAY_HTML_TAG_RE
+
     sites = list(_PLACEHOLDER_SITE_RE.finditer(joined))
-    if not sites:  # pragma: no cover - the site pattern is a superset of detection
+    if not sites and _PLACEHOLDER_RE.search(joined) is not None:  # pragma: no cover
         sites = list(_PLACEHOLDER_RE.finditer(joined))
+    sites.extend(STRAY_HTML_TAG_RE.finditer(joined))
+    if not sites:
+        return []
     contexts = tuple(_placeholder_context(joined, site.start(), site.end()) for site in sites)
     first = sites[0]
     return [
@@ -970,8 +985,8 @@ def _placeholder_findings(joined: str) -> list[ContractFinding]:
             severity="critical",
             code="placeholder_leak",
             message=(
-                f"Artifact text contains {len(sites)} placeholder/sentinel "
-                f"site(s); first {first.group(0)!r} near {contexts[0]!r}"
+                f"Artifact text contains {len(sites)} placeholder/sentinel or stray "
+                f"markup site(s); first {first.group(0)!r} near {contexts[0]!r}"
             ),
             occurrences=contexts,
         )
