@@ -1,10 +1,15 @@
-"""Adaptive delivery scaffolding: contracts, routing, and measurement.
+"""Adaptive delivery vocabulary: contracts, routing, planning, measurement.
 
-This package is the Phase 0/1 foundation for the target PRD
-(``docs/design/adaptive_delivery_prd.md``). It is intentionally not wired into
-``DoclingRenderStrategy`` or the CLI yet: wiring happens behind the Phase 0
-gate, with the legacy modes mapped through
-:func:`ubt.delivery.contracts.legacy_delivery_contract`.
+This package carries the target PRD's delivery vocabulary
+(``docs/design/adaptive_delivery_prd.md``): the request/response contract,
+the pure-function router, the structure-census planner, and the measurement
+protocol/cache. ``plan_for_document`` is wired into the pipeline preflight
+(CLI, API and MCP requests all funnel through it), with legacy modes mapped
+through :func:`ubt.delivery.contracts.legacy_delivery_contract`.
+
+Not wired yet: the MeasurementService has no production caller (fit decisions
+still come from the render-side estimators), and the Stage 3A/5 CELS solvers
+live in ``ubt.core.layout`` and ``ubt.adapters.pdf.cels_*``.
 
 The artifact-side verdict lives in ``ubt.core.engine.delivery_contract`` and
 the PDF evidence reader in ``ubt.adapters.pdf.delivery_evidence``; this package

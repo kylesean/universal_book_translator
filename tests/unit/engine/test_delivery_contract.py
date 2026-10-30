@@ -460,7 +460,7 @@ def test_report_serializes_to_a_stable_payload() -> None:
 
 
 def test_mixed_cjk_latin_prose_run_clipping_and_duplication_are_caught() -> None:
-    """Regression for _run_present / _run_share_present loophole:
+    """Regression for the _run_present loophole (the old bag-of-words fallback):
     A CJK paragraph containing ASCII tokens (e.g. (3.1), GCA, DG) must not fall
     into whitespace-tokenized Latin matching or single-character bag-of-words
     matching across the book.

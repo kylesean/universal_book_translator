@@ -15,7 +15,8 @@ Thresholds:
     < 0.08:      Clean faithful deliverable
     0.08 - 0.15: Acceptable with major review finding
     > 0.15:      Excessive distortion; trigger page_reflow or document readable degradation
-    Critical:    Any overlap_ratio > 0 or out_of_bounds_ratio > 0 triggers critical fail-closed.
+    Critical:    overlap_ratio > 0.001 or out_of_bounds_ratio > 0.001 triggers
+                 critical fail-closed (the epsilon absorbs float noise).
 """
 
 from __future__ import annotations

@@ -897,23 +897,6 @@ def _run_present(
     return False
 
 
-def _run_share_present(run: str, joined: str) -> float:
-    """Share of a run's tokens that appear anywhere in the artifact.
-
-    The fallback for a run that is not contiguous. A CJK line break can also
-    fall *inside* a sentence at a point where the surrounding text reflows
-    differently, so a long run may be split across two pages. Measuring token
-    coverage is the weaker claim the artifact audit already uses for exactly
-    this case; it is reported separately so a clipped block and a reflowed one
-    are not conflated.
-    """
-    tokens = [token for token in re.findall(r"[\u4e00-\u9fff]|[A-Za-z0-9]+", run) if token]
-    if not tokens:
-        return 1.0
-    hits = sum(1 for token in tokens if token in joined)
-    return hits / len(tokens)
-
-
 _TOKEN_RE = re.compile(r"[\u4e00-\u9fff]|[A-Za-z0-9]+")
 
 #: Token-overlap floor for a block too short or too math-broken to make a

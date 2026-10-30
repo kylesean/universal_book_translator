@@ -8,7 +8,8 @@ re-inventing the mapping at each call site.
 
 The artifact-side verdict already exists in
 ``ubt.core.engine.delivery_contract`` (``ContractName``). That module owns the
-eight invariants; this module owns the routing/request vocabulary. A parity
+artifact invariants (ten named checks plus a conditional style-group row);
+this module owns the routing/request vocabulary. A parity
 test pins the two value sets together so a rename cannot split them.
 
 Compatibility note: the current public config still speaks

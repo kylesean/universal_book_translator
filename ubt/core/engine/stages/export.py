@@ -2098,7 +2098,7 @@ async def run_export_stage(
         companion_artifacts=companion_summary_dict["results"],
     )
 
-    # Artifact-level delivery contract: eight invariants read from the PDF
+    # Artifact-level delivery contract: invariants read from the PDF
     # itself. Written after the reports so a refusal keeps its audit trail.
     # Non-PDF deliverables are out of scope for the PDF geometry contract.
     delivery_report = (
