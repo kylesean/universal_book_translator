@@ -65,7 +65,20 @@ _DYNAMIC_ENTRY_POINTS: frozenset[str] = frozenset(
 #: Production orphans (no importer outside ``tests/``) that are deliberately
 #: retained. Every entry must say what keeps it, so the list cannot become a
 #: silent graveyard. Empty is the healthy state.
-_PRODUCTION_ORPHAN_ALLOWLIST: frozenset[str] = frozenset()
+_PRODUCTION_ORPHAN_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        # CELS Stage 5 rigid inline-formula follower (GAP-14 / AD-032):
+        # unit-verified against the real chapter-3.pdf p9 page
+        # (test_cels_formula_follower.py) but the faithful channel still
+        # delivers formulas via strip + Typst overlay; the Stage 5
+        # content-stream rewrite loop this module belongs to has no
+        # production call site yet (cels_spike covers text-only injection).
+        # Wire it into the faithful path or delete it when the Stage 5 gate
+        # lands; the stale-entry check below will not let the entry outlive
+        # the module.
+        "ubt.adapters.pdf.cels_formula",
+    }
+)
 
 #: Package ``__init__`` files and ``__main__`` are entry points by design.
 _ENTRY_MODULE_SUFFIXES = ("__init__", "__main__")
