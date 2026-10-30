@@ -199,3 +199,44 @@ def test_stage4_condensation_loop_resolves_deficit() -> None:
     assert not sol2.requires_llm_condensation
     assert len(sol2.stage4_requests) == 0
     assert sol2.distortion.verdict == "faithful_deliverable"
+
+
+def test_elastic_segments_carry_y_up_orientation() -> None:
+    """Segments span the printable area in PDF y-up order (y_top > y_bottom).
+
+    Regression: the coordinator used to construct the segment with
+    ``y_top=printable_box.y0`` and ``y_bottom=printable_box.y1``, which the
+    ``max(0.0, y_top - y_bottom)`` height property clamped to 0.0 for every
+    page, so any Stage 3A consumer reading the segment would have measured a
+    zero-height flow.
+    """
+    printable = Box(x0=54.0, y0=54.0, x1=558.0, y1=738.0)
+    blocks = [
+        PageLayoutBlock(
+            block_id=f"b{i}",
+            box=Box(x0=54.0, y0=100.0 + i * 40.0, x1=558.0, y1=100.0 + i * 40.0 + 30.0),
+            text=f"段落文本 {i}",
+            source_font_size_pt=10.0,
+            required_height_pt=30.0,
+        )
+        for i in range(3)
+    ]
+
+    sol = solve_page_cels(
+        page_no=1,
+        blocks=blocks,
+        page_width=612.0,
+        page_height=792.0,
+        printable_box=printable,
+        source_body_size_pt=10.0,
+        realized_body_size_pt=10.0,
+    )
+
+    segments = [seg for track_sol in sol.track_solutions for seg in track_sol.elastic_segments]
+    assert segments
+    for seg in segments:
+        assert seg.y_top > seg.y_bottom
+        assert seg.height > 0.0
+        # The segment must cover the source blocks it was built from.
+        assert seg.y_top >= max(box.y1 for box in seg.source)
+        assert seg.y_bottom <= min(box.y0 for box in seg.source)

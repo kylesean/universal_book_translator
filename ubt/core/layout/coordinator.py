@@ -275,8 +275,8 @@ def solve_page_cels(
 
         segment = ElasticFlowSegment(
             track_index=track.index,
-            y_top=printable_box.y0,
-            y_bottom=printable_box.y1,
+            y_top=printable_box.y1,
+            y_bottom=printable_box.y0,
             source=tuple(track_boxes),
         )
         track_solutions.append(
