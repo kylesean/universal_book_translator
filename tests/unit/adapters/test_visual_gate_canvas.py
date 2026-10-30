@@ -39,6 +39,7 @@ from ubt.adapters.pdf.visual_gate import (
     CANVAS_COLLISION_RATIO,
     CANVAS_MIN_TEXT_PIXELS,
     InkCollisionPage,
+    _collision_findings,
     canvas_ink_collision_findings,
     canvas_ink_collision_pages,
     canvas_ink_collision_ratio,
@@ -329,3 +330,97 @@ def test_a_lower_threshold_fires_on_a_page_the_default_allows(tmp_path: Path) ->
         {1: bg_path}, {1: final_path}, ratio_threshold=ratio - 0.001
     )
     assert len(strict) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Per-placed-block measurement
+# --------------------------------------------------------------------------- #
+
+
+def test_a_region_collision_produces_a_finding_naming_the_block() -> None:
+    """A localized collision fires on the region budget, naming the block.
+
+    The ATC'25 replay's four unreadable tables measured page-global 0.005 to
+    0.022 - all under the page budget - while their block-local ratios read
+    0.42 to 0.55 (measured on the real artifact against its own stripped
+    background). The finding must come from the region measurement and must
+    name where on the page the collision sits, or an operator is sent to hunt
+    a whole page for a table.
+    """
+    page = InkCollisionPage(
+        page=2,
+        ratio=0.005,
+        text_pixels=150_000,
+        collided_pixels=750,
+        worst_region_ratio=0.465,
+        worst_region=(317.0, 308.0, 244.0, 39.0),
+    )
+    findings = _collision_findings([page])
+    assert [f.code for f in findings] == ["canvas_ink_collision"]
+    assert findings[0].severity == "major"
+    assert "Page 2" in findings[0].message
+    assert "(317, 308)" in findings[0].message
+    # The message must also say why the page-global number did not catch it.
+    assert "page-global" in findings[0].message
+
+
+def test_a_page_over_the_global_budget_fires_on_the_page_message() -> None:
+    """The original page-global path keeps its message when it is the one that
+    trips (a keep-verbatim page gone wrong, a fully overprinted page)."""
+    page = InkCollisionPage(
+        page=16,
+        ratio=0.489,
+        text_pixels=21_174,
+        collided_pixels=10_346,
+        worst_region_ratio=0.0,
+        worst_region=None,
+    )
+    findings = _collision_findings([page])
+    assert [f.code for f in findings] == ["canvas_ink_collision"]
+    assert "48.9% of the translated text" in findings[0].message
+
+
+def test_a_clean_region_never_fires() -> None:
+    """Measured clean ceiling on the ATC'25 replay was 0.054 (a lesson box
+    whose text sits inside its own border) - far under the region budget."""
+    page = InkCollisionPage(
+        page=5,
+        ratio=0.001,
+        text_pixels=100_000,
+        collided_pixels=100,
+        worst_region_ratio=0.054,
+        worst_region=(59.0, 92.0, 230.0, 82.0),
+    )
+    assert _collision_findings([page]) == []
+
+
+def test_keep_verbatim_pages_are_excluded_from_the_canvas_measurement() -> None:
+    """A keep-verbatim page re-draws the source text on itself by design.
+
+    Measured on the ATC'25 replay: its references page read 48.9% collided
+    while being pixel-identical to the source page (194 differing pixels at
+    150 dpi) - the overlay's font-substitution antialiasing, not a legibility
+    defect. The canvas tier must measure pages that ship a translation, and
+    skip the ones that ship the source back.
+    """
+    from types import SimpleNamespace
+
+    from ubt.adapters.pdf.visual_gate import translated_canvas_pages
+
+    def _block(page: int, *, target: str, source: str, skip: bool = False):
+        return SimpleNamespace(
+            bbox=SimpleNamespace(page=page),
+            target_text=target,
+            source_text=source,
+            skip_translate=skip,
+        )
+
+    blocks = [
+        _block(2, target="译文", source="source text"),  # translated
+        _block(15, target="source text", source="source text"),  # kept verbatim
+        _block(16, target="", source="source text"),  # no target at all
+        _block(17, target="source text", source="source text", skip=True),
+        _block(17, target="第 17 页的译文", source="page 17 source"),  # translated
+        _block(None, target="没有页码的译文", source="x"),  # unplaceable: ignored
+    ]
+    assert translated_canvas_pages(blocks) == {2, 17}

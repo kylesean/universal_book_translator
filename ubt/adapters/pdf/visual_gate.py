@@ -359,6 +359,38 @@ def canvas_page_rois(
     return page_rois
 
 
+def translated_canvas_pages(blocks: Sequence[object]) -> set[int]:
+    """Pages where at least one block ships a translation.
+
+    The canvas tier measures *translated* text landing on background ink. A
+    keep-verbatim page — a bibliography the run deliberately left in the source
+    language — is re-drawn on its own background by design: the overlay sits on
+    the original ink almost stroke for stroke, and measuring it reports the
+    font substitution's antialiasing as a collision. The ATC'25 replay's
+    references page read 48.9% collided while being pixel-identical to its
+    source (194 differing pixels at 150 dpi, measured).
+
+    A block counts as translated when it ships a target that differs from its
+    source and was not marked skip-translate; a page counts when any of its
+    blocks does. Loose ``getattr`` access because the gate's ``blocks``
+    parameter is deliberately untyped.
+    """
+    pages: set[int] = set()
+    for b in blocks:
+        if getattr(b, "skip_translate", False):
+            continue
+        target = str(getattr(b, "target_text", "") or "").strip()
+        if not target:
+            continue
+        source = str(getattr(b, "source_text", "") or "").strip()
+        if target == source:
+            continue
+        page = getattr(getattr(b, "bbox", None), "page", None)
+        if page:
+            pages.add(int(page))
+    return pages
+
+
 def pdf_page_count(pdf_path: Path) -> int:
     """Return PDF page count via pikepdf, or -1 when unreadable."""
     try:
@@ -1349,6 +1381,21 @@ def text_occlusion_findings(
 #: body line lying along a table rule, which reads far higher.
 CANVAS_COLLISION_RATIO = 0.03
 
+#: Per-placed-block collision budget, with the added-ink floor a region must
+#: clear before its ratio means anything. The page-global ratio dilutes a
+#: localized collision into invisibility: on the ATC'25 replay the re-typeset
+#: tables sat on the stripper's leftover rules and ghost rows and were
+#: unreadable, yet every one of them measured *below* the 3% page budget,
+#: because a table is a small share of a two-column page's text mass. Measured
+#: on that replay at 110 dpi with the facsimile source's own block boxes
+#: (page-global / worst block): the four broken tables read 0.005/0.465,
+#: 0.013/0.449, 0.005/0.417 and 0.022/0.550, while the cleanest legitimate
+#: block anywhere in the sample (a lesson box whose text sits inside its own
+#: border) read 0.054. 0.3 sits between those families with a 5x margin over
+#: the clean page; the floor keeps three-glyph regions from voting.
+CANVAS_REGION_COLLISION_RATIO = 0.3
+CANVAS_REGION_MIN_TEXT_PX = 600
+
 #: Edge magnitude (0-255 greyscale units, ``ImageFilter.FIND_EDGES``) above which
 #: a background pixel counts as ink that was already on the page. Calibrated
 #: against the corpus: a hairline rule at 110 dpi reads well over 100 through
@@ -1459,6 +1506,10 @@ class InkCollisionPage:
     same page. It is recorded even for pages that pass, because "this page was
     drawn on the canvas" is the precondition of the whole measurement and a
     report that does not carry it cannot be audited after the fact.
+
+    ``worst_region_ratio``/``worst_region`` carry the per-placed-block
+    measurement: the worst ratio any single block's region reached, and that
+    block's box. Both stay at their defaults when the caller passed no regions.
     """
 
     page: int
@@ -1466,6 +1517,8 @@ class InkCollisionPage:
     text_pixels: int
     collided_pixels: int
     pair_identity: float = 1.0
+    worst_region_ratio: float = 0.0
+    worst_region: tuple[float, float, float, float] | None = None
 
     @property
     def paired(self) -> bool:
@@ -1656,6 +1709,72 @@ def canvas_ink_collision_ratio(
     return collided / text_pixels, text_pixels, collided
 
 
+def canvas_ink_collision_regions(
+    background_png: Path,
+    final_png: Path,
+    rois: Sequence[tuple[float, float, float, float]],
+    *,
+    dpi: int = DEFAULT_DPI,
+) -> list[tuple[tuple[float, float, float, float], float, int, int]]:
+    """Per-placed-block collision: ``(bbox, ratio, text_px, collided_px)``.
+
+    The page-global ratio dilutes a localized collision into invisibility — a
+    broken table is a small share of a two-column page's text mass, so it read
+    under the page budget on the ATC'25 replay while being unreadable. Measured
+    per placed block, the same defect is unmissable.
+
+    The mask, footprint and edge maps are computed once over the full page and
+    then cropped per region, so a region sees exactly what the page-global
+    measurement sees inside its box (the dilation ring at a crop boundary is
+    preserved by cropping the already-dilated map). Regions whose added ink is
+    below ``CANVAS_REGION_MIN_TEXT_PX`` are dropped: a region with three glyphs
+    cannot support a ratio. Regions are ``None``-tolerant the way the page-level
+    check is — an unreadable pair yields an empty list, never a zero.
+    """
+    if not rois:
+        return []
+    try:
+        from PIL import Image, ImageChops, ImageFilter
+    except ImportError:
+        return []
+    try:
+        with Image.open(background_png) as bg_img:
+            background = bg_img.convert("L")
+        with Image.open(final_png) as fg_img:
+            final = fg_img.convert("L")
+    except (OSError, ValueError):
+        return []
+    if background.size != final.size or background.size[0] < 3 or background.size[1] < 3:
+        return []
+
+    added = ImageChops.subtract(background, final)
+    mask = added.point(lambda value: 255 if value > CANVAS_TEXT_DIFF_THRESHOLD else 0)
+    footprint = mask.filter(ImageFilter.MaxFilter(2 * CANVAS_MASK_DILATE_PX + 1))
+    edges = background.filter(ImageFilter.FIND_EDGES).point(
+        lambda value: 255 if value > CANVAS_EDGE_THRESHOLD else 0
+    )
+
+    scale = dpi / 72.0
+    pad = 8.0 * scale
+    width, height = background.size
+    measured: list[tuple[tuple[float, float, float, float], float, int, int]] = []
+    for r_x, r_y, r_w, r_h in rois:
+        box = (
+            max(0, int(r_x * scale - pad)),
+            max(0, int(r_y * scale - pad)),
+            min(width, int((r_x + r_w) * scale + pad)),
+            min(height, int((r_y + r_h) * scale + pad)),
+        )
+        if box[0] >= box[2] or box[1] >= box[3]:
+            continue
+        text_px = mask.crop(box).histogram()[255]
+        if text_px < CANVAS_REGION_MIN_TEXT_PX:
+            continue
+        collided = ImageChops.multiply(footprint.crop(box), edges.crop(box)).histogram()[255]
+        measured.append(((r_x, r_y, r_w, r_h), collided / text_px, text_px, collided))
+    return measured
+
+
 def canvas_ink_collision_pages(
     background_pngs: Mapping[int, Path],
     final_pngs: Mapping[int, Path],
@@ -1708,6 +1827,15 @@ def canvas_ink_collision_pages(
         if result is None:
             continue
         ratio, text_pixels, collided = result
+        worst_region_ratio = 0.0
+        worst_region: tuple[float, float, float, float] | None = None
+        if rois:
+            for region, region_ratio, _px, _collided in canvas_ink_collision_regions(
+                background_png, final_png, rois, dpi=dpi
+            ):
+                if region_ratio > worst_region_ratio:
+                    worst_region_ratio = region_ratio
+                    worst_region = region
         measured.append(
             InkCollisionPage(
                 page=artifact_page,
@@ -1715,6 +1843,8 @@ def canvas_ink_collision_pages(
                 text_pixels=text_pixels,
                 collided_pixels=collided,
                 pair_identity=identity,
+                worst_region_ratio=worst_region_ratio,
+                worst_region=worst_region,
             )
         )
     return measured
@@ -1725,7 +1855,15 @@ def _collision_findings(
     *,
     ratio_threshold: float = CANVAS_COLLISION_RATIO,
 ) -> list[VisualFinding]:
-    """One ``canvas_ink_collision`` finding per page over ``ratio_threshold``.
+    """One ``canvas_ink_collision`` finding per page over a budget.
+
+    Two budgets, because one measurement cannot serve both shapes of failure:
+
+    - the page-global ratio trips when a whole page's translation sits on ink;
+    - the per-placed-block ratio trips when a *localized* region does. The
+      page-global number diluted a broken table into invisibility on the ATC'25
+      replay (page-global under the budget on all four unreadable tables),
+      because a table is a small share of a two-column page's text mass.
 
     Split from the measurement so ``run_visual_gate`` can measure once and use
     the same numbers twice: findings for the verdict, and ratios for ``stats``.
@@ -1738,22 +1876,42 @@ def _collision_findings(
     """
     findings: list[VisualFinding] = []
     for page in measured:
-        if page.ratio <= ratio_threshold:
-            continue
-        findings.append(
-            VisualFinding(
-                severity="major",
-                code="canvas_ink_collision",
-                message=(
-                    f"Page {page.page}: {page.ratio:.1%} of the translated text "
-                    f"({page.collided_pixels} of {page.text_pixels} px) sits on ink "
-                    "that was already on the page (stripped background "
-                    "rule/figure/glyph); the translation may be struck through or "
-                    "unreadable"
-                ),
-                page=page.page,
+        if page.ratio > ratio_threshold:
+            findings.append(
+                VisualFinding(
+                    severity="major",
+                    code="canvas_ink_collision",
+                    message=(
+                        f"Page {page.page}: {page.ratio:.1%} of the translated text "
+                        f"({page.collided_pixels} of {page.text_pixels} px) sits on ink "
+                        "that was already on the page (stripped background "
+                        "rule/figure/glyph); the translation may be struck through or "
+                        "unreadable"
+                    ),
+                    page=page.page,
+                )
             )
-        )
+        elif (
+            page.worst_region is not None
+            and page.worst_region_ratio > CANVAS_REGION_COLLISION_RATIO
+        ):
+            region = page.worst_region
+            findings.append(
+                VisualFinding(
+                    severity="major",
+                    code="canvas_ink_collision",
+                    message=(
+                        f"Page {page.page}: {page.worst_region_ratio:.1%} of the translated "
+                        f"text inside the placed block at "
+                        f"({region[0]:.0f}, {region[1]:.0f}) {region[2]:.0f}x{region[3]:.0f} pt "
+                        "sits on ink that was already on the page (stripped background "
+                        "rule/figure/glyph); the page-global share "
+                        f"({page.ratio:.1%}) stays under the budget, but the block itself "
+                        "may be struck through or unreadable"
+                    ),
+                    page=page.page,
+                )
+            )
     return findings
 
 
@@ -2070,6 +2228,7 @@ async def run_visual_gate(
     sampled = select_sample_pages(total, flagged, adaptive_sample_budget(total, sample_pages))
     vlm_pages: list[int] = []
     canvas_pages: list[InkCollisionPage] = []
+    canvas_verbatim_excluded: list[int] = []
     skip_notes: list[str] = []
     with tempfile.TemporaryDirectory(prefix="ubt_visual_") as tmp_dir:
         # render_pages_to_png rasterizes each sampled page in-process via
@@ -2160,10 +2319,24 @@ async def run_visual_gate(
                     "background page render failed (pdf_oxide); canvas ink-collision check skipped"
                 )
             elif bg_pngs:
+                # Keep-verbatim pages are excluded by design, not by sampling:
+                # their overlay re-draws the source text on itself, and the
+                # measurement would report the font substitution's antialiasing
+                # as a collision (see :func:`translated_canvas_pages`). The
+                # exclusion is counted in ``stats`` so a report can show how
+                # many declared pages were measured and why the rest were not.
+                translated = translated_canvas_pages(blocks)
+                canvas_verbatim_excluded.extend(
+                    sorted(
+                        artifact_page
+                        for artifact_page, background_page in canvas_pairs.items()
+                        if artifact_page in sampled and artifact_page not in translated
+                    )
+                )
                 sampled_pairs = {
                     artifact_page: background_page
                     for artifact_page, background_page in canvas_pairs.items()
-                    if artifact_page in sampled
+                    if artifact_page in sampled and artifact_page in translated
                 }
                 canvas_pages = await asyncio.to_thread(
                     canvas_ink_collision_pages,
@@ -2274,6 +2447,19 @@ async def run_visual_gate(
             1
             for artifact_page in (canvas_pairs or {})
             if artifact_page in sampled and artifact_page not in {p.page for p in canvas_pages}
+        ),
+        # Keep-verbatim pages excluded from the canvas measurement by design:
+        # their overlay re-draws the source on itself, so a "collision" there is
+        # the font substitution's antialiasing, not a legibility defect. Next to
+        # ``canvas_sampled_declared`` this says where the measurement chose not
+        # to look, instead of leaving the gap unexplained.
+        "canvas_verbatim_excluded": len(canvas_verbatim_excluded),
+        # The worst per-placed-block ratio measured anywhere in the sample. The
+        # page-global ``canvas_worst_ratio`` cannot see a localized collision
+        # (that blind spot is why the region measurement exists), so this is the
+        # number a warn-to-fail promotion decision must read beside it.
+        "canvas_worst_region_ratio": (
+            round(max((page.worst_region_ratio for page in canvas_pages), default=0.0), 4)
         ),
     }
     return VisualGateResult(
