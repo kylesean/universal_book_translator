@@ -56,6 +56,85 @@ def test_upgrading_any_output_shaping_package_re_converts(package: str) -> None:
     assert bumped != baseline, f"a {package} upgrade must invalidate the cache entry"
 
 
+def test_a_new_model_snapshot_re_converts(tmp_path: Path) -> None:
+    """The weights are not pinned by the package versions or the lock file.
+
+    Docling fetches its checkpoints per repository revision, so re-downloading a
+    model — or a mutable ``main`` moving — replaces the weights under an
+    unchanged ``docling`` version. The key reads ``refs/main`` (one small file):
+    the commit the resolver would load, not a hash of multi-gigabyte weights.
+    """
+    hub = tmp_path / "hub"
+    repo = hub / "models--docling-project--docling-layout-heron"
+    (repo / "refs").mkdir(parents=True)
+    (repo / "refs" / "main").write_text("a" * 40, encoding="utf-8")
+
+    with (
+        patch.object(cache, "_hf_hub_cache", return_value=hub),
+        patch.object(cache, "_local_artifacts_identity", return_value=None),
+    ):
+        first = _key()
+        (repo / "refs" / "main").write_text("b" * 40, encoding="utf-8")
+        second = _key()
+
+    assert first != second, "a new model snapshot must invalidate the cached conversion"
+
+
+def test_a_missing_model_repo_is_a_stable_identity(tmp_path: Path) -> None:
+    """An environment without the weights must not produce a new key per call."""
+    hub = tmp_path / "hub"
+    hub.mkdir()
+
+    with (
+        patch.object(cache, "_hf_hub_cache", return_value=hub),
+        patch.object(cache, "_local_artifacts_identity", return_value=None),
+    ):
+        assert _key() == _key()
+
+
+def test_a_local_artifact_store_changes_the_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A caller pointing Docling at local weights must not replay hub-built entries."""
+    import sys
+    from types import SimpleNamespace
+
+    from ubt.adapters.pdf import docling_cache as module
+
+    store = tmp_path / "artifacts"
+    store.mkdir()
+    fake = SimpleNamespace(settings=SimpleNamespace(artifacts_path=str(store)))
+    monkeypatch.setitem(sys.modules, "docling.datamodel.settings", fake)
+
+    first = _key()
+    other = tmp_path / "other-artifacts"
+    other.mkdir()
+    fake.settings.artifacts_path = str(other)
+
+    assert first != _key()
+    # And the identity names the store rather than pretending to know a revision.
+    assert module._local_artifacts_identity() == f"artifacts={other}:{other.stat().st_mtime_ns}"
+
+
+def test_a_replaced_local_artifact_snapshot_changes_the_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+    import sys
+    from types import SimpleNamespace
+
+    store = tmp_path / "artifacts"
+    store.mkdir()
+    fake = SimpleNamespace(settings=SimpleNamespace(artifacts_path=str(store)))
+    monkeypatch.setitem(sys.modules, "docling.datamodel.settings", fake)
+
+    first = _key()
+    stat = store.stat()
+    os.utime(store, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+
+    assert first != _key(), "replacing the weights under the store must re-convert"
+
+
 def _write_entry(directory: Path, key: str, *, pages: int, texts: int) -> None:
     """Write a cached conversion directly, without running Docling."""
     import gzip

@@ -59,6 +59,91 @@ def _package_version(name: str) -> str:
         return "unknown"
 
 
+#: Hugging Face repos whose weights determine a conversion's output. The
+#: layout/table structure comes from these checkpoints, and ``uv lock`` pins the
+#: *package* versions while the weights are fetched by repo ref — an operator who
+#: re-downloads or repoints a model (or a new snapshot lands) otherwise replays
+#: the old conversion from the cache.
+_DOCLING_WEIGHT_REPOS = (
+    "models--docling-project--docling-layout-heron",
+    "models--docling-project--docling-models",
+    "models--docling-project--CodeFormulaV2",
+)
+
+
+def _hf_hub_cache() -> Path:
+    """The Hugging Face hub cache root, resolved the way ``huggingface_hub`` does."""
+    hub_cache = os.environ.get("HF_HUB_CACHE")
+    if hub_cache:
+        return Path(hub_cache)
+    hf_home = os.environ.get("HF_HOME")
+    if hf_home:
+        return Path(hf_home) / "hub"
+    return Path.home() / ".cache" / "huggingface" / "hub"
+
+
+def _weight_revision(hub: Path, repo: str) -> str:
+    """The revision of ``repo``'s weights, read without touching the weights.
+
+    ``refs/main`` holds the commit the resolver would load and the snapshot
+    directory is named by that commit, so the identity is one small file read —
+    hashing multi-gigabyte checkpoints on every ingest would cost more than the
+    conversation the cache exists to avoid. A repo that is not downloaded reads
+    as ``absent``, which is stable within an environment (the first conversion
+    that downloads it writes the ref and changes the key, which is correct: the
+    result of that run is not what the previous environment would have produced).
+    """
+    repo_dir = hub / repo
+    try:
+        ref = (repo_dir / "refs" / "main").read_text(encoding="utf-8").strip()
+    except OSError:
+        ref = ""
+    if ref:
+        return ref
+    try:
+        snapshots = sorted(p.name for p in (repo_dir / "snapshots").iterdir() if p.is_dir())
+    except OSError:
+        return "absent"
+    return snapshots[-1] if snapshots else "absent"
+
+
+def _local_artifacts_identity() -> str | None:
+    """Identity of a locally resolved Docling artifact directory, if configured.
+
+    Read out of the already-imported module rather than importing docling here:
+    it is a heavy optional dependency, and a process that is converting PDFs has
+    imported it long before it asks for a cache key. The path names the store
+    and its directory mtime moves when a snapshot is replaced under it; weights
+    rewritten in place without touching the directory are not detectable without
+    hashing gigabytes, which is the cost this cache exists to avoid.
+    """
+    module = sys.modules.get("docling.datamodel.settings")
+    settings = getattr(module, "settings", None) if module is not None else None
+    artifacts = getattr(settings, "artifacts_path", None)
+    if not artifacts:
+        return None
+    path = Path(artifacts)
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return f"artifacts={path}:absent"
+    return f"artifacts={path}:{mtime}"
+
+
+def _docling_weight_identity() -> str:
+    """Which weights the conversion will load, without reading them.
+
+    A caller who pointed Docling at a local artifact store gets an identity for
+    that store; everyone else gets the Hugging Face revision of each repo the
+    pipeline loads.
+    """
+    local = _local_artifacts_identity()
+    if local is not None:
+        return local
+    hub = _hf_hub_cache()
+    return ",".join(f"{repo}={_weight_revision(hub, repo)}" for repo in _DOCLING_WEIGHT_REPOS)
+
+
 def docling_cache_key(
     pdf_sha256: str,
     page_range: tuple[int, int] | None,
@@ -74,7 +159,9 @@ def docling_cache_key(
     device) before retrying, so a degraded retry can never be served the entry the
     healthy attempt would have written. Docling's version is included because its
     layout and formula models define the result — an upgrade must re-convert, not
-    replay.
+    replay. The model *weights* are keyed separately (the repository revisions of
+    the checkpoints the pipeline loads): they are downloaded independently of the
+    package versions and can change under an unchanged lock file.
     """
     digest = hashlib.sha256()
     digest.update(f"v{DOCLING_CACHE_VERSION}|{pdf_sha256}|{page_range}|".encode())
@@ -100,6 +187,11 @@ def docling_cache_key(
             f"|docling-core={_package_version('docling-core')}"
             f"|docling-parse={_package_version('docling-parse')}"
             f"|docling-ibm-models={_package_version('docling-ibm-models')}"
+            # Package versions do not pin the checkpoints: the models are
+            # fetched per repo revision and can be re-downloaded or replaced
+            # under the same versions. See ``_weight_revision`` for why the
+            # identity is a ref, not a hash of the weights.
+            f"|weights={_docling_weight_identity()}"
         ).encode()
     )
     return digest.hexdigest()[:32]
