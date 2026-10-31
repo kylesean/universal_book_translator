@@ -1,4 +1,11 @@
-"""Hard integrity validation & render output with warning annotations."""
+"""The export stage: build the delivered file and validate it on the way out.
+
+Everything that can only be judged against the finished artifact happens here —
+integrity guards on the text about to be written, the render-quality and skip
+flags recorded back onto the blocks, the paid post-render visual gate, and the
+usage billing the report reads — so a run is never declared complete on
+evidence collected before the render existed.
+"""
 
 from __future__ import annotations
 
@@ -71,8 +78,7 @@ from ubt.core.validators.math_guard import apply_math_guards
 
 logger = logging.getLogger(__name__)
 
-#: Values that mean "target only" in the two vocabularies that meet here: the
-#: advisor's ``DualMode`` and the adapter's ``bilingual_mode``.
+#: Spellings of "target only" in both vocabularies (see :func:`_is_mono`).
 _MONO_VALUES = frozenset({"mono", "monolingual"})
 
 
@@ -131,7 +137,7 @@ def apply_render_skip_flags(
 ) -> list[dict[str, Any]]:
     """Sync ``render_skip:{reason}`` error flags with this render's skips.
 
-    Pure helper (unit-testable): maps the adapter's ``(block_id, reason)``
+    Maps the adapter's ``(block_id, reason)``
     side channel onto the finalized blocks. Unknown block ids are ignored
     and flags already present are not duplicated. Stale flags from a
     previous render of the same job are dropped first: a render-only rerun
@@ -189,7 +195,7 @@ def apply_render_quality_flags(
 ) -> set[str]:
     """Sync render-quality error flags with this render's flags.
 
-    Pure helper (unit-testable). Stale flags from a previous render are dropped
+    Stale flags from a previous render are dropped
     first, mirroring ``apply_render_skip_flags``: a render-only rerun at a larger
     size must clear a ``low_legibility_font`` that does not describe the current
     artifact. Unknown block ids are ignored and present flags are not
@@ -472,12 +478,14 @@ def _check_completion_ratio(
 def _partition_render_skip_counts(
     skip_checkpoints: list[dict[str, Any]],
 ) -> tuple[int, int]:
-    """Separate true fail-closed skips (spill, no_zone, math_unrenderable) from intentional preserved elements."""
-    # Every ``render_skip:`` is fail-closed by definition now: the intentional
-    # families (``policy``/``non_prose``/``chrome``/``footer``) never had a
-    # producer and were removed. ``_partition_render_skip_counts`` stays as the
-    # named seam so the call site keeps reading as a partition rather than a
-    # count with a zero bolted on.
+    """Count the fail-closed ``render_skip:`` checkpoints.
+
+    The second half of the returned pair is always 0: every ``render_skip:`` is
+    fail-closed by definition now, because the intentional families
+    (``policy``/``non_prose``/``chrome``/``footer``) never had a producer and
+    were removed. The pair survives as the named seam so the call site keeps
+    reading as a partition rather than a count with a zero bolted on.
+    """
     fail_closed = sum(
         1
         for cp in skip_checkpoints
@@ -967,7 +975,6 @@ def _write_table_appendix(
     if table_mode == "skip":
         return None
 
-    # Collect translated table blocks
     table_blocks = [
         b
         for b in blocks
@@ -1043,7 +1050,7 @@ async def _write_reflow_companion(
     rendered_path: Path,
     render: RenderPlan,
 ) -> CompanionArtifactResult:
-    """Write an L3 reading copy beside a facsimile/page_locked delivery (D13).
+    """Write an L3 reading copy beside a facsimile/page_locked delivery.
 
     The facsimile artifact is the faithful one but its text is painted glyphs: a
     reader cannot restyle it, search it, or re-wrap it on a small screen. This
@@ -1321,7 +1328,7 @@ def _delivery_contract_evidence(
     """
     from ubt.core.engine.delivery_contract import ContractBlock, OverflowRecord, StyleSample
     from ubt.core.ports import read_delivery_evidence
-    from ubt.render.delivered_text import delivered_text, dropped_page_furniture
+    from ubt.render.delivered_text import delivered_text, dropped_page_furniture, is_toc_entry
 
     mode = str(getattr(getattr(ctx.config, "typst", None), "delivery_mode", "") or "")
     actual_mode = str((getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_mode", "") or "")
@@ -1352,9 +1359,21 @@ def _delivery_contract_evidence(
     # style group, PRD FR-L4; without the corpus the replay's lmbench page had
     # its 5.3pt grid characters win the body vote and the document read as a
     # 4.18pt body drift).
+    selected_pages = ctx.config.get_selected_pages()
     exhibit_texts: list[str] = []
     for block in final_blocks:
         if block.skip_translate or dropped_page_furniture(block):
+            continue
+        if is_toc_entry(block) or (block.provenance and block.provenance.toc_entry):
+            continue
+        page = (
+            int(block.bbox.page)
+            if block.bbox is not None
+            else int(getattr(block.provenance, "source_page", 0) or 0)
+        )
+        if page <= 0:
+            continue
+        if selected_pages and page not in selected_pages:
             continue
         if block.block_type is BlockType.TABLE:
             exhibit_text = delivered_text(block).strip()
@@ -1366,7 +1385,6 @@ def _delivery_contract_evidence(
         text = delivered_text(block).strip()
         if not text:
             continue
-        page = int(block.bbox.page) if block.bbox is not None else 0
         has_multi_page_boxes = False
         if (
             block.provenance
@@ -1401,7 +1419,19 @@ def _delivery_contract_evidence(
         source = str(getattr(ctx.manifest, "source_path", "") or "")
         if source:
             try:
-                expected_pages = pdf_page_count(Path(source))
+                src_count = pdf_page_count(Path(source))
+                rendered_count = None
+                if rendered_path.exists():
+                    rendered_count = pdf_page_count(rendered_path)
+                selected_pages = ctx.config.get_selected_pages()
+                if (
+                    selected_pages
+                    and rendered_count == len(selected_pages)
+                    and src_count != rendered_count
+                ):
+                    expected_pages = len(selected_pages)
+                else:
+                    expected_pages = src_count
             except Exception as exc:  # noqa: BLE001 - a missing count is reported, not fatal
                 logger.debug("Delivery contract: source page count unavailable: %s", exc)
 
@@ -1455,8 +1485,8 @@ def _delivery_contract_evidence(
         declared_page_expansion=declared_page_expansion,
     )
 
-    # The renderer declares the document body group before it draws (G4 Stage
-    # 3A); the reader above supplies the sizes. Keeping the two apart is what
+    # The renderer declares the document body group before it draws; the reader
+    # above supplies the sizes. Keeping the two apart is what
     # stops a drifted page from excusing itself: membership is the plan's, the
     # number is the artifact's.
     from ubt.core.layout.style_group import plan_from_metadata
@@ -1532,7 +1562,7 @@ def _evaluate_delivery(
 
 
 def _artifact_payload(report: ArtifactReport) -> dict[str, Any]:
-    """Serialize an :class:`~ubt.pipeline.artifact.ArtifactReport` for the sidecar."""
+    """Serialize an :class:`~ubt.adapters.pdf.artifact_text.ArtifactReport` for the sidecar."""
     return {
         "total": report.total,
         "missing": [check.element_id for check in report.missing],
@@ -1988,8 +2018,6 @@ async def run_export_stage(
         epub_res,
         attestation_res,
     ]
-    # The reading copy is rendered, not serialized like the views above, so it
-    # runs here where the adapter and the final blocks are both in scope.
     companion_results.append(
         await _write_reflow_companion(ctx, adapter, final_blocks, rendered_path, render)
     )
@@ -2025,8 +2053,6 @@ async def run_export_stage(
     )
     yield comp_event
 
-    # Post-render visual gate: T0/T1 deterministic +
-    # optional pixel confirmation + sampled T2 VLM + VisualVerifyLoop.
     # Enforcement is deferred until after _build_reports (below): a refusal
     # must still leave the quality/metrics reports on disk for audit.
     rendered_path, visual_report_path, gate = await _run_visual_gate(
@@ -2065,10 +2091,6 @@ async def run_export_stage(
                 opt_res.model_dump(),
             )
 
-    # Dual output (BabelDOC no-dual/no-mono style): when the pipeline asked
-    # for a complementary artifact, render it from the same translated
-    # blocks (no extra LLM cost). PDF only — other adapters have no
-    # render-mode override plumbing.
     # The two artifact identities (requested target vs returned file, which the
     # visual gate may have rewritten) named once, where the render returns.
     from ubt.core.job_options import delivered_artifact
@@ -2152,11 +2174,97 @@ async def run_export_stage(
         else True
     )
     if delivery_report is not None and not contract_ok and not ctx.is_mock_run:
-        raise IntegrityViolationError(
-            f"Export blocked for job {ctx.job_id}: delivery contract failed — "
-            f"{delivery_report.summary_line()}. See "
-            f"{sidecar_path(rendered_path, 'delivery_contract.json')}."
-        )
+        plan_meta = (getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_plan")
+        can_degrade = False
+        if isinstance(plan_meta, dict):
+            can_degrade = str(plan_meta.get("degrade_policy", "")).lower() == "allow_degrade" or (
+                str(plan_meta.get("contract", "")).lower() == "faithful"
+                and bool(getattr(ctx.config, "allow_degrade", False))
+            )
+        else:
+            can_degrade = bool(getattr(ctx.config, "allow_degrade", False))
+
+        if can_degrade and getattr(delivery_report, "contract", "") == "faithful":
+            logger.warning(
+                "Export contract failed for faithful mode (%s); degrading to reflow reading copy as permitted by policy",
+                delivery_report.summary_line(),
+            )
+            # Check if a reflow companion artifact was already successfully generated
+            reflow_companion = rendered_path.with_name(
+                f"{rendered_path.stem}_reflow{rendered_path.suffix}"
+            )
+            if reflow_companion.exists() and reflow_companion.stat().st_size > 0:
+                import shutil
+
+                shutil.copy2(reflow_companion, rendered_path)
+            else:
+                strategy = getattr(adapter, "_renderer", None)
+                if strategy is not None and hasattr(strategy, "delivery_mode"):
+                    strategy.delivery_mode = "reflow"
+                await _render_adapter_output(
+                    adapter=adapter,
+                    manifest=ctx.manifest,
+                    blocks=final_blocks,
+                    target_lang=ctx.target_lang,
+                    output_path=rendered_path,
+                    bilingual_mode=render.bilingual_mode,
+                    render_plan=render,
+                )
+
+            if hasattr(ctx.manifest, "metadata") and isinstance(ctx.manifest.metadata, dict):
+                ctx.manifest.metadata["delivery_mode"] = "reflow"
+                if "delivery_plan" in ctx.manifest.metadata and isinstance(
+                    ctx.manifest.metadata["delivery_plan"], dict
+                ):
+                    ctx.manifest.metadata["delivery_plan"]["contract"] = "readable"
+                    ctx.manifest.metadata["delivery_plan"]["effective_mode"] = "reflow"
+                    ctx.manifest.metadata["delivery_plan"]["degraded"] = True
+                    reasons = list(ctx.manifest.metadata["delivery_plan"].get("reasons", []))
+                    reasons.append(
+                        f"faithful delivery contract failed ({delivery_report.summary_line()}); degraded to reflow reading copy"
+                    )
+                    ctx.manifest.metadata["delivery_plan"]["reasons"] = reasons
+
+            await asyncio.to_thread(
+                ledger.set_job_metadata_value,
+                actual_job_id,
+                "delivery_mode",
+                "reflow",
+            )
+
+            # Re-evaluate delivery under the degraded readable contract
+            delivery_report = await asyncio.to_thread(
+                _evaluate_delivery,
+                ctx,
+                adapter,
+                final_blocks,
+                rendered_path,
+                delivery_contract,
+            )
+            contract_ok = (
+                (delivery_report.passed if allow_major else delivery_report.deliverable)
+                if delivery_report is not None
+                else True
+            )
+            report, report_path = await _build_reports(
+                ctx,
+                final_blocks,
+                rendered_path=rendered_path,
+                visual_report_path=visual_report_path,
+                glossary_dicts=glossary_dicts,
+                enforced_spans=enforced_spans,
+                run_usage=run_usage,
+                delivery_contract=delivery_contract,
+                mode_advisory=render.bilingual_advisory,
+                companion_artifacts=companion_summary_dict["results"],
+            )
+
+        if not contract_ok:
+            raise IntegrityViolationError(
+                f"Export blocked for job {ctx.job_id}: delivery contract failed — "
+                f"{delivery_report.summary_line()}. See "
+                f"{sidecar_path(rendered_path, 'delivery_contract.json')}."
+            )
 
     # Enforce AFTER the reports are on disk so a refused job keeps its audit
     # trail, and downgrade to a warning for rehearsal (mock) runs — a mock

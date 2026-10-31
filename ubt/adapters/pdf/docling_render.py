@@ -1561,6 +1561,7 @@ class DoclingRenderStrategy:
 
                 elastic_stretch = 100.0
                 elastic_leading = body_group.leading_em
+                elastic_size_pt = body_group.size_pt
                 if pno in page_fits:
                     fit = page_fits[pno]
                     if not fit.fits and fit.deficit_pt > 0:
@@ -1571,13 +1572,14 @@ class DoclingRenderStrategy:
                         )
                         elastic_stretch = elastic_style.stretch_pct
                         elastic_leading = elastic_style.leading_em
+                        elastic_size_pt = round(elastic_style.font_size_pt, 2)
 
                 pages_spec.append(
                     FacsimilePageSpec(
                         page_no=pno,
                         page_w=round(pw, 2),
                         page_h=round(ph, 2),
-                        uniform_size_pt=body_group.size_pt,
+                        uniform_size_pt=elastic_size_pt,
                         leading_em=elastic_leading,
                         tracking_em=body_group.tracking_em,
                         stretch_pct=elastic_stretch,
@@ -1592,8 +1594,8 @@ class DoclingRenderStrategy:
                         "page_h_pt": round(ph, 2),
                         "measured_size_pt": round(source_size_pt, 3),
                         "measured_leading_pt": round(source_leading_pt, 3),
-                        "delivered_size_pt": round(body_group.size_pt, 3),
-                        "delivered_leading_em": body_group.leading_em,
+                        "delivered_size_pt": round(elastic_size_pt, 3),
+                        "delivered_leading_em": elastic_leading,
                         "tracking_em": round(body_group.tracking_em, 4),
                         "tier": "L1",
                         "fits": bool(page_fits[pno].fits),

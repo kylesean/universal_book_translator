@@ -1708,3 +1708,43 @@ def test_docling_parser_disambiguates_side_by_side_subfigures() -> None:
     reanchored = reanchor_figure_captions([img_left, img_right, cap_left, cap_right])
     assert getattr(reanchored[2].provenance, "caption_parent_id", None) == "pdf_main#img_left"
     assert getattr(reanchored[3].provenance, "caption_parent_id", None) == "pdf_main#img_right"
+
+
+def test_facsimile_single_column_flow_grouping() -> None:
+    renderer = FacsimileRenderer(enable_column_flow=True)
+    p = FacsimilePageSpec(
+        page_no=1,
+        page_w=595.0,
+        page_h=842.0,
+        uniform_size_pt=10.0,
+        leading_em=0.55,
+        tracking_em=0.0,
+        stretch_pct=100.0,
+        placements=[
+            FacsimileBlockPlacement(
+                block_id="b1",
+                page=1,
+                x0=70.0,
+                y0=600.0,
+                x1=520.0,
+                y1=700.0,
+                src_y0=600.0,
+                src_y1=700.0,
+                text="First single column paragraph.",
+            ),
+            FacsimileBlockPlacement(
+                block_id="b2",
+                page=1,
+                x0=70.0,
+                y0=500.0,
+                x1=520.0,
+                y1=590.0,
+                src_y0=500.0,
+                src_y1=590.0,
+                text="Second single column paragraph.",
+            ),
+        ],
+        tier="L1",
+    )
+    markup = renderer.build_markup(pages=[p], bg_pdf_filename="bg.pdf")
+    assert "flow-group: 2 blocks" in markup

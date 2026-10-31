@@ -351,14 +351,27 @@ class FacsimileRenderer:
 
                 # Criteria for intra-column natural flow:
                 # 1. Neither block is a table or code block
-                # 2. Neither block spans full page width
-                # 3. Both blocks sit in the same column (left or right)
-                # 4. Reading order descends down the column
-                # 5. In the source document, they were adjacent paragraphs in the same text flow (src_gap <= 22pt)
-                is_spanning = width > 0.65 * p.page_w
-                prev_is_spanning = prev_w > 0.65 * p.page_w
+                # 2. Both blocks sit in the same column track (or single-column track)
+                # 3. Reading order descends down the column
+                # 4. In the source document, they were adjacent paragraphs in the same text flow (src_gap <= 24pt)
                 col = 0 if dx < 0.5 * p.page_w else 1
                 prev_col = 0 if prev_dx < 0.5 * p.page_w else 1
+
+                # Single-column documents (width > 60% of page_w) form a single track down the page
+                is_single_col_pair = (
+                    width > 0.60 * p.page_w
+                    and prev_w > 0.60 * p.page_w
+                    and abs(dx - prev_dx) <= 24.0
+                    and abs(width - prev_w) <= 40.0
+                )
+                # Multi-column documents require both blocks to sit within the same column
+                is_multi_col_pair = (
+                    width <= 0.60 * p.page_w
+                    and prev_w <= 0.60 * p.page_w
+                    and col == prev_col
+                    and abs(dx - prev_dx) <= 24.0
+                )
+                same_track = is_single_col_pair or is_multi_col_pair
 
                 orig_prev_y0 = prev_pl.src_y0 if prev_pl.src_y0 is not None else prev_pl.y0
                 orig_curr_y1 = pl.src_y1 if pl.src_y1 is not None else pl.y1
@@ -372,11 +385,9 @@ class FacsimileRenderer:
                     and not prev_pl.is_code
                     and not pl.is_caption
                     and not prev_pl.is_caption
-                    and not is_spanning
-                    and not prev_is_spanning
-                    and col == prev_col
+                    and same_track
                     and dy >= prev_dy
-                    and 0.0 <= src_gap <= 22.0
+                    and -4.0 <= src_gap <= 24.0
                 )
 
                 if can_group:
