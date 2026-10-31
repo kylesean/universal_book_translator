@@ -34,8 +34,10 @@ from ubt.core.math_symbols import INLINE_RENDERABLE_COMMANDS
 _CJK_RE = re.compile(f"[{HAN_UNIFIED_CLASS}]")
 # Bracketed numeric citations ([1], [12-14], [3, 7]) are prose accessories,
 # not math: strip them before analysis so "Research anchors: [1], [6]" stays
-# prose. (Same shape as CitationMasker._CITATION_PATTERN, duplicated to keep
-# this module dependency-free.)
+# prose. Same body as CitationMasker._CITATION_PATTERN minus its boundary
+# guards — a throwaway strip needs neither the lookarounds nor the masker's
+# placeholder/restore machinery, and importing that would couple a Gate-1
+# validator to the cleaners' masking family.
 _CITATION_STRIP_RE = re.compile(r"\[\s*\d+(?:\s*[-–]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-–]\s*\d+)?)*\s*\]")
 # Strong math signals. Deliberately excludes comma/period (ordinary prose
 # punctuation); isolated-letter density carries those cases instead.

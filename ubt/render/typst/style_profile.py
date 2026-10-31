@@ -1,7 +1,9 @@
-"""DocumentStyleProfile and PageStyleProfile: Visual style cloning for Typst rendering.
+"""``DocumentStyleProfile`` / ``PageStyleProfile``: visual style cloned from the source.
 
-Clones visual styling (primary heading color, body font size baseline, and per-page metrics)
-from source document IR blocks and geometry. Resolves G3 (docs/design/adaptive_delivery_prd.md §10.2).
+The heading color and body size a document really uses are measured, not guessed:
+``TypstDocumentRenderer`` reads these profiles so a translated page keeps its
+source's typography instead of a hard-coded default
+(G3, docs/design/adaptive_delivery_prd.md §10.2).
 """
 
 from __future__ import annotations
@@ -28,8 +30,6 @@ _BLACK_HEX_SET = {"#000000", "#000", "#00000000", "black", "#111111", "#222222"}
 
 @dataclass(frozen=True, slots=True)
 class PageStyleProfile:
-    """Visual style profile for an individual page."""
-
     page_no: int
     primary_heading_hex: str | None = None
     body_size_pt: float = 10.0
@@ -40,8 +40,6 @@ class PageStyleProfile:
 
 @dataclass(frozen=True, slots=True)
 class DocumentStyleProfile:
-    """Extracted book-wide visual style and typographic profile."""
-
     primary_heading_hex: str = DEFAULT_PRIMARY_HEADING_HEX
     secondary_heading_hex: str = DEFAULT_PRIMARY_HEADING_HEX
     body_size_pt: float = 10.0
@@ -53,7 +51,7 @@ class DocumentStyleProfile:
     per_page_profiles: dict[int, PageStyleProfile] = field(default_factory=dict)
 
     def to_metadata_dict(self) -> dict[str, Any]:
-        """Serialize profile for manifest.metadata."""
+        """The subset written into ``manifest.metadata``; per-page profiles stay out."""
         return {
             "primary_heading_hex": self.primary_heading_hex,
             "secondary_heading_hex": self.secondary_heading_hex,
@@ -73,12 +71,12 @@ def extract_document_style_profile(
     page_dims: Sequence[tuple[float, float]] = (),
     fallback_heading_color: str = DEFAULT_PRIMARY_HEADING_HEX,
 ) -> DocumentStyleProfile:
-    """Extract book-wide visual style profile from document blocks.
+    """Book-wide style, measured over every block.
 
-    1. Dominant heading color: identifies the most frequent non-black color across all
-       headings in the document.
-    2. Body text size: calculates median measured body font size.
-    3. Document geometry: determines mode page dimensions and columns.
+    Heading color is the most frequent *non-black* measurement and body size the
+    median: one tinted heading or one oversized drop cap must not define how the
+    document looks, and a paper whose headings are black must not come out branded
+    (see ``DEFAULT_PRIMARY_HEADING_HEX`` for that incident).
     """
     heading_colors: list[str] = []
     body_sizes: list[float] = []

@@ -13,14 +13,7 @@ This module owns the marker's two constants and nothing else:
   pass could not account for it is escaped as prose rather than mangled by the
   math transpiler (a leak that used to fail the whole compile).
 * :data:`SEMANTIC_BREAK_FLAG` -- the ``error_flags`` marker the continuation
-  heuristic consults, so it can never re-fuse blocks a break deliberately
-  separated.
-
-The IRBlock *splitting* helpers this module used to carry (``bifurcate_block`` /
-``bifurcate_blocks``) had no caller once the overlay PDF engine was deleted: the
-publication (Typst) renderer reflows from the IR and never re-materialized
-bifurcated siblings. They were removed rather than kept as a second, untested
-split path.
+  heuristic consults; its own comment states what it guards against.
 """
 
 from __future__ import annotations

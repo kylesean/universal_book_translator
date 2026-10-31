@@ -1,4 +1,4 @@
-"""``ubt.layout`` -- theme resolution and element-level fidelity assignment (layout and theme presentation layer).
+"""``ubt.layout`` -- theme resolution (layout and theme presentation layer).
 
 ``theme`` is the single owner of the presentation policy the sink stages read:
 the language-resolved font stack, base size, leading, bilingual pairing style,

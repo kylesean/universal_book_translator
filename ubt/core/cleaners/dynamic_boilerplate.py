@@ -2,9 +2,8 @@
 
 Autonomously learns recurring publisher legal notices and copyright footers
 directly from book samples without hardcoding publisher names. Running headers
-and page markers are handled by the fixed structural patterns in
-:meth:`BoilerplateFingerprint.clean_head`; consensus header harvesting is not
-implemented, so ``header_patterns`` is reserved and always empty.
+and page markers are *not* harvested — the fixed structural patterns in
+:meth:`BoilerplateFingerprint.clean_head` strip them.
 """
 
 from __future__ import annotations
@@ -49,9 +48,8 @@ _RUNNING_HEADER_PATTERN = re.compile(
 class BoilerplateFingerprint:
     """Consensus boilerplate fingerprint learned dynamically for a specific book.
 
-    Only footer disclaimers are harvested; ``header_patterns`` is reserved for
-    a future consensus header learner and is currently always empty, while
-    :meth:`clean_head` strips headers via fixed structural patterns.
+    ``header_patterns`` is reserved for a future consensus header learner and is
+    currently always empty; headers are stripped by :meth:`clean_head`.
     """
 
     footer_disclaimers: tuple[str, ...] = ()

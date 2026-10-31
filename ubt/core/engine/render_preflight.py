@@ -1,17 +1,15 @@
 """Spend-the-tokens gate: compile a sample before the draft stage bills.
 
-`README.md`'s dependency table warned that a broken Typst toolchain kills a PDF
-job at Stage 6 — after every token of the whole book has been spent. That is
-not hypothetical: ledger job `fc1d7bd7b799` shows 209 blocks translated in 3m03s
-followed by a Typst compile failure and zero output.
+A broken Typst toolchain used to kill a PDF job at the export stage -- after
+every token of the whole book had been spent: a real ledger job recorded 209
+blocks translated in 3m03s, then a Typst compile failure and zero output.
 
 This module runs the *real* PDF render path over a handful of source-text
 blocks, before Stage 3, so toolchain-shaped failures (missing binary, version
 drift, generated markup the compiler rejects) exit non-zero at zero token cost.
 It is not a full rehearsal: defects that only appear once translated text
-exists (e.g. the `#box[...](...)` code-mode crash fixed by a98a315) still
-surface only at export — what changes is that a book cannot finish
-translation only to discover the renderer itself is dead.
+exists still surface only at export -- what changes is that a book cannot
+finish translation only to discover the renderer itself is dead.
 """
 
 from __future__ import annotations
@@ -149,8 +147,9 @@ async def run_render_preflight(
     """Render a source-text sample through the adapter's real PDF path.
 
     Raises DocumentParseError with operator-facing guidance when the render
-    fails; a non-PDF adapter or an empty sample skips, because text-only
-    outputs never touch Typst. Callers run this before any billable stage.
+    fails; an adapter with no render engine, or an empty block list, skips,
+    because text-only outputs never touch Typst. Callers run this before any
+    billable stage.
     """
     if adapter.engine_name is None or not blocks:
         return

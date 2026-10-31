@@ -1,19 +1,20 @@
-"""PDF size miniaturization and lossless stream compression pipeline.
+"""PDF size miniaturization and stream recompression pipeline.
 
-Miniaturizes delivered PDFs through:
-1. Stream deduplication: Identifies duplicate image, form, and font streams across
-   pages via SHA-256 content hashing and updates /Resources references to canonical streams.
-2. High-ratio Flate recompression: Re-compresses stream objects using zlib/flate level 9.
-3. QPDF Object Stream packing: Consolidates loose dictionaries, numbers, and indirect
-   objects into compressed /ObjStm streams (PDF 1.5+).
-4. Unreferenced resource pruning: Purges dead objects and dangling XRef entries.
-5. Fast Web View linearization: Arranges object streams for progressive page streaming.
-6. Multi-tier profile adaptation:
-   - ``lossless``: 100% bit-identical vector, image, and text preservation.
-   - ``ebook``: Bounds oversized raster images (e.g. >1600px) to balanced JPEG DCTDecode.
-   - ``screen``: Bounds images to ultra-compact web resolution (e.g. >1000px).
-7. Strict text-layer and geometry verification: Guarantees page count and searchable
-   text layer are NEVER corrupted or degraded.
+The pass rebuilds the file with pikepdf — SHA-256 duplicate-stream redirection,
+Flate recompression at the configured level, object-stream packing, linearization
+— optionally preceded by a Ghostscript pass that subsets fonts and detects
+duplicate images. No profile is byte-preserving, ``lossless`` included: that
+profile only means *no raster downsampling* (``max_image_dimension`` stays
+unset), while the rewritten dictionaries and recompressed streams still change
+the file's bytes. Fidelity is therefore claimed semantically — same page count,
+same searchable text — never as a hash match, and ``ebook``/``screen`` trade
+more away by re-encoding oversized images as bounded JPEG.
+
+:func:`verify_pdf_fidelity` gates the candidate before it replaces the input.
+Its hard invariants are parseability and page count; the character-similarity
+check on the extracted text layer is best-effort — it sits inside
+``except ImportError: pass`` and swallows its own failures, so it can step
+aside without rejecting anything.
 """
 
 from __future__ import annotations
@@ -299,10 +300,13 @@ def verify_pdf_fidelity(
 ) -> tuple[bool, str]:
     """Verify structural validity and text fidelity between original and candidate PDFs.
 
-    Ensures:
-    1. Both PDFs are syntactically valid and parseable by pikepdf.
-    2. Page count is identical (invariant).
-    3. Text extracted via pypdfium2 maintains high character-level fidelity.
+    The hard invariants are parseability by pikepdf and an identical page count;
+    either failing rejects the candidate outright. The character-level text
+    comparison is best-effort beside them: it is wrapped in ``except
+    ImportError: pass`` (both libraries ship in the base dependency set, so the
+    branch only fires on a broken environment) and any other exception inside it
+    is logged rather than propagated. A True result on such an environment
+    therefore means "structure is sound", not "the text layer was diffed".
     """
     try:
         with pikepdf.open(original_path) as orig_pdf, pikepdf.open(candidate_path) as cand_pdf:
@@ -329,7 +333,6 @@ def verify_pdf_fidelity(
             if not cand_text:
                 return False, "Candidate PDF lost all extractable text"
 
-            # Compute character ratio
             from rapidfuzz import fuzz
 
             ratio = fuzz.ratio(orig_text, cand_text) / 100.0
@@ -387,7 +390,9 @@ def optimize_pdf(
     fonts_subsetted = False
     engine_used = "pikepdf"
 
-    # Set maximum Flate compression level in QPDF C++ engine
+    # QPDF holds the flate level as process-wide state rather than a per-save
+    # argument, so this single call covers every save below; if it is refused
+    # the cost is only QPDF's own default ratio, never correctness.
     try:
         pikepdf._core.set_flate_compression_level(opts.flate_level)
     except Exception as exc:
@@ -398,7 +403,9 @@ def optimize_pdf(
         tmp_dir_path = Path(tmp_dir)
         working_pdf = src
 
-        # Step 1: Optional Ghostscript font subsetting pass
+        # Ghostscript runs first and alone: it is the only stage that can
+        # subset fonts, and because it rewrites the whole file its output is
+        # used only if it clears the fidelity gate below.
         if opts.subset_fonts and opts.engine in (
             OptimizationEngine.AUTO,
             OptimizationEngine.GHOSTSCRIPT,
@@ -414,7 +421,6 @@ def optimize_pdf(
                 else:
                     logger.debug("Ghostscript pass rejected due to fidelity check: %s", reason)
 
-        # Step 2: Pikepdf stream deduplication, image downsampling, and object stream packing
         stg2_path = tmp_dir_path / "stage2.pdf"
         try:
             with pikepdf.open(working_pdf) as pdf:
@@ -439,7 +445,6 @@ def optimize_pdf(
                         jpeg_quality=opts.jpeg_quality,
                     )
 
-                # Save with maximum object stream compression and linearization
                 pdf.save(
                     stg2_path,
                     compress_streams=True,
@@ -467,7 +472,7 @@ def optimize_pdf(
                 error=str(exc),
             )
 
-        # Step 3: Verify candidate integrity and page count
+        # Verify candidate integrity and page count
         candidate_size = stg2_path.stat().st_size
         if opts.verify_fidelity:
             valid, reason = verify_pdf_fidelity(src, stg2_path)
@@ -492,7 +497,8 @@ def optimize_pdf(
 
         duration = (time.perf_counter() - start_time) * 1000.0
 
-        # Step 4: Check if optimization yielded size savings
+        # A rewrite that does not shrink the file is not worth delivering: keep
+        # the original bytes and report the run as already optimal.
         if candidate_size >= orig_size:
             if not in_place:
                 shutil.copyfile(src, target_path)

@@ -174,7 +174,11 @@ class AdaptiveTokenBucket:
                 )
 
     def report_success(self) -> None:
-        """Trigger additive increase (AI) on successful API responses."""
+        """Apply the additive-increase half of AIMD after one accepted request.
+
+        Only a success may raise the ceiling -- a 429 halves it -- so the climb
+        back is deliberately slower than the fall, and ``max_rpm`` caps it.
+        """
         with self._thread_lock:
             now = time.monotonic()
             elapsed = now - self.last_update
@@ -183,9 +187,12 @@ class AdaptiveTokenBucket:
             self.tpm_tokens = min(self.tpm_capacity, self.tpm_tokens + elapsed * self.tpm_fill_rate)
             if self.consecutive_429 > 0:
                 self.consecutive_429 = 0
-            # Standard congestion-avoidance AIMD: capacity increases additively by at most
-            # 1.0 RPM per full window (1 / capacity per request), avoiding bursty saw-tooth oscillations
-            # under concurrent completions.
+            # The increment is the reciprocal of the current capacity: one
+            # request per window at the operating point, which is the standard
+            # congestion-control step and keeps many concurrent completions from
+            # saw-toothing the rate. Reciprocal alone is wrong at both ends -- it
+            # would explode below 1 rpm and vanish at thousands -- so the step is
+            # clamped to the 0.05..1.0 rpm band the floor and ceiling are set for.
             increment = min(1.0, max(0.05, 1.0 / max(1.0, self.capacity)))
             new_rpm = min(float(self.max_rpm), self.capacity + increment)
             self.capacity = new_rpm

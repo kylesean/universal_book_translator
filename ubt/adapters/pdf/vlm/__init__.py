@@ -1,8 +1,10 @@
 """VLM transcription core: registry + driver contract + anchoring.
 
-Scans enter here because the previous scan path is dead in practice
-(Docling is installed but neither of its OCR backends — easyocr nor
-tesserocr — is, so ``do_ocr=True`` goes nowhere).
+Scans enter here because this project deliberately keeps Docling's own OCR leg
+switched off: ``docling_parser`` pins ``do_ocr = False``, and neither of
+Docling's classical backends is a declared dependency, so turning Docling's OCR
+on would not be a fallback but a new install requirement. Transcribing a page
+that has no text layer is this registry's job.
 
 Architecture:
 - Drivers RECOGNIZE text (reading order). They never own geometry.

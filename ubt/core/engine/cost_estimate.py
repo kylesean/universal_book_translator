@@ -51,7 +51,6 @@ logger = logging.getLogger(__name__)
 # cannot disagree about how many tokens a block of text is worth.
 _CHARS_PER_TOKEN = 4
 
-# Default fallback ratio when source_lang/target_lang are not provided.
 _OUTPUT_TOKEN_RATIO = 1.5
 
 _CJK_LANGS = frozenset({"zh", "ja", "ko", "yue", "wuu"})

@@ -61,7 +61,7 @@ EventFactory = Callable[..., Awaitable[TranslationProgressEvent]]
 class StageContext:
     """The immutable inputs and per-run collaborators a pipeline stage reads.
 
-    Frozen on purpose (unified pipeline stage context): ``frozen=True`` stops a
+    Frozen on purpose: ``frozen=True`` stops a
     stage from *rebinding* any field -- config, ledger, collaborators cannot be
     swapped mid-run. It does not deep-freeze the object graph: run-level mutable
     state flows through ``ctx.manifest.run``, the one sanctioned channel a stage
@@ -89,15 +89,12 @@ class StageContext:
     create_event: EventFactory
 
     # --- Per-run services -------------------------------------------------
-    # The collaborators this run builds for its stages (QE runner, repair loop,
-    # FastPass filter, adaptive policy, in-flight semaphore, TM, HTML validator)
-    # live in :class:`~ubt.core.engine.services.RunServices`, constructed by the
-    # plan and handed to the stages that use them.
+    # See :class:`~ubt.core.engine.services.RunServices`; the plan builds it once
+    # and passes it as a parameter, so nothing services-related is a field here.
 
     # --- Optional, and defaulted so a stage test can omit them -------------
-    #: Only the stages that read or write the artifact need this; the QE,
-    #: repair and triage stages never touch the adapter, and a test driving one
-    #: of them should not have to invent an adapter to say so.
+    #: Only ingest and export touch the adapter; see :meth:`require_adapter`
+    #: for why it may be absent.
     adapter: DocumentAdapter | None = None
     output_path: Path | None = None
 
@@ -114,7 +111,9 @@ class StageContext:
     #: Overridable so a test can make backfill a no-op without a fake router.
     complete_raw_fn: Callable[..., Awaitable[str]] | None = None
     #: Set by the driver so the export stage can bill exactly this run, at the
-    #: moment it renders. A callable, not a snapshot: the numbers must be read
+    #: moment it renders. A callable, not a snapshot: the run session is still
+    #: accumulating spend while later stages run, so the totals have to be read
+    #: at render time rather than captured when the context was built.
     measure_run_usage: Callable[[], dict[str, dict[str, int]]] = lambda: {}
     #: Persist this run's usage to the ledger on demand. The export stage calls
     #: it after the paid post-render visual gate so a report built from the
@@ -149,13 +148,6 @@ class StageContext:
             )
         if self.cancel_token is not None and self.cancel_token.is_set():
             raise JobInterruptedError(f"Job {self.job_id} cancelled cooperatively")
-
-    # --- Produced by an earlier stage -------------------------------------
-    # Values one stage produces and a later one consumes live in
-    # :mod:`ubt.core.engine.facts` now: the plan owns them and passes the value to
-    # the stage that reads it, so the inter-stage flow is an explicit, typed
-    # parameter instead of a field on this shared object. The block snapshot
-    # lives in :class:`~ubt.core.engine.blocks.BlockReader`, owned by the plan.
 
     @property
     def is_mock_run(self) -> bool:
@@ -192,9 +184,9 @@ class StageContext:
 
 
 def check_stage_cancelled(ctx: object) -> None:
-    """Stop the run if the context exposes check_cancelled and is cancelled.
+    """Stop the run if the context exposes ``check_cancelled`` and is cancelled.
 
-    Gracefully no-ops if the object does not expose ``check_cancelled`` (e.g. lightweight test doubles).
+    Objects without that method (lightweight test doubles) pass.
     """
     fn = getattr(ctx, "check_cancelled", None)
     if callable(fn):

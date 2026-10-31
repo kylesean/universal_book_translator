@@ -1,7 +1,8 @@
 """Deterministic file fingerprinting for document adapters.
 
-The production persistence contract is the SQLite ledger schema; a whole
-in-memory IR is never serialized to JSON.
+The fingerprint is a function of the file's *bytes*, not its path or name: a
+book that is moved or renamed keeps the identity the manifest ``doc_id`` and the
+adapter caches are keyed on, while an edited one loses it.
 """
 
 import hashlib
@@ -12,7 +13,10 @@ from ubt.core.exceptions import DocumentParseError
 
 
 def compute_file_sha256(file_path: Path, chunk_size: int = 65536) -> str:
-    """Calculate SHA-256 fingerprint of a file safely without loading it all into memory."""
+    """Digest read in ``chunk_size`` blocks, so a book-sized file never lands in
+    memory whole; an unreadable path surfaces as :class:`DocumentParseError`
+    rather than a raw ``OSError`` the caller would have to translate itself.
+    """
     hasher = hashlib.sha256()
     try:
         with file_path.open("rb") as f:

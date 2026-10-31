@@ -1,7 +1,11 @@
-"""High-performance deterministic terminology consistency enforcer using Aho-Corasick.
+"""Deterministic terminology consistency enforcement, Aho-Corasick when available.
 
-Prevents terminology drift, canonicalizes non-preferred aliases to approved renderings,
-and replaces untranslated source term leaks with the canonical target translation.
+Prevents terminology drift, canonicalizes non-preferred aliases to approved
+renderings, and replaces untranslated source term leaks with the canonical
+target translation. :mod:`ahocorasick` is an *optional* accelerator: without it
+the same rules are applied by a per-pattern regex sweep, so results are
+identical and only the scanning cost differs (see
+:meth:`DeterministicGlossaryEnforcer._build_automaton`).
 """
 
 from __future__ import annotations
@@ -36,7 +40,12 @@ class EnforcementRecord:
 
 
 def _is_latin_word_char(ch: str) -> bool:
-    """Check whether a character is an alphabetic/alphanumeric word character or connector."""
+    """Whether ``ch`` continues a Latin identifier (letters, digits, ``_``, ``-``).
+
+    Deliberately False for CJK: a term abutting Han characters has a clean
+    boundary, so counting Han as a word character would veto every match in a
+    CJK target.
+    """
     if ch in ("_", "-"):
         return True
     if ch.isascii():
@@ -260,16 +269,20 @@ def _compound_occurrence_spans(text: str, compounds: set[str]) -> list[tuple[int
 
 
 class DeterministicGlossaryEnforcer:
-    """Enforces 100% deterministic terminology consistency using an Aho-Corasick automaton.
+    """Deterministic terminology enforcement over a single pass of the text.
 
-    Features:
-    1. Aho-Corasick multi-pattern dictionary tree for $O(N)$ string scanning.
-    2. Boundary-aware match verification (word boundary assertions for Latin/Cyrillic scripts).
-    3. Longest-match-first disambiguation for overlapping term matches.
-    4. Single-pass non-destructive string slicing (immune to cyclic re-substitutions).
-    5. Morphological inflection awareness: allows approved target inflected variants.
-    6. A private CJK tokenizer so a compound-word guard never depends on (or
-       mutates) another job's process-global tokenizer state.
+    With :mod:`ahocorasick` installed every pattern is matched simultaneously by
+    one automaton; without it :meth:`_build_automaton` leaves ``_automaton`` as
+    ``None`` and enforcement falls back to a per-pattern ``re.finditer`` loop —
+    the same matches and the same replacements, no longer linear in text length.
+    The dependency is an optimization, not a requirement.
+
+    What makes the output deterministic rather than merely greedy: each rule
+    carries its own word/token boundary assertions, overlapping matches resolve
+    longest-first, and replacements are spliced in one non-destructive pass so a
+    cyclic rule pair (``A→B``, ``B→A``) cannot re-rewrite its own output.
+    Approved target inflections are left alone, and the CJK tokenizer is
+    per-instance because ``jieba.dt`` is process-global.
     """
 
     def __init__(
@@ -394,14 +407,17 @@ class DeterministicGlossaryEnforcer:
     def _verify_boundary(
         self, text: str, start: int, end: int, check_left: bool, check_right: bool
     ) -> bool:
-        """Check whether the match satisfies word/token boundary assertions."""
-        # Left boundary check
+        """Whether a match at ``[start, end)`` may be replaced under its rule's flags.
+
+        A side is checked only when the rule asked for it (the flags come from the
+        pattern's own first and last character), so ``AI`` refuses to match inside
+        ``AIService`` while a CJK term may still abut CJK.
+        """
         if check_left and start > 0:
             prev_char = text[start - 1]
             if _is_latin_word_char(prev_char):
                 return False
 
-        # Right boundary check
         if check_right and end < len(text):
             next_char = text[end]
             if _is_latin_word_char(next_char):

@@ -1,11 +1,11 @@
-"""Semantic Flow-Isolated IR Data Models (Pydantic v2).
+"""The pipeline's mutable block record and the vocabularies it shares.
 
-``IRBlock`` is the pipeline's mutable working record. Its *structure* is the
-typed :class:`~ubt.model.ast.Element` it carries (single source of truth: one attribute, one
+``IRBlock`` is the working record: its *structure* is the typed
+:class:`~ubt.model.ast.Element` it carries (single source of truth: one attribute, one
 origin); everything structural -- ``block_type``, ``flow_id``, ``region``,
-``source_text``, ``bbox``, ``spine_index`` -- is derived from that element, so
-the two cannot disagree. What is left on the block is execution state
-(status, translation, scores) plus the adapter's typography.
+``source_text``, ``bbox``, ``spine_index`` -- is derived from that element, so the
+two cannot disagree. What is left on the block is execution state (status,
+translation, scores) plus the adapter's typography.
 """
 
 from __future__ import annotations
@@ -40,39 +40,44 @@ from ubt.model.span import CompositeSpan, Span
 
 
 class FlowID(StrEnum):
-    """Semantic flow types: determines physical boundaries for sliding context windows."""
+    """Semantic flow types: determines physical boundaries for sliding context windows.
 
-    MAIN_STORY = "main_story"  # Main narrative/dialogue body stream
-    SIDEBAR_ASIDE = "sidebar_aside"  # Sidebar, textbook callout boxes, feature cards
-    FOOTNOTE = "footnote"  # Footnotes and endnotes
-    TABLE_GRID = "table_grid"  # Table cell text grid
-    CAPTION = "caption"  # Figure and table captions / callouts
+    The names say what lives in a flow; only two need spelling out:
+    ``FOOTNOTE`` covers endnotes as well, and ``SIDEBAR_ASIDE`` covers textbook
+    callout boxes and feature cards, not just page-margin sidebars.
+    """
+
+    MAIN_STORY = "main_story"
+    SIDEBAR_ASIDE = "sidebar_aside"
+    FOOTNOTE = "footnote"
+    TABLE_GRID = "table_grid"
+    CAPTION = "caption"
 
 
 class BlockType(StrEnum):
     """Semantic type of IRBlock."""
 
-    NARRATIVE = "narrative"  # Descriptive narrative paragraph
-    DIALOGUE = "dialogue"  # Character dialogue
-    HEADING = "heading"  # Section headings / chapter titles
-    CODE = "code"  # Source code / terminal listings (triggers token masking)
-    FORMULA = "formula"  # Math formulas (LaTeX protection)
-    IMAGE = "image"  # Illustration or picture block
-    TABLE = "table"  # Composite table
-    LIST_ITEM = "list_item"  # Bulleted or numbered list item
+    NARRATIVE = "narrative"
+    DIALOGUE = "dialogue"
+    HEADING = "heading"
+    CODE = "code"  # triggers token masking
+    FORMULA = "formula"  # LaTeX protection
+    IMAGE = "image"
+    TABLE = "table"
+    LIST_ITEM = "list_item"
 
 
 class BlockStatus(StrEnum):
     """Lifecycle status of IRBlock."""
 
-    PENDING = "pending"  # Waiting to be drafted
-    DRAFTED = "drafted"  # Drafted by tier-1 cheaper model
-    MTQE_PASSED = "mtqe_passed"  # Quality passed MTQE, released directly
-    REPAIR_PENDING = "repair_pending"  # Below threshold, queued for targeted repair
-    REPAIRED = "repaired"  # Repaired by tier-2 flagship model
-    FAILED = "failed"  # Failed after retries / circuit-break
-    NEEDS_HUMAN = "needs_human"  # MQM Major severity: shippable but queued for human PE
-    BLOCKED_HUMAN = "blocked_human"  # MQM Critical unresolved: MUST NOT ship machine output
+    PENDING = "pending"
+    DRAFTED = "drafted"  # by the tier-1 cheaper model
+    MTQE_PASSED = "mtqe_passed"
+    REPAIR_PENDING = "repair_pending"
+    REPAIRED = "repaired"  # by the tier-2 flagship model
+    FAILED = "failed"
+    NEEDS_HUMAN = "needs_human"  # MQM Major: shippable, queued for human PE
+    BLOCKED_HUMAN = "blocked_human"  # MQM Critical: MUST NOT ship machine output
 
 
 # Single source of truth for the lifecycle's terminal states. is_finalized,
@@ -309,12 +314,10 @@ class BlockProvenance(BaseModel):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    # Physical bounding boxes & source layout
     physical_boxes: list[dict[str, Any]] = Field(default_factory=list)
     source_page: int | None = None
     page_kind: str | None = None
 
-    # Typography & styling
     is_bold: bool | None = None
     is_italic: bool | None = None
     font_size: float | None = None
@@ -322,12 +325,10 @@ class BlockProvenance(BaseModel):
     font_name: str | None = None
     alignment: str | None = None
 
-    # Table of contents (TOC) metadata
     toc_entry: bool | None = None
     toc_page: str | None = None
     toc_leaders: bool | None = None
 
-    # Cross-page continuation & bifurcation
     fused_sources: list[str] = Field(default_factory=list)
     fused_block_ids: list[str] = Field(default_factory=list)
     fused_count: int | None = None
@@ -336,7 +337,6 @@ class BlockProvenance(BaseModel):
     bifurcated_total: int | None = None
     bifurcation_index: int | None = None
 
-    # Layout witnesses, VLM & repairs
     vlm_lines: list[Any] = Field(default_factory=list)
     anchor_provenance: str | None = None
     anchor_stats: dict[str, Any] | None = None
@@ -382,7 +382,7 @@ class IRBlock(BaseModel):
     glossary_hits: list[str] = Field(default_factory=list)  # Matched glossary terms
     mtqe_score: float | None = None  # Quality metric score (0.00 ~ 1.00)
     repair_rounds: int = 0  # Completed targeted repair iterations (max 2)
-    error_flags: list[str] = Field(default_factory=list)  # e.g., ["html_attr_mismatch"]
+    error_flags: list[str] = Field(default_factory=list)  # e.g., ["math_token_corrupt"]
 
     # MQM severity triage
     mqm_severity: str | None = None  # "critical" | "major" | "minor" (None = not triaged)
@@ -446,7 +446,6 @@ class IRBlock(BaseModel):
 
     @property
     def is_finalized(self) -> bool:
-        """Returns True if the block has reached a terminal status."""
         return self.status in TERMINAL_STATUSES
 
     def transition_to(
@@ -517,7 +516,7 @@ class IRBlock(BaseModel):
         element = remaining_update.pop("element", self.element)
         element_changes: dict[str, Any] = {}
 
-        # 1. Structural aliases
+        # Aliases that name a structural fact rather than an element field.
         if "source_text" in remaining_update:
             element = _with_element_source(element, remaining_update.pop("source_text"))
         if "flow_id" in remaining_update:
@@ -531,7 +530,7 @@ class IRBlock(BaseModel):
                 new_span = dataclasses.replace(new_span, page=page)
             element_changes["span"] = new_span
 
-        # 2. Dynamic element fields (id, spine_index, skip_translate, region, level, marker, etc.)
+        # Anything left that is a real field of the element dataclass moves onto it.
         el_fields = {f.name for f in dataclasses.fields(element)}
         for f in list(remaining_update.keys()):
             if f in el_fields:
@@ -545,12 +544,10 @@ class IRBlock(BaseModel):
 
     @classmethod
     def from_element(cls, element: ElementT, *, style: StyleMeta | None = None) -> IRBlock:
-        """Create a pipeline execution block wrapping an immutable document AST element."""
         return cls(element=element, style=style)
 
     @classmethod
     def from_elements(cls, elements: Iterable[ElementT]) -> list[IRBlock]:
-        """Wrap an iterable of document AST elements into pipeline execution blocks."""
         return [cls(element=el) for el in elements]
 
     def with_source_text(self, text: str) -> IRBlock:
@@ -577,7 +574,7 @@ class ChapterMeta(BaseModel):
 
 
 class BookManifest(BaseModel):
-    """Top-level book manifest for $O(1)$ memory consumption and chapter indexing."""
+    """Top-level book manifest: identity, languages, chapter index, run decisions."""
 
     doc_id: str
     title: str

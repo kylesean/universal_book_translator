@@ -24,8 +24,8 @@ keep their positions to 0.0 pt.
 **Form XObjects are not descended into by default.** The measured share of page
 text living in Form XObjects is 0–8.8 %, and what lives there is figure content —
 chart axis ticks (``68 70 75 80 85 90``) and a legend (``DocLayout-YOLO``,
-``MinerU2.5``, ``Dolphin-v2``). Phase 1–4 of the delivery design keeps original
-in-figure text, so stripping those is a defect, not a feature.
+``MinerU2.5``, ``Dolphin-v2``). The delivery keeps the source's in-figure text,
+so stripping those is a defect, not a feature.
 
 **The fail-safe direction is "keep".** ``erase_rects=None`` means *strip
 nothing*, not *strip everything*. The old default stripped the page clean, and

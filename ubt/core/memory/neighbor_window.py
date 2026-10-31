@@ -1,4 +1,10 @@
-"""Bidirectional read-only neighbor sliding window generator."""
+"""The read-only neighbour excerpts handed to the prompt beside a block.
+
+Which blocks count as a neighbour is a flow question, decided in one place:
+:meth:`NeighborContextBuilder.extract_from_blocks`. Everything else here is
+presentation — trimming, labelling, and the section heading that keeps the model
+from treating an excerpt as text to translate.
+"""
 
 from ubt.core.ir.models import IRBlock
 
@@ -6,7 +12,7 @@ DEFAULT_NEIGHBOR_CHARS = 300
 
 
 class NeighborContextBuilder:
-    """Constructs prompt-ready read-only neighboring excerpts strictly within the same semantic flow."""
+    """Assembles prompt-ready read-only neighbouring excerpts."""
 
     def __init__(self, neighbor_chars: int = DEFAULT_NEIGHBOR_CHARS) -> None:
         self.neighbor_chars = neighbor_chars
@@ -60,9 +66,9 @@ class NeighborContextBuilder:
         # structurally parallel to "### Source Paragraph to Translate" instead of
         # as bare paragraphs adjacent to the text to translate. The bracketed
         # per-excerpt labels were not enough on their own: chapter-3 shipped
-        # blocks whose output was the neighbour excerpt translated and prepended
-        # (pdf_main#b0009/b0045/b0068/b0089/b0162 all fail the added-content
-        # probe for exactly this reason). No information is added or removed.
+        # blocks whose output was the neighbour excerpt translated and prepended,
+        # and every one of them failed the added-content probe for that reason.
+        # No information is added or removed.
         return "### Reference Context (read-only, NOT part of the task)\n\n" + "\n\n".join(parts)
 
     @classmethod
@@ -101,7 +107,11 @@ class NeighborContextBuilder:
         fallback_prev_text: str | None = None,
         fallback_next_text: str | None = None,
     ) -> str:
-        """Extract neighbor context ensuring strict flow isolation."""
+        """The one flow-isolating entry point: neighbours are drawn only from blocks
+        sharing ``target_block.flow_id``, so a footnote's window never reaches into
+        the body paragraph it annotates. :meth:`extract_excerpts` is flow-agnostic
+        and trusts whatever text the caller hands it.
+        """
         # Filter blocks strictly belonging to the identical flow_id
         same_flow = [b for b in surrounding_blocks if b.flow_id == target_block.flow_id]
         same_flow.sort(key=lambda b: b.spine_index)

@@ -1,6 +1,4 @@
-"""Universal Book Translator CLI package.
-
-``app`` is resolved lazily. Importing it eagerly pulled ``ubt.cli.main`` — and
+"""``app`` is resolved lazily. Importing it eagerly pulled ``ubt.cli.main`` — and
 with it ``typer`` and every command module — into anything that touched this
 package, including `scripts/build_console_assets.py`, which wants only the
 JavaScript toolchain probe in ``ubt.cli.jstoolchain``. That made a pure

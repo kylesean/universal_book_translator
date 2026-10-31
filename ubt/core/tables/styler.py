@@ -1,4 +1,12 @@
-"""Styling engine for multi-page repeated table headers and continuation notices."""
+"""Typst/HTML continuation markup for tables that break across pages.
+
+A continuation notice can only be placed by comparing the page it is drawn on
+against the page where the table started (or ends), so the Typst markup carries
+``<ubt-tbl-start-…>`` / ``<ubt-tbl-end-…>`` metadata labels and finds them with
+``query()`` at compile time. ``sanitize_table_uid`` restricts the label suffix to
+``[A-Za-z0-9_-]`` because a Typst label is an *identifier*: any other character
+is a parse error in the generated source, not a cosmetic difference.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +16,6 @@ from ubt.core.tables.models import TableContinuationConfig
 
 
 def sanitize_table_uid(raw_id: str) -> str:
-    """Sanitize raw block ID into a valid Typst label identifier."""
     clean = re.sub(r"[^A-Za-z0-9_-]+", "-", str(raw_id)).strip("-")
     return clean or "tbl"
 
@@ -20,10 +27,10 @@ def generate_typst_table_continuation_elements(
     config: TableContinuationConfig | None = None,
     indent: str = "    ",
 ) -> tuple[str, str, str, str]:
-    """Generate the four Typst primitives for multi-page table continuation.
+    """(start_anchor, header_cell, footer_block, end_anchor), in source order.
 
-    Returns:
-        (start_anchor, header_continuation_cell, footer_continuation_block, end_anchor)
+    The header cell and footer block come back ``""`` when their config switch
+    is off, so four returned strings do not mean four things to emit.
     """
     cfg = config or TableContinuationConfig()
     uid = sanitize_table_uid(table_uid)
@@ -74,7 +81,11 @@ def generate_typst_table_continuation_elements(
 
 
 def generate_html_table_continuation_css() -> str:
-    """Generate CSS rules ensuring repeated headers and continuation styling across printed pages."""
+    """Print CSS: ``*-header-group``/``*-footer-group`` repeat thead/tfoot per page.
+
+    Needs ``break-inside: auto`` on the table itself, or the browser moves the
+    whole table to the next page instead of splitting it and repeating headers.
+    """
     return (
         "<style>\n"
         "@media print {\n"

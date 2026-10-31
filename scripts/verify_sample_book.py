@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
 """End-to-end sample book verification runner and deployment smoke check.
 
-Validates the full Universal Book Translator (UBT) ingest, representation,
-and rendering pipeline against a reference technical mini-monograph
-(``examples/sample_book/deep_learning_primer.md``).
-
-Verifications performed:
-1. Ingestion & IR Extraction: Extracts AST elements (headings, equations, tables, code blocks).
-2. Typographic Container Fit: Tests code wrapping and zero-width break injection.
-3. Dry-Run Translation & Contract Integrity: Ensures 100% text delivery and zero loss.
-4. Typst Document Compilation: Generates reproducible Typst markup and compiles to PDF.
-5. Layout Diagnostics: Ensures zero margin breaches or layout spills on rendered output.
+Runs the real chain -- ingest, IR, container repair, dry-run translation contract,
+Typst compile, layout audit -- over the bundled reference mini-monograph
+(``examples/sample_book/deep_learning_primer.md``). Each stage has its own unit
+tests; this is the one place that proves they still hand off to each other, because a
+stage that drops text or spills a margin only shows up once the PDF is rendered and
+measured.
 
 Usage:
     uv run python scripts/verify_sample_book.py

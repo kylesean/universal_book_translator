@@ -110,7 +110,7 @@ def screen_drafted_blocks(
     glossary_terms: list[str] | None = None,
     rehearsal: bool = False,
 ) -> tuple[list[IRBlock], list[dict[str, Any]]]:
-    """Public name for the deterministic FastPass screen used by Agent mode.
+    """The deterministic FastPass screen, shared with Agent mode.
 
     The provider pipeline's gate and the Agent finish path must apply the same
     invariant checks. Keeping the implementation in one place prevents an Agent
@@ -136,7 +136,7 @@ async def _audit_pass_sample(
     invisible to the ``pass_sample`` mechanism meant to audit a fraction of clean
     passes (``TieredQERunner``), leaving that knob inert. When the runner samples
     passes, they are scored here and any below-threshold block is routed back
-    into repair. A plain heuristic/COMET runner has no ``pass_sample``, so
+    into repair. A plain heuristic runner has no ``pass_sample``, so
     the default configuration is unchanged.
 
     Both halves are returned. Reporting only the demoted ones meant a block the
@@ -284,8 +284,7 @@ async def run_quality_gate_stage(
         # classify a terminology violation at its own band instead of the 0.92
         # pass value. Heuristic and tiered runners expose ``with_glossary``
         # (the tier forwards it to its heuristic leg, the only leg that scores
-        # terminology); a subprocess/neural runner has none and keeps its own
-        # scoring.
+        # terminology); a runner without it keeps its own scoring.
         qe_runner = bind_glossary(glossary_dicts)
         scoring.qe_runner = qe_runner
         scoring.repair_loop = services.repair_loop_for(
@@ -423,10 +422,11 @@ async def run_quality_gate_stage(
                 float(s) if index in measured else None for index, s in enumerate(raw_scores)
             ]
         else:
-            # Bi-modal Gate Track 1: Structural Integrity.
-            # When uncalibrated (HeuristicQERunner, or a COMET subprocess whose
-            # torch import failed), do NOT fabricate continuous pseudo-scores.
-            # Explicitly mark mtqe_score = None and route to REPAIR_PENDING based on structural defect flags.
+            # Structural Integrity: the only track for an uncalibrated runner.
+            # No runner in the tree is calibrated (see repair_loop's tier
+            # comment), so do NOT fabricate continuous pseudo-scores here.
+            # Explicitly mark mtqe_score = None and route to REPAIR_PENDING based
+            # on structural defect flags.
             scores = [None] * len(suspicious_blocks)
 
         engine = qe_runner.score_source()

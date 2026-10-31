@@ -55,9 +55,9 @@ from ubt.core.validators.consistency import (
     scale_equivalent_values,
 )
 
-# Sentence terminators and abbreviation masking live in ``term_shape`` next
-# to the shared ``count_sentences`` (the MT admission gate imports the same
-# one), as does the identifier-shape rule (shared with the fast-pass gate).
+# Sentence terminators, abbreviation masking and ``count_sentences`` all live
+# in ``term_shape``, so the identifier-shape rule (shared with the fast-pass
+# gate) and the sentence count stay one definition instead of two copies.
 _is_identifier_shaped = is_identifier_shaped
 # Latin verbatim runs (same shape as the fast-pass carry-over whitelist).
 _LATIN_RUN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+\-]*")

@@ -5,8 +5,8 @@ term survive translation; ``is_verbatim_carryover`` is its wider superset used t
 strip legitimately-kept tokens from the target-language density residue. The
 difference is load-bearing: ``IT``/``US``/``MHA`` kept verbatim must not read as
 untranslated, yet the omission gate must not demand ``IT``/``OR`` survive.
-``count_sentences`` is the one counter both the omission gate and the MT
-admission gate share, so abbreviation periods must not inflate the count.
+``count_sentences`` is the QE subsystem's only sentence counter, so
+abbreviation periods must not inflate the count.
 """
 
 from __future__ import annotations

@@ -137,8 +137,9 @@ class ProgressSnapshot(BaseModel):
     needs_human_blocks: int = 0
     blocked_human_blocks: int = 0
     # Blocks that reached ANY final disposition (completed + failed +
-    # needs_human + blocked_human): the finalized numerator of
-    # ``progress_percent``. ``completed_blocks`` keeps its narrow ledger
+    # needs_human + blocked_human). NOT the numerator of ``progress_percent``:
+    # that is ``_successful_work``, which excludes failures, so a dead provider
+    # cannot fill the bar. ``completed_blocks`` keeps its narrow ledger
     # meaning — it is the same number the quality report's
     # ``summary.completed_blocks`` reads — while this counter answers "how much
     # of the book has been fully processed". The live fraction additionally
@@ -281,14 +282,9 @@ class ProgressSnapshot(BaseModel):
     def to_payload(self) -> dict[str, Any]:
         """Queue-row form: counters always present, artifact paths only when known.
 
-        The counters plus the ``processed_blocks``/``progress_percent``
-        projection keep their keys even when a value is unknown
-        (``estimated_cost_usd: null`` before the first usage report), because
-        that is the shape rows have always had and the queue-mode SSE frame
-        forwards this dict to clients verbatim. The three artifact paths are
-        omitted until an export names them. Rows written before
-        ``processed_blocks``/``progress_percent`` existed stay readable: both
-        default to 0 and are recomputed by ``from_ledger`` on the next read.
+        Counter keys are always present (``estimated_cost_usd: null`` before the
+        first usage report) because the queue-mode SSE frame forwards this dict
+        verbatim; the artifact paths are omitted until an export names them.
         """
         payload = self.model_dump()
         for key in ARTIFACT_KEYS:

@@ -31,8 +31,8 @@ async def export_pdf_to_markdown(pdf_path: Path, md_path: Path) -> None:
         async for ch in adapter.parse_stream(pdf_path):
             blocks.extend(ch.blocks)
     finally:
-        # Release the adapter-owned MathJax node subprocess; without this it
-        # leaks once per invocation.
+        # Release the adapter-owned Docling worker pool and in-process converter;
+        # without this they leak once per invocation.
         adapter.close()
 
     print(f"[pdf->md] Extracted {len(blocks)} blocks. Writing Markdown to {md_path}...")

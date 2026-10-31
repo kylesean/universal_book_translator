@@ -1,29 +1,31 @@
 """CELS Stage 3: the two-phase style and vertical solve.
 
-Design: ``docs/design/adaptive_delivery_prd.md`` §8.2.1 (the math form) and
-§7.4.3 of the tech design (the two phases). Like the rest of
-``ubt.core.layout`` this module is deliberately pure: measured inputs in,
-solved geometry out. It opens no PDF and owns no renderer; the Typst-backed
-measurement arrives as an injected :data:`BlockMeasureFn`, and the Cassowary
-solver arrives through ``kiwisolver`` (the ``[cels]`` extra), imported lazily so
-a default install can still import this module.
+The math form is a Cassowary linear system; the shape is two phases, and the
+split is the point of the module. Like the rest of ``ubt.core.layout`` this
+module is deliberately pure: measured inputs in, solved geometry out. It opens
+no PDF and owns no renderer; the Typst-backed measurement arrives as an
+injected :data:`BlockMeasureFn`, and the Cassowary solver arrives through
+``kiwisolver`` (the ``[cels]`` extra), imported lazily so a default install can
+still import this module.
 
 The two phases, and why they must not merge
 -------------------------------------------
 ``N_i`` (a block's line count) is a ``ceil()`` over wrapping -- a piecewise
 constant that changes discontinuously with size, tracking and width. Cassowary
 only solves continuous systems, so handing it ``N_i`` as something to derive is
-the "pseudo-linear, fake-feasible" failure the tech design forbids. Phase 3A
-therefore fixes the style (and with it every ``N_i``, via real measurement),
+the "pseudo-linear, fake-feasible" failure this split exists to prevent. Phase
+3A therefore fixes the style (and with it every ``N_i``, via real measurement),
 and Phase 3B solves only the continuous vertical degrees of freedom.
 
 Phase 3A -- ``solve_style_group``
-    One size per style group (PRD §8.2: "字号差异只能来自 StyleRole"). The
-    search walks the knobs in the PRD's *preference* order -- tracking, then
-    leading, then right-borrow, and size reduction last (P10: 缩字号是最后手段)
-    -- and accepts the first candidate whose measured heights fit the track.
+    One size per style group: a size difference may only come from the style
+    role a block carries, never from per-block ad-hoc scaling. The
+    search walks the knobs in preference order -- tracking, then leading, then
+    right-borrow, and size reduction last, because shrinking the font is the
+    final resort -- and accepts the first candidate whose measured heights fit
+    the track.
 
-    One documented deviation from §7.4.3: the search order lists ``γ_x`` first,
+    One documented deviation from that order: the ladder lists ``γ_x`` first,
     but the only measurement backend that exists (the Typst probe) **refuses
     non-unity horizontal scale** -- Typst's static-font ``stretch`` does not
     change advance widths, so a γ_x swept here would be measured on a lie. 3A
@@ -35,13 +37,13 @@ Phase 3A -- ``solve_style_group``
 
 Phase 3B -- ``solve_vertical``
     kiwisolver over ``y_top/y_bottom`` and ``deficit`` per block. The strength
-    assignment is the PRD's, with one deliberate hardening: the fit inequality
-    ``(height + deficit ≥ H_req)`` is **required**, not strong. As the PRD
-    labels it (strong) it can conflict with the equally-strong ``deficit == 0``
-    on an over-full track, and which one Cassowary then breaks is unspecified.
-    Required-fit keeps the semantics deterministic: track bounds and gaps can
-    force a height below its requirement, the strong ``deficit == 0`` is
-    sacrificed, and the resulting positive deficit is exactly the PRD's
+    assignment follows the design, with one deliberate hardening: the fit
+    inequality ``(height + deficit ≥ H_req)`` is **required**, not strong. As
+    the strong term the design names, it can conflict with the equally-strong
+    ``deficit == 0`` on an over-full track, and which one Cassowary then breaks
+    is unspecified. Required-fit keeps the semantics deterministic: track bounds
+    and gaps can force a height below its requirement, the strong
+    ``deficit == 0`` is sacrificed, and the resulting positive deficit is the
     "unmet height" that triggers Stage 4 -- never a shrunk font, never a
     silently dropped block.
 """
@@ -74,19 +76,22 @@ __all__ = [
     "solve_vertical",
 ]
 
-#: Absolute body floor (PRD §7.4.3): a body group never solves below this.
+#: Absolute body floor: a body group never solves below this.
 BODY_FLOOR_PT = 7.5
 #: Non-body roles (captions, table cells) may go lower, but must warn.
 NON_BODY_FLOOR_PT = 5.5
-#: Candidate size step for the discrete 3A search (PRD: 0.25pt).
+#: Candidate size step for the discrete 3A search.
 SIZE_STEP_PT = 0.25
-#: faithful may enlarge a group to at most 1.10x its source size (PRD §8.2).
+#: ``faithful`` may enlarge a group to at most this multiple of its source size.
 MAX_EXPANSION_RATIO = 1.10
-#: Stage 4 trigger: a deficit above this is a real shortfall (PRD §7.4.4).
+#: Stage 4 trigger: a deficit above this is a real shortfall.
 DEFICIT_TRIGGER_PT = 1.5
 #: Default minimum gap between consecutive blocks in one track.
 DEFAULT_MIN_GAP_PT = 2.0
-#: Micro-typography bounds (PRD §7.4.3): tracking −0.03..+0.06em, leading 1.08..1.55.
+#: Micro-typography bounds. Tracking is only ever *compressed* here (the search
+#: walks down from 0 to :data:`TRACKING_MIN_EM`); there is no loosening bound
+#: because no candidate asks for positive tracking. Leading is clamped to
+#: :data:`LEADING_MIN_RATIO`..:data:`LEADING_MAX_RATIO`.
 TRACKING_MIN_EM = -0.03
 TRACKING_STEP_EM = 0.005
 LEADING_MIN_RATIO = 1.08
@@ -179,8 +184,8 @@ class VerticalBlockInput:
 
     ``required_height_pt`` is 3A's *measured* height at the solved style; the
     solver never derives it. ``source_top_pt`` is the source block's top edge
-    in PDF user space (y up), and inputs are ordered top-down as the PRD's
-    ``B_1..B_n``.
+    in PDF user space (y up), and inputs are ordered top-down, so block 1 is
+    the highest on the page.
     """
 
     index: int
@@ -221,7 +226,7 @@ class SolvedBlockSpec:
 
 
 # ---------------------------------------------------------------------------
-# Stage 3A
+# Phase 3A: the discrete style search
 # ---------------------------------------------------------------------------
 
 
@@ -230,12 +235,12 @@ def _floor_for(role: Literal["body", "caption", "table_cell"]) -> float:
 
 
 def _leading_candidates(source_ratio: float) -> tuple[float, ...]:
-    """Source leading first, then tighter, down to the floor. Never above 1.55.
+    """Source leading first, then tighter, down to the floor; never looser than
+    the maximum ratio.
 
-    The floor itself is always a candidate even when the 0.05 step lands past
-    it (1.30, 1.25, … 1.10, 1.08): a style that only fits at the exact floor
-    must be reachable, or the search would walk the font size past a leading
-    solution that exists.
+    The floor is always a candidate even when the step lands past it: a style
+    that only fits at the exact floor must be reachable, or the search would
+    walk the font size past a leading solution that exists.
     """
     start = min(max(source_ratio, LEADING_MIN_RATIO), LEADING_MAX_RATIO)
     out: list[float] = []
@@ -249,7 +254,7 @@ def _leading_candidates(source_ratio: float) -> tuple[float, ...]:
 
 
 def _tracking_candidates() -> tuple[float, ...]:
-    """Zero first (no distortion), then tighter, down to −0.03em."""
+    """Zero first (no distortion), then tighter, down to :data:`TRACKING_MIN_EM`."""
     out: list[float] = []
     value = 0.0
     while value >= TRACKING_MIN_EM - 1e-9:
@@ -299,14 +304,14 @@ def solve_style_group(
     min_gap_pt: float = DEFAULT_MIN_GAP_PT,
     size_step_pt: float = SIZE_STEP_PT,
 ) -> StyleGroupSolution:
-    """Solve one style group's shared style (PRD §8.2.1 phase 3A).
+    """Solve one style group's shared style: Phase 3A.
 
-    Walks the knobs in the PRD's preference order -- tracking, leading,
-    right-borrow, and size last -- accepting the first candidate whose
+    Walks the knobs in the preference order this module documents -- tracking,
+    leading, right-borrow, and size last -- accepting the first candidate whose
     *measured* heights (never estimates) fit ``available_height_pt``. Size
-    descends from the group's source size toward the role floor in
-    ``size_step_pt`` steps; the floor is ``max(0.80 x source, 7.5pt)`` for body
-    text and 5.5pt for captions/table cells.
+    descends from the group's source size toward the role floor (``BODY_FLOOR_PT``
+    for body text, ``NON_BODY_FLOOR_PT`` for captions and table cells, and never
+    below 80 % of the source size) in ``size_step_pt`` steps.
 
     When even the floor style does not fit, the returned solution carries
     ``fits=False`` and a measured :attr:`StyleFit.char_budget` per block --
@@ -502,7 +507,7 @@ def solve_vertical(
     track: VerticalTrack,
     min_gap_pt: float = DEFAULT_MIN_GAP_PT,
 ) -> tuple[SolvedBlockSpec, ...]:
-    """Distribute blocks vertically inside one track (PRD §8.2.1 phase 3B).
+    """Distribute blocks vertically inside one track: Phase 3B.
 
     Strengths, and what each one buys:
 

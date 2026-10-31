@@ -155,9 +155,8 @@ def create_dry_run_orchestrator(
     upload manuscript pages during a "zero-spend" rehearsal. The rehearsal runs
     on a copy with every page-image egress path closed.
 
-    The ledger directory is isolated too, for the reasons
-    :func:`rehearsal_db_dir` gives: a rehearsal must not be able to look like a
-    job, and must not accumulate in the store the operator reads.
+    The ledger directory is isolated too -- for the reasons
+    :func:`rehearsal_db_dir` gives.
 
     The **content cache** is isolated as well, and that one is a correctness fix
     rather than housekeeping: see :func:`rehearsal_cache_dir`. Until it was

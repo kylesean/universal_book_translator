@@ -40,8 +40,9 @@ _DROPPED = re.compile(r"the source held a (?P<src>\[[0-9, ]*\])-row/column grid"
 #: reason in ``error_flags`` verbatim, sometimes under a structural-failure label).
 _PREFIXES = ("repair_structural_failure: ",)
 
-#: ``(table, column)`` pairs that carry a flags JSON array. The block ledger and
-#: the quality-report rewrite both read the same shape.
+#: SQL predicate over ``blocks.error_flags_json`` selecting the rows that carry
+#: the legacy table-shape sentences. The block ledger and the quality-report
+#: rewrite both read the same shape.
 _LIKE_CLAUSES = "error_flags_json LIKE '%rows hold%' OR error_flags_json LIKE '%row/column grid%'"
 
 

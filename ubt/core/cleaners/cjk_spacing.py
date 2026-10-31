@@ -1,18 +1,27 @@
-"""CJK spacing normalization for translated target text.
+"""CJK typography normalization for translated target text.
 
-MT models (especially small ones) emit ASCII spaces where Chinese
-typesetting uses none: ``改进， 而不是`` or ``FinFET是 一种``. Those stray
-spaces survive into the Typst PDF and read as stutter. This cleaner strips
-only unambiguous cases and deliberately keeps spaces between CJK and Latin
-(``FinFET 和 GAA`` stays as-is):
+Three rewrites, run in this order by :func:`normalize_publishing_cjk`:
 
-- space(s) between two CJK characters;
-- space(s) immediately before CJK punctuation (，。；：、？！）》”’ … —);
-- space(s) immediately after CJK punctuation (（《“‘【 。，；：、？！）》”’ … —).
+- **de-spacing** (:func:`normalize_cjk_spacing`) — MT models (especially small
+  ones) emit ASCII spaces where Chinese typesetting uses none: ``改进， 而不是``.
+  Those stray spaces survive into the Typst PDF and read as stutter, so
+  horizontal whitespace between two CJK characters and on either side of CJK
+  punctuation is removed. An existing single space between CJK and Latin is
+  left alone here.
+- **pangu spacing** (:func:`apply_pangu_spacing`) — the opposite direction, and
+  the reason this module is not purely a stripper: where CJK meets Latin, a
+  digit, ``%`` or an inline math/mask span with *no* gap at all (``FinFET是``),
+  a half-width space is inserted per the Pangu / W3C Chinese-layout requirement
+  (``FinFET 是``).
+- **punctuation** (:func:`normalize_cjk_punctuation`) — GB/T 15834-2011 forms:
+  ``--``, en-dashes and lone em-dashes become ``——``, 3-dot ellipses ``……``.
 
-Pure function, applied at export to non-skipped target text, and gated on the
-target language: the space-removal rules only run for spaceless writing systems
-(``zh``/``ja``).
+The de-spacing rules are gated on spaceless writing systems (``zh``/``ja``) —
+they also cover Hangul, so running them on a Korean target welded every word
+together. All three share one protection contract: bytes inside code spans,
+mask tokens, math, HTML tags and Markdown table separator rows are never
+rewritten (see :func:`_split_protected`). Pure functions, applied at export to
+non-skipped target text.
 """
 
 from __future__ import annotations
@@ -183,22 +192,15 @@ def apply_pangu_spacing(text: str, target_lang: str = "zh") -> str:
     parts = _split_protected(text)
     for i in range(0, len(parts), 2):
         seg = parts[i]
-        # 1. CJK + Latin/Num
         seg = _PANGU_CJK_THEN_LATIN.sub(r"\1 \2", seg)
-        # 2. Latin/Num + CJK
         seg = _PANGU_LATIN_THEN_CJK.sub(r"\1 \2", seg)
-        # 2b. CJK + half-width bracket with Latin/Num/Math: e.g. 式(3.1) -> 式 (3.1)
         seg = _PANGU_CJK_THEN_BRACKET.sub(r"\1 \2", seg)
-        # 2c. Half-width bracket with Latin/Num/Math + CJK: e.g. (3.1)出发 -> (3.1) 出发
         seg = _PANGU_BRACKET_THEN_CJK.sub(r"\1 \2", seg)
-        # 2d. Num + half-width bracket with Latin/Num: e.g. 图 3.1(a) -> 图 3.1 (a)
         # Only a *digit* may precede the bracket. A letter is an identifier, and
         # ``sin(x)`` / ``f(x)`` are function calls, not bracketed references — the
         # old ``_LATIN_OR_NUM`` rule inserted a space and broke them.
         seg = _PANGU_DIGIT_THEN_BRACKET.sub(r"\1 \2", seg)
-        # 3. Number/Latin + % + CJK (e.g. 15% 的性能)
         seg = _PANGU_PERCENT_THEN_CJK.sub(r"\1 \2", seg)
-        # 6. Clean spaces around CJK punctuation
         seg = _BEFORE_PUNCT.sub(r"\1", seg)
         seg = _AFTER_PUNCT.sub(r"\1", seg)
 

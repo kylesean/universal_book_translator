@@ -111,7 +111,7 @@ async def bill_job_run(
 
 
 def budget_violation(bill: JobBill, budget_usd: float | None, job_id: str) -> str | None:
-    """Return the stop message when the job has outgrown its cap, else None.
+    """The stop message when the job has outgrown its cap, or None.
 
     A hard stop by design: the ledger keeps everything drafted so far, so
     raising UBT_BUDGET_USD and rerunning the same job id resumes from here.

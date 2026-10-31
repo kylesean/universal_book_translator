@@ -1,4 +1,10 @@
-"""Whole-book translation bible terminology extraction stage."""
+"""Whole-book translation bible terminology extraction stage.
+
+Runs after ingest and before drafting: every later stage (draft prompt,
+glossary enforcers, QE scoring, export) reads the single ``Terminology`` value
+filled here, so the book's term list has to exist once, whole, before the first
+block is paid for.
+"""
 
 import asyncio
 import hashlib
@@ -126,7 +132,7 @@ async def run_bible_stage(
     """Extract, mine, and backfill translation bible for the whole book.
 
     The extracted terminology is written into the plan-owned ``terminology``
-    value (explicit stage execution context) for the stages that follow, and the stage
+    value for the stages that follow, and the stage
     yields its own ``BIBLE_EXTRACTED`` event when it has one.
 
     ``ctx.fast_lane`` (short docs): seeds + chapter titles only —
@@ -272,7 +278,7 @@ async def run_bible_stage(
         block_texts = await asyncio.to_thread(ledger.fetch_source_texts, actual_job_id)
 
     check_stage_cancelled(ctx)
-    # Tier-2: Language-agnostic LLM Document-Skeleton Terminology Extraction.
+    # Language-agnostic LLM document-skeleton terminology extraction.
     #
     # This runs on the fast lane too. Gating it left the short route with **no
     # terminology mechanism at all**: the fast lane produced no mined terms, the
@@ -345,9 +351,7 @@ async def run_bible_stage(
     # Translation backfill channel. It runs on the fast lane too, for the same
     # reason the skeleton call does: an untranslated mined entry is a term the
     # glossary cannot enforce, so gating this left the short route with mined
-    # entries that no gate could use. The comment that used to sit here ("seeds
-    # already carry translations, and untranslated mined entries do not exist
-    # there") stopped being true once the 0-token miners were un-gated above.
+    # entries that no gate could use.
     backfilled_count = 0
     if any(not e.translation for e in merged_entries):
         check_stage_cancelled(ctx)

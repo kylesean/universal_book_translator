@@ -276,9 +276,9 @@ async def keep_lease_fresh(
     Every writer that holds a lease for longer than one window must call this —
     a run and a re-export alike. It is one implementation on purpose: renewal
     had been written only inside the pipeline, so ``re_export_job`` held an
-    unrenewed 300 s lease across a whole-book Typst render plus the visual gate,
-    and a page-heavy re-export could outlive the lease and be legally reclaimed
-    while both processes wrote the same ledger and output file.
+    unrenewed default lease across a whole-book Typst render plus the visual
+    gate, and a page-heavy re-export could outlive the lease and be legally
+    reclaimed while both processes wrote the same ledger and output file.
 
     Returns (does not raise) on lease loss: the caller owns the stop decision,
     because the run's stages stop at their own boundary checks while a

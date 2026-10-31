@@ -58,9 +58,9 @@ def text_digest(blocks: Sequence[object]) -> str:
     that renumbers) is a real change rather than noise.
 
     ``status`` is included because it decides *which* text ships: a block that
-    moves to NEEDS_HUMAN after a failed repair renders its source instead of
-    its draft, so a status flip changes the output even when ``target_text``
-    does not.
+    moves to NEEDS_HUMAN after a failed repair still renders its labelled machine
+    draft, while BLOCKED_HUMAN renders the source, so a status flip changes the
+    output even when ``target_text`` does not.
     """
     hasher = hashlib.sha256()
     for block in sorted(blocks, key=lambda b: str(getattr(b, "id", ""))):

@@ -1,11 +1,12 @@
 """Shared placeholder-token infrastructure for the masking cleaners.
 
-The math / code / citation maskers all protect verbatim spans behind an opaque,
-checksum-tagged token before drafting and verify the echo on restore. The
-integrity machinery — the short checksum, the positional ordering, the
-inversion detector, and the :class:`UnmaskReport` verdict — is mask-agnostic, so
-it lives here rather than being reached into from ``math_masker``'s private
-namespace by its siblings.
+The contract every masker here implements, stated once: a span the model must
+not touch is replaced by an opaque token before drafting and put back after,
+and the echoed token is verified on restore. What is mask-agnostic lives here —
+the short checksum, the positional ordering, the inversion detector, and the
+:class:`UnmaskReport` verdict — rather than being reached into from
+``math_masker``'s private namespace by its siblings. The math / code / citation /
+email maskers differ only in *which* spans they recognize.
 """
 
 import functools
@@ -58,7 +59,9 @@ class TokenFactory:
     Every masker (math / code / citation / email) does the same three things per
     protected span: take the next index, build ``<prefix><index:04d>-<checksum>⟧``,
     and record ``token -> original``. One owner keeps the token shape (and thus
-    the checksum binding) identical across the families.
+    the checksum binding) identical across the families: the ``-<checksum>``
+    suffix is what lets restore catch a model that rewrote the index, so no
+    masker has to re-explain the binding in its own ``mask`` docstring.
     """
 
     mask_prefix: str

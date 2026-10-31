@@ -55,7 +55,9 @@ def parse_epigraph_text(text: str) -> tuple[str, str] | None:
         if quote and source and len(source) <= 60:
             return quote, source
 
-    # If text is enclosed in quotation marks and short (<160 chars) with parenthetical author
+    # Opening/closing quote marks around the body with a parenthetical author
+    # after them: the pairing itself is the evidence, so no length test is
+    # applied on top of it.
     m_paren = re.match(r'^[“"「『](.*?)[”"」』]\s*[（\(](.*?)[）\)]$', cleaned, re.DOTALL)
     if m_paren:
         return m_paren.group(1).strip(), m_paren.group(2).strip()

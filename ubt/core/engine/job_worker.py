@@ -229,7 +229,7 @@ class JobWorker:
                         return
                     ledger.set_job_metadata_value(job.job_id, "abort_reason", reason)
                     ledger.finalize_job(job.job_id, status=status)
-            except Exception as exc:  # best-effort terminal write
+            except Exception as exc:
                 logger.debug("Could not write abort ledger for %s: %s", job.job_id, exc)
             finally:
                 lock.release()
@@ -255,7 +255,7 @@ class JobWorker:
             try:
                 with SQLiteJobLedger(db_path, read_only=True) as ledger:
                     return ledger.get_job_status(job.job_id)
-            except Exception as exc:  # read-only arbitration probe
+            except Exception as exc:
                 logger.debug("Job %s: ledger status probe failed: %s", job.job_id, exc)
                 return None
 
@@ -341,7 +341,6 @@ class JobWorker:
             job_config = apply_config_overrides(
                 self.config, overrides_from_request(payload, allow_provider_keys=False)
             )
-            # Inspect if custom event_source implementation accepts cancel_token.
             kwargs: dict[str, Any] = {}
             if "cancel_token" in inspect.signature(self._event_source).parameters:
                 kwargs["cancel_token"] = cancel_token
@@ -366,7 +365,6 @@ class JobWorker:
                     ):
                         raise JobInterruptedError(f"job {job.job_id} cancelled by request")
 
-            # Check if lease loss or cancellation occurred right as the generator finished
             if lease_lost.is_set():
                 raise LeaseLostError(f"job {job.job_id} lost its lease to another worker")
             if cancel_token.is_set() or await self._q(

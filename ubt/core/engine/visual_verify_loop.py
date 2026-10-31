@@ -1,6 +1,6 @@
 """Visual gate control loop and quarantine orchestration.
 
-Coordinates post-render visual verification (T0/T1/T2):
+Coordinates post-render visual verification (T0/T0.5/T1/T2):
 1. Runs post-render Visual Gate;
 2. If major/critical layout defects are found, marks the affected page blocks
    as NEEDS_HUMAN with visual_gate_failed flags;
@@ -79,10 +79,7 @@ def _typst_source_path(pdf_path: Path) -> Path | None:
 
 
 class VisualVerifyLoop:
-    """Visual-verification control loop: verify the render, quarantine on defect.
-
-    See the module docstring for the coordination flow this class implements.
-    """
+    """Visual-verification control loop: verify the render, quarantine on defect."""
 
     def __init__(
         self,
@@ -106,7 +103,7 @@ class VisualVerifyLoop:
         self.target_lang = target_lang
         self.router = router
         # The render decision, so the retune re-render uses the same mode/engine
-        # (compiler render plan protocol) and the gate reads the same facing/mode.
+        # and the gate reads the same facing/mode.
         self.render_plan = render_plan
         self.sample_pages = max(0, sample_pages)
         self.max_vlm_pages = max(0, max_vlm_pages)

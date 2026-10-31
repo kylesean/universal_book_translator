@@ -1,4 +1,4 @@
-"""Stage 5: Targeted Repair Loop with Option B Preserved Draft Fallbacks."""
+"""Stage 5: targeted repair loop; a failed repair keeps its draft for human review."""
 
 import asyncio
 import html
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 def failed_draft_checkpoint(cand: IRBlock, res: BaseException) -> dict[str, Any]:
     """The checkpoint written when a repair call fails for one block.
 
-    Option B: preserve the draft/target with a failure notice instead of
+    Keep the draft/target with a failure notice instead of
     replacing it with the bare source.
 
     The ``title`` keeps a one-line summary, not the provider's whole JSON
@@ -72,7 +72,7 @@ async def run_repair_stage(
     defer_unresolved_to_triage: bool = True,
     chapter_id: str | None = None,
 ) -> AsyncGenerator[TranslationProgressEvent, None]:
-    """Execute iterative surgical repairs on candidate blocks with Option B draft retention."""
+    """Execute iterative surgical repairs on candidate blocks, retaining drafts when a repair fails."""
     check_stage_cancelled(ctx)
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
@@ -259,7 +259,7 @@ async def run_repair_stage(
             )
             raw_text = b.target_text or b.draft_text or ""
             if final_status == BlockStatus.FAILED and raw_text:
-                # Option B: keep translation draft with warning mark for human review
+                # Failed repair: keep the translation draft with a warning mark for human review
                 target = f'<mark class="ubt-failed-draft" title="QE check not passed (score: {b.mtqe_score})">{raw_text}</mark>'
             else:
                 target = raw_text or b.source_text

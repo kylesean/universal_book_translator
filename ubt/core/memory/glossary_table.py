@@ -36,7 +36,12 @@ def build_global_glossary_table(
     max_entries: int,
     context: ScopeContext | None = None,
 ) -> str:
-    """Build the book-level decision sheet, capped to ``max_entries``."""
+    """Build the book-level decision sheet.
+
+    ``max_entries`` is a *ranking* cap, not a truncate-what-happens-to-be-first
+    one: persons and places lead, then attestation frequency, so a sheet that
+    has to shrink loses the terms a reader is least likely to meet.
+    """
     if context is not None:
         from ubt.core.memory.scoped_glossary import resolve_effective_glossary
 
@@ -63,7 +68,14 @@ def build_chunk_glossary_table(
     source_text: str,
     context: ScopeContext | None = None,
 ) -> str:
-    """Build the per-block glossary markdown table with local abbreviations."""
+    """The retrieval table for ``source_text``: terms and abbreviations appearing in it.
+
+    "Chunk" is the scope the table is designed for, and every caller passes the
+    text of the unit it is about to draft, repair or escalate — the draft,
+    repair, triage and consistency stages currently hand in one *block's*
+    source text each. Either way the table and the fingerprint are derived from
+    the same argument, which is the property that has to hold.
+    """
     if context is not None:
         from ubt.core.memory.scoped_glossary import resolve_effective_glossary
 

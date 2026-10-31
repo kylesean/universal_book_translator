@@ -1,4 +1,17 @@
-"""The system surface: ``/health``, ``/system`` (info + doctor checks)."""
+"""The system surface: what the process is, and what it is set to do.
+
+Two planes share this module and the line between them is the reason it exists
+separately. The *identity* plane answers "who may call" — liveness, and the
+exchange of an API key for a same-origin session cookie; it is the only part
+reachable before a caller has credentials, so it must stay cheap and
+side-effect-free. The *configuration* plane answers "what is in force" — the
+resolved model and provider blocks, the quality-estimation gate, the
+page-egress gate, the path boundary, the doctor checklist — and is the console's
+read of the running process rather than of a config file, because the two can
+differ (env overrides, an operator's edit applied at boot). Neither plane
+touches job state: a job's inputs are on the jobs surface and its outputs on
+the artifact surface, so nothing here can be used to reach a document.
+"""
 
 from __future__ import annotations
 
@@ -475,12 +488,12 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
 
     @api_app.get("/system/info", response_model=SystemInfoResponse, tags=["System"])
     async def system_info(request: Request) -> dict[str, Any]:
-        """The console's security-boundary panel (real host + allowed roots).
+        """Report the live security posture this request arrived under.
 
-        Reports the host this request reached (loopback vs exposed), whether the
+        The host that accepted the connection (loopback vs exposed), whether the
         API-key gate is on, and the filesystem roots ``resolve_secure_path``
-        actually enforces — so the panel shows the live policy, not a hardcoded
-        sample.
+        actually enforces — so the console's boundary panel shows the policy in
+        force, not a hardcoded sample.
         """
 
         # The *bind* address, not the client-supplied ``Host`` header: a

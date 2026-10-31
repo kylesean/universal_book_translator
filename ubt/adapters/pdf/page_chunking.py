@@ -1,4 +1,4 @@
-"""Out-of-core page chunking and eviction utilities for long PDF documents."""
+"""Out-of-core page chunking utilities for long PDF documents."""
 
 from __future__ import annotations
 
@@ -9,10 +9,12 @@ DEFAULT_PDF_PAGE_CHUNK_SIZE: int = 50
 
 
 def get_pdf_page_chunk_size() -> int:
-    """Return page chunk size for out-of-core streaming of large PDFs.
+    """Page chunk size for out-of-core streaming, from ``UBT_PDF_STREAM_CHUNK_SIZE``.
 
-    Controlled via environment variable ``UBT_PDF_STREAM_CHUNK_SIZE``.
-    Defaults to 50 pages per chunk.
+    Falls back to :data:`DEFAULT_PDF_PAGE_CHUNK_SIZE` when the variable is
+    unset or not a positive integer; a non-numeric value is silently ignored
+    rather than failing the run, because chunk size is a memory knob, not a
+    correctness one.
     """
     raw = os.environ.get("UBT_PDF_STREAM_CHUNK_SIZE", "")
     if raw.isdigit() and int(raw) > 0:

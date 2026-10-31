@@ -1,10 +1,16 @@
-"""Bi-directional Round-Trip Back-Translation Verifier (RoundTripVerifier).
+"""Round-trip back-translation verifier.
 
-Audits translation quality by projecting the target text back into the source language:
-1. Sentence-level smoothed BLEU / N-gram lexical fidelity scoring.
-2. Entity & Numeric Conservation Ratio (prevents hallucination / loss of figures).
-3. Negation & Polarity Inversion Detection (prevents critical semantic flips).
-4. Automated MQM defect classification (Accuracy / Omission, Addition, Mistranslation).
+Audits a translation by projecting the target back into the source language and
+comparing that projection with the original: if the projection no longer says
+the same thing, the translation cannot have preserved it. It runs offline — the
+``ubt roundtrip`` command is the only constructor — and with no
+``back_translator`` bound the projection is the deterministic
+:meth:`RoundTripVerifier._deterministic_projection`, so BLEU and fuzzy overlap
+here measure entity carry-through, not model-level adequacy.
+
+Negation/polarity inversion is deliberately *not* a weighted term: a flip can
+still share n-grams and average its way over a threshold, so an inversion caps
+the composite and fails the block outright.
 """
 
 from __future__ import annotations
@@ -106,16 +112,13 @@ def compute_sentence_bleu(
     max_order: int = 4,
     smooth: bool = True,
 ) -> float:
-    """Compute sentence-level BLEU score with add-1 (Lin/Chen) smoothing.
+    """Sentence-level BLEU with add-1 (Lin/Chen) smoothing.
 
-    Args:
-        reference: Reference token sequence (original source text).
-        hypothesis: Hypothesis token sequence (back-translated text).
-        max_order: Maximum n-gram order (default 4).
-        smooth: Whether to apply smoothing for short sequences.
-
-    Returns:
-        BLEU score between 0.0 and 1.0.
+    Unsmoothed, any n-gram order missing from the hypothesis zeroes a precision,
+    and one zero precision zeroes the whole score — which is most short
+    back-projections. Add-1 (``clipped+1 / total+1``) keeps the score ordered by
+    overlap instead of bimodal; the brevity penalty still stops a truncated
+    projection from profiting.
     """
     ref_len = len(reference)
     hyp_len = len(hypothesis)
@@ -268,7 +271,6 @@ class RoundTripVerifier:
                 mqm_severity="critical",
             )
 
-        # 1. Resolve or compute back-translation
         if back_translated is not None:
             back_text = back_translated.strip()
         elif self.back_translator is not None:
@@ -283,15 +285,12 @@ class RoundTripVerifier:
             # Deterministic projection fallback when no live model is bound
             back_text = self._deterministic_projection(mt_clean, src_clean, src_lang=src_lang)
 
-        # 2. Tokenize and compute lexical BLEU
         src_tokens = tokenize_words(src_clean, lang=src_lang)
         back_tokens = tokenize_words(back_text, lang=src_lang)
         bleu = compute_sentence_bleu(src_tokens, back_tokens)
 
-        # 3. Fuzzy similarity (token sort ratio)
         fuzzy = fuzz.token_sort_ratio(src_clean, back_text) / 100.0
 
-        # 4. Entity & Numeric Conservation
         src_entities = extract_key_entities(src_clean)
         back_entities = extract_key_entities(back_text)
 
@@ -303,13 +302,12 @@ class RoundTripVerifier:
             missing = []
             entity_ratio = 1.0
 
-        # 5. Polarity / Negation conservation
         polarity_ok, polarity_reason = check_polarity_conservation(
             src_clean, back_text, src_lang=src_lang
         )
 
-        # 6. Composite scoring
-        # Weighting: BLEU (0.40) + Entity (0.35) + Fuzzy (0.15) + Length Ratio (0.10)
+        # Symmetric length ratio (shorter over longer): a truncated projection
+        # loses real content, which a lexical precision alone can still reward.
         len_ratio = (
             min(1.0, float(len(back_text)) / max(1.0, float(len(src_clean))))
             if len(back_text) <= len(src_clean)

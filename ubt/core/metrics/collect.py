@@ -79,7 +79,13 @@ def _visual_page_count(visual_report: Mapping[str, Any] | None, route_pages: int
 
 
 def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None = None) -> KpiSet:
-    """Collect the KPI v1 set from a finished job's report artifacts."""
+    """Derive this job's KPI set from the artifacts the pipeline persisted.
+
+    The definitions live in :mod:`ubt.core.metrics.schema` and are stamped on the
+    result as :data:`~ubt.core.metrics.schema.SCHEMA_VERSION`, so a consumer can
+    tell which definition produced the numbers instead of comparing two runs
+    whose same-named KPIs mean different things.
+    """
     total_blocks = report.summary.total_blocks
     chars = report.route.chars if report.route is not None else 0
     route_pages = report.route.pages if report.route is not None else 0

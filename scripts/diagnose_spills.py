@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Typst layout spill and physical overflow diagnostic utility.
 
-Deterministic geometry inspection tool for delivered PDF documents.
-Identifies margin intrusions, multi-column gutter collisions, formula/table
-spills, and type collapses, outputting spatial heatmaps and structured JSON.
+Run this on a *delivered* PDF when the compile succeeded but the page reads wrong:
+the compiler cannot see that a table crossed the gutter or that a footnote got shrunk
+to the legibility floor, and only measuring the ink on the page separates a real spill
+from a margin the audit was simply told about (``--template``). Prints spatial
+heatmaps, or JSON with ``--json`` for a batch gate.
 
 Usage:
     uv run python scripts/diagnose_spills.py book.pdf

@@ -1,4 +1,4 @@
-"""The per-run services a stage reads (unified pipeline orchestration).
+"""The per-run services a stage reads.
 
 These keep "what the run *was configured with*" apart from "the collaborators
 the run *built for itself*": one named value the plan constructs once and hands

@@ -109,8 +109,9 @@ async def run_mode_advisory_stage(
     layout.tier_basis = tier_basis
     layout.enforcement = enforcement
 
-    # Run-policy keys: the renderer reads these off the plan (compiler
-    # render plan protocol). They are passed as arguments, not posted on manifest.run.
+    # Run-policy keys: written onto the plan-owned ``render`` value the plan
+    # threads to the export stage, rather than posted on ``manifest.run``, so
+    # the renderer's inputs stay a typed parameter instead of shared metadata.
     render.translate_chrome = config.translate_chrome
 
     figure_pages: set[int] = set()

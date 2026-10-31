@@ -3,10 +3,13 @@
 Deliberately pikepdf rather than pdf_oxide, even though pdf_oxide is now the
 render/text engine: pikepdf resolves *inherited* page attributes
 (``/MediaBox``/``/Rotate`` on the Pages tree node) exactly like pypdf did,
-while pdf_oxide 0.3.78 silently defaults an inherited ``/MediaBox`` to
-US-Letter (verified against a hand-built inherited-geometry PDF). Geometry
-feeds correctness gates (artifact parity, out-of-bounds), so it stays on the
-engine with correct inheritance semantics. Raw content-stream operator counts
+while pdf_oxide silently defaults an inherited ``/MediaBox`` to US-Letter
+(verified against a hand-built inherited-geometry PDF). Geometry feeds
+correctness gates (artifact parity, out-of-bounds), so it stays on the engine
+with correct inheritance semantics: the pdf_oxide pin is guarded by
+``tests/unit/adapters/test_pdf_oxide_contract.py``, and that contract covers
+only the four symbols ``oxide_render`` uses — an upgrade that changed
+inheritance here would stay green. Raw content-stream operator counts
 (`:func:`count_ops``) reproduce pypdf's ``get_contents().operations`` counts
 exactly (147/147 pages on the test corpus), which keeps the calibrated
 ``PROFILE_VECTOR_PATH_OPS`` knob calibrated.

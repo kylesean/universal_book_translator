@@ -1,8 +1,8 @@
-"""AST-based LaTeX math transpiler for Typst using pylatexenc.
+"""AST-based LaTeX math transpiler for Typst (pylatexenc).
 
-This module provides structural transpilation of complex LaTeX math environments
-(matrices, cases, aligned equations, arrays) into native Typst math constructs
-(``mat(...)``, ``cases(...)``, multiline alignments).
+Matrices, cases and aligned blocks only convert correctly from the parsed node tree:
+the token-level transpiler behind them has no structure to read, so ``typstify_math``
+hands anything carrying a ``\\begin{...}`` environment here.
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ from pylatexenc.latexwalker import (  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
-#: Supported matrix environments and their Typst delimiters
 _MATRIX_DELIMS: dict[str, str] = {
     "pmatrix": "(",
     "pmatrix*": "(",

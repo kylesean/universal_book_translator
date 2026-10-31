@@ -102,7 +102,6 @@ class VisionEndpointDriver:
         origin_pt: tuple[float, float] = (0.0, 0.0),
     ) -> PageTranscript:
         """Transcribe one rendered page image via the vision chat endpoint."""
-        # Convert PIL image to JPEG bytes
         buf = io.BytesIO()
         if hasattr(image, "convert"):
             rgb_img = image.convert("RGB")

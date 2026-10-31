@@ -32,11 +32,14 @@ async def run_chapter_streaming_pipeline(
     """Execute streaming pipelined chapter processing across stages.
 
     Decouples the book-wide monolithic stage barriers (all-draft -> all-qe -> all-repair)
-    into a concurrent two-worker pipeline:
-      - Worker 1 (Draft Worker): drafts chapters in spine order (C_1, C_2, ...), maintaining
+    into a concurrent pipeline of three tasks:
+      - Draft Worker: drafts chapters in spine order (C_1, C_2, ...), maintaining
         rolling memory context across chapters, then enqueues each completed chapter to qe_queue.
-      - Worker 2 (QE & Repair Worker): consumes drafted chapters from qe_queue and executes
-        Quality Gate and Repair stages concurrently while Worker 1 is drafting the next chapter.
+      - QE & Repair Worker: consumes drafted chapters from qe_queue and executes
+        Quality Gate and Repair stages concurrently while the Draft Worker is
+        drafting the next chapter.
+      - Supervisor: gathers the two workers, so one failing fast enough for the
+        other to be cancelled rather than drafting into a dead pipeline.
 
     Multiplexes progress events onto an asynchronous event queue so callers receive real-time
     progress updates as blocks and chapters complete.
@@ -49,7 +52,6 @@ async def run_chapter_streaming_pipeline(
         elif start_idx > 0:
             chapters = chapters[start_idx:]
     if not chapters:
-        # Fallback to monolithic stage execution when no chapter metadata is present
         async for event in run_draft_stage(ctx, services, terminology):
             yield event
         if ctx.config.c_text_enabled:
@@ -132,7 +134,6 @@ async def run_chapter_streaming_pipeline(
                     async for event in stage_events:
                         await event_queue.put(event)
 
-                # Emit CHAPTER_COMPLETED milestone event
                 chapter_done_event = await ctx.create_event(
                     EventType.CHAPTER_COMPLETED,
                     ctx.job_id,
@@ -149,10 +150,10 @@ async def run_chapter_streaming_pipeline(
 
     async def supervisor() -> None:
         try:
-            # Concurrently await both workers so failure in either triggers immediate reaction
+            # Gather so a failure in either worker surfaces here, rather than
+            # leaving the sibling drafting into a dead pipeline.
             await asyncio.gather(draft_task, qe_task)
         except BaseException as exc:
-            # Cancel sibling tasks on unhandled error and wait for them to finish
             for t in (draft_task, qe_task):
                 if not t.done():
                     t.cancel()

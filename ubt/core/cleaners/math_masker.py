@@ -4,10 +4,9 @@ Display math normally arrives as whole ``FORMULA`` blocks (``skip_translate``)
 and never reaches the LLM. But *inline* math inside narrative prose —
 ``$K_{t}$``, ``\\(x^2\\)``, ``$$…$$`` pasted into Markdown/EPUB/HTML sources —
 would otherwise be translated as prose ("K 的 t" etc.) or corrupted by
-glossary substitution. Like citations and code, inline math is therefore
-masked behind deterministic tokens before drafting and unmasked afterwards —
-the same placeholder-protection contract as
-:class:`~ubt.core.cleaners.code_masker.CodeMasker`.
+glossary substitution. Like citations and code, inline math is a verbatim span,
+so it goes through the placeholder contract defined in
+:mod:`~ubt.core.cleaners.mask_tokens`.
 
 Deliberately there is NO "formula hint" instruction to the LLM (BabelDOC's
 ``--add-formula-placehold-hint`` is off by default upstream for the same
@@ -72,11 +71,7 @@ class MathMasker(BaseMasker):
     default_prefix = _MASK_PREFIX
 
     def mask(self, text: str) -> tuple[str, dict[str, str]]:
-        """Replace math spans with protective tokens; returns (masked, mapping).
-
-        Tokens carry a checksum suffix (``⟦MATH_MASK_0001-a3f⟧``) binding the
-        index to the masked original; see :func:`~ubt.core.cleaners.mask_tokens.token_checksum`.
-        """
+        """Replace math spans with protective tokens; returns (masked, mapping)."""
         factory = TokenFactory(self.mask_prefix)
 
         def _replace(match: re.Match[str]) -> str:

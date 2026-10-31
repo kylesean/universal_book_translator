@@ -1,4 +1,4 @@
-"""Adaptive mathematical formula breaker with AST operator precedence and cost optimization."""
+"""Adaptive mathematical formula breaker: operator break tables and greedy line selection."""
 
 from __future__ import annotations
 
@@ -51,17 +51,14 @@ class AdaptiveMathBreaker:
         if len(eq) <= width or "\n" in eq or "\\\n" in eq or "\\\\" in eq:
             return eq
 
-        # Step 1: Discover all candidate breakpoints at depth 0
         candidates = self._find_candidate_breakpoints(eq, syn)
         if not candidates:
             return eq
 
-        # Step 2: Select optimal breakpoints using min-penalty path
         selected_bps = self._select_optimal_breakpoints(eq, candidates, width)
         if not selected_bps:
             return eq
 
-        # Step 3: Reconstruct expression with line breaks and optional alignment
         return self._format_multiline(eq, selected_bps, syn, do_align)
 
     def _find_candidate_breakpoints(self, equation: str, syntax: MathSyntax) -> list[BreakPoint]:
@@ -132,16 +129,20 @@ class AdaptiveMathBreaker:
         candidates: list[BreakPoint],
         target_width: int,
     ) -> list[BreakPoint]:
-        """Select a subset of breakpoints minimizing global line penalty."""
+        """Greedily select breakpoints left-to-right (no global optimum is computed).
+
+        WHY greedy: the pass walks candidates in order and breaks as soon as the
+        running line reaches 70% of ``target_width``, then peeks at only the next
+        two candidates for a cheaper operator. It never backtracks, so a globally
+        minimal total penalty is not guaranteed — only a locally reasonable one.
+        """
         selected: list[BreakPoint] = []
         line_start = 0
 
-        # Greedy lookahead: when current line exceeds target_width or a strong relation is reached
         for idx, bp in enumerate(candidates):
             line_len = bp.index - line_start
 
-            # If line is approaching target_width (>= 0.7 * target_width)
-            # or if the current line has exceeded target_width
+            # Break once the line reaches 70% of the target, or has passed it
             if line_len >= 0.7 * target_width:
                 # Lookahead to see if a relation operator exists within the next 20%
                 better_lookahead = None

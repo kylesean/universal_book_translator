@@ -1,4 +1,4 @@
-"""Visual Scalpel: precision bounding-box cropping for multimodal LLM inspection and L4 repair.
+"""Visual Scalpel: precision bounding-box cropping for multimodal LLM inspection and visual repair.
 
 Extracts targeted, high-resolution image crops from PDF pages using zero-AGPL pypdfium2,
 converting coordinates from PDF points (origin bottom-left) to raster pixels with safety
@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 # Standard points-to-DPI scale: 72 points per inch.
 # 150 DPI provides ~2.08x resolution, optimal for VLM OCR and symbol recognition.
 DEFAULT_SCALPEL_DPI: int = 150
-#: Margin grown around a box when the crop is a *prompt* — the L4 repair path
-#: reads it once to answer a question and is told which region it is looking at,
-#: so a little surrounding context is harmless and often useful.
+#: Margin grown around a box when the crop is a *prompt* — the repair loop's
+#: visual path reads it once to answer a question and is told which region it is
+#: looking at, so a little surrounding context is harmless and often useful.
 DEFAULT_BLEED_PT: float = 4.0
 
 #: Margin for a crop that becomes a *page* (a delivered asset the Typst renderer
@@ -469,7 +469,7 @@ def is_visual_scalpel_applicable(
     source_pdf_path: Path | str | None,
     vision_threshold: float = 0.60,
 ) -> bool:
-    """Evaluate whether an IRBlock qualifies for L4 multimodal visual repair.
+    """Evaluate whether an IRBlock qualifies for multimodal visual repair.
 
     Triggers when:
     1. A valid source PDF file is available;
@@ -481,7 +481,7 @@ def is_visual_scalpel_applicable(
     (:func:`ubt.core.ports.is_visual_scalpel_applicable`) that calls this through
     the SPI registry. The two names drifted (``qe_threshold_for_vision`` here,
     ``vision_threshold`` there), so every real call raised ``TypeError`` and the
-    L4 visual-repair path never ran.
+    visual-repair path never ran.
     """
     if source_pdf_path is None:
         return False
@@ -494,7 +494,8 @@ def is_visual_scalpel_applicable(
     if bbox is None or bbox.page <= 0:
         return False
 
-    # Check non-empty area
+    # A box this flat carries no glyphs, so a crop of it would be bleed margin
+    # alone — the model would be asked about a strip of blank page.
     if abs(bbox.x1 - bbox.x0) <= 1.0 or abs(bbox.y1 - bbox.y0) <= 1.0:
         return False
 

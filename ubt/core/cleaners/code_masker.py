@@ -1,4 +1,9 @@
-"""Code block and inline identifier token masking for syntax protection."""
+"""Code block and inline identifier token masking for syntax protection.
+
+A fenced block or ``inline code`` span is syntax, not prose: a model that
+"localizes" an identifier or reflows a line inside a block has changed the
+artifact, so the span is frozen for the duration of drafting.
+"""
 
 import re
 
@@ -20,12 +25,7 @@ class CodeMasker(BaseMasker):
     default_prefix = "⟦CODE_MASK_"
 
     def mask(self, text: str) -> tuple[str, dict[str, str]]:
-        """Replace code blocks and inline code with deterministic protective tokens.
-
-        Tokens carry a checksum suffix (``⟦CODE_MASK_0001-a3f⟧``) binding the
-        index to the masked original; see
-        :func:`~ubt.core.cleaners.mask_tokens.token_checksum`.
-        """
+        """Replace code blocks and inline code with deterministic protective tokens."""
         factory = TokenFactory(self.mask_prefix)
 
         # 1. Mask fenced multi-line code blocks first

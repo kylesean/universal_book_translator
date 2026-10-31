@@ -1,4 +1,4 @@
-"""PDFium line geometry vs Docling layout IoU cross-check (Defense 1).
+"""PDFium line geometry vs Docling layout IoU cross-check.
 
 In the analyze stage, born-digital PDF pages can suffer from deep-learning
 layout model hallucinations (e.g. cross-column spans, phantom bounding boxes,
@@ -7,15 +7,18 @@ cross-checking by extracting physical text lines via PDFium (the ground-truth
 glyph stream) and computing the Intersection-over-Union (IoU) with Docling's
 bounding boxes.
 
-When a text block's IoU with physical text lines falls below the threshold
-(default 0.60), or when a block with text content has no physical lines under
-it, the block is gracefully demoted to PRESERVED_OPAQUE:
-- Its element confidence is set to Confidence.UNKNOWN.
-- Its skip_translate and policy_translate are set to True/False (skip translation).
-- Its provenance records the mismatch details.
-- The block is rendered as its source text (see
-  ``document_renderer._block_text``), so the reader sees the original rather
-  than a mistranslation of a hallucinated box.
+A block is demoted to PRESERVED_OPAQUE when the witness contradicts it: the IoU
+against the union of the physical lines under it falls below ``DEFAULT_MIN_IOU``
+— a relaxed bar for very short blocks, whose boxes are tight enough that any
+witness union overshoots them — *and* that union does not contain the block's
+own box (``_MIN_WITNESS_CONTAINMENT`` is the second acceptance path); or it has
+no physical lines at all while carrying substantial text. A page with no lines
+is left alone entirely: that is a scan, and OCR/VLM is the correct witness
+there. The demotion sets ``Confidence.UNKNOWN`` with
+``skip_translate=True``/``policy_translate=False``, records the mismatch in the
+provenance, and the renderer then prints the source text (see
+``document_renderer._block_text``), so the reader sees the original rather than
+a mistranslation of a hallucinated box.
 
 The same physical lines are the witness for three text-content repairs, each a
 pure function applied to a block only when the witness proves the change, so a
@@ -861,14 +864,13 @@ def cross_check_blocks_with_pdfium(
 ) -> list[IRBlock]:
     """Verify Docling text block bounding boxes against PDFium glyph lines.
 
-    For each prose text block on a born-digital page:
-    1. Extracts cached PDFium lines for the page.
-    2. If the page is textless (scanned image), skips verification (left to OCR/VLM).
-    3. Finds PDFium lines intersecting the block's bounding box.
-    4. Computes the IoU between the block's bbox and the union of intersecting lines.
-    5. If IoU < min_iou (or zero intersecting lines for substantial text), marks the
-       block with Confidence.UNKNOWN and skip_translate=True, so it ships as its
-       own source text instead of a translation.
+    The convention a caller cannot see from the signature: blocks that pass are
+    enriched **in place** from the witness (font size, style, inline runs) and
+    returned as the same objects, while a failing block is replaced by a *new*
+    IRBlock carrying ``Confidence.UNKNOWN`` and ``skip_translate`` — so the list
+    mixes mutated originals with rebuilt failures. Blocks that are not
+    verifiable types, and pages with no physical lines at all, are appended
+    untouched.
     """
     path = Path(pdf_path)
     output: list[IRBlock] = []

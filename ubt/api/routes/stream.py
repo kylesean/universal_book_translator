@@ -1,8 +1,11 @@
-"""The ``/stream`` surface: per-job SSE progress streams.
+"""The ``/jobs/{job_id}/stream`` surface: one long-lived SSE feed per job.
 
-Split out of :mod:`ubt.api.app` verbatim (see :mod:`ubt.api.routes`); the
-subscriber accounting (``QueueSubscriberCounter`` and the process-wide
-ceiling) moved with it, since only this surface uses it.
+Subscriber accounting lives here — ``QueueSubscriberCounter`` and the
+process-wide ceiling — because the stream is the only surface that holds a
+connection open, and so the only one a single client can exhaust by itself.
+A response is a snapshot stream rather than an event log: each frame restates
+the whole progress state, which is what lets a client that reconnects without a
+cursor still converge.
 """
 
 from __future__ import annotations
@@ -123,7 +126,8 @@ def register_stream_routes(api_app: FastAPI, scope: ApiScope) -> None:
             ),
         )
 
-    # Bounded per-job frame history for Last-Event-ID replay (PRD §9.2).
+    # Bounded per-job frame history for Last-Event-ID replay
+    # (``docs/design/adaptive_delivery_prd.md`` §9.2).
     sse_replay = SseReplayBuffer()
     api_app.state.sse_replay = sse_replay
     api_app.state.sse_broadcaster = sse_broadcaster
@@ -156,7 +160,9 @@ def register_stream_routes(api_app: FastAPI, scope: ApiScope) -> None:
         ``terminal_frame``); the payload never depends on how the server was
         started. Every frame carries an ``id:`` cursor, so a client reconnecting
         with ``Last-Event-ID`` (header or ``?last_event_id=``) receives the
-        frames it missed before the live stream resumes (PRD §9.2).
+        frames it missed before the live stream resumes — the replay contract of
+        ``docs/design/adaptive_delivery_prd.md`` §9.2, carried by
+        :class:`~ubt.api.sse_replay.SseReplayBuffer`.
         """
         valid_id = validate_job_id(job_id)
         if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):

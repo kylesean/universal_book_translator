@@ -132,55 +132,61 @@ class WorkbenchController:
         self.notify()
 
     def handle_key(self, key: str) -> KeyAction | None:
-        """Translate raw key input to high-level action and execute state change."""
+        """Translate raw key input to high-level action and execute state change.
+
+        The key-to-action mapping below is the readable part, so it is not
+        restated in comments. Two facts the code does not show:
+
+        * ``key`` is always exactly one character.
+          :class:`~ubt.cli.workbench.runner.InteractiveKeyReader` dispatches what
+          ``os.read`` returns byte by byte, so an arrow press arrives as three
+          separate calls (``\\x1b``, ``[``, the final byte) and no branch here can
+          match a direction key — only the literal letters do.
+        * ``NEXT_JOB``, ``PREV_JOB`` and ``RETRY_FAILED`` are reported, never
+          performed. The reader discards this return value, there is no
+          selected-job state to move, and the dashboard has no channel back into
+          a running pipeline, so those three keys annotate the ticker at best.
+          Re-queueing quarantined blocks means a fresh run over the same ledger:
+          ``ubt translate <input> --job-id <id>``.
+        """
         if not key:
             return None
 
-        # Space or P: Pause/Resume
         if key in ("p", "P", " "):
             self.toggle_pause()
             return KeyAction.TOGGLE_PAUSE
 
-        # + or =: Increase concurrency
         if key in ("+", "="):
             self.increase_concurrency()
             return KeyAction.INCREASE_CONCURRENCY
 
-        # - or _: Decrease concurrency
         if key in ("-", "_"):
             self.decrease_concurrency()
             return KeyAction.DECREASE_CONCURRENCY
 
-        # Tab or l: Next tab
         if key in ("\t", "l", "L"):
             self.next_tab()
             return KeyAction.NEXT_TAB
 
-        # h: Prev tab
         if key in ("h", "H"):
             self.prev_tab()
             return KeyAction.PREV_TAB
 
-        # j / Down: Next Job
         if key in ("j", "J"):
             return KeyAction.NEXT_JOB
 
-        # k / Up: Prev Job
         if key in ("k", "K"):
             return KeyAction.PREV_JOB
 
-        # r: Retry Failed
         if key in ("r", "R"):
             self.state.add_event("Retrying quarantined blocks requested")
             self.notify()
             return KeyAction.RETRY_FAILED
 
-        # ?: Help
         if key == "?":
             self.toggle_help()
             return KeyAction.TOGGLE_HELP
 
-        # q / Q / Ctrl-C (\x03)
         if key in ("q", "Q", "\x03"):
             self.request_cancel()
             return KeyAction.QUIT
@@ -225,7 +231,6 @@ class WorkbenchController:
         if "repaired" in meta:
             self.state.repaired_count = int(meta["repaired"])
 
-        # Token & cost stats
         res = self.state.resource
         if "prompt_tokens" in meta:
             res.prompt_tokens += int(meta["prompt_tokens"])

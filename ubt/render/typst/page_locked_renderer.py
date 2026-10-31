@@ -1,9 +1,6 @@
 """Tier L2 Page-Locked Reflow Renderer.
 
-Renders source pages into 1:1 page-aligned, style-cloned Typst documents:
-1. Clones source page physical trim size (page_w, page_h), margins, columns, and theme colors.
-2. Applies monotonic binary-search page-lock convergence to ensure Page N never spills to Page N+1.
-3. Preserves 1:1 page correspondence (N_out == N_src) for complex non-separable or collided layouts.
+Renders source pages into 1:1 page-aligned, style-cloned Typst documents.
 
 **The body floor outranks the page count.** ``FLOOR_PT`` (7.5pt, owned by
 ``ubt/render/layout_solver.py``) is the smallest body size this project will

@@ -150,9 +150,11 @@ def parse_scope_spec(scope: str | None) -> tuple[ScopeLevel, str]:
 
 
 def matches_scope(scope_spec: str | None, context: ScopeContext) -> tuple[bool, ScopeLevel]:
-    """Check if an entry's scope specification matches the current execution context.
+    """Whether ``scope_spec`` covers ``context``, and the level it resolved to.
 
-    Returns (is_match, resolved_scope_level).
+    The level travels with the verdict because arbitration compares *levels*, not
+    spec strings: entries that both match are ranked BLOCK > SECTION > CHAPTER >
+    DOMAIN > GLOBAL, and the narrower one wins outright.
     """
     level, ident = parse_scope_spec(scope_spec)
 
@@ -194,10 +196,11 @@ def _get_entry_field(entry: BibleEntry | dict[str, Any], field: str, default: An
 
 
 def score_context_affinity(entry: BibleEntry | dict[str, Any], text: str) -> float:
-    """Calculate semantic affinity score based on context hints and negative hints.
+    """Affinity of ``entry`` for ``text``: one point per matching positive hint.
 
-    Positive hints increase score by 1.0 each.
-    Negative disqualifying hints disqualify the entry (score -100.0).
+    A matching negative hint returns -100.0 immediately instead of subtracting,
+    so a disqualification cannot be argued back into contention by a pile of
+    positive hits.
     """
     if not text:
         return 0.0

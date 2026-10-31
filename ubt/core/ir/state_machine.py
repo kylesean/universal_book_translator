@@ -1,8 +1,14 @@
 """Lifecycle state machine and transition guards for IRBlock.
 
 Defines the formal transition matrix and predecessor relations for BlockStatus.
-Every status transition in-memory or persisted to SQLite must satisfy these rules,
-preventing backward skips, terminal resurrection, or unverified leaps.
+Every status transition, in-memory or persisted to SQLite, must satisfy these
+rules — and what the rules forbid is an **undeclared** edge, not a backward one.
+The matrix itself declares re-entry from every terminal status (a consistency
+finding re-opens ``MTQE_PASSED``, a human post-edit re-opens ``FAILED``), because
+those revisits are ordinary; what a caller may not do is invent an edge the
+matrix does not list. ``allow_override`` is the separate, explicit act for that:
+the stages and the review API that legitimately write over a terminal block pass
+it, so the escape stays visible in the call site.
 """
 
 from __future__ import annotations
@@ -32,7 +38,7 @@ def _init_transitions() -> tuple[
                 BlockStatus.FAILED,  # drafting failure / budget exhausted / timeout
             }
         ),
-        # DRAFTED: initial draft generated, awaiting QE audit
+        # DRAFTED: awaiting the QE audit.
         BlockStatus.DRAFTED: frozenset(
             {
                 BlockStatus.DRAFTED,  # idempotent
@@ -43,7 +49,7 @@ def _init_transitions() -> tuple[
                 BlockStatus.FAILED,  # unrecoverable QE evaluation error / budget cap
             }
         ),
-        # REPAIR_PENDING: queued for targeted LLM repair
+        # REPAIR_PENDING: queued for the repair stage.
         BlockStatus.REPAIR_PENDING: frozenset(
             {
                 BlockStatus.REPAIR_PENDING,  # multi-round intermediate retry
@@ -51,10 +57,10 @@ def _init_transitions() -> tuple[
                 BlockStatus.MTQE_PASSED,  # alternative repair / verified translation
                 BlockStatus.NEEDS_HUMAN,  # repair budget/rounds exhausted, non-critical defect
                 BlockStatus.BLOCKED_HUMAN,  # repair budget/rounds exhausted, critical blocker
-                BlockStatus.FAILED,  # fatal repair error / unrecoverable failure
+                BlockStatus.FAILED,  # fatal repair error
             }
         ),
-        # MTQE_PASSED: quality passed, released directly (terminal unless Bible inconsistency or human PE revision)
+        # MTQE_PASSED: terminal unless a Bible inconsistency or a human PE revision re-opens it.
         BlockStatus.MTQE_PASSED: frozenset(
             {
                 BlockStatus.MTQE_PASSED,  # idempotent
@@ -65,7 +71,7 @@ def _init_transitions() -> tuple[
                 BlockStatus.FAILED,  # Fatal export failure
             }
         ),
-        # REPAIRED: successfully repaired by flagship model (terminal unless Bible inconsistency or human PE revision)
+        # REPAIRED: terminal unless a Bible inconsistency or a human PE revision re-opens it.
         BlockStatus.REPAIRED: frozenset(
             {
                 BlockStatus.REPAIRED,  # idempotent
@@ -76,7 +82,7 @@ def _init_transitions() -> tuple[
                 BlockStatus.FAILED,  # Fatal export failure
             }
         ),
-        # NEEDS_HUMAN: MQM major defect, shippable but queued for human PE (terminal unless human PE acts)
+        # NEEDS_HUMAN: terminal unless a human PE acts.
         BlockStatus.NEEDS_HUMAN: frozenset(
             {
                 BlockStatus.NEEDS_HUMAN,  # idempotent
@@ -87,7 +93,7 @@ def _init_transitions() -> tuple[
                 BlockStatus.FAILED,  # Rejected by human
             }
         ),
-        # BLOCKED_HUMAN: MQM critical defect, MUST NOT ship machine output (terminal unless human PE acts)
+        # BLOCKED_HUMAN: terminal unless a human PE acts; its machine output never ships.
         BlockStatus.BLOCKED_HUMAN: frozenset(
             {
                 BlockStatus.BLOCKED_HUMAN,  # idempotent
@@ -97,7 +103,7 @@ def _init_transitions() -> tuple[
                 BlockStatus.FAILED,  # Rejected by human
             }
         ),
-        # FAILED: unrecoverable failure (terminal unless triaged or human PE acts)
+        # FAILED: terminal unless triage or a human PE acts.
         BlockStatus.FAILED: frozenset(
             {
                 BlockStatus.FAILED,  # idempotent
@@ -122,7 +128,12 @@ _PREDECESSORS_CACHE: dict[BlockStatus, frozenset[BlockStatus]] | None = None
 
 
 def get_valid_transitions() -> dict[BlockStatus, frozenset[BlockStatus]]:
-    """Return the mapping of valid transitions for each BlockStatus."""
+    """The transition matrix, built once.
+
+    Immutable and read per block, so it is derived lazily and cached instead of
+    rebuilt by every status write; :func:`get_allowed_predecessors` is filled by
+    the same pass.
+    """
     global _TRANSITIONS_CACHE, _PREDECESSORS_CACHE
     if _TRANSITIONS_CACHE is None:
         _TRANSITIONS_CACHE, _PREDECESSORS_CACHE = _init_transitions()
@@ -130,7 +141,7 @@ def get_valid_transitions() -> dict[BlockStatus, frozenset[BlockStatus]]:
 
 
 def get_allowed_predecessors() -> dict[BlockStatus, frozenset[BlockStatus]]:
-    """Return the mapping of valid predecessor statuses for each BlockStatus."""
+    """The reverse view, produced by the same pass as :func:`get_valid_transitions`."""
     global _TRANSITIONS_CACHE, _PREDECESSORS_CACHE
     if _PREDECESSORS_CACHE is None:
         _TRANSITIONS_CACHE, _PREDECESSORS_CACHE = _init_transitions()
@@ -143,7 +154,17 @@ def can_transition(
     *,
     allow_override: bool = False,
 ) -> bool:
-    """Return True if transitioning from `from_status` to `to_status` is permitted."""
+    """Whether the lifecycle permits this edge.
+
+    Two cases skip the matrix. A self-transition is idempotent — a resumed job
+    re-marks a block it already marked — so it cannot be a violation.
+    ``allow_override`` is the explicit act the consistency/triage stages and the
+    review API pass when they legitimately write over a terminal block, so the
+    escape stays visible at the call site. Anything else needs a declared edge,
+    and a status name the enum does not have reads as "not permitted" rather
+    than raising: callers coerce strings out of the ledger and must not each
+    write their own ``try``.
+    """
     from ubt.core.ir.models import BlockStatus
 
     try:

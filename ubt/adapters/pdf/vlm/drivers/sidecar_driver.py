@@ -1,14 +1,13 @@
-"""Zero-AGPL pluggable HTTP Sidecar OCR Driver.
+"""HTTP sidecar OCR driver, registered as ``sidecar``.
 
-Connects UBT to a local or remote Docker sidecar microservice (e.g., PaddleOCR,
-MinerU, Surya, or enterprise OCR gateway) over HTTP/REST.
-
-Features:
-- Completely decoupled: UBT stays lightweight without heavy C++/CUDA dependencies.
-- Standard JSON wire format: accepts image, returns lines and bounding boxes.
-- Zero-AGPL coordinate normalization: maps [0, 1], [0, 1000] (PaddleOCR grid),
-  or pixel coordinates to canonical PDF points via PageBBoxResolver.
-- Auto-probe / health check: ping /health to detect running sidecars.
+Talks to a local or remote Docker/Podman OCR microservice over REST (PaddleOCR,
+MinerU, Surya, or an enterprise gateway), so the page-level OCR models and their
+CUDA dependencies stay outside this process. The wire contract is what
+:meth:`SidecarOcrDriver.recognize` sends and reads: a JPEG multipart POST to
+``/v1/ocr`` returning ``{"lines": [{"text", "box" or "bbox", "confidence"}],
+"coord_system"}``, and ``/health`` for the availability probe used by driver
+selection. Boxes may arrive in any of the coordinate spaces
+:class:`PageBBoxResolver` understands, because the sidecars do not agree on one.
 """
 
 from __future__ import annotations
@@ -53,7 +52,13 @@ class SidecarOcrDriver:
         api_key: str | None = None,
         timeout: float = 0.5,
     ) -> bool:
-        """Fast non-blocking probe to check if the sidecar service is online."""
+        """Blocking ``/health`` GET: True only on HTTP 200, False on any error.
+
+        The call itself is synchronous, so callers on an event loop must not put
+        it on a hot path; it is kept off them by the short default timeout (the
+        driver-selection probe passes 0.3s) and by the fact that it runs in the
+        CLI doctor and the pre-parse registry check rather than per page.
+        """
         target = (endpoint or os.environ.get("UBT_OCR_ENDPOINT", DEFAULT_SIDECAR_ENDPOINT)).rstrip(
             "/"
         )
@@ -77,8 +82,7 @@ class SidecarOcrDriver:
         rotation: int = 0,
         origin_pt: tuple[float, float] = (0.0, 0.0),
     ) -> PageTranscript:
-        """Send page image to OCR sidecar and return measured VlmLine items."""
-        # Convert PIL image to JPEG bytes
+        """Send the page image to the OCR sidecar and return measured VlmLine items."""
         buf = io.BytesIO()
         if hasattr(image, "convert"):
             rgb_img = image.convert("RGB")

@@ -1,4 +1,4 @@
-"""BreakageSolver: flow one element's text across a chain of physical boxes.
+"""Flow solver (``solve_flow``): flow one element's text across a chain of physical boxes.
 
 A semantic element (a paragraph crossing a page boundary, a caption continuing in
 a second column) can own several physical boxes. The element is translated as a
@@ -216,7 +216,7 @@ def approximate_measure(
             if span.startswith("$"):
                 inner = span.strip("$").strip()
                 # Strip LaTeX macro names (\text, \psi, \frac, braces) to estimate
-                # rendered math advance, plus 1.0em of math padding around the span.
+                # rendered math advance, plus 0.8em of math padding around the span.
                 cleaned = re.sub(r"\\[A-Za-z]+", "M", inner)
                 cleaned = re.sub(r"[{}\s_^\[\]]+", "", cleaned)
                 total += max(1.5, len(cleaned) * 0.65 + 0.8)

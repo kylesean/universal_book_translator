@@ -1,4 +1,9 @@
-"""Standardized book translation quality report generator."""
+"""The quality report a run writes beside its artifact.
+
+Built from the ledger's stats and the block rows, so it answers what the delivered
+file alone cannot: what the book scored, which blocks were skipped or left
+fail-closed, and what the run cost.
+"""
 
 import ast
 import logging
@@ -116,13 +121,13 @@ class ReportPlaceholderMetrics(BaseModel):
 
 
 class ReportRepairBreakdown(BaseModel):
-    """Breakdown of repair iterations and circuit breaker activations."""
+    """How the book's blocks fared across repair rounds."""
 
     model_config = ConfigDict(frozen=True)
 
     direct_pass_count: int  # 0 repair rounds (fast-pass or initial draft passed)
-    round_1_repaired_count: int  # fixed in round 1
-    round_2_repaired_count: int  # fixed in round 2
+    round_1_repaired_count: int
+    round_2_repaired_count: int
     exhausted_count: int  # reached max rounds
 
 
@@ -139,7 +144,7 @@ class ReportRenderCoverage(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    rendered_blocks: int  # completed blocks (== summary.completed); see fail_closed_blocks
+    rendered_blocks: int  # completed blocks; see fail_closed_blocks
     #: ``render_skip:`` occurrences that lost a translation. By-design keeps
     #: (``skip_translate``, ``facsimile_preserved_opaque``) are **not** here; they
     #: are counted in ``preserved_blocks``.
@@ -221,11 +226,10 @@ class ReportEntityConsistency(BaseModel):
 
 
 class QualityReport(BaseModel):
-    """Complete translation quality audit report.
+    """The run's quality audit record.
 
     Not "publication-grade": that describes a human workflow (translate -> review
-    -> typeset -> proof), not an artifact a machine pipeline produces. See
-    docs/guides/SEMANTIC_FIRST_REARCHITECTURE_RFC.md 1.3.
+    -> typeset -> proof), not an artifact a machine pipeline produces.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -343,7 +347,7 @@ class QualityReport(BaseModel):
 
 
 def _percentile(values: list[float], p: float) -> float:
-    """Calculate the p-th percentile (0.0 to 1.0) of a sorted list of floats."""
+    """Linear interpolation over a **sorted** list; ``p`` is a fraction, not a percent."""
     if not values:
         return 0.0
     if len(values) == 1:
@@ -406,7 +410,6 @@ def build_quality_report(
     blocked_human = int(stats.get("blocked_human", 0))
     pass_rate = round(completed / total, 4) if total > 0 else 1.0
     estimated_cost = round(token_cost_usd, 5) if token_cost_usd is not None else None
-    # Display-formula blocks delivered (inline math is not counted).
     formula_blocks = sum(1 for b in all_blocks if b.block_type == BlockType.FORMULA)
 
     # MTQE scores analysis: only blocks that actually met the QE gate; the

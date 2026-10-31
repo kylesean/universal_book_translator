@@ -1,4 +1,14 @@
-"""Stage 1: Manifest Registration & Streaming Chapter Preprocessing."""
+"""Stage 1: manifest registration and streaming chapter preprocessing.
+
+The resume guards below protect one property: the ledger only holds what the run
+that created it ingested. A resume with a different chapter window, page
+selection or run identity would export a silently truncated book or re-grade
+completed work under new knobs, so those mismatches fail fast. The rule they
+share, stated once here: a *stored* value whose shape cannot be interpreted
+(rows from an older build or an external ledger) counts as unknown and never
+blocks a legitimate resume -- the guard only refuses a value it can compare and
+has proved different.
+"""
 
 from __future__ import annotations
 
@@ -101,9 +111,6 @@ def _guard_chapter_window(
     if stored is None:
         ledger.set_job_metadata_value(job_id, "chapter_window", requested)
         return
-    # Stored rows or external ledger inputs may hold an unexpected shape; only a
-    # well-formed list is comparable, and anything else is treated as unknown
-    # rather than as a mismatch that would block a legitimate resume.
     if not isinstance(stored, list):
         return
     if list(stored) != requested:
@@ -139,9 +146,6 @@ def _guard_selected_pages(
     if stored is None:
         ledger.set_job_metadata_value(job_id, "selected_pages", requested)
         return
-    # Stored rows or external ledger inputs may hold an unexpected shape; only
-    # a list is comparable, anything else counts as unknown and must not block
-    # a legitimate resume.
     if not isinstance(stored, list):
         return
     if stored != requested:
@@ -228,7 +232,7 @@ def _record_run_identity(
     engine_sig: str,
     mock_run: bool,
 ) -> None:
-    """Overwrite the recorded identity (used by the ``--fresh`` restart path)."""
+    """Overwrite the recorded identity (the fresh-run path, :func:`_reset_job_for_fresh_run`)."""
     ledger.set_job_metadata_value(
         job_id, _RUN_IDENTITY_KEY, _run_identity(profile_name, engine_sig, mock_run)
     )
@@ -257,9 +261,6 @@ def _guard_run_identity(
     if stored is None:
         ledger.set_job_metadata_value(job_id, _RUN_IDENTITY_KEY, requested)
         return
-    # Stored rows or external ledger inputs may hold an unexpected shape; only a
-    # dict is comparable, anything else counts as unknown rather than a mismatch
-    # that would block a legitimate resume.
     if not isinstance(stored, dict):
         return
     stored_profile = stored.get("profile_name")

@@ -1,4 +1,4 @@
-"""The render decision and the renderer's outcome (compiler render plan protocol).
+"""The render decision and the renderer's outcome.
 
 ``RenderPlan`` is what the advisories decide about *this run's* render: the mode,
 the chrome/cover treatment, and whether a companion artifact was requested. It

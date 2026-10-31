@@ -1,4 +1,11 @@
-"""EPUB Native DOM Tree bilingual injection adapter using zipfile and BeautifulSoup."""
+"""EPUB bilingual output: ZIP and package-document handling over the shared DOM injection.
+
+Per-node injection is not here: :func:`ubt.adapters.dom_inject.inject_translated_block`
+is the one engine HTML and EPUB deliver through, so the escaping and the
+bilingual-target class tagging cannot drift between the two formats. What is
+EPUB-specific is the container — reading and repacking the ZIP, the OPF package
+document, the NCX/nav TOC, and the per-member read budget.
+"""
 
 import asyncio
 import dataclasses
@@ -347,7 +354,12 @@ def _parse_chapter_blocks(
 
 
 class EPUBAdapter(BaseDocumentAdapter):
-    """Adapter for EPUB books with zero-corruption DOM injection."""
+    """EPUB adapter: injects the target node into the chapter's own DOM.
+
+    The chapters are not rebuilt from the IR — each source XHTML member is
+    parsed, :func:`ubt.adapters.dom_inject.inject_translated_block` adds the
+    translated node next to the original, and the archive is repacked.
+    """
 
     output_suffixes = frozenset({".epub"})
 
@@ -374,7 +386,6 @@ class EPUBAdapter(BaseDocumentAdapter):
                     )
                 opf_soup = BeautifulSoup(decode_markup(opf_bytes), "xml")
 
-                # Extract title and author
                 title_tag = opf_soup.find("dc:title") or opf_soup.find("title")
                 title = title_tag.get_text().strip() if title_tag else input_path.stem
 
@@ -508,7 +519,9 @@ class EPUBAdapter(BaseDocumentAdapter):
         input_path = Path(manifest.source_path)
         block_names = set(BLOCK_TAGS)
 
-        # Build in-memory lookup table of translated blocks: block_id -> target_text
+        # ``all_blocks`` is the unfiltered render input: body blocks, chapter
+        # titles and skip_translate blocks alike. Each map below is one view of
+        # it, filtered for what that step injects.
         all_blocks = blocks
         # A skip_translate block's target_text equals its source_text (ingest.py
         # stamps them so the ledger holds the verbatim text). Injecting them
@@ -604,7 +617,6 @@ class EPUBAdapter(BaseDocumentAdapter):
                                 data, doc_dir, title_map, bilingual_mode=bilingual_mode
                             )
 
-                    # Check if file is a chapter XHTML document
                     matching_chapter = next(
                         (c for c in manifest.chapters if c.source_file == info.filename),
                         None,

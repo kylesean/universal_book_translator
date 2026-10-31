@@ -1,4 +1,4 @@
-"""Industrial Universal Book Translator CLI application powered by Typer and Rich."""
+"""Industrial Universal Book Translator CLI application."""
 
 import json
 import sys
@@ -82,6 +82,9 @@ from ubt.core.metrics import (
 
 app = typer.Typer(
     name="ubt",
+    # The one rendered help line: click prefers this over the group callback's
+    # docstring, so the docstring is deliberately left out rather than kept as a
+    # second copy that could drift.
     help="Industrial-grade Universal Bilingual Book Translation Engine.",
     no_args_is_help=True,
 )
@@ -103,7 +106,6 @@ def main_callback(
         ),
     ] = False,
 ) -> None:
-    """Industrial-grade Universal Bilingual Book Translation Engine."""
     # Diagnostics go to stderr by default, so stdout stays clean for the
     # machine-readable `--json` output of every subcommand. Commands that draw a
     # Rich Live progress bar (translate) re-route records onto the shared stdout
@@ -651,7 +653,6 @@ def tm_evict(
     console.print(f"[bold green]✓ Evicted {removed} entr(y/ies).[/]")
 
 
-# Register modular subcommands
 @app.command(name="api")
 def api_command(
     host: Annotated[
@@ -702,6 +703,8 @@ app.add_typer(backmatter_app, name="backmatter")
 app.add_typer(figure_app, name="figure")
 app.add_typer(epigraph_app, name="epigraph")
 app.command(name="console")(console_command)
+# ``web`` is this one command under a shorter name, not a second surface: the
+# product is the UBT Operator Console, so both spellings print the same help.
 app.command(name="web")(console_command)
 
 __all__ = [

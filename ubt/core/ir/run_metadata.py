@@ -32,6 +32,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 #: Keys that stay in ``manifest.metadata`` because they describe the source
 #: document or the rendered artifact rather than a decision made this run.
+#: Its reason for existing is the parity check in
+#: ``tests/unit/test_option_surface_parity.py``: a key listed here whose writer
+#: was deleted is an option that silently stopped being written, and this
+#: frozenset is the only place that claims each key has a live writer. Removing
+#: it removes the test's oracle, so it is read by a test on purpose.
 ARTIFACT_METADATA_KEYS: Final[frozenset[str]] = frozenset(
     {
         # Source document, read by the adapters and the bible stage.
@@ -54,7 +59,7 @@ class RunMetadata(BaseModel):
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
-    # --- Routing and cost policy ------------------------------------------
+    # Routing and cost policy.
     route_decision: dict[str, Any] | None = None
     route_mode: str | None = None
     adaptive_policy: dict[str, Any] | None = Field(
@@ -62,13 +67,11 @@ class RunMetadata(BaseModel):
     )
     config_snapshot: dict[str, Any] | None = None
 
-    # --- Bilingual / render mode ------------------------------------------
-    # The whole render decision (mode, engine, chrome/cover, secondary request)
-    # lives in ``RunFacts.RenderPlan`` and the renderer's result in
-    # ``RenderOutcome`` (compiler render plan protocol). Nothing is posted here:
-    # this was the last inter-stage bus on the manifest.
+    # The render decision is not carried here: it lives in ``RunFacts.RenderPlan``
+    # and the renderer's result in ``RenderOutcome``, both passed as arguments, so
+    # nothing is posted onto the manifest between stages.
 
-    # --- Extraction / formula policy --------------------------------------
+    # Extraction and formula policy.
     selected_pages: list[int] | None = None
 
     #: Explicit column override from ``--columns``/``UBT_LAYOUT_COLUMNS`` (1 or 2).
@@ -78,13 +81,9 @@ class RunMetadata(BaseModel):
     #: docstring).
     layout_columns: int | None = None
 
-    # --- Delivery verdict -------------------------------------------------
-    # The verdict is computed, never stored: ``job_options.delivery_verdict_from_blocks``
-    # derives it from the block counters, and the CLI, REST and web console all
-    # call that one rule. Two fields used to sit here (``delivery_status`` /
-    # ``delivery_warning``) that no code ever assigned, so the report carried two
-    # permanent nulls and the quality screen rendered a banner that could never
-    # appear.
+    # The delivery verdict is computed, never stored:
+    # ``job_options.delivery_verdict_from_blocks`` derives it from the block
+    # counters, and the CLI, REST and web console all call that one rule.
 
     def to_metadata_dict(self) -> dict[str, Any]:
         """Only the fields this run actually set, as JSON-native values.

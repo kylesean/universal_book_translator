@@ -186,7 +186,14 @@ class BaseDocumentAdapter(ABC):
 
 
 class BasePDFEngineAdapter(BaseDocumentAdapter):
-    """Specialized SPI abstraction for PDF engines supporting dual-track pluggability."""
+    """Specialized SPI abstraction for the adapters bound to a PDF engine key.
+
+    The keys live in the factory's ``_PDF_ENGINE_REGISTRY`` — ``docling`` and
+    ``pdfium`` today, plus anything added in-process through
+    :func:`ubt.adapters.factory.register_pdf_engine`. ``auto`` is not a key of
+    its own: it always resolves to ``docling``, whose semantic ingest is the
+    only lossless route (see ``ubt/adapters/factory.py``).
+    """
 
     output_suffixes = frozenset({".pdf"})
     supports_page_selection = True
@@ -194,7 +201,7 @@ class BasePDFEngineAdapter(BaseDocumentAdapter):
     @property
     @abstractmethod
     def engine_name(self) -> str:
-        """Identifier of the PDF engine implementation (e.g. 'babeldoc', 'typst')."""
+        """The PDF-engine registry key this adapter is bound to (``docling``, ``pdfium``)."""
         pass
 
     async def render_blocks(

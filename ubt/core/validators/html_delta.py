@@ -38,7 +38,13 @@ class _ImgTagCollector(HTMLParser):
 
 
 class HTMLDeltaValidator(ContentValidator):
-    """Verifies that translated text preserves structural image tags and attributes."""
+    """Verifies that translated text preserves structural image tags and attributes.
+
+    Hard errors are the structural ones only. The advisory findings the module
+    docstring describes — emphasis-tag drift and dropped anchor hrefs — come
+    back in ``details['formatting_warnings']``, on a passing result as well as
+    a failing one, so a fluent re-tagged draft is never retried.
+    """
 
     def validate(self, original: str, translated: str) -> ValidationResult:
         src_html, src_md, src_bad = self._scan_image_refs(original)

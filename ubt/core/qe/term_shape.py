@@ -4,11 +4,10 @@ Used by both the fast-pass structural gate and the omission gate so the
 "identifier-shaped" rule (camelCase humps, all-caps acronyms, embedded digits)
 has a single definition rather than a byte-identical copy that can drift.
 
-``count_sentences`` is shared for the same reason: it is the omission gate's
-abbreviation-masking counter, and the (unwired) MT admission gate imports it
-too instead of keeping a second, abbreviation-blind copy that counted
-``Eq. (3.11)`` / ``Fig. 3.5`` periods as sentence breaks and therefore
-disagreed with the omission gate on the very same text.
+``count_sentences`` lives here because its abbreviation masking is only
+correct with the terminator table below: a second counter elsewhere would
+re-derive "where a sentence ends" from a different regex and disagree with
+this module on formula-dense narrative ('Eq. (3.11)', 'Fig. 3.5').
 """
 
 import re

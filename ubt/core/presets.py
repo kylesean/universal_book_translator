@@ -1,9 +1,11 @@
 """Quality presets: the single source of truth for user-facing policy bundles.
 
-A preset is a deterministic bundle over *quality* parameters — prompt depth,
-formula handling, exec mode, and which PDF **parser** to use. It never disables
-a correctness gate and never picks a **model**: "how much care to spend
-translating" is a policy decision, while the model is the operator's.
+A preset is a deterministic bundle over the engine parameters declared on
+:class:`PresetPolicy` — :data:`PRESET_ENGINE_FIELDS` derives that list from the
+dataclass, so the bundle's coverage cannot silently fall behind a new knob. A
+preset never disables a correctness gate and never picks a **model**: "how much
+care to spend translating" is a policy decision, while the model is the
+operator's.
 
 ``pdf_engine`` is in the bundle because parser choice *is* a quality decision
 (pdfium is fast and geometry-only, docling is lossless and slow), and leaving it

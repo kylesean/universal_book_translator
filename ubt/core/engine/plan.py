@@ -1,4 +1,4 @@
-"""The stage plan: order and gating, stated once (stage execution plan).
+"""The stage plan: order and gating, stated once.
 
 The orchestrator owns the run's resources -- the writer lock, ledger, adapter,
 router, and the per-run collaborators -- and this module owns *what runs in what

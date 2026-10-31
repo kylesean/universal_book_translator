@@ -8,8 +8,10 @@ endpoint is*, never from what the driver is called.
 
 Two locality questions exist and must not be conflated:
 
-- **Privacy (this module)** — is the endpoint ON THIS MACHINE? Only loopback
-  and the container-host aliases qualify. A box elsewhere on the LAN is
+- **Privacy (this module)** — is the endpoint ON THIS MACHINE? The loopback
+  addresses and the names in :data:`_LOCAL_HOSTNAMES` qualify: ``localhost``,
+  the container-host aliases, and ``0.0.0.0`` as an operator writes it for a
+  server bound to this box. A box elsewhere on the LAN is
   another machine: a page sent there HAS left this one, whatever the billing
   table says. A private address therefore does *not* qualify.
 - **Billing (``ubt.core.router.pricing.endpoint_is_local``)** — is the
@@ -30,7 +32,11 @@ from urllib.parse import urlparse
 
 __all__ = ["endpoint_on_this_machine", "resolved_ocr_endpoint"]
 
-#: Hostnames that name this machine in the container era.
+#: Hostnames that name this machine in the container era. ``0.0.0.0`` is in the
+#: set because it is how an operator writes the address of a local server bound
+#: to every interface — as a *destination* it reaches this box, never another
+#: one. It is a name, so it bypasses the loopback test below; a literal address
+#: still has to be a loopback one, which is why a private LAN IP is not local.
 _LOCAL_HOSTNAMES = frozenset(
     {"localhost", "0.0.0.0", "host.docker.internal", "host.containers.internal"}
 )

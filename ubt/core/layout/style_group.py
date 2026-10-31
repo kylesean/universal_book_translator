@@ -1,4 +1,4 @@
-"""Document-level style groups: the G4 Stage 3A decision.
+"""Document-level style groups: the document-wide body-size decision.
 
 `ubt/render/layout_solver.solve_page_2d` searches one uniform body size **per
 page**, in a band derived from that page's own measured source size. Two
@@ -12,19 +12,20 @@ runs.
 This module makes the decision the other way round: **one** size for the whole
 document body group, chosen so that every member page can still hold its text.
 The group size is a short-plank minimum, not an average — an average would
-shrink the tight pages and leave the roomy ones inflated, which is the
-"ransom-note" typography the PRD forbids (P10 / §8.2).
+shrink the tight pages and leave the roomy ones inflated, which is exactly the
+"ransom-note" typography a book layout must not ship.
 
-Order of preference follows PRD §7.4.3, with the levers that actually exist on
-the current rendering path:
+Order of preference is fixed by the micro-typography ladder, using the levers
+that actually exist on the current rendering path:
 
     tracking (Tc)  ->  leading pitch (TL)  ->  right-side borrow (Δw)  ->  size
 
-``γ_x`` (``Tz`` horizontal scaling) is deliberately absent: G2 measured that
-Typst does not change advance width for a static face via ``text(stretch:)``,
-so the only real implementation is the CELS content-stream path (Stage 5). A
-ladder rung that cannot be applied is not listed here — a rung that silently
-did nothing would let the planner believe it had bought space it never bought.
+``γ_x`` (``Tz`` horizontal scaling) is deliberately absent: measurement showed
+that Typst does not change advance width for a static face via
+``text(stretch:)``, so the only real implementation is the CELS content-stream
+path (Stage 5). A ladder rung that cannot be applied is not listed here — a rung
+that silently did nothing would let the planner believe it had bought space it
+never bought.
 
 Two integrity rules are load-bearing:
 
@@ -51,12 +52,14 @@ narrower question the legacy facsimile channel can act on today — one size for
 the document body group, decided from cheap geometry before a single page is
 drawn, plus the exception policy and the record the delivery contract reads.
 
-They share the same PRD limits (7.5pt body floor, 0.80/1.10 band, 0.25pt step,
-tracking −0.03em, leading 1.08) and the constants are mirrored here rather than
-imported, because the facsimile path must not start failing when the CELS engine
-is refactored. When the CELS renderer replaces the facsimile one, the plan this
-module produces becomes the *input* to ``solve_style_group``: same group, same
-size, measured instead of estimated.
+They share the same body-floor / expansion-band / step / tracking / pitch
+limits, and the constants are mirrored here rather than imported: the facsimile
+path must not start failing when the CELS engine is refactored. Mirroring is a
+coupling that has to be edited in both places, so the names here match
+:mod:`ubt.core.layout.solver` on purpose and stay greppable against it. When the
+CELS renderer replaces the facsimile one, the plan this module produces becomes
+the *input* to ``solve_style_group``: same group, same size, measured instead of
+estimated.
 """
 
 from __future__ import annotations
@@ -77,22 +80,22 @@ BODY_ROLE = "body"
 #: tolerance by editing one number here.
 DRIFT_TOLERANCE_PT = 0.5
 
-#: PRD §7.4.3 body limits: an absolute floor plus a relative one, whichever is
-#: higher. The relative floor is what stops a book measured at 9.8pt from
-#: shipping a 7.5pt body just because one page was full.
+#: Body limits: an absolute floor plus a relative one, whichever is higher. The
+#: relative floor is what stops a book whose source body is large from shipping
+#: the absolute floor just because one page was full.
 BODY_FLOOR_PT = 7.5
 RELATIVE_FLOOR = 0.80
 
-#: PRD §8.2: ``faithful`` may grow the body up to 1.10x the source. The ceiling
-#: bounds the *search*, it is never a target — starting there is exactly the
-#: inflation half of the measured drift.
+#: ``faithful`` may grow the body by at most this multiple of the source size.
+#: The ceiling bounds the *search*, it is never a target — starting there is
+#: exactly the inflation half of the measured drift.
 CEILING_RATIO = 1.10
 MAX_BODY_PT = 12.0
 
-#: Discrete size step. The PRD asks for 0.25pt; stepping rather than bisecting
-#: keeps the probe count bounded and the result reproducible, and the feasibility
-#: of ``H_req = N_i * s * lambda`` is monotone in ``s`` only while ``N_i`` is
-#: fixed, which a step ladder sidesteps entirely.
+#: Discrete size step. Stepping rather than bisecting keeps the probe count
+#: bounded and the result reproducible, and the feasibility of
+#: ``H_req = N_i * s * lambda`` is monotone in ``s`` only while ``N_i`` is fixed,
+#: which a step ladder sidesteps entirely.
 SIZE_STEP_PT = 0.25
 
 #: Exception budget. At or below these shares an exception is a documented page;
@@ -100,16 +103,16 @@ SIZE_STEP_PT = 0.25
 EXCEPTION_PAGE_SHARE = 0.10
 EXCEPTION_BLOCK_SHARE = 0.05
 
-#: Lowest line-height ratio the ladder is allowed to reach (PRD §7.4.3).
+#: Lowest line-height ratio the ladder is allowed to reach.
 PITCH_FLOOR = 1.08
 
-#: Widest tracking compression the ladder is allowed to reach (PRD §7.4.3).
+#: Widest tracking compression the ladder is allowed to reach.
 TRACKING_FLOOR_EM = -0.030
 
 #: Most Δw the ladder may borrow from the same column's right whitespace. It is
 #: a *same-column* borrow: Stage 1's track boundary, not the page margin, is the
 #: real limit, and the width probe that supplies it is responsible for the
-#: trailing-ink pad (AD-020).
+#: trailing-ink pad.
 WIDTH_BORROW_MAX_PT = 4.0
 
 
@@ -353,9 +356,9 @@ def plan_body_group(
     Policy (confirmed with the product owner, in this order):
 
     1. **Source size first.** The search starts at the document's own measured
-       body size, not at the ceiling: PRD P10 puts micro-typography before size,
-       and §8.2 clones the source. The ladder is walked only when a page still
-       does not fit.
+       body size, not at the ceiling: micro-typography is spent before size, and
+       a faithful channel clones the source rather than optimising it. The ladder
+       is walked only when a page still does not fit.
     2. **Least compression that helps.** At any size the rung with the *smallest*
        failing set wins, and among rungs tied on that set the mildest one wins.
        Compressing the whole book to rescue pages it does not rescue is a

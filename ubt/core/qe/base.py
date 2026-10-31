@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 
 
 class BaseQERunner(ABC):
-    """Abstract interface for local MTQE evaluation engines."""
+    """Abstract interface for MTQE evaluation engines (in-process or remote)."""
 
     @abstractmethod
     async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:

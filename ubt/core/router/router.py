@@ -792,10 +792,18 @@ class ModelRouter:
         is_repair: bool = False,
         attempt_budget: list[int] | None = None,
     ) -> str:
-        """Execute inference with rate limiter acquisition, parameter pre-cleaning, and backoff retry on 429."""
+        """Send one inference request: rate-limit, pre-clean parameters, retry on 429.
+
+        Rate-limit acquisition happens inside the retry loop, so a 429 that
+        shrinks the bucket is paid for by the *retry* rather than by the request
+        that already failed -- the alternative lets a retry storm spend tokens
+        the limiter was never told to hold back.
+        """
         profile = self._get_profile(model)
 
-        # 1. System prompt handling: merge into user prompt if backend doesn't support system turn
+        # A profile that declares no system turn still has to receive the system
+        # text, so it is folded into the user prompt instead of dropped; dropping
+        # it would silently change what the model is being asked to do.
         if not profile.supports_system_prompt and system_prompt.strip():
             effective_user_prompt = f"{system_prompt.strip()}\n\n{user_prompt.strip()}"
             effective_system_prompt: str | None = None
@@ -803,12 +811,15 @@ class ModelRouter:
             effective_user_prompt = user_prompt
             effective_system_prompt = system_prompt if system_prompt.strip() else None
 
-        # 2. Reasoning effort parameter pre-cleaning
+        # Parameters are cleaned from the *declared* capability, never from the
+        # model name: reasoning effort is dropped unless the profile says the
+        # endpoint takes it.
         effective_effort = reasoning_effort if profile.supports_reasoning_effort else None
 
-        # 3. Temperature parameter pre-cleaning: unsupported models (o1/o3)
-        # get None and the provider omits the key entirely, instead of
-        # sending a value and eating one 400 per block.
+        # Same for temperature. Reasoning-family endpoints are the ones that
+        # reject it, and they are configured with ``supports_temperature = false``
+        # rather than recognised here by name -- the key is then omitted entirely,
+        # instead of being sent and eating one 400 per block.
         effective_temp = temperature if profile.supports_temperature else None
 
         retries = 0

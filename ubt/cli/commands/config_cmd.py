@@ -50,8 +50,6 @@ DOMAIN_CONFIG_MODELS: dict[str, tuple[type[BaseModel], str]] = {
 
 @dataclass(slots=True)
 class ValidationFinding:
-    """A single diagnostic sanity check finding."""
-
     domain: str
     target: str
     level: str  # "OK", "WARN", "FAIL"
@@ -87,7 +85,6 @@ def validate_configuration(config: UBTConfig, domain: str | None = None) -> list
     """Perform static sanity checks and environment validation on active configuration."""
     findings: list[ValidationFinding] = []
 
-    # 1. Router checks
     if domain is None or domain == "router":
         parsed = urlparse(config.base_url)
         if parsed.scheme in ("http", "https"):
@@ -158,7 +155,6 @@ def validate_configuration(config: UBTConfig, domain: str | None = None) -> list
                 )
             )
 
-    # 2. Typst checks
     if domain is None or domain == "typst":
         typst_path = shutil.which("typst")
         if typst_path:
@@ -207,7 +203,6 @@ def validate_configuration(config: UBTConfig, domain: str | None = None) -> list
                 )
             )
 
-    # 3. Quality checks
     if domain is None or domain == "quality":
         if 0.0 <= config.qe_threshold <= 1.0:
             findings.append(
@@ -247,7 +242,6 @@ def validate_configuration(config: UBTConfig, domain: str | None = None) -> list
                 )
             )
 
-    # 4. Engine checks
     if domain is None or domain == "engine":
         db_path = Path(config.db_dir)
         try:

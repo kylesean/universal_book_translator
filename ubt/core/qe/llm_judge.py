@@ -1,11 +1,11 @@
-"""L3 LLM-as-Judge QE (suspect-only) + tiered routing.
+"""LLM-as-judge QE for suspect pairs only, plus the tiered routing around it.
 
-Industry mapping (2026 consensus):
-- L1 rules/heuristic, full volume: ``FastPassFilter`` + ``HeuristicQERunner``.
-- L2/L3 LLM judge, selected suspect pairs only: this module. Only the pairs a second
-  opinion can actually inform get one cheap LLM call (score-only, ~20 output
-  tokens, temperature 0). Deterministic span annotation for repair stays
-  rule-based (``MQMSpanAnnotator``) — the judge only decides routing, not spans.
+Two layers: the deterministic one (``FastPassFilter`` + ``HeuristicQERunner``)
+scores every block, and this judge is consulted only where a second opinion can
+actually change the routing decision — one cheap call per suspect pair
+(score-only, ~20 output tokens, temperature 0). Deterministic span annotation
+for repair stays rule-based (``MQMSpanAnnotator``): the judge decides routing,
+never spans.
 
 ROI: with the default configuration the judge sees only the single unclassified
 structural class the heuristic emits (the ambiguous class contains exactly
@@ -340,7 +340,7 @@ class LLMJudgeQERunner(BaseQERunner):
 
 
 class TieredQERunner(BaseQERunner):
-    """L1 heuristic for all pairs, L3 judge only where a second opinion informs.
+    """Heuristic scores every pair; the judge runs only where a second opinion informs.
 
     The heuristic emits twelve discrete values, and each one *is* a defect class
     (:data:`QE_DEFECT_CLASS_LEGEND`), so routing on the score routes on the

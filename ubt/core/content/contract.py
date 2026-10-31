@@ -5,10 +5,14 @@ language- and layout-agnostic: it reads the content graph and the ledgers, not
 the render path. A regression on any path therefore surfaces the same way -- as
 an unbalanced book -- instead of as a document-type-specific bug.
 
-Severity tracks what a delivery can prove. *Unaccounted* and *dropped*
-content are hard errors -- absence is detectable without a verifier. An
-unverified reconstruction is a *warning*: the asset was accounted for, but no
-round-trip check has proven the reconstruction faithful.
+Severity tracks what a delivery can prove. Text that was never decided, or was
+dropped without a keep-verbatim reason, is a hard error -- absence is
+detectable without a verifier. An unverified asset reconstruction is a
+*warning*: the asset was accounted for, but no round-trip check has proven the
+reconstruction faithful. An asset the renderer dropped deliberately is neither:
+it is counted in the report, so the number is auditable, but no violation is
+raised -- deciding whether a dropped asset should fail the contract is still
+open.
 """
 
 from __future__ import annotations

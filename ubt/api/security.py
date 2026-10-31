@@ -248,21 +248,27 @@ def resolve_secure_path(
 ) -> Path:
     """Validate and resolve path against path traversal attacks and sandbox restrictions.
 
-    Check order is deliberate, and the two rules below read like a
-    contradiction unless they are stated together:
+    Check order is deliberate, and the allowlist and the deny lists read like a
+    contradiction unless their precedence is stated together:
 
-    1. A literal ``..`` is always refused.
-    2. The path must be contained in the effective allowlist
-       (``UBT_ALLOWED_DIRS``, else the working directory + ``config.db_dir``).
-    3. The hard-coded *system* deny list is skipped for a path an operator
-       explicitly allowlisted — otherwise the conventional ``/var/lib/ubt``
-       deployment could never be served.
-    4. The *sensitive-name* deny list (:data:`SENSITIVE_FILENAME_PARTS`) still
-       applies to every path, allowlist included. An allowlist is a scope
-       decision ("these books may be read"), not a licence to serve the
-       ``.ssh``/``.env``/``credentials.json`` that happen to live beside them —
-       and these routes are reachable without credentials by default. Refusing
-       a whitelisted secret file on purpose, not by bug.
+    * A literal ``..`` is always refused.
+    * The path must be contained in the effective allowlist
+      (``UBT_ALLOWED_DIRS``, else the working directory + ``config.db_dir``).
+    * Allowlist wins over the *system* deny list
+      (:data:`SYSTEM_DISALLOWED_PREFIXES`): a path an operator explicitly
+      allowlisted skips it — otherwise the conventional ``/var/lib/ubt``
+      deployment could never be served.
+    * Allowlist loses to the *sensitive-name* deny list
+      (:data:`SENSITIVE_FILENAME_PARTS`), which still applies to every path,
+      allowlist included. An allowlist is a scope decision ("these books may be
+      read"), not a licence to serve the ``.ssh``/``.env``/``credentials.json``
+      that happen to live beside them — and these routes are reachable without
+      credentials by default. Refusing a whitelisted secret file on purpose, not
+      by bug.
+
+    The two allowlist-precedence rules are named rather than numbered so the
+    inline note at each check can cite the rule, not an ordinal that shifts when
+    a check is added.
 
     Component matching is casefolded: ``.SSH`` and ``.ssh`` are the same
     directory on a case-insensitive filesystem.
@@ -289,7 +295,8 @@ def resolve_secure_path(
         # base) is authoritative for paths inside it — for the containment rule
         # and for the hard-coded system deny list below, which is the fallback
         # sandbox of the no-whitelist posture. The sensitive-name deny list is
-        # the one rule it does NOT override (docstring point 4).
+        # the one rule it does NOT override: see "Allowlist loses to the
+        # sensitive-name deny list" in the docstring above.
         explicit_whitelist = False
         if allowed_bases is not None:
             # Resolve every base: containment is compared against the *resolved*
@@ -335,7 +342,8 @@ def resolve_secure_path(
 
     # Reject attempts to read user secrets, shell configurations, or
     # credentials. Applied *after* the allowlist and to whitelisted paths too —
-    # that precedence is intentional; see point 4 of the docstring above.
+    # that precedence is intentional; see "Allowlist loses to the sensitive-name
+    # deny list" in the docstring above.
     for part in resolved.parts:
         if is_sensitive_path_part(part):
             raise HTTPException(

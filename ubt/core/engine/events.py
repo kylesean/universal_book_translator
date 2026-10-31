@@ -28,7 +28,7 @@ class EventType(StrEnum):
 
 
 class TranslationProgressEvent(BaseModel):
-    """Standard progress event payload emitted outward by Level 0 Core engine."""
+    """The progress event payload the engine emits outward."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -36,7 +36,6 @@ class TranslationProgressEvent(BaseModel):
     job_id: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
-    # Block counters
     total_blocks: int
     #: Blocks excluded from ``total_blocks`` because the skip rule marked them
     #: ``mtqe_passed`` without translating them — images, bibliography entries,
@@ -55,9 +54,8 @@ class TranslationProgressEvent(BaseModel):
     needs_human_blocks: int = 0
     blocked_human_blocks: int = 0
 
-    # Real-time metrics
-    current_avg_qe: float = 0.0  # Current book-level average MTQE score
-    bottom_15_avg_qe: float = 0.0  # Lowest 15% blocks average score
+    current_avg_qe: float = 0.0
+    bottom_15_avg_qe: float = 0.0
     # Estimated token spend in USD; None = no usage reported yet (never a
     # fabricated 0.0, which a polling client reads as "confirmed zero spend").
     estimated_cost_usd: float | None = None
@@ -65,7 +63,6 @@ class TranslationProgressEvent(BaseModel):
     # (verifies the static-prefix TCO lever; 0.0 = unmeasured)
     cache_hit_rate: float = 0.0
 
-    # Detail info
     message: str = ""
     active_block_id: str | None = None
     # Machine-readable artifact location (EXPORT_COMPLETED). Keeps ``message``

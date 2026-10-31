@@ -1,4 +1,8 @@
-"""Consistency defenses and Translation Memory subsystem.
+"""Consistency defenses: the mined bible, term matching, coreference, context memory.
+
+Translation Memory is not re-exported here: its callers import
+``ubt.core.memory.tm`` from the module itself, so this package's surface stays
+the vocabulary the prompt-building stages share.
 
 The mined book bible and the structural + QE quality gate run on every job. The
 hierarchical context memory below (L1 neighbours / L2 chapter snapshots / L3

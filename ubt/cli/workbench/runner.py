@@ -102,7 +102,6 @@ async def run_workbench(
             screen=True,
         ) as live:
             while not controller.is_cancelled:
-                # 1. Update queue items if queue is attached
                 if queue is not None:
                     try:
                         raw_jobs = queue.list_jobs(limit=10)
@@ -121,10 +120,8 @@ async def run_workbench(
                     except Exception as exc:  # noqa: BLE001
                         logger.debug("Queue poll error in workbench: %s", exc)
 
-                # 2. Sample process resources
                 controller.sample_resources()
 
-                # 3. Check if worker completed
                 if worker_task is not None and worker_task.done():
                     if worker_task.exception() is not None:
                         controller.state.status = JobControlStatus.FAILED
@@ -135,14 +132,11 @@ async def run_workbench(
                     live.update(render_dashboard(controller.state))
                     break
 
-                # 4. Render frame
                 live.update(render_dashboard(controller.state))
                 await asyncio.sleep(1.0 / refresh_rate)
 
-            # Final render frame
             live.update(render_dashboard(controller.state))
 
-            # If cancelled, cancel worker
             if controller.is_cancelled and worker_task is not None and not worker_task.done():
                 worker_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):

@@ -16,7 +16,7 @@ and differs from the ledger's current target counts as a revision.
 
 Both formats must carry the job binding they were exported with (the CSV
 ``job_id`` column / the XLIFF ``ubt-job-id`` note). Block ids are structural
-names (``ch_003#b012``) that repeat across the ledgers of the same book, so
+names (``ch_003#b0002``) that repeat across the ledgers of the same book, so
 an unbound or foreign-bound file cannot be told apart from a same-named block
 in another language's job — it is refused.
 """
@@ -92,7 +92,9 @@ def parse_csv_revisions(file_path: Path) -> ParsedRevisions:
 
 
 def _extract_target_text(target_el: Any) -> str:
-    """Extract full text from target element, restoring <ph> tokens without truncation."""
+    """The element's full text, re-inserting ``<ph>`` tokens so a target that
+    continues after a child element is not truncated at that child.
+    """
     parts: list[str] = [target_el.text or ""]
     for child in target_el:
         tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
@@ -157,7 +159,7 @@ def parse_xliff_revisions(file_path: Path) -> ParsedRevisions:
 
 
 def parse_revisions(file_path: Path) -> ParsedRevisions:
-    """Dispatch on file suffix: ``.csv`` table vs ``.xliff``/``.xlf`` document."""
+    """Dispatch on file suffix: ``.csv`` table vs ``.xliff``/``.xlf``/``.xml`` document."""
     suffix = file_path.suffix.lower()
     if suffix == ".csv":
         return parse_csv_revisions(file_path)
@@ -177,12 +179,6 @@ def import_pe_revisions(
     target_lang: str | None = None,
 ) -> PEImportResult:
     """Apply human PE revisions to the ledger and (optionally) the shared TM.
-
-    The file must be bound to this ledger's job (CSV ``job_id`` column / XLIFF
-    ``ubt-job-id`` note, both written by the exporter): block ids repeat across
-    the ledgers of the same book, so an unbound or foreign-bound file cannot be
-    distinguished from same-named blocks in another language's job and is
-    refused outright.
 
     Rows whose revision is unknown to the ledger or identical to the current
     target are skipped. Accepted revisions are promoted to ``REPAIRED`` with a

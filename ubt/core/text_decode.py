@@ -3,8 +3,8 @@
 A leaf module: it depends on nothing in :mod:`ubt` so both the core-side
 readers (:mod:`ubt.analyze.reader_md`, ``reader_html``) and the adapter layer
 can share one decoder without the readers importing ``ubt.adapters`` — a
-layering inversion, since the readers sit below the adapters. The declared /
-BOM / charset-detected decode order has exactly one owner here.
+layering inversion, since the readers sit below the adapters. The BOM / UTF-8 /
+declared / detected decode order has exactly one owner here.
 """
 
 from __future__ import annotations
@@ -28,14 +28,20 @@ _FALLBACK_ENCODINGS = ("utf_8", "gb18030", "big5", "cp932", "cp1252")
 
 
 def decode_markup(raw: bytes) -> str:
-    """Decode an XML/HTML/Markdown byte stream, preferring UTF-8 then its declared encoding.
+    """Decode an XML/HTML/Markdown byte stream, in this order and for these reasons.
 
-    ``errors="ignore"`` silently dropped every byte a non-UTF-8 template could
-    not represent. UTF-8 is tried first so a *stale* declaration on already
-    UTF-8 bytes (every member the EPUB adapter re-serialises) can never
-    mis-decode; only genuinely non-UTF-8 bytes fall back to the BOM / XML
-    declaration / ``<meta charset>``, then to a replacement decode so nothing
-    disappears without a visible marker.
+    A BOM first: it is the source *asserting* its encoding, so it is honoured
+    before anything is guessed (UTF-8 BOM decodes as ``utf-8-sig``, a UTF-16 BOM
+    as UTF-16). Then strict UTF-8, ahead of the declaration, so a *stale*
+    declaration on already-UTF-8 bytes (every member the EPUB adapter
+    re-serialises) can never mis-decode. Then the declared
+    ``encoding=``/``charset=`` read out of the first 1024 bytes, then charset
+    detection over :data:`_FALLBACK_ENCODINGS`, and only then a replacement
+    decode.
+
+    The last step is ``errors="replace"``, not ``errors="ignore"``: ignoring
+    silently dropped every byte a non-UTF-8 template could not represent, while
+    a replacement marker makes the loss visible.
     """
     if raw.startswith(b"\xef\xbb\xbf"):
         return raw.decode("utf-8-sig")

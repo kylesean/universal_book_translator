@@ -1,22 +1,21 @@
-"""LayoutDistortionScore calculation for adaptive delivery.
+"""Page-level layout distortion scoring.
 
-Design: ``docs/design/adaptive_delivery_prd.md`` §8.10 &
-``docs/guides/ADAPTIVE_DELIVERY_TECH_DESIGN.md`` §7.4. Resolves GAP-17.
+:func:`compute_page_distortion` answers one question about a delivered page:
+how far did the reflowed layout depart from the source, on a scale a QA gate can
+threshold? The result is :class:`PageDistortionScore` -- a total, the five
+sub-scores it is built from, and the verdict band the total falls in.
 
-Formula:
-    LayoutDistortionScore(page) =
-      0.30 * overlap_ratio
-    + 0.25 * out_of_bounds_ratio
-    + 0.20 * style_drift
-    + 0.15 * gutter_violation
-    + 0.10 * whitespace_void
+Five weighted components, because those are the five ways a reflow visibly
+damages a page: overlapping boxes, boxes pushed outside the printable area, body
+size drifting from the source, boxes straddling a column boundary, and a blank
+void left at the foot. The weights rank them by how badly a reader notices --
+collision first, whitespace last -- and are written once, in the expression
+inside :func:`compute_page_distortion`.
 
-Thresholds:
-    < 0.08:      Clean faithful deliverable
-    0.08 - 0.15: Acceptable with major review finding
-    > 0.15:      Excessive distortion; trigger page_reflow or document readable degradation
-    Critical:    overlap_ratio > 0.001 or out_of_bounds_ratio > 0.001 triggers
-                 critical fail-closed (the epsilon absorbs float noise).
+Overlap and out-of-bounds are fail-closed rather than merely weighted: either
+one is a *collision*, not a degradation, and a weighted total would bury a real
+defect under an otherwise good page. Past the float-noise epsilon they escalate
+to the critical verdict no matter how small the score is.
 """
 
 from __future__ import annotations
@@ -56,7 +55,13 @@ def compute_page_distortion(
     tail_void_area: float = 0.0,
     source_boxes: Sequence[Box] | None = None,
 ) -> PageDistortionScore:
-    """Compute the 5-component LayoutDistortionScore for one page."""
+    """Score one page's departure from its own source layout.
+
+    ``boxes`` are the post-reflow boxes; ``source_boxes``, when supplied, let a
+    collision already present in the source count as well. A page with no boxes
+    scores clean rather than raising -- an empty page is not a distortion, and
+    whether it should exist at all is somebody else's finding.
+    """
     n_boxes = len(boxes)
     if n_boxes == 0:
         sub = DistortionSubscores(0.0, 0.0, 0.0, 0.0, 0.0)
@@ -81,14 +86,14 @@ def compute_page_distortion(
                     ov += x_ov * y_ov
         return ov
 
-    # 1. Overlap ratio: overlapping area / total box area (evaluates both solved and source boxes)
     total_area = sum(b.area for b in boxes) or 1.0
     overlap_area = _calc_overlap(boxes)
     if source_boxes:
         overlap_area = max(overlap_area, _calc_overlap(source_boxes))
     overlap_ratio = min(1.0, overlap_area / total_area)
 
-    # 2. Out-of-bounds ratio: boxes outside printable box / total boxes
+    # A one-point tolerance: a solved box that only grazes the printable edge is
+    # rounding, not a clipped box.
     oob_count = 0
     for b in boxes:
         if (
@@ -100,24 +105,22 @@ def compute_page_distortion(
             oob_count += 1
     out_of_bounds_ratio = float(oob_count) / float(n_boxes)
 
-    # 3. Style drift: |realized - source| / source
     if source_body_size_pt > 0:
         drift = abs(realized_body_size_pt - source_body_size_pt) / source_body_size_pt
         style_drift = min(1.0, drift)
     else:
         style_drift = 0.0
 
-    # 4. Gutter violation: boxes crossing track boundaries / total boxes
+    # Only a multi-column page has a column boundary to straddle; on a
+    # single-column page the track is the whole text width.
     gutter_viol_count = 0
     if len(tracks) >= 2:
         for b in boxes:
-            # A box violates track gutters if it straddles a track boundary without being a pinned obstacle
             in_track = any((b.x0 >= t.x0 - 1.0 and b.x1 <= t.x1 + 1.0) for t in tracks)
             if not in_track:
                 gutter_viol_count += 1
     gutter_violation = float(gutter_viol_count) / float(n_boxes)
 
-    # 5. Whitespace void: unused void area / printable area
     printable_area = printable_box.area or 1.0
     whitespace_void = min(1.0, max(0.0, tail_void_area / printable_area))
 

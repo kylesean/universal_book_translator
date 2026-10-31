@@ -117,7 +117,12 @@ def _merge_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
 
 
 def _split_protected_spans(text: str) -> list[str]:
-    """Split text into alternating [unprotected, protected, ...] segments."""
+    """Alternating ``[unprotected, protected, …]`` segments.
+
+    Same split as :func:`ubt.core.cleaners.cjk_spacing._split_protected`; the
+    reasoning for what is protected and what deliberately is not (quoted spans)
+    is argued there, so keep the two in sync rather than re-deriving it here.
+    """
     intervals = _merge_intervals(extract_code_like_spans(text))
     if not intervals:
         return [text]

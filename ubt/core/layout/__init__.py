@@ -6,9 +6,6 @@ and the vertical flow (:mod:`ubt.core.layout.solver`). Both are deliberately
 pure: no PDF, no render backend; measurement and the Cassowary solver arrive
 through injected delegates, so the modules stay unit-testable against
 synthetic pages and importable without the ``[cels]`` extra.
-
-Target design: ``docs/design/adaptive_delivery_prd.md`` §7–§8. Staged plan:
-``docs/guides/ADAPTIVE_DELIVERY_TECH_DESIGN.md`` §7.1.
 """
 
 from __future__ import annotations

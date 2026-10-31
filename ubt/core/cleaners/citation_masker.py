@@ -6,9 +6,8 @@ Academic text carries inline citation markers ([12], [12-14], [3, 7, 21],
 re-numbered, ranges are translated as prose ("12 到 14"), "et al." is localized
 into the middle of a reference, or markers are dropped entirely. Citations are
 identifiers — they must stay retrievable and match the reference list — so they
-are masked behind deterministic tokens before drafting and unmasked afterwards,
-the same placeholder-protection contract as
-:class:`~ubt.core.cleaners.code_masker.CodeMasker`.
+get the placeholder treatment defined in
+:mod:`~ubt.core.cleaners.mask_tokens`.
 
 Both forms are protected: bracketed numeric markers and parenthesised
 author-year references. Only a *reference-shaped* parenthetical is masked (an
@@ -74,12 +73,7 @@ class CitationMasker(BaseMasker):
     default_prefix = _MASK_PREFIX
 
     def mask(self, text: str) -> tuple[str, dict[str, str]]:
-        """Replace citations with protective tokens; returns (masked_text, mapping).
-
-        Tokens carry a checksum suffix (``⟦CITE_MASK_0001-a3f⟧``) binding the
-        index to the masked citation; see
-        :func:`~ubt.core.cleaners.mask_tokens.token_checksum`.
-        """
+        """Replace citations with protective tokens; returns (masked_text, mapping)."""
         factory = TokenFactory(self.mask_prefix)
 
         masked = _CITATION_PATTERN.sub(lambda m: factory.next(m.group(0)), text)

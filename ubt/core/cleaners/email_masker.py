@@ -3,10 +3,9 @@
 Academic and production PDFs carry contact addresses (``research@deepseek.com``)
 and links (``https://…``) that an LLM routinely mangles: ``research@`` gets
 translated as a word, a URL's path is rewritten, or the address is split across
-a line and half of it is dropped. They are identifiers, not prose, so they are
-masked behind deterministic tokens before drafting and unmasked afterwards —
-the same placeholder-protection contract as
-:class:`~ubt.core.cleaners.code_masker.CodeMasker`.
+a line and half of it is dropped. These are identifiers, not prose, so they are
+protected by the placeholder contract in
+:mod:`~ubt.core.cleaners.mask_tokens`.
 
 URLs are masked before emails so a ``mailto:user@host`` or ``https://user@host``
 does not leave its ``user@host`` half to be caught as a bare email. Both are the
@@ -41,12 +40,7 @@ class EmailMasker(BaseMasker):
     default_prefix = _MASK_PREFIX
 
     def mask(self, text: str) -> tuple[str, dict[str, str]]:
-        """Replace addresses/URLs with protective tokens; returns (masked, mapping).
-
-        Tokens carry a checksum suffix (``⟦EMAIL_MASK_0001-a3f⟧``) binding the
-        index to the masked original; see
-        :func:`~ubt.core.cleaners.mask_tokens.token_checksum`.
-        """
+        """Replace addresses/URLs with protective tokens; returns (masked, mapping)."""
         factory = TokenFactory(self.mask_prefix)
 
         def _replace_url(match: re.Match[str]) -> str:

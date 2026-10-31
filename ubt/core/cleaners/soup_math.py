@@ -6,8 +6,9 @@ the LLM, and LaTeX-delimited inline math is masked by
 make docling merge display equations *into* narrative blocks as delimiter-free
 unicode soup (``whereQ0``, ``βSI=e−ψpert/(2Vtm)``, ``5CfinVtm``): no ``$``,
 no backslash, nothing ``MathMasker`` can see. Left unmasked, the LLM
-"translates" the soup (``——√((——))`` debris in the PDF) and the anchored
-a rewrite then blanks the perfect vector original underneath.
+"translates" the soup — ``βSI=e−ψpert/(2Vtm)`` comes back as ``——√((——))``
+debris — and because the span sits in a *narrative* block, not a ``FORMULA``
+one, the renderer typesets that debris as ordinary paragraph text.
 
 This module detects such spans (precision-first: a span must carry real math
 signal, never bare identifiers) and masks them behind opaque tokens reusing

@@ -10,7 +10,7 @@ Limitations are explicit rather than silent:
 * ``horizontal_scale`` is refused until a shaping path (HarfBuzz/rustybuzz)
   can change advance widths. Typst's ``text(stretch:)`` did not change static
   font widths in the measured version, so reporting a measurement for it would
-  be a fake. CELS Stage 3A can add that path later.
+  be a fake; the refusal lifts only if such a shaping path is added.
 * A compiler/font/probe failure raises :class:`MeasurementError`; it never
   returns a zero-height "fits" result.
 """

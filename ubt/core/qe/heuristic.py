@@ -322,7 +322,12 @@ class HeuristicQERunner(BaseQERunner):
         return False
 
     def score_source(self) -> str:
-        """The discrete defect-band engine, named as the report has always called it."""
+        """``"heuristic"`` — the ``qe_score_source`` label for defect-band scores.
+
+        A stable literal rather than something derived from the class name:
+        persisted reports already carry this string, so a rename would silently
+        rewrite the audit trail of past runs.
+        """
         return "heuristic"
 
     def glossary_violation(self, source_text: str, target_text: str) -> str | None:

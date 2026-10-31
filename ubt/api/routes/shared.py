@@ -135,7 +135,7 @@ def deliverable_paths(output_file: str | Path) -> dict[str, Path]:
 
 
 def progress_frame(snapshot: dict[str, Any], status: str) -> str:
-    """The one non-terminal ``/stream`` frame, shared by both deployment modes.
+    """The one non-terminal ``/jobs/{job_id}/stream`` frame, shared by both modes.
 
     Queue mode polls a durable snapshot; embedded mode folds engine events into
     the same ``ProgressSnapshot``. Emitting that snapshot as ``event: progress``
@@ -154,7 +154,7 @@ def terminal_frame(
     *,
     counters: dict[str, Any] | None = None,
 ) -> str:
-    """The one terminal ``/stream`` frame, shared by both deployment modes.
+    """The one terminal ``/jobs/{job_id}/stream`` frame, shared by both modes.
 
     ``counters`` carries the final block totals. Without them the console's log
     line fell back to ``0/0 blocks``: the terminal frame used to hold only

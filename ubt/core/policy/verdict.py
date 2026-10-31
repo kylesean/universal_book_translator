@@ -1,9 +1,11 @@
 """Translation verdict: zero-LLM-cost pre-filter.
 
-UBT already gates *after* drafting (0-Token FastPass); this gate runs
-*before* any model call. :func:`judge_block` applies ten ordered
-``KEEP_ORIGIN`` short-circuit rules — the first match wins and the block
-ships verbatim. Anything surviving all ten rules is translated.
+UBT already gates *after* drafting (0-Token FastPass); this gate runs *before*
+any model call. :func:`judge_block` applies nine ordered keep-source
+short-circuit rules: the first match wins and the block ships verbatim, and
+anything surviving all nine is translated. The rules are numbered by position in
+``judge_block``; a number is written out only where the label carries the
+reasoning, since the ``verdict:*`` reason code already names the rest.
 
 Rules only ever *withhold* translation; they never rewrite text, so a
 false positive costs style, never correctness — and every keep carries a
@@ -34,8 +36,8 @@ from ubt.core.policy.layout_policy import (
 from ubt.model.ast import RegionKind
 
 # Two or more purely-lowercase words read as prose ("effective mobility"), not
-# as a figure/table label ("B1", "Fig. 3", "kg"). Rule 10 kept such prose in the
-# source language; only genuine short labels should be kept.
+# as a figure/table label ("B1", "Fig. 3", "kg"). Rule 9 would keep such prose in
+# the source language; only genuine short labels should be kept.
 _PROSE_PHRASE_RE = re.compile(r"\b[a-z]{2,}\b[ _]+\b[a-z]{2,}\b")
 
 
@@ -83,10 +85,8 @@ def judge_block(block: IRBlock, *, translate_chrome: bool = False) -> Verdict:
     # audit reason even when its text is empty or placeholder-only.
     if block.policy_translate is False:
         return Verdict(False, block.policy_reason or "verdict:explicit_keep")
-    # Rule 2: empty blocks.
     if not stripped:
         return Verdict(False, "verdict:empty")
-    # Rule 3: pure placeholders (no word/CJK characters at all).
     if not UNICODE_WORD_RE.search(stripped):
         return Verdict(False, "verdict:placeholder")
     # Rule 4: non-text block types / adapter-marked skips keep origin.
@@ -110,10 +110,8 @@ def judge_block(block: IRBlock, *, translate_chrome: bool = False) -> Verdict:
     digits_only = re.sub(r"[- ]", "", stripped)
     if ISBN_DIGITS_RE.match(digits_only):
         return Verdict(False, "verdict:identifier_only")
-    # Rule 7: hexdumps / byte tables.
     if _is_hexdump(stripped):
         return Verdict(False, "verdict:hexdump")
-    # Rule 8: index-like single-token line lists.
     if _is_index_list(stripped):
         return Verdict(False, "verdict:index_list")
     # Rule 9: short alnum labels outside the main story flow.
@@ -128,7 +126,11 @@ def judge_block(block: IRBlock, *, translate_chrome: bool = False) -> Verdict:
 
 
 def apply_verdict(block: IRBlock, verdict: Verdict) -> None:
-    """Stamp the verdict onto the block (auditable via ledger v5 columns)."""
+    """Stamp the verdict onto the block, in the two fields the ledger carries.
+
+    ``policy_translate``/``policy_reason`` are what a kept block is audited
+    through later, so a verdict must never be recorded in only one of them.
+    """
     block.policy_translate = verdict.translate
     block.policy_reason = verdict.reason
     if not verdict.translate:

@@ -443,13 +443,13 @@ class _SanitizingParser(HTMLParser):
         """HTML comments are dropped (payload smuggling vector)."""
 
     def handle_decl(self, decl: str) -> None:
-        """Doctype/decls are dropped."""
+        """Dropped: a doctype is document-level, invalid inside an inline fragment."""
 
     def handle_pi(self, data: str) -> None:
-        """Processing instructions are dropped."""
+        """Dropped: a processing instruction is not part of the allowed inline vocabulary."""
 
     def unknown_decl(self, data: str) -> None:
-        """Unknown declarations (CDATA etc.) are dropped."""
+        """Dropped: CDATA and friends would otherwise emit their body unescaped."""
 
     # -- finalization ------------------------------------------------------
 
@@ -852,7 +852,7 @@ def _skip_to_close(text: str, start: int, name: str) -> int:
 
 
 def sanitize_html_fragment(text: str) -> str:
-    """Return ``text`` with dangerous HTML removed (allowlist approach).
+    """Return ``text`` with dangerous HTML removed.
 
     Plain-text angle brackets that are not real, balanced inline markup are
     preserved as escaped text (see :func:`_neutralize_pseudo_tags`), so

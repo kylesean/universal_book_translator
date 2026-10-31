@@ -1,12 +1,11 @@
-"""ContainerFitRepair: Adaptive container fitting and code/token boundary repair for Typst.
+"""Container fitting and code/token boundary repair for Typst.
 
-Prevents horizontal layout spills and container clipping in technical books and papers:
-1. Adaptive Monospace Code Scaling: Computes max line widths (accounting for 2.0x CJK characters),
-   dynamically adjusting monospace font size from 8.5pt down to 7.0pt.
-2. Smart Token-Aware Code Wrapping: Wraps lines exceeding container width at operator,
-   comma, or bracket boundaries with hanging indent.
-3. Soft Break Injection for Unbroken Tokens: Injects zero-width break opportunities (\\u200b)
-   into long URLs, file paths, and identifiers to prevent right-margin prose spills.
+A rigid container — a table cell, a code block, a narrow column — is the one place
+where a correct translation still breaks the page: a long monospace line or an
+unbroken URL runs past the margin, and Typst overflows it rather than shrink it.
+These helpers size and break content to the container it has to live in instead of to
+the text's own length (:func:`fit_code_block`, :func:`inject_soft_breaks`,
+:func:`repair_bottleneck_containers`).
 """
 
 from __future__ import annotations
@@ -19,7 +18,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 def effective_char_width(char: str) -> float:
-    """Return effective width unit for character (1.0 for ASCII, 2.0 for CJK/full-width)."""
     code = ord(char)
     # CJK Unified Ideographs, Hiragana, Katakana, Hangul, Fullwidth Forms
     if (
@@ -35,8 +33,6 @@ def effective_char_width(char: str) -> float:
 
 
 def measure_line_width(line: str) -> float:
-    """Calculate effective character units for a line of code."""
-    # Expand tabs to 4 spaces for consistent measurement
     expanded = line.expandtabs(4)
     return sum(effective_char_width(c) for c in expanded)
 
@@ -65,7 +61,6 @@ def smart_wrap_code_line(
             sub_lines.append(current_prefix + content)
             break
 
-        # Search for best break in content within avail
         best_break = -1
         curr_u = 0.0
         for i, ch in enumerate(content):

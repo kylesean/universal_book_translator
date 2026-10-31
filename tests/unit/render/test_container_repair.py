@@ -1,4 +1,4 @@
-"""Unit tests for ContainerFitRepair (P2-16)."""
+"""Unit tests for the Typst container-fitting helpers (P2-16)."""
 
 from __future__ import annotations
 
