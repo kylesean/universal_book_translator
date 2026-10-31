@@ -82,9 +82,11 @@ _EXCLUDED_SOURCE_NAMES: frozenset[str] = frozenset({"CHANGELOG.md"})
 _MD_REF_RE = re.compile(r"(?P<path>[A-Za-z0-9_][A-Za-z0-9_.\-/]*\.md)")
 
 #: Basenames that are documentation by shape, wherever they appear. ``README.md``
-#: and ``DESIGN.md`` are the ones this repo actually uses; the rest are the names
-#: a dead pointer historically took (``AGENTS.md``, ``SECURITY.md``,
-#: ``CONTRIBUTING.md``, ``*_STRATEGY.md``, ``*_RFC.md``).
+#: is the one this repo actually uses (``DESIGN.md`` was retired with the console
+#: rewrite, but the name stays: it is a doc shape, and an old pointer to it must
+#: still be caught); the rest are the names a dead pointer historically took
+#: (``AGENTS.md``, ``SECURITY.md``, ``CONTRIBUTING.md``, ``*_STRATEGY.md``,
+#: ``*_RFC.md``).
 _DOC_BASENAME_RE = re.compile(
     r"(?:README|DESIGN|ARCHITECTURE|GLOSSARY|CHANGELOG|SECURITY|CONTRIBUTING|AGENTS"
     r"|SPEC|PLAN|NOTES|GUIDE|STRATEGY|RFC|PRD|RECORD|LOG|ANALYSIS|REVIEW)\.md$"
@@ -111,8 +113,8 @@ def _dead_pointers(relative: str, text: str, *, base: Path | None = None) -> lis
     """Documentation pointers in *text* that do not resolve in this tree.
 
     ``relative`` labels findings only; ``base`` is the directory the references
-    are written from -- a link in ``web/README.md`` to ``DESIGN.md`` means
-    ``web/DESIGN.md``, so the referencing file's own directory is tried first and
+    are written from -- a link inside ``web/`` to ``NOTES.md`` means
+    ``web/NOTES.md``, so the referencing file's own directory is tried first and
     the repo root second (the two spellings both appear in this tree).
     """
     root = _REPO_ROOT
@@ -178,7 +180,7 @@ def test_no_pointer_to_a_file_the_clone_does_not_have(source: Path) -> None:
     )
 
 
-def test_detector_flags_a_dead_pointer_and_ignores_a_fixture_name() -> None:
+def test_detector_flags_a_dead_pointer_and_ignores_a_fixture_name(tmp_path: Path) -> None:
     """The detector must fire on the real failure and stay silent on noise.
 
     Both halves matter. The false negative is what happened: ``see AGENTS.md``
@@ -207,8 +209,14 @@ def test_detector_flags_a_dead_pointer_and_ignores_a_fixture_name() -> None:
     live = "See `deploy/docker/README.md` for container options.\n"
     assert not _dead_pointers("README.md", live), "a pointer that resolves must pass"
 
-    sibling = "See DESIGN.md for the token table.\n"
-    assert not _dead_pointers("web/README.md", sibling, base=_REPO_ROOT / "web"), (
+    # The sibling case uses a fixture tree rather than a repo file: the repo's
+    # own web/ has exactly one Markdown file (README.md), which also exists at
+    # the root, so it cannot show "tried against the referencing directory
+    # first" without a name that resolves in only one of the two.
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / "NOTES.md").write_text("# notes\n", encoding="utf-8")
+    sibling = "See NOTES.md for the token table.\n"
+    assert not _dead_pointers("web/README.md", sibling, base=tmp_path / "web"), (
         "a bare name resolves against the referencing file's own directory"
     )
     assert _dead_pointers("web/README.md", sibling), "...and is not a repo-root file"

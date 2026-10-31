@@ -90,7 +90,7 @@ Two rules follow, and `tests/unit/test_doc_authority.py` enforces both:
 
 What *is* versioned is the root set — `README.md`, `ARCHITECTURE.md`,
 `GLOSSARY.md`, `SEMANTIC_JUDGE.md`, `CHANGELOG.md`, `scripts/README.md`,
-`web/README.md`, `web/DESIGN.md`, `deploy/docker/README.md` — plus each module's
+`web/README.md`, `deploy/docker/README.md` — plus each module's
 own docstring. That is the documentation a reviewer and CI can actually read.
 `CHANGELOG.md` is exempt from the link check: an entry cites the tree it
 describes, and rewriting history to satisfy a present-day check falsifies it (the

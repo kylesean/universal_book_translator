@@ -3,7 +3,6 @@
 Frontend for **Universal Book Translator (UBT)**: a local-first Single Page Application (SPA) designed as an operator cockpit and post-editing workbench for high-fidelity bilingual book translation.
 
 See also:
-- [`DESIGN.md`](DESIGN.md) for the visual design manifesto, light/dark palette, and anti-AI-slop guidelines.
 - [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the engine architecture the console drives.
 
 ---
