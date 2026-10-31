@@ -1017,7 +1017,7 @@
           "System"
         ],
         "summary": "System Info",
-        "description": "The console's security-boundary panel (real host + allowed roots).\n\nReports the host this request reached (loopback vs exposed), whether the\nAPI-key gate is on, and the filesystem roots ``resolve_secure_path``\nactually enforces \u2014 so the panel shows the live policy, not a hardcoded\nsample.",
+        "description": "Report the live security posture this request arrived under.\n\nThe host that accepted the connection (loopback vs exposed), whether the\nAPI-key gate is on, and the filesystem roots ``resolve_secure_path``\nactually enforces \u2014 so the console's boundary panel shows the policy in\nforce, not a hardcoded sample.",
         "operationId": "system_info_system_info_get",
         "parameters": [
           {
@@ -1870,7 +1870,7 @@
           "Jobs"
         ],
         "summary": "Stream Progress",
-        "description": "SSE: ``event: progress`` snapshots until one ``event: <status>`` terminal frame.\n\nBoth deployment modes emit that one contract (see ``progress_frame`` /\n``terminal_frame``); the payload never depends on how the server was\nstarted. Every frame carries an ``id:`` cursor, so a client reconnecting\nwith ``Last-Event-ID`` (header or ``?last_event_id=``) receives the\nframes it missed before the live stream resumes (PRD \u00a79.2).",
+        "description": "SSE: ``event: progress`` snapshots until one ``event: <status>`` terminal frame.\n\nBoth deployment modes emit that one contract (see ``progress_frame`` /\n``terminal_frame``); the payload never depends on how the server was\nstarted. Every frame carries an ``id:`` cursor, so a client reconnecting\nwith ``Last-Event-ID`` (header or ``?last_event_id=``) receives the\nframes it missed before the live stream resumes \u2014 the replay contract of\n``docs/design/adaptive_delivery_prd.md`` \u00a79.2, carried by\n:class:`~ubt.api.sse_replay.SseReplayBuffer`.",
         "operationId": "stream_progress_jobs__job_id__stream_get",
         "parameters": [
           {

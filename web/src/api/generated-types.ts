@@ -293,12 +293,12 @@ export interface paths {
         };
         /**
          * System Info
-         * @description The console's security-boundary panel (real host + allowed roots).
+         * @description Report the live security posture this request arrived under.
          *
-         *     Reports the host this request reached (loopback vs exposed), whether the
+         *     The host that accepted the connection (loopback vs exposed), whether the
          *     API-key gate is on, and the filesystem roots ``resolve_secure_path``
-         *     actually enforces — so the panel shows the live policy, not a hardcoded
-         *     sample.
+         *     actually enforces — so the console's boundary panel shows the policy in
+         *     force, not a hardcoded sample.
          */
         get: operations["system_info_system_info_get"];
         put?: never;
@@ -532,7 +532,9 @@ export interface paths {
          *     ``terminal_frame``); the payload never depends on how the server was
          *     started. Every frame carries an ``id:`` cursor, so a client reconnecting
          *     with ``Last-Event-ID`` (header or ``?last_event_id=``) receives the
-         *     frames it missed before the live stream resumes (PRD §9.2).
+         *     frames it missed before the live stream resumes — the replay contract of
+         *     ``docs/design/adaptive_delivery_prd.md`` §9.2, carried by
+         *     :class:`~ubt.api.sse_replay.SseReplayBuffer`.
          */
         get: operations["stream_progress_jobs__job_id__stream_get"];
         put?: never;

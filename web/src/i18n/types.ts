@@ -195,6 +195,14 @@ export interface TranslationDictionary {
     deliveryModeAuto: string
     deliveryModeReadable: string
     deliveryModeFaithful: string
+    faithfulShowcaseTitle: string
+    faithfulShowcaseDesc: string
+    faithfulFeatureStretch: string
+    faithfulFeatureBooktabs: string
+    faithfulFeatureFlow: string
+    faithfulFeatureAnchor: string
+    faithfulPresetRecommendation: string
+    faithfulPresetSwitchAction: string
     allowDegrade: string
     allowDegradeHelp: string
     enableCels: string
@@ -601,6 +609,17 @@ export interface TranslationDictionary {
     contractModeLabel: string
     contractDeliverableLabel: string
     contractChecksTitle: string
+    contractCheckOverlap: string
+    contractCheckBounds: string
+    contractCheckGeometry: string
+    contractCheckStyle: string
+    contractCheckStyleGroup: string
+    contractCheckTextRealization: string
+    contractCheckPlaceholders: string
+    contractCheckAssets: string
+    contractCheckFonts: string
+    contractCheckPageCount: string
+    contractCheckReadable: string
     celsDistortionTitle: string
     celsDistortionScore: string
     celsDistortionSafe: string

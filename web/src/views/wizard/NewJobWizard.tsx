@@ -11,6 +11,8 @@ import {
   Globe,
   ChevronDown,
   X,
+  Sparkles,
+  CheckCircle2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -1398,6 +1400,54 @@ export function NewJobWizard() {
                       </div>
                       {deliveryMode === 'faithful' && (
                         <>
+                          <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 sm:col-span-2 space-y-3">
+                            <div className="flex items-start gap-2.5">
+                              <Sparkles className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                              <div className="space-y-1">
+                                <h4 className="text-sm font-semibold text-foreground">
+                                  {t.wizard.faithfulShowcaseTitle}
+                                </h4>
+                                <p className="text-xs text-muted-foreground leading-relaxed">
+                                  {t.wizard.faithfulShowcaseDesc}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 pt-1">
+                              <div className="flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-[11px] font-medium text-foreground">
+                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                                <span className="truncate">{t.wizard.faithfulFeatureStretch}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-[11px] font-medium text-foreground">
+                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                                <span className="truncate">{t.wizard.faithfulFeatureBooktabs}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-[11px] font-medium text-foreground">
+                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                                <span className="truncate">{t.wizard.faithfulFeatureFlow}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-[11px] font-medium text-foreground">
+                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                                <span className="truncate">{t.wizard.faithfulFeatureAnchor}</span>
+                              </div>
+                            </div>
+                            {preset !== 'high_fidelity' && (
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-200">
+                                <span>{t.wizard.faithfulPresetRecommendation}</span>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs border-amber-500/40 bg-background hover:bg-amber-500/20 shrink-0"
+                                  onClick={() => {
+                                    hasUserSelectedPresetRef.current = true
+                                    setPreset('high_fidelity')
+                                  }}
+                                >
+                                  {t.wizard.faithfulPresetSwitchAction}
+                                </Button>
+                              </div>
+                            )}
+                          </div>
                           <div className="flex items-center justify-between rounded-lg border border-border/80 p-3 sm:col-span-2">
                             <div className="space-y-0.5 pr-4">
                               <div className="flex items-center gap-1.5">

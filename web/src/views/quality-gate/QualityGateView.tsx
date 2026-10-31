@@ -275,6 +275,35 @@ export function QualityGateView() {
       ? celsDistortions.reduce((acc, cur) => acc + (cur.score || 0), 0) / celsDistortions.length
       : null
 
+  const getContractCheckLabel = (name: string): string => {
+    switch (name) {
+      case 'overlap':
+        return t.quality.contractCheckOverlap
+      case 'bounds':
+        return t.quality.contractCheckBounds
+      case 'geometry':
+        return t.quality.contractCheckGeometry
+      case 'style':
+        return t.quality.contractCheckStyle
+      case 'style_group':
+        return t.quality.contractCheckStyleGroup
+      case 'text_realization':
+        return t.quality.contractCheckTextRealization
+      case 'placeholders':
+        return t.quality.contractCheckPlaceholders
+      case 'assets':
+        return t.quality.contractCheckAssets
+      case 'fonts':
+        return t.quality.contractCheckFonts
+      case 'page_count':
+        return t.quality.contractCheckPageCount
+      case 'readable':
+        return t.quality.contractCheckReadable
+      default:
+        return name
+    }
+  }
+
   const checks: Check[] = [
     {
       title: t.quality.chipDeliveryContract,
@@ -326,22 +355,29 @@ export function QualityGateView() {
             <div className="space-y-2">
               <div className="text-xs font-medium text-muted-foreground">{t.quality.contractChecksTitle}</div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {contractChecks.map((chk) => (
-                  <div
-                    key={chk.name}
-                    className={cn(
-                      'flex items-center justify-between rounded border px-2.5 py-1.5 text-xs',
-                      chk.status === 'pass'
-                        ? 'border-emerald-600/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                        : chk.status === 'warn'
-                          ? 'border-amber-600/20 bg-amber-500/10 text-amber-700 dark:text-amber-400'
-                          : 'border-destructive/20 bg-destructive/10 text-destructive'
-                    )}
-                  >
-                    <span className="font-mono">{chk.name}</span>
-                    <span className="font-bold uppercase">{chk.status}</span>
-                  </div>
-                ))}
+                {contractChecks.map((chk) => {
+                  const isPass = chk.status.toLowerCase().startsWith('pass')
+                  const isWarn = chk.status.toLowerCase().startsWith('warn')
+                  return (
+                    <div
+                      key={chk.name}
+                      className={cn(
+                        'flex flex-col justify-between gap-1 rounded border px-2.5 py-1.5 text-xs',
+                        isPass
+                          ? 'border-emerald-600/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                          : isWarn
+                            ? 'border-amber-600/20 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                            : 'border-destructive/20 bg-destructive/10 text-destructive'
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-semibold text-foreground truncate">{getContractCheckLabel(chk.name)}</span>
+                        <span className="font-bold uppercase text-[10px] shrink-0">{chk.status}</span>
+                      </div>
+                      <span className="font-mono text-[10px] text-muted-foreground">{chk.name}</span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
