@@ -12,6 +12,7 @@ from ubt.delivery.contracts import (
     DeliveryMode,
     DeliverySignals,
     DocumentClass,
+    LayoutComplexity,
     legacy_delivery_contract,
 )
 from ubt.delivery.router import route_delivery
@@ -55,6 +56,7 @@ def test_plan_serializes_with_stable_schema_version() -> None:
         DeliverySignals(
             document_class=DocumentClass.ACADEMIC,
             text_trust=0.95,
+            layout_complexity=LayoutComplexity.LOW,
         ),
         requested=DeliveryMode.AUTO,
     )

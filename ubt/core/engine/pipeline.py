@@ -2,8 +2,7 @@
 
 This module owns a run's *resources*: the writer-lock lease, the ledger, the
 adapter, the router and the per-run collaborators. :mod:`ubt.core.engine.plan`
-owns *what runs in what order* -- it invokes 14 stages, from ingest through
-export.
+owns *what runs in what order*, from ingest through export.
 
 The "six-stage" label this docstring used to carry described an earlier shape of
 the plan and outlived it by nine stages; it is removed rather than corrected to
@@ -168,8 +167,8 @@ def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryD
     is_pdf = input_path.suffix.lower() == ".pdf"
     requested = str(getattr(config, "delivery_mode", "auto") or "auto")
     # Phase 0/1 structure census runs for new ``faithful`` and ``auto`` PDF
-    # requests so ``DeliverySignals`` (layout_complexity, text_trust, has_scan)
-    # reflect measured PDF structure rather than hardcoded defaults.
+    # requests so ``DeliverySignals`` (layout_complexity, text_trust) reflect
+    # measured PDF structure rather than hardcoded defaults.
     needs_census = requested in ("faithful", "auto") and is_pdf
     facts: PdfStructureFacts | None = None
     page_count = 0
@@ -183,9 +182,20 @@ def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryD
                 page_count = probe_pdf_pages(input_path)[0]
             except Exception as exc:  # noqa: BLE001 - unmeasured page count becomes text_trust=0
                 logger.debug("Delivery plan: page count unavailable for %s: %s", input_path, exc)
+    raw_doc_mode = str(getattr(config, "document_mode", "auto") or "auto")
+    doc_mode = raw_doc_mode
+    if doc_mode == "auto" and is_pdf:
+        try:
+            from ubt.core.job_options import resolve_document_mode
+
+            doc_mode = resolve_document_mode(raw_doc_mode, input_path)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "Delivery plan: document mode resolution fallback for %s: %s", input_path, exc
+            )
     return plan_for_document(
         requested,
-        document_mode=str(getattr(config, "document_mode", "auto") or "auto"),
+        document_mode=doc_mode,
         is_pdf=is_pdf,
         has_scan=bool(facts.has_scan) if facts is not None else False,
         # A PDF whose census could not run is not a clean native source. Treat
@@ -426,8 +436,8 @@ class PipelineOrchestrator:
         else:
             self.router = router
 
-        # Completion hook the orchestrator invokes *inside* its writer-lock block
-        # to ensure all post-completion writes remain under the single-writer guard.
+        # Contract documented at the hook's definition: the writer-lock
+        # single-writer rationale is stated once, in job_runner.py.
         self.finalize_job = finalize_job
 
         #: Set by the lease-renewal task when another process reclaimed this
@@ -851,9 +861,8 @@ class PipelineOrchestrator:
         active_block_id: str | None = None,
         artifact_path: str | None = None,
     ) -> TranslationProgressEvent:
-        """Query real-time statistics from ledger and build progress event.
-
-        the stats query (including an ``ORDER BY mtqe_score`` over all
+        """The stats query (including an ``ORDER BY mtqe_score`` over all scored
+        blocks) is synchronous SQLite; it must run in a worker thread, not
         scored blocks) is synchronous SQLite; it must run in a worker thread, not
         on the event loop where every SSE subscriber and concurrent job shares
         the same thread. All stage call sites therefore ``await`` this method.
@@ -1157,7 +1166,6 @@ class PipelineOrchestrator:
         source_lang: str = "",
         cancel_token: asyncio.Event | None = None,
     ) -> AsyncGenerator[TranslationProgressEvent, None]:
-        """Execute the staged translation pipeline, yielding real-time progress events."""
         if not input_path.exists():
             raise DocumentParseError(f"Input document does not exist: {input_path}")
         prep = await self._prepare_run(
@@ -1245,13 +1253,12 @@ class PipelineOrchestrator:
             # cross-process job mutual exclusion).
             writer_lock = LedgerWriterLock(db_path, actual_job_id)
             # Off-loop, like every other sqlite call: a losing claimant parks on
-            # the lock's busy_timeout (10 s) and a fresh ledger runs its
-            # migrations, so taking either inline stalls every slot's loop —
-            # the missed-heartbeat path that reclaims a still-running job and
-            # bills the book twice (see job_worker's ``_q``).
+            # the lock's busy_timeout (30 s -- writer_lock.py) and a fresh ledger
+            # runs its migrations, so taking either inline stalls every slot's
+            # loop — the missed-heartbeat path that reclaims a still-running job
+            # and bills the book twice (see job_worker's ``_q``).
             await asyncio.to_thread(writer_lock.acquire)
 
-            # Staged execution lifecycle with guaranteed resource cleanup and failure handling.
             ledger = await asyncio.to_thread(
                 SQLiteJobLedger, db_path, fresh=bool(self.config.fresh)
             )
@@ -1261,8 +1268,10 @@ class PipelineOrchestrator:
 
             # -----------------------------------------------------------------
             # Adaptive Policy Resolution (single pipeline)
-            # Granularity is always micro; the render engine stays a separate
-            # decision (see adaptive_policy).
+            # The policy carries no granularity axis: the translation unit is
+            # always the micro block, and ``config.macro_chunk_size`` (default 8)
+            # only decides how many micro blocks share one draft call. The render
+            # engine stays a separate decision (see adaptive_policy).
             # -----------------------------------------------------------------
             adaptive_policy = resolve_adaptive_policy(
                 manifest=manifest,
@@ -1276,13 +1285,11 @@ class PipelineOrchestrator:
             # the repair-round cap) rather than restating ledger, job id,
             # languages, event factory and semaphore every time. The per-run
             # language-bound collaborators are built here rather than at the
-            # stage that uses them so the whole set is visible in one place.
+            # stage that uses them so the whole set is visible in one place, and
+            # are handed to the plan instead of becoming fields on the shared
+            # context. ``fast_pass`` is the run's single filter, created above
+            # next to the runner it is bound to.
             concurrency_sem = asyncio.Semaphore(self.config.max_concurrency)
-            # The per-run services the stages read (document compiler architecture): built here, where
-            # the whole set is visible in one place, and handed to the plan
-            # instead of being fields on the shared context. ``fast_pass`` is
-            # the run's single filter, created above next to the runner it is
-            # bound to.
             services = RunServices(
                 fast_pass=runtime_fast_pass,
                 qe_runner=runtime_qe_runner,
@@ -1290,10 +1297,8 @@ class PipelineOrchestrator:
                 adaptive_policy=adaptive_policy,
                 concurrency_sem=concurrency_sem,
                 tm=tm,
-                # The book's source text is immutable after ingest, so it is read
-                # and indexed once per run and shared by the draft stage and the
-                # quality gate (see SourceDocumentIndex). Loaded lazily, after
-                # ingest has produced the blocks.
+                # Loaded lazily, after ingest has produced the blocks; why it is
+                # shared lives in :class:`SourceDocumentIndex`.
                 source_document=SourceDocumentIndex(),
                 qe_runner_explicit=self._qe_runner_explicit,
                 repair_loop_explicit=self._repair_loop_explicit,
@@ -1344,13 +1349,10 @@ class PipelineOrchestrator:
             # those writes to GeneratorExit.
             # -----------------------------------------------------------------
             # The values a stage produces and a later one consumes live here for
-            # the whole run (explicit stage execution context): the plan threads each to
-            # the stage that reads it, and the terminal hook reads the same facts
-            # the stages filled.
+            # the whole run: the plan threads each to the stage that reads it,
+            # and the terminal hook reads the same facts the stages filled.
             facts = RunFacts()
-            # The run's one mutable state: the block snapshot, owned by the plan
-            # and read explicitly by the analyze-adjacent stages (unified
-            # pipeline stage context).
+            # The run's one piece of mutable state, revision-guarded (blocks.py).
             blocks = BlockReader(ledger, actual_job_id)
 
             async def _on_export_completed(event: TranslationProgressEvent) -> None:

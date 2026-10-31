@@ -109,6 +109,19 @@ def test_auto_paper_routes_to_readable() -> None:
     assert decision.plan.default_page_strategy is PageStrategy.DOCUMENT_REFLOW
 
 
+def test_auto_structured_paper_upgrades_to_faithful() -> None:
+    decision = _plan(
+        "auto",
+        document_mode="paper",
+        multicolumn_page_share=0.8,
+        formula_heavy=True,
+    )
+    assert decision.effective_mode == "facsimile"
+    assert decision.plan.contract is DeliveryContract.FAITHFUL
+    assert decision.plan.degrade_policy is DegradePolicy.ALLOW_DEGRADE
+    assert decision.plan.default_page_strategy is PageStrategy.CANVAS
+
+
 def test_auto_book_routes_to_readable() -> None:
     decision = _plan("auto", document_mode="book")
     assert decision.effective_mode == "reflow"

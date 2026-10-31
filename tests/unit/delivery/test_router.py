@@ -42,21 +42,61 @@ def _signals(
 
 
 def test_academic_defaults_to_readable() -> None:
-    plan = route_delivery(_signals(document_class=DocumentClass.ACADEMIC))
+    plan = route_delivery(
+        _signals(
+            document_class=DocumentClass.ACADEMIC,
+            layout_complexity=LayoutComplexity.LOW,
+        )
+    )
     assert plan.feasible
     assert plan.contract is DeliveryContract.READABLE
     assert plan.default_page_strategy is PageStrategy.DOCUMENT_REFLOW
     assert plan.degrade_policy is DegradePolicy.FAIL
 
 
+def test_academic_structured_upgrades_to_faithful() -> None:
+    plan = route_delivery(
+        _signals(
+            document_class=DocumentClass.ACADEMIC,
+            layout_complexity=LayoutComplexity.HIGH,
+        )
+    )
+    assert plan.feasible
+    assert plan.contract is DeliveryContract.FAITHFUL
+    assert plan.default_page_strategy is PageStrategy.CANVAS
+    assert plan.degrade_policy is DegradePolicy.ALLOW_DEGRADE
+    assert any("auto-upgraded to faithful" in reason for reason in plan.reasons)
+
+
+def test_academic_damaged_defaults_to_readable() -> None:
+    plan = route_delivery(
+        _signals(
+            document_class=DocumentClass.ACADEMIC,
+            layout_complexity=LayoutComplexity.HIGH,
+            text_trust=0.5,
+        )
+    )
+    assert plan.feasible
+    assert plan.contract is DeliveryContract.READABLE
+    assert plan.default_page_strategy is PageStrategy.DOCUMENT_REFLOW
+
+
 def test_technical_long_book_and_mobile_default_to_readable() -> None:
     for document_class in (
-        DocumentClass.TECHNICAL,
         DocumentClass.LONG_BOOK,
         DocumentClass.MOBILE,
     ):
         plan = route_delivery(_signals(document_class=document_class))
         assert plan.contract is DeliveryContract.READABLE
+
+    # Technical document with LOW complexity also defaults to readable
+    tech_plan = route_delivery(
+        _signals(
+            document_class=DocumentClass.TECHNICAL,
+            layout_complexity=LayoutComplexity.LOW,
+        )
+    )
+    assert tech_plan.contract is DeliveryContract.READABLE
 
 
 def test_contract_document_defaults_to_faithful_when_eligible() -> None:

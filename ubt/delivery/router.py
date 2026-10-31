@@ -21,6 +21,7 @@ from ubt.delivery.contracts import (
     DeliverySignals,
     DocumentClass,
     FaithfulEligibility,
+    LayoutComplexity,
     PageKind,
     PageStrategy,
 )
@@ -29,14 +30,19 @@ from ubt.delivery.contracts import (
 #: repaired and re-flowed instead.
 MIN_FAITHFUL_TEXT_TRUST = 0.80
 
-#: Document classes whose reading value beats page identity. Academic and
-#: technical documents are the PRD's default ``readable`` users even when the
-#: source happens to be page-lock feasible: reflow can expand pages for Chinese
-#: and keeps formulas/figures in reading order.
-_READABLE_FIRST_CLASSES: frozenset[DocumentClass] = frozenset(
+#: Document classes that can automatically upgrade from AUTO to FAITHFUL
+#: when pristine native layout signals (multi-column, math formulas, tables)
+#: are detected, retaining an automatic resilient fallback (allow_degrade) to reflow.
+_STRUCTURED_UPGRADE_CLASSES: frozenset[DocumentClass] = frozenset(
     {
         DocumentClass.ACADEMIC,
         DocumentClass.TECHNICAL,
+    }
+)
+
+#: Document classes whose reading value unconditionally beats page identity.
+_READABLE_FIRST_CLASSES: frozenset[DocumentClass] = frozenset(
+    {
         DocumentClass.LONG_BOOK,
         DocumentClass.MOBILE,
     }
@@ -115,6 +121,38 @@ def route_delivery(
         )
 
     # requested is AUTO.
+    if signals.document_class in _STRUCTURED_UPGRADE_CLASSES:
+        # Native born-digital academic & technical documents with structural complexity
+        # (multi-column, formulas, exhibits) gain immense value from 1:1 topological
+        # facsimile. When pristine and eligible, auto upgrades to faithful with an
+        # automatic fallback (DegradePolicy.ALLOW_DEGRADE) to readable reflow.
+        # Simple plain-narrative papers (LOW complexity) or scanned/damaged papers
+        # default to readable reflow.
+        if eligibility.eligible and signals.layout_complexity in (
+            LayoutComplexity.HIGH,
+            LayoutComplexity.MEDIUM,
+        ):
+            return _faithful_plan(
+                signals,
+                eligibility,
+                requested,
+                DegradePolicy.ALLOW_DEGRADE,
+                reasons=(
+                    f"document_class={signals.document_class.value!r} is native structured (complexity={signals.layout_complexity.value}) "
+                    "and faithful-eligible; auto-upgraded to faithful with resilient degrade fallback",
+                ),
+            )
+        return _readable_plan(
+            signals,
+            eligibility,
+            requested,
+            policy,
+            reasons=(
+                f"document_class={signals.document_class.value!r} defaults to readable "
+                f"(eligible={eligibility.eligible}, complexity={signals.layout_complexity.value})",
+            ),
+        )
+
     if signals.document_class in _READABLE_FIRST_CLASSES:
         return _readable_plan(
             signals,
