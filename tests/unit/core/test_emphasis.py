@@ -190,3 +190,22 @@ def test_mark_and_parse_emphasis_italic() -> None:
     assert runs[0].text == "important" and runs[0].bold is True and runs[0].italic is False
     assert runs[1].text == "novel" and runs[1].bold is False and runs[1].italic is True
     assert strip_emphasis_markers(marked) == text
+
+
+def test_unclosed_markers_are_parsed_and_stripped() -> None:
+    # Model frequently drops ⟧ on closing sentinels before CJK, space, or punctuation
+    clean, runs = parse_emphasis("CPU ⟦/B 资源涉及控制")
+    assert clean == "CPU 资源涉及控制"
+    assert runs == ()
+    assert "⟦" not in clean
+
+    clean, runs = parse_emphasis("敏感的（sensitive）⟦/B，因为")
+    assert clean == "敏感的（sensitive），因为"
+    assert runs == ()
+
+    clean, runs = parse_emphasis("这是 ⟦B 关键技术 ⟦/B 的实现")
+    assert clean == "这是 关键技术 的实现"
+    assert [(r.text, r.bold) for r in runs] == [("关键技术", True)]
+
+    assert strip_emphasis_markers("CPU ⟦/B 资源") == "CPU 资源"
+    assert strip_emphasis_markers(r"CPU \llbracket /B 资源") == "CPU 资源"

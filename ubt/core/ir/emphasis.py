@@ -33,7 +33,11 @@ ITALIC_CLOSE = "⟦/I⟧"
 #: and a bare ``/`` inside a math span, and Typst failed with ``unknown variable:
 #: lbracket`` (mamba ``pdf_main#b0426``) — losing the document. Spacing and case
 #: inside the brackets are accepted too, so ``⟦ B ⟧`` and ``⟦/b⟧`` match.
-_MARKER_RE = re.compile(r"(?:\u27e6|\\llbracket)\s*(/)?\s*([BbIi])\s*(?:\u27e7|\\rrbracket)")
+#: Models also frequently omit the closing bracket (e.g. ``⟦/B`` or ``⟦B``) before
+#: punctuation, spaces, or CJK text, which previously leaked into the rendered text.
+_MARKER_RE = re.compile(
+    r"(?:\u27e6|\\+llbracket)\s*(/)?\s*([BbIi])\s*(?:\u27e7|\\+rrbracket|(?=[^a-zA-Z0-9_\\]|$))"
+)
 
 #: A pdfium char probe and the docling text can disagree on a dash or quote
 #: (``agent–environment`` vs ``agent-environment``), so a source span located
