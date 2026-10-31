@@ -244,3 +244,28 @@ def test_a_deeper_heading_still_nests() -> None:
 
     assert paths["1.1.1 C"] == ("1", "1.1", "1.1.1")
     assert paths["1.1.2 D"] == ("1", "1.1", "1.1.2")
+
+
+def test_the_acknowledgments_section_carries_the_personal_name_rule() -> None:
+    """A name is the one string a translation must never invent.
+
+    The acknowledgments section transliterates densest: the ATC'25 replay
+    shipped "Yinqian Zhang" as an invented 张-something because no rule told
+    the model names are off-limits. The rule rides the section trail, so it
+    reaches the prompt for every chunk of the section and nothing else.
+    """
+    blocks = [
+        _Block("heading", "9 Acknowledgments", id="h1"),
+        _Block("narrative", "We thank Yinqian Zhang for the discussions.", id="p1"),
+        _Block("narrative", "This work was supported by Ant Group.", id="p2"),
+        _Block("heading", "Appendix A Benchmarks", id="h2"),
+        _Block("narrative", "Numbers follow.", id="p3"),
+    ]
+    ack = section_context_for(blocks, [blocks[1], blocks[2]])
+    appendix = section_context_for(blocks, [blocks[4]])
+
+    assert "Personal Names" in ack
+    assert "never transliterate" in ack
+    assert ack.startswith("9 Acknowledgments")
+    # The rule is section-scoped: the appendix trail carries no such rule.
+    assert "Personal Names" not in appendix

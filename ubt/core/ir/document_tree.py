@@ -22,6 +22,7 @@ that resume, billing and PE export depend on (RFC §7.2).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -206,6 +207,24 @@ def heading_trail(section: Section) -> str:
     return " > ".join(section.trail or (section.title,))
 
 
+#: A section whose heading opens the acknowledgments. Personal names live here
+#: denser than anywhere else in a document, and a name is the one string a
+#: translation must never invent: a transliterated "Yinqian Zhang" is a
+#: different person to everyone who searches for the author afterwards. The
+#: heading usually carries its own numbering ("9 Acknowledgments"), so the
+#: match is a search, not an anchor.
+_ACKNOWLEDGMENT_HEADING_RE = re.compile(r"acknowledg|致谢|鸣谢|后记", re.IGNORECASE)
+#: Publishing convention for the acknowledgments section: names stay in their
+#: source script (institutions and funding bodies may be translated; the people
+#: may not be renamed). Same register as the style rules in the prompt module.
+_PERSONAL_NAME_RULE = (
+    "[Personal Names]: Every person's name in this section stays exactly as the "
+    "source spells it, in its original script and order -- never transliterate, "
+    "transcribe, or reorder a personal name. Institutions, laboratories and "
+    "funding bodies may be translated; people may not be renamed."
+)
+
+
 def section_context_for(
     blocks: Sequence[IRBlock],
     chunk: Sequence[IRBlock],
@@ -220,10 +239,18 @@ def section_context_for(
     A chunk that already contains its own heading gets the trail too, and that
     is deliberate: the prompt is then identical for every chunk of a section,
     so the content-addressed cache key does not change halfway through.
+
+    A chunk inside the acknowledgments carries the personal-name rule appended
+    to the trail -- section-scoped like the trail itself, so the cache key
+    still stays stable for every chunk of the section.
     """
     if not chunk:
         return ""
     section = section_index(blocks, max_level=max_level).get(chunk[0].id)
     if section is None:
         return ""
-    return heading_trail(section)
+    trail = heading_trail(section)
+    title = (section.title or "").strip()
+    if title and _ACKNOWLEDGMENT_HEADING_RE.search(title):
+        trail = f"{trail}\n\n{_PERSONAL_NAME_RULE}"
+    return trail
