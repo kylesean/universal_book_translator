@@ -818,6 +818,13 @@ class PageLockedReflowRenderer:
                     page_columns=1,
                     content_width_pt=col_w,
                     target_lang=target_lang,
+                    # Continuation notices ride every tier: a tall grid in a
+                    # page-locked column breaks across the page boundary, and
+                    # a reader meeting the second fragment without "（续表）"
+                    # has lost the thread (measured on the ATC'25 SQLite
+                    # results table).
+                    enable_continuation=True,
+                    table_uid=f"src-{b.id}",
                 )
                 if table_markup:
                     lines.append(f"  {table_markup}")

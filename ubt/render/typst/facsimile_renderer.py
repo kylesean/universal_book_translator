@@ -138,12 +138,18 @@ class FacsimileRenderer:
         if pl.is_table:
             from ubt.render.typst.document_renderer import render_table
 
+            # Continuation notices ride every tier: a tall grid this tier
+            # places on one canvas still breaks across the page boundary, and
+            # a reader meeting the second fragment without "（续表）" has lost
+            # the thread (measured on the ATC'25 SQLite results table).
             table_markup = render_table(
                 pl.text,
                 is_math_ok=self._math_gate,
                 page_columns=1,
                 content_width_pt=width_pt,
                 target_lang=target_lang,
+                enable_continuation=True,
+                table_uid=f"src-{pl.block_id}",
             )
             if table_markup:
                 return table_markup

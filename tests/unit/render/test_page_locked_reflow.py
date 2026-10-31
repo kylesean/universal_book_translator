@@ -461,3 +461,38 @@ async def test_docling_render_page_locked_routing(
     res = await strategy.render_blocks(manifest, blocks, "zh", out_pdf)
     assert res == out_pdf
     assert manifest.metadata["delivery_mode"] == "page_locked"
+
+
+def test_page_locked_table_carries_continuation_notices() -> None:
+    """A tall grid the column will split carries its own continuation notices.
+
+    ``render_table`` already repeats the header row on a page break; the
+    notices ("（续下页）" under the first fragment, "（续表）" atop the next)
+    are what tell the reader the fragments are one exhibit -- measured missing
+    on the ATC'25 SQLite results table.
+    """
+    geom = PageGeometry(
+        page_w=595.0,
+        page_h=842.0,
+        margin_top=36.0,
+        margin_bottom=36.0,
+        margin_left=36.0,
+        margin_right=36.0,
+        columns=1,
+        theme_color_hex="#000000",
+    )
+    grid = "\n".join(["| Op | Cost |", "|---|---|"] + [f"| op{i} | {i}.0 |" for i in range(6)])
+    block = _make_block("t1", grid, btype=BlockType.TABLE)
+    spec = PageLockedPageSpec(
+        page_no=1,
+        geometry=geom,
+        uniform_size_pt=9.5,
+        leading_em=0.33,
+        par_spacing_em=0.60,
+        blocks=[block],
+    )
+    markup = PageLockedReflowRenderer().build_page_markup(spec, target_lang="zh")
+    assert "ubt-tbl-start-src-t1" in markup
+    assert "ubt-tbl-end-src-t1" in markup
+    assert "（续下页）" in markup
+    assert "（续表）" in markup

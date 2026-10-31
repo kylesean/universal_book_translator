@@ -2039,7 +2039,11 @@ class TypstDocumentRenderer:
         backmatter_config: object | None = None,
         enable_grid_figures: bool = False,
         figure_config: object | None = None,
-        enable_table_continuation: bool = False,
+        # Continuation notices default ON: the primitives are invisible unless
+        # a table actually breaks across a page, and a reader meeting the
+        # second fragment without "（续表）" has lost the thread. Pass False
+        # only for a delivery contract that forbids renderer-added text.
+        enable_table_continuation: bool = True,
         table_continuation_config: object | None = None,
         enable_epigraph: bool = False,
         epigraph_config: object | None = None,

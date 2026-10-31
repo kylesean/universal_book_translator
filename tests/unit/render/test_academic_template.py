@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from ubt.adapters.pdf.typst_compile import resolve_typst_binary
-from ubt.core.ir.models import BlockType, BookManifest, FlowID, IRBlock
+from ubt.core.ir.models import BlockType, BookManifest, FlowID, IRBlock, make_element
 from ubt.render.typst.academic import (
     academic_preamble,
     academic_title_banner,
@@ -717,3 +717,31 @@ def test_a_table_at_the_readability_floor_is_flagged(tmp_path: Path) -> None:
     comfortable: list[float] = []
     render_table(md, content_width_pt=520, scale_out=comfortable)
     assert comfortable and comfortable[0] > 0.60
+
+
+def test_document_renderer_wires_table_continuation_by_default() -> None:
+    """The reflow tier's grids ship continuation notices without asking.
+
+    The primitives are invisible unless a table actually breaks across a page,
+    so the default costs nothing on short grids and rescues tall ones: a reader
+    meeting the second fragment knows it belongs to the exhibit above.
+    """
+    grid = "\n".join(["| Op | Cost |", "|---|---|"] + [f"| op{i} | {i}.0 |" for i in range(6)])
+    blocks = [
+        IRBlock(
+            element=make_element(
+                id="b1",
+                spine_index=1,
+                block_type=BlockType.TABLE,
+                source_text=grid,
+            ),
+            target_text=grid,
+        )
+    ]
+    renderer = TypstDocumentRenderer()
+    source, _stats = renderer.build_source(blocks, Path(tempfile.mkdtemp()))
+    # The delivered (target) grid carries the anchors and both notices.
+    assert "ubt-tbl-start-tgt-b1" in source
+    assert "ubt-tbl-end-tgt-b1" in source
+    assert "（续下页）" in source
+    assert "（续表）" in source

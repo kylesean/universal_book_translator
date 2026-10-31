@@ -1360,3 +1360,33 @@ async def test_render_facsimile_rescues_bottleneck_container(
     assert rendered_pages[0].tier == "L1"
     assert ("b_tight", "container_fit_repaired") in strategy.last_render_flags
     assert "b_tight" in manifest.metadata.get("container_fit_repaired_segments", [])
+
+
+def test_facsimile_table_carries_continuation_notices() -> None:
+    """The L1 canvas tier wires continuation notices into its grids too.
+
+    Same delivery rule as the page-locked tier: a grid that breaks across the
+    page boundary tells the reader where its second fragment begins.
+    """
+    grid = "\n".join(["| Op | Cost |", "|---|---|"] + [f"| op{i} | {i}.0 |" for i in range(6)])
+    placement = FacsimileBlockPlacement(
+        block_id="b0100",
+        page=1,
+        x0=50.0,
+        y0=100.0,
+        x1=350.0,
+        y1=300.0,
+        text=grid,
+        is_table=True,
+    )
+    page_spec = FacsimilePageSpec(
+        page_no=1,
+        page_w=500.0,
+        page_h=700.0,
+        uniform_size_pt=10.0,
+        leading_em=0.35,
+        placements=[placement],
+    )
+    markup = FacsimileRenderer().build_markup([page_spec], "bg.pdf", target_lang="zh")
+    assert "ubt-tbl-start-src-b0100" in markup
+    assert "（续下页）" in markup
