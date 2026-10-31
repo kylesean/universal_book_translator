@@ -712,6 +712,7 @@ export function MissionControl() {
   const [downloading, setDownloading] = useState(false)
   const [deliverables, setDeliverables] = useState<DeliverableItem[]>([])
   const [companionArtifacts, setCompanionArtifacts] = useState<CompanionArtifactInfo[]>([])
+  const [deliverableListing, setDeliverableListing] = useState<DeliverableListing | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -721,12 +722,14 @@ export function MissionControl() {
           if (alive) {
             setDeliverables(listing.items)
             setCompanionArtifacts(listing.companionArtifacts ?? [])
+            setDeliverableListing(listing)
           }
         })
         .catch(() => {
           if (alive) {
             setDeliverables([])
             setCompanionArtifacts([])
+            setDeliverableListing(null)
           }
         })
     } else {
@@ -734,6 +737,7 @@ export function MissionControl() {
         if (alive) {
           setDeliverables((prev) => (prev.length > 0 ? [] : prev))
           setCompanionArtifacts((prev) => (prev.length > 0 ? [] : prev))
+          setDeliverableListing(null)
         }
       })
     }
@@ -2076,11 +2080,32 @@ export function MissionControl() {
                     </div>
                   ) : (
                     <div className="space-y-3 p-3.5">
+                      {deliverableListing?.degraded && (
+                        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+                          <div className="flex items-center gap-2 font-semibold text-amber-800 dark:text-amber-300">
+                            <AlertTriangle className="size-4 shrink-0" />
+                            <span>{t.mission.degradedAlertTitle}</span>
+                          </div>
+                          <p className="leading-relaxed pl-6">
+                            {deliverableListing.degradeReason || t.mission.degradedAlertDesc}
+                          </p>
+                        </div>
+                      )}
+
                       <section className="overflow-hidden rounded-lg border border-border/70">
-                        <div className="border-b border-border/70 bg-emerald-500/5 px-3 py-2">
-                          <h3 className="text-xs font-semibold tracking-wide text-foreground">
-                            {missionT.readerProductsTitle}
-                          </h3>
+                        <div className="border-b border-border/70 bg-emerald-500/5 px-3 py-2 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-xs font-semibold tracking-wide text-foreground">
+                              {missionT.readerProductsTitle}
+                            </h3>
+                            {deliverableListing?.deliveryMode && (
+                              <Badge variant="outline" className="text-[10px] font-mono font-normal">
+                                {deliverableListing.deliveryMode === 'faithful'
+                                  ? t.mission.deliveryModeBadgeFaithful
+                                  : t.mission.deliveryModeBadgeReadable}
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                         <div className="divide-y divide-border/60">
                           {deliverables

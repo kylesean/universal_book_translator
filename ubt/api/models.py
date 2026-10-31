@@ -662,7 +662,7 @@ class JobStatusResponse(ProgressSnapshot):
 # not describe them and the web client typed the payloads as Record<string,
 # any> — the frontend then re-declared each field by hand and could not tell
 # when the server changed one. Declaring the shapes here makes the generated
-# types the contract (2026-10-14 review, W4-5).
+# types the contract.
 # --------------------------------------------------------------------------- #
 
 
@@ -748,6 +748,10 @@ class DeliverableListResponse(BaseModel):
     delivery_verdict: str | None = None
     #: Companion artifact export audit summaries (e.g. status, size, reason).
     companion_artifacts: list[dict[str, Any]] | None = None
+    delivery_mode: str | None = None
+    planned_delivery_mode: str | None = None
+    degraded: bool = False
+    degrade_reason: str | None = None
 
 
 class GlossaryResponse(BaseModel):

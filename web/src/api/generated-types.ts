@@ -1260,6 +1260,17 @@ export interface components {
             companion_artifacts?: {
                 [key: string]: unknown;
             }[] | null;
+            /** Delivery Mode */
+            delivery_mode?: string | null;
+            /** Planned Delivery Mode */
+            planned_delivery_mode?: string | null;
+            /**
+             * Degraded
+             * @default false
+             */
+            degraded: boolean;
+            /** Degrade Reason */
+            degrade_reason?: string | null;
         };
         /**
          * EgressConfigRequest

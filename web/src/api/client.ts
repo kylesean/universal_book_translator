@@ -516,6 +516,10 @@ export interface DeliverableListing {
    *  opening the download rather than surface the 409 afterwards. */
   deliveryVerdict: 'passed' | 'warning' | 'blocked' | null
   companionArtifacts?: CompanionArtifactInfo[]
+  deliveryMode?: string | null
+  plannedDeliveryMode?: string | null
+  degraded?: boolean
+  degradeReason?: string | null
 }
 
 export async function listDeliverables(jobId: string): Promise<DeliverableListing> {
@@ -537,6 +541,10 @@ export async function listDeliverables(jobId: string): Promise<DeliverableListin
           error: c.error,
         }))
       : [],
+    deliveryMode: data.delivery_mode ?? null,
+    plannedDeliveryMode: data.planned_delivery_mode ?? null,
+    degraded: Boolean(data.degraded),
+    degradeReason: data.degrade_reason ?? null,
   }
 }
 

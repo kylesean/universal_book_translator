@@ -854,6 +854,10 @@ def test_wizard_sends_layout_columns_within_the_api_range() -> None:
 # --- the pre-flight panel must not show contradictory numbers ----------------
 
 _WIZARD_SRC = _REPO_ROOT / "web" / "src" / "views" / "wizard" / "NewJobWizard.tsx"
+#: The preflight assessment panel. It used to live inside ``NewJobWizard`` and the
+#: contract tests below still describe *wizard behaviour*, not a file layout —
+#: they read the panel directly so a further split cannot silently drop them.
+_PREFLIGHT_SRC = _REPO_ROOT / "web" / "src" / "views" / "wizard" / "PreflightPanel.tsx"
 
 
 def test_the_estimate_provenance_badge_is_panel_level_not_per_row() -> None:
@@ -867,9 +871,9 @@ def test_the_estimate_provenance_badge_is_panel_level_not_per_row() -> None:
     explanation. Every scale figure comes from the same assess call, so the
     marker belongs on the panel header.
     """
-    if not _WIZARD_SRC.exists():
+    if not _PREFLIGHT_SRC.exists():
         pytest.skip("web/ frontend is not present in this checkout")
-    source = _WIZARD_SRC.read_text(encoding="utf-8")
+    source = _PREFLIGHT_SRC.read_text(encoding="utf-8")
 
     # The badge is rendered from the header block, above the metric rows.
     header_end = source.index("preflightTitle")
@@ -901,9 +905,9 @@ def test_the_formula_density_row_explains_text_vs_layout() -> None:
     assert "math_density" in AssessDocumentFacts.model_fields
     assert "has_formulas" in AssessDocumentFacts.model_fields
 
-    if not _WIZARD_SRC.exists():
+    if not _PREFLIGHT_SRC.exists():
         pytest.skip("web/ frontend is not present in this checkout")
-    source = _WIZARD_SRC.read_text(encoding="utf-8")
+    source = _PREFLIGHT_SRC.read_text(encoding="utf-8")
     assert "mathDensityWithObjects" in source
     assert "mathDensityTextOnly" in source
 
@@ -948,9 +952,9 @@ def test_the_wizard_shows_total_tokens_not_just_the_source_size() -> None:
     assert "prompt_tokens" in AssessCost.model_fields
     assert "completion_tokens" in AssessCost.model_fields
 
-    if not _WIZARD_SRC.exists():
+    if not _PREFLIGHT_SRC.exists():
         pytest.skip("web/ frontend is not present in this checkout")
-    source = _WIZARD_SRC.read_text(encoding="utf-8")
+    source = _PREFLIGHT_SRC.read_text(encoding="utf-8")
     assert "cost.prompt_tokens + assessment.cost.completion_tokens" in source, (
         "the token row does not sum prompt+completion"
     )
@@ -1017,9 +1021,9 @@ def test_font_residue_warning_carries_the_at_risk_page_count() -> None:
     assert '"at_risk_pages": at_risk' in source, (
         "FONT_RESIDUE_RISK no longer carries at_risk_pages in its params"
     )
-    if not _WIZARD_SRC.exists():
+    if not _PREFLIGHT_SRC.exists():
         pytest.skip("web/ frontend is not present in this checkout")
-    wizard = _WIZARD_SRC.read_text(encoding="utf-8")
+    wizard = _PREFLIGHT_SRC.read_text(encoding="utf-8")
     assert "at_risk_pages" in wizard
     assert "warningAtRiskClause" in wizard
 

@@ -69,6 +69,8 @@ export interface TranslationDictionary {
     uploading: string
     orBrowse: string
     manualPathPlaceholder: string
+    serverPathToggle: string
+    clearFile: string
     sourceLang: string
     provider: string
     providerHelp: string
@@ -126,8 +128,15 @@ export interface TranslationDictionary {
     estTimeHeuristicNote: string
     /** Task-order section headers. */
     stepFile: string
+    stepDelivery: string
     stepQuality: string
     stepBudget: string
+    deliveryBadgeAuto: string
+    deliveryBadgeFaithful: string
+    deliveryBadgeReadable: string
+    deliveryDescAuto: string
+    deliveryDescFaithful: string
+    deliveryDescReadable: string
     basicsTitle: string
     /** Submit guard: no valid quote for the current form. */
     quoteRiskTitle: string
@@ -399,6 +408,10 @@ export interface TranslationDictionary {
     downloadPrimary: string
     oneClickExport: string
     readerProductsTitle: string
+    degradedAlertTitle: string
+    degradedAlertDesc: string
+    deliveryModeBadgeFaithful: string
+    deliveryModeBadgeReadable: string
     companionArtifactsTitle: string
     companionGeneratedBadge: string
     companionSkippedBadge: string

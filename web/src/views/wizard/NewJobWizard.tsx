@@ -7,16 +7,11 @@ import {
   ArrowRight,
   AlertTriangle,
   Loader2,
-  Sliders,
-  Globe,
   ChevronDown,
   X,
-  Sparkles,
-  CheckCircle2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -29,7 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { Alert, AlertTitle, AlertDescription } from '@/components/ui/Alert'
+import { Alert, AlertDescription } from '@/components/ui/Alert'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { InfoTip } from '@/components/ui/InfoTip'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -46,75 +41,7 @@ import {
   type RuntimeConfig,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
-
-/** Human-readable duration from a seconds estimate (e.g. "3m", "1.2h"). */
-function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
-  return `${(seconds / 3600).toFixed(1)}h`
-}
-
-/**
- * Substitute ``{key}`` placeholders; a missing key is left visible, not blank.
- * A list value joins with the locale's separator rather than JS's default comma.
- */
-function interpolate(
-  template: string,
-  params: Record<string, unknown>,
-  listSeparator: string,
-): string {
-  return template.replace(/\{(\w+)\}/g, (whole, key: string) => {
-    if (!(key in params)) return whole
-    const value = params[key]
-    return Array.isArray(value) ? value.join(listSeparator) : String(value)
-  })
-}
-
-/**
- * Localize a pre-flight warning by its stable engine code.
- *
- * The engine's ``detail_zh`` is Chinese only, so rendering it directly showed
- * Chinese copy in the English console. The dictionary is keyed on the same
- * codes the engine switches on; an unknown code falls back to the engine copy
- * (Chinese, but honest) rather than printing a raw key.
- */
-function warningText(
-  warning: JobAssessResponse['warnings'][number],
-  t: ReturnType<typeof useI18n>['t'],
-): string {
-  const template = t.wizard.warningCodes[warning.code]
-  if (!template) return warning.detail_zh
-  const params: Record<string, unknown> = { ...(warning.params ?? {}) }
-  // FONT_RESIDUE_RISK interpolates a remedy clause, which the engine picks
-  // from a scanned / not-scanned branch, plus the at-risk page count when the
-  // witness found suspect pages it could not confirm.
-  if (warning.code === 'FONT_RESIDUE_RISK') {
-    params.remedy = params.is_scanned ? t.wizard.warningRemedyRescan : t.wizard.warningRemedyOcr
-    const atRisk = Number(params.at_risk_pages ?? 0)
-    params.at_risk_clause =
-      atRisk > 0 ? t.wizard.warningAtRiskClause.replace('{count}', String(atRisk)) : ''
-  }
-  return interpolate(template, params, t.wizard.listSeparator)
-}
-
-/**
- * The route badge's short localized labels. The engine emits raw enums
- * (`recommended_dual_mode` mono/dual, `recommended_preset`
- * high_fidelity/standard); an unknown value still shows itself so a future
- * preset renders as its own name rather than "undefined".
- */
-function routeBadge(
-  dual: string,
-  preset: string,
-  t: ReturnType<typeof useI18n>['t'],
-): string {
-  const duals: Record<string, string> = { mono: t.wizard.routeMono, dual: t.wizard.routeDual }
-  const presets: Record<string, string> = {
-    high_fidelity: t.wizard.routeHighFidelity,
-    standard: t.wizard.routeStandard,
-  }
-  return `${duals[dual] ?? dual} · ${presets[preset] ?? preset}`
-}
+import { PreflightPanel } from './PreflightPanel'
 
 /**
  * The languages the engine has a profile for (`ubt/core/language_profile.py`),
@@ -149,6 +76,12 @@ function numericFieldInvalid(raw: string, min: number): boolean {
   if (!raw.trim()) return false // empty = follow the operator's default
   const value = Number(raw)
   return !Number.isFinite(value) || value < min
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 interface ChoiceSelectProps {
@@ -204,6 +137,40 @@ function FieldLabel({
   )
 }
 
+function WizardSection({
+  step,
+  title,
+  meta,
+  children,
+  className,
+}: {
+  step: number
+  title: string
+  meta?: React.ReactNode
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <section
+      className={cn(
+        'border-t border-border/70 pt-6 first:border-t-0 first:pt-0',
+        className,
+      )}
+    >
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+        <div className="flex min-w-0 items-baseline gap-3">
+          <span className="font-mono text-xs font-medium text-muted-foreground tabular-nums">
+            {String(step).padStart(2, '0')}
+          </span>
+          <h2 className="text-base font-semibold tracking-tight text-foreground">{title}</h2>
+        </div>
+        {meta ? <div className="max-w-full text-xs text-muted-foreground">{meta}</div> : null}
+      </div>
+      {children}
+    </section>
+  )
+}
+
 export function NewJobWizard() {
   const { t } = useI18n()
   const navigate = useNavigate()
@@ -224,9 +191,9 @@ export function NewJobWizard() {
 
   // Advanced compiler & layout options
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
-  // 提供商与语言：默认值已经足够好（默认提供商、en→zh），折叠不影响
-  // 正确性——摘要徽章让收起态仍有信息量。
-  const [basicsOpen, setBasicsOpen] = useState(false)
+  // The server-path input is a secondary affordance for files already on the
+  // host; the browser picker remains the primary intake path.
+  const [showServerPath, setShowServerPath] = useState(false)
   // 无有效报价时的提交确认（见 requestSubmit）。
   const [quoteRiskOpen, setQuoteRiskOpen] = useState(false)
   // 已确认过的报价指纹：同一配置确认一次即可。
@@ -419,8 +386,7 @@ export function NewJobWizard() {
             setFileName((prev) => prev || res.document?.file_name || '')
           }
           if (res.document?.file_size_bytes) {
-            const sz = res.document.file_size_bytes
-            setFileSize((prev) => prev || (sz > 1024 * 1024 ? `${(sz / (1024 * 1024)).toFixed(1)} MB` : `${(sz / 1024).toFixed(0)} KB`))
+            setFileSize((prev) => prev || formatFileSize(res.document?.file_size_bytes ?? 0))
           }
           if (!hasUserSelectedPresetRef.current && res.route?.recommended_preset) {
             const recP = res.route.recommended_preset.toLowerCase() as any
@@ -526,7 +492,7 @@ export function NewJobWizard() {
   // stays valid — the manual path field still allows server-side paths too.
   const handleFile = async (file: File) => {
     setFileName(file.name)
-    setFileSize((file.size / (1024 * 1024)).toFixed(1) + ' MB')
+    setFileSize(formatFileSize(file.size))
     setIsUploading(true)
     setAssessError(null)
     setAssessment(null)
@@ -613,6 +579,20 @@ export function NewJobWizard() {
   const chapterCountInvalid = numericFieldInvalid(chapterCount, 1)
   const advancedNumericInvalid =
     concurrencyInvalid || chapterStartInvalid || chapterCountInvalid
+  const canSubmit =
+    filePath.trim() !== '' &&
+    !isSubmitting &&
+    glossaryError === null &&
+    !budgetInvalid &&
+    !advancedNumericInvalid
+  const submitBlockedReason = !filePath.trim()
+    ? null
+    : glossaryError ??
+      (budgetInvalid
+        ? t.wizard.budgetInvalid
+        : advancedNumericInvalid
+          ? t.wizard.fieldMinOne
+          : null)
   /**
    * 报价是否存在且与当前表单一致——「先验后花」承诺的守门条件。
    *
@@ -852,52 +832,47 @@ export function NewJobWizard() {
     },
   ]
 
-  const mathDensityLabel = (density?: string | null) => {
-    switch (density?.toLowerCase()) {
-      case 'high':
-        return t.wizard.mathDensityHigh
-      case 'medium':
-        return t.wizard.mathDensityMedium
-      case 'low':
-        return t.wizard.mathDensityLow
-      default:
-        return density?.toUpperCase() ?? '—'
-    }
-  }
+  const deliveryOptions = [
+    {
+      value: 'auto' as const,
+      name: t.wizard.deliveryModeAuto,
+      desc: t.wizard.deliveryDescAuto,
+    },
+    {
+      value: 'faithful' as const,
+      name: t.wizard.deliveryModeFaithful,
+      desc: t.wizard.deliveryDescFaithful,
+    },
+    {
+      value: 'readable' as const,
+      name: t.wizard.deliveryModeReadable,
+      desc: t.wizard.deliveryDescReadable,
+    },
+  ]
 
   return (
     <div
       className={cn(
-        'mx-auto w-full max-w-[1500px] flex-1 space-y-6 overflow-y-auto px-4 py-6 sm:px-7 lg:pb-8',
-        filePath.trim() ? 'pb-24' : 'pb-6'
+        'mx-auto w-full max-w-[1500px] flex-1 overflow-y-auto px-4 py-6 sm:px-7 lg:pb-8',
+        filePath.trim() && 'pb-24',
       )}
     >
-      {/* View Title */}
-      <div className="border-b border-border/80 pb-5">
+      <header className="border-b border-border/80 pb-5">
         <h1 className="text-2xl font-semibold tracking-[-0.025em] text-foreground">
           {t.wizard.title}
         </h1>
         <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
           {t.wizard.subtitle}
         </p>
-      </div>
+      </header>
 
-      {/* Main 2-Column Split */}
-      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12 lg:gap-7">
-        {/* Left Column: Input, Preset, Budget */}
-        <div className="lg:col-span-7 space-y-6">
-          {/* Step 1: File Dropzone */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <span className="flex items-center justify-center size-5 rounded-full bg-primary text-primary-foreground text-xs font-bold">1</span>
-                <h2 className="text-sm font-semibold tracking-tight text-foreground">
-                  {t.wizard.stepFile.replace(/^[①②③123]\s*[·•]?\s*/, '')}
-                </h2>
-              </div>
-              <span className="text-xs text-muted-foreground">PDF · EPUB · DOCX · MD · TXT</span>
-            </div>
-
+      <div className="mt-6 grid grid-cols-1 items-start gap-7 xl:grid-cols-[minmax(0,1fr)_390px]">
+        <div className="min-w-0 space-y-7">
+          <WizardSection
+            step={1}
+            title={t.wizard.stepFile}
+            meta={<span className="hidden font-mono sm:inline">PDF · EPUB · DOCX · MD · TXT</span>}
+          >
             <input
               type="file"
               ref={fileInputRef}
@@ -907,62 +882,72 @@ export function NewJobWizard() {
               className="hidden"
             />
 
-            {/* If a file has been selected, show active file banner, else dropzone */}
             {fileName || (filePath && filePath.trim()) ? (
-              <div className="rounded-xl border border-border bg-card p-4 transition-all shadow-xs">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="size-10 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
-                      <FileText className="size-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-foreground truncate">
-                        {fileName || filePath.split('/').pop()}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2">
-                        {fileSize && <span>{fileSize}</span>}
-                        {assessment?.document?.format_ext && (
-                          <Badge variant="secondary" className="text-xs uppercase font-mono px-1.5 py-0">
-                            {assessment.document.format_ext.replace('.', '')}
-                          </Badge>
-                        )}
-                        <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                          {isAssessing ? t.wizard.reassessing : t.common.ready}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={isUploading}
-                    >
-                      {isUploading ? (
-                        <Loader2 className="size-3.5 animate-spin mr-1.5" />
-                      ) : (
-                        <UploadCloud className="size-3.5 mr-1.5" />
+              <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-foreground">
+                    {fileName || filePath.split('/').pop()}
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
+                    {fileSize ? <span className="font-mono">{fileSize}</span> : null}
+                    {assessment?.document?.format_ext ? (
+                      <span className="font-mono uppercase">
+                        {assessment.document.format_ext.replace('.', '')}
+                      </span>
+                    ) : null}
+                    <span
+                      className={cn(
+                        'inline-flex items-center gap-1.5 font-medium',
+                        isUploading || isAssessing
+                          ? 'text-muted-foreground'
+                          : 'text-emerald-700 dark:text-emerald-400',
                       )}
-                      <span>{t.wizard.orBrowse}</span>
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => {
-                        setFilePath('')
-                        setFileName('')
-                        setFileSize('')
-                        setAssessment(null)
-                      }}
-                      className="size-8 text-muted-foreground hover:text-foreground"
-                      title="Clear file"
                     >
-                      <X className="size-4" />
-                    </Button>
+                      {isUploading || isAssessing ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : null}
+                      {isUploading
+                        ? t.wizard.uploading
+                        : isAssessing
+                          ? t.wizard.reassessing
+                          : t.common.ready}
+                    </span>
                   </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                  >
+                    {isUploading ? (
+                      <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                    ) : (
+                      <UploadCloud className="mr-1.5 size-3.5" />
+                    )}
+                    {t.wizard.orBrowse}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      setFilePath('')
+                      setFileName('')
+                      setFileSize('')
+                      setAssessment(null)
+                      setAssessError(null)
+                      setAssessStale(false)
+                      lastAssessedFileRef.current = ''
+                    }}
+                    className="size-8 text-muted-foreground hover:text-foreground"
+                    title={t.wizard.clearFile}
+                    aria-label={t.wizard.clearFile}
+                  >
+                    <X className="size-4" />
+                  </Button>
                 </div>
               </div>
             ) : (
@@ -985,170 +970,145 @@ export function NewJobWizard() {
                     if (!isUploading) fileInputRef.current?.click()
                   }
                 }}
-                className={`relative flex flex-col items-center justify-center p-8 rounded-xl border-2 border-dashed transition-all cursor-pointer text-center group ${
+                className={cn(
+                  'group flex cursor-pointer flex-col gap-4 rounded-xl border border-dashed p-6 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:flex-row sm:items-center sm:justify-between',
                   isDragOver
                     ? 'border-primary bg-primary/[0.04]'
-                    : 'border-border/80 hover:border-primary/50 bg-card hover:bg-muted/20'
-                }`}
+                    : 'border-border bg-card hover:border-border-hover hover:bg-muted/20',
+                )}
               >
-                <div className="size-11 rounded-full bg-muted border border-border flex items-center justify-center text-muted-foreground mb-3 shadow-2xs group-hover:scale-105 group-hover:text-foreground transition-all">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">
+                    {isUploading
+                      ? t.wizard.uploading
+                      : isDragOver
+                        ? t.wizard.dropzoneActive
+                        : t.wizard.dropzoneTitle}
+                  </p>
+                  <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground">
+                    {t.wizard.dropzoneSubtitle}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  disabled={isUploading}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    fileInputRef.current?.click()
+                  }}
+                >
                   {isUploading ? (
-                    <Loader2 className="size-5 animate-spin text-primary" />
+                    <Loader2 className="mr-1.5 size-3.5 animate-spin" />
                   ) : (
-                    <UploadCloud className="size-5" />
+                    <UploadCloud className="mr-1.5 size-3.5" />
                   )}
-                </div>
-                <div className="text-sm font-semibold text-foreground">
-                  {isUploading
-                    ? t.wizard.uploading
-                    : isDragOver
-                      ? t.wizard.dropzoneActive
-                      : t.wizard.dropzoneTitle}
-                </div>
-                <div className="mt-3">
-                  <Button variant="outline" size="sm" className="pointer-events-none shadow-2xs">
-                    {t.wizard.orBrowse}
-                  </Button>
-                </div>
+                  {t.wizard.orBrowse}
+                </Button>
               </div>
             )}
 
-            {/* Manual Path Fallback */}
-            <div className="flex gap-2 items-center">
-              <Input
-                type="text"
-                value={filePath}
-                onChange={(e) => setFilePath(e.target.value)}
-                placeholder={t.wizard.manualPathPlaceholder}
-                aria-label={t.wizard.manualPathPlaceholder}
-                className="flex-1 min-w-0"
-              />
-              <Button
-                onClick={() => {
-                  hasUserSelectedPresetRef.current = false
-                  hasUserSelectedDomainRef.current = false
-                  hasUserSelectedDualModeRef.current = false
-                  void runAssess(filePath, { silent: false })
-                }}
-                disabled={!filePath.trim() || isAssessing}
-                variant="outline"
-                size="icon"
-                className="shrink-0 size-9"
-                aria-label={t.wizard.assessBtn}
-                title={t.wizard.assessBtn}
+            <div className="mt-2">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
+                aria-expanded={showServerPath}
+                onClick={() => setShowServerPath((open) => !open)}
               >
-                {isAssessing ? (
-                  <Loader2 className="size-3.5 animate-spin text-primary" />
-                ) : (
-                  <RefreshCw className="size-3.5 text-muted-foreground" />
-                )}
-              </Button>
+                {t.wizard.serverPathToggle}
+                <ChevronDown
+                  className={cn(
+                    'size-3.5 transition-transform',
+                    showServerPath && 'rotate-180',
+                  )}
+                />
+              </button>
             </div>
 
-            {assessError && (
-              <Alert variant="destructive">
+            {showServerPath ? (
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <Input
+                  type="text"
+                  value={filePath}
+                  onChange={(e) => setFilePath(e.target.value)}
+                  placeholder={t.wizard.manualPathPlaceholder}
+                  aria-label={t.wizard.manualPathPlaceholder}
+                  className="min-w-0 flex-1"
+                />
+                <Button
+                  type="button"
+                  onClick={() => {
+                    hasUserSelectedPresetRef.current = false
+                    hasUserSelectedDomainRef.current = false
+                    hasUserSelectedDualModeRef.current = false
+                    void runAssess(filePath, { silent: false })
+                  }}
+                  disabled={!filePath.trim() || isAssessing}
+                  variant="secondary"
+                  className="shrink-0"
+                >
+                  {isAssessing ? (
+                    <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-1.5 size-3.5" />
+                  )}
+                  {t.wizard.assessBtn}
+                </Button>
+              </div>
+            ) : null}
+
+            {assessError ? (
+              <Alert variant="destructive" className="mt-3">
                 <AlertTriangle className="size-4" />
                 <AlertDescription>{assessError}</AlertDescription>
               </Alert>
-            )}
-          </div>
+            ) : null}
+          </WizardSection>
 
-          {/* Step 2: Presets List */}
-          <div className="space-y-3 pt-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <span className="flex items-center justify-center size-5 rounded-full bg-primary text-primary-foreground text-xs font-bold">2</span>
-                <h2 className="text-sm font-semibold tracking-tight text-foreground">
-                  {t.wizard.stepQuality.replace(/^[①②③123]\s*[·•]?\s*/, '')}
-                </h2>
-              </div>
-            </div>
-
-            <RadioGroup
-              value={preset ?? undefined}
-              onValueChange={(value) => {
-                hasUserSelectedPresetRef.current = true
-                setPreset(value as typeof preset)
-              }}
-              className="overflow-hidden rounded-xl border border-border bg-card"
-            >
-              {presetOptions.map((p, index) => {
-                const isSelected = preset === p.id
-                const isRecommended =
-                  assessment?.route?.recommended_preset?.toLowerCase() === p.id
-                return (
-                  <label
-                    key={p.id}
-                    htmlFor={`preset-${p.id}`}
-                    className={cn(
-                      'relative flex h-24 cursor-pointer items-start gap-3 px-4 py-3.5 transition-colors',
-                      index < presetOptions.length - 1 && 'border-b border-border/70',
-                      isSelected
-                        ? 'bg-primary/[0.045]'
-                        : 'hover:bg-muted/35'
-                    )}
-                  >
-                    <RadioGroupItem
-                      id={`preset-${p.id}`}
-                      value={p.id}
-                      className="mt-0.5 shrink-0"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-semibold text-foreground">{p.name}</span>
-                        <Badge variant="secondary" className="font-normal">
-                          {p.badge}
-                        </Badge>
-                        {isRecommended && (
-                          <Badge
-                            variant="outline"
-                            className="border-emerald-600/25 bg-emerald-500/10 font-normal text-emerald-700 dark:text-emerald-400"
-                          >
-                            {t.wizard.engineRecommended}
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                        {p.desc}
-                      </p>
-                    </div>
-                    <InfoTip label={p.name}>{p.detail}</InfoTip>
-                  </label>
-                )
-              })}
-            </RadioGroup>
-          </div>
-
-          {/* Provider and languages */}
-          <Collapsible open={basicsOpen} onOpenChange={setBasicsOpen}>
-            <div className="rounded-xl border border-border bg-card px-4 shadow-xs">
-              <CollapsibleTrigger asChild>
-                <button
-                  type="button"
-                  className="group flex w-full items-center justify-between py-3.5 text-left"
-                >
-                  <div className="flex flex-wrap items-center gap-2.5">
-                    <Globe className="size-4 text-muted-foreground" />
-                    <span className="text-sm font-semibold text-foreground">{t.wizard.basicsTitle}</span>
-                    <Badge variant="outline" className="font-normal">
-                      {LANGUAGES.find((lang) => lang.code === sourceLang)?.label.split(' (')[0]}
-                      {' → '}
-                      {LANGUAGES.find((lang) => lang.code === targetLang)?.label.split(' (')[0]}
-                    </Badge>
-                  </div>
-                  <ChevronDown
-                    className={cn(
-                      'size-4 text-muted-foreground transition-transform',
-                      basicsOpen && 'rotate-180'
-                    )}
+          {/* Step 2: Language & output */}
+          <WizardSection
+            step={2}
+            title={t.wizard.stepDelivery}
+            meta={
+              <span className="font-mono">
+                {sourceLang.toUpperCase()} → {targetLang.toUpperCase()}
+              </span>
+            }
+          >
+            <div className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                {t.wizard.basicsTitle}
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="space-y-1.5">
+                  <FieldLabel htmlFor="wizard-source-lang">{t.wizard.sourceLang}</FieldLabel>
+                  <ChoiceSelect
+                    id="wizard-source-lang"
+                    value={sourceLang}
+                    onValueChange={setSourceLang}
+                    options={LANGUAGES.map((lang) => ({
+                      value: lang.code,
+                      label: lang.label,
+                    }))}
                   />
-                </button>
-              </CollapsibleTrigger>
-
-              <CollapsibleContent className="space-y-4 border-t border-border py-4">
+                </div>
+                <div className="space-y-1.5">
+                  <FieldLabel htmlFor="wizard-target-lang">{t.wizard.targetLang}</FieldLabel>
+                  <ChoiceSelect
+                    id="wizard-target-lang"
+                    value={targetLang}
+                    onValueChange={setTargetLang}
+                    options={LANGUAGES.map((lang) => ({
+                      value: lang.code,
+                      label: lang.label,
+                    }))}
+                  />
+                </div>
                 {declaredProviders.length > 0 ? (
-                  <div>
-                    <div className="flex items-center gap-1.5 mb-1.5">
+                  <div className="space-y-1.5 sm:col-span-2 xl:col-span-1">
+                    <div className="flex items-center gap-1.5">
                       <FieldLabel htmlFor="wizard-provider">{t.wizard.provider}</FieldLabel>
                       <InfoTip label={t.wizard.providerHelp}>{t.wizard.providerHelp}</InfoTip>
                     </div>
@@ -1172,7 +1132,7 @@ export function NewJobWizard() {
                       ]}
                     />
                     {selectedProviderDetail ? (
-                      <p className="text-xs text-muted-foreground mt-1">
+                      <p className="truncate font-mono text-xs text-muted-foreground">
                         {selectedProviderDetail.base_url ?? '—'}
                         {selectedProviderDetail.api_mode
                           ? ` · ${selectedProviderDetail.api_mode}`
@@ -1182,170 +1142,311 @@ export function NewJobWizard() {
                           : ''}
                       </p>
                     ) : null}
-                    {runtime !== null && !runtime.active.can_translate ? (
-                      <p className="mt-1.5 text-xs leading-relaxed text-amber-700 dark:text-amber-400">
-                        {t.wizard.providerUnavailable} {t.wizard.providerUnavailableHelp}
+                  </div>
+                ) : null}
+              </div>
+              {runtime !== null && !runtime.active.can_translate ? (
+                <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+                  {t.wizard.providerUnavailable} {t.wizard.providerUnavailableHelp}
+                </p>
+              ) : null}
+            </div>
+
+            <RadioGroup
+              value={deliveryMode}
+              onValueChange={(value) => {
+                setDeliveryMode(value as typeof deliveryMode)
+              }}
+              className="mt-5 grid gap-2 md:grid-cols-3"
+            >
+              {deliveryOptions.map((opt) => {
+                const isSelected = deliveryMode === opt.value
+                return (
+                  <label
+                    key={opt.value}
+                    htmlFor={`delivery-${opt.value}`}
+                    className={cn(
+                      'flex cursor-pointer flex-col gap-2 rounded-xl border p-3.5 transition-colors',
+                      isSelected
+                        ? 'border-primary/35 bg-primary/[0.045]'
+                        : 'border-border bg-card hover:border-border-hover hover:bg-muted/20',
+                    )}
+                  >
+                    <div className="flex items-start gap-2">
+                      <RadioGroupItem
+                        id={`delivery-${opt.value}`}
+                        value={opt.value}
+                        className="mt-0.5 shrink-0"
+                      />
+                      <span className="text-sm font-semibold leading-tight text-foreground">
+                        {opt.name}
+                      </span>
+                    </div>
+                    <p className="pl-6 text-xs leading-relaxed text-muted-foreground">
+                      {opt.desc}
+                    </p>
+                  </label>
+                )
+              })}
+            </RadioGroup>
+
+            {deliveryMode === 'faithful' ? (
+              <div className="mt-3 rounded-xl bg-primary/[0.035] p-4">
+                <h3 className="text-sm font-semibold text-foreground">
+                  {t.wizard.faithfulShowcaseTitle}
+                </h3>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  {t.wizard.faithfulShowcaseDesc}
+                </p>
+                <p className="mt-2 text-xs leading-relaxed text-foreground/80">
+                  {[
+                    t.wizard.faithfulFeatureStretch,
+                    t.wizard.faithfulFeatureBooktabs,
+                    t.wizard.faithfulFeatureFlow,
+                    t.wizard.faithfulFeatureAnchor,
+                  ].join(t.wizard.listSeparator)}
+                </p>
+
+                <div className="mt-4 grid gap-4 border-t border-primary/10 pt-4 sm:grid-cols-2">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <Label
+                          htmlFor="inline-allow-degrade"
+                          className="cursor-pointer text-sm font-medium text-foreground"
+                        >
+                          {t.wizard.allowDegrade}
+                        </Label>
+                        <InfoTip label={t.wizard.allowDegrade}>
+                          {t.wizard.allowDegradeHelp}
+                        </InfoTip>
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {t.wizard.allowDegradeHelp}
+                      </p>
+                    </div>
+                    <Switch
+                      id="inline-allow-degrade"
+                      checked={allowDegrade}
+                      onCheckedChange={setAllowDegrade}
+                    />
+                  </div>
+
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <Label
+                          htmlFor="inline-enable-cels"
+                          className="cursor-pointer text-sm font-medium text-foreground"
+                        >
+                          {t.wizard.enableCels}
+                        </Label>
+                        <InfoTip label={t.wizard.enableCels}>{t.wizard.enableCelsHelp}</InfoTip>
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {t.wizard.enableCelsHelp}
+                      </p>
+                    </div>
+                    <Switch
+                      id="inline-enable-cels"
+                      checked={enableCels}
+                      onCheckedChange={setEnableCels}
+                    />
+                  </div>
+                </div>
+
+                {preset !== 'high_fidelity' ? (
+                  <div className="mt-4 flex flex-col gap-2 rounded-lg bg-amber-500/10 p-3 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between dark:text-amber-100">
+                    <span className="leading-relaxed">
+                      {t.wizard.faithfulPresetRecommendation}
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="link"
+                      onClick={() => {
+                        hasUserSelectedPresetRef.current = true
+                        setPreset('high_fidelity')
+                      }}
+                      className="h-auto shrink-0 p-0 text-xs font-semibold text-amber-900 dark:text-amber-100"
+                    >
+                      {t.wizard.faithfulPresetSwitchAction}
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </WizardSection>
+
+          {/* Step 3: Quality presets */}
+          <WizardSection
+            step={3}
+            title={t.wizard.stepQuality}
+            meta={<span>{t.wizard.presets}</span>}
+          >
+            <RadioGroup
+              value={preset ?? undefined}
+              onValueChange={(value) => {
+                hasUserSelectedPresetRef.current = true
+                setPreset(value as typeof preset)
+              }}
+              className="overflow-hidden rounded-xl border border-border bg-card"
+            >
+              {presetOptions.map((p, index) => {
+                const isSelected = preset === p.id
+                const isRecommended =
+                  assessment?.route?.recommended_preset?.toLowerCase() === p.id
+                return (
+                  <label
+                    key={p.id}
+                    htmlFor={`preset-${p.id}`}
+                    className={cn(
+                      'relative flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors',
+                      index < presetOptions.length - 1 && 'border-b border-border/70',
+                      isSelected
+                        ? 'bg-primary/[0.045]'
+                        : 'hover:bg-muted/35',
+                    )}
+                  >
+                    <RadioGroupItem
+                      id={`preset-${p.id}`}
+                      value={p.id}
+                      className="mt-0.5 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-foreground">{p.name}</span>
+                        <Badge variant="secondary" className="font-normal">
+                          {p.badge}
+                        </Badge>
+                        {isRecommended && (
+                          <Badge
+                            variant="outline"
+                            className="border-emerald-600/25 bg-emerald-500/10 font-normal text-emerald-700 dark:text-emerald-400"
+                          >
+                            {t.wizard.engineRecommended}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground sm:line-clamp-1">
+                        {p.desc}
+                      </p>
+                    </div>
+                    <InfoTip label={p.name}>{p.detail}</InfoTip>
+                  </label>
+                )
+              })}
+            </RadioGroup>
+          </WizardSection>
+
+          {/* Step 4: Budget */}
+          <WizardSection step={4} title={t.wizard.stepBudget}>
+            <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">{t.wizard.budgetCeiling}</p>
+                  <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+                    {t.wizard.budgetHelp}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2.5">
+                  <Label
+                    htmlFor="unlimited-toggle"
+                    className="cursor-pointer select-none text-xs font-normal text-muted-foreground"
+                  >
+                    {t.wizard.budgetUnlimitedToggle}
+                  </Label>
+                  <Switch
+                    id="unlimited-toggle"
+                    checked={budgetUsd === null}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setBudgetUsd(null)
+                        setBudgetInput('')
+                      } else {
+                        const seeded = 10
+                        setBudgetInput(String(seeded))
+                        setBudgetUsd(seeded)
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 border-t border-border/70 pt-4">
+                {budgetUsd === null ? (
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
+                      {t.wizard.budgetUnlimited}
+                    </p>
+                    {quoteCost !== null && quoteCost > 0 ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const value = Math.ceil(quoteCost * 1.5 * 100) / 100
+                          setBudgetInput(value.toFixed(2))
+                          setBudgetUsd(value)
+                        }}
+                        className="h-8 shrink-0 font-mono text-xs"
+                      >
+                        {t.wizard.budgetSuggest.replace(
+                          '{usd}',
+                          (Math.ceil(quoteCost * 1.5 * 100) / 100).toFixed(2),
+                        )}
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="max-w-md space-y-2">
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono text-sm text-muted-foreground">
+                        $
+                      </span>
+                      <Input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={budgetInput}
+                        onChange={(event) => {
+                          const raw = event.target.value
+                          setBudgetInput(raw)
+                          const parsed = parseFloat(raw)
+                          setBudgetUsd(Number.isFinite(parsed) && parsed > 0 ? parsed : null)
+                        }}
+                        placeholder={t.wizard.budgetPlaceholder}
+                        className={cn(
+                          'pl-7',
+                          budgetInvalid &&
+                            'border-destructive focus-visible:ring-destructive',
+                        )}
+                      />
+                    </div>
+                    {budgetInvalid ? (
+                      <p className="text-xs text-destructive">{t.wizard.budgetInvalid}</p>
+                    ) : assessment?.cost.total_cost_usd != null &&
+                      assessment.cost.total_cost_usd > budgetUsd ? (
+                      <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+                        {t.wizard.budgetExceedsQuote} ($
+                        {assessment.cost.total_cost_usd.toFixed(2)})
                       </p>
                     ) : null}
                   </div>
-                ) : null}
-
-                {declaredProviders.length > 0 ? (
-                  <div>
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                      <FieldLabel htmlFor="wizard-repair-provider">
-                        {t.wizard.repairProvider}
-                      </FieldLabel>
-                      <InfoTip label={t.wizard.repairProviderHelp}>
-                        {t.wizard.repairProviderHelp}
-                      </InfoTip>
-                    </div>
-                    <ChoiceSelect
-                      id="wizard-repair-provider"
-                      value={repairProvider || '__follow__'}
-                      onValueChange={(value) =>
-                        setRepairProvider(value === '__follow__' ? '' : value)
-                      }
-                      options={[
-                        { value: '__follow__', label: t.wizard.repairProviderDefault },
-                        ...declaredProviders.map((p) => ({
-                          value: p.name,
-                          label: p.name + (p.draft_model ? ` — ${p.draft_model}` : ''),
-                        })),
-                      ]}
-                    />
-                  </div>
-                ) : null}
-
-                {/* Language Pair */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <FieldLabel htmlFor="wizard-source-lang">
-                      {t.wizard.sourceLang}
-                    </FieldLabel>
-                    <ChoiceSelect
-                      id="wizard-source-lang"
-                      value={sourceLang}
-                      onValueChange={setSourceLang}
-                      options={LANGUAGES.map((lang) => ({
-                        value: lang.code,
-                        label: lang.label,
-                      }))}
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel htmlFor="wizard-target-lang">
-                      {t.wizard.targetLang}
-                    </FieldLabel>
-                    <ChoiceSelect
-                      id="wizard-target-lang"
-                      value={targetLang}
-                      onValueChange={setTargetLang}
-                      options={LANGUAGES.map((lang) => ({
-                        value: lang.code,
-                        label: lang.label,
-                      }))}
-                    />
-                  </div>
-                </div>
-              </CollapsibleContent>
-            </div>
-          </Collapsible>
-
-          {/* Step 3: Budget Setting */}
-          <div className="rounded-xl border border-border bg-card p-4 space-y-3.5 shadow-xs">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <span className="flex items-center justify-center size-5 rounded-full bg-primary text-primary-foreground text-xs font-bold">3</span>
-                <h2 className="text-sm font-semibold tracking-tight text-foreground">
-                  {t.wizard.stepBudget.replace(/^[①②③123]\s*[·•]?\s*/, '')}
-                </h2>
-              </div>
-
-              <div className="flex items-center gap-2.5 shrink-0">
-                <Label htmlFor="unlimited-toggle" className="text-xs text-muted-foreground font-normal cursor-pointer select-none">
-                  {t.wizard.budgetUnlimitedToggle}
-                </Label>
-                <Switch
-                  id="unlimited-toggle"
-                  checked={budgetUsd === null}
-                  onCheckedChange={(checked) => {
-                    if (checked) {
-                      setBudgetUsd(null)
-                      setBudgetInput('')
-                    } else {
-                      const seeded = 10
-                      setBudgetInput(String(seeded))
-                      setBudgetUsd(seeded)
-                    }
-                  }}
-                />
+                )}
               </div>
             </div>
-
-            {budgetUsd === null ? (
-              quoteCost !== null && quoteCost > 0 && (
-                <div className="flex justify-end pt-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const v = Math.ceil(quoteCost * 1.5 * 100) / 100
-                      setBudgetInput(v.toFixed(2))
-                      setBudgetUsd(v)
-                    }}
-                    className="text-xs font-mono h-7"
-                  >
-                    {t.wizard.budgetSuggest.replace(
-                      '{usd}',
-                      (Math.ceil(quoteCost * 1.5 * 100) / 100).toFixed(2)
-                    )}
-                  </Button>
-                </div>
-              )
-            ) : (
-              <div className="space-y-2 pt-1">
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-mono text-muted-foreground">
-                    $
-                  </span>
-                  <Input
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    value={budgetInput}
-                    onChange={(e) => {
-                      const raw = e.target.value
-                      setBudgetInput(raw)
-                      const parsed = parseFloat(raw)
-                      setBudgetUsd(Number.isFinite(parsed) && parsed > 0 ? parsed : null)
-                    }}
-                    placeholder={t.wizard.budgetPlaceholder}
-                    className={`pl-7 ${budgetInvalid ? 'border-destructive focus-visible:ring-destructive' : ''}`}
-                  />
-                </div>
-                {budgetInvalid ? (
-                  <p className="text-xs text-destructive">{t.wizard.budgetInvalid}</p>
-                ) : assessment?.cost.total_cost_usd != null && assessment.cost.total_cost_usd > budgetUsd ? (
-                  <p className="text-xs text-amber-600 dark:text-amber-500">
-                    {t.wizard.budgetExceedsQuote} (${assessment.cost.total_cost_usd.toFixed(2)})
-                  </p>
-                ) : null}
-              </div>
-            )}
-          </div>
+          </WizardSection>
 
           {/* Optional controls, grouped so the default path stays quiet. */}
           <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
-            <div className="rounded-xl border border-border bg-card px-4 shadow-xs">
+            <div className="rounded-xl border border-border bg-card px-4">
               <CollapsibleTrigger asChild>
                 <button
                   type="button"
                   className="group flex w-full items-center justify-between py-3.5 text-left"
                 >
                   <div className="flex flex-wrap items-center gap-2.5">
-                    <Sliders className="size-4 text-muted-foreground" />
                     <span className="text-sm font-semibold text-foreground">
                       {t.wizard.advancedOptionsTitle}
                     </span>
@@ -1382,106 +1483,6 @@ export function NewJobWizard() {
                       {t.wizard.advancedDeliveryHelp}
                     </p>
                     <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="space-y-1.5 sm:col-span-2">
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel htmlFor="wizard-delivery-mode">{t.wizard.deliveryMode}</FieldLabel>
-                          <InfoTip label={t.wizard.deliveryMode}>{t.wizard.deliveryModeHelp}</InfoTip>
-                        </div>
-                        <ChoiceSelect
-                          id="wizard-delivery-mode"
-                          value={deliveryMode}
-                          onValueChange={(value) => setDeliveryMode(value as typeof deliveryMode)}
-                          options={[
-                            { value: 'auto', label: t.wizard.deliveryModeAuto },
-                            { value: 'readable', label: t.wizard.deliveryModeReadable },
-                            { value: 'faithful', label: t.wizard.deliveryModeFaithful },
-                          ]}
-                        />
-                      </div>
-                      {deliveryMode === 'faithful' && (
-                        <>
-                          <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 sm:col-span-2 space-y-3">
-                            <div className="flex items-start gap-2.5">
-                              <Sparkles className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                              <div className="space-y-1">
-                                <h4 className="text-sm font-semibold text-foreground">
-                                  {t.wizard.faithfulShowcaseTitle}
-                                </h4>
-                                <p className="text-xs text-muted-foreground leading-relaxed">
-                                  {t.wizard.faithfulShowcaseDesc}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 pt-1">
-                              <div className="flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-[11px] font-medium text-foreground">
-                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                                <span className="truncate">{t.wizard.faithfulFeatureStretch}</span>
-                              </div>
-                              <div className="flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-[11px] font-medium text-foreground">
-                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                                <span className="truncate">{t.wizard.faithfulFeatureBooktabs}</span>
-                              </div>
-                              <div className="flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-[11px] font-medium text-foreground">
-                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                                <span className="truncate">{t.wizard.faithfulFeatureFlow}</span>
-                              </div>
-                              <div className="flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-[11px] font-medium text-foreground">
-                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                                <span className="truncate">{t.wizard.faithfulFeatureAnchor}</span>
-                              </div>
-                            </div>
-                            {preset !== 'high_fidelity' && (
-                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-200">
-                                <span>{t.wizard.faithfulPresetRecommendation}</span>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-7 text-xs border-amber-500/40 bg-background hover:bg-amber-500/20 shrink-0"
-                                  onClick={() => {
-                                    hasUserSelectedPresetRef.current = true
-                                    setPreset('high_fidelity')
-                                  }}
-                                >
-                                  {t.wizard.faithfulPresetSwitchAction}
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex items-center justify-between rounded-lg border border-border/80 p-3 sm:col-span-2">
-                            <div className="space-y-0.5 pr-4">
-                              <div className="flex items-center gap-1.5">
-                                <Label htmlFor="wizard-allow-degrade" className="text-sm font-medium">
-                                  {t.wizard.allowDegrade}
-                                </Label>
-                                <InfoTip label={t.wizard.allowDegrade}>{t.wizard.allowDegradeHelp}</InfoTip>
-                              </div>
-                              <p className="text-xs text-muted-foreground">{t.wizard.allowDegradeHelp}</p>
-                            </div>
-                            <Switch
-                              id="wizard-allow-degrade"
-                              checked={allowDegrade}
-                              onCheckedChange={setAllowDegrade}
-                            />
-                          </div>
-                          <div className="flex items-center justify-between rounded-lg border border-border/80 p-3 sm:col-span-2">
-                            <div className="space-y-0.5 pr-4">
-                              <div className="flex items-center gap-1.5">
-                                <Label htmlFor="wizard-enable-cels" className="text-sm font-medium">
-                                  {t.wizard.enableCels}
-                                </Label>
-                                <InfoTip label={t.wizard.enableCels}>{t.wizard.enableCelsHelp}</InfoTip>
-                              </div>
-                              <p className="text-xs text-muted-foreground">{t.wizard.enableCelsHelp}</p>
-                            </div>
-                            <Switch
-                              id="wizard-enable-cels"
-                              checked={enableCels}
-                              onCheckedChange={setEnableCels}
-                            />
-                          </div>
-                        </>
-                      )}
                       <div className="space-y-1.5">
                         <div className="flex items-center gap-1.5">
                           <FieldLabel htmlFor="wizard-dual-mode">{t.wizard.dualMode}</FieldLabel>
@@ -1765,6 +1766,35 @@ export function NewJobWizard() {
                       {t.wizard.advancedExecHelp}
                     </p>
                     <div className="grid gap-4 sm:grid-cols-2">
+                      {declaredProviders.length > 0 ? (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <FieldLabel htmlFor="wizard-repair-provider">
+                              {t.wizard.repairProvider}
+                            </FieldLabel>
+                            <InfoTip label={t.wizard.repairProvider}>
+                              {t.wizard.repairProviderHelp}
+                            </InfoTip>
+                          </div>
+                          <ChoiceSelect
+                            id="wizard-repair-provider"
+                            value={repairProvider || '__follow__'}
+                            onValueChange={(value) =>
+                              setRepairProvider(value === '__follow__' ? '' : value)
+                            }
+                            options={[
+                              {
+                                value: '__follow__',
+                                label: t.wizard.repairProviderDefault,
+                              },
+                              ...declaredProviders.map((p) => ({
+                                value: p.name,
+                                label: p.name + (p.draft_model ? ` — ${p.draft_model}` : ''),
+                              })),
+                            ]}
+                          />
+                        </div>
+                      ) : null}
                       <div className="space-y-1.5">
                         <div className="flex items-center gap-1.5">
                           <FieldLabel>{t.wizard.concurrency}</FieldLabel>
@@ -1822,266 +1852,25 @@ export function NewJobWizard() {
           </Collapsible>
         </div>
 
-        {/* Right Column: Pre-flight assessment */}
-        <Card className="lg:col-span-5 lg:sticky lg:top-6 flex flex-col justify-between overflow-hidden shadow-xs">
-          <CardHeader className="p-5 border-b border-border pb-4 space-y-2">
-            <div className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="text-base font-bold text-foreground tracking-tight flex items-center gap-2">
-                  <span className="size-2 rounded-full bg-emerald-500 shadow-xs" />
-                  <span>{t.wizard.preflightTitle}</span>
-                </CardTitle>
-              </div>
-              {isReassessing ? (
-                <Badge variant="outline" className="animate-pulse text-xs font-mono gap-1">
-                  <Loader2 className="size-3 animate-spin inline" />
-                  {t.wizard.reassessing}
-                </Badge>
-              ) : assessStale && assessment ? (
-                <Badge
-                  variant="outline"
-                  className="border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-                >
-                  {t.wizard.assessStale}
-                </Badge>
-              ) : assessment ? (
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <Badge
-                    variant="outline"
-                    className={`text-xs font-mono font-semibold ${
-                      assessment.cost.billable_blocks_is_exact
-                        ? 'text-emerald-700 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/5'
-                        : 'text-amber-700 dark:text-amber-400 border-amber-500/30 bg-amber-500/5'
-                    }`}
-                  >
-                    {assessment.cost.billable_blocks_is_exact
-                      ? t.wizard.estimateExact
-                      : t.wizard.estimateApproximate}
-                  </Badge>
-                  <Badge
-                    variant="outline"
-                    className="border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                  >
-                    <span className="mr-1.5 size-1.5 rounded-full bg-emerald-500" />
-                    {t.common.ready}
-                  </Badge>
-                </div>
-              ) : (
-                <Badge variant="outline">{t.common.idle}</Badge>
-              )}
-            </div>
-            {assessment && typeof assessment.meta?.provider === 'string' && assessment.meta.provider !== '' && (
-              <div className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <span className="text-xs font-mono text-muted-foreground/80">
-                  {t.wizard.quoteProviderNote.replace('{provider}', assessment.meta.provider)}
-                </span>
-              </div>
-            )}
-          </CardHeader>
-
-          <CardContent className="p-5 space-y-4">
-            {assessment ? (
-              <div className="space-y-4">
-                {/* High Impact Metrics */}
-                <div className="grid grid-cols-2 gap-3">
-                  {/* Source Chars & Scale */}
-                  <div className="p-3.5 rounded-xl border border-border bg-card space-y-1">
-                    <div className="text-xs font-medium text-muted-foreground">{t.wizard.sourceChars}</div>
-                    <div className="font-mono text-xl font-bold tracking-tight text-foreground tabular-nums">
-                      {assessment.document.source_chars.toLocaleString()}
-                    </div>
-                    <div className="text-xs text-muted-foreground truncate font-mono">
-                      {assessment.document.selected_pages != null
-                        ? `${assessment.document.selected_pages} / ${assessment.document.pages} ${t.wizard.pagesUnit}`
-                        : `${assessment.document.pages} ${t.wizard.pagesUnit}`} · {assessment.document.chapters} {t.wizard.chapters}
-                    </div>
-                  </div>
-
-                  {/* Estimated Cost */}
-                  <div className="p-3.5 rounded-xl border border-border bg-card space-y-1">
-                    <div className="text-xs font-medium text-muted-foreground">{t.wizard.estCost}</div>
-                    <div className="font-mono text-xl font-bold tracking-tight tabular-nums">
-                      {assessment.cost.total_cost_usd === null ||
-                      assessment.cost.total_cost_usd === undefined ? (
-                        <span className="text-muted-foreground text-sm">{t.wizard.notPriced}</span>
-                      ) : assessment.cost.total_cost_usd === 0 ? (
-                        <span className="text-emerald-600 dark:text-emerald-400">
-                          $0.00 <span className="text-xs font-sans font-normal text-muted-foreground">({t.wizard.localFreeLabel})</span>
-                        </span>
-                      ) : (
-                        <span className="text-amber-600 dark:text-amber-500">
-                          ${assessment.cost.total_cost_usd.toFixed(2)}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-muted-foreground truncate font-mono">
-                      {t.wizard.estTime}: {formatDuration(assessment.runtime.est_seconds_low)} – {formatDuration(assessment.runtime.est_seconds_high)}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Blueprint Specs */}
-                <div className="p-4 rounded-xl border border-border bg-muted/20 space-y-3">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground pb-2 border-b border-border flex items-center justify-between">
-                    <span>{t.wizard.scorecardTitle}</span>
-                    <span className="text-primary font-medium">
-                      {routeBadge(assessment.route.recommended_dual_mode, assessment.route.recommended_preset, t)}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                    <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-card border border-border">
-                      <span className="text-muted-foreground text-xs">{t.wizard.estTokens}</span>
-                      <span className="font-semibold text-foreground">
-                        {(assessment.cost.prompt_tokens + assessment.cost.completion_tokens).toLocaleString()}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-card border border-border">
-                      <div className="flex items-center gap-1">
-                        <span className="text-muted-foreground text-xs">{t.wizard.mathDensity}</span>
-                        <InfoTip label={t.wizard.mathDensity}>
-                          {assessment.document.has_formulas
-                            ? t.wizard.mathDensityWithObjects
-                            : t.wizard.mathDensityTextOnly}
-                        </InfoTip>
-                      </div>
-                      <span
-                        className={`font-semibold ${
-                          assessment.document.math_density === 'high'
-                            ? 'text-amber-600 dark:text-amber-500'
-                            : 'text-primary'
-                        }`}
-                      >
-                        {mathDensityLabel(assessment.document.math_density)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-card border border-border">
-                      <span className="text-muted-foreground text-xs">{t.wizard.scannedRatio}</span>
-                      <span className="font-semibold text-foreground">
-                        {assessment.document.scan_page_share != null
-                          ? `${(assessment.document.scan_page_share * 100).toFixed(0)}%`
-                          : assessment.document.is_scanned
-                            ? '100%'
-                            : '0%'}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-card border border-border">
-                      <span className="text-muted-foreground text-xs">{t.wizard.confidence}</span>
-                      <span className="font-semibold text-primary">
-                        {(assessment.route.confidence * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Pre-flight Warnings */}
-                {assessment.warnings.length > 0 && (
-                  <Alert variant="warning" className="space-y-2">
-                    <div className="flex items-center gap-1.5 font-semibold text-xs text-amber-700 dark:text-amber-400">
-                      <AlertTriangle className="size-4 shrink-0" />
-                      <span>{t.wizard.probeWarnings} ({assessment.warnings.length})</span>
-                    </div>
-                    <div className="space-y-1.5 max-h-36 overflow-y-auto pl-5">
-                      {assessment.warnings.map((warning) => (
-                        <div key={warning.code} className="text-xs text-muted-foreground leading-relaxed">
-                          {warningText(warning, t)}
-                        </div>
-                      ))}
-                    </div>
-                  </Alert>
-                )}
-              </div>
-            ) : (
-              <div className="py-20 flex flex-col items-center justify-center text-center">
-                <div className="size-12 rounded-full bg-muted flex items-center justify-center text-muted-foreground mb-3">
-                  <FileText className="size-6" />
-                </div>
-                <div className="text-sm font-semibold text-foreground">{t.wizard.preflightTitle}</div>
-                <p className="text-xs text-muted-foreground max-w-xs mt-1.5 leading-relaxed">
-                  {t.wizard.waitingFile}
-                </p>
-              </div>
-            )}
-          </CardContent>
-
-          {/* Rehearsal banner */}
-          {rehearsalOnly ? (
-            <div className="mx-5 mb-4">
-              <Alert variant="warning" className="space-y-2">
-                <AlertTitle className="text-amber-700 dark:text-amber-400 font-semibold text-xs">
-                  {t.wizard.rehearsalBannerTitle}
-                </AlertTitle>
-                <AlertDescription className="text-xs leading-relaxed">
-                  {t.wizard.rehearsalBannerBody}
-                </AlertDescription>
-                <div className="flex items-center gap-2 pt-1">
-                  <Button size="sm" onClick={() => navigate('/system')}>
-                    {t.wizard.rehearsalBannerCta}
-                  </Button>
-                  {!rehearsalAcknowledged ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setRehearsalAcknowledged(true)}
-                    >
-                      {t.wizard.rehearsalBannerAck}
-                    </Button>
-                  ) : null}
-                </div>
-              </Alert>
-            </div>
-          ) : null}
-
-          {/* Action Footer */}
-          <CardFooter className="p-5 border-t border-border bg-muted/20 flex flex-col items-stretch space-y-3">
-            {submitError && (
-              <Alert variant="destructive">
-                <AlertTriangle className="size-4" />
-                <AlertDescription>{submitError}</AlertDescription>
-              </Alert>
-            )}
-            {reusedJobId && (
-              <Alert className="flex items-start justify-between gap-2">
-                <AlertDescription>{t.wizard.submitReusedNote}</AlertDescription>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/jobs/${reusedJobId}`)}
-                  className="shrink-0 underline hover:no-underline font-semibold text-xs font-mono text-primary cursor-pointer"
-                >
-                  {reusedJobId}
-                </button>
-              </Alert>
-            )}
-            <Button
-              onClick={requestSubmit}
-              disabled={
-                !filePath.trim() ||
-                isSubmitting ||
-                glossaryError !== null ||
-                budgetInvalid ||
-                advancedNumericInvalid
-              }
-              variant="default"
-              size="lg"
-              className="w-full h-11 text-sm font-semibold shadow-xs"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
-                  {t.wizard.compiling}
-                </>
-              ) : (
-                <>
-                  <span>{t.wizard.startCompile}</span>
-                  <ArrowRight className="size-4 ml-2" />
-                </>
-              )}
-            </Button>
-          </CardFooter>
-        </Card>
+        <PreflightPanel
+          assessment={assessment}
+          assessStale={assessStale}
+          canSubmit={canSubmit}
+          deliveryMode={deliveryMode}
+          isReassessing={isReassessing}
+          isSubmitting={isSubmitting}
+          onAcknowledgeRehearsal={() => setRehearsalAcknowledged(true)}
+          onOpenReusedJob={() => {
+            if (reusedJobId) navigate(`/jobs/${reusedJobId}`)
+          }}
+          onOpenSystem={() => navigate('/system')}
+          onRequestSubmit={requestSubmit}
+          rehearsalAcknowledged={rehearsalAcknowledged}
+          rehearsalOnly={rehearsalOnly}
+          reusedJobId={reusedJobId}
+          submitBlockedReason={submitBlockedReason}
+          submitError={submitError}
+        />
       </div>
 
       {/* Submit guard dialog */}
@@ -2161,13 +1950,7 @@ export function NewJobWizard() {
         </div>
         <Button
           onClick={requestSubmit}
-          disabled={
-            !filePath.trim() ||
-            isSubmitting ||
-            glossaryError !== null ||
-            budgetInvalid ||
-            advancedNumericInvalid
-          }
+          disabled={!canSubmit}
           variant="default"
           className="h-10 px-4 text-xs font-semibold shadow-xs shrink-0"
         >
