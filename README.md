@@ -50,10 +50,13 @@ uv run python scripts/verify_sample_book.py
 ```
 This runs against [`examples/sample_book/deep_learning_primer.md`](examples/sample_book/deep_learning_primer.md) and compiles a validated PDF with zero margin spills.
 
-Extras: `pdf` (Docling), `ocr` / `academic` (RapidOCR + ONNX runtime), `mcp`
-(the MCP server). PDF output needs the `typst` compiler on
-`PATH` — a PDF job fails at the render stage without it. `ubt doctor` checks the
-key, the ledger directory, Typst and CJK fonts, and says what breaks.
+Extras: `ocr` / `academic` (RapidOCR + ONNX runtime, for scanned books), `cels`
+(the constraint solver the faithful channel measures with), `mcp` (the MCP
+server). `pdf` and `academic` re-state the Docling pin, but Docling is a base
+dependency — a bare install already has the semantic PDF engine. PDF output needs
+the `typst` compiler on `PATH` — a PDF job fails at the render stage without it.
+`ubt doctor` checks the key, the ledger directory, Typst and CJK fonts, and says
+what breaks.
 
 ## Quick start
 
@@ -124,16 +127,12 @@ ubt console                  # opens http://127.0.0.1:8000/ in a browser
 `127.0.0.1:8000` by default, and opens the browser for you; for a loopback bind
 it also opens the server without an auth gate.
 
-For a console that survives closing its terminal, run it as a user service:
-
-```bash
-systemctl --user enable ubt-console.service
-systemctl --user start ubt-console.service
-journalctl --user -u ubt-console.service -f
-```
-
-The service keeps the UI and API on `127.0.0.1:8000`; `--dev`/Vite is for frontend
-development only and is not needed to use the console.
+For a console that survives closing its terminal, run `ubt console --no-browser`
+under a service manager of your choice: the repo ships no unit file, so a systemd
+user unit is something you write yourself (an `ExecStart=` for that command, and
+`journalctl --user -u <your-unit> -f` to follow its log). Either way the console
+stays on `127.0.0.1:8000` unless `--host`/`--port` say otherwise; `--dev`/Vite is
+for frontend development only and is not needed to use the console.
 
 **Configuring a model in the browser.** You do not need a shell to get started.
 Engine Doctor (`/system`) lists every provider block in `ubt.toml`, lets you add
@@ -163,11 +162,16 @@ one machine.
 
 ## Rendering
 
-There is one PDF render path. The document is rebuilt from the IR and Typst
-lays it out: uniform body type (10.5pt), translated table headers, and native
-math from LaTeX→Typst conversion. It is reading-grade, not DTP-grade — text
-reflows and the page count changes, so the artifact is a new document rather
-than a copy of the source layout.
+There is one export pipeline, and the run's delivery mode picks the renderer
+behind it. A `readable` delivery — what `auto` resolves to for a book or a paper
+— rebuilds the document from the IR and lets Typst lay it out: uniform body type
+(10.5pt), translated table headers, and native math from LaTeX→Typst conversion.
+It is reading-grade, not DTP-grade — text reflows and the page count changes, so
+that artifact is a new document rather than a copy of the source layout. A
+`faithful` delivery keeps the source geometry instead: the facsimile renderer
+draws the translated text onto a text-stripped copy of the source page, and the
+page-locked one reflows it inside 1:1 page-aligned geometry, either way stopping
+at the 7.5pt body floor rather than shrinking the type past readable.
 
 The reader-facing choice is `dual_mode` (`mono` / `dual` / `auto`, default
 `auto`): `dual` pairs each block's source line above its translation, `mono`
@@ -180,9 +184,9 @@ selects the prompt depth, formula handling and parser (a preset does pick
 
 Formula enrichment is not a quality gradient: only `vector_math` sets it
 to `on`, which runs the VLM math transcription to vector LaTeX (slow — roughly
-15–60 s per formula on CPU). Every other preset leaves it `auto`, which resolves
-to cropping the source region, so `high_fidelity` and `standard` render identical
-math and differ only in prompt depth.
+15–60 s per formula on CPU). `high_fidelity` and `standard` leave it `auto`, which
+resolves to cropping the source region, so those two render identical math and
+differ only in prompt depth; `preview` and `fast` set it `off`.
 
 Measured on the reference paper (arXiv 2101.03961): distinct font sizes drop
 from 44 to 3–5, formula residue from 0.857 to 0.000, untranslated-block markers
@@ -233,8 +237,10 @@ Measured against the current implementation, not aspirational:
   both assessment and translate, rather than reported as a parse failure),
   colour/watermarked backgrounds (no background-colour probe, so
   light text on dark pages is invisible), and text drawn inside figures.
-- **Text expansion**: there is no fixed box to overflow — the page reflows and
-  pagination changes — so a translation is never shrunk to fit a source box.
+- **Text expansion**: on the readable delivery there is no fixed box to
+  overflow — the page reflows and pagination changes — so a translation is never
+  shrunk to fit a source box. The faithful channel does fit source boxes, down to
+  the 7.5pt body floor, and records a page-overflow finding when it runs out.
 - **Per format**: DOCX footnotes/endnotes, column settings and TOC fields are
   not read; a PDF up to 50 pages is ingested as one chapter, so per-chapter
   resume and billing do not apply to it.
@@ -246,10 +252,12 @@ Measured against the current implementation, not aspirational:
   standards-complete (no TBX/SRX), so hand-off to external CAT tooling is
   limited.
 
-Design notes, RFCs and the adaptive-delivery PRD are maintained in the working
-tree under `docs/`, which is intentionally unversioned (gitignored) — a clone
-carries the code and tests only, not those notes. So a `docs/...` citation inside
-a code comment is a **citation**, not a link: it names where a decision was
-recorded. The reason that governs the code is written in the comment itself,
-because you cannot open the note from a clone. Policy and the full convention:
-`ARCHITECTURE.md`, "Docs are not in the repo".
+Design notes are maintained in the working tree under `docs/` — the
+adaptive-delivery PRD and the refactor design in `docs/design/`, the delivery
+tech design and implementation plan in `docs/guides/` — and `docs/` is
+intentionally unversioned (gitignored): a clone carries the code and tests only,
+not those notes. So a `docs/...` citation inside a code comment is a **citation**,
+not a link: it names where a decision was recorded. The reason that governs the
+code is written in the comment itself, because you cannot open the note from a
+clone. Policy and the full convention: `ARCHITECTURE.md`, "Docs are not in the
+repo".
