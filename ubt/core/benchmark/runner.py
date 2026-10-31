@@ -130,8 +130,8 @@ def extract_cost_metrics(
                 estimated_cost_usd = summary["estimated_cost_usd"]
             if cache_hit_rate == 0.0 and "cache_hit_rate" in summary:
                 cache_hit_rate = float(summary["cache_hit_rate"] or 0.0)
-        except Exception:
-            pass
+        except Exception as exc:  # metrics fall back to the values measured above
+            logger.debug("Could not read benchmark report %s: %s", report_path, exc)
 
     return CostBenchmarkMetrics(
         prompt_tokens=prompt_tokens,

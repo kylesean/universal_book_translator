@@ -1,9 +1,12 @@
-"""Shared plain-text extraction helpers for lightweight PDF text engines.
+"""Shared plain-text extraction helpers for lightweight PDF text paths.
 
-Used by the pdf_oxide fallback inside :class:`DoclingPDFAdapter` and by the
-pypdfium2 fast path (:class:`PDFiumAdapter`). Keeping the paragraph
-classification in one place guarantees the two plain-text engines never
-diverge in block typing, ensuring consistent translation quality on born-digital PDFs.
+Consumers are the pdf_oxide fallback inside the Docling family
+(``ubt.adapters.pdf.docling_parser`` imports :func:`pages_to_blocks`) and the
+core port ``ubt.core.ports.sample_pdf_pages`` (this module's
+:func:`sample_pdf_pages`), so core needs neither to name this adapter module
+nor to import a PDF library. The pdfium reader does not come through here: it
+types its own blocks from real geometry in ``ubt.adapters.pdf.reader_pdf``, and
+the shared rules it must agree with live in :mod:`ubt.analyze.structure`.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock, make_ele
 
 
 def sample_page_indices(page_count: int, max_samples: int = 10) -> list[int]:
-    """Return a representative sample of page indices across a document.
+    """0-based page indices to probe, deduplicated and at most ``max_samples`` long.
 
     Avoids front-matter sampling bias (where pages 0..9 are almost always cover,
     blank, TOC, and preface) by sampling page 0 plus evenly distributed fractions
@@ -43,13 +46,7 @@ def sample_page_indices(page_count: int, max_samples: int = 10) -> list[int]:
 
 
 def sample_pdf_pages(path: Path) -> tuple[int, bool, str]:
-    """Sample a PDF into ``(page_count, is_scanned, text_preview)``.
 
-    Reached from ``ubt.core.ports.sample_pdf_pages`` so core names neither this
-    adapter module nor a heavy PDF dependency. Fast path is the concurrency-safe
-    pypdfium2 gate; a pdf_oxide fallback covers corrupt xrefs. Failures degrade to
-    ``(1, False, "")`` — sampling is best-effort evidence, never a hard gate.
-    """
     try:
         from ubt.adapters.pdf.pdfium_gate import open_document
 
@@ -70,7 +67,7 @@ def sample_pdf_pages(path: Path) -> tuple[int, bool, str]:
         full_sample = "\n".join(text_samples)
         is_scanned = len(full_sample.strip()) < 100 * max(1, min(5, page_count))
         return page_count, is_scanned, full_sample
-    except Exception:
+    except Exception:  # pdfium probe failed; the oxide extractor below is the fallback
         pass
 
     from ubt.adapters.pdf import oxide_render

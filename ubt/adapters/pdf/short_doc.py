@@ -46,7 +46,7 @@ def probe_pdf_pages(pdf_path: Path) -> tuple[int, int]:
             return n_pages, chars
         finally:
             doc.close()
-    except Exception:
+    except Exception:  # pdfium probe failed; the oxide extractor below is the fallback
         pass
 
     try:

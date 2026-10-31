@@ -249,7 +249,7 @@ def _harvest_text_lines(textpage: object) -> list[tuple[str, tuple[float, float,
         try:
             rect = textpage.get_rect(i)  # type: ignore[attr-defined]
             text = (textpage.get_text_bounded(*rect) or "").strip()  # type: ignore[attr-defined]
-        except Exception:
+        except Exception:  # a rect whose text cannot be read is simply omitted
             continue
         if text:
             lines.append((text, (rect[0], rect[1], rect[2], rect[3])))

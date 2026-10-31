@@ -3,8 +3,10 @@
 Runs Docling conversions in a separate spawned process to:
 1. Isolate the main orchestrator process from native PyTorch/CUDA C++ crashes
    (SIGSEGV, SIGBUS, OOM).
-2. Keep a warm ``DocumentConverter`` loaded across multiple 50-page chunks of a
-   book, eliminating 5-15s cold-start weight loads per chunk.
+2. Keep a warm ``DocumentConverter`` loaded across the many page chunks of a
+   book (chunk size comes from :func:`ubt.adapters.pdf.page_chunking.get_pdf_page_chunk_size`,
+   i.e. ``UBT_PDF_STREAM_CHUNK_SIZE``), eliminating 5-15s cold-start weight
+   loads per chunk.
 3. Fully return 100% of GPU VRAM and system RAM to the OS kernel upon
    ``close()`` when ingestion finishes.
 """
@@ -128,7 +130,7 @@ class DoclingWorkerPool:
                         try:
                             if p.is_alive():
                                 p.terminate()
-                        except Exception:
+                        except Exception:  # already-dead worker: shutdown below still runs
                             pass
                 executor.shutdown(wait=True, cancel_futures=True)
             except Exception as exc:

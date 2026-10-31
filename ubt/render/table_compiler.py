@@ -755,7 +755,7 @@ def compile_typst_booktabs(
                 config=t_cfg,
                 indent="  ",
             )
-        except Exception:
+        except Exception:  # continuation markup failed; the table renders without it
             pass
 
     lines: list[str] = ["#["]

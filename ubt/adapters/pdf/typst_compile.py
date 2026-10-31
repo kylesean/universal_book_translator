@@ -141,7 +141,7 @@ def typst_version(binary: str = "typst") -> str | None:
         )
         if proc.returncode == 0:
             return proc.stdout.strip()
-    except Exception:
+    except Exception:  # probe only: an unparsable version is reported as absent
         pass
     return None
 

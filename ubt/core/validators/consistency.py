@@ -1,4 +1,11 @@
-"""0-Token consistency validators for numbers and glossary terms."""
+"""0-Token consistency validators for numbers and glossary terms.
+
+Both classes guard one failure mode — a quantity or an approved term whose
+meaning changes in transit — and decide deterministically from the source and
+target text alone, because their verdict can fail a block outright: a
+hallucinated ``10^23`` or a silently re-numbered citation is not something a
+fluency score reliably catches.
+"""
 
 import re
 from collections import Counter
@@ -692,7 +699,7 @@ def _count_suffix_values(text: str) -> dict[str, set[str]]:
         factor = _COUNT_SUFFIX_FACTORS[match.group("sfx").lower()]
         try:
             value = Decimal(match.group("num")) * factor
-        except Exception:
+        except ArithmeticError:  # Decimal cannot represent this count: skip the token
             continue
         token = canonicalize_numeric_token(match.group("num"))
         if token:

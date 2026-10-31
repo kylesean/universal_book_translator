@@ -86,7 +86,7 @@ def probe_gpu_acceleration(record: Callable[..., None]) -> None:
                             params=params,
                         )
                         return
-        except Exception:
+        except Exception:  # nvidia-smi probe failed; the PyTorch check below is the fallback
             pass
 
     # 2. Check PyTorch CUDA / MPS
@@ -114,7 +114,7 @@ def probe_gpu_acceleration(record: Callable[..., None]) -> None:
                     detail_code="gpu_acceleration.metal_ok",
                 )
                 return
-        except Exception:
+        except Exception:  # torch probe failed; the CPU fallback below records the verdict
             pass
 
     # Fallback: CPU execution
@@ -223,7 +223,7 @@ def probe_local_inference(config: UBTConfig, record: Callable[..., None]) -> Non
                         params={"model": config.draft_model},
                     )
                     return
-    except Exception:
+    except Exception:  # ollama probe failed; the configured base_url check below is the fallback
         pass
 
     # Check configured base_url if local
@@ -289,7 +289,7 @@ def probe_ghostscript(record: Callable[..., None]) -> None:
                 params={"version": ver},
             )
             return
-        except Exception:
+        except Exception:  # probe failed; the WARN verdict below is the answer
             pass
 
     record(
@@ -349,7 +349,7 @@ def probe_typst_version(record: Callable[..., None]) -> None:
                     params={"version": ver_str},
                 )
                 return
-    except Exception:
+    except Exception:  # version probe failed; the verdict below reports what was found
         pass
 
     record(
