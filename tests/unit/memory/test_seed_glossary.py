@@ -206,3 +206,23 @@ def test_loaded_entries_pass_clean_guardrails(tmp_path: Path) -> None:
     # A slogan-length source is dropped by clean_bible_entry.
     path = _write(tmp_path, "g.csv", "one two three four five,太长口号\n")
     assert load_external_glossary(path) == []
+
+
+def test_the_paper_profile_carries_the_formal_abbreviation_seeds(tmp_path: Path) -> None:
+    """``paper`` ships formal-writing conventions the model kept guessing at.
+
+    Measured on the ATC'25 replay: the same \"Inv. N:\" abbreviation rendered
+    three ways across eleven blocks -- \"图 1：\" (mistranslated as figure),
+    \"不变量 N：\" and a bare \"Inv. 5:\". A seed glossary under the profile
+    auto-probing already picks for academic papers makes the mapping reach the
+    chunk table whenever the abbreviation appears, so one document renders it
+    one way.
+    """
+    entries = seed_entries_for_profile("paper")
+    by_source = {e.source: e for e in entries}
+
+    assert by_source["Inv."].translation == "不变量"
+    assert by_source["Theorem"].translation == "定理"
+    # The proper nouns a paper may not rename stay Latin.
+    assert by_source["Rust"].translation == "Rust"
+    assert by_source["TCB"].translation == "TCB"
