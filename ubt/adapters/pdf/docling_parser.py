@@ -37,8 +37,6 @@ from ubt.adapters.pdf.docling_cache import (  # noqa: F401 -- re-exported
     DOCLING_CACHE_VERSION,
     _cleanup_docling_converter,
     _ensure_docling_pdfium_lock,
-    _package_version,
-    _strip_picture_payloads,
     docling_asset_dir,
     docling_cache_key,
     read_docling_document,
@@ -785,7 +783,85 @@ def type_docling_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
     blocks = merge_table_continuation_fragments(blocks)
     blocks = restore_ordered_markers(blocks)
     blocks = restore_appendix_headings(blocks)
+    blocks = reanchor_figure_captions(blocks)
     return blocks
+
+
+def reanchor_figure_captions(blocks: list[IRBlock]) -> list[IRBlock]:
+    """Re-anchor figure captions rigidly to their mother figure BBoxes.
+
+    Identifies figure captions (FlowID.CAPTION, RegionKind.CAPTION, or matching
+    `Fig(ure)? N` patterns) and finds the corresponding BlockType.IMAGE on the
+    same page located immediately above the caption.
+    Locks the caption vertical position to +4pt below the image BBox (y1 = img.bbox.y0 - 4.0pt),
+    and records the mother figure ID in block provenance (`caption_parent_id`).
+    """
+    images_by_page: dict[int, list[IRBlock]] = {}
+    for b in blocks:
+        if b.block_type == BlockType.IMAGE and b.bbox and b.bbox.page:
+            images_by_page.setdefault(b.bbox.page, []).append(b)
+
+    if not images_by_page:
+        return blocks
+
+    caption_pattern = re.compile(r"^(?:fig(?:ure)?|图)\.?\s*[\d\w]+", re.IGNORECASE)
+    table_pattern = re.compile(r"^(?:table|表)\.?\s*[\d\w]+", re.IGNORECASE)
+
+    updated_blocks: list[IRBlock] = []
+    for b in blocks:
+        is_caption_cand = (
+            b.flow_id == FlowID.CAPTION
+            or b.region == RegionKind.CAPTION
+            or bool(caption_pattern.match(b.source_text.strip()))
+        )
+        is_table_caption = bool(table_pattern.match(b.source_text.strip()))
+
+        if is_caption_cand and not is_table_caption and b.bbox and b.bbox.page in images_by_page:
+            p_images = images_by_page[b.bbox.page]
+            cap_mid_x = (b.bbox.x0 + b.bbox.x1) / 2.0
+            cap_y1 = b.bbox.y1
+
+            best_img: IRBlock | None = None
+            min_dist = float("inf")
+            for img in p_images:
+                if not img.bbox:
+                    continue
+                dist = img.bbox.y0 - cap_y1
+                horiz_overlap = max(0.0, min(img.bbox.x1, b.bbox.x1) - max(img.bbox.x0, b.bbox.x0))
+                horiz_close = abs(cap_mid_x - (img.bbox.x0 + img.bbox.x1) / 2.0) <= max(
+                    100.0, img.bbox.x1 - img.bbox.x0
+                )
+                if (
+                    -15.0 <= dist <= 150.0
+                    and (horiz_overlap > 0.0 or horiz_close)
+                    and dist < min_dist
+                ):
+                    min_dist = dist
+                    best_img = img
+
+            if best_img is not None and best_img.bbox is not None:
+                anchored_y1 = round(best_img.bbox.y0 - 4.0, 2)
+                cap_h = max(12.0, b.bbox.y1 - b.bbox.y0)
+                anchored_y0 = round(anchored_y1 - cap_h, 2)
+                new_span = Span(
+                    page=b.bbox.page,
+                    bbox=(b.bbox.x0, anchored_y0, b.bbox.x1, anchored_y1),
+                )
+                prov_dict = b.provenance.model_dump()
+                prov_dict["caption_parent_id"] = best_img.id
+                prov_dict["is_anchored_caption"] = True
+
+                new_element = dataclasses.replace(b.element, span=new_span)
+                b = b.model_copy(
+                    update={
+                        "element": new_element,
+                        "provenance": BlockProvenance(**prov_dict),
+                    }
+                )
+
+        updated_blocks.append(b)
+
+    return updated_blocks
 
 
 def _free_vram_gib() -> float | None:

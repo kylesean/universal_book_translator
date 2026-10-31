@@ -36,14 +36,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ubt.core.content.nodes import ReconstructionRecord
+from ubt.core.fs_perms import restrict_dir_to_owner
 
-# The wrapper predicates are re-exported under their historical private names:
-# existing callers and tests import ``_unwrap_mark`` / ``_is_placeholder`` here.
-# The implementation lives in ``ubt.render.delivered_text`` so the companion
-# HTML/EPUB views share it (they previously had no wrapper handling at all).
+# The wrapper predicates live in ``ubt.render.delivered_text`` so the companion
+# HTML/EPUB views share them (they previously had no wrapper handling at all); this
+# module's blocked-markup guard is one consumer, under a module-private name.
 from ubt.render.delivered_text import delivered_text, dropped_page_furniture, is_toc_entry
 from ubt.render.delivered_text import is_placeholder as _is_placeholder
-from ubt.render.delivered_text import unwrap_mark as _unwrap_mark  # noqa: F401 -- re-exported
 from ubt.render.inline_spans import block_runs, locate_runs
 from ubt.render.page_trim import COLUMN_GUTTER_SHARE, MM_PER_PT, PageSetup
 from ubt.render.table_compiler import parse_markdown_table, verify_table_reconstruction
@@ -881,6 +880,7 @@ def render_table(
     page_columns: int = 1,
     content_width_pt: float | None = None,
     content_height_pt: float | None = None,
+    base_font_size_pt: float | None = None,
     scale_out: list[float] | None = None,
     allow_landscape: bool = False,
     table_scale_factor: float = 1.0,
@@ -891,6 +891,7 @@ def render_table(
     continuation_config: object | None = None,
     span_full_width: bool = False,
     full_page_width_pt: float | None = None,
+    stretch_pct: float = 100.0,
 ) -> str:
     """Render a Markdown table as a Typst ``#table`` with a three-line frame.
 
@@ -1112,11 +1113,16 @@ def render_table(
         runs.append(max(longest_run, _TABLE_MIN_COLUMN_EM))
 
     width_pt = content_width_pt if content_width_pt is not None else _TABLE_DEFAULT_TEXT_WIDTH_PT
+    base_pt = (
+        float(base_font_size_pt)
+        if base_font_size_pt is not None and base_font_size_pt > 0
+        else TABLE_BASE_PT
+    )
     total_weight = sum(weights) or 1.0
     # Only the gutters are taken out here: each column's own inset is folded
     # into its minimum below, so deducting it twice would under-allocate.
     share_available = max(
-        width_pt - (columns - 1) * _TABLE_GUTTER_EM * TABLE_BASE_PT,
+        width_pt - (columns - 1) * _TABLE_GUTTER_EM * base_pt,
         1.0,
     )
 
@@ -1157,7 +1163,7 @@ def render_table(
         # content + 2*inset. Omitting the inset here left a 120.9pt run in a
         # 123.9pt column whose usable width was 113.9pt, and the string crossed
         # the text-block edge by 5pt on a page that had room.
-        run_mins = [run * TABLE_BASE_PT * scale + 2 * _TABLE_CELL_INSET_PT for run in runs]
+        run_mins = [run * base_pt * scale + 2 * _TABLE_CELL_INSET_PT for run in runs]
         total_run_min = sum(run_mins)
         if total_run_min >= share_available:
             # Even the runs do not fit. Squeeze proportionally so the table
@@ -1166,7 +1172,7 @@ def render_table(
             return [m * share_available / total_run_min for m in run_mins]
         # Give each column at least enough to keep its header readable before
         # sharing the rest by proportion.
-        floor = [w / _TABLE_HEADER_LINES * TABLE_BASE_PT * scale for w in weights]
+        floor = [w / _TABLE_HEADER_LINES * base_pt * scale for w in weights]
         base = [max(m, f) for m, f in zip(run_mins, floor, strict=True)]
         base_total = sum(base)
         if base_total >= share_available:
@@ -1191,8 +1197,8 @@ def render_table(
     inset_budget = 2 * _TABLE_CELL_INSET_PT * columns
     required_scale = (
         1.0
-        if total_run_em * TABLE_BASE_PT + inset_budget <= share_available
-        else (share_available - inset_budget) / (total_run_em * TABLE_BASE_PT)
+        if total_run_em * base_pt + inset_budget <= share_available
+        else (share_available - inset_budget) / (total_run_em * base_pt)
     )
     required_scale = max(required_scale, 0.0)
     effective_scale = required_scale * table_scale_factor
@@ -1354,33 +1360,36 @@ def render_table(
     # table footnote printed below it. The width fit above knows nothing about
     # height, so the emitted scale is re-fit here: iterate, because the wrap
     # count is a step function of the scale.
+    inset_x_pt = _TABLE_CELL_INSET_PT
+    inset_y_pt = _TABLE_CELL_INSET_PT
+    min_legible_scale = max(_TABLE_MIN_TEXT_SCALE, 5.2 / base_pt)
     if content_height_pt is not None and content_height_pt > 0.0:
-        cell_inset_total = 2 * _TABLE_CELL_INSET_PT
         hlines_pt = 2.7
 
-        def _natural_height(scale: float) -> float:
+        def _natural_height(scale: float, pad_y: float) -> float:
             total_lines = 0
             for row_cells in cell_em:
                 row_lines = 1
                 for col, parts in enumerate(row_cells):
                     if col >= len(widths):
                         break
-                    capacity_em = max(widths[col] / (TABLE_BASE_PT * scale), _TABLE_MIN_COLUMN_EM)
+                    capacity_em = max(widths[col] / (base_pt * scale), _TABLE_MIN_COLUMN_EM)
                     lines = sum(max(1, math.ceil(em / capacity_em)) for em in parts)
                     row_lines = max(row_lines, lines)
                 total_lines += row_lines
-            return (
-                total_lines * TABLE_BASE_PT * scale * 1.35
-                + (len(cell_em)) * cell_inset_total
-                + hlines_pt
-            )
+            return total_lines * base_pt * scale * 1.35 + (len(cell_em)) * (2 * pad_y) + hlines_pt
 
         fitted = emitted_scale
-        for _ in range(3):
-            natural = _natural_height(fitted)
+        pad_y = inset_y_pt
+        for _ in range(5):
+            natural = _natural_height(fitted, pad_y)
             if natural <= content_height_pt:
                 break
-            fitted = max(fitted * content_height_pt / natural, _TABLE_MIN_TEXT_SCALE)
+            pad_y = max(1.0, pad_y * (content_height_pt / natural))
+            fitted = max(fitted * (content_height_pt / natural), min_legible_scale)
+
+        inset_y_pt = round(pad_y, 1)
+        inset_x_pt = round(min(5.0, max(2.0, 5.0 * fitted)), 1)
         if fitted < emitted_scale:
             emitted_scale = fitted
             # The width path's ``shrink`` was decided before the budget ran; a
@@ -1419,17 +1428,18 @@ def render_table(
                 indent=indent,
             )
 
+    stretch_arg = f", stretch: {stretch_pct:.0f}%" if stretch_pct < 100.0 else ""
     if full_page:
         lines = ['#place(top + center, scope: "parent", float: true, block(width: 100%)[']
-        if emitted_scale < 1.0:
-            lines.append(f"  #set text(size: {emitted_scale:.2f}em)")
+        if emitted_scale < 1.0 or stretch_arg:
+            lines.append(f"  #set text(size: {emitted_scale:.2f}em{stretch_arg})")
         if start_anchor:
             lines.append(f"  {start_anchor}")
         lines.append("  #table(")
     elif landscape:
         lines = ["#page(flipped: true)["]
-        if emitted_scale < 1.0:
-            lines.append(f"  #set text(size: {emitted_scale:.2f}em)")
+        if emitted_scale < 1.0 or stretch_arg:
+            lines.append(f"  #set text(size: {emitted_scale:.2f}em{stretch_arg})")
         if start_anchor:
             lines.append(f"  {start_anchor}")
         lines.append("  #table(")
@@ -1444,14 +1454,18 @@ def render_table(
         # (0.49pt on the last page). Nothing was lost by the page count: the
         # whole document had been shrunk to fit.
         lines = ["#["]
-        if shrink:
-            lines.append(f"  #set text(size: {emitted_scale:.2f}em)")
+        if shrink or stretch_arg:
+            lines.append(f"  #set text(size: {emitted_scale:.2f}em{stretch_arg})")
         if start_anchor:
             lines.append(f"  {start_anchor}")
         lines.append("  #table(")
+    if inset_x_pt == 5.0 and inset_y_pt == 5.0:
+        inset_line = f"{indent}inset: 5pt,"
+    else:
+        inset_line = f"{indent}inset: (x: {inset_x_pt:.1f}pt, y: {inset_y_pt:.1f}pt),"
     lines += [
         f"{indent}columns: {column_spec},",
-        f"{indent}inset: 5pt,",
+        inset_line,
         f"{indent}column-gutter: 0.7em,",
         f"{indent}align: (col, row) => if row == 0 {{ center + horizon }} else {{ left + horizon }},",
         f"{indent}stroke: none,",
@@ -2355,7 +2369,7 @@ class TypstDocumentRenderer:
         original extraction cache surviving.
         """
         self.stats = ReflowStats()
-        build_dir.mkdir(parents=True, exist_ok=True)
+        restrict_dir_to_owner(build_dir)
         blocks = _normalize_single_column_page_order(blocks)
 
         if (

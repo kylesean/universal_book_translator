@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 
 import pytest
 
 from ubt.render.table_compiler import (
     TableComplexity,
+    compile_typst_booktabs,
     normalize_table_to_source,
     parse_markdown_table,
     probe_table_complexity,
@@ -198,3 +200,76 @@ def test_normalize_table_to_source_never_pads_a_dropped_column() -> None:
     assert normalized == target
     ok = verify_table_reconstruction(source, normalized)
     assert not ok.ok and "row_1_cell_count_mismatch" in ok.reason
+
+
+def test_compile_typst_booktabs_structure() -> None:
+    """Standard table emits Typst booktabs with 3-line rules and no vertical borders."""
+    md = """
+| 方法 | 准确率 | 延迟 (ms) |
+| --- | --- | --- |
+| 基线模型 | 82.5% | 15.2 |
+| 拓扑增强 | 91.8% | 16.0 |
+"""
+    result = compile_typst_booktabs(md, content_width_pt=350.0)
+    assert result, "expected compiled booktabs markup"
+    assert "stroke: none" in result
+    assert "table.hline(stroke: 1.2pt)" in result  # top & bottom rules
+    assert "table.hline(stroke: 0.5pt)" in result  # mid header rule
+    assert "[*方法*]" in result
+    assert "[82.5%]" in result
+
+
+def test_compile_typst_booktabs_adaptive_widths() -> None:
+    """Wide CJK descriptive columns receive proportionally wider allocation than narrow numeric ones."""
+    md = """
+| ID | 详细架构描述与注意力特征提取分析 | 评分 |
+| --- | --- | --- |
+| 1 | 这是一个非常宽且详尽的多头自注意力机制说明文本 | 9.5 |
+"""
+    result = compile_typst_booktabs(md, content_width_pt=400.0)
+    # Extract columns: (w1, w2, w3)
+    match = re.search(r"columns:\s*\(([^)]+)\)", result)
+    assert match is not None
+    widths = [float(w.strip().removesuffix("pt")) for w in match.group(1).split(",")]
+    assert len(widths) == 3
+    # Middle column (wide CJK) must be significantly wider than col 0 (ID) and col 2 (Score)
+    assert widths[1] > widths[0] * 3.0
+    assert widths[1] > widths[2] * 3.0
+
+
+def test_compile_typst_booktabs_stretch_compact() -> None:
+    """When stretch_pct is provided, font stretch is injected for variable font compaction."""
+    md = """
+| Col1 | Col2 |
+| --- | --- |
+| A | B |
+"""
+    result = compile_typst_booktabs(md, stretch_pct=90.0)
+    assert "stretch: 90%" in result
+
+
+def test_compile_typst_booktabs_cell_clipping_height_fit() -> None:
+    """When content_height_pt is constrained, font scales down and insets compact to prevent cell clipping."""
+    md = "\n".join(
+        ["| Index | Measurement |", "|---|---|"] + [f"| item_{i} | value_{i} |" for i in range(10)]
+    )
+    # 10 rows in a 50pt box -> must shrink scale and compact inset
+    result = compile_typst_booktabs(md, content_height_pt=50.0, base_font_size_pt=10.0)
+    assert result
+    # Emitted scale in #set text(size: Xem) should be scaled down
+    match = re.search(r"#set text\(size:\s*([\d\.]+)em", result)
+    assert match is not None
+    scale = float(match.group(1))
+    assert scale < 1.0
+
+
+def test_compile_typst_booktabs_math_and_breaks() -> None:
+    """Math formulas and <br> line breaks in cells are preserved cleanly."""
+    md = """
+| Parameter | Value |
+| --- | --- |
+| Loss $L_2$ | Line 1<br>Line 2 |
+"""
+    result = compile_typst_booktabs(md)
+    assert "$L_2$" in result or "L_2" in result
+    assert "\\\n" in result  # Typst line break for <br>

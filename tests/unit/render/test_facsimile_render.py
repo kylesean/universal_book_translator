@@ -1476,3 +1476,130 @@ def test_facsimile_block_level_stretch_emitted() -> None:
     )
     markup = FacsimileRenderer().build_markup([page_spec], "bg.pdf", target_lang="zh")
     assert "stretch: 95%" in markup
+
+
+def test_facsimile_caption_rigid_anchoring_and_no_flow_grouping() -> None:
+    """Captions are rigidly anchored (+4pt below image) and NEVER merged into prose flow groups."""
+    # Mother image sits at y0=200, y1=350.
+    # Anchored caption sits at y1 = 200 - 4 = 196, y0 = 176.
+    cap_placement = FacsimileBlockPlacement(
+        block_id="b_cap",
+        page=1,
+        x0=50.0,
+        y0=176.0,
+        x1=250.0,
+        y1=196.0,
+        text="图 1：系统架构与执行流程示意图",
+        is_caption=True,
+        parent_figure_id="img_001",
+        src_y0=176.0,
+        src_y1=196.0,
+    )
+    # Succeeding prose block sits at y0=140, y1=170 (src_gap = 176 - 170 = 6pt <= 22pt)
+    prose_placement = FacsimileBlockPlacement(
+        block_id="b_prose",
+        page=1,
+        x0=50.0,
+        y0=140.0,
+        x1=250.0,
+        y1=170.0,
+        text="本节详细介绍系统整体架构及其核心设计原则。",
+        src_y0=140.0,
+        src_y1=170.0,
+    )
+    page_spec = FacsimilePageSpec(
+        page_no=1,
+        page_w=500.0,
+        page_h=700.0,
+        uniform_size_pt=10.0,
+        leading_em=0.35,
+        placements=[cap_placement, prose_placement],
+    )
+    renderer = FacsimileRenderer(enable_column_flow=True)
+    markup = renderer.build_markup([page_spec], "bg.pdf", target_lang="zh")
+
+    # 1. Caption must NOT be merged into a flow group with the prose
+    assert "flow-group: 2 blocks" not in markup
+    # 2. Caption block must have clip: false to prevent text truncation
+    assert "clip: false" in markup
+    # 3. Caption text centered under figure
+    assert "图 1：系统架构与执行流程示意图" in markup
+
+
+def test_facsimile_table_booktabs_rendering() -> None:
+    """Facsimile tables compile into academic booktabs with 3-line rules and white background mask."""
+    grid = "\n".join(
+        [
+            "| 参数 | 基准 | 优化后 |",
+            "|---|---|---|",
+            "| 吞吐量 (QPS) | 1250 | 3820 |",
+            "| P99 延迟 (ms) | 42.5 | 11.2 |",
+        ]
+    )
+    placement = FacsimileBlockPlacement(
+        block_id="b_tbl",
+        page=1,
+        x0=60.0,
+        y0=200.0,
+        x1=400.0,
+        y1=320.0,
+        text=grid,
+        is_table=True,
+    )
+    page_spec = FacsimilePageSpec(
+        page_no=1,
+        page_w=500.0,
+        page_h=700.0,
+        uniform_size_pt=10.0,
+        leading_em=0.35,
+        placements=[placement],
+    )
+    markup = FacsimileRenderer().build_markup([page_spec], "bg.pdf", target_lang="zh")
+    assert "stroke: none" in markup
+    assert "table.hline(stroke: 1.2pt)" in markup or "table.hline(stroke: 1.1pt)" in markup
+    assert 'fill: rgb("#ffffff")' in markup  # masks old stripped background vector lines
+
+
+def test_docling_parser_reanchors_figure_captions() -> None:
+    """Parser identifies figure captions and anchors their BBoxes 4pt below mother figures."""
+    from ubt.adapters.pdf.docling_parser import reanchor_figure_captions
+    from ubt.core.ir.models import (
+        BlockProvenance,
+        BlockType,
+        BoundingBox,
+        FlowID,
+        IRBlock,
+        make_element,
+    )
+
+    img_block = IRBlock(
+        element=make_element(
+            id="pdf_main#img_001",
+            spine_index=1,
+            block_type=BlockType.IMAGE,
+            source_text="/tmp/img.png",
+            bbox=BoundingBox(page=1, x0=50.0, y0=300.0, x1=300.0, y1=450.0),
+            skip_translate=True,
+        )
+    )
+    # Caption sits slightly below image originally (e.g. at y1=290, y0=265)
+    cap_block = IRBlock(
+        element=make_element(
+            id="pdf_main#b0002",
+            spine_index=2,
+            block_type=BlockType.NARRATIVE,
+            flow_id=FlowID.CAPTION,
+            source_text="Figure 1: High-fidelity layout preservation model.",
+            bbox=BoundingBox(page=1, x0=50.0, y0=265.0, x1=300.0, y1=290.0),
+        ),
+        provenance=BlockProvenance(),
+    )
+
+    reanchored = reanchor_figure_captions([img_block, cap_block])
+    assert len(reanchored) == 2
+    re_cap = reanchored[1]
+    assert re_cap.bbox is not None
+    # Rigid anchor check: top of caption (y1) MUST equal image y0 (300.0) - 4.0 = 296.0pt
+    assert re_cap.bbox.y1 == 296.0
+    assert getattr(re_cap.provenance, "caption_parent_id", None) == "pdf_main#img_001"
+    assert getattr(re_cap.provenance, "is_anchored_caption", False) is True

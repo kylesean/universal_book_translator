@@ -98,7 +98,8 @@ def _physical_box_region(pbox: PhysicalBox, page_width: float) -> tuple[int, int
     """The ``(page, column)`` region one physical box belongs to."""
     bw = pbox.bbox[2] - pbox.bbox[0]
     bmid = (pbox.bbox[0] + pbox.bbox[2]) / 2.0
-    bcol = 0 if bw > FULL_WIDTH_SHARE * page_width or bmid < page_width * 0.50 else 1
+    straddles_center = pbox.bbox[0] < page_width * 0.50 < pbox.bbox[2]
+    bcol = 0 if bw > 0.50 * page_width or straddles_center or bmid < page_width * 0.50 else 1
     return (int(pbox.page), bcol)
 
 
@@ -111,33 +112,45 @@ def group_multi_region_boxes(block: IRBlock, page_width: float) -> list[Physical
     ):
         return None
     raw_boxes = boxes_from_provenance(block.provenance.physical_boxes)
-    distinct_regions = {_physical_box_region(bx, page_width) for bx in raw_boxes}
-    if len(distinct_regions) <= 1:
-        return None
+    # Consecutive lines on the same page with overlapping horizontal projections
+    # belong to the same column region and must never be fragmented into flow slices.
     grouped_boxes: list[PhysicalBox] = []
     curr_reg: tuple[int, int] | None = None
     curr_page = 0
     ux0, uy0, ux1, uy1 = 0.0, 0.0, 0.0, 0.0
     for bx in raw_boxes:
         reg = _physical_box_region(bx, page_width)
-        if reg != curr_reg:
+        bx_page = int(bx.page)
+        bx0, by0, bx1, by1 = (
+            float(bx.bbox[0]),
+            float(bx.bbox[1]),
+            float(bx.bbox[2]),
+            float(bx.bbox[3]),
+        )
+
+        is_same_region = False
+        if curr_reg is not None and bx_page == curr_page:
+            ov = max(0.0, min(ux1, bx1) - max(ux0, bx0))
+            mw = min(ux1 - ux0, bx1 - bx0)
+            if mw > 0 and (ov / mw) > 0.25:
+                is_same_region = True
+
+        if not is_same_region and reg != curr_reg:
             if curr_reg is not None:
                 grouped_boxes.append(PhysicalBox.of(curr_page, (ux0, uy0, ux1, uy1)))
             curr_reg = reg
-            curr_page = int(bx.page)
-            ux0, uy0, ux1, uy1 = (
-                float(bx.bbox[0]),
-                float(bx.bbox[1]),
-                float(bx.bbox[2]),
-                float(bx.bbox[3]),
-            )
+            curr_page = bx_page
+            ux0, uy0, ux1, uy1 = bx0, by0, bx1, by1
         else:
-            ux0 = min(ux0, float(bx.bbox[0]))
-            uy0 = min(uy0, float(bx.bbox[1]))
-            ux1 = max(ux1, float(bx.bbox[2]))
-            uy1 = max(uy1, float(bx.bbox[3]))
+            ux0 = min(ux0, bx0)
+            uy0 = min(uy0, by0)
+            ux1 = max(ux1, bx1)
+            uy1 = max(uy1, by1)
     if curr_reg is not None:
         grouped_boxes.append(PhysicalBox.of(curr_page, (ux0, uy0, ux1, uy1)))
+
+    if len(grouped_boxes) <= 1:
+        return None
     return grouped_boxes
 
 
@@ -183,7 +196,8 @@ def build_page_fit_models(
                 # A preserved figure/formula is a vertical obstacle for the prose
                 # above it: glue may not expand into it. Same rule as the loop.
                 obs_top = float(block.bbox.y1)
-                if width > FULL_WIDTH_SHARE * pw:
+                straddles = float(block.bbox.x0) < pw * 0.50 < float(block.bbox.x1)
+                if width > 0.50 * pw or straddles:
                     obstacles.setdefault(0, []).append(obs_top)
                     obstacles.setdefault(1, []).append(obs_top)
                 else:
@@ -233,7 +247,8 @@ def build_page_fit_models(
             if block.bbox.page != page_no:
                 continue
             mid_x = (float(block.bbox.x0) + float(block.bbox.x1)) / 2.0
-            column = 0 if width > FULL_WIDTH_SHARE * pw or mid_x < pw * 0.50 else 1
+            straddles = float(block.bbox.x0) < pw * 0.50 < float(block.bbox.x1)
+            column = 0 if width > 0.50 * pw or straddles or mid_x < pw * 0.50 else 1
             buckets.setdefault(column, []).append(
                 {
                     "id": block.id,

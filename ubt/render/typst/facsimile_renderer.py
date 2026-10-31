@@ -78,6 +78,10 @@ class FacsimileBlockPlacement:
     src_y1: float | None = None
     #: Horizontal glyph stretch percentage (e.g. 90.0, 95.0, 100.0) for variable font elastic compaction
     stretch_pct: float = 100.0
+    #: The block is a figure caption rigidly anchored to a figure
+    is_caption: bool = False
+    #: ID of the parent figure (e.g. image) this caption is anchored to
+    parent_figure_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -147,17 +151,24 @@ class FacsimileRenderer:
     ) -> str:
         """Typst markup for one placement's text, sized and styled by its block type."""
         if pl.is_table:
+            from ubt.render.table_compiler import compile_typst_booktabs
             from ubt.render.typst.document_renderer import render_table
 
-            # Continuation notices ride every tier: a tall grid this tier
-            # places on one canvas still breaks across the page boundary, and
-            # a reader meeting the second fragment without "（续表）" has lost
-            # the thread (measured on the ATC'25 SQLite results table).
-            #
-            # The height budget is the box the source gave the grid: a
-            # translated table wraps more lines than its source (CJK cells),
-            # and without the budget the grid grew straight into the table
-            # footnote printed below it (measured on the ATC'25 replay, p13).
+            # First try dedicated academic booktabs compiler
+            table_markup = compile_typst_booktabs(
+                pl.text,
+                content_width_pt=width_pt,
+                content_height_pt=max(0.0, float(pl.y1) - float(pl.y0)),
+                base_font_size_pt=base_font_size_pt,
+                stretch_pct=pl.stretch_pct,
+                target_lang=target_lang,
+                is_math_ok=self._math_gate,
+                enable_continuation=True,
+                table_uid=f"src-{pl.block_id}",
+            )
+            if table_markup:
+                return table_markup
+
             table_markup = render_table(
                 pl.text,
                 is_math_ok=self._math_gate,
@@ -165,6 +176,7 @@ class FacsimileRenderer:
                 content_width_pt=width_pt,
                 content_height_pt=max(0.0, float(pl.y1) - float(pl.y0)),
                 base_font_size_pt=base_font_size_pt,
+                stretch_pct=pl.stretch_pct,
                 target_lang=target_lang,
                 enable_continuation=True,
                 table_uid=f"src-{pl.block_id}",
@@ -207,6 +219,15 @@ class FacsimileRenderer:
         stretch = (
             f"stretch: {pl.stretch_pct:.0f}%, " if pl.stretch_pct and pl.stretch_pct < 100.0 else ""
         )
+
+        if pl.is_caption:
+            cap_size = f"size: {pl.font_size_pt}pt, " if pl.font_size_pt else "size: 9pt, "
+            fill = f'fill: rgb("{pl.text_color_hex}")' if pl.text_color_hex != "#000000" else ""
+            fill_arg = f", {fill}" if fill else ""
+            return (
+                f"#set par(justify: false, leading: 0.50em)\n"
+                f'    #align(center)[#text({cap_size}{stretch}weight: "regular"{fill_arg})[{escaped}]]'
+            )
 
         if pl.is_heading:
             weight = _normalise_weight(pl.font_weight, is_heading=True, bold=True)
@@ -348,6 +369,8 @@ class FacsimileRenderer:
                     and not prev_pl.is_table
                     and not pl.is_code
                     and not prev_pl.is_code
+                    and not pl.is_caption
+                    and not prev_pl.is_caption
                     and not is_spanning
                     and not prev_is_spanning
                     and col == prev_col
@@ -372,13 +395,35 @@ class FacsimileRenderer:
                             f"    {content}\n"
                             f"  ])"
                         )
-                    else:
+                    elif pl.is_caption:
                         lines.append(
                             f"  #place(top + left, dx: {dx}pt, dy: {dy}pt, "
-                            f"block(width: {width}pt, height: {height}pt, clip: true, outset: (top: 2.5pt, bottom: 2.5pt))[\n"
+                            f"block(width: {width}pt, height: {height}pt, clip: false, outset: (top: 2.0pt, bottom: 2.0pt))[\n"
                             f"    {content}\n"
                             f"  ])"
                         )
+                    else:
+                        eff_stretch = min(pl.stretch_pct, p.stretch_pct)
+                        if eff_stretch < 100.0:
+                            scale_factor = eff_stretch / 100.0
+                            inner_w = round(width / scale_factor, 2)
+                            lines.append(
+                                f"  #place(top + left, dx: {dx}pt, dy: {dy}pt, "
+                                f"block(width: {width}pt, height: {height}pt, clip: true, outset: (top: 2.5pt, bottom: 2.5pt))[\n"
+                                f"    #scale(x: {eff_stretch:.0f}%, origin: left + top)[\n"
+                                f"      #block(width: {inner_w}pt)[\n"
+                                f"        {content}\n"
+                                f"      ]\n"
+                                f"    ]\n"
+                                f"  ])"
+                            )
+                        else:
+                            lines.append(
+                                f"  #place(top + left, dx: {dx}pt, dy: {dy}pt, "
+                                f"block(width: {width}pt, height: {height}pt, clip: true, outset: (top: 2.5pt, bottom: 2.5pt))[\n"
+                                f"    {content}\n"
+                                f"  ])"
+                            )
                 else:
                     # Flow group of contiguous paragraphs in column
                     grp_dx = round(min(it[1] for it in grp), 2)
@@ -395,12 +440,27 @@ class FacsimileRenderer:
                             flow_body.append(f"    {v_gap}")
                         flow_body.append(f"    #block[\n      {it_content}\n    ]")
                     flow_content_str = "\n".join(flow_body)
-                    lines.append(
-                        f"  #place(top + left, dx: {grp_dx}pt, dy: {grp_dy}pt, "
-                        f"block(width: {grp_width}pt, height: {grp_height}pt, clip: true, outset: (top: 3.0pt, bottom: 3.0pt))[\n"
-                        f"{flow_content_str}\n"
-                        f"  ])"
-                    )
+                    eff_stretch = min(min(it[0].stretch_pct for it in grp), p.stretch_pct)
+                    if eff_stretch < 100.0:
+                        scale_factor = eff_stretch / 100.0
+                        inner_w = round(grp_width / scale_factor, 2)
+                        lines.append(
+                            f"  #place(top + left, dx: {grp_dx}pt, dy: {grp_dy}pt, "
+                            f"block(width: {grp_width}pt, height: {grp_height}pt, clip: true, outset: (top: 3.0pt, bottom: 3.0pt))[\n"
+                            f"    #scale(x: {eff_stretch:.0f}%, origin: left + top)[\n"
+                            f"      #block(width: {inner_w}pt)[\n"
+                            f"{flow_content_str}\n"
+                            f"      ]\n"
+                            f"    ]\n"
+                            f"  ])"
+                        )
+                    else:
+                        lines.append(
+                            f"  #place(top + left, dx: {grp_dx}pt, dy: {grp_dy}pt, "
+                            f"block(width: {grp_width}pt, height: {grp_height}pt, clip: true, outset: (top: 3.0pt, bottom: 3.0pt))[\n"
+                            f"{flow_content_str}\n"
+                            f"  ])"
+                        )
 
             lines.append("]")
             lines.append("")

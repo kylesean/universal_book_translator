@@ -44,6 +44,18 @@ class TypeElasticitySolver:
             deficit_ratio: (measured_height / allowed_height) - 1.0. Negative or 0 means fits within budget.
         """
         if deficit_ratio <= 0.0:
+            # Positive underflow / slack absorption: when text is significantly shorter than box,
+            # relax leading up to 0.72em to improve typographical gray and avoid empty void
+            if deficit_ratio <= -0.20:
+                relaxed_leading = min(
+                    0.72, round(cls.LEADING_STEPS[0] + abs(deficit_ratio) * 0.20, 2)
+                )
+                return ElasticTypeStyle(
+                    font_size_pt=base_font_size,
+                    leading_em=relaxed_leading,
+                    stretch_pct=cls.STRETCH_STEPS[0],
+                    scale=1.0,
+                )
             return ElasticTypeStyle(
                 font_size_pt=base_font_size,
                 leading_em=cls.LEADING_STEPS[0],

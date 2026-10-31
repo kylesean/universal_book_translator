@@ -18,10 +18,18 @@ def test_zero_deficit_keeps_defaults() -> None:
 
 
 def test_negative_deficit_keeps_defaults() -> None:
-    # Underflow (spacious box)
+    # Small underflow (spacious box < 20% slack) keeps defaults
     style = TypeElasticitySolver.resolve_params(base_font_size=10.0, deficit_ratio=-0.15)
     assert style.font_size_pt == 10.0
     assert style.leading_em == 0.62
+    assert style.stretch_pct == 100.0
+
+
+def test_significant_slack_absorbs_via_relaxed_leading() -> None:
+    # Significant underflow (>= 20% slack) absorbs by relaxing leading up to 0.72em
+    style = TypeElasticitySolver.resolve_params(base_font_size=10.0, deficit_ratio=-0.40)
+    assert style.font_size_pt == 10.0
+    assert style.leading_em == 0.70
     assert style.stretch_pct == 100.0
 
 

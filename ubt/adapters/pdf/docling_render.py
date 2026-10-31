@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,8 +21,9 @@ from ubt.adapters.pdf.strip_pdf_text import BoxRect
 from ubt.adapters.pdf.typst_compile import typst_version
 from ubt.core.content.nodes import ReconstructionRecord
 from ubt.core.exceptions import DocumentParseError
-from ubt.core.ir.models import BlockType, BookManifest, IRBlock
+from ubt.core.ir.models import BlockType, BookManifest, FlowID, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
+from ubt.model.ast import RegionKind
 from ubt.render.inline_spans import block_runs
 
 if TYPE_CHECKING:
@@ -790,6 +792,12 @@ class DoclingRenderStrategy:
                 if other.bbox and other.bbox.page == pno and not other.skip_translate
             ]
 
+            images_on_page = [
+                img
+                for img in page_blocks
+                if img.block_type == BlockType.IMAGE and img.bbox and img.bbox.page == pno
+            ]
+
             for b in page_blocks:
                 if not b.bbox:
                     continue
@@ -857,6 +865,54 @@ class DoclingRenderStrategy:
                         bx1 -= off_x
                         by0 -= off_y
                         by1 -= off_y
+
+                is_caption = (
+                    getattr(b, "flow_id", None) == FlowID.CAPTION
+                    or getattr(b, "region", None) == RegionKind.CAPTION
+                    or getattr(b.provenance, "is_anchored_caption", False)
+                    or bool(
+                        re.match(
+                            r"^(?:fig(?:ure)?|图)\.?\s*[\d\w]+",
+                            b.source_text.strip(),
+                            re.IGNORECASE,
+                        )
+                    )
+                ) and not bool(
+                    re.match(r"^(?:table|表)\.?\s*[\d\w]+", b.source_text.strip(), re.IGNORECASE)
+                )
+
+                parent_fig_id = getattr(b.provenance, "caption_parent_id", None)
+                if is_caption and images_on_page:
+                    matching_img = None
+                    if parent_fig_id:
+                        matching_img = next(
+                            (img for img in images_on_page if img.id == parent_fig_id), None
+                        )
+                    if matching_img is None:
+                        min_dist = float("inf")
+                        cap_mid_x = (bx0 + bx1) / 2.0
+                        for img in images_on_page:
+                            if not img.bbox:
+                                continue
+                            dist = float(img.bbox.y0) - by1
+                            horiz_overlap = max(
+                                0.0,
+                                min(float(img.bbox.x1), bx1) - max(float(img.bbox.x0), bx0),
+                            )
+                            horiz_close = abs(
+                                cap_mid_x - (float(img.bbox.x0) + float(img.bbox.x1)) / 2.0
+                            ) <= max(100.0, float(img.bbox.x1) - float(img.bbox.x0))
+                            if (
+                                -15.0 <= dist <= 150.0
+                                and (horiz_overlap > 0.0 or horiz_close)
+                                and dist < min_dist
+                            ):
+                                min_dist = dist
+                                matching_img = img
+                    if matching_img and matching_img.bbox:
+                        parent_fig_id = matching_img.id
+                        by1 = round(float(matching_img.bbox.y0) - 4.0, 2)
+                        by0 = round(by1 - max(12.0, h), 2)
 
                 # Multi-region flow handling:
                 # If a block spans multiple disjoint regions (different columns or different pages),
@@ -1008,19 +1064,22 @@ class DoclingRenderStrategy:
                 glyph_aspect = (len(target_content) - ascii_count + ascii_count * 0.50) / max(
                     1, len(target_content)
                 )
-                records_by_column.setdefault(column, []).append(
-                    {
-                        "id": b.id,
-                        "top": by1,
-                        "bot": by0,
-                        "w": w,
-                        "x0": bx0,
-                        "x1": bx1,
-                        "n": max(1, round(h / source_leading_pt)),
-                        "glyphs": len(target_content.strip()),
-                        "glyph_aspect": glyph_aspect,
-                    }
-                )
+                if is_caption:
+                    obstacles_by_column.setdefault(column, []).append(by0)
+                else:
+                    records_by_column.setdefault(column, []).append(
+                        {
+                            "id": b.id,
+                            "top": by1,
+                            "bot": by0,
+                            "w": w,
+                            "x0": bx0,
+                            "x1": bx1,
+                            "n": max(1, round(h / source_leading_pt)),
+                            "glyphs": len(target_content.strip()),
+                            "glyph_aspect": glyph_aspect,
+                        }
+                    )
 
                 is_table = b.block_type == BlockType.TABLE
                 if is_table:
@@ -1049,6 +1108,8 @@ class DoclingRenderStrategy:
                         runs=tuple(block_runs(b)),
                         src_y0=by0,
                         src_y1=by1,
+                        is_caption=is_caption,
+                        parent_figure_id=parent_fig_id,
                     )
                 )
 
@@ -1457,13 +1518,17 @@ class DoclingRenderStrategy:
                     skipped.append((pb.id, "facsimile_preserved_opaque"))
 
                 elastic_stretch = 100.0
-                if pno in page_fits and not page_fits[pno].fits and page_fits[pno].deficit_pt > 0:
-                    deficit_ratio = page_fits[pno].deficit_pt / max(100.0, ph - 100.0)
-                    elastic_style = TypeElasticitySolver.resolve_params(
-                        base_font_size=body_group.size_pt,
-                        deficit_ratio=deficit_ratio,
-                    )
-                    elastic_stretch = elastic_style.stretch_pct
+                elastic_leading = body_group.leading_em
+                if pno in page_fits:
+                    fit = page_fits[pno]
+                    if not fit.fits and fit.deficit_pt > 0:
+                        deficit_ratio = fit.deficit_pt / max(100.0, ph - 100.0)
+                        elastic_style = TypeElasticitySolver.resolve_params(
+                            base_font_size=body_group.size_pt,
+                            deficit_ratio=deficit_ratio,
+                        )
+                        elastic_stretch = elastic_style.stretch_pct
+                        elastic_leading = elastic_style.leading_em
 
                 pages_spec.append(
                     FacsimilePageSpec(
@@ -1471,7 +1536,7 @@ class DoclingRenderStrategy:
                         page_w=round(pw, 2),
                         page_h=round(ph, 2),
                         uniform_size_pt=body_group.size_pt,
-                        leading_em=body_group.leading_em,
+                        leading_em=elastic_leading,
                         tracking_em=body_group.tracking_em,
                         stretch_pct=elastic_stretch,
                         placements=placements,

@@ -1,7 +1,11 @@
-"""Table complexity assessment and Typst table compiler.
+"""Table parsing, cell-count verification, and the in-place vs. appendix decision.
 
-Determines whether a table block can be typeset in-place via Typst micro-grid
-or should be deferred to a dedicated high-fidelity translated table appendix.
+A translated table is safe to typeset in the body only while its geometry still holds:
+merged cells, six-plus columns, or prose-sized cells will not fit one column's measure
+no matter what the renderer does to them, and a clipped table in the body is worse than
+a clean one in the appendix. The complexity probe makes that call, and
+``verify_table_reconstruction`` guards the other half — that the translation neither
+gained nor lost a cell on the way.
 """
 
 from __future__ import annotations
@@ -96,7 +100,6 @@ def parse_markdown_table(
     if len(table_lines) < 2:
         return None
 
-    # Check separator row
     header_line = table_lines[0]
     sep_idx = -1
     for idx in range(1, min(3, len(table_lines))):
@@ -106,7 +109,6 @@ def parse_markdown_table(
             break
 
     if sep_idx == -1:
-        # No standard separator line found
         return None
 
     def _cell(value: str) -> str:
@@ -342,9 +344,8 @@ def probe_table_complexity(
     page_columns: int = 1,
     content_width_pt: float | None = None,
 ) -> TableComplexity:
-    """Assess whether a table can be safely overlaid in-place without clipping or overflow."""
+    """Whether the table can be typeset in the body without clipping, or defers to the appendix."""
     text_lower = markup.lower()
-    # 1. Merged cells or complex HTML markers
     if (
         "colspan" in text_lower
         or "rowspan" in text_lower
@@ -375,9 +376,9 @@ def probe_table_complexity(
     cols = len(headers)
     total_rows = len(rows) + 1  # Including header
 
-    # 2. Too many columns & single-column density
-    # In single-column layout, dense tables (>= 8 columns) lack column space and warrant
-    # a landscape contingency or appendix. 6-7 columns in narrow layout also suggest landscape.
+    # A table this wide cannot get column space out of a single-column measure, so it
+    # defers to the appendix; and when the measure is too narrow to hold it at all,
+    # rotating the page buys the room back, so landscape is suggested instead.
     if cols >= 8:
         is_single_col_dense = page_columns == 1 and (
             content_width_pt is None or content_width_pt < 600.0
@@ -403,7 +404,6 @@ def probe_table_complexity(
             contingency="landscape" if is_narrow_dense else "appendix",
         )
 
-    # 3. Geometry density check
     if bbox is not None:
         height = getattr(bbox, "height", None)
         if height is None and hasattr(bbox, "y1") and hasattr(bbox, "y0"):
@@ -434,7 +434,6 @@ def probe_table_complexity(
                 contingency="appendix",
             )
 
-    # 4. Long prose in table cells
     all_cells = headers + [c for r in rows for c in r]
     if all_cells:
         avg_len = sum(len(c) for c in all_cells) / len(all_cells)
@@ -458,9 +457,252 @@ def probe_table_complexity(
     )
 
 
+_LATIN_LOWER_EM = 0.557
+_LATIN_UPPER_EM = 0.698
+_DIGIT_EM = 0.548
+_CJK_EM = 1.0
+_CJK_PUNCT_EM = 0.5
+_ASCII_PUNCT_EM = 0.364
+_SPACE_EM = 0.256
+
+_BREAKABLE_RANGES = (
+    (0x2E80, 0x9FFF),  # CJK radicals .. CJK unified ideographs
+    (0xF900, 0xFAFF),  # CJK compatibility ideographs
+    (0xFF00, 0xFFEF),  # half/full-width forms (full-width punctuation)
+    (0x3000, 0x303F),  # CJK symbols and punctuation
+    (0x1100, 0x11FF),  # Hangul Jamo
+    (0xA960, 0xA97F),  # Hangul Jamo Extended-A
+    (0xAC00, 0xD7FF),  # Hangul syllables + Jamo Extended-B
+)
+
+
+def _is_cjk(char: str) -> bool:
+    code = ord(char)
+    return any(low <= code <= high for low, high in _BREAKABLE_RANGES)
+
+
+def _is_hangul(char: str) -> bool:
+    code = ord(char)
+    return 0x1100 <= code <= 0x11FF or 0xA960 <= code <= 0xA97F or 0xAC00 <= code <= 0xD7FF
+
+
+def _is_cjk_punct(char: str) -> bool:
+    code = ord(char)
+    return 0x3000 <= code <= 0x303F or 0xFF01 <= code <= 0xFF65
+
+
+def _char_em(char: str) -> float:
+    if char.isspace():
+        return _SPACE_EM
+    if _is_hangul(char):
+        return _CJK_EM
+    if _is_cjk(char):
+        return _CJK_EM if ord(char) >= 0x3040 else _CJK_PUNCT_EM
+    if char.isdigit():
+        return _DIGIT_EM
+    if "A" <= char <= "Z":
+        return _LATIN_UPPER_EM
+    if char.isalpha():
+        return _LATIN_LOWER_EM
+    return _ASCII_PUNCT_EM
+
+
+def _text_em(text: str) -> float:
+    return sum(_char_em(char) for char in text)
+
+
+def _longest_unbreakable(text: str) -> float:
+    widest = 0.0
+    run = 0.0
+    for char in text:
+        if _is_cjk_punct(char):
+            widest = max(widest, run)
+            run = 0.0
+        elif char.isspace() or _is_cjk(char):
+            widest = max(widest, run)
+            run = _char_em(char) if not char.isspace() else 0.0
+        elif char in "-\u2010\u2011\u2013\u2014":
+            run += _char_em(char)
+            widest = max(widest, run)
+            run = 0.0
+        else:
+            run += _char_em(char)
+    return max(widest, run)
+
+
+def compile_typst_booktabs(
+    markup: str,
+    *,
+    content_width_pt: float | None = None,
+    content_height_pt: float | None = None,
+    base_font_size_pt: float | None = None,
+    min_font_size_pt: float = 7.5,
+    stretch_pct: float = 100.0,
+    target_lang: str = "zh",
+    is_math_ok: Any | None = None,
+    enable_continuation: bool = False,
+    table_uid: str = "",
+) -> str:
+    """Compile a Markdown table into an academic Typst booktabs (#table) structure.
+
+    Features:
+    - Standard 3-line academic booktabs formatting:
+      - 1.2pt top rule
+      - 0.5pt mid rule below header
+      - 1.2pt bottom rule
+      - stroke: none (no vertical rules)
+    - Adaptive column widths based on font advance measurements and unbreakable runs.
+    - Cell clipping and overlap defense:
+      - Micro insets (x: 3.5pt, y: 2.0pt, adaptively reduced if height-constrained).
+      - Elastic variable font stretch (stretch_pct: 90%~100%).
+      - Dynamic font scale down to min_font_size_pt (floor 7.5pt).
+    - Math formulas ($...$) and line breaks (<br>) cleanly transpiled.
+    - Table header bolding ([*Header*]).
+    - Continuation support when enabled.
+    """
+    parsed = parse_markdown_table(markup, escape=False)
+    if parsed is None:
+        return ""
+    headers, rows = parsed
+    columns = len(headers)
+    if columns == 0:
+        return ""
+
+    try:
+        from ubt.render.typst.document_renderer import render_prose
+    except Exception:
+
+        def render_prose(s: str, is_math_ok: Any = None) -> str:  # type: ignore[misc]
+            return typst_escape(s)
+
+    def _render_cell_content(val: str, *, is_hdr: bool) -> str:
+        parts = re.split(r"<br\s*/?>", val.strip())
+        lines = [render_prose(p.strip(), is_math_ok=is_math_ok) for p in parts]
+        joined = "\\\n".join(lines)
+        return f"[*{joined}*]" if is_hdr and joined else f"[{joined}]"
+
+    base_pt = (
+        float(base_font_size_pt) if base_font_size_pt is not None and base_font_size_pt > 0 else 9.0
+    )
+    width_pt = (
+        float(content_width_pt) if content_width_pt is not None and content_width_pt > 0 else 468.0
+    )
+
+    weights: list[float] = []
+    runs: list[float] = []
+    for col in range(columns):
+        col_longest = 0.0
+        col_run = 0.0
+        for values in [headers, *rows]:
+            if col < len(values):
+                for part in re.split(r"<br\s*/?>", values[col]):
+                    p_txt = part.strip()
+                    col_longest = max(col_longest, _text_em(p_txt))
+                    col_run = max(col_run, _longest_unbreakable(p_txt))
+        weights.append(max(col_longest, 1.0))
+        runs.append(max(col_run, 1.0))
+
+    total_weight = sum(weights) or 1.0
+    gutter_pt = 0.7 * base_pt
+    share_available = max(1.0, width_pt - (columns - 1) * gutter_pt)
+
+    stretch_factor = max(0.85, min(1.0, stretch_pct / 100.0))
+    inset_x_pt = 3.5
+    inset_y_pt = 2.0
+
+    total_run_em = sum(runs) * stretch_factor
+    inset_budget = 2 * inset_x_pt * columns
+    required_width = total_run_em * base_pt + inset_budget
+    scale = 1.0
+    if required_width > share_available:
+        scale = max(
+            min_font_size_pt / base_pt,
+            (share_available - inset_budget) / max(1.0, total_run_em * base_pt),
+        )
+
+    if content_height_pt is not None and content_height_pt > 0.0:
+        total_rows = len(rows) + 1
+        est_height = total_rows * (base_pt * scale * 1.35 + 2 * inset_y_pt) + 2.9
+        if est_height > content_height_pt:
+            ratio = content_height_pt / est_height
+            scale = max(min_font_size_pt / base_pt, scale * ratio)
+            inset_y_pt = max(1.0, inset_y_pt * ratio)
+            inset_x_pt = max(2.0, inset_x_pt * ratio)
+
+    run_mins = [run * base_pt * scale * stretch_factor + 2 * inset_x_pt for run in runs]
+    total_min = sum(run_mins)
+    if total_min >= share_available:
+        widths = [m * share_available / total_min for m in run_mins]
+    else:
+        slack = share_available - total_min
+        widths = [m + slack * (w / total_weight) for m, w in zip(run_mins, weights, strict=True)]
+
+    column_spec = "(" + ", ".join(f"{max(12.0, w * 0.998):.1f}pt" for w in widths) + ")"
+
+    start_anchor = ""
+    header_continuation_cell = ""
+    footer_continuation_block = ""
+    if enable_continuation and len(rows) >= 4:
+        try:
+            from ubt.core.tables.models import TableContinuationConfig
+            from ubt.core.tables.styler import generate_typst_table_continuation_elements
+
+            t_cfg = TableContinuationConfig()
+            (
+                start_anchor,
+                header_continuation_cell,
+                footer_continuation_block,
+                _,
+            ) = generate_typst_table_continuation_elements(
+                columns=columns,
+                table_uid=table_uid or f"tbl-{abs(hash(markup)) % 100000}",
+                lang=target_lang,
+                config=t_cfg,
+                indent="  ",
+            )
+        except Exception:
+            pass
+
+    lines: list[str] = ["#["]
+    stretch_arg = f", stretch: {stretch_pct:.0f}%" if stretch_pct < 100.0 else ""
+    if scale < 1.0 or stretch_arg:
+        lines.append(f"  #set text(size: {scale:.2f}em{stretch_arg})")
+    lines.append("  #set par(justify: false, leading: 0.55em)")
+    if start_anchor:
+        lines.append(f"  {start_anchor}")
+    lines.append("  #table(")
+    lines.append(f"    columns: {column_spec},")
+    lines.append(f"    inset: (x: {inset_x_pt:.1f}pt, y: {inset_y_pt:.1f}pt),")
+    lines.append("    column-gutter: 0.7em,")
+    lines.append(
+        "    align: (col, row) => if row == 0 { center + horizon } else { left + horizon },"
+    )
+    lines.append("    stroke: none,")
+    lines.append("    table.header(")
+    lines.append("      repeat: true,")
+    if header_continuation_cell:
+        lines.append(header_continuation_cell)
+    lines.append("      table.hline(stroke: 1.2pt),")
+    hdr_cells_str = ", ".join(_render_cell_content(h, is_hdr=True) for h in headers)
+    lines.append(f"      {hdr_cells_str},")
+    lines.append("      table.hline(stroke: 0.5pt),")
+    lines.append("    ),")
+    for row in rows:
+        padded_row = list(row) + [""] * (columns - len(row))
+        row_str = ", ".join(_render_cell_content(c, is_hdr=False) for c in padded_row[:columns])
+        lines.append(f"    {row_str},")
+    if footer_continuation_block:
+        lines.append(footer_continuation_block)
+    lines.append("    table.hline(stroke: 1.2pt),")
+    lines.append("  )")
+    lines.append("]")
+    return "\n".join(lines)
+
+
 __all__ = [
     "TableComplexity",
     "TableReconstruction",
+    "compile_typst_booktabs",
     "count_table_cells",
     "parse_markdown_table",
     "probe_table_complexity",
