@@ -159,7 +159,8 @@ class FacsimileRenderer:
                 pl.text,
                 content_width_pt=width_pt,
                 content_height_pt=max(0.0, float(pl.y1) - float(pl.y0)),
-                base_font_size_pt=base_font_size_pt,
+                base_font_size_pt=pl.font_size_pt or base_font_size_pt,
+                min_font_size_pt=6.5,
                 stretch_pct=pl.stretch_pct,
                 target_lang=target_lang,
                 is_math_ok=self._math_gate,
@@ -391,7 +392,7 @@ class FacsimileRenderer:
                     if pl.is_table:
                         lines.append(
                             f"  #place(top + left, dx: {dx}pt, dy: {dy}pt, "
-                            f'block(width: {width}pt, height: {height}pt, fill: rgb("#ffffff"), clip: false, outset: (top: 2.5pt, bottom: 2.5pt))[\n'
+                            f'block(width: {width}pt, height: {height}pt, fill: rgb("#ffffff"), clip: true, outset: (top: 2.5pt, bottom: 2.5pt))[\n'
                             f"    {content}\n"
                             f"  ])"
                         )

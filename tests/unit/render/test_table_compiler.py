@@ -325,3 +325,33 @@ def test_compile_typst_booktabs_empty_rows() -> None:
     assert result
     assert "table.hline(stroke: 1.2pt)" in result
     assert "table.hline(stroke: 0.5pt)" not in result
+
+
+def test_compile_typst_booktabs_dense_cjk_proportional_allocation_and_height_solve() -> None:
+    """Academic tables with multi-char CJK headers and tight vertical boxes dynamically scale and fit."""
+    md = """
+| 基于 Rust 的 OS | Linux | Tock | RedLeaf | Theseus |
+|---|---|---|---|---|
+| 使用不安全关键字的包 | 6 / 11 (55%) | 91 / 98 (93%) | 36 / 58 (62%) | 54 / 171 (32%) |
+"""
+    # 38.7pt height budget (as on ATC'25 page 2)
+    result = compile_typst_booktabs(
+        md,
+        content_width_pt=244.49,
+        content_height_pt=38.71,
+        base_font_size_pt=9.75,
+        min_font_size_pt=6.5,
+    )
+    assert result
+    # Column 0 (10-char CJK text) must receive wider width than numeric columns
+    match = re.search(r"columns:\s*\(([^)]+)\)", result)
+    assert match is not None
+    widths = [float(w.strip().removesuffix("pt")) for w in match.group(1).split(",")]
+    assert len(widths) == 5
+    assert widths[0] > widths[1]
+    assert widths[0] > widths[2]
+    # Font scale must be scaled down to fit within the 38.71pt box
+    scale_match = re.search(r"#set text\(size:\s*([\d\.]+)em", result)
+    assert scale_match is not None
+    scale = float(scale_match.group(1))
+    assert scale < 1.0

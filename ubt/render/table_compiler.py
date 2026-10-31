@@ -10,6 +10,7 @@ gained nor lost a cell on the way.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -621,46 +622,115 @@ def compile_typst_booktabs(
         weights.append(max(col_longest, 1.0))
         runs.append(max(col_run, 1.0))
 
-    total_weight = sum(weights) or 1.0
-    gutter_pt = 0.7 * base_pt
-    share_available = max(1.0, width_pt - (columns - 1) * gutter_pt)
-
     stretch_factor = max(0.85, min(1.0, stretch_pct / 100.0))
     inset_x_pt = 3.5
     inset_y_pt = 2.0
 
     total_run_em = sum(runs) * stretch_factor
     inset_budget = 2 * inset_x_pt * columns
-    required_width = total_run_em * base_pt + inset_budget
+    gutter_pt = 0.7 * base_pt
+    share_available = max(1.0, width_pt - (columns - 1) * gutter_pt)
+
     scale = 1.0
+    required_width = total_run_em * base_pt + inset_budget
     if required_width > share_available:
         scale = max(
             min_font_size_pt / base_pt,
             (share_available - inset_budget) / max(1.0, total_run_em * base_pt),
         )
 
-    if content_height_pt is not None and content_height_pt > 0.0:
-        total_rows = len(rows) + 1
-        total_visual_lines = sum(
-            max((len(re.split(r"<br\s*/?>", c)) for c in r if c), default=1)
-            for r in [headers, *rows]
-        )
-        est_height = (
-            total_visual_lines * (base_pt * scale * 1.35) + total_rows * (2 * inset_y_pt) + 2.9
-        )
-        if est_height > content_height_pt:
-            ratio = content_height_pt / est_height
-            scale = max(min_font_size_pt / base_pt, scale * ratio)
-            inset_y_pt = max(1.0, inset_y_pt * ratio)
-            inset_x_pt = max(2.0, inset_x_pt * ratio)
+    def _allocate_columns(col_pt: float, str_pct: float, in_x: float) -> list[float]:
+        s_fact = max(0.85, min(1.0, str_pct / 100.0))
+        c_gutter = 0.7 * col_pt
+        c_share = max(1.0, width_pt - (columns - 1) * c_gutter)
+        col_mins = [r * col_pt * s_fact + 2 * in_x for r in runs]
+        tot_m = sum(col_mins)
+        if tot_m >= c_share:
+            return [m * c_share / tot_m for m in col_mins]
 
-    run_mins = [run * base_pt * scale * stretch_factor + 2 * inset_x_pt for run in runs]
-    total_min = sum(run_mins)
-    if total_min >= share_available:
-        widths = [m * share_available / total_min for m in run_mins]
-    else:
-        slack = share_available - total_min
-        widths = [m + slack * (w / total_weight) for m, w in zip(run_mins, weights, strict=True)]
+        # Water-filling distribution: columns with more text get proportional share,
+        # but no column receives less than its unbreakable minimum.
+        alloc = [0.0] * columns
+        rem_cols = list(range(columns))
+        rem_share = c_share
+        while rem_cols:
+            rem_wt = sum(weights[c] for c in rem_cols) or 1.0
+            clamped = False
+            for c in list(rem_cols):
+                prop = rem_share * (weights[c] / rem_wt)
+                if prop < col_mins[c]:
+                    alloc[c] = col_mins[c]
+                    rem_share -= col_mins[c]
+                    rem_cols.remove(c)
+                    clamped = True
+                    break
+            if not clamped:
+                for c in rem_cols:
+                    alloc[c] = rem_share * (weights[c] / rem_wt)
+                break
+        return alloc
+
+    def _estimate_height(
+        col_pt: float, str_pct: float, in_x: float, in_y: float, col_widths: list[float]
+    ) -> float:
+        s_fact = max(0.85, min(1.0, str_pct / 100.0))
+        tot_lines = 0
+        for r in [headers, *rows]:
+            row_lines = 1
+            for c_idx, cell in enumerate(r):
+                if not cell:
+                    continue
+                avail_w = max(8.0, col_widths[c_idx] - 2 * in_x)
+                parts = re.split(r"<br\s*/?>", cell)
+                cell_lines = sum(
+                    max(1, math.ceil((_text_em(p.strip()) * col_pt * s_fact) / avail_w))
+                    for p in parts
+                    if p.strip()
+                )
+                row_lines = max(row_lines, cell_lines)
+            tot_lines += row_lines
+        return tot_lines * (col_pt * 1.25) + (len(rows) + 1) * (2 * in_y) + 2.9
+
+    eff_stretch_pct = stretch_pct
+    widths = _allocate_columns(base_pt * scale, eff_stretch_pct, inset_x_pt)
+
+    # Height constraint solving: dynamically scale down font, compact insets,
+    # and apply elastic font stretch if height budget is tight
+    if content_height_pt is not None and content_height_pt > 0.0:
+        est_h = _estimate_height(base_pt * scale, eff_stretch_pct, inset_x_pt, inset_y_pt, widths)
+        if est_h > content_height_pt:
+            min_scale = max(0.5, min_font_size_pt / base_pt)
+            start_scale_step = int(round(scale * 100))
+            found = False
+            s_pct_candidates = (
+                [stretch_pct, min(stretch_pct, 95.0), min(stretch_pct, 90.0)]
+                if stretch_pct < 100.0
+                else [100.0]
+            )
+            for s_step in range(start_scale_step, int(min_scale * 100) - 1, -2):
+                s = s_step / 100.0
+                in_y = max(1.0, 2.0 * s)
+                in_x = max(1.5, 3.5 * s)
+                for s_pct in s_pct_candidates:
+                    c_pt = base_pt * s
+                    w_cand = _allocate_columns(c_pt, s_pct, in_x)
+                    h = _estimate_height(c_pt, s_pct, in_x, in_y, w_cand)
+                    if h <= content_height_pt:
+                        scale = s
+                        eff_stretch_pct = s_pct
+                        inset_x_pt = in_x
+                        inset_y_pt = in_y
+                        widths = w_cand
+                        found = True
+                        break
+                if found:
+                    break
+            if not found:
+                scale = min_scale
+                eff_stretch_pct = stretch_pct
+                inset_y_pt = 1.0
+                inset_x_pt = 1.5
+                widths = _allocate_columns(base_pt * scale, eff_stretch_pct, inset_x_pt)
 
     column_spec = "(" + ", ".join(f"{max(12.0, w * 0.998):.1f}pt" for w in widths) + ")"
 
@@ -689,7 +759,7 @@ def compile_typst_booktabs(
             pass
 
     lines: list[str] = ["#["]
-    stretch_arg = f", stretch: {stretch_pct:.0f}%" if stretch_pct < 100.0 else ""
+    stretch_arg = f", stretch: {eff_stretch_pct:.0f}%" if eff_stretch_pct < 100.0 else ""
     if scale < 1.0 or stretch_arg:
         lines.append(f"  #set text(size: {scale:.2f}em{stretch_arg})")
     lines.append("  #set par(justify: false, leading: 0.55em)")
