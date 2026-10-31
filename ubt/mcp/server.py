@@ -17,7 +17,9 @@ calling agent is the orchestrator):
 - ``ubt_agent_finish`` — run deterministic quality gates and render the deliverable.
 - ``ubt_list_issues`` — list translation issues/defects for HITL review.
 - ``ubt_edit_segment`` — apply human/agent post-edit revision to a segment.
-- ``ubt_doctor`` — preflight checks (API key, writable ledger dir, deps).
+- ``ubt_re_export`` — re-render a finished job's deliverable.
+- ``ubt_list_jobs`` — list recent jobs from the ledger.
+- ``ubt_doctor`` — the shared preflight checklist the CLI and console also run.
 
 Transport: stdio (local-trust: same user, no X-API-Key gate — path inputs
 still pass the shared allowlist sandbox in ``_sandbox_path``, the REST
@@ -67,6 +69,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - install-shape guard
         "    pip install 'universal-book-translator[mcp]'"
     ) from exc
 
+from ubt import __version__
 from ubt.adapters import get_adapter_for_path
 from ubt.api.manager import JobManager
 from ubt.api.models import JobSubmitRequest
@@ -136,7 +139,7 @@ mcp = MCPServer(
         "ubt_agent_finish. Agent mode makes no model calls inside UBT. Use "
         "ubt_translate_book only when UBT should call a configured provider."
     ),
-    version="0.4",
+    version=__version__,
 )
 
 
@@ -580,9 +583,9 @@ async def ubt_translate_book(
     job_id: str | None = None,
     draft_model: str | None = None,
     repair_model: str | None = None,
-    # None-defaults throughout: _run_translation_job only setattr()s non-None
-    # payload values, so an unset tool arg never overwrites the operator's
-    # UBT_EXEC_MODE / UBT_FORMULA_MODE environment (same convention as the CLI).
+    # None-defaults throughout: ``execute_job`` layers only non-None request
+    # overrides on the operator config, so an unset tool arg never overwrites
+    # UBT_EXEC_MODE / UBT_FORMULA_MODE (same convention as the CLI).
     pdf_engine: str | None = None,
     dual_mode: str | None = None,
     delivery_mode: str | None = None,
