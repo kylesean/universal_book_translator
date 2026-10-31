@@ -797,6 +797,11 @@ class DoclingRenderStrategy:
                 for img in page_blocks
                 if img.block_type == BlockType.IMAGE and img.bbox and img.bbox.page == pno
             ]
+            tables_on_page = [
+                tbl
+                for tbl in page_blocks
+                if tbl.block_type == BlockType.TABLE and tbl.bbox and tbl.bbox.page == pno
+            ]
 
             for b in page_blocks:
                 if not b.bbox:
@@ -866,7 +871,10 @@ class DoclingRenderStrategy:
                         by0 -= off_y
                         by1 -= off_y
 
-                is_caption = (
+                is_table_cap = bool(
+                    re.match(r"^(?:table|表)\.?\s*[\d\w]+", b.source_text.strip(), re.IGNORECASE)
+                )
+                is_fig_cap = (
                     getattr(b, "flow_id", None) == FlowID.CAPTION
                     or getattr(b, "region", None) == RegionKind.CAPTION
                     or getattr(b.provenance, "is_anchored_caption", False)
@@ -877,19 +885,18 @@ class DoclingRenderStrategy:
                             re.IGNORECASE,
                         )
                     )
-                ) and not bool(
-                    re.match(r"^(?:table|表)\.?\s*[\d\w]+", b.source_text.strip(), re.IGNORECASE)
-                )
+                ) and not is_table_cap
+                is_caption = is_fig_cap or is_table_cap
 
                 parent_fig_id = getattr(b.provenance, "caption_parent_id", None)
-                if is_caption and images_on_page:
+                if is_fig_cap and images_on_page:
                     matching_img = None
                     if parent_fig_id:
                         matching_img = next(
                             (img for img in images_on_page if img.id == parent_fig_id), None
                         )
                     if matching_img is None:
-                        min_dist = float("inf")
+                        best_cost = float("inf")
                         cap_mid_x = (bx0 + bx1) / 2.0
                         for img in images_on_page:
                             if not img.bbox:
@@ -899,20 +906,51 @@ class DoclingRenderStrategy:
                                 0.0,
                                 min(float(img.bbox.x1), bx1) - max(float(img.bbox.x0), bx0),
                             )
-                            horiz_close = abs(
-                                cap_mid_x - (float(img.bbox.x0) + float(img.bbox.x1)) / 2.0
-                            ) <= max(100.0, float(img.bbox.x1) - float(img.bbox.x0))
-                            if (
-                                -15.0 <= dist <= 150.0
-                                and (horiz_overlap > 0.0 or horiz_close)
-                                and dist < min_dist
-                            ):
-                                min_dist = dist
-                                matching_img = img
+                            img_w = max(1.0, float(img.bbox.x1) - float(img.bbox.x0))
+                            img_mid_x = (float(img.bbox.x0) + float(img.bbox.x1)) / 2.0
+                            horiz_dist = abs(cap_mid_x - img_mid_x)
+                            horiz_close = horiz_dist <= max(100.0, img_w)
+                            if -15.0 <= dist <= 150.0 and (horiz_overlap > 0.0 or horiz_close):
+                                v_penalty = dist if dist >= 0 else abs(dist) * 2.0
+                                cost = v_penalty + horiz_dist * 0.15
+                                if cost < best_cost:
+                                    best_cost = cost
+                                    matching_img = img
                     if matching_img and matching_img.bbox:
                         parent_fig_id = matching_img.id
                         by1 = round(float(matching_img.bbox.y0) - 4.0, 2)
                         by0 = round(by1 - max(12.0, h), 2)
+                elif is_table_cap and tables_on_page:
+                    matching_tbl = None
+                    if parent_fig_id:
+                        matching_tbl = next(
+                            (tbl for tbl in tables_on_page if tbl.id == parent_fig_id), None
+                        )
+                    if matching_tbl is None:
+                        best_cost = float("inf")
+                        cap_mid_x = (bx0 + bx1) / 2.0
+                        for tbl in tables_on_page:
+                            if not tbl.bbox:
+                                continue
+                            dist = by0 - float(tbl.bbox.y1)
+                            horiz_overlap = max(
+                                0.0,
+                                min(float(tbl.bbox.x1), bx1) - max(float(tbl.bbox.x0), bx0),
+                            )
+                            tbl_w = max(1.0, float(tbl.bbox.x1) - float(tbl.bbox.x0))
+                            tbl_mid_x = (float(tbl.bbox.x0) + float(tbl.bbox.x1)) / 2.0
+                            horiz_dist = abs(cap_mid_x - tbl_mid_x)
+                            horiz_close = horiz_dist <= max(100.0, tbl_w)
+                            if -15.0 <= dist <= 150.0 and (horiz_overlap > 0.0 or horiz_close):
+                                v_penalty = dist if dist >= 0 else abs(dist) * 2.0
+                                cost = v_penalty + horiz_dist * 0.15
+                                if cost < best_cost:
+                                    best_cost = cost
+                                    matching_tbl = tbl
+                    if matching_tbl and matching_tbl.bbox:
+                        parent_fig_id = matching_tbl.id
+                        by0 = round(float(matching_tbl.bbox.y1) + 4.0, 2)
+                        by1 = round(by0 + max(12.0, h), 2)
 
                 # Multi-region flow handling:
                 # If a block spans multiple disjoint regions (different columns or different pages),
@@ -1209,7 +1247,7 @@ class DoclingRenderStrategy:
                             text=pl.text,
                             source_font_size_pt=eff_size,
                             required_height_pt=needed_h,
-                            is_pinned=False,
+                            is_pinned=pl.is_caption,
                         )
                     )
 
@@ -1397,6 +1435,10 @@ class DoclingRenderStrategy:
 
                 relaxed_placements: list[FacsimileBlockPlacement] = []
                 for pl in placements:
+                    if pl.is_caption:
+                        # Rigidly anchored captions must never be displaced by CELS
+                        relaxed_placements.append(pl)
+                        continue
                     spec = solved_map.get(pl.block_id)
                     if spec is not None and spec.height_pt > 0:
                         relaxed_placements.append(

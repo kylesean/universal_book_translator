@@ -521,13 +521,14 @@ def _longest_unbreakable(text: str) -> float:
         elif char.isspace() or _is_cjk(char):
             widest = max(widest, run)
             run = _char_em(char) if not char.isspace() else 0.0
-        elif char in "-\u2010\u2011\u2013\u2014":
+        elif char in "-\u2010\u2011\u2013\u2014/\\":
             run += _char_em(char)
             widest = max(widest, run)
             run = 0.0
         else:
             run += _char_em(char)
-    return max(widest, run)
+    # Cap single unbreakable run at 25.0em to prevent monolithic tokens from crushing tables
+    return min(25.0, max(widest, run))
 
 
 def compile_typst_booktabs(
@@ -567,6 +568,24 @@ def compile_typst_booktabs(
     columns = len(headers)
     if columns == 0:
         return ""
+
+    # Parse column alignments from markdown separator line if available
+    alignments: list[str] = []
+    lines_raw = [line.strip() for line in markup.strip().splitlines() if line.strip()]
+    table_lines_raw = [line for line in lines_raw if line.startswith("|") and line.endswith("|")]
+    for idx in range(1, min(3, len(table_lines_raw))):
+        sep_cells = [c.strip() for c in _split_row(table_lines_raw[idx])]
+        if sep_cells and all(re.match(r"^:?-+:?$", c) for c in sep_cells):
+            for sc in sep_cells[:columns]:
+                if sc.startswith(":") and sc.endswith(":"):
+                    alignments.append("center")
+                elif sc.endswith(":"):
+                    alignments.append("right")
+                else:
+                    alignments.append("left")
+            break
+    while len(alignments) < columns:
+        alignments.append("left")
 
     try:
         from ubt.render.typst.document_renderer import render_prose
@@ -622,7 +641,13 @@ def compile_typst_booktabs(
 
     if content_height_pt is not None and content_height_pt > 0.0:
         total_rows = len(rows) + 1
-        est_height = total_rows * (base_pt * scale * 1.35 + 2 * inset_y_pt) + 2.9
+        total_visual_lines = sum(
+            max((len(re.split(r"<br\s*/?>", c)) for c in r if c), default=1)
+            for r in [headers, *rows]
+        )
+        est_height = (
+            total_visual_lines * (base_pt * scale * 1.35) + total_rows * (2 * inset_y_pt) + 2.9
+        )
         if est_height > content_height_pt:
             ratio = content_height_pt / est_height
             scale = max(min_font_size_pt / base_pt, scale * ratio)
@@ -674,8 +699,9 @@ def compile_typst_booktabs(
     lines.append(f"    columns: {column_spec},")
     lines.append(f"    inset: (x: {inset_x_pt:.1f}pt, y: {inset_y_pt:.1f}pt),")
     lines.append("    column-gutter: 0.7em,")
+    align_items = ", ".join(f"{a} + horizon" for a in alignments)
     lines.append(
-        "    align: (col, row) => if row == 0 { center + horizon } else { left + horizon },"
+        f"    align: (col, row) => if row == 0 {{ center + horizon }} else {{ ({align_items},).at(col) }},"
     )
     lines.append("    stroke: none,")
     lines.append("    table.header(")
@@ -685,7 +711,8 @@ def compile_typst_booktabs(
     lines.append("      table.hline(stroke: 1.2pt),")
     hdr_cells_str = ", ".join(_render_cell_content(h, is_hdr=True) for h in headers)
     lines.append(f"      {hdr_cells_str},")
-    lines.append("      table.hline(stroke: 0.5pt),")
+    if rows:
+        lines.append("      table.hline(stroke: 0.5pt),")
     lines.append("    ),")
     for row in rows:
         padded_row = list(row) + [""] * (columns - len(row))

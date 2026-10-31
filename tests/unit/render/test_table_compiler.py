@@ -273,3 +273,55 @@ def test_compile_typst_booktabs_math_and_breaks() -> None:
     result = compile_typst_booktabs(md)
     assert "$L_2$" in result or "L_2" in result
     assert "\\\n" in result  # Typst line break for <br>
+
+
+def test_compile_typst_booktabs_column_alignments() -> None:
+    """Markdown column alignments (:---, :---:, ---:) are transpiled to Typst alignment arrays."""
+    md = """
+| Left Align | Center Align | Right Align |
+| :--- | :---: | ---: |
+| Alpha | Beta | 123.45 |
+"""
+    result = compile_typst_booktabs(md)
+    assert "left + horizon, center + horizon, right + horizon" in result
+
+
+def test_compile_typst_booktabs_slash_breaks_in_urls() -> None:
+    """Long URLs with slashes are treated as break opportunities so they do not over-inflate run minimums."""
+    md = """
+| Name | Endpoint URL |
+| --- | --- |
+| API | https://example.com/api/v1/projects/technical/evaluations/run |
+"""
+    result = compile_typst_booktabs(md, content_width_pt=350.0)
+    assert result
+    # Columns shouldn't be shrunk down to minimum font size because of slash breaks
+    assert "#set text(size: 0.75em" not in result
+
+
+def test_compile_typst_booktabs_multiline_br_height_budget() -> None:
+    """Rows with multiple <br> tags are accurately accounted for in vertical height estimation."""
+    md = """
+| Module | Responsibilities |
+| --- | --- |
+| Core | Task 1<br>Task 2<br>Task 3<br>Task 4 |
+"""
+    # 1 row with 4 lines in a tight 30pt height box -> must scale down
+    result = compile_typst_booktabs(md, content_height_pt=30.0, base_font_size_pt=10.0)
+    assert result
+    match = re.search(r"#set text\(size:\s*([\d\.]+)em", result)
+    assert match is not None
+    scale = float(match.group(1))
+    assert scale < 1.0
+
+
+def test_compile_typst_booktabs_empty_rows() -> None:
+    """Table with only headers and no data rows compiles cleanly without redundant 0.5pt mid rule."""
+    md = """
+| Empty Header 1 | Empty Header 2 |
+| --- | --- |
+"""
+    result = compile_typst_booktabs(md)
+    assert result
+    assert "table.hline(stroke: 1.2pt)" in result
+    assert "table.hline(stroke: 0.5pt)" not in result

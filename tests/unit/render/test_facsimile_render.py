@@ -1603,3 +1603,108 @@ def test_docling_parser_reanchors_figure_captions() -> None:
     assert re_cap.bbox.y1 == 296.0
     assert getattr(re_cap.provenance, "caption_parent_id", None) == "pdf_main#img_001"
     assert getattr(re_cap.provenance, "is_anchored_caption", False) is True
+    # Physical boxes must also be synchronized with the new span
+    assert re_cap.provenance.physical_boxes[0]["bbox"][3] == 296.0
+
+
+def test_docling_parser_reanchors_table_captions_above_tables() -> None:
+    """Parser identifies table captions and rigidly locks them 4pt above mother tables."""
+    from ubt.adapters.pdf.docling_parser import reanchor_figure_captions
+    from ubt.core.ir.models import (
+        BlockProvenance,
+        BlockType,
+        BoundingBox,
+        IRBlock,
+        make_element,
+    )
+
+    tbl_block = IRBlock(
+        element=make_element(
+            id="pdf_main#tbl_001",
+            spine_index=2,
+            block_type=BlockType.TABLE,
+            source_text="| H1 | H2 |\n|---|---|\n| V1 | V2 |",
+            bbox=BoundingBox(page=1, x0=50.0, y0=200.0, x1=300.0, y1=320.0),
+        )
+    )
+    # Caption sits slightly above table originally (e.g. at y0=330, y1=350)
+    cap_block = IRBlock(
+        element=make_element(
+            id="pdf_main#b0003",
+            spine_index=1,
+            block_type=BlockType.NARRATIVE,
+            source_text="Table 1: Comprehensive benchmark results across model families.",
+            bbox=BoundingBox(page=1, x0=50.0, y0=330.0, x1=300.0, y1=350.0),
+        ),
+        provenance=BlockProvenance(),
+    )
+
+    reanchored = reanchor_figure_captions([tbl_block, cap_block])
+    assert len(reanchored) == 2
+    re_cap = reanchored[1]
+    assert re_cap.bbox is not None
+    # Rigid anchor check: bottom of caption (y0) MUST equal table y1 (320.0) + 4.0 = 324.0pt
+    assert re_cap.bbox.y0 == 324.0
+    assert getattr(re_cap.provenance, "caption_parent_id", None) == "pdf_main#tbl_001"
+    assert getattr(re_cap.provenance, "is_anchored_caption", False) is True
+    assert re_cap.provenance.physical_boxes[0]["bbox"][1] == 324.0
+
+
+def test_docling_parser_disambiguates_side_by_side_subfigures() -> None:
+    """Side-by-side subfigures with captions at similar heights are disambiguated by horizontal alignment."""
+    from ubt.adapters.pdf.docling_parser import reanchor_figure_captions
+    from ubt.core.ir.models import (
+        BlockProvenance,
+        BlockType,
+        BoundingBox,
+        FlowID,
+        IRBlock,
+        make_element,
+    )
+
+    img_left = IRBlock(
+        element=make_element(
+            id="pdf_main#img_left",
+            spine_index=1,
+            block_type=BlockType.IMAGE,
+            source_text="/tmp/left.png",
+            bbox=BoundingBox(page=1, x0=50.0, y0=300.0, x1=200.0, y1=450.0),
+            skip_translate=True,
+        )
+    )
+    img_right = IRBlock(
+        element=make_element(
+            id="pdf_main#img_right",
+            spine_index=2,
+            block_type=BlockType.IMAGE,
+            source_text="/tmp/right.png",
+            bbox=BoundingBox(page=1, x0=250.0, y0=300.0, x1=400.0, y1=450.0),
+            skip_translate=True,
+        )
+    )
+    cap_left = IRBlock(
+        element=make_element(
+            id="pdf_main#cap_left",
+            spine_index=3,
+            block_type=BlockType.NARRATIVE,
+            flow_id=FlowID.CAPTION,
+            source_text="Figure 1(a): Left subfigure analysis.",
+            bbox=BoundingBox(page=1, x0=50.0, y0=270.0, x1=200.0, y1=292.0),
+        ),
+        provenance=BlockProvenance(),
+    )
+    cap_right = IRBlock(
+        element=make_element(
+            id="pdf_main#cap_right",
+            spine_index=4,
+            block_type=BlockType.NARRATIVE,
+            flow_id=FlowID.CAPTION,
+            source_text="Figure 1(b): Right subfigure analysis.",
+            bbox=BoundingBox(page=1, x0=250.0, y0=270.0, x1=400.0, y1=292.0),
+        ),
+        provenance=BlockProvenance(),
+    )
+
+    reanchored = reanchor_figure_captions([img_left, img_right, cap_left, cap_right])
+    assert getattr(reanchored[2].provenance, "caption_parent_id", None) == "pdf_main#img_left"
+    assert getattr(reanchored[3].provenance, "caption_parent_id", None) == "pdf_main#img_right"

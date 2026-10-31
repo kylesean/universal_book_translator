@@ -788,20 +788,30 @@ def type_docling_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
 
 
 def reanchor_figure_captions(blocks: list[IRBlock]) -> list[IRBlock]:
-    """Re-anchor figure captions rigidly to their mother figure BBoxes.
+    """Re-anchor figure and table captions rigidly to their mother figure/table BBoxes.
 
     Identifies figure captions (FlowID.CAPTION, RegionKind.CAPTION, or matching
     `Fig(ure)? N` patterns) and finds the corresponding BlockType.IMAGE on the
     same page located immediately above the caption.
-    Locks the caption vertical position to +4pt below the image BBox (y1 = img.bbox.y0 - 4.0pt),
-    and records the mother figure ID in block provenance (`caption_parent_id`).
+    Locks the caption vertical position to +4pt below the image BBox (y1 = img.bbox.y0 - 4.0pt).
+
+    Identifies table captions (matching `Table N` patterns) and finds the corresponding
+    BlockType.TABLE on the same page located immediately below the caption (standard academic layout).
+    Locks the caption vertical position to +4pt above the table BBox (y0 = tbl.bbox.y1 + 4.0pt).
+
+    Synchronizes both `element.span` and `provenance.physical_boxes` to guarantee
+    spatial consistency across all downstream layout solvers.
     """
     images_by_page: dict[int, list[IRBlock]] = {}
+    tables_by_page: dict[int, list[IRBlock]] = {}
     for b in blocks:
-        if b.block_type == BlockType.IMAGE and b.bbox and b.bbox.page:
-            images_by_page.setdefault(b.bbox.page, []).append(b)
+        if b.bbox and b.bbox.page:
+            if b.block_type == BlockType.IMAGE:
+                images_by_page.setdefault(b.bbox.page, []).append(b)
+            elif b.block_type == BlockType.TABLE:
+                tables_by_page.setdefault(b.bbox.page, []).append(b)
 
-    if not images_by_page:
+    if not images_by_page and not tables_by_page:
         return blocks
 
     caption_pattern = re.compile(r"^(?:fig(?:ure)?|图)\.?\s*[\d\w]+", re.IGNORECASE)
@@ -809,35 +819,40 @@ def reanchor_figure_captions(blocks: list[IRBlock]) -> list[IRBlock]:
 
     updated_blocks: list[IRBlock] = []
     for b in blocks:
+        if not b.bbox or not b.bbox.page:
+            updated_blocks.append(b)
+            continue
+
+        raw_txt = b.source_text.strip()
+        is_table_caption = bool(table_pattern.match(raw_txt))
         is_caption_cand = (
             b.flow_id == FlowID.CAPTION
             or b.region == RegionKind.CAPTION
-            or bool(caption_pattern.match(b.source_text.strip()))
+            or bool(caption_pattern.match(raw_txt))
         )
-        is_table_caption = bool(table_pattern.match(b.source_text.strip()))
 
-        if is_caption_cand and not is_table_caption and b.bbox and b.bbox.page in images_by_page:
+        if is_caption_cand and not is_table_caption and b.bbox.page in images_by_page:
             p_images = images_by_page[b.bbox.page]
             cap_mid_x = (b.bbox.x0 + b.bbox.x1) / 2.0
             cap_y1 = b.bbox.y1
 
             best_img: IRBlock | None = None
-            min_dist = float("inf")
+            best_cost = float("inf")
             for img in p_images:
                 if not img.bbox:
                     continue
                 dist = img.bbox.y0 - cap_y1
                 horiz_overlap = max(0.0, min(img.bbox.x1, b.bbox.x1) - max(img.bbox.x0, b.bbox.x0))
-                horiz_close = abs(cap_mid_x - (img.bbox.x0 + img.bbox.x1) / 2.0) <= max(
-                    100.0, img.bbox.x1 - img.bbox.x0
-                )
-                if (
-                    -15.0 <= dist <= 150.0
-                    and (horiz_overlap > 0.0 or horiz_close)
-                    and dist < min_dist
-                ):
-                    min_dist = dist
-                    best_img = img
+                img_w = max(1.0, img.bbox.x1 - img.bbox.x0)
+                img_mid_x = (img.bbox.x0 + img.bbox.x1) / 2.0
+                horiz_dist = abs(cap_mid_x - img_mid_x)
+                horiz_close = horiz_dist <= max(100.0, img_w)
+                if -15.0 <= dist <= 150.0 and (horiz_overlap > 0.0 or horiz_close):
+                    v_penalty = dist if dist >= 0 else abs(dist) * 2.0
+                    cost = v_penalty + horiz_dist * 0.15
+                    if cost < best_cost:
+                        best_cost = cost
+                        best_img = img
 
             if best_img is not None and best_img.bbox is not None:
                 anchored_y1 = round(best_img.bbox.y0 - 4.0, 2)
@@ -850,6 +865,56 @@ def reanchor_figure_captions(blocks: list[IRBlock]) -> list[IRBlock]:
                 prov_dict = b.provenance.model_dump()
                 prov_dict["caption_parent_id"] = best_img.id
                 prov_dict["is_anchored_caption"] = True
+                prov_dict["physical_boxes"] = [
+                    {"page": b.bbox.page, "bbox": [b.bbox.x0, anchored_y0, b.bbox.x1, anchored_y1]}
+                ]
+
+                new_element = dataclasses.replace(b.element, span=new_span)
+                b = b.model_copy(
+                    update={
+                        "element": new_element,
+                        "provenance": BlockProvenance(**prov_dict),
+                    }
+                )
+
+        elif is_table_caption and b.bbox.page in tables_by_page:
+            p_tables = tables_by_page[b.bbox.page]
+            cap_mid_x = (b.bbox.x0 + b.bbox.x1) / 2.0
+            cap_y0 = b.bbox.y0
+
+            best_tbl: IRBlock | None = None
+            best_cost = float("inf")
+            for tbl in p_tables:
+                if not tbl.bbox:
+                    continue
+                # Academic tables place caption above the table (dist: caption bottom to table top)
+                dist = cap_y0 - tbl.bbox.y1
+                horiz_overlap = max(0.0, min(tbl.bbox.x1, b.bbox.x1) - max(tbl.bbox.x0, b.bbox.x0))
+                tbl_w = max(1.0, tbl.bbox.x1 - tbl.bbox.x0)
+                tbl_mid_x = (tbl.bbox.x0 + tbl.bbox.x1) / 2.0
+                horiz_dist = abs(cap_mid_x - tbl_mid_x)
+                horiz_close = horiz_dist <= max(100.0, tbl_w)
+                if -15.0 <= dist <= 150.0 and (horiz_overlap > 0.0 or horiz_close):
+                    v_penalty = dist if dist >= 0 else abs(dist) * 2.0
+                    cost = v_penalty + horiz_dist * 0.15
+                    if cost < best_cost:
+                        best_cost = cost
+                        best_tbl = tbl
+
+            if best_tbl is not None and best_tbl.bbox is not None:
+                anchored_y0 = round(best_tbl.bbox.y1 + 4.0, 2)
+                cap_h = max(12.0, b.bbox.y1 - b.bbox.y0)
+                anchored_y1 = round(anchored_y0 + cap_h, 2)
+                new_span = Span(
+                    page=b.bbox.page,
+                    bbox=(b.bbox.x0, anchored_y0, b.bbox.x1, anchored_y1),
+                )
+                prov_dict = b.provenance.model_dump()
+                prov_dict["caption_parent_id"] = best_tbl.id
+                prov_dict["is_anchored_caption"] = True
+                prov_dict["physical_boxes"] = [
+                    {"page": b.bbox.page, "bbox": [b.bbox.x0, anchored_y0, b.bbox.x1, anchored_y1]}
+                ]
 
                 new_element = dataclasses.replace(b.element, span=new_span)
                 b = b.model_copy(
