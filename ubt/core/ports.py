@@ -585,6 +585,7 @@ def read_delivery_evidence(
     overflow_records: Sequence[Any] = (),
     style_samples: Sequence[Any] = (),
     read_geometry: bool = True,
+    exhibit_texts: Sequence[str] = (),
 ) -> Any:
     """Read a delivered PDF into the delivery contract's evidence shape."""
     from ubt.adapters.pdf.delivery_evidence import read_artifact_evidence
@@ -593,6 +594,7 @@ def read_delivery_evidence(
         rendered_path,
         contract=contract,
         blocks=blocks,
+        exhibit_texts=exhibit_texts,
         expected_page_count=expected_page_count,
         missing_assets=missing_assets,
         overflow_records=overflow_records,

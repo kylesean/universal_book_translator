@@ -1339,10 +1339,22 @@ def _delivery_contract_evidence(
             contract = "readable"
 
     blocks: list[ContractBlock] = []
+    # Table grids are verified as assets, not as text blocks -- but the style
+    # sampler needs their delivered text to recognize a grid's own characters
+    # on the page and keep them out of the body-size vote (a grid is its own
+    # style group, PRD FR-L4; without the corpus the replay's lmbench page had
+    # its 5.3pt grid characters win the body vote and the document read as a
+    # 4.18pt body drift).
+    exhibit_texts: list[str] = []
     for block in final_blocks:
         if block.skip_translate or dropped_page_furniture(block):
             continue
-        if block.block_type in (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE):
+        if block.block_type is BlockType.TABLE:
+            exhibit_text = delivered_text(block).strip()
+            if exhibit_text:
+                exhibit_texts.append(exhibit_text)
+            continue
+        if block.block_type in (BlockType.FORMULA, BlockType.IMAGE):
             continue
         text = delivered_text(block).strip()
         if not text:
@@ -1402,6 +1414,13 @@ def _delivery_contract_evidence(
 
     style_samples: list[StyleSample] = []
     for page in getattr(adapter, "last_page_geometry", None) or []:
+        # A page the solver flagged as a style exception (shrunk past the body
+        # group to fit an exhibit) is not a body-group vote: its recorded size
+        # is the *exception's* size, and letting it vote reads the document as
+        # a body drift that is really one page's overflow -- which the
+        # overflow records above already account for.
+        if page.get("style_exception"):
+            continue
         size = page.get("delivered_size_pt")
         if isinstance(size, (int, float)) and size > 0:
             style_samples.append(
@@ -1416,6 +1435,7 @@ def _delivery_contract_evidence(
         rendered_path,
         contract=contract,
         blocks=blocks,
+        exhibit_texts=exhibit_texts,
         expected_page_count=expected_pages,
         missing_assets=missing_assets,
         overflow_records=overflow_records,

@@ -338,6 +338,7 @@ def read_artifact_evidence(
     *,
     contract: str,
     blocks: Sequence[ContractBlock],
+    exhibit_texts: Sequence[str] = (),
     expected_page_count: int | None = None,
     missing_assets: Iterable[str] = (),
     font_issues: Iterable[str] = (),
@@ -365,9 +366,8 @@ def read_artifact_evidence(
     # while every prose page sat at one size.
     exhibit_norm = tuple(
         _normalise_text(line)
-        for block in blocks
-        if block.kind == "table"
-        for line in (block.text or "").splitlines()
+        for text in (*[b.text for b in blocks if b.kind == "table"], *exhibit_texts)
+        for line in text.splitlines()
         if len(_normalise_text(line)) >= 6
     )
     # Body text a page must carry to earn a body-size sample: a page of pure
@@ -495,8 +495,8 @@ def read_artifact_evidence(
         # both estimators read a table-dominated page as the *grid's* size,
         # which read that replay as a 4.18pt body drift and blocked the export.
         style_samples=tuple(style_samples)
-        or _exact_body_sizes(pdf_path, page_exhibits or None, body_pages or None)
-        or measured,
+        or measured
+        or _exact_body_sizes(pdf_path, page_exhibits or None, body_pages or None),
     )
 
 
