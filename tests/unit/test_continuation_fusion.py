@@ -113,3 +113,37 @@ def test_join_continuous_text_handles_script_and_hyphen_boundaries(
     pieces: list[str], expected: str
 ) -> None:
     assert join_continuous_text(pieces) == expected
+
+
+def test_a_column_jump_run_fuses_into_one_block() -> None:
+    """A paragraph running out of one column and into the next fuses too.
+
+    Two-column reading order continues at the top of the next column, which
+    sits at or above the bottom of the previous one and to its right -- the
+    same mid-sentence evidence a page break leaves, on one page.
+    """
+    first = _prose(
+        "pdf_main#b0001",
+        "The column ends mid-sentence and",
+        page=1,
+        y0=100.0,
+        x0=50.0,
+        x1=290.0,
+        target="栏末断句",
+    )
+    second = _prose(
+        "pdf_main#b0002",
+        "picks up at the top of the next one.",
+        page=1,
+        y0=700.0,
+        x0=310.0,
+        x1=550.0,
+        target="续于次栏",
+    )
+    fused = fuse_continuation_blocks([first, second])
+
+    assert len(fused) == 1
+    assert (
+        fused[0].source_text
+        == "The column ends mid-sentence and picks up at the top of the next one."
+    )
