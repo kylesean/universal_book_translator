@@ -135,6 +135,7 @@ class _Ctx:
 
 class _Config:
     qe_threshold = 0.5
+    max_repair_rounds = 2
 
 
 @dataclass
@@ -143,15 +144,19 @@ class _Event:
     message: str
 
 
-async def _run(ledger: _Ledger, repair: _RepairLoop) -> list[dict[str, Any]]:
+async def _run(
+    ledger: _Ledger, repair: _RepairLoop | None, *, escalate: bool = True
+) -> list[dict[str, Any]]:
     ctx = _Ctx(ledger)
-    services = _Services(repair_loop=repair, concurrency_sem=asyncio.Semaphore(1))
+    loop = repair or _RepairLoop()
+    services = _Services(repair_loop=loop, concurrency_sem=asyncio.Semaphore(1))
     events: list[Any] = []
     gen: AsyncIterator[Any] = run_triage_stage(
         ctx,  # type: ignore[arg-type]
         services,  # type: ignore[arg-type]
         _Terminology(),  # type: ignore[arg-type]
-        _Scoring(repair_loop=repair),  # type: ignore[arg-type]
+        _Scoring(repair_loop=loop),  # type: ignore[arg-type]
+        escalate=escalate,
     )
     async for event in gen:
         events.append(event)
@@ -206,3 +211,41 @@ def test_a_correct_draft_after_repair_passes() -> None:
     assert len(updates) == 1
     assert updates[0]["status"] is BlockStatus.REPAIRED
     assert updates[0]["target_text"] == "修好的草稿"
+
+
+class _NeverCalled(_RepairLoop):
+    """Fails the test if the stage reaches for a model call."""
+
+    async def repair_single_block(self, *, block: IRBlock, **_kw: Any) -> IRBlock:
+        raise AssertionError("host-driven triage must not call the model")
+
+
+def test_host_driven_triage_returns_a_critical_block_for_repair() -> None:
+    """escalate=False gives the host the escalated round instead of spending it."""
+    block = _block("b4", error_flags=["Numeric fidelity failure: missing ['2']"])
+    ledger = _Ledger([block])
+    updates = asyncio.run(_run(ledger, _NeverCalled(), escalate=False))
+
+    assert len(updates) == 1
+    update = updates[0]
+    assert update["status"] is BlockStatus.REPAIR_PENDING
+    assert update["target_text"] == "一个正确的草稿"
+    # The classification still lands on the record for the review workbench.
+    assert update["mqm_severity"] == "critical"
+
+
+def test_host_driven_triage_routes_terminal_once_the_repair_budget_is_spent() -> None:
+    """At the repair ceiling the block must route terminal, or finish deadlocks.
+
+    A still-critical block at ``max_repair_rounds`` cannot be claimed (the claim
+    query applies the same cap), so handing it back again would leave ``finish``
+    reporting ``repair_required`` for work nothing can take.
+    """
+    block = _block("b5", error_flags=["Numeric fidelity failure: missing ['2']"])
+    block = block.model_copy(update={"repair_rounds": 2})
+    ledger = _Ledger([block])
+    updates = asyncio.run(_run(ledger, _NeverCalled(), escalate=False))
+
+    assert len(updates) == 1
+    assert updates[0]["status"] is BlockStatus.NEEDS_HUMAN
+    assert updates[0]["target_text"] == "一个正确的草稿"

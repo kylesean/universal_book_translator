@@ -141,6 +141,100 @@ async def test_prepare_claim_submit_finish_without_any_model_call(tmp_path: Path
     assert Path(finished.report_path).exists()
 
 
+async def _drive_to_terminal(service: AgentTranslationService, job_id: str) -> None:
+    """Claim and submit every package with the fixture translation."""
+    while True:
+        claim = await service.claim(AgentClaimRequest(job_id=job_id))
+        if claim.package is None:
+            return
+        result = await service.submit(
+            AgentSubmitRequest(
+                job_id=job_id,
+                package_id=claim.package.package_id,
+                lease_token=claim.package.lease_token,
+                blocks=[
+                    AgentBlockSubmission(
+                        block_id=block.block_id, translation=_translate(block.masked_source)
+                    )
+                    for block in claim.package.blocks
+                ],
+            )
+        )
+        assert result.accepted_blocks == len(claim.package.blocks)
+
+
+@pytest.mark.asyncio
+async def test_finish_runs_triage_and_writes_the_tm(tmp_path: Path) -> None:
+    """Finish closes out the same quality loop as the provider plan, zero-token.
+
+    A block a repair path left ``FAILED`` used to strand ``finish`` in
+    ``needs_attention`` forever: only triage — which the Agent path skipped —
+    classifies it. Here triage hands it back to the host (critical, one repair
+    round of budget left), the host repairs it, and the second finish renders
+    and writes the accepted pairs into the shared TM.
+    """
+    source = _write_book(tmp_path)
+    config = _config(tmp_path)
+    service = AgentTranslationService(config=config)
+    prepared = await service.prepare(
+        AgentPrepareRequest(
+            input_path=str(source),
+            output_path=str(tmp_path / "translated.md"),
+            job_id="agent_closeout",
+        )
+    )
+    await _drive_to_terminal(service, prepared.job_id)
+
+    db_path = config.db_dir / f"{prepared.job_id}.sqlite"
+    with SQLiteJobLedger(db_path) as ledger:
+        blocks = ledger.get_all_blocks(prepared.job_id)
+        broken = next(b for b in blocks if "42" in b.source_text)
+        ledger.save_checkpoints_batch(
+            [
+                {
+                    "block_id": broken.id,
+                    "status": BlockStatus.FAILED,
+                    # One of the two configured rounds is already spent, so the
+                    # single host repair below reaches the ceiling and the
+                    # screen can route the block terminal instead of asking
+                    # again (its stale defect flag is never cleared by submit).
+                    "repair_rounds": 1,
+                    "error_flags": [
+                        "Numeric fidelity failure: Unauthorized numeric tokens in translation: ['3']"
+                    ],
+                }
+            ],
+            allow_terminal_override=True,
+        )
+
+    first = await service.finish(AgentFinishRequest(job_id=prepared.job_id))
+    assert first.status == "repair_required"
+    assert first.repair_blocks == 1
+
+    claim = await service.claim(AgentClaimRequest(job_id=prepared.job_id))
+    assert claim.package is not None
+    assert [b.block_id for b in claim.package.blocks] == [broken.id]
+    await service.submit(
+        AgentSubmitRequest(
+            job_id=prepared.job_id,
+            package_id=claim.package.package_id,
+            lease_token=claim.package.lease_token,
+            blocks=[
+                AgentBlockSubmission(block_id=broken.id, translation="数值是 42。"),
+            ],
+        )
+    )
+
+    finished = await service.finish(AgentFinishRequest(job_id=prepared.job_id))
+    assert finished.status == "completed"
+    assert finished.output_path is not None
+
+    from ubt.core.memory.tm import TranslationMemory
+
+    tm = TranslationMemory(config.db_dir / "tm.sqlite")
+    assert tm.entry_count() > 0
+
+
 @pytest.mark.asyncio
 async def test_prepare_same_id_with_different_inputs_is_rejected(tmp_path: Path) -> None:
     source = _write_book(tmp_path)

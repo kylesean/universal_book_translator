@@ -30,6 +30,7 @@ import secrets
 import time
 from collections.abc import Sequence
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -37,7 +38,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ubt.core.config import UBTConfig
 from ubt.core.engine.events import EventType, TranslationProgressEvent
-from ubt.core.engine.facts import Terminology
+from ubt.core.engine.facts import Scoring, Terminology
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.ledger_mixins import (
     AGENT_REQUEST_FINGERPRINT_KEY,
@@ -47,9 +48,12 @@ from ubt.core.engine.ledger_mixins import (
 from ubt.core.engine.repair_loop import RepairLoop
 from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
+from ubt.core.engine.stages.consistency import run_consistency_stage
 from ubt.core.engine.stages.export import run_export_stage
 from ubt.core.engine.stages.ingest import run_ingest_stage
 from ubt.core.engine.stages.quality_gate import screen_drafted_blocks
+from ubt.core.engine.stages.tm_writeback import run_tm_writeback_stage
+from ubt.core.engine.stages.triage import run_triage_stage
 from ubt.core.engine.writer_lock import LedgerWriterLock, keep_lease_fresh
 from ubt.core.exceptions import (
     LedgerError,
@@ -136,6 +140,16 @@ def _agent_router() -> ModelRouter:
 
 def _now() -> float:
     return time.time()
+
+
+@dataclass(frozen=True)
+class _RenderStage:
+    """Shared context, services and plan for ``finish``'s closeout and export."""
+
+    ctx: StageContext
+    services: RunServices
+    terminology: Terminology
+    render_plan: RenderPlan
 
 
 def _hash_token(token: str) -> str:
@@ -1355,7 +1369,14 @@ class AgentTranslationService:
                 for block in blocks
             ):
                 await self._quality_screen(ledger, request.job_id, manifest, config)
-                blocks = await asyncio.to_thread(ledger.get_all_blocks, request.job_id)
+            # Build the render stage now: the deterministic closeout must run
+            # before the "is every block terminal" gate, because consistency
+            # and triage can hand work back to the host (REPAIR_PENDING). That
+            # is what makes the gate below the single place that decides
+            # between repair_required and export.
+            stage = await self._build_render_stage(ledger, request.job_id, manifest, config)
+            await self._quality_closeout(stage)
+            blocks = await asyncio.to_thread(ledger.get_all_blocks, request.job_id)
             non_terminal = [b for b in blocks if b.status not in TERMINAL_STATUSES]
             if non_terminal:
                 pending = [b for b in non_terminal if b.status is BlockStatus.PENDING]
@@ -1390,7 +1411,7 @@ class AgentTranslationService:
                 if lease_lost.is_set():
                     raise UBTError("Agent finish stopped: the writer lease was reclaimed")
                 return result
-            event = await self._render(ledger, db_path, request.job_id, manifest, config)
+            event = await self._render(stage)
             if lease_lost.is_set():
                 raise UBTError("Agent finish stopped: the writer lease was reclaimed")
             report_path = await asyncio.to_thread(
@@ -1499,14 +1520,21 @@ class AgentTranslationService:
                 )
         await asyncio.to_thread(ledger.save_checkpoints_batch, updates, job_id=job_id)
 
-    async def _render(
+    async def _build_render_stage(
         self,
         ledger: SQLiteJobLedger,
-        db_path: Path,
         job_id: str,
         manifest: BookManifest,
         config: UBTConfig,
-    ) -> TranslationProgressEvent:
+    ) -> _RenderStage:
+        """Build everything the closeout and the export share, once.
+
+        Split from :meth:`_render` because the deterministic quality closeout
+        must run *before* ``finish`` decides whether the job can render: the
+        context, services and render plan are the same objects either way, and
+        building them twice would run the terminology load and the route
+        decision twice.
+        """
         render_config = config.model_copy(
             update={"visual_judge_enabled": False, "ocr_mode": "off", "allow_page_upload": False}
         )
@@ -1519,6 +1547,15 @@ class AgentTranslationService:
             source_lang=manifest.source_lang,
             fast_pass=fast_pass,
         )
+        # The TM is written, never read on this path: the host supplies the
+        # translation. Writeback still matters so a later provider run (or a
+        # later Agent job) benefits from what was accepted here.
+        tm = None
+        if render_config.tm_enabled:
+            from ubt.core.memory.tm import TranslationMemory
+
+            await asyncio.to_thread(render_config.db_dir.mkdir, parents=True, exist_ok=True)
+            tm = await asyncio.to_thread(TranslationMemory, render_config.db_dir / "tm.sqlite")
         services = RunServices(
             fast_pass=fast_pass,
             qe_runner=qe,
@@ -1536,6 +1573,7 @@ class AgentTranslationService:
                 reason="agent finish (render-only)",
             ),
             concurrency_sem=asyncio.Semaphore(1),
+            tm=tm,
         )
         terminology = await self._terminology(ledger, job_id)
         source_path = Path(manifest.source_path)
@@ -1571,21 +1609,55 @@ class AgentTranslationService:
             create_event=self._event_factory(ledger, job_id),
             lease_lost=self._lease_lost,
         )
+        return _RenderStage(
+            ctx=ctx, services=services, terminology=terminology, render_plan=render_plan
+        )
+
+    async def _quality_closeout(self, stage: _RenderStage) -> None:
+        """Run the deterministic half of the pipeline's quality loop.
+
+        A provider run closes out with consistency (drift repair), triage (MQM
+        severity + PE routing) and, after export, TM writeback. The Agent path
+        used to skip all three, so a finished Agent job shipped with no
+        severity classification, no PE queue and an empty TM — a different
+        quality contract for the same ledger. Every stage here is zero-token:
+        consistency and triage are driven with ``repair=False`` /
+        ``escalate=False``, which hands actionable repairs back to the host as
+        ``REPAIR_PENDING`` instead of spending a model round unknown to it.
+        """
+        ctx = stage.ctx
+        scoring = Scoring()
+        if ctx.config.consistency_enforce != "off":
+            async for _event in run_consistency_stage(
+                ctx, stage.services, stage.terminology, scoring, repair=False
+            ):
+                pass
+        async for _event in run_triage_stage(
+            ctx, stage.services, stage.terminology, scoring, escalate=False
+        ):
+            pass
+
+    async def _render(self, stage: _RenderStage) -> TranslationProgressEvent:
         terminal: TranslationProgressEvent | None = None
         async for event in run_export_stage(
-            ctx,
-            services,
-            render_plan,
-            terminology,
+            stage.ctx,
+            stage.services,
+            stage.render_plan,
+            stage.terminology,
             claims_finality=True,
         ):
             if event.event_type is EventType.EXPORT_COMPLETED:
                 terminal = event
         if terminal is None:
             raise UBTError("Agent render produced no terminal export event")
+        # Mirrors the provider plan's terminal hook: writeback runs on the
+        # export event, before the result is returned.
+        await run_tm_writeback_stage(stage.ctx, stage.services, stage.terminology)
         from ubt.core.engine.progress import persist_progress_metadata
 
-        await asyncio.to_thread(persist_progress_metadata, terminal, ledger, job_id)
+        await asyncio.to_thread(
+            persist_progress_metadata, terminal, stage.ctx.ledger, stage.ctx.job_id
+        )
         return terminal
 
     async def _terminology(self, ledger: SQLiteJobLedger, job_id: str) -> Terminology:

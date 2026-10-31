@@ -148,8 +148,20 @@ async def run_triage_stage(
     services: RunServices,
     terminology: Terminology,
     scoring: Scoring,
+    *,
+    escalate: bool = True,
 ) -> AsyncIterator[TranslationProgressEvent]:
-    """Classify unresolved blocks by MQM severity and route them accordingly."""
+    """Classify unresolved blocks by MQM severity and route them accordingly.
+
+    ``escalate=False`` is the host-driven mode (Agent translation), where this
+    stage must never call a model. A critical block that still has repair
+    budget left is handed back as ``REPAIR_PENDING`` so the host repairs it
+    through claim/submit — the analogue of the one escalated model round the
+    provider pipeline spends here. Once the budget is spent the block falls
+    through to the same ``NEEDS_HUMAN``/``BLOCKED_HUMAN`` terminals as ever,
+    which is what bounds the loop: the host would otherwise keep being asked
+    for a repair the claim query refuses to hand out.
+    """
     check_stage_cancelled(ctx)
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
@@ -162,6 +174,10 @@ async def run_triage_stage(
     concurrency_sem = services.concurrency_sem
     create_event_fn = ctx.create_event
     qe_threshold = ctx.config.qe_threshold
+    #: Remaining-round budget for host-driven repair. Only read when
+    #: ``escalate`` is off; a provider run lets the repair loop's own circuit
+    #: breaker own the ceiling.
+    host_repair_cap = max(0, int(getattr(ctx.config, "max_repair_rounds", 0) or 0))
     repair_pending = await asyncio.to_thread(
         ledger.fetch_blocks_by_status, actual_job_id, BlockStatus.REPAIR_PENDING
     )
@@ -178,7 +194,7 @@ async def run_triage_stage(
         # unrecoverable" failures are still triaged.
         and not is_transient_lifecycle_only(b.error_flags)
         # FAILED is terminal per IRBlock.is_finalized, but this stage is the
-        # Documented last net for repair-path failures: classify
+        # documented last net for repair-path failures: classify
         # them into the human queue instead of leaving raw FAILED blocks.
         and b.status in (BlockStatus.REPAIR_PENDING, BlockStatus.FAILED)
     ]
@@ -191,6 +207,7 @@ async def run_triage_stage(
         "critical_blocked": 0,
         "needs_human": 0,
         "auto_passed": 0,
+        "repair_requested": 0,
     }
 
     async def _progress_heartbeat(message: str) -> TranslationProgressEvent:
@@ -263,7 +280,7 @@ async def run_triage_stage(
 
     escalation_results: dict[str, dict[str, Any]] = {}
     escalation_errors: dict[str, str] = {}
-    if critical:
+    if critical and escalate:
         # Drive the fan-out task by task instead of one opaque ``gather`` so
         # the long silent stretch (E2E: 4m56s between REPAIR_BATCH_COMPLETED
         # and TRIAGE_COMPLETED while 310 escalated repairs ran) can spend a
@@ -320,7 +337,8 @@ async def run_triage_stage(
                             ),
                         ):
                             raise exc
-                        # The block still lands in BLOCKED_HUMAN below, but without a
+                        # The block still lands in NEEDS_HUMAN (or BLOCKED_HUMAN
+                        # for a fatal leak) below, but without a
                         # marker nobody can tell "escalation never ran" apart from
                         # "escalation ran and failed" in the PE queue.
                         escalation_errors[cand.id] = str(exc)[:200]
@@ -358,6 +376,26 @@ async def run_triage_stage(
                         "mtqe_score": escalation["mtqe_score"],
                         "repair_rounds": escalation["repair_rounds"],
                         "error_flags": escalation["error_flags"],
+                        **mqm_update,
+                    }
+                )
+                continue
+
+            if not escalate and cand.repair_rounds < host_repair_cap:
+                # Host-driven mode: the escalated round the provider pipeline
+                # spends on the model is instead handed back as work the host
+                # can claim. ``repair_rounds`` is incremented by the Agent
+                # submit path for repair packages, so this terminates at
+                # ``host_repair_cap`` and the block then routes terminal below.
+                counters["repair_requested"] += 1
+                updates.append(
+                    {
+                        "block_id": cand.id,
+                        "target_text": cand.target_text or cand.draft_text or "",
+                        "status": BlockStatus.REPAIR_PENDING,
+                        "mtqe_score": cand.mtqe_score,
+                        "repair_rounds": cand.repair_rounds,
+                        "error_flags": cand.error_flags,
                         **mqm_update,
                     }
                 )
@@ -489,6 +527,12 @@ async def run_triage_stage(
         counters["needs_human"],
         counters["auto_passed"],
     )
+    if counters["repair_requested"]:
+        logger.info(
+            "MQM triage (host-driven) for job %s: %d critical block(s) returned for host repair",
+            actual_job_id,
+            counters["repair_requested"],
+        )
 
     event = await create_event_fn(
         EventType.TRIAGE_COMPLETED,

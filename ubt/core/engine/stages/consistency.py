@@ -67,8 +67,20 @@ async def run_consistency_stage(
     services: RunServices,
     terminology: Terminology,
     scoring: Scoring,
+    *,
+    repair: bool = True,
 ) -> AsyncIterator[TranslationProgressEvent]:
-    """Detect terminology drift and (mode='repair') re-translate drifted blocks."""
+    """Detect terminology drift and (mode='repair') re-translate drifted blocks.
+
+    ``repair=False`` is the host-driven mode (Agent translation), where this
+    stage must never call a model. In ``mode='repair'`` it still acts: drifted
+    blocks that have repair budget left are demoted to ``REPAIR_PENDING`` with
+    the same ``terminology_consistency`` constraint flags the provider path
+    would hand the model, so the host repairs them through claim/submit. A
+    block already at the repair ceiling is left alone — the claim query would
+    refuse to hand it out, and demoting it again would leave the job asking
+    for work nobody can claim.
+    """
     check_stage_cancelled(ctx)
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
@@ -123,6 +135,47 @@ async def run_consistency_stage(
         return
 
     by_id = {b.id: b for b in deliverable}
+    if not repair:
+        # Host-driven mode: the paid unit is a host repair, so only blocks that
+        # the claim query will still hand out are demoted. Everything else is
+        # reported, not requeued (see the stage docstring).
+        ceiling = max(0, int(getattr(ctx.config, "max_repair_rounds", 0) or 0))
+        host_updates: list[dict[str, Any]] = []
+        per_block_flags: dict[str, list[str]] = {}
+        for task in tasks:
+            block = by_id.get(task.block_id)
+            if block is None or block.repair_rounds >= ceiling:
+                continue
+            flags = per_block_flags.setdefault(task.block_id, list(block.error_flags))
+            if task.flag not in flags:
+                flags.append(task.flag)
+        for block_id, flags in sorted(per_block_flags.items()):
+            host_updates.append(
+                {
+                    "block_id": block_id,
+                    "status": BlockStatus.REPAIR_PENDING,
+                    "error_flags": flags,
+                }
+            )
+        if host_updates:
+            # A drifted block is normally terminal (MTQE_PASSED / REPAIRED);
+            # without the override the terminal guard drops the demotion and
+            # the drift ships silently.
+            await asyncio.to_thread(
+                ledger.save_checkpoints_batch, host_updates, allow_terminal_override=True
+            )
+        skipped = len({t.block_id for t in tasks}) - len(host_updates)
+        message = (
+            f"Terminology consistency: returned {len(host_updates)} drifted block(s) "
+            f"to host repair"
+            + (f"; {skipped} at the repair ceiling were left as-is" if skipped else "")
+        )
+        logger.info(message)
+        yield await create_event_fn(
+            EventType.REPAIR_BATCH_COMPLETED, actual_job_id, ledger, message=message
+        )
+        return
+
     glossary_validator = GlossaryConsistencyValidator(glossary=glossary_dicts)
     per_block: dict[str, list[ConsistencyTask]] = {}
     for task in tasks:
@@ -169,7 +222,8 @@ async def run_consistency_stage(
         error_flags = list(repaired.error_flags)
         # A terminology repair is accepted only when the rendering is actually
         # restored. The repair loop's acceptance check is term-blind unless its
-        # QE runner is glossary-aware, so on a comet/neural/subprocess engine the
+        # QE runner is glossary-aware (:meth:`BaseQERunner.is_glossary_aware` —
+        # only the glossary-bound heuristic tier is), so otherwise the
         # constraint flag is dropped and a still-drifted block would be promoted
         # REPAIRED — which triage never re-reads. Verify the postcondition here.
         if status is BlockStatus.REPAIRED:
