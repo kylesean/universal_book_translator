@@ -282,27 +282,146 @@ def _char_center_in_box(rect: tuple[float, float, float, float], box: BBox) -> b
     return box[0] - 1.0 <= cx <= box[2] + 1.0 and box[1] - 1.0 <= cy <= box[3] + 1.0
 
 
+def _median(values: Sequence[float]) -> float:
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2] if ordered else 0.0
+
+
+#: Glyphs that can *be* a raised marker. Alphanumerics cover citation/affiliation
+#: digits and ordinal suffixes; the symbol set covers the footnote daggers and
+#: the typographic asterisk (U+2217, what LaTeX ``\ast`` emits). ASCII ``*`` is
+#: deliberately absent: it hangs at mid height in every line it appears in, and
+#: in code listings (``*p`` dereference) it is an operator, not a marker. A
+#: hanging hyphen or apostrophe is likewise a placement, never a marker.
+_MARKER_GLYPHS = frozenset("∗†‡§")
+
+#: A marker run is short: a citation is one or two digits plus a riding comma,
+#: an ordinal suffix two letters. A lifted stretch longer than this is a line of
+#: print, never a marker.
+_MAX_MARKER_CLUSTER = 4
+
+
+def _is_marker_glyph(text: str) -> bool:
+    return bool(text) and (text[0].isalnum() or text[0] in _MARKER_GLYPHS)
+
+
+def _superscript_indexes(chars: Sequence[CharStyle], body_height: float) -> set[int]:
+    """Indexes (into ``chars``) of glyphs set as superscripts.
+
+    A superscript is defined typographically, not by size: a short run of marker
+    glyphs lifted off its line's baseline. Both facts come from the glyph boxes
+    -- ``font_size`` cannot be trusted, because pdfium reports the ``Tf``
+    operand alone and a PDF that scales through the text matrix reports 1.0 for
+    every character (measured on the ATC'25 source, footnote markers included).
+
+    The analysis is per *line*: pdfium glyph boxes are per-glyph, so within one
+    visual line the descenders (g/y/p/q), the baseline letters and the raised
+    markers each have distinct box bottoms -- clustering by bottom alone would
+    take a descender cluster for the baseline and flag ordinary baseline letters
+    as raised (measured: "is s" flagged on a references page whose only crime
+    was a descender). Chars are therefore bottom-clustered tightly, and the
+    clusters chain-merged into lines; a line's baseline is the modal bottom of
+    its glyphs (the majority sit on it), and a glyph is lifted when its bottom
+    clears that baseline by more than a hair but stays within the line's own
+    height.
+
+    A lifted run then qualifies only if it is short and contains a marker glyph
+    (``_is_marker_glyph``). The trailing comma of a name line (``Peng 1,∗,``)
+    hangs below the baseline and is never lifted; the comma inside a citation
+    (``3,4``) rides at the raised height and stays inside its run, so the render
+    never splits one citation into super/plain/super.
+    """
+    if body_height <= 0.0 or not chars:
+        return set()
+    # Pass 1: tight clusters by box bottom -- one line's baseline letters share
+    # a bottom to ~0.2pt, while its descenders, commas and raised markers sit a
+    # few points off it.
+    bottom_tol = 0.15 * body_height
+    ordered = sorted(
+        (i for i, c in enumerate(chars) if not c.text.isspace()),
+        key=lambda i: chars[i].rect[1],
+    )
+    clusters: list[list[int]] = []
+    for i in ordered:
+        if clusters and abs(chars[i].rect[1] - chars[clusters[-1][0]].rect[1]) <= bottom_tol:
+            clusters[-1].append(i)
+        else:
+            clusters.append([i])
+    # Pass 2: chain the clusters into visual lines. A raised marker sits within
+    # a line height of its own line's baseline (measured up to ~0.8x); the next
+    # line sits a full pitch away (at least ~1.15x a body height with any real
+    # leading). One body height sits between the two with margin on both sides.
+    line_gap = 1.0 * body_height
+    lines: list[list[int]] = []
+    prev_bottom: float | None = None
+    for cluster in clusters:
+        cluster_bottom = chars[cluster[0]].rect[1]
+        # ``clusters`` ascends by bottom (PDF y-up): the gap to the previous
+        # cluster is this bottom minus the previous one.
+        if prev_bottom is not None and cluster_bottom - prev_bottom <= line_gap:
+            lines[-1].extend(cluster)
+        else:
+            lines.append(list(cluster))
+        prev_bottom = cluster_bottom
+    superscript: set[int] = set()
+    for line in lines:
+        bottoms = [round(chars[i].rect[1], 2) for i in line]
+        baseline = max(set(bottoms), key=bottoms.count)
+        line_height = _median([chars[i].rect[3] - chars[i].rect[1] for i in line])
+        if line_height <= 0.0:
+            continue
+        lifted = [
+            i
+            for i in line
+            if baseline + 0.12 * line_height < chars[i].rect[1] <= baseline + line_height
+        ]
+        if not lifted:
+            continue
+        # A marker is glued to its anchor: runs are contiguous in x, with a gap
+        # allowance that covers the space inside "3, 4" but not the distance to
+        # the next author's marker.
+        lifted.sort(key=lambda i: chars[i].rect[0])
+        gap_tol = 0.4 * body_height
+        run: list[int] = []
+        runs: list[list[int]] = []
+        for i in lifted:
+            if run and chars[i].rect[0] - chars[run[-1]].rect[2] > gap_tol:
+                runs.append(run)
+                run = []
+            run.append(i)
+        if run:
+            runs.append(run)
+        for candidate in runs:
+            if len(candidate) > _MAX_MARKER_CLUSTER:
+                continue
+            if not any(_is_marker_glyph(chars[i].text) for i in candidate):
+                continue
+            superscript.update(candidate)
+    return superscript
+
+
 def styled_runs_in_box(
     chars: Sequence[CharStyle],
     box: BBox,
-    *,
-    superscript_ratio: float = 0.8,
 ) -> list[tuple[str, bool, bool, bool, str | None]]:
     """Merge a page's characters inside ``box`` into ``(text, bold, italic,
     superscript, color_hex)`` runs of constant style.
 
     Only non-default runs are returned (bold / superscript / coloured): plain
-    body text needs no run and would only bloat the block's style. A raised
-    marker is a glyph smaller than ``superscript_ratio`` of the box's median size
-    (the footnote daggers are ~0.73x the body); a whitespace glyph is neutral and
-    rides the surrounding run rather than starting one of its own (pdfium reports
+    body text needs no run and would only bloat the block's style. A superscript
+    is a short marker run lifted off its line's baseline (see
+    :func:`_superscript_indexes`); a small glyph sitting ON the baseline is a
+    font variant, never a superscript. A whitespace glyph is neutral and rides
+    the surrounding run rather than starting one of its own (pdfium reports
     synthetic spaces with a degenerate 1pt box).
     """
     inside = [c for c in chars if c.text and _char_center_in_box(c.rect, box)]
     if not inside:
         return []
-    sizes = sorted(c.font_size for c in inside if c.font_size >= 4.5 and not c.text.isspace())
-    base = sizes[len(sizes) // 2] if sizes else 0.0
+    body_height = _median(
+        [c.rect[3] - c.rect[1] for c in inside if not c.text.isspace() and c.rect[3] > c.rect[1]]
+    )
+    superscript = _superscript_indexes(inside, body_height)
     runs: list[tuple[str, bool, bool, bool, str | None]] = []
     buffer: list[str] = []
     style: tuple[bool, bool, bool, str | None] | None = None
@@ -318,12 +437,12 @@ def styled_runs_in_box(
             runs.append((text, style[0], style[1], style[2], style[3]))
         buffer = []
 
-    for char in inside:
+    for idx, char in enumerate(inside):
         if char.text.isspace():
             if buffer:
                 buffer.append(char.text)
             continue
-        raised = base > 0 and char.font_size >= 4.5 and char.font_size < superscript_ratio * base
+        raised = idx in superscript
         current = (char.bold, False, raised, char.color_hex)
         if style is not None and current != style:
             _flush()

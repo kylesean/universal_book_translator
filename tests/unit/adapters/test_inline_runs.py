@@ -47,7 +47,9 @@ def test_styled_runs_group_bold_superscript_and_colour_only() -> None:
         _char(0, "A"),
         _char(5, "B"),
         _char(10, "C", bold=True),
-        _char(15, "1", size=7.0),  # < 0.8 * 11 -> superscript
+        # A superscript is smaller AND lifted: the marker rides 2.5pt above the
+        # body baseline, the way a real footnote reference is set.
+        CharStyle((15.0, 2.5, 20.0, 10.0), "1", 7.0, False, None),
         _char(20, "D", color="#0000ff"),
     ]
     runs = styled_runs_in_box(chars, (0.0, 0.0, 25.0, 12.0))
@@ -56,6 +58,22 @@ def test_styled_runs_group_bold_superscript_and_colour_only() -> None:
         ("1", False, False, True, None),
         ("D", False, False, False, "#0000ff"),
     ]
+
+
+def test_small_print_on_the_baseline_is_not_a_superscript() -> None:
+    # Measured on the ATC'25 caption "A Another Example for OSTD APIs": the
+    # acronym's tail is genuinely set at 9.56pt inside an 11.96pt line -- but ON
+    # the baseline. A size drop without a baseline lift is a font variant, and
+    # flagging it wrapped an ordinary caption in #super mid-word.
+    chars = [
+        _body(0, "O", height=8.5),
+        _body(5, "S", height=6.8),
+        _body(10, "T", height=6.5),
+        _body(15, "D", height=6.5),
+        _body(20, "s", height=5.8),
+    ]
+    runs = styled_runs_in_box(chars, (0.0, -2.0, 25.0, 12.0))
+    assert runs == []
 
 
 def test_a_space_rides_the_surrounding_run() -> None:
@@ -68,6 +86,74 @@ def test_a_space_rides_the_surrounding_run() -> None:
     ]
     runs = styled_runs_in_box(chars, (0.0, 0.0, 10.0, 12.0))
     assert runs == [("G o", False, False, False, "#0000ff")]
+
+
+def _body(x0: float, text: str, *, bottom: float = 0.0, height: float = 10.0) -> CharStyle:
+    """A body glyph whose box bottom and height are stated explicitly.
+
+    The default ``_char`` helper gives every glyph the same box, which is why it
+    cannot exercise the geometry path: a matrix-scaled PDF reports one
+    ``font_size`` for everything and distinguishes a raised marker only through
+    the glyph box.
+    """
+    return CharStyle((x0, bottom, x0 + 5.0, bottom + height), text, 1.0, False, None)
+
+
+def test_a_matrix_scaled_marker_is_raised_by_geometry() -> None:
+    """A raised digit is found through its glyph box when ``font_size`` is blind.
+
+    Measured on the ATC'25 source: pdfium reports 1.0 for every character --
+    author-affiliation markers included -- because the PDF scales through the
+    text matrix. The marker's box (bottom lifted ~40% of a line, height ~0.77x
+    the body's) is the only signal, and the size-ratio rule cannot see it.
+    """
+    chars = [
+        _body(0, "Y"),
+        _body(5, "u"),
+        _body(10, "k"),
+        _body(15, "e"),
+        _body(20, " "),  # space between name and marker
+        _body(25, "1", bottom=4.0, height=7.7),  # the affiliation marker
+    ]
+    runs = styled_runs_in_box(chars, (0.0, -2.0, 30.0, 12.0))
+    assert runs == [("1", False, False, True, None)]
+
+
+def test_a_hanging_hyphen_is_not_a_marker() -> None:
+    # A hyphen hangs at half cap height: its box bottom is well above the
+    # line's baseline and its glyph is small. It is still not a superscript --
+    # compounds like "ABI-Compatible" must not ship wrapped in #super. A
+    # cluster of pure punctuation never qualifies as a raised marker.
+    chars = [
+        _body(0, "R"),
+        _body(5, "u"),
+        _body(10, "s"),
+        _body(15, "t"),
+        _body(20, "-", bottom=4.0, height=2.5),
+        _body(25, "b"),
+        _body(30, "a"),
+    ]
+    runs = styled_runs_in_box(chars, (0.0, -2.0, 35.0, 12.0))
+    assert runs == []
+
+
+def test_a_marker_comma_rides_the_raised_run() -> None:
+    # A citation ``3,4`` draws its comma below the raised digits; splitting the
+    # cluster there would render super/plain/super in the target. The comma
+    # hangs far enough below the digit bottoms to be its own cluster only in
+    # hostile geometry -- within one tolerance it rides the digits' cluster.
+    chars = [
+        _body(0, "Z"),
+        _body(5, "h"),
+        _body(10, "a"),
+        _body(15, "n"),
+        _body(20, "g"),
+        _body(25, "3", bottom=4.0, height=7.7),
+        _body(30, ",", bottom=3.4, height=7.7),
+        _body(35, "4", bottom=4.0, height=7.7),
+    ]
+    runs = styled_runs_in_box(chars, (0.0, -2.0, 40.0, 12.0))
+    assert runs == [("3,4", False, False, True, None)]
 
 
 def test_a_trailing_space_is_not_part_of_the_run() -> None:

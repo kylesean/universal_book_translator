@@ -30,6 +30,7 @@ from typing import Any
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, IRBlock
 from ubt.render.delivered_text import delivered_text
+from ubt.render.inline_spans import block_runs
 from ubt.render.layout_solver import FLOOR_PT
 from ubt.render.typst.escape import typst_escape
 
@@ -780,14 +781,22 @@ class PageLockedReflowRenderer:
 
             escaped = typst_escape(txt)
 
+            # The same block's styled spans the reflow channel already renders
+            # (bold, raised footnote markers, link colour) are this channel's to
+            # deliver too: a page-locked book keeps its superscript citation
+            # markers only if the runs reach ``render_prose``. Passing none drops
+            # every span on this tier -- measured on the ATC'25 replay, where the
+            # paragraph-footnote markers rendered as full-size inline digits.
+            runs = block_runs(b)
+
             if b.block_type == BlockType.HEADING:
                 lvl = getattr(b.element, "level", 1) if hasattr(b, "element") else 1
                 size_em = "1.25em" if lvl <= 1 else "1.10em"
                 lines.append(
-                    f'  #block(above: 0.8em, below: 0.5em)[#text(weight: "bold", size: {size_em}, fill: rgb("{geom.theme_color_hex}"))[{render_prose(txt, is_math_ok=self._math_gate)}]]'
+                    f'  #block(above: 0.8em, below: 0.5em)[#text(weight: "bold", size: {size_em}, fill: rgb("{geom.theme_color_hex}"))[{render_prose(txt, runs, is_math_ok=self._math_gate)}]]'
                 )
             elif b.block_type == BlockType.LIST_ITEM:
-                lines.append(f"  - {render_prose(txt, is_math_ok=self._math_gate)}")
+                lines.append(f"  - {render_prose(txt, runs, is_math_ok=self._math_gate)}")
             elif b.block_type == BlockType.TABLE:
                 # A Markdown grid must be typeset, not printed: escaped, its pipes
                 # and dashes are literal text.
@@ -839,7 +848,7 @@ class PageLockedReflowRenderer:
                 code_mk = repair_code_block_markup(txt, container_width_pt=col_w)
                 lines.append(f"  {code_mk}")
             else:
-                lines.append(f"  {render_prose(txt, is_math_ok=self._math_gate)}")
+                lines.append(f"  {render_prose(txt, runs, is_math_ok=self._math_gate)}")
                 lines.append("")
 
         lines.append("]")

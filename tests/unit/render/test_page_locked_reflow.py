@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from ubt.core.ir.models import BlockType, BoundingBox, IRBlock, StyleMeta, make_element
+from ubt.core.ir.models import BlockType, BoundingBox, InlineRun, IRBlock, StyleMeta, make_element
 from ubt.render.layout_solver import FLOOR_PT
 from ubt.render.typst.facsimile_renderer import (
     FacsimileBlockPlacement,
@@ -277,6 +277,49 @@ def test_build_page_markup() -> None:
     assert "Quantum Field Theory" in markup
     assert "Introduction to particle physics." in markup
     assert 'fill: rgb("#0078ae")' in markup
+
+
+def test_page_locked_markup_carries_the_blocks_styled_runs() -> None:
+    """A raised citation marker stays raised on the page-locked tier.
+
+    The reflow channel locates a block's inline runs and wraps them
+    (``#super``/``#strong``/fill); the page-locked channel renders the same
+    block through the same ``render_prose`` -- but only if the runs are handed
+    over. Measured on the ATC'25 replay: the author line's affiliation markers
+    shipped as full-size inline digits on this tier while the same runs styled
+    correctly on the reflow tier.
+    """
+    geom = PageGeometry(
+        page_w=595.0,
+        page_h=842.0,
+        margin_top=36.0,
+        margin_bottom=36.0,
+        margin_left=36.0,
+        margin_right=36.0,
+        columns=1,
+        theme_color_hex="#000000",
+    )
+    block = _make_block("p1", "Yuke Peng 1, Hongliang Tian 2")
+    block = block.model_copy(
+        update={
+            "style": StyleMeta(
+                inline_runs=(
+                    InlineRun(text="1", superscript=True),
+                    InlineRun(text="2", superscript=True),
+                )
+            )
+        }
+    )
+    spec = PageLockedPageSpec(
+        page_no=1,
+        geometry=geom,
+        uniform_size_pt=9.5,
+        leading_em=0.33,
+        par_spacing_em=0.60,
+        blocks=[block],
+    )
+    markup = PageLockedReflowRenderer().build_page_markup(spec, target_lang="zh")
+    assert "#super" in markup
 
 
 def test_page_locked_render_document_mock(tmp_path: Path) -> None:
