@@ -8,6 +8,7 @@ import pytest
 
 from ubt.adapters.pdf.docling_parser import (
     annotate_layout_metadata,
+    restore_appendix_headings,
     restore_ordered_markers,
 )
 from ubt.adapters.pdf.textgeom import LineBox
@@ -280,3 +281,52 @@ def test_a_single_line_heading_keeps_its_simple_span(monkeypatch: pytest.MonkeyP
     out = annotate_layout_metadata([heading], Path("/does/not/matter.pdf"))
 
     assert not isinstance(out[0].element.span, CompositeSpan)
+
+
+# --- appendix headings the layout model missed ------------------------------
+
+
+def test_an_appendix_heading_matching_typed_siblings_is_retitled() -> None:
+    """``A ...`` ships a heading where Docling typed a paragraph.
+
+    Measured on the ATC'25 paper: Docling read "B Complete results ..." and
+    "C Complete results ..." as headings but "A Another Example for OSTD APIs"
+    as a body paragraph, which then shipped set as body text. The document's
+    own letter-marked headings corroborate the shape.
+    """
+    heading_b = _para(
+        "b293",
+        "B Complete results for Redis benchmark",
+        block_type=BlockType.HEADING,
+    )
+    narrative_a = _para("b290", "A Another Example for OSTD APIs")
+    prose = _para("b291", "A new approach to memory isolation is proposed here.")
+
+    out = restore_appendix_headings([narrative_a, prose, heading_b])
+
+    assert out[0].block_type is BlockType.HEADING
+    assert out[0].source_text == "A Another Example for OSTD APIs"
+    # Prose keeps its type even though it opens with an article: the word after
+    # the marker is lowercase, so the shape does not match at all.
+    assert out[1].block_type is BlockType.NARRATIVE
+    assert out[2].block_type is BlockType.HEADING
+
+
+def test_a_letter_shape_without_typed_siblings_stays_prose() -> None:
+    # A paper with no letter-marked headings offers no corroboration: "A CPU
+    # pipeline ..." as a one-line paragraph stays prose.
+    prose = _para("p1", "A CPU pipeline flush costs microseconds here")
+    assert restore_appendix_headings([prose])[0].block_type is BlockType.NARRATIVE
+
+
+def test_a_wrapped_or_terminated_paragraph_is_never_a_heading() -> None:
+    heading_b = _para("b293", "B Complete results", block_type=BlockType.HEADING)
+    # Terminal punctuation reads as a sentence even with the marker shape.
+    terminated = _para("b294", "A Second observation follows.")
+    # A 60pt-tall block is two printed lines of prose, not a title.
+    two_lines = _para("b295", "A Example with a very long appendix title", y1=60.0)
+
+    out = restore_appendix_headings([heading_b, terminated, two_lines])
+
+    assert out[1].block_type is BlockType.NARRATIVE
+    assert out[2].block_type is BlockType.NARRATIVE

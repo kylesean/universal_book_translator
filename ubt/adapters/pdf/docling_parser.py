@@ -374,6 +374,101 @@ def restore_ordered_markers(blocks: list[IRBlock]) -> list[IRBlock]:
     return out
 
 
+#: An appendix heading opens with a lone capital letter (``A``/``B``/``C`` ...),
+#: then a capitalized word. The letter must be a *marker*, not an opening
+#: article, so the word after it must be capitalized too -- prose reads
+#: ``A new approach``, an appendix heading reads ``A Another Example ...``.
+#: Only the opening is anchored: the title may run on ("A Another Example for
+#: OSTD APIs"), which is why the document-consistency corroboration below, not
+#: the shape alone, is what keeps prose out.
+_APPENDIX_HEADING_RE = re.compile(r"^([A-Z])\s+[A-Z]")
+#: An appendix heading is a title: short enough to be one, and it never ends in
+#: sentence punctuation (a terminal period would make ``A B.`` read as prose).
+_APPENDIX_HEADING_MAX_CHARS = 80
+#: ...and it fits on one source line. A wrapped paragraph opening on
+#: ``A Capitalized`` word is prose, not a heading.
+_APPENDIX_HEADING_MAX_LINE_HEIGHT_PT = 26.0
+
+
+def _appendix_heading_marker(block: IRBlock) -> str | None:
+    """The appendix letter when ``block`` has the appendix-heading shape.
+
+    Shape only: block type plays no part, so an already-typed heading
+    corroborates the document's appendix-marking style and an untyped
+    paragraph can be re-typed against it.
+    """
+    if block.skip_translate or block.flow_id is not FlowID.MAIN_STORY:
+        return None
+    text = (block.source_text or "").strip()
+    if not text or len(text) > _APPENDIX_HEADING_MAX_CHARS:
+        return None
+    if text[-1] in ".,;:!?" or "\n" in text:
+        return None
+    match = _APPENDIX_HEADING_RE.match(text)
+    if match is None:
+        return None
+    # One printed line: a heading wraps at titles, not at paragraph length.
+    bbox = block.bbox
+    if bbox is not None and (bbox.y1 - bbox.y0) > _APPENDIX_HEADING_MAX_LINE_HEIGHT_PT:
+        return None
+    return match.group(1)
+
+
+def restore_appendix_headings(blocks: list[IRBlock]) -> list[IRBlock]:
+    """Re-type letter-marked paragraphs as appendix headings.
+
+    Docling's layout model reads most appendix headings as section headers but
+    misses some -- measured on the ATC'25 paper, "B Complete results ..." and
+    "C Complete results ..." came out as headings while "A Another Example for
+    OSTD APIs" came out as a body paragraph and shipped set as body text. The
+    shape is unambiguous (a lone capital letter, then a capitalized word, one
+    line, no terminal punctuation), and what makes re-typing safe is document
+    consistency, the same corroboration ``restore_ordered_markers`` demands of
+    a list: this document must already carry a letter-marked heading, and the
+    candidate's letter must sit next to one of theirs in the appendix sequence
+    -- the missed heading is always the sequence's neighbour the model skipped
+    (``A`` beside typed ``B``/``C``). Prose that merely opens with a capitalized
+    word stays prose in a paper with no letter-marked headings.
+    """
+    heading_markers = {
+        marker
+        for block in blocks
+        if block.block_type is BlockType.HEADING
+        and (marker := _appendix_heading_marker(block)) is not None
+    }
+    # Appendix letters run consecutively: a typed "B" vouches for a missed "A"
+    # (or "C"), not for an arbitrary narrative that happens to open "A CPU ...".
+    corroborated = set(heading_markers)
+    for marker in heading_markers:
+        corroborated.add(chr(ord(marker) - 1))
+        corroborated.add(chr(ord(marker) + 1))
+    if not heading_markers:
+        return blocks
+    out = list(blocks)
+    for index, block in enumerate(out):
+        if block.block_type is not BlockType.NARRATIVE:
+            continue
+        marker = _appendix_heading_marker(block)
+        if marker is None or marker not in corroborated:
+            continue
+        element = make_element(
+            id=block.id,
+            spine_index=block.spine_index,
+            block_type=BlockType.HEADING,
+            flow_id=block.flow_id,
+            region=block.region,
+            source_text=block.source_text,
+            bbox=block.bbox,
+            span=block.element.span,
+            skip_translate=block.skip_translate,
+            confidence=block.element.confidence,
+            decorative=block.element.decorative,
+            level=1,
+        )
+        out[index] = block.model_copy(update={"element": element})
+    return out
+
+
 def _is_prose_footer(text: str) -> bool:
     """Whether a one-off page footer is a footnote paragraph, not chrome.
 
@@ -688,6 +783,7 @@ def type_docling_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
     blocks = resolve_overlapping_formula_blocks(blocks)
     blocks = merge_table_continuation_fragments(blocks)
     blocks = restore_ordered_markers(blocks)
+    blocks = restore_appendix_headings(blocks)
     return blocks
 
 
@@ -2448,6 +2544,7 @@ __all__ = [
     "map_docling_document_to_blocks",
     "read_docling_document",
     "resolve_formula_enrichment",
+    "restore_appendix_headings",
     "restore_ordered_markers",
     "annotate_layout_metadata",
     "vlm_fallback_missing_pages",
