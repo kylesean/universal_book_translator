@@ -61,7 +61,6 @@ _SEARCH_BASES = (
     "ubt/cli/commands",
     "ubt/model",
     "ubt/render",
-    "ubt/pipeline",
     "ubt/analyze",
     "scripts",
 )

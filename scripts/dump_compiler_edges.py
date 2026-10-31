@@ -1,10 +1,12 @@
 """Dump the core→compiler module-level import edges (read-only; exits non-zero on violation).
 
 The acceptance tool for the layering invariant: a module-level ``ubt.core``
-import of ``ubt.pipeline`` / ``ubt.segment`` / ``ubt.translate`` is a forbidden
-reverse edge, and a ``ubt.core.engine <-> ubt.pipeline`` package cycle fails
-this check. TYPE_CHECKING imports never enter the runtime import graph and are
-excluded, as is the exempted inward edge to the shared leaf ``ubt.model``.
+import of ``ubt.segment`` / ``ubt.translate`` is a forbidden reverse edge, the
+engine's equivalent is a module-level ``ubt.core.engine -> ubt.render`` edge
+into the document compiler, and a ``ubt.core.engine <-> ubt.render`` package
+cycle fails this check. TYPE_CHECKING imports never enter the runtime import
+graph and are excluded, as is the exempted inward edge to the shared leaf
+``ubt.model``.
 
 Run from the repository root: ``.venv/bin/python scripts/dump_compiler_edges.py``.
 """
@@ -12,7 +14,17 @@ Run from the repository root: ``.venv/bin/python scripts/dump_compiler_edges.py`
 import ast
 from pathlib import Path
 
-COMPILER = ("ubt.pipeline", "ubt.segment", "ubt.translate", "ubt.model")
+#: The translation-unit compiler layer: ``ubt.core`` may not import these at
+#: module scope. ``ubt.model`` is the shared leaf, exempted by ``_EXEMPT_LEAF``.
+COMPILER = ("ubt.segment", "ubt.translate", "ubt.model")
+#: Plus the document compiler, forbidden to the engine specifically: every
+#: ``ubt.render`` module reads core's IR and cleaners, so a module-level
+#: ``ubt.core.engine -> ubt.render`` edge is the inward edge of the package
+#: cycle checked below. Outside the engine two edges predate this rule
+#: (``core/cleaners/table_stitcher.py`` -> ``render/table_compiler.py``,
+#: ``core/benchmark/runner.py`` -> ``render/typst/layout_diagnostics.py``) and
+#: are not counted as violations here.
+ENGINE_COMPILER = (*COMPILER, "ubt.render")
 #: The zero-out-edge shared leaf: core→model is an inward edge, exempted by design.
 _EXEMPT_LEAF = "ubt.model"
 
@@ -99,13 +111,16 @@ def main() -> int:
     n = 0
     forbidden = 0
     for f in sorted(Path("ubt/core").rglob("*.py")):
+        # The engine is held to the compiler layer plus the document compiler;
+        # the rest of core is held to the translation-unit packages only.
+        compiler = ENGINE_COMPILER if Path("ubt/core/engine") in f.parents else COMPILER
         for ln, mod in scan(f)[0]:
-            if any(mod == c or mod.startswith(c + ".") for c in COMPILER):
+            if any(mod == c or mod.startswith(c + ".") for c in compiler):
                 print(f"  {f}:{ln} -> {mod}")
                 n += 1
                 if not (mod == _EXEMPT_LEAF or mod.startswith(_EXEMPT_LEAF + ".")):
                     forbidden += 1
-    print(f"  合计: {n}（验收：pipeline/segment/translate 三类 = 0）")
+    print(f"  合计: {n}（验收：engine→render 与 segment/translate 两类 = 0）")
 
     # ``core`` is the domain layer: it must not import an adapter. Without this the
     # gate only watched the compiler packages, so any core module that reached for
@@ -138,7 +153,7 @@ def main() -> int:
                 if tgt != src:
                     edges.setdefault(src, set()).add(tgt)
 
-    a, b = "ubt.core.engine", "ubt.pipeline"
+    a, b = "ubt.core.engine", "ubt.render"
     ab, ba = b in edges.get(a, set()), a in edges.get(b, set())
     cycle = ab and ba
     print(f"== {a} <-> {b}: cycle={cycle}（验收：False）==")
@@ -163,16 +178,20 @@ def main() -> int:
     # --------------------------------------------------------------------------- #
     # Port-boundary invariant: within ubt.core, only ubt/core/ports.py is
     # permitted to contain function-level (lazy) bridges into ubt.adapters or the
-    # compiler packages (ubt.pipeline, ubt.segment, ubt.translate).
+    # compiler packages (ubt.segment, ubt.translate).
     # Any lazy import elsewhere in ubt.core is an architectural leak bypassing the
     # designated port bridge.
+    #
+    # ``ubt.render`` is deliberately absent from this list: the render layer is
+    # not behind the port bridge, and the export stage, the render preflight and
+    # the layout coordinator lazy-import it as their normal calling shape.
     # --------------------------------------------------------------------------- #
     lazy_leaks: list[tuple[str, int, str]] = []
     for f in sorted(Path("ubt/core").rglob("*.py")):
         if f.name == "ports.py":
             continue
         for ln, mod in scan(f)[1]:
-            for bad in ("ubt.adapters", "ubt.pipeline", "ubt.segment", "ubt.translate"):
+            for bad in ("ubt.adapters", "ubt.segment", "ubt.translate"):
                 if mod == bad or mod.startswith(bad + "."):
                     lazy_leaks.append((str(f), ln, mod))
 
