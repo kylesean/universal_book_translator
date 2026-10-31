@@ -1390,3 +1390,40 @@ def test_facsimile_table_carries_continuation_notices() -> None:
     markup = FacsimileRenderer().build_markup([page_spec], "bg.pdf", target_lang="zh")
     assert "ubt-tbl-start-src-b0100" in markup
     assert "（续下页）" in markup
+
+
+def test_facsimile_table_respects_its_source_box_height() -> None:
+    """A translated grid may not grow past the box its source occupied.
+
+    CJK cells wrap more lines than the source's Latin ones; without a height
+    budget the grid overran its box straight into the table footnote printed
+    below it (measured on the ATC'25 replay, p13). The tier passes the box
+    height and the grid shrinks instead.
+    """
+    grid = "\n".join(["| Op | Cost |", "|---|---|"] + [f"| op{i} | {i}.0 |" for i in range(6)])
+    placement = FacsimileBlockPlacement(
+        block_id="b0100",
+        page=1,
+        x0=50.0,
+        y0=100.0,
+        x1=350.0,
+        y1=140.0,  # a 40pt box: far too short for eight rows at full size
+        text=grid,
+        is_table=True,
+    )
+    page_spec = FacsimilePageSpec(
+        page_no=1,
+        page_w=500.0,
+        page_h=700.0,
+        uniform_size_pt=10.0,
+        leading_em=0.35,
+        placements=[placement],
+    )
+    markup = FacsimileRenderer().build_markup([page_spec], "bg.pdf", target_lang="zh")
+    scales = [
+        float(line.strip().split(":")[1].strip().removesuffix("em)"))
+        for line in markup.splitlines()
+        if line.strip().startswith("#set text(size:") and line.strip().endswith("em)")
+    ]
+    assert scales, "expected a shrunk table text size in the markup"
+    assert min(scales) < 0.84

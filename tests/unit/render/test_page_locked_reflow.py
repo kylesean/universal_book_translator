@@ -7,7 +7,15 @@ from typing import Any
 
 import pytest
 
-from ubt.core.ir.models import BlockType, BoundingBox, InlineRun, IRBlock, StyleMeta, make_element
+from ubt.core.ir.models import (
+    BlockType,
+    BoundingBox,
+    FlowID,
+    InlineRun,
+    IRBlock,
+    StyleMeta,
+    make_element,
+)
 from ubt.render.layout_solver import FLOOR_PT
 from ubt.render.typst.facsimile_renderer import (
     FacsimileBlockPlacement,
@@ -496,3 +504,46 @@ def test_page_locked_table_carries_continuation_notices() -> None:
     assert "ubt-tbl-end-src-t1" in markup
     assert "（续下页）" in markup
     assert "（续表）" in markup
+
+
+def test_page_locked_anchors_the_note_flow_at_the_bottom() -> None:
+    """Footnote-flow blocks print after the body, never between body blocks.
+
+    A note the extractor read out of vertical order used to land wherever the
+    sort put it -- between two paragraphs mid-page. Publishing convention (and
+    the source's own layout) puts the page's notes under the text column.
+    """
+    geom = PageGeometry(
+        page_w=595.0,
+        page_h=842.0,
+        margin_top=36.0,
+        margin_bottom=36.0,
+        margin_left=36.0,
+        margin_right=36.0,
+        columns=1,
+        theme_color_hex="#000000",
+    )
+    body_top = _make_block("p1", "正文段落。")
+    note = _make_block("n1", "1 这是页脚注。")
+    note = note.model_copy(
+        update={
+            "element": make_element(
+                id="n1",
+                spine_index=2,
+                block_type=BlockType.NARRATIVE,
+                flow_id=FlowID.FOOTNOTE,
+                source_text="1 这是页脚注。",
+            )
+        }
+    )
+    body_next = _make_block("p2", "第二段正文。")
+    spec = PageLockedPageSpec(
+        page_no=1,
+        geometry=geom,
+        uniform_size_pt=9.5,
+        leading_em=0.33,
+        par_spacing_em=0.60,
+        blocks=[body_top, note, body_next],
+    )
+    markup = PageLockedReflowRenderer().build_page_markup(spec, target_lang="zh")
+    assert markup.index("正文段落。") < markup.index("第二段正文。") < markup.index("这是页脚注。")

@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from ubt.core.exceptions import DocumentParseError
-from ubt.core.ir.models import BlockType, IRBlock
+from ubt.core.ir.models import BlockType, FlowID, IRBlock
 from ubt.render.delivered_text import delivered_text
 from ubt.render.inline_spans import block_runs
 from ubt.render.layout_solver import FLOOR_PT
@@ -726,6 +726,15 @@ class PageLockedReflowRenderer:
                     round(float(b.bbox.x0), 1) if b.bbox else 0.0,
                 )
             )
+
+        # A page's footnotes print at the bottom of the page, not inline: the
+        # note flow is anchored last so a note extracted out of vertical order
+        # cannot land between body blocks (publishing convention, and the
+        # source's own layout -- the note band sits under the text column).
+        footnotes = [b for b in ordered_blocks if b.flow_id is FlowID.FOOTNOTE]
+        if footnotes:
+            ordered_blocks = [b for b in ordered_blocks if b.flow_id is not FlowID.FOOTNOTE]
+            ordered_blocks.extend(footnotes)
 
         for b in ordered_blocks:
             # An image block's text is the asset *path* the parser stored

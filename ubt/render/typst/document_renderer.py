@@ -27,6 +27,7 @@ Design notes that are load-bearing:
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import shutil
 from collections.abc import Iterable, Sequence
@@ -879,6 +880,7 @@ def render_table(
     is_math_ok: Callable[[str], bool] | None = None,
     page_columns: int = 1,
     content_width_pt: float | None = None,
+    content_height_pt: float | None = None,
     scale_out: list[float] | None = None,
     allow_landscape: bool = False,
     table_scale_factor: float = 1.0,
@@ -1088,6 +1090,15 @@ def render_table(
     weights: list[float] = []
     runs: list[float] = []
     widest_unbreakable = 0.0
+    # Per-cell text widths in base em, header first: the height budget needs to
+    # know how many lines each row wraps to at a candidate scale.
+    cell_em: list[list[list[float]]] = [
+        [
+            [_text_em(part.strip()) for part in re.split(r"<br\s*/?>", values[col])]
+            for col in range(min(columns, len(values)))
+        ]
+        for values in (headers, *rows)
+    ]
     for col in range(columns):
         longest = 0.0
         longest_run = 0.0
@@ -1334,6 +1345,49 @@ def render_table(
     # that fits at full size; a table that had to shrink uses the computed
     # factor, and never a value above it.
     emitted_scale = min(table_scale, float(_TABLE_TEXT_SCALE) * table_scale_factor)
+
+    # Height budget: a caller that gives the table a fixed box (the facsimile
+    # tier injects text into the source's own boxes) must not have the grid
+    # grow past it. A translated table wraps more lines than its source --
+    # measured on the ATC'25 paper, the CJK cells of one 5-row benchmark table
+    # added eight wrapped lines and the grid overran its box straight into the
+    # table footnote printed below it. The width fit above knows nothing about
+    # height, so the emitted scale is re-fit here: iterate, because the wrap
+    # count is a step function of the scale.
+    if content_height_pt is not None and content_height_pt > 0.0:
+        cell_inset_total = 2 * _TABLE_CELL_INSET_PT
+        hlines_pt = 2.7
+
+        def _natural_height(scale: float) -> float:
+            total_lines = 0
+            for row_cells in cell_em:
+                row_lines = 1
+                for col, parts in enumerate(row_cells):
+                    if col >= len(widths):
+                        break
+                    capacity_em = max(widths[col] / (TABLE_BASE_PT * scale), _TABLE_MIN_COLUMN_EM)
+                    lines = sum(max(1, math.ceil(em / capacity_em)) for em in parts)
+                    row_lines = max(row_lines, lines)
+                total_lines += row_lines
+            return (
+                total_lines * TABLE_BASE_PT * scale * 1.35
+                + (len(cell_em)) * cell_inset_total
+                + hlines_pt
+            )
+
+        fitted = emitted_scale
+        for _ in range(3):
+            natural = _natural_height(fitted)
+            if natural <= content_height_pt:
+                break
+            fitted = max(fitted * content_height_pt / natural, _TABLE_MIN_TEXT_SCALE)
+        if fitted < emitted_scale:
+            emitted_scale = fitted
+            # The width path's ``shrink`` was decided before the budget ran; a
+            # height-driven shrink must open the same emission gate or the
+            # smaller scale is computed and then never applied.
+            shrink = shrink or not landscape
+
     if scale_out is not None:
         scale_out.append(emitted_scale)
 

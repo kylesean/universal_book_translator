@@ -142,11 +142,17 @@ class FacsimileRenderer:
             # places on one canvas still breaks across the page boundary, and
             # a reader meeting the second fragment without "（续表）" has lost
             # the thread (measured on the ATC'25 SQLite results table).
+            #
+            # The height budget is the box the source gave the grid: a
+            # translated table wraps more lines than its source (CJK cells),
+            # and without the budget the grid grew straight into the table
+            # footnote printed below it (measured on the ATC'25 replay, p13).
             table_markup = render_table(
                 pl.text,
                 is_math_ok=self._math_gate,
                 page_columns=1,
                 content_width_pt=width_pt,
+                content_height_pt=max(0.0, float(pl.y1) - float(pl.y0)),
                 target_lang=target_lang,
                 enable_continuation=True,
                 table_uid=f"src-{pl.block_id}",
