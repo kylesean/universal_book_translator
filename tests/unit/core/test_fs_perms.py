@@ -48,3 +48,27 @@ def test_sanitize_display_path() -> None:
     assert sanitize_display_path(home) == "~"
     assert sanitize_display_path(home / "books" / "sample.pdf") == "~/books/sample.pdf"
     assert sanitize_display_path("/tmp/outside.txt") == "/tmp/outside.txt"
+
+
+def test_world_readable_scan_skips_non_traversable_subtrees(tmp_path: Path) -> None:
+    """Exposure needs traversal: a 0700 build dir walls off its contents.
+
+    UBT's build directories are born owner-only precisely so the manuscripts
+    inside stay private; the scan must not list files it cannot be opened for,
+    or every private build dir would read as a leak.
+    """
+    from ubt.core.fs_perms import world_readable_files
+
+    private = restrict_dir_to_owner(tmp_path / "build")
+    (private / "manuscript.txt").write_text("全书译文", encoding="utf-8")
+    (private / "manuscript.txt").chmod(0o644)  # mode says readable; the dir says no
+
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o755)
+    (shared / "leaked.txt").write_text("泄露的文本", encoding="utf-8")
+    (shared / "leaked.txt").chmod(0o644)
+
+    found = world_readable_files(tmp_path)
+
+    assert shared / "leaked.txt" in found
+    assert private / "manuscript.txt" not in found

@@ -189,6 +189,17 @@ def world_readable_files(directory: Path, extra_dirs: Iterable[Path] = ()) -> li
             if not root.is_dir():
                 continue
             for dirpath, _dirnames, filenames in os.walk(root, onerror=_onerror):
+                # Exposure needs traversal: a directory that grants no search
+                # permission (x) to group or other walls off everything below
+                # it, no matter the files' own modes -- UBT's own build dirs
+                # are born 0700 exactly for this. Walking into them would
+                # list files no other user can open.
+                try:
+                    dir_mode = Path(dirpath).stat().st_mode
+                except OSError:
+                    continue
+                if not dir_mode & 0o011:
+                    continue
                 for name in filenames:
                     child = Path(dirpath) / name
                     try:

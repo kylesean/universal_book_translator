@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from ubt.core.exceptions import DocumentParseError
+from ubt.core.fs_perms import restrict_dir_to_owner
 from ubt.render.typst.page_locked_renderer import (
     PageLockedPageSpec,
     PageLockedReflowRenderer,
@@ -311,7 +312,7 @@ class FacsimileRenderer:
         compile_fn: Callable[[str, str, str], tuple[bool, str]] | None = None,
     ) -> Path:
         """Compile the facsimile pages into the final output PDF."""
-        build_dir.mkdir(parents=True, exist_ok=True)
+        restrict_dir_to_owner(build_dir)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         local_bg = build_dir / "bg_stripped.pdf"

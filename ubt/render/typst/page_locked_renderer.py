@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from ubt.core.exceptions import DocumentParseError
+from ubt.core.fs_perms import restrict_dir_to_owner
 from ubt.core.ir.models import BlockType, FlowID, IRBlock
 from ubt.render.delivered_text import delivered_text
 from ubt.render.inline_spans import block_runs
@@ -589,7 +590,7 @@ def make_asset_copier(
         if target.exists():
             return target.name
         try:
-            build_dir.mkdir(parents=True, exist_ok=True)
+            restrict_dir_to_owner(build_dir)
             shutil.copy2(candidate, target)
         except OSError:
             return None
@@ -630,7 +631,7 @@ def make_formula_cropper(
             cropped = delivered_crop_pil(source_pdf, int(bbox.page), bbox, dpi=FIGURE_ASSET_DPI)
             if getattr(cropped, "width", 0) < 4 or getattr(cropped, "height", 0) < 4:
                 return None
-            build_dir.mkdir(parents=True, exist_ok=True)
+            restrict_dir_to_owner(build_dir)
             cropped.save(target)
         except Exception as exc:
             logger.debug("Formula raster fallback failed for %s: %s", block.id, exc)

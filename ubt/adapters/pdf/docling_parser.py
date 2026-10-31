@@ -59,6 +59,7 @@ from ubt.adapters.pdf.plain_text_extractor import pages_to_blocks
 from ubt.analyze.structure import looks_like_debris, looks_like_listing, pdf_list_marker
 from ubt.core.cleaners.lnds_pruner import normalize_academic_pdf_math
 from ubt.core.exceptions import DocumentParseError
+from ubt.core.fs_perms import restrict_dir_to_owner
 from ubt.core.ir.models import (
     BlockProvenance,
     BlockType,
@@ -1421,7 +1422,7 @@ def map_iterated_items(
                 and getattr(img, "width", 0) >= 50
                 and getattr(img, "height", 0) >= 40
             ):
-                assets_dir.mkdir(parents=True, exist_ok=True)
+                restrict_dir_to_owner(assets_dir)
                 try:
                     img.save(asset_path)
                 except Exception as exc:
@@ -1462,7 +1463,7 @@ def map_iterated_items(
                     # and drawn on the page as part of it.
                     cropped = delivered_crop_pil(pdf_path, page_no, item_bbox, dpi=FIGURE_ASSET_DPI)
                     if getattr(cropped, "width", 0) >= 50 and getattr(cropped, "height", 0) >= 40:
-                        assets_dir.mkdir(parents=True, exist_ok=True)
+                        restrict_dir_to_owner(assets_dir)
                         cropped.save(asset_path)
                 except Exception as exc:
                     logger.debug("Fallback PDF crop failed for picture asset: %s", exc)
