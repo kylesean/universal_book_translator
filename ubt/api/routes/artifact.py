@@ -1,4 +1,13 @@
-"""The artifact surface: deliverable download, reports, page previews."""
+"""The artifact surface: a finished job's on-disk outputs, as bytes.
+
+Everything here resolves a stored path through the artifact sandbox and returns
+the file or its metadata, so the surface's rule is about *how* a stored file may
+reach a caller: attached for saving, or rendered in place when the caller asks
+for an inline read, with the media type taken from the file's own suffix and an
+opaque-origin sandbox because deliverable HTML is generated from untrusted book
+content. Re-rendering is not here — a page preview recomputes one page against
+the live ledger instead of reading a stored file, which is review-surface work.
+"""
 
 from __future__ import annotations
 
@@ -420,6 +429,10 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
                     }
                 )
         companion_artifacts: list[dict[str, Any]] | None = None
+        delivery_mode: str | None = None
+        planned_delivery_mode: str | None = None
+        degraded: bool = False
+        degrade_reason: str | None = None
         db_path = _job_db_path(valid_id)
         if db_path.exists() and _is_job_ledger_sync(valid_id):
             try:
@@ -431,8 +444,22 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
                         and isinstance(meta["results"], list)
                     ):
                         companion_artifacts = meta["results"]
-            except Exception:
-                pass
+                    raw_mode = ledger.get_job_metadata_value(valid_id, "delivery_mode")
+                    if isinstance(raw_mode, str):
+                        delivery_mode = raw_mode
+                    plan = ledger.get_job_metadata_value(valid_id, "delivery_plan")
+                    if isinstance(plan, dict):
+                        planned_delivery_mode = plan.get("contract")
+                    if planned_delivery_mode == "faithful" and delivery_mode in (
+                        "reflow",
+                        "readable",
+                    ):
+                        degraded = True
+                        degrade_reason = (
+                            "原文档物理版面存在字符溢出或排版冲突，已安全回退为自适应流式精排交付"
+                        )
+            except Exception as exc:  # metadata is optional: the artifact list still answers
+                logger.debug("Could not read artifact metadata for %s: %s", valid_id, exc)
 
         return JSONResponse(
             {
@@ -447,6 +474,10 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
                 # 409-ing after it. ``None`` = no report yet, which is not a
                 # refusal.
                 "delivery_verdict": await asyncio.to_thread(_delivery_verdict_sync, valid_id),
+                "delivery_mode": delivery_mode,
+                "planned_delivery_mode": planned_delivery_mode,
+                "degraded": degraded,
+                "degrade_reason": degrade_reason,
             }
         )
 
