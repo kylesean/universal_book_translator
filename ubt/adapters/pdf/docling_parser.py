@@ -2201,7 +2201,7 @@ def _reject_empty_book(
         raise DocumentParseError(
             f"No content could be parsed from '{path.name}': every page lacks an "
             f"extractable text layer{mode_note}. Enable OCR (--ocr local or "
-            "--ocr vlm) or set UBT_VLM_SCAN_FALLBACK=missing."
+            "--ocr cloud) or set UBT_OCR_FALLBACK=missing."
         )
     if missing_pages:
         page_list = ", ".join(str(p) for p in sorted(missing_pages)[:12])
@@ -2212,7 +2212,7 @@ def _reject_empty_book(
             f"Only part of '{path.name}' could be read: {len(missing_pages)}{of_total} "
             f"page(s) have no extractable text layer{mode_note} (pages {page_list}{more}). "
             "Refusing to deliver a book with those pages missing. Enable OCR "
-            "(--ocr local, a measured-box engine, or --ocr vlm for a remote "
+            "(--ocr local, a measured-box engine, or --ocr cloud for a remote "
             "service) to transcribe "
             "them, or restrict the run to the pages that do have text with --pages."
         )
@@ -2250,8 +2250,9 @@ def _driver_can_transcribe_scans(driver: Any) -> bool:
 def _ocr_unavailable_hint(mode: str) -> str:
     """Accurate remediation when no OCR driver is available for scanned pages.
 
-    The vision-LLM route (``--ocr vlm``) is deliberately NOT offered: it yields
-    no measured boxes, so it cannot supply geometry for a page that has none.
+    The vision-LLM route (``--ocr cloud``) is deliberately NOT offered: it
+    yields no measured boxes, so it cannot supply geometry for a page that has
+    none.
     """
     return (
         "To enable OCR for scanned pages:\n"
@@ -2259,7 +2260,7 @@ def _ocr_unavailable_hint(mode: str) -> str:
         "docker build -t ubt-ocr-sidecar deploy/docker/ocr-sidecar && "
         "docker run -d -p 8765:8765 ubt-ocr-sidecar:latest\n"
         "  2. Or install local rapidocr: pip install rapidocr-onnxruntime\n"
-        "Note: --ocr vlm (vision LLM) returns text without geometry, so it can "
+        "Note: --ocr cloud (vision LLM) returns text without geometry, so it can "
         "proofread a page that already has a text layer but cannot transcribe a "
         "scanned page.\n"
         "Original scanned pages will be preserved."
@@ -2531,7 +2532,7 @@ def vlm_fallback_missing_pages(
         return _reject_empty_book(path, blocks, f"{effective_mode}: no OCR driver available")
 
     if missing and not _driver_can_transcribe_scans(driver):
-        # Selecting `--ocr vlm` for a document with textless pages is a dead
+        # Selecting `--ocr cloud` for a document with textless pages is a dead
         # end: recognition fails closed without measured boxes, so say it now
         # instead of letting every page fail one at a time.
         logger.warning(

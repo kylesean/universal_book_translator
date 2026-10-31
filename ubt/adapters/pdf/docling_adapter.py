@@ -185,8 +185,8 @@ class _PDFRenderStackMixin:
         ``page_range`` (a non-contiguous ``--pages``); see ``parse_stream``.
 
         Async so an override can off-load blocking work: Docling's textless-page
-        VLM fallback (default OFF via ``UBT_VLM_SCAN_FALLBACK``) does network
-        IO and runs in a thread; pdfium's native reader has no such pass.
+        VLM fallback (default OFF via ``UBT_OCR_FALLBACK``) does network IO and
+        runs in a thread; pdfium's native reader has no such pass.
         """
         return blocks
 
