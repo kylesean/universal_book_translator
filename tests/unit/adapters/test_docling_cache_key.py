@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -53,3 +54,49 @@ def test_upgrading_any_output_shaping_package_re_converts(package: str) -> None:
     baseline = _key()
     bumped = _key(**{package: _VERSIONS[package] + ".post1"})
     assert bumped != baseline, f"a {package} upgrade must invalidate the cache entry"
+
+
+def _write_entry(directory: Path, key: str, *, pages: int, texts: int) -> None:
+    """Write a cached conversion directly, without running Docling."""
+    import gzip
+    import json
+
+    payload = {
+        "schema_name": "DoclingDocument",
+        "version": "1.0.0",
+        "name": "cached",
+        "origin": {"mimetype": "application/pdf", "binary_hash": 1, "filename": "x.pdf"},
+        "pages": {
+            str(no): {
+                "page_no": no,
+                "size": {"width": 100.0, "height": 100.0},
+            }
+            for no in range(1, pages + 1)
+        },
+        "texts": [
+            {
+                "self_ref": f"#/texts/{i}",
+                "label": "paragraph",
+                "text": f"paragraph {i}",
+                "orig": f"paragraph {i}",
+            }
+            for i in range(texts)
+        ],
+    }
+    with gzip.open(directory / f"{key}.json.gz", "wt", encoding="utf-8") as fh:
+        json.dump(payload, fh)
+
+
+def test_a_truncated_conversion_is_not_replayed(tmp_path: Path) -> None:
+    """Six paragraphs for a 26-page chunk is a broken conversion, not a sparse one.
+
+    The old guard demanded only "at least one text item anywhere", so a
+    conversion that returned a fraction of the document replayed as the whole
+    book on every later run. The caller knows how many pages the chunk covers.
+    """
+    _write_entry(tmp_path, "truncated", pages=6, texts=6)
+
+    assert cache.read_docling_document("truncated", cache_dir=tmp_path, expected_pages=26) is None
+    assert (
+        cache.read_docling_document("truncated", cache_dir=tmp_path, expected_pages=6) is not None
+    )

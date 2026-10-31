@@ -421,10 +421,19 @@ BOOK_TEXT_FILE_MODE = 0o600
 # ---------------------------------------------------------------------------
 # Concurrent-run ceiling for the MCP entry layer (mcp/server)
 # ---------------------------------------------------------------------------
-# The REST server already caps live runs at this many; MCP had no ceiling, so a
-# single agent turn could spawn unbounded full-pipeline tasks. One value for
-# both doors, so they cannot drift apart.
+# MCP had no ceiling, so a single agent turn could spawn unbounded
+# full-pipeline tasks. This is the *fallback* ceiling: the MCP server re-reads
+# ``UBT_JOB_MAX_RUNNING`` on each submission (``_sync_manager_cap`` in
+# ``ubt/mcp/server.py``), the same setting the REST app reads, so an operator
+# who lowers the cap gets it on both doors. Keep the default in step with
+# ``UBTConfig.job_max_running``.
 MCP_MAX_RUNNING_JOBS = 8
+
+#: How long a cancel handler waits for the run's writer lease before giving up
+#: and leaving the terminal write to the pipeline itself. One value for both
+#: cancel surfaces: they waited 2s server-side and 10s over MCP, so the same
+#: cancellation persisted or not depending on which door the caller used.
+CANCEL_LOCK_WAIT_SECONDS = 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -555,14 +564,6 @@ CALIBRATION: dict[str, KnobMeta] = {
         H, "mirrors api/app.py max_running_jobs=8; no measurement behind either"
     ),
 }
-
-
-def calibration_summary() -> dict[str, int]:
-    """Count knobs by calibration status."""
-    counts = {status.value: 0 for status in Calibration}
-    for meta in CALIBRATION.values():
-        counts[meta.status.value] += 1
-    return counts
 
 
 #: Flags that make a draft unsafe to ship at all — not "the translation may be

@@ -292,8 +292,6 @@ class DraftRuntime:
     # failures trip the breaker; any drafted block resets it.
     fail_fast_consecutive: int = 0
     last_fail_fast_reason: str = ""
-    ctx: StageContext | None = None
-    create_event_fn: Any = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,6 +337,32 @@ def _routing_scheduler(policy: Any) -> Any | None:
     return scheduler
 
 
+def _paid_block_ids(blocks: Sequence[IRBlock]) -> set[str]:
+    """Blocks whose draft already landed and must not be marked failed.
+
+    A group task can raise after some of its members were checkpointed. Two
+    states count as paid: the block carries target text (the draft cost was
+    already spent), or it reached a verdict that consumes that draft
+    (``mtqe_passed`` / ``repaired`` / a human queue). ``repair_pending`` also
+    holds a draft awaiting repair. Marking any of them FAILED with a
+    ``Drafting error:`` flag makes resume route them to
+    ``reset_blocks_to_pending``, which NULLs the text and re-bills it.
+    """
+    return {
+        block.id
+        for block in blocks
+        if (block.target_text or "").strip()
+        or block.status
+        in (
+            BlockStatus.MTQE_PASSED,
+            BlockStatus.REPAIRED,
+            BlockStatus.NEEDS_HUMAN,
+            BlockStatus.BLOCKED_HUMAN,
+            BlockStatus.REPAIR_PENDING,
+        )
+    }
+
+
 def _draft_failure_prefix(exc: BaseException) -> str:
     """Choose the resume marker for a failed provider call.
 
@@ -379,7 +403,7 @@ class _DraftProcessor:
     def chunk_context(
         self, chunk: list[tuple[IRBlock, _DraftInputs]], section_context: str = ""
     ) -> str:
-        """The content key of one macro-chunk draft prompt (content-addressed cache layer).
+        """The content key of one macro-chunk draft prompt.
 
         A macro chunk is a *different* prompt from any single block's -- all the
         chunk's blocks ride one XML request -- so it keys separately. The merged
@@ -428,7 +452,7 @@ class _DraftProcessor:
         )
 
     def prompt_context(self, inputs: _DraftInputs) -> str:
-        """The content key of one draft prompt (content-addressed cache layer).
+        """The content key of one draft prompt.
 
         The production generate step is *not* a pure function of the masked
         source: the same source drafted under a different glossary, neighbour
@@ -652,8 +676,8 @@ class _DraftProcessor:
 
         # Off-loop: regex/parse-heavy masking would otherwise serialize the
         # single event loop across concurrent draft tasks and SSE fan-out. The
-        # mask order (code -> math -> soup -> citation) lives in the engine, not
-        # here (translation unit segmentation layer).
+        # mask order (email -> code -> math -> soup -> citation) lives in the
+        # engine, not here.
         masked = await asyncio.to_thread(self.runtime.engine.mask, _source_with_bold_markers(block))
 
         macro_ctx = ""
@@ -744,8 +768,7 @@ class _DraftProcessor:
 
         # Restore in reverse mask order (citation -> soup -> math -> code ->
         # email) and judge: the engine owns that order and verifies every
-        # namespace with the same checksummed contract (translation unit
-        # segmentation layer).
+        # namespace with the same checksummed contract.
         masked = ports.masked_source(
             text=inputs.masked_source,
             code_map=inputs.code_map,
@@ -800,7 +823,12 @@ class _DraftProcessor:
         drafted_block = block.model_copy(
             update={"target_text": final_draft, "draft_text": final_draft, "style": new_style}
         )
-        self.runtime.memory_mgr.record_drafted_block(drafted_block)
+        if restore_clean:
+            # Only a trustworthy draft enters rolling/chapter memory. A dirty
+            # restore (unresolved or mutated protected spans) is heading for
+            # repair and may be replaced; summarizing it would seed every later
+            # prompt in the chapter with the corrupted sentence.
+            self.runtime.memory_mgr.record_drafted_block(drafted_block)
 
         update = {
             "block_id": block.id,
@@ -922,9 +950,9 @@ class _DraftProcessor:
                 return draft_raw
 
             try:
-                # The engine owns the cache-aware generate step (content-addressed
-                # cache layer): a hit skips the provider entirely, and a changed
-                # prompt (context) is a miss, not a stale draft. The prompt key
+                # The engine owns the cache-aware generate step: a hit skips the
+                # provider entirely, and a changed prompt (context) is a miss,
+                # not a stale draft. The prompt key
                 # is built only when a cache is set, so a cache-less run pays
                 # nothing for it.
                 context = (
@@ -1007,7 +1035,7 @@ class _DraftProcessor:
         cached_context: str | None = None
         if self.runtime.engine.cache is not None:
             # One provider call, many units: keyed on the chunk's own prompt
-            # digest, so a re-run of the same chunk is a hit (content-addressed cache layer).
+            # digest, so a re-run of the same chunk is a hit.
             cached_context = self.chunk_context(chunk, section_context)
             cached_raw = await asyncio.to_thread(
                 self.runtime.engine.cached_value, cached_context, kind="translate_chunk"
@@ -1244,6 +1272,14 @@ class _DraftProcessor:
 
         critical_exc: BaseException | None = None
         stranded: list[dict[str, Any]] = []
+        #: Blocks whose draft is already checkpointed. A group task can raise
+        #: *after* some members were finalized (the per-block isolation below
+        #: covers finalize errors, not a later failure), and marking those
+        #: FAILED made the resume path treat a paid draft as a transient
+        #: drafting failure — ``reset_blocks_to_pending`` then NULLs its text
+        #: and the next run pays for the same block again. Loaded lazily, once,
+        #: only when a group actually fails.
+        paid_ids: set[str] | None = None
         for res, group in zip(results, groups, strict=True):
             if isinstance(
                 res,
@@ -1259,8 +1295,20 @@ class _DraftProcessor:
                 continue
             if isinstance(res, Exception):
                 logger.warning("Draft task failed with exception: %s", res)
+                if paid_ids is None:
+                    # Re-read rather than trusting the in-memory IRBlocks: the
+                    # flusher checkpoints successes asynchronously, so the copy
+                    # this batch started from does not show them.
+                    current = await asyncio.to_thread(
+                        self.runtime.ledger.get_all_blocks, self.runtime.actual_job_id
+                    )
+                    paid_ids = _paid_block_ids(current)
                 prefix = _draft_failure_prefix(res)
                 for b in group:
+                    if b.id in paid_ids:
+                        # It already landed before the group raised; retrying
+                        # it is what loses the paid text.
+                        continue
                     stranded.append(
                         {
                             "block_id": b.id,
@@ -1382,15 +1430,15 @@ async def _build_draft_runtime(
     config = ctx.config
     from ubt.cache.store import DiskCacheStore
 
-    # The translate step's content cache (content-addressed cache layer): a resumed or re-run
+    # The translate step's content cache: a resumed or re-run
     # job reuses drafts whose exact prompt is unchanged. Fail-open, and off when
     # UBT_CACHE_ENABLED=0.
     draft_cache = DiskCacheStore(config.cache_dir) if config.cache_enabled else None
-    # The per-unit transform (mask -> restore -> judge) has one owner now
-    # (translation unit segmentation layer): the engine holds the fixed mask order, while the
+    # The per-unit transform (mask -> restore -> judge) has one owner now: the
+    # engine holds the fixed mask order, while the
     # router/batch/retry orchestration below stays in this stage. The cache is
     # keyed on the exact prompt, so the production path and the standalone path
-    # share one content-addressed translate step (content-addressed cache layer).
+    # share one translate step.
     translation_engine = ports.translation_engine(
         placeholders=ports.placeholder_engine(),
         model=router.draft_model,
@@ -1478,7 +1526,6 @@ async def _build_draft_runtime(
         active_fast_pass.set_document_context(document_source)
     counters = {
         "tm_exact_hits": 0,
-        "translate_cache_hits": 0,
     }
 
     # Exact TM hits are only valid under this run's prompt/glossary context;
@@ -1537,8 +1584,6 @@ async def _build_draft_runtime(
             active_fast_pass=active_fast_pass,
             counters=counters,
             flusher=flusher,
-            ctx=ctx,
-            create_event_fn=create_event_fn,
         ),
         policy=DraftPolicy(
             glossary_dicts=glossary_dicts,
@@ -1742,10 +1787,9 @@ async def run_draft_stage(
                     )
             await asyncio.to_thread(_persist_memory_state, ledger, actual_job_id, memory_mgr)
         memory_mgr.discard_pending_blocks()
-        if counters["tm_exact_hits"] or counters["translate_cache_hits"]:
+        if counters["tm_exact_hits"]:
             logger.info(
-                "Draft stage summary for %s: tm_exact_hits=%d translate_cache_hits=%d",
+                "Draft stage summary for %s: tm_exact_hits=%d",
                 actual_job_id,
                 counters["tm_exact_hits"],
-                counters["translate_cache_hits"],
             )

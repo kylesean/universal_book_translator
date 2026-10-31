@@ -28,7 +28,9 @@ _MAX_CONSECUTIVE_FAILURES = 3
 
 
 class _Wake:
-    """Sentinel pushed by ``close()`` to unpark a worker idling in ``get()``."""
+    """Sentinel ``close()`` pushes so a worker parked on its ``_wake`` event has
+    something to drain; ``_drain_nowait`` drops it instead of saving it.
+    """
 
 
 _WAKE = _Wake()
@@ -94,10 +96,6 @@ class CheckpointBatchFlusher:
                 raise exc
 
     async def enqueue(self, update: dict[str, Any]) -> None:
-        """Enqueue a block checkpoint update.
-
-        If the flusher has been closed, commits synchronously in a thread.
-        """
         self._raise_if_task_died()
         if self._closed:
             await asyncio.to_thread(self.ledger.save_checkpoints_batch, [update])
@@ -186,7 +184,7 @@ class CheckpointBatchFlusher:
         if not batch:
             return True
         try:
-            await asyncio.to_thread(self.ledger.save_checkpoints_batch, batch)
+            changed = await asyncio.to_thread(self.ledger.save_checkpoints_batch, batch)
         except Exception as exc:
             self._failures += 1
             logger.error(
@@ -199,10 +197,20 @@ class CheckpointBatchFlusher:
             self._retry_batches.insert(0, batch)
             return False
         self._failures = 0
+        if not changed:
+            # A batch that matched no row is not a successful checkpoint: the
+            # block ids were outside this job's scope, or the state machine
+            # refused the write (a non-terminal update aimed at a terminal
+            # row). Retrying would no-op again, but returning True silently let
+            # the caller believe it had persisted work it did not.
+            logger.warning(
+                "Checkpoint batch of %d block(s) matched no ledger row "
+                "(job scope or status refused); nothing was written.",
+                len(batch),
+            )
         return True
 
     async def _run_flusher(self) -> None:
-        """Continuously collect and flush queued updates to SQLite."""
         batch: list[dict[str, Any]] = []
         try:
             while not self._closed or not self._queue.empty() or self._retry_batches:

@@ -1,4 +1,18 @@
-"""The jobs surface: assess, upload, submit, list, cancel, resume, delete, status."""
+"""The jobs surface: one job's lifecycle, from intake to a terminal state.
+
+Routes are grouped by *what the caller is doing to the job record*, not by
+HTTP shape, and the boundary is what this module documents rather than an
+endpoint list: a list here goes stale the moment a handler is added, while the
+rule below still identifies the right home for a new one. Intake (probe, accept
+a file, enqueue), inspection (the queue, one job's status) and the transitions
+over a record (cancel, resume, discard its parse, delete) are here because all
+four only read or write job bookkeeping. A job's *content* is deliberately not
+here — reading and editing finalized blocks lives on the review surface,
+served outputs on the artifact surface, and the live feed on
+``/jobs/{job_id}/stream`` — because those handlers resolve the same job through
+a different authority (the ledger's block state, the artifact sandbox) and
+would drag that machinery in here.
+"""
 
 from __future__ import annotations
 
@@ -56,7 +70,13 @@ from ubt.core.exceptions import (
     UnsupportedDocumentFormatError,
 )
 from ubt.core.fs_perms import ensure_private_dir
-from ubt.core.job_options import clean_source_stem, resolve_target_output
+from ubt.core.job_options import (
+    clean_source_stem,
+    request_payload_of,
+    resolve_target_output,
+    submission_mismatch,
+)
+from ubt.core.policy.layout_policy import CANCEL_LOCK_WAIT_SECONDS
 from ubt.core.presets import Preset
 from ubt.core.router.router import ModelRouter
 
@@ -338,6 +358,32 @@ def _progress_from_ledger(db_dir: Path, job_id: str) -> dict[str, Any] | None:
         return None
 
 
+def _resubmit_identity(
+    req: JobSubmitRequest,
+    resolved_in: Path,
+    *,
+    config: Any,
+) -> dict[str, Any]:
+    """The run identity a repeated job id must match.
+
+    Paths are compared in their resolved form because that is what the stored
+    payload carries: the raw request may spell the same file differently (a
+    symlink, a relative path) and must still count as the same run. An omitted
+    output path is left out on purpose — the server derives it from the job id
+    and the input, both already compared.
+    """
+    identity = req.model_dump(mode="json")
+    identity["input_path"] = str(resolved_in)
+    if req.output_path:
+        resolved_out = resolve_secure_path(req.output_path, must_exist=False, config=config)
+        identity["output_path"] = str(resolved_out) if resolved_out is not None else req.output_path
+    else:
+        identity.pop("output_path", None)
+    if req.glossary:
+        identity["glossary"] = str(Path(req.glossary).resolve())
+    return identity
+
+
 def _persist_accepted_placeholder(
     db_dir: Path,
     job_id: str,
@@ -579,6 +625,30 @@ def register_job_routes(
                     JobStatus.FAILED,
                     JobStatus.CANCELLED,
                 ):
+                    # Reuse is authorized for *this request*, not merely for
+                    # this id: a caller that reuses an id with a different
+                    # target language used to be handed the old run and its
+                    # old result, silently answering a question nobody asked.
+                    changed = submission_mismatch(
+                        request_payload_of(existing_queued),
+                        _resubmit_identity(req, resolved_in, config=app_config),
+                    )
+                    if changed:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail=(
+                                f"job_id {requested_id} already exists with different "
+                                f"arguments: {', '.join(changed)}; use a different job_id"
+                            ),
+                        )
+                    if req.dry_run and not bool(existing_queued.payload.get("dry_run", False)):
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail=(
+                                f"job_id {requested_id} already runs as a real "
+                                "translation; rehearsal needs a different job_id"
+                            ),
+                        )
                     return JobSubmitResponse(
                         job_id=existing_queued.job_id,
                         status=existing_queued.status.value,
@@ -596,6 +666,27 @@ def register_job_routes(
                 JobStatus.FAILED,
                 JobStatus.CANCELLED,
             ):
+                # Same rule as the queue branch: the id names one request.
+                changed = submission_mismatch(
+                    request_payload_of(existing),
+                    _resubmit_identity(req, resolved_in, config=app_config),
+                )
+                if changed:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            f"job_id {requested_id} already exists with different "
+                            f"arguments: {', '.join(changed)}; use a different job_id"
+                        ),
+                    )
+                if req.dry_run and not existing.request.dry_run:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            f"job_id {requested_id} already runs as a real "
+                            "translation; rehearsal needs a different job_id"
+                        ),
+                    )
                 return JobSubmitResponse(
                     job_id=existing.job_id,
                     status=existing.status,
@@ -926,7 +1017,7 @@ def register_job_routes(
                     # then finalize; if it is still held, the pipeline itself
                     # will land the terminal status.
                     lock = LedgerWriterLock(db_path, valid_id)
-                    deadline = time.monotonic() + 2.0
+                    deadline = time.monotonic() + CANCEL_LOCK_WAIT_SECONDS
                     while True:
                         try:
                             lock.acquire()

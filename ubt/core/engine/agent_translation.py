@@ -915,7 +915,23 @@ class AgentTranslationService:
     # claim / submit
     # ------------------------------------------------------------------
     async def claim(self, request: AgentClaimRequest) -> AgentClaimResult:
-        db_path, ledger = await self._open_job(request.job_id)
+        """Refuse while a provider pipeline owns the job, then claim.
+
+        Concurrent *Agent* claims are a supported capability — the atomic
+        package lease in ``claim_next_agent_work`` guarantees two hosts never
+        receive the same block — so this must not hold the job-level writer
+        lease itself (that would turn a second host's claim into a conflict).
+        What it must not do is race a provider pipeline, which holds that lease
+        for its whole run; the pipeline refuses an Agent job outright, and this
+        probe makes the reverse ordering fail loudly instead of interleaving
+        checkpoints.
+        """
+        db_path = self._job_db_path(request.job_id)
+        await self._refuse_if_another_writer(request.job_id, db_path)
+        return await self._claim_with_job(request)
+
+    async def _claim_with_job(self, request: AgentClaimRequest) -> AgentClaimResult:
+        _, ledger = await self._open_job(request.job_id)
         try:
             await self._assert_agent_job(ledger, request.job_id)
             expired = await asyncio.to_thread(
@@ -928,7 +944,6 @@ class AgentTranslationService:
             return await self._claim_locked(ledger, request)
         finally:
             await asyncio.to_thread(ledger.close)
-            del db_path
 
     async def _claim_locked(
         self, ledger: SQLiteJobLedger, request: AgentClaimRequest
@@ -958,6 +973,11 @@ class AgentTranslationService:
             expires_at=expires_at,
             now=_now(),
             limit=max(1, min(package_size, _MAX_PACKAGE_SIZE)),
+            repair_rounds_cap=int(
+                (config_meta.get("max_repair_rounds") if isinstance(config_meta, dict) else None)
+                or 0
+            )
+            or None,
         )
         if not candidates:
             stats = await asyncio.to_thread(ledger.get_job_stats, request.job_id)
@@ -1118,6 +1138,17 @@ class AgentTranslationService:
         )
 
     async def submit(self, request: AgentSubmitRequest) -> AgentSubmitResult:
+        """Refuse while a provider pipeline owns the job, then submit.
+
+        Same rule as :meth:`claim`: concurrent Agent hosts are serialized by
+        the atomic package commit inside ``submit_agent_work``, not by the
+        job-level lease.
+        """
+        db_path = self._job_db_path(request.job_id)
+        await self._refuse_if_another_writer(request.job_id, db_path)
+        return await self._submit_with_job(request)
+
+    async def _submit_with_job(self, request: AgentSubmitRequest) -> AgentSubmitResult:
         _, ledger = await self._open_job(request.job_id)
         try:
             await self._assert_agent_job(ledger, request.job_id)
@@ -1646,10 +1677,37 @@ class AgentTranslationService:
             manifest.metadata["_agent_config"] = agent_config
         return manifest
 
-    async def _open_job(self, job_id: str) -> tuple[Path, SQLiteJobLedger]:
+    @staticmethod
+    async def _refuse_if_another_writer(job_id: str, db_path: Path) -> None:
+        """Refuse a claim/submit while a live writer lease is held.
+
+        The only legitimate holder during the Agent workflow is a concurrent
+        ``prepare``/``finish`` (or a re-export) — never another claim, which
+        does not take the lease. Refusing is the safe answer for all of them:
+        the caller retries after the writer finishes.
+        """
+        holder = await asyncio.to_thread(LedgerWriterLock.lease_holder, db_path, job_id)
+        if holder is None:
+            return
+        raise UBTError(
+            f"Job {job_id} is being written by another process (pid {holder}); "
+            "wait for it to finish before claiming or submitting blocks."
+        )
+
+    def _job_db_path(self, job_id: str) -> Path:
+        """The ledger file for ``job_id``, or a clear error if it does not exist.
+
+        Split from :meth:`_open_job` so a caller can take the writer lease
+        *before* the ledger connection is built (the schema init must happen
+        under the lock, like every other writer).
+        """
         db_path = self.config.db_dir / f"{job_id}.sqlite"
         if not db_path.exists():
             raise UBTError(f"no such job: {job_id}")
+        return db_path
+
+    async def _open_job(self, job_id: str) -> tuple[Path, SQLiteJobLedger]:
+        db_path = self._job_db_path(job_id)
         ledger = await asyncio.to_thread(SQLiteJobLedger, db_path)
         return db_path, ledger
 

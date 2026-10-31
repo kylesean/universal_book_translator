@@ -18,7 +18,7 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, get_args
+from typing import Any, Literal, cast, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
@@ -619,30 +619,73 @@ class PriorOutput:
     input_path: str
 
 
-def prior_output_of(prior: object) -> PriorOutput | None:
-    """Extract the recorded output from a job record or a queue payload.
+def request_payload_of(prior: object) -> Mapping[str, Any] | None:
+    """The stored request behind a queue row or a manager job record.
 
-    The entry points hold the "prior run of this id" in two shapes — a manager
-    ``JobRecord`` (which carries ``.request``) and a queue payload ``dict`` — so
-    the extraction lives here rather than being re-spelled per surface. Returns
-    ``None`` when the record carries no output path (nothing to authorize).
+    The entry points hold the "prior run of this id" in two shapes — a queue
+    payload ``dict`` and a manager ``JobRecord`` (which carries ``.request``) —
+    so the extraction lives here rather than being re-spelled per surface.
     """
     if prior is None:
         return None
-    if isinstance(prior, dict):
-        payload: object = prior
-    else:
-        payload = getattr(prior, "payload", None)
-        if not isinstance(payload, dict):
-            request = getattr(prior, "request", None)
-            payload = request.model_dump() if request is not None else None
-    if not isinstance(payload, dict):
+    if isinstance(prior, Mapping):
+        return prior
+    payload = getattr(prior, "payload", None)
+    if isinstance(payload, Mapping):
+        return payload
+    request = getattr(prior, "request", None)
+    if request is not None and hasattr(request, "model_dump"):
+        return cast("Mapping[str, Any]", request.model_dump())
+    return None
+
+
+def prior_output_of(prior: object) -> PriorOutput | None:
+    """Extract the recorded output from a job record or a queue payload.
+
+    Returns ``None`` when the record carries no output path (nothing to
+    authorize).
+    """
+    payload = request_payload_of(prior)
+    if payload is None:
         return None
     out = payload.get("output_path")
     inp = payload.get("input_path")
     if not out or not inp:
         return None
     return PriorOutput(output_path=str(out), input_path=str(inp))
+
+
+#: Request keys a resubmit may differ on without making it a different run.
+#: ``dry_run`` is resolved server-side (auto-rehearsal flips it when the
+#: operator has no credential), so comparing it would refuse a legitimate retry
+#: on a machine whose key was fixed between attempts. ``rehearsal_auto`` is the
+#: queue's marker for that server-side decision, not a caller argument.
+_RESUBMIT_IGNORED_KEYS = frozenset({"dry_run", "rehearsal_auto"})
+
+
+def submission_mismatch(
+    prior: Mapping[str, Any] | None,
+    requested: Mapping[str, Any],
+) -> list[str]:
+    """Keys whose value differs between a stored submit payload and a retry.
+
+    A job id is an idempotency key for *one request*, not for one input file:
+    reusing it with a different target language, provider, page range or output
+    path must be refused rather than handing back a run that answers a
+    different question. Returns the differing keys, sorted; an empty list means
+    the retry is the same request.
+
+    Only keys present in ``requested`` take part, so each entry point can
+    decide how much of its request model is part of the run's identity (the
+    REST surface compares the whole model, MCP the same subset it documents).
+    """
+    if not prior:
+        return []
+    return sorted(
+        key
+        for key, value in requested.items()
+        if key not in _RESUBMIT_IGNORED_KEYS and prior.get(key) != value
+    )
 
 
 def deliverable_candidates(
@@ -693,10 +736,11 @@ def own_prior_deliverable(
     Overwrite is a *re-run of one job*, not a licence to truncate any file the
     job could name. The three entry points used to answer this question three
     different ways — REST compared a directory's *parent*, MCP treated ``fresh``
-    as a blanket licence, and the CLI missed the suffix-less path form. REST and
-    MCP now share this helper. The CLI does **not** call it: ``translate``
-    refuses any existing candidate without a same-job exemption, so a legitimate
-    re-run of one job is allowed on the API/MCP surfaces and refused on the CLI.
+    as a blanket licence, and the CLI missed the suffix-less path form. All
+    three entry points share this helper now. ``translate --fresh`` remains the
+    documented explicit override (pinned by
+    ``tests/unit/cli/test_cli_overwrite_parity.py``): it is an operator saying
+    "overwrite", not a different answer to this question.
 
     There is one question ("is this the file this very job already produced?")
     and it has one answer:
@@ -858,18 +902,6 @@ class CompanionArtifactResult(BaseModel):
     duration_ms: float | None = None
     reason: str | None = None
     error: str | None = None
-
-    @property
-    def is_generated(self) -> bool:
-        return self.status == "generated"
-
-    @property
-    def is_skipped(self) -> bool:
-        return self.status == "skipped"
-
-    @property
-    def is_failed(self) -> bool:
-        return self.status == "failed"
 
 
 class CompanionExportSummary(BaseModel):

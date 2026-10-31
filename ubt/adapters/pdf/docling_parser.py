@@ -877,10 +877,18 @@ def reanchor_figure_captions(blocks: list[IRBlock]) -> list[IRBlock]:
                     }
                 )
 
-        elif is_table_caption and b.bbox.page in tables_by_page:
-            p_tables = tables_by_page[b.bbox.page]
-            cap_mid_x = (b.bbox.x0 + b.bbox.x1) / 2.0
-            cap_y0 = b.bbox.y0
+        elif (
+            is_table_caption
+            and (caption_bbox := b.bbox) is not None
+            and caption_bbox.page in tables_by_page
+        ):
+            # ``b`` is reassigned with ``model_copy`` in the branch above, which
+            # makes mypy drop the loop-top ``b.bbox`` narrowing for the rest of
+            # the chain; the local keeps every read below tied to the checked
+            # value.
+            p_tables = tables_by_page[caption_bbox.page]
+            cap_mid_x = (caption_bbox.x0 + caption_bbox.x1) / 2.0
+            cap_y0 = caption_bbox.y0
 
             best_tbl: IRBlock | None = None
             best_cost = float("inf")
@@ -889,7 +897,10 @@ def reanchor_figure_captions(blocks: list[IRBlock]) -> list[IRBlock]:
                     continue
                 # Academic tables place caption above the table (dist: caption bottom to table top)
                 dist = cap_y0 - tbl.bbox.y1
-                horiz_overlap = max(0.0, min(tbl.bbox.x1, b.bbox.x1) - max(tbl.bbox.x0, b.bbox.x0))
+                horiz_overlap = max(
+                    0.0,
+                    min(tbl.bbox.x1, caption_bbox.x1) - max(tbl.bbox.x0, caption_bbox.x0),
+                )
                 tbl_w = max(1.0, tbl.bbox.x1 - tbl.bbox.x0)
                 tbl_mid_x = (tbl.bbox.x0 + tbl.bbox.x1) / 2.0
                 horiz_dist = abs(cap_mid_x - tbl_mid_x)
@@ -903,17 +914,25 @@ def reanchor_figure_captions(blocks: list[IRBlock]) -> list[IRBlock]:
 
             if best_tbl is not None and best_tbl.bbox is not None:
                 anchored_y0 = round(best_tbl.bbox.y1 + 4.0, 2)
-                cap_h = max(12.0, b.bbox.y1 - b.bbox.y0)
+                cap_h = max(12.0, caption_bbox.y1 - caption_bbox.y0)
                 anchored_y1 = round(anchored_y0 + cap_h, 2)
                 new_span = Span(
-                    page=b.bbox.page,
-                    bbox=(b.bbox.x0, anchored_y0, b.bbox.x1, anchored_y1),
+                    page=caption_bbox.page,
+                    bbox=(caption_bbox.x0, anchored_y0, caption_bbox.x1, anchored_y1),
                 )
                 prov_dict = b.provenance.model_dump()
                 prov_dict["caption_parent_id"] = best_tbl.id
                 prov_dict["is_anchored_caption"] = True
                 prov_dict["physical_boxes"] = [
-                    {"page": b.bbox.page, "bbox": [b.bbox.x0, anchored_y0, b.bbox.x1, anchored_y1]}
+                    {
+                        "page": caption_bbox.page,
+                        "bbox": [
+                            caption_bbox.x0,
+                            anchored_y0,
+                            caption_bbox.x1,
+                            anchored_y1,
+                        ],
+                    }
                 ]
 
                 new_element = dataclasses.replace(b.element, span=new_span)
@@ -1125,7 +1144,8 @@ def convert_docling_document(
         file_sha256 = compute_file_sha256_cached(path)
 
     key = docling_cache_key(file_sha256, page_range, options)
-    cached = read_docling_document(key)
+    expected_pages = page_range[1] - page_range[0] + 1 if page_range is not None else None
+    cached = read_docling_document(key, expected_pages=expected_pages)
     if cached is not None:
         logger.info(
             "Reusing the cached Docling conversion of '%s' instead of re-running it.",
@@ -1147,7 +1167,7 @@ def convert_docling_document(
     def _convert() -> Any:
         nonlocal key
         key = docling_cache_key(file_sha256, page_range, options)
-        c = read_docling_document(key)
+        c = read_docling_document(key, expected_pages=expected_pages)
         if c is not None:
             logger.info(
                 "Reusing the cached Docling conversion of '%s' instead of re-running it.",
@@ -1324,7 +1344,12 @@ def extract_with_docling(
                 formula_crop_margin=formula_crop_margin,
                 file_sha256=file_sha256,
             )
-            cached_doc = read_docling_document(key)
+            cached_doc = read_docling_document(
+                key,
+                expected_pages=(
+                    page_range[1] - page_range[0] + 1 if page_range is not None else None
+                ),
+            )
             if cached_doc is not None:
                 return map_docling_document_to_blocks(cached_doc, path, file_sha256)
         except Exception as exc:
@@ -2308,18 +2333,39 @@ def _pages_without_text(
             probe_doc = pdfium.PdfDocument(str(path))
             try:
                 total = len(probe_doc)
+                if page_scope is not None:
+                    required = sorted({p for p in page_scope if 1 <= p <= total})
+                else:
+                    first = page_range[0] if page_range else 1
+                    last = min(page_range[1], total) if page_range else total
+                    required = list(range(first, last + 1))
+                blank = _blank_pages(probe_doc, required)
             finally:
                 probe_doc.close()
         except Exception as exc:
             logger.warning("Page-coverage probe: cannot open '%s': %s", path.name, exc)
             return [], 0
-    if page_scope is not None:
-        required = sorted({p for p in page_scope if 1 <= p <= total})
-    else:
-        first = page_range[0] if page_range else 1
-        last = min(page_range[1], total) if page_range else total
-        required = list(range(first, last + 1))
-    return [p for p in required if p not in text_covered], total
+    return [p for p in required if p not in text_covered and p not in blank], total
+
+
+def _blank_pages(probe_doc: Any, pages: Sequence[int]) -> set[int]:
+    """Pages pdfium draws nothing on at all — no text, image, path or form.
+
+    A print book's blank verso is genuinely empty: there is no text layer to
+    lose and nothing for OCR to read. Counting it as a missing page refused the
+    whole book (``_reject_empty_book``) unless the operator enabled OCR, which
+    would have transcribed nothing. Only a page with **zero page objects**
+    qualifies, so a scanned or figure-only page — whose raster is the very
+    content the completeness guard must not silently drop — is still reported.
+    """
+    blank: set[int] = set()
+    for page_no in pages:
+        try:
+            if not any(True for _ in probe_doc[page_no - 1].get_objects()):
+                blank.add(page_no)
+        except Exception as exc:  # noqa: BLE001 - no evidence of emptiness
+            logger.debug("Blank-page probe failed for page %d: %s", page_no, exc)
+    return blank
 
 
 def vlm_fallback_missing_pages(

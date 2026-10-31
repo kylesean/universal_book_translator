@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from ubt.adapters.pdf.docling_blocks import merge_table_continuation_fragments
-from ubt.core.ir.models import BlockType, BoundingBox, IRBlock, make_element
+from ubt.core.ir.models import BlockType, BoundingBox, FlowID, IRBlock, make_element
 
 pytestmark = pytest.mark.fast
 
@@ -19,11 +19,13 @@ def _make_block(
     x1: float,
     y1: float,
     text: str,
+    flow_id: FlowID = FlowID.MAIN_STORY,
 ) -> IRBlock:
     elem = make_element(
         id=block_id,
         spine_index=1,
         block_type=block_type,
+        flow_id=flow_id,
         source_text=text,
         bbox=BoundingBox(page=page, x0=x0, y0=y0, x1=x1, y1=y1),
     )
@@ -115,3 +117,29 @@ def test_merge_table_continuation_fragments_does_not_swallow_near_prose() -> Non
     assert merged[1].id == "b02"
     assert merged[0].bbox is not None
     assert merged[0].bbox.y0 == 200.0
+
+
+def test_a_footnote_directly_below_a_table_is_not_absorbed() -> None:
+    """A note below the grid is page furniture, not the table's tail.
+
+    It passes the 25pt proximity and column-envelope guards, and a short
+    debris-shaped note matched the fragment test — the note then became grid
+    markup (translated as a cell, gone from the page's prose).
+    """
+    tbl = _make_block("b01", BlockType.TABLE, 1, 70.0, 200.0, 540.0, 400.0, "| A | B |")
+    note = _make_block(
+        "b02",
+        BlockType.NARRATIVE,
+        1,
+        70.0,
+        188.0,
+        300.0,
+        198.0,
+        "1) See Table 2 for the full comparison.",
+        flow_id=FlowID.FOOTNOTE,
+    )
+
+    merged = merge_table_continuation_fragments([tbl, note])
+
+    assert [b.id for b in merged] == ["b01", "b02"]
+    assert merged[0].source_text == "| A | B |"

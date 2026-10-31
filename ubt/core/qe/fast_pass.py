@@ -152,6 +152,16 @@ _DIGIT_RE = re.compile(r"\d")
 #: Any letter, in any script. Used by the "no letters at all" density check:
 #: a target of pure punctuation is not a translation when the source had prose.
 _LETTER_RE = re.compile(r"[^\W\d_]")
+
+#: A mask token that survived restore (the checksum disagreed, so the span was
+#: never substituted) or that a repair candidate echoed back. The render layer
+#: turns it into ``⟨missing⟩`` so the loss is visible rather than machinery on
+#: the page — but that also meant a block could be marked REPAIRED while a
+#: sentence was missing a span, because neither the structural invariants nor
+#: the repair residual checks looked for the token itself. Every masker prefix
+#: is ``[A-Z]+_MASK_`` (SOUP/MATH/CITE/CODE/EMAIL); emphasis markers such as
+#: ``⟦B⟧`` deliberately do not match.
+_RESIDUAL_MASK_TOKEN_RE = re.compile(r"[⟦\[【]?[A-Z]+_MASK_\d{4}-[0-9a-z]{1,3}[⟧\]】]?")
 #: English-word-equivalent weight of one CJK glyph in the length-ratio gate.
 #: EN→ZH prose compresses to roughly 0.35–0.6 raw characters per source
 #: character; counting a Han glyph as ~2.2 source characters (one word ≈ 4.4
@@ -306,17 +316,6 @@ def _max_repeated_line_run(text: str) -> int:
     source repeats something unrelated.
     """
     return max((run_len for _, run_len in _repeated_line_runs(text)), default=0)
-
-
-def _has_repeated_line_run(text: str) -> bool:
-    """True when ``text`` itself carries a run of identical non-empty lines.
-
-    The loop detector below is only a hallucination signal when the *source*
-    does not repeat the same shape: a refrain, a repeated heading, or a table
-    of identical rows is faithfully repeated in the target, and quarantining it
-    sent a correct block to repair (a flat 0.2 flag score) for nothing.
-    """
-    return _detect_line_repetition_loop(text) is not None
 
 
 def _repeated_line_runs_across_blanks(text: str) -> list[tuple[str, int]]:
@@ -1084,6 +1083,26 @@ class FastPassFilter:
                 length_ratio=0.0,
             )
 
+        # 1a. A protected span that never came back. The draft stage already
+        # routes a corrupt block to repair, but repair validates its *candidate*
+        # with this same function and used to accept one that still carried the
+        # token — the block then left repair as REPAIRED and the renderer
+        # printed ``⟨missing⟩`` where the formula/citation/branded span should
+        # be. Failing here makes the correction visible: the candidate is
+        # rejected, the block stays queued (or escalates) instead of shipping.
+        residual_token = _RESIDUAL_MASK_TOKEN_RE.search(tgt_clean)
+        if residual_token is not None:
+            return FastPassDecision(
+                passed=False,
+                reason=(
+                    "Residual mask token in target text "
+                    f"({residual_token.group(0)!r}): a protected span was not "
+                    "restored; re-translate the block rather than reword it"
+                ),
+                target_ratio=0.0,
+                length_ratio=0.0,
+            )
+
         # 1b. Verbatim echo. The reason doubles as the repair instruction.
         # Skipped for a rehearsal run: its echo is source-identical on purpose.
         if (
@@ -1246,8 +1265,11 @@ class FastPassFilter:
         # 3b. Math-span preservation check (Gate 4, the XLIFF
         # placeholder-QA paradigm): inline math masked before drafting must be
         # restored verbatim after unmasking. A dropped ⟦MATH_MASK_*⟧ token
-        # surfaces here as a span multiset mismatch and routes to repair, where
-        # the block is re-masked from source (self-healing closed loop).
+        # surfaces here as a span multiset mismatch and routes to repair. Repair
+        # does not re-mask or re-draft the block: it re-runs this same check on
+        # each candidate, so a candidate that still drops the span is rejected
+        # and the block stays queued (escalating to a human at the rounds cap)
+        # rather than shipping with the formula missing.
         # Currency ($5) is never a span, so prices don't trip this gate.
         src_spans = extract_math_spans(src_clean)
         tgt_spans = extract_math_spans(tgt_clean)

@@ -1,4 +1,4 @@
-"""Content-addressed caching for the analyze step (content-addressed cache layer).
+"""Content-addressed caching for the analyze step.
 
 ``read_pdf`` is a pure transform of a PDF's bytes into a ``Document`` (and then
 into ``IRBlock``s): the same file and page range always yield the same blocks.
@@ -104,6 +104,12 @@ def docling_identity() -> str:
         # the asset filename, which is the other half of the invalidation — see
         # ``DELIVERED_CROP_POLICY_TAG``.
         "ubt.adapters.pdf.visual_scalpel",
+        # ``fuse_continuation_blocks`` runs *inside* the cached computation
+        # (``docling_adapter._extract_blocks_sync``), so a change to how
+        # page-spanning paragraphs are merged changes the cached blocks. It was
+        # missing, so the fix that stopped over-merging was a no-op on every
+        # previously converted document.
+        "ubt.core.ir.continuation",
     )
 
 
@@ -136,10 +142,24 @@ def cached_blocks(
         ],
         {},
     )
+    # ``get_or_compute`` runs ``compute`` when the entry is missing, so an
+    # exception raised *by compute* arrives through the same ``except`` as a
+    # corrupt cache entry. Re-running compute on the former is pure waste (it
+    # failed deterministically and the second run pays for it again), so track
+    # whether the failure came from our own computation.
+    computed = False
+
+    def _compute() -> str:
+        nonlocal computed
+        computed = True
+        return _BLOCKS.dump_json(compute()).decode("utf-8")
+
     try:
-        raw = store.get_or_compute(key, lambda: _BLOCKS.dump_json(compute()).decode("utf-8"))
+        raw = store.get_or_compute(key, _compute)
         return _BLOCKS.validate_json(raw)
     except (OSError, ValueError, KeyError, TypeError) as exc:
+        if computed:
+            raise
         logger.debug("analyze cache entry unusable for %s: %s", key, exc)
         return compute()
 

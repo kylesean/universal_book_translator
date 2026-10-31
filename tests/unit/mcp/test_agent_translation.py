@@ -58,6 +58,42 @@ def _translate(masked: str) -> str:
 
 
 @pytest.mark.asyncio
+async def test_claim_refuses_while_a_pipeline_holds_the_job_lease(tmp_path: Path) -> None:
+    """A claim must not race a provider pipeline that owns the job.
+
+    Concurrent *Agent* claims stay supported (they are serialized by the atomic
+    package lease, see ``test_concurrent_claims_never_lease_the_same_block``),
+    so the fix cannot be "claim takes the job lease" — that would turn a second
+    host's claim into a conflict. It detects the foreign writer instead.
+    """
+    from ubt.core.engine.writer_lock import LedgerWriterLock
+    from ubt.core.exceptions import UBTError
+
+    source = _write_book(tmp_path)
+    config = _config(tmp_path)
+    service = AgentTranslationService(config=config)
+    prepared = await service.prepare(
+        AgentPrepareRequest(
+            input_path=str(source),
+            output_path=str(tmp_path / "translated.md"),
+            job_id="agent_lease",
+        )
+    )
+
+    db_path = config.db_dir / f"{prepared.job_id}.sqlite"
+    held = LedgerWriterLock(db_path, prepared.job_id)
+    held.acquire()
+    try:
+        with pytest.raises(UBTError, match="being written by another process"):
+            await service.claim(AgentClaimRequest(job_id=prepared.job_id))
+    finally:
+        held.release()
+
+    claim = await service.claim(AgentClaimRequest(job_id=prepared.job_id))
+    assert claim.package is not None
+
+
+@pytest.mark.asyncio
 async def test_prepare_claim_submit_finish_without_any_model_call(tmp_path: Path) -> None:
     source = _write_book(tmp_path)
     service = AgentTranslationService(config=_config(tmp_path))
@@ -346,6 +382,12 @@ async def test_repair_rounds_are_consumed_and_stop_at_human_gate(tmp_path: Path)
             saved = ledger.get_block(block.block_id, job_id=prepared.job_id)
         assert saved is not None
         assert saved.repair_rounds == expected_round
+
+    # Past the gate the block must not be re-leased: the claim query had no
+    # rounds bound, so an Agent host could re-claim a hopeless block forever
+    # (and pay for every attempt) instead of finishing into the human queue.
+    exhausted = await service.claim(AgentClaimRequest(job_id=prepared.job_id))
+    assert exhausted.package is None, "an exhausted repair must not be re-leasable"
 
     with pytest.raises(Exception, match="below the 50% floor"):
         await service.finish(AgentFinishRequest(job_id=prepared.job_id))

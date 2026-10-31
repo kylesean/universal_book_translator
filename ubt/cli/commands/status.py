@@ -346,6 +346,18 @@ def job_status(
             else []
         )
         unresolved_conflicts = [c for c in conflicts if not c.get("resolved")]
+        # Cross-process truth: ``job_meta.status`` has no "running" value, so a
+        # non-terminal row alone cannot tell a live run from a crashed one.
+        # The writer lease can, and the REST/console surfaces already read it.
+        # Without this the CLI showed an active run and a dead one identically.
+        holder = LedgerWriterLock.lease_holder(db_path, job_id)
+        stored_status = ledger.get_job_status(job_id)
+        if holder is not None:
+            run_state = "running"
+        elif stored_status in ("completed", "failed", "cancelled"):
+            run_state = stored_status
+        else:
+            run_state = "stale"
         if json_output:
             print(
                 json.dumps(
@@ -363,6 +375,9 @@ def job_status(
                         "visual": visual_summary,
                         "terminology_conflicts": conflicts,
                         "unresolved_terminology_conflicts": len(unresolved_conflicts),
+                        "run_state": run_state,
+                        "writer_pid": holder,
+                        "ledger_status": stored_status,
                     }
                 )
             )
@@ -372,6 +387,10 @@ def job_status(
         table.add_column("Metric", style="bold cyan")
         table.add_column("Value", style="bold green")
 
+        table.add_row(
+            "Run State",
+            f"running (pid {holder})" if holder is not None else run_state,
+        )
         table.add_row("Total Blocks", str(total))
         table.add_row("Completed Blocks", str(completed))
         table.add_row("Processed (terminal states)", f"{processed} ({pct}%)")

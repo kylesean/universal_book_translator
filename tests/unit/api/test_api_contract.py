@@ -687,6 +687,47 @@ def test_a_repeated_submit_reports_that_it_reused_the_job(
     assert second.json()["job_id"] == first.json()["job_id"]
 
 
+def test_resubmit_with_different_arguments_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The id is an idempotency key for one request, not one input file.
+
+    Before this guard, reusing a live id with a different target language
+    returned the first job, so the caller's second request (a different
+    language) was silently answered by the first run's artifact.
+    """
+
+    async def _stay_running(self: JobManager, record: JobRecord, config: Any) -> None:
+        record.status = JobStatus.RUNNING
+
+    monkeypatch.setattr(JobManager, "execute_job", _stay_running)
+    with TestClient(create_app(config=_config(tmp_path))) as client:
+        doc = _write_doc(tmp_path)
+        first = client.post(
+            "/jobs/submit",
+            json={
+                "input_path": str(doc),
+                "job_id": "contract-mismatch-1",
+                "target_lang": "zh",
+            },
+            headers=_AUTH,
+        )
+        second = client.post(
+            "/jobs/submit",
+            json={
+                "input_path": str(doc),
+                "job_id": "contract-mismatch-1",
+                "target_lang": "ja",
+            },
+            headers=_AUTH,
+        )
+
+    assert first.status_code == 202
+    assert second.status_code == 409
+    assert "different arguments" in second.json()["detail"]
+    assert "target_lang" in second.json()["detail"]
+
+
 def test_an_accepted_job_survives_a_restart_before_ingest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

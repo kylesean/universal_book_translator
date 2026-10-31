@@ -142,7 +142,13 @@ class DominantStyleTagger:
         # Apply styled spans on working text
         for run in inline_runs:
             needle = run.text.strip()
-            if not needle or needle in span_style_map.values():
+            # ``span_style_map`` holds InlineRun values, so a membership test
+            # against the *string* never matched: a run whose text had already
+            # been reserved as a slot was tagged a second time, and the slot's
+            # style was overwritten by the later assignment. Compare the text.
+            if not needle or any(
+                existing.text.strip() == needle for existing in span_style_map.values()
+            ):
                 continue
             # Check if run matches base style
             if (

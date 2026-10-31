@@ -250,3 +250,35 @@ def test_a_non_contiguous_page_selection_is_not_widened_to_its_range(
     # The actual selection: nothing is missing.
     exact, _ = _pages_without_text(pdf, blocks, (1, 4), page_scope=[1, 4])
     assert exact == []
+
+
+def test_a_genuinely_blank_page_is_not_a_missing_page(tmp_path: Path) -> None:
+    """A blank verso has no text layer to lose and nothing for OCR to read.
+
+    Counting it as missing refused the whole book (``_reject_empty_book``)
+    unless the operator enabled OCR, which would transcribe nothing. Only a
+    page with zero page objects is exempt: a scanned or figure-only page still
+    carries an image object and stays reported.
+    """
+    from pdf_builders import write_text_pdf
+
+    from ubt.adapters.pdf.docling_parser import _pages_without_text
+
+    pdf = write_text_pdf(tmp_path / "blank.pdf", [["one"], [], ["three"]])
+    blocks = [
+        IRBlock(
+            element=make_element(
+                id=f"pdf_main#b{page:04d}",
+                spine_index=page,
+                block_type=BlockType.NARRATIVE,
+                source_text=f"page {page}",
+                bbox=BoundingBox(page=page, x0=10.0, y0=10.0, x1=200.0, y1=30.0),
+            )
+        )
+        for page in (1, 3)
+    ]
+
+    missing, total = _pages_without_text(pdf, blocks, None)
+
+    assert total == 3
+    assert missing == [], "an empty page must not refuse the book"

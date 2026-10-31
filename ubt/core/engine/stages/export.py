@@ -44,6 +44,7 @@ from ubt.core.job_options import (
     RUN_REPORT_KINDS,
     CompanionArtifactResult,
     CompanionExportSummary,
+    artifact_and_report_paths,
     resolve_target_output,
     sidecar_path,
 )
@@ -2260,9 +2261,17 @@ async def run_export_stage(
             )
 
         if not contract_ok:
+            # The report is optional in this scope; calling through it directly
+            # would raise AttributeError inside the failure path and hide the
+            # contract failure behind a formatting error.
+            contract_summary = (
+                delivery_report.summary_line()
+                if delivery_report is not None
+                else "no delivery report was produced"
+            )
             raise IntegrityViolationError(
                 f"Export blocked for job {ctx.job_id}: delivery contract failed — "
-                f"{delivery_report.summary_line()}. See "
+                f"{contract_summary}. See "
                 f"{sidecar_path(rendered_path, 'delivery_contract.json')}."
             )
 
@@ -2293,11 +2302,24 @@ async def run_export_stage(
     # has to treat as "not stale".
     deliverable_digest = await asyncio.to_thread(rendered_digest_for, ledger, actual_job_id)
     if claims_finality:
+        # The download pointers commit with the status. Persisting them from the
+        # export hook afterwards left a crash window where the job read
+        # ``completed`` with no ``output_file`` — undownloadable, and every
+        # surface reported success. Derived from the same helper the hook uses,
+        # so the two cannot name different files.
+        artifact_output, artifact_report, artifact_visual = artifact_and_report_paths(
+            str(rendered_path)
+        )
         await asyncio.to_thread(
             ledger.finalize_job,
             actual_job_id,
             status="completed",
             rendered_digest=deliverable_digest,
+            artifacts={
+                "output_file": str(artifact_output),
+                "report_file": str(artifact_report),
+                "visual_report_file": str(artifact_visual),
+            },
         )
     else:
         # A re-export does not own the job's terminal status, but this artifact

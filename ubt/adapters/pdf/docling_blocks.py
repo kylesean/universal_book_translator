@@ -1,9 +1,8 @@
 """Pure IRBlock shaping helpers for the Docling adapter.
 
-These are the Docling adapter's raw item helpers: read a Docling item's own
-provenance (page spans, geometry) and render its grid to markup. They never
-classify or repair -- the analyzer types directly from Docling's labels in
-:func:`ubt.adapters.pdf.docling_parser.extract_with_docling` (native analyzer AST type production).
+They read a Docling item's own provenance (page spans, geometry) and render its
+grid to markup; they never classify or repair. Classification happens as the
+items are read, from Docling's own labels.
 No caption fuse/decouple/latch heuristics live here: Docling labels captions
 (``CAPTION``, ``PICTURE``, a ``FIG. N`` title), and the analyzer trusts those
 labels rather than re-guessing the boundaries afterwards.
@@ -627,6 +626,13 @@ def merge_table_continuation_fragments(blocks: list[IRBlock]) -> list[IRBlock]:
                 break
             # Hard barriers: never swallow another table, heading, or caption
             if nxt.block_type in (BlockType.TABLE, BlockType.HEADING):
+                break
+            # Footnotes, captions and asides are page furniture, not the table's
+            # tail. Docling places a footnote directly under a grid often enough
+            # that the 25pt proximity and column-envelope guards do not exclude
+            # it, and absorbing it turned the note into grid markup: translated
+            # as a cell and gone from the page's prose.
+            if nxt.flow_id in (FlowID.FOOTNOTE, FlowID.CAPTION, FlowID.SIDEBAR_ASIDE):
                 break
             ntxt = (nxt.source_text or "").strip()
             if ntxt.lower().startswith(("table ", "figure ", "fig. ")):

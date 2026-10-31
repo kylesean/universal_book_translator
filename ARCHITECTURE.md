@@ -15,8 +15,9 @@ enforcing tool is named too.
 Two families of reverse edge are forbidden: the adapters (`ubt.adapters` already
 depends on core's IR models, so the reverse edge is a package-level cycle that
 would drag docling and Typst tooling into the core import graph) and the
-compiler packages (`ubt.segment` / `ubt.translate`, where a module-level edge
-from core closes the `core.engine <-> pipeline` cycle).
+compiler packages (`ubt.segment` / `ubt.translate`, and the document compiler
+`ubt.render` — each imports core's leaf helpers, so a module-level edge from
+`ubt.core.engine` back into one closes a package-level cycle).
 
 The packages, from the leaf upward. This is not a strict total order — what
 matters is the direction of the forbidden edges, stated per package below:
@@ -24,14 +25,15 @@ matters is the direction of the forbidden edges, stated per package below:
 | Package | Role |
 | --- | --- |
 | `ubt/model` | The leaf document AST: `Element`/`ElementT`, `Span`/`CompositeSpan`/`CanonicalSource`, and the translation-unit types (`Segment`, `Placeholder`). Pure data: it imports nothing from the rest of `ubt`. |
-| `ubt/core` | The domain: IR (`ubt/core/ir`), engine, policy, QE, validators, ledger, router, memory. **May not** import `ubt.adapters` at module level; implementations reach it through `ubt/core/ports.py` (function-level lazy imports). |
+| `ubt/core` | The domain: IR (`ubt/core/ir`), engine, policy, QE, validators, ledger, router, memory, and artifact identity (`ubt/core/job_options.py`: the default output directory, and the two delivered-artifact paths — the requested target and the returned render — that every sidecar and companion keys on). **May not** import `ubt.adapters` at module level; implementations reach it through `ubt/core/ports.py` (function-level lazy imports). |
 | `ubt/cache` | Content-addressed caches (`DiskCacheStore`, the Docling conversion cache's directory root) plus `ubt/cache/dirs.py`. Leaf-adjacent: it may import `ubt/core` leaves (`fs_perms`) and `ubt/core/engine/pipeline.py` imports `ubt/cache.dirs`, which makes `core` ↔ `cache` a package-level cycle. Tolerated because `fs_perms` is a leaf module with no reverse edge; do not deepen it. |
-| `ubt/layout` | Theme/direction helpers. `direction_for` is read by the render and export code, and the Typst renderer also reads `Theme.leading_em` for body leading; the rest of `Theme` (`resolve_theme`, the bilingual/size/paper fields) is exercised by tests alone — do not treat this package as the single source of truth for font stacks or paper size until a renderer reads those. |
+| `ubt/layout` | Theme/direction helpers. `direction_for` is read by the render and export code, and the Typst preamble takes body leading and first-line indent from the per-language `TypographicConvention` (`convention_for` in `theme.py`), not from a `Theme` instance; the rest of `Theme` (`resolve_theme`, the leading/size/paper/bilingual fields) is exercised by tests alone — do not treat this package as the single source of truth for font stacks or paper size until a renderer reads those. |
 | `ubt/analyze` | Format readers turning sources into the typed AST (`read_md`, `read_html`, `read_epub`, `read_docx`), plus the shared walkers, numbering and classifier rules the adapters call. It builds on `ubt/core`'s leaf helpers (`ubt/core/xml_safety`, `zip_safety`, `ir`) and **may not** import `ubt.adapters`. |
 | `ubt/adapters` | Format adapters (`ubt/adapters/factory.py`) plus the PDF engines and the render stack. |
 | `ubt/segment`, `ubt/translate` | The translation-unit layer: placeholder masking/restore and the engine that drives it. |
-| `ubt/render` | Lowering delivered blocks to HTML (`html_view.py`), EPUB (`epub_view.py`) and the Typst PDF document (`typst/document_renderer.py`). It **may not** import `ubt.adapters`. |
-| `ubt/pipeline` | Artifact identity (`artifact.py`): the two paths the export stage keys on. |
+| `ubt/render` | Lowering delivered blocks to HTML (`html_view.py`), EPUB (`epub_view.py`) and the Typst PDF — `typst/` is a family of renderers, not one module: `document_renderer.py` reflow, the page-faithful `facsimile_renderer.py` and `page_locked_renderer.py`, and the `academic.py` template, all reached at runtime by `ubt/adapters/pdf/docling_render.py`. It **may not** import `ubt.adapters`. |
+| `ubt/delivery` | The adaptive-delivery vocabulary: contract types, the pure router, the structure-census planner, the measurement scaffold. `ubt/core/engine/pipeline.py` and the export stage import it at module level; its only edge back into the domain is `ubt.core.exceptions`, a zero-out-edge leaf — the same tolerated shape as `ubt/cache`. |
+| `ubt/resources` | Not Python: the data files the code reads (`prices.toml`, `providers.toml`, `glossaries/<profile>/<lang>.json`). No import edges. |
 | `ubt/cli`, `ubt/api`, `ubt/mcp` | The three entry-point surfaces, which may import anything. |
 
 `ubt/core/ports.py` is the single sanctioned bridge back to the higher layers.
@@ -43,10 +45,11 @@ capability.
 ### The invariant is enforced, not just documented
 
 - `scripts/dump_compiler_edges.py` is the acceptance tool. It exits non-zero if
-  any module-level `ubt.core` import of `ubt.pipeline` / `ubt.segment` /
-  `ubt.translate` exists (the inward edge to the leaf `ubt.model` is exempt by
-  design), if the `ubt.core.engine <-> ubt.pipeline` package cycle exists, if
-  any `ubt.render -> ubt.adapters` module-level edge exists, or if **any**
+  any module-level `ubt.core` import of `ubt.segment` / `ubt.translate` exists
+  (the inward edge to the leaf `ubt.model` is exempt by design), if
+  `ubt.core.engine` imports the document compiler `ubt.render` at module level,
+  if the `ubt.core.engine <-> ubt.render` package cycle exists, if any
+  `ubt.render -> ubt.adapters` module-level edge exists, or if **any**
   module-level `ubt.core -> ubt.adapters` edge exists. The last check was
   missing while this section already claimed the invariant was enforced: a core
   module could import docling or typst and every gate stayed green.
@@ -59,8 +62,9 @@ capability.
 
 ## Docs are not in the repo
 
-`docs/` — the two RFCs, the guides, the adaptive-delivery PRD and its four
-execution documents — is gitignored on purpose. Each file describes one HEAD and
+`docs/` — four notes today: the adaptive-delivery PRD and the refactor design
+under `docs/design/`, the delivery tech design and implementation plan under
+`docs/guides/` — is gitignored on purpose. Each file describes one HEAD and
 is rewritten by the next audit round, so versioning them made a stale design note
 indistinguishable from a current specification.
 
@@ -90,7 +94,9 @@ What *is* versioned is the root set — `README.md`, `ARCHITECTURE.md`,
 own docstring. That is the documentation a reviewer and CI can actually read.
 `CHANGELOG.md` is exempt from the link check: an entry cites the tree it
 describes, and rewriting history to satisfy a present-day check falsifies it (the
-same reasoning keeps `check_doc_refs.py` out of `docs/archive` and `docs/reviews`).
+same reasoning is why `check_doc_refs.py` skips dated audit records — it excludes
+the `archive/` and `reviews/` subdirectories of `docs/` by name, whether or not
+this HEAD's docs set has them).
 
 ## Sanctioned duplication
 
@@ -191,9 +197,10 @@ greppable.
 ## The ledger is the single source of run state
 
 `ubt/core/engine/ledger.py` assembles `SQLiteJobLedger` from `LedgerBase`
-(connection, transactions, schema migrations) and three mixins (job lifecycle,
-block writes, batch-API partitions). The database is SQLite in WAL mode under
-`db_dir` (default `.ubt/ledgers`).
+(connection, thread-safety, pragmas, and the one flat baseline schema — it opens
+and stamps the schema, it does not migrate anything incrementally) and three
+mixins (job lifecycle, block writes, batch-API partitions). The database is
+SQLite in WAL mode under `db_dir` (default `.ubt/ledgers`).
 
 - `ledger_base.py` owns the flattened baseline schema and `SCHEMA_VERSION`
   (1000; `TARGET_SCHEMA_VERSION` is retained as an alias). Fresh databases are
@@ -228,9 +235,11 @@ is what stops two processes running the same `job_id` at once.
 `job_locks` table inside the ledger SQLite database (`(job_id, owner_pid,
 owner_token, lease_expires_at, acquired_at)`), replacing the obsolete
 `.writer.lock` file-offset lock that failed on NFS, overlayfs, and container
-filesystems. The lease duration defaults to 300 seconds (`DEFAULT_LEASE_SECONDS`);
-contention raises `LedgerWriterLockConflictError` with holder details. A crashed
-process's expired lease is reclaimed atomically via `UPDATE`.
+filesystems. The lease duration defaults to 60 seconds (`DEFAULT_LEASE_SECONDS`)
+and is renewed by a heartbeat that beats at a third of the lease, so a writer
+holding across a whole-book render keeps its claim; contention raises
+`LedgerWriterLockConflictError` with holder details. A crashed process's expired
+lease is reclaimed atomically via `UPDATE`.
 
 Every writer takes the lock. `ubt/api/review.py`'s `apply_human_edit` is the
 canonical example of the pattern: acquire, refuse with a typed conflict if
@@ -238,6 +247,15 @@ another process holds it, do the ledger write in one transaction, feed the
 accepted pair back into the shared TM, release in `finally`. `re_export.py`
 follows the same shape. Read-only surfaces (status, inspect, MCP fallback reads)
 never take it.
+
+One deliberate exception is the Agent claim/submit pair
+(`ubt/core/engine/agent_translation.py`). Two Agent hosts claiming concurrently
+are a supported workflow, so those two operations cannot hold the job lease —
+that would turn the second host's claim into a conflict. They are serialized by
+the atomic package lease inside `claim_next_agent_work` instead, and they still
+probe for a live foreign writer and refuse: a provider pipeline holds the lease
+for its whole run, and the pipeline itself refuses to start on an Agent-mode
+ledger, so neither side can silently become the second writer.
 
 ## The block lifecycle
 
@@ -259,20 +277,32 @@ distinguish a live job from one whose process died. Every outward surface
 normalizes before answering (REST's disk fallback downgrades a non-terminal row
 to `failed`; MCP's `ubt_job_status` downgrades only after the ledger goes quiet).
 The service-level `JobStatus` enum in `ubt/core/engine/job_queue.py` —
-`submitted`, `queued`, `running`, `completed`, `failed`, `cancelled` — is the
-queue's vocabulary, and the queue is a separate SQLite file. Do not conflate the
-three.
+`submitted`, `queued`, `running`, `awaiting_agent`, `completed`, `failed`,
+`cancelled` — is the queue's vocabulary, and the queue is a separate SQLite file.
+`awaiting_agent` is a durable Agent job parked between MCP calls: it holds **no**
+writer lease by design, so the normal "no lease means failed" projection must not
+be applied to it. Do not conflate the three.
 
 ## The render path
 
-There is **one** PDF path. `ubt/render/typst/document_renderer.py` rebuilds the
-document from the IR and lets Typst lay it out; it does not draw fragments back
-onto the source page. Uniform body type, rebuilt tables with translated headers,
-and native math via `ubt/render/typst/math_transpiler.py` all follow from
-rebuilding rather than overlaying. The renderer is deterministic — same blocks
-in, same bytes out. `ubt/adapters/pdf/typst_compile.py` is the subprocess
-boundary; both it and the binary probe are total (a missing binary is a verdict,
-never an unhandled `FileNotFoundError`).
+There is **one** export pipeline and a family of renderers behind it. The run
+names a delivery contract — `readable` reflows, `faithful` keeps the source page
+geometry, `auto` routes by the document's measured facts (`ubt/core/config.py`;
+the legacy `reflow` / `facsimile` / `page_locked` spellings still route, mapped by
+`ubt.delivery.contracts.legacy_delivery_contract`).
+`ubt/adapters/pdf/docling_render.py` dispatches on it, so the Typst backends are
+runtime imports rather than one hard-wired path: a readable run goes to
+`ubt/render/typst/document_renderer.py`, which rebuilds the document from the IR
+and lets Typst lay it out, while a faithful run goes to
+`typst/facsimile_renderer.py` and `typst/page_locked_renderer.py`, which place
+the delivered blocks back on the source page's geometry. Rebuilding rather than
+overlaying is what gives the reflow artifact its uniform body type, its rebuilt
+tables with translated headers, and its native math via
+`ubt/render/typst/math_transpiler.py`. The renderer is deterministic — same
+blocks in, same bytes out.
+`ubt/adapters/pdf/typst_compile.py` is the subprocess boundary; both it and the
+binary probe are total (a missing binary is a verdict, never an unhandled
+`FileNotFoundError`).
 
 Two companions lower the same delivered blocks for other readers:
 `ubt/render/html_view.py` (`compose_html`) and `ubt/render/epub_view.py`

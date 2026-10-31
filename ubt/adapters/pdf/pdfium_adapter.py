@@ -192,9 +192,6 @@ class PDFiumAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
     formulas.
     """
 
-    #: Content-addressed analyze cache (set in apply_config).
-    analysis_cache: CacheStore | None = None
-
     def __init__(self, font_family: str | None = None) -> None:
         self._init_render_stack(font_family=font_family)
 
@@ -249,4 +246,9 @@ class PDFiumAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         self, path: Path, page_range: tuple[int, int] | None = None
     ) -> list[IRBlock]:
         """Geometric line harvesting with column-aware reading order."""
-        return extract_blocks_with_pdfium(path, page_range, store=self.analysis_cache)
+        # No analyze cache here on purpose: ``analysis_cache`` is assigned only
+        # by ``DoclingPDFAdapter.apply_config`` (the base is a no-op), so the
+        # old ``store=self.analysis_cache`` was always ``None`` — it promised a
+        # cache path that never existed. The function keeps its ``store``
+        # parameter for direct callers.
+        return extract_blocks_with_pdfium(path, page_range)

@@ -34,7 +34,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-import shutil
 import time
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -109,13 +108,19 @@ from ubt.core.job_options import (
     prior_output_of,
     profile_name_is_valid,
     resolve_target_output,
+    submission_mismatch,
     validate_request_enums,
 )
 from ubt.core.job_options import (
     JOB_ID_RE as JOB_ID_RE,
 )
 from ubt.core.language_profile import is_supported_lang, supported_lang_codes
-from ubt.core.policy.layout_policy import MCP_MAX_RUNNING_JOBS as MCP_MAX_RUNNING_JOBS
+from ubt.core.policy.layout_policy import (
+    CANCEL_LOCK_WAIT_SECONDS,
+)
+from ubt.core.policy.layout_policy import (
+    MCP_MAX_RUNNING_JOBS as MCP_MAX_RUNNING_JOBS,
+)
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket, build_rate_limiter
 
 mcp = MCPServer(
@@ -152,9 +157,10 @@ def _mcp_error_boundary(func: Any) -> Any:
 
 logger = logging.getLogger(__name__)
 
-#: How long a disk-path cancel waits for the pipeline's writer lock before
-#: leaving the terminal write to the running pipeline (mirrors the REST wait).
-_CANCEL_LOCK_WAIT_SEC = 10.0
+#: Strong references to the background writes the cancel tool starts: the
+#: event loop holds only weak refs, so an unreferenced task can be collected
+#: mid-flight and the terminal ledger row silently never lands.
+_cancel_finalize_tasks: set[asyncio.Task[None]] = set()
 
 
 _MAX_RETAINED = 100
@@ -191,6 +197,29 @@ _MANAGER = JobManager(
     max_running_jobs=MCP_MAX_RUNNING_JOBS,
     max_retained_jobs=_MAX_RETAINED,
 )
+
+
+def _sync_manager_cap() -> None:
+    """Honour ``UBT_JOB_MAX_RUNNING`` on the MCP door too.
+
+    The manager is built at import (every tool holds a reference to it), but the
+    ceiling is an operator setting, not a compile-time constant: the REST app
+    has always read ``job_max_running`` per app, and MCP read only the policy
+    default, so an operator who set the ceiling to 1 to serialise work on a
+    single GPU still got eight concurrent pipelines through this surface. Read
+    on submission rather than at import so an env override (or a test's
+    ``monkeypatch``) is effective, and fall back to the policy default instead
+    of making the server unimportable when the config file is malformed.
+    """
+    try:
+        _MANAGER.max_running_jobs = UBTConfig.from_env().job_max_running
+    except Exception as exc:  # noqa: BLE001 - a bad config must not kill the tool
+        logger.warning(
+            "Could not read UBT_JOB_MAX_RUNNING (%s); keeping the policy default of %d",
+            exc,
+            MCP_MAX_RUNNING_JOBS,
+        )
+
 
 #: Slots for ``ubt_assess_book(deep=True)``.
 #:
@@ -561,7 +590,10 @@ async def ubt_translate_book(
     db_dir: str | None = None,
     preset: str | None = None,
     glossary: str | None = None,
-    pages: str | None = None,
+    # Same cap as ``ubt_agent_prepare``: a page list is a short expression
+    # ("1-10,14"), and without a bound a multi-megabyte string was parsed by
+    # ``parse_page_ranges`` before anything could reject it.
+    pages: Annotated[str | None, Field(max_length=256)] = None,
     # Column count of the delivered layout (1 or 2). REST carries the same field
     # and the CLI spells it ``--columns``; leaving it off this surface meant an
     # agent could not set a layout the other two doors offered.
@@ -594,6 +626,7 @@ async def ubt_translate_book(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Translate a document end to end. Returns immediately with a job_id; poll ubt_job_status."""
+    _sync_manager_cap()
     _check_lang(target_lang, "target_lang")
     _check_lang(source_lang, "source_lang")
     profile = _check_profile(profile)
@@ -652,7 +685,9 @@ async def ubt_translate_book(
                 f"job_id {jid} is already bound to a different input document; "
                 "use a different job_id"
             )
-        changed = sorted(key for key, value in requested.items() if prior.get(key) != value)
+        # Shared with the REST intake: the id names one request, and both
+        # surfaces must agree on which keys make a retry a different run.
+        changed = submission_mismatch(prior, requested)
         if changed:
             raise ToolError(
                 f"job_id {jid} already exists with different arguments: "
@@ -913,19 +948,8 @@ async def ubt_cancel_job(job_id: str, db_dir: str | None = None) -> dict[str, An
     """Cancel an in-flight translation job. Idempotent: terminal jobs return their status as-is."""
     jid = _check_job_id(job_id)
     rec = _MANAGER.get_job(jid)
-    if rec is not None:
-        if rec.status not in (JobStatus.SUBMITTED, JobStatus.RUNNING):
-            return {"job_id": jid, "status": rec.status}
-        rec.status = JobStatus.CANCELLED
-        task = rec.task
-        if task is not None and not task.done():
-            task.cancel()
-        return {"job_id": jid, "status": JobStatus.CANCELLED}
-
     base = _safe_output_path(str(db_dir)) if db_dir else UBTConfig.from_env().db_dir
     db_path = base / f"{jid}.sqlite"
-    if not db_path.exists():
-        raise ToolError(f"no such job: {jid}")
 
     # Everything below (mkdir/chmod, WAL pragmas, schema migration, reads and
     # the finalize write) is blocking AND the migration must not race a
@@ -934,7 +958,7 @@ async def ubt_cancel_job(job_id: str, db_dir: str | None = None) -> dict[str, An
     # the ledger under it, all in one worker thread off the event loop.
     def _cancel_locked() -> dict[str, Any]:
         lock = LedgerWriterLock(db_path, jid)
-        deadline = time.monotonic() + _CANCEL_LOCK_WAIT_SEC
+        deadline = time.monotonic() + CANCEL_LOCK_WAIT_SECONDS
         while True:
             try:
                 lock.acquire()
@@ -963,6 +987,38 @@ async def ubt_cancel_job(job_id: str, db_dir: str | None = None) -> dict[str, An
         finally:
             lock.release()
 
+    def _finalize_in_background() -> None:
+        """Land the terminal row a cancelled task may never reach.
+
+        ``task.cancel()`` only schedules the cancellation: a task that was
+        still queued to start never touches the ledger at all, and one that is
+        unwinding may be killed before its own finalize. The REST cancel
+        handler has always written this row; the MCP in-memory branch returned
+        immediately, leaving the job non-terminal until the 300s staleness
+        fallback told every reader it had failed.
+        """
+        try:
+            if db_path.exists():
+                _cancel_locked()
+        except Exception as exc:  # noqa: BLE001 - a background write must not escape
+            logger.debug("Could not persist cancellation for %s: %s", jid, exc)
+
+    if rec is not None:
+        if rec.status not in (JobStatus.SUBMITTED, JobStatus.RUNNING):
+            return {"job_id": jid, "status": rec.status}
+        rec.status = JobStatus.CANCELLED
+        task = rec.task
+        if task is not None and not task.done():
+            task.cancel()
+        # Strong reference: the event loop holds only weak refs, so an
+        # unreferenced task can be collected before the thread pool finishes.
+        finalize = asyncio.create_task(asyncio.to_thread(_finalize_in_background))
+        _cancel_finalize_tasks.add(finalize)
+        finalize.add_done_callback(_cancel_finalize_tasks.discard)
+        return {"job_id": jid, "status": JobStatus.CANCELLED}
+
+    if not db_path.exists():
+        raise ToolError(f"no such job: {jid}")
     return await asyncio.to_thread(_cancel_locked)
 
 
@@ -1258,45 +1314,40 @@ async def ubt_list_jobs(db_dir: str | None = None, limit: int = 50) -> dict[str,
     ),
 )
 @_mcp_error_boundary
-async def ubt_doctor() -> dict[str, Any]:
-    """Preflight checks: API key, writable ledger dir, key optional deps."""
+async def ubt_doctor(deep: bool = False) -> dict[str, Any]:
+    """Preflight checks, from the same checklist the CLI and console run.
+
+    This tool used to carry its own five-check copy (key, ledger dir, three
+    imports, typst). The CLI and ``/system/doctor`` share
+    ``collect_checks``, so the MCP surface was the one door that could report
+    OK for an environment the other two call broken (and vice versa). ``deep``
+    adds the process/memory sampling the CLI offers.
+    """
+    from ubt.cli.commands.doctor import collect_checks
+
     config = UBTConfig.from_env()
-    checks: list[dict[str, str]] = []
-
-    def _record(name: str, status: str, detail: str = "") -> None:
-        checks.append({"name": name, "status": status, "detail": detail})
-
-    if has_real_credential(config):
-        _record("api_key", "OK", f"base={config.base_url}")
-    elif not credential_required(config):
-        # A local endpoint authenticates nothing; reporting FAIL here sent
-        # operators looking for a key that the endpoint never wanted.
-        _record("api_key", "OK", f"local endpoint, no credential needed: {config.base_url}")
-    else:
-        _record("api_key", "FAIL", "set UBT_LLM_API_KEY or select a provider (UBT_PROVIDER)")
-    try:
-        config.db_dir.mkdir(parents=True, exist_ok=True)
-        probe = config.db_dir / ".ubt_doctor_probe"
-        probe.write_text("ok", encoding="utf-8")
-        probe.unlink(missing_ok=True)
-        _record("ledger_dir", "OK", str(config.db_dir))
-    except OSError as exc:
-        _record("ledger_dir", "FAIL", str(exc))
-    import importlib.util as _ilu
-
-    for dep in ("pypdfium2", "docx", "bs4"):
-        _record(
-            "dep:" + dep,
-            "OK" if _ilu.find_spec(dep) is not None else "WARN",
-            "missing — install the feature extra" if _ilu.find_spec(dep) is None else "",
-        )
-    _record(
-        "typst",
-        "OK" if shutil.which("typst") else "WARN",
-        "" if shutil.which("typst") else "PDF reflow falls back to markdown companion",
-    )
-    ok = all(c["status"] != "FAIL" for c in checks)
-    return {"ok": ok, "checks": checks}
+    # Off-loop: font/WAL probing and (with ``deep``) process sampling block.
+    checks = await asyncio.to_thread(collect_checks, config, probe=False, deep=deep)
+    summary = {"fail": 0, "warn": 0, "ok": 0, "skip": 0}
+    for check in checks:
+        summary[check.status.lower()] += 1
+    status = "fail" if summary["fail"] else ("warn" if summary["warn"] else "ok")
+    return {
+        # ``ok`` is kept for callers written against the old shape.
+        "ok": summary["fail"] == 0,
+        "status": status,
+        "summary": summary,
+        "checks": [
+            {
+                "group": check.group,
+                "name": check.name,
+                "status": check.status,
+                "detail": check.detail,
+                "fix": check.fix,
+            }
+            for check in checks
+        ],
+    }
 
 
 def main() -> None:

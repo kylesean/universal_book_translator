@@ -1262,6 +1262,22 @@ class PipelineOrchestrator:
             ledger = await asyncio.to_thread(
                 SQLiteJobLedger, db_path, fresh=bool(self.config.fresh)
             )
+            # An Agent-hosted job is translated by an external host through
+            # ubt_agent_claim/submit; running the provider pipeline over the
+            # same ledger would draft the same blocks with a second writer (and
+            # pay the provider for work the Agent host is also doing). Refuse
+            # before any spend instead of letting ingest reinterpret the job.
+            from ubt.core.engine.agent_translation import AGENT_MODE
+
+            stored_mode = await asyncio.to_thread(
+                ledger.get_job_metadata_value, actual_job_id, "translation_mode"
+            )
+            if stored_mode == AGENT_MODE:
+                raise UBTError(
+                    f"Job {actual_job_id} is an Agent-hosted translation; run it "
+                    "through ubt_agent_claim/ubt_agent_submit, or start a new job "
+                    "id for a provider translation."
+                )
             if self.config.tm_enabled:
                 self.config.db_dir.mkdir(parents=True, exist_ok=True)
                 tm = TranslationMemory(self.config.db_dir / "tm.sqlite")

@@ -68,6 +68,7 @@ _ISSUE_MARKERS: dict[str, tuple[str, ...]] = {
         "Hallucinated LaTeX",
         "math_token_corrupt",
         "soup_token_corrupt",
+        "Residual mask token",
         "Visual witness discrepancy",
     ),
     "numeric": ("Numeric fidelity",),

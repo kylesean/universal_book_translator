@@ -135,10 +135,6 @@ def agent_package_accepted_blocks(package: Mapping[str, Any]) -> int:
     return int(package.get("block_count") or 0)
 
 
-#: Terminal ``job_meta.status`` values. A ``completed`` finalize must not
-#: overwrite any of these (the string mirror of the queue's terminal set).
-
-
 def _style_json(style: Any) -> str | None:
     """Serialize a checkpoint's style for the ``style_json`` column.
 
@@ -840,6 +836,7 @@ class LedgerJobsMixin(_LedgerHost):
         status: str = "completed",
         *,
         rendered_digest: str | None = None,
+        artifacts: Mapping[str, str] | None = None,
     ) -> None:
         """Mark job metadata as completed or terminated.
 
@@ -849,13 +846,18 @@ class LedgerJobsMixin(_LedgerHost):
         ``failed``/``cancelled`` stay permissive by design — the abort path must
         land a terminal write even mid-flight.
 
-        ``rendered_digest`` is written **in the same transaction** as the status
-        flip. It used to be a separate ``set_job_metadata_value`` call *after*
-        this one, which left a window where the job read ``completed`` with no
-        digest at all. Nothing self-heals that state: ``is_delivery_stale``
-        treats a missing digest as "not stale" (it has to, for jobs that
-        predate the marker), so the download endpoint would hand out a file
-        rendered from text the ledger no longer holds. Both writes now commit
+        ``rendered_digest`` and ``artifacts`` are written **in the same
+        transaction** as the status flip. The digest used to be a separate
+        ``set_job_metadata_value`` call *after* this one, which left a window
+        where the job read ``completed`` with no digest at all. Nothing
+        self-heals that state: ``is_delivery_stale`` treats a missing digest as
+        "not stale" (it has to, for jobs that predate the marker), so the
+        download endpoint would hand out a file rendered from text the ledger
+        no longer holds. ``artifacts`` (the deliverable/report paths the
+        download surface reads through ``output_file``) had the same defect
+        until it was folded in here: the export hook persisted them after the
+        event, so a crash in that window left a ``completed`` job with nothing
+        to download and every surface reporting success. Both now commit
         together or not at all.
         """
         with self._get_conn() as conn:
@@ -958,6 +960,25 @@ class LedgerJobsMixin(_LedgerHost):
                         actual_id,
                     ),
                 )
+            if artifacts:
+                # Same transaction, same reason as the digest above: a pointer
+                # that lands after the status flip is a pointer a crash can
+                # drop, and the job then reads completed with nothing to
+                # download. json_set keeps every other metadata key intact.
+                for key, value in artifacts.items():
+                    if value is None:
+                        continue
+                    conn.execute(
+                        "UPDATE job_meta "
+                        "   SET metadata_json = json_set("
+                        "       COALESCE(NULLIF(metadata_json, ''), '{}'), ?, json(?)) "
+                        " WHERE job_id = ?",
+                        (
+                            "$." + json.dumps(str(key)),
+                            json.dumps(str(value), ensure_ascii=False),
+                            actual_id,
+                        ),
+                    )
             conn.execute("COMMIT;")
 
     def record_visual_report(self, job_id: str, report: dict[str, Any]) -> None:
@@ -1110,6 +1131,7 @@ class LedgerBlocksMixin(_LedgerHost):
         now: float,
         limit: int,
         package_state: dict[str, Any] | None = None,
+        repair_rounds_cap: int | None = None,
     ) -> tuple[list[IRBlock], dict[str, Any]]:
         """Select and lease the next Agent package in one transaction.
 
@@ -1155,14 +1177,28 @@ class LedgerBlocksMixin(_LedgerHost):
                     f"Agent job {job_id} is finishing; wait for ubt_agent_finish to return"
                 )
             status = BlockStatus.REPAIR_PENDING
+            # Exhausted repairs are not re-leasable. The provider path's
+            # ``fetch_repair_eligible_blocks`` has always applied the rounds
+            # cap; this query did not, so an Agent host could re-claim the same
+            # hopeless block forever (paying for each attempt) instead of
+            # letting ``finish`` route it to a human.
+            #
+            # ``<=``, not ``<``: the Agent path deliberately grants one attempt
+            # past ``max_repair_rounds`` (the escalation round the provider path
+            # buys via ``escalation_extra_rounds``). With a cap of 2, a block
+            # starting at round 0 is claimable at 0, 1 and 2 — three attempts —
+            # and the third submission leaves it at 3, past the gate.
+            cap = int(repair_rounds_cap) if repair_rounds_cap else 0
+            repair_clause = " AND repair_rounds <= ?" if cap > 0 else ""
+            repair_params: tuple[Any, ...] = (cap,) if cap > 0 else ()
             candidates = conn.execute(
-                """
+                f"""
                 SELECT * FROM blocks
-                 WHERE job_id = ? AND skip_translate = 0 AND status = ?
+                 WHERE job_id = ? AND skip_translate = 0 AND status = ?{repair_clause}
                  ORDER BY spine_index ASC, block_id ASC
                  LIMIT ?
                 """,
-                (actual_id, status.value, int(limit)),
+                (actual_id, status.value, *repair_params, int(limit)),
             ).fetchall()
             if not candidates:
                 status = BlockStatus.PENDING
@@ -1855,7 +1891,7 @@ class LedgerBlocksMixin(_LedgerHost):
                 draft_text = item.get("draft_text")
                 mtqe_score = item.get("mtqe_score")
                 repair_rounds = item.get("repair_rounds")
-                # Default None (not ) so an omitted key preserves
+                # Default None so an omitted key preserves
                 # the stored flags instead of overwriting them with "[]".
                 error_flags = item.get("error_flags")
                 tm_hit = item.get("tm_hit")

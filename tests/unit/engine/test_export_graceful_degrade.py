@@ -10,6 +10,8 @@ import pytest
 
 from ubt.core.ir.models import BookManifest
 
+pytestmark = pytest.mark.fast
+
 
 @pytest.mark.asyncio
 async def test_export_degrade_to_reflow_on_faithful_failure(tmp_path: Path) -> None:

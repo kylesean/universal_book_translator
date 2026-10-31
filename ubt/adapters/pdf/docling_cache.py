@@ -129,7 +129,12 @@ def _strip_picture_payloads(node: Any) -> Any:
     return node
 
 
-def read_docling_document(key: str, *, cache_dir: Path | None = None) -> Any | None:
+def read_docling_document(
+    key: str,
+    *,
+    cache_dir: Path | None = None,
+    expected_pages: int | None = None,
+) -> Any | None:
     """Return the cached DoclingDocument for ``key``, or None on any miss.
 
     A *truncated* conversion is treated as a miss, not as a cached answer.
@@ -158,12 +163,27 @@ def read_docling_document(key: str, *, cache_dir: Path | None = None) -> Any | N
         if target.exists():
             logger.warning("Docling cache entry %s is unreadable (%s); re-converting", target, exc)
         return None
+    page_count = len(getattr(document, "pages", {}) or {})
     if not _conversion_has_usable_text(document):
         logger.warning(
             "Docling cache entry %s holds %d page(s) but no extracted text; "
             "discarding it and re-converting rather than replaying a broken conversion.",
             target,
-            len(getattr(document, "pages", {}) or {}),
+            page_count,
+        )
+        return None
+    if expected_pages is not None and page_count < expected_pages:
+        # "Some text somewhere" is not enough: a conversion that returned 6
+        # pages for a 26-page chunk has six paragraphs and passed the check
+        # above, then replayed as the whole document on every later run. The
+        # caller knows how many pages the chunk must cover; fewer pages than
+        # that is a truncated conversion, not a legitimate sparse one.
+        logger.warning(
+            "Docling cache entry %s holds %d page(s) but the chunk covers %d; "
+            "discarding the truncated conversion and re-converting.",
+            target,
+            page_count,
+            expected_pages,
         )
         return None
     return document

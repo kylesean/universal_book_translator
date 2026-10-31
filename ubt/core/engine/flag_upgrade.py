@@ -42,7 +42,7 @@ from ubt.core.qe.defect_taxonomy import (
     parse_defect_flag,
 )
 
-#: ``(category, detail-prefix)`` for legacy spellings whose severity is settled.
+#: Legacy marker -> defect category, for spellings whose severity is settled.
 #:
 #: Only markers whose severity the taxonomy states *unambiguously* are listed.
 #: A structural marker that is not critical is ``major`` by the triage contract;
@@ -71,6 +71,7 @@ _CATEGORY_BY_MARKER: dict[str, str] = {
     "math_token_corrupt": "math_token_corrupt",
     "cite_token_corrupt": "cite_token_corrupt",
     "code_token_corrupt": "code_token_corrupt",
+    "Residual mask token": "residual_mask_token",
     "Visual witness discrepancy": "visual_witness",
     "Target text suspiciously truncated": "length_truncated",
     "Target text suspiciously inflated": "length_inflated",
@@ -131,8 +132,10 @@ def upgrade_flag(flag: str) -> str | None:
 
     * a flag already in structured form (idempotence);
     * a lifecycle note, which is not a quality defect and whose readers match
-      by prefix (``Drafting error:`` and friends are in
-      ``TRANSIENT_FAILURE_PREFIXES``);
+      by prefix (the drafting/repair/untranslated prefixes
+      :func:`_is_lifecycle` checks -- a superset of
+      ``TRANSIENT_FAILURE_PREFIXES``, since a non-retryable drafting failure is
+      lifecycle text too but never transient);
     * a flag no table places, whose severity would have to be guessed.
 
     Every rewrite is verified against the routing rule before it is returned:
@@ -149,7 +152,6 @@ def upgrade_flag(flag: str) -> str | None:
     severity = _severity_for(flag)
     upgraded = format_defect_flag(category, severity, _detail(flag, category))
 
-    # The safety check: same verdict, same severity, same format-only answer.
     if has_critical_defect([flag]) != has_critical_defect([upgraded]):
         return None
     if has_structural_defect([flag]) != has_structural_defect([upgraded]):

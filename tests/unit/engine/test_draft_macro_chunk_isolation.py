@@ -171,3 +171,25 @@ async def test_a_failed_macro_chunk_redrafts_blocks_individually() -> None:
     statuses = {u["block_id"]: str(u.get("status")) for u in runtime.flusher.updates}
     assert statuses["b1"] == "drafted"
     assert statuses["b2"] == "drafted"
+
+
+def test_a_group_raise_leaves_already_paid_blocks_alone() -> None:
+    """The group-level failure path must not re-flag a checkpointed draft.
+
+    ``run_draft_batch`` marks every member of a group that raised. A block that
+    already landed (target text, or a verdict that consumed it) must be
+    excluded: re-flagging it as a transient *drafting* failure is what makes
+    resume clear the paid text and re-bill the provider.
+    """
+    from ubt.core.engine.stages.draft import _paid_block_ids
+    from ubt.core.ir.models import BlockStatus
+
+    drafted = _block("b1")
+    drafted.target_text = "译文一"
+    passed = _block("b2")
+    passed.status = BlockStatus.MTQE_PASSED
+    repaired = _block("b3")
+    repaired.status = BlockStatus.REPAIR_PENDING
+    untouched = _block("b4")
+
+    assert _paid_block_ids([drafted, passed, repaired, untouched]) == {"b1", "b2", "b3"}

@@ -93,25 +93,18 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
         # a scanned (text-less) document still escapes to docling — pdfium
         # extracts zero blocks from one, which is a capability boundary, not a
         # routing preference. See docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md.
-        if path is None:
-            # No path to probe (a registry lookup): ``auto`` is conservative.
+        if path is None or engine_key == "auto":
+            # No path to probe (a registry lookup) is conservative for an
+            # explicit ``pdfium``; ``auto`` never consults the probe at all.
             engine_key = "docling" if engine_key == "auto" else "pdfium"
         else:
-            try:
-                plan = inspect_pdf_profile(path)
-            except Exception as exc:
-                logger.warning(
-                    "Content probe failed on '%s' (%s); defaulting engine to 'pdfium'.",
-                    path.name,
-                    exc,
-                    exc_info=True,
-                )
-                plan = None
-            if plan is None:
-                engine_key = "pdfium"
-            elif engine_key == "auto":
-                engine_key = plan.primary_engine
-            elif plan.has_scan:
+            # ``inspect_pdf_profile`` is total: every return point builds a
+            # profile (``pdf_profiler``), and its own broad except returns the
+            # docling default. The old ``except → pdfium`` branch and the
+            # ``plan is None`` fallthrough were therefore unreachable, and
+            # ``plan.primary_engine`` was a constant "docling".
+            plan = inspect_pdf_profile(path)
+            if plan.has_scan:
                 logger.warning(
                     "'%s' looks scanned (pages without a text layer); pdfium would "
                     "extract 0 blocks, so routing it to docling for OCR-grade ingest.",

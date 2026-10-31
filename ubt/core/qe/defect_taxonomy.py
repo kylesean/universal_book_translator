@@ -94,6 +94,10 @@ STRUCTURAL_DEFECT_MARKERS: tuple[str, ...] = (
     "soup_token_corrupt",
     "code_token_corrupt",
     "cite_token_corrupt",
+    # The token was never restored at all, so the target still carries the
+    # machinery (``⟦SOUP_MASK_0001-f2d⟧``). Same loss as the five restored-
+    # mismatch names above, caught before a repair candidate can be accepted.
+    "Residual mask token",
     "Omission suspected",
     "Numeric fidelity",
     "Visual witness discrepancy",
@@ -183,6 +187,7 @@ CRITICAL_DEFECT_MARKERS: tuple[str, ...] = (
     "soup_token_corrupt",
     "code_token_corrupt",
     "cite_token_corrupt",
+    "Residual mask token",
     "Numeric fidelity",
     "Math span mismatch",
     "Undelimited math",
@@ -261,6 +266,7 @@ STRUCTURAL_CATEGORIES: tuple[str, ...] = (
     "math_token_corrupt",
     "cite_token_corrupt",
     "code_token_corrupt",
+    "residual_mask_token",
     "visual_witness",
     "length_truncated",
     "length_inflated",

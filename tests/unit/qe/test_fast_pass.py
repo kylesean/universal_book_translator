@@ -25,7 +25,6 @@ from ubt.core.qe.fast_pass import (
     REHEARSAL_MARKER,
     FastPassFilter,
     _detect_line_repetition_loop,
-    _has_repeated_line_run,
     _math_spans_equivalent,
     _max_repeated_line_run,
     _missing_heading_label,
@@ -308,12 +307,6 @@ def test_a_run_without_word_content_is_not_a_loop() -> None:
     assert _detect_line_repetition_loop("| 0 | 0 |\n| 0 | 0 |\n| 0 | 0 |\n| 0 | 0 |") is None
 
 
-def test_has_repeated_line_run_matches_the_loop_detector() -> None:
-    loop = "This is a repeated hallucination line.\n" * 4
-    assert _has_repeated_line_run(loop) is True
-    assert _has_repeated_line_run("alpha\nbeta") is False
-
-
 # --------------------------------------------------------------------------- #
 # FastPassFilter.evaluate: the gate end to end.
 # --------------------------------------------------------------------------- #
@@ -405,13 +398,12 @@ def test_verbatim_term_strip_keeps_letter_boundaries() -> None:
 
 
 def test_repetition_detectors_agree() -> None:
-    # _has_repeated_line_run delegates to the loop detector; pin the contract
-    # so the two entry points cannot drift apart again.
+    # _max_repeated_line_run and loop detector agree on repetitive runs
     loop = "This is a repeated hallucination line.\n" * 4
-    assert _has_repeated_line_run(loop) is True
+    assert _max_repeated_line_run(loop) >= 4
     assert _detect_line_repetition_loop(loop) is not None
     plain = "alpha\nbeta\ngamma\n"
-    assert _has_repeated_line_run(plain) is False
+    assert _max_repeated_line_run(plain) < 2
     assert _detect_line_repetition_loop(plain) is None
 
 
@@ -475,6 +467,41 @@ def test_model_scaffolding_is_a_fatal_leak(leaked: str) -> None:
     )
     assert not decision.passed, leaked
     assert "Prompt template XML artifacts" in decision.reason
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "⟦SOUP_MASK_0001-f2d⟧",
+        "⟦MATH_MASK_0003-46⟧",
+        "⟦CITE_MASK_0010-abc⟧",
+    ],
+)
+def test_a_residual_mask_token_is_a_structural_failure(token: str) -> None:
+    """A protected span that was never restored must not pass as repaired.
+
+    Repair validates its candidate with this same gate. Before this check a
+    candidate that still carried the raw token was accepted, the block left
+    repair as REPAIRED, and the renderer printed ``⟨missing⟩`` where the span
+    belonged.
+    """
+    decision = FastPassFilter().validate_structural_invariants(
+        source_text="The model is trained end to end.",
+        target_text=f"该模型{token}经过端到端训练。",
+        block_type="narrative",
+    )
+    assert not decision.passed
+    assert "Residual mask token" in decision.reason
+
+
+def test_emphasis_markers_are_not_mask_tokens() -> None:
+    """``⟦B⟧``/``⟦I⟧`` carry meaning the renderer consumes; only _MASK_ leaks are fatal."""
+    decision = FastPassFilter().validate_structural_invariants(
+        source_text="The model is trained end to end.",
+        target_text="该模型⟦B⟧经过⟦/B⟧端到端训练。",
+        block_type="narrative",
+    )
+    assert decision.passed, decision.reason
 
 
 def test_ordinary_prose_is_not_a_leak() -> None:
