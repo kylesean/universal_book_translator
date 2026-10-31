@@ -48,12 +48,8 @@ def test_direction_for_the_language_table(tag: str | None, want: Direction) -> N
 
 
 def test_an_rtl_target_resolves_an_rtl_theme_with_fonts() -> None:
-    zh = resolve_theme("en", "zh")
     ar = resolve_theme("en", "ar")
-    assert zh.source_direction is Direction.LTR
-    assert zh.target_direction is Direction.LTR
-    assert ar.source_direction is Direction.LTR
-    assert ar.target_direction is Direction.RTL
+    assert direction_for(ar.target_lang) is Direction.RTL
     assert ar.fonts, "an RTL target must still resolve a font stack"
 
 

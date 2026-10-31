@@ -32,17 +32,6 @@ def test_context_budget_initialization_and_scaling() -> None:
     assert budget.max_terminology_tokens == 3072
     assert budget.max_history_tokens == 2048
 
-    # Scaled down for small model (e.g. 4096 context window)
-    scaled_small = ContextBudget.from_context_window(4096)
-    assert scaled_small.max_context_tokens == 4096
-    assert scaled_small.max_terminology_tokens < budget.max_terminology_tokens
-    assert scaled_small.max_history_tokens < budget.max_history_tokens
-
-    # Scaled up for large model (e.g. 64k window)
-    scaled_large = ContextBudget.from_context_window(65536)
-    assert scaled_large.max_context_tokens == 65536
-    assert scaled_large.max_terminology_tokens > budget.max_terminology_tokens
-
 
 def test_estimate_prompt_tokens_accuracy() -> None:
     ascii_text = "Hello world this is a test paragraph for token counting."
@@ -133,62 +122,6 @@ def test_assemble_critique_issues_deduplication_and_limit() -> None:
     assert "General fluency / quality score below threshold" in empty_formatted
 
 
-def test_prompt_context_assembler_draft_assembly() -> None:
-    assembler = PromptContextAssembler()
-    source = "The fundamental theorem of calculus establishes the relationship between differentiation and integration."
-
-    # Test Hybrid Strategy
-    system_hybrid, user_hybrid = assembler.assemble_draft(
-        source_text=source,
-        strategy="hybrid",
-        target_lang="zh",
-        source_lang="en",
-        genre_profile="academic",
-        global_glossary="| Calculus | 微积分 |\n|---|---|",
-        glossary_table="| Theorem | 定理 |\n|---|---|",
-        rolling_summary="Previous section discussed limits.",
-        epoch_summary="Book history: mathematical foundations.",
-    )
-
-    assert "scholarly scientific translator" in system_hybrid
-    assert "Terminology Glossary" in user_hybrid
-    assert "Book Continuity" in user_hybrid
-    assert "Story Context" in user_hybrid
-    assert draft_source_from_prompt(user_hybrid) == source
-
-    # Test Rich Strategy
-    system_rich, user_rich = assembler.assemble_draft(
-        source_text=source,
-        strategy="rich",
-        target_lang="zh",
-        source_lang="en",
-        genre_profile="academic",
-        global_glossary="| Calculus | 微积分 |\n|---|---|",
-        glossary_table="| Theorem | 定理 |\n|---|---|",
-    )
-    assert "Translation Bible (Strict Global Terminology Mappings)" in system_rich
-    assert "Translation Bible (Strict Mappings)" in user_rich
-    assert draft_source_from_prompt(user_rich) == source
-
-
-def test_prompt_context_assembler_macro_chunk_assembly() -> None:
-    assembler = PromptContextAssembler()
-    blocks = [("b001", "First paragraph."), ("b002", "Second paragraph.")]
-
-    system, user = assembler.assemble_macro_chunk(
-        blocks=blocks,
-        target_lang="zh",
-        source_lang="en",
-        section_context="Section 2.1 Overview",
-        global_glossary="| Paragraph | 段落 |\n|---|---|",
-    )
-
-    assert "Translation Bible (Strict Global Terminology Mappings)" in system
-    assert '<block id="b001">First paragraph.</block>' in user
-    assert '<block id="b002">Second paragraph.</block>' in user
-    assert "Section Context" in user
-
-
 def test_prompt_context_assembler_repair_with_global_glossary() -> None:
     assembler = PromptContextAssembler()
     source = "The Hamiltonian operator represents total system energy."
@@ -212,30 +145,6 @@ def test_prompt_context_assembler_repair_with_global_glossary() -> None:
     assert "Terminology drift: Hamiltonian should be 哈密顿量" in user_repair
     # Source recovery must not leak scaffold
     assert draft_source_from_prompt(user_repair) == source
-
-
-def test_prompt_context_assembler_consistency_assembly() -> None:
-    assembler = PromptContextAssembler()
-    source = "The quantum wavefunction collapses upon observation."
-    draft = "量子波函数在观测时坍塌。"
-    consistency_flags = [
-        "[GLOSSARY_VIOLATION]: 'wavefunction' translated as '波函数' but book standard is '态函数'"
-    ]
-
-    system, user = assembler.assemble_consistency(
-        source_text=source,
-        draft_text=draft,
-        consistency_flags=consistency_flags,
-        strategy="hybrid",
-        target_lang="zh",
-        source_lang="en",
-        global_glossary="| Wavefunction | 态函数 |\n|---|---|",
-    )
-
-    assert "Terminology Glossary" in user
-    assert "态函数" in user
-    assert "[GLOSSARY_VIOLATION]" in user
-    assert draft_source_from_prompt(user) == source
 
 
 def test_repair_builders_directly_accept_global_glossary() -> None:

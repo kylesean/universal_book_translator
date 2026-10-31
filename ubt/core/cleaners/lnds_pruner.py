@@ -1,4 +1,11 @@
-"""Longest Non-Decreasing Subsequence (LNDS) Page Number Pruning and Calibre Cleaner."""
+"""LNDS page-number pruning and Calibre markup cleanup for extracted pages.
+
+Running page numbers reach us as standalone digit lines interleaved with
+content digits — years, section and figure references — so "drop any lone
+number" deletes real text. The longest *non-decreasing subsequence* of the
+standalone digits is the running numbering: only those lines go, every other
+digit line survives.
+"""
 
 import bisect
 import re
@@ -457,23 +464,6 @@ class LNDSPageCleaner:
         return clean_calibre_and_lnds_pages(
             text, strip_all_page_numbers=self.strip_all_page_numbers, source_lang=self.source_lang
         )
-
-    def clean_block(self, block: IRBlock) -> IRBlock:
-        """Clean Calibre markup and local noise artifacts within an individual block.
-
-        WARNING:
-            LNDS monotonic page number detection requires chapter-wide sequence context
-            (at least 4 sequential page numbers across lines). Calling this method on an
-            isolated single-paragraph block will NOT trigger LNDS sequence stripping.
-            For document translation pipelines, always use :meth:`clean_chapter_blocks`.
-        """
-        cleaned_text = strip_calibre_markup(block.source_text)
-        if block.block_type is not BlockType.CODE:
-            # CODE blocks ship verbatim, so their whitespace is semantics: the
-            # OCR-artifact pass ends in a horizontal-whitespace collapse that
-            # turns valid indentation into an IndentationError.
-            cleaned_text = strip_textbook_ocr_artifacts(cleaned_text, source_lang=self.source_lang)
-        return block.with_source_text(cleaned_text)
 
     def clean_chapter_blocks(self, blocks: list[IRBlock]) -> list[IRBlock]:
         """Clean Calibre noise and cross-block monotonic page numbers across a chapter."""

@@ -9,7 +9,6 @@ from ubt.core.math.breaker import (
 )
 from ubt.core.math.cost import (
     CATEGORY_BASE_COSTS,
-    calculate_line_penalty,
     get_operator_tables,
 )
 from ubt.core.math.models import (
@@ -30,6 +29,5 @@ __all__ = [
     "OperatorCategory",
     "audit_math_blocks",
     "break_equation",
-    "calculate_line_penalty",
     "get_operator_tables",
 ]

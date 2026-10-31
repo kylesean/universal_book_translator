@@ -4,7 +4,7 @@ Two executors run jobs: the embedded :class:`ubt.api.manager.JobManager` (an
 in-process asyncio task) and the queue :class:`ubt.core.engine.job_worker.JobWorker`
 (one process draining the durable queue). They are *not* two implementations of
 one job — each deployment mode drives exactly one of them — but they built the
-orchestrator with the same twelve-line block, and that block has drifted
+orchestrator with the same block, and that block has drifted
 before: the manager's hand-written copy silently dropped the quality preset
 until the shared ``overrides_from_request`` mapping replaced it.
 
@@ -17,8 +17,6 @@ recomputes from its own key, overriding an API auto-decision — see
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
-from typing import Any
 
 from ubt.core.config import UBTConfig
 from ubt.core.engine.dry_run import create_dry_run_orchestrator
@@ -61,11 +59,4 @@ def build_job_orchestrator(
     )
 
 
-def resolve_job_paths(payload: dict[str, Any]) -> tuple[Path, Path | None]:
-    """The input/output paths every executor reads from a job payload."""
-    input_path = Path(str(payload["input_path"]))
-    raw_output = payload.get("output_path")
-    return input_path, Path(str(raw_output)) if raw_output else None
-
-
-__all__ = ["FinalizeJobHook", "build_job_orchestrator", "resolve_job_paths"]
+__all__ = ["FinalizeJobHook", "build_job_orchestrator"]

@@ -20,7 +20,6 @@ from ubt.core.providers import (
     load_defaults_config,
     load_layer_config,
     load_provider_config,
-    read_config_file,
 )
 
 pytestmark = pytest.mark.fast
@@ -78,7 +77,10 @@ def test_ubt_config_file_model(tmp_path: Path) -> None:
     config_path = tmp_path / "ubt.toml"
     config_path.write_text(content, encoding="utf-8")
 
-    file_cfg = read_config_file(config_path)
+    file_cfg = UBTConfigFile(
+        defaults=load_defaults_config(config_path),
+        providers={"custom-openai": load_provider_config("custom-openai", config_path)},
+    )
     assert isinstance(file_cfg, UBTConfigFile)
     assert file_cfg.defaults.provider == "custom-openai"
     assert file_cfg.defaults.api_timeout == 90.0
@@ -277,17 +279,3 @@ def test_validate_block_rejects_invalid_values_in_toml(tmp_path: Path) -> None:
     )
     with pytest.raises(ProviderConfigError):
         load_provider_config("bad_url", custom_path=bad_url_toml)
-
-
-def test_read_config_file_missing_and_empty(tmp_path: Path) -> None:
-    """read_config_file handles missing and empty config files gracefully."""
-    # Missing explicit path raises FileNotFoundError
-    with pytest.raises(FileNotFoundError):
-        read_config_file(tmp_path / "does_not_exist.toml")
-
-    # Empty file parses defaults and empty providers
-    empty_toml = tmp_path / "empty.toml"
-    empty_toml.write_text("", encoding="utf-8")
-    cfg_file = read_config_file(empty_toml)
-    assert isinstance(cfg_file, UBTConfigFile)
-    assert cfg_file.providers == {}

@@ -17,7 +17,6 @@ from ubt.core.policy.layout_policy import (
     PROSE_BLOCK_TYPES,
     Calibration,
     KnobMeta,
-    calibration_summary,
     formula_debris_share,
     is_non_prose_degradable,
 )
@@ -51,14 +50,6 @@ def test_every_calibration_entry_is_a_knobmeta_with_valid_status() -> None:
 def test_every_calibration_key_resolves_to_a_module_attribute() -> None:
     missing = [name for name in CALIBRATION if not hasattr(lp, name)]
     assert missing == []
-
-
-def test_calibration_summary_matches_registry() -> None:
-    summary = calibration_summary()
-    # hypothesis count dropped by 2 when the unreachable LENGTH_* length-policy
-    # knobs were removed alongside the branch that could never fire.
-    assert summary == {"proven": 28, "single_doc": 31, "hypothesis": 14}
-    assert sum(summary.values()) == len(CALIBRATION)
 
 
 # --------------------------------------------------------------------------- #

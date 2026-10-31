@@ -272,7 +272,6 @@ def test_drift_detection_regression_and_improvement() -> None:
 
     c1_drift = next(d for d in drift_report.case_drifts if d.case_id == "case-1")
     assert c1_drift.verdict == "REGRESSED"
-    assert c1_drift.is_regression is True
     assert any("Status regressed" in r for r in c1_drift.reasons)
     assert any("Contract errors increased" in r for r in c1_drift.reasons)
 

@@ -87,7 +87,9 @@ _deliverable_paths = deliverable_paths
 _is_own_prior_output = is_own_prior_output
 _output_path_claimant = output_path_claimant
 
-# Public symbol exports and test instrumentation hooks
+#: The leading-underscore entries are not oversights: the test suite and the
+#: console contract import those two helpers from this module, and a name in
+#: ``__all__`` is how that dependency stays declared rather than accidental.
 __all__ = [
     "JobManager",
     "JobRecord",
@@ -575,13 +577,14 @@ def _resolve_bind(host: str | None, port: int | None) -> tuple[str, int]:
     return str(args.host), int(args.port)
 
 
-def run_server(host: str | None = None, port: int | None = None) -> None:
-    """CLI helper to boot uvicorn server.
+def run_server(host: str | None = None, port: int | None = None, *, reload: bool = False) -> None:
+    """Boot uvicorn, bound to localhost unless told otherwise.
 
-    Defaults to binding localhost only. The service now refuses to start without
-    an API key gate: set ``UBT_API_KEY`` (``UBT_STRICT_AUTH=1`` makes the
-    refusal fatal instead of a warning-and-continue). For a local,
-    throwaway server, ``UBT_ALLOW_NO_AUTH=1`` opts into running open.
+    Contract: this server does not start unauthenticated. Set ``UBT_API_KEY`` to
+    enable the gate; ``UBT_ALLOW_NO_AUTH=1`` is the named escape hatch that boots
+    open on purpose for a throwaway local run. ``UBT_STRICT_AUTH=1`` is the
+    deployment-level promise that the gate is on, so it refuses the boot even
+    when that escape hatch is set.
     """
     host, port = _resolve_bind(host, port)
     setup_logging()
@@ -597,4 +600,4 @@ def run_server(host: str | None = None, port: int | None = None) -> None:
     _require_api_key_gate(server_config)
     import uvicorn
 
-    uvicorn.run("ubt.api.app:app", host=host, port=port, reload=False)
+    uvicorn.run("ubt.api.app:app", host=host, port=port, reload=reload)

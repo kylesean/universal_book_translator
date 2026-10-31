@@ -109,9 +109,7 @@ def test_companion_artifact_result_and_summary_contract(tmp_path: Path) -> None:
         size_bytes=path_xliff.stat().st_size,
         duration_ms=14.2,
     )
-    assert r_gen.is_generated is True
-    assert r_gen.is_skipped is False
-    assert r_gen.is_failed is False
+    assert r_gen.status == "generated"
     assert r_gen.size_bytes == 8
 
     r_skip = CompanionArtifactResult(
@@ -119,7 +117,7 @@ def test_companion_artifact_result_and_summary_contract(tmp_path: Path) -> None:
         status="skipped",
         reason="config.emit_epub_companion is disabled",
     )
-    assert r_skip.is_skipped is True
+    assert r_skip.status == "skipped"
     assert r_skip.path is None
     assert r_skip.size_bytes is None
 
@@ -129,7 +127,7 @@ def test_companion_artifact_result_and_summary_contract(tmp_path: Path) -> None:
         duration_ms=5.0,
         error="Rendering context broken",
     )
-    assert r_fail.is_failed is True
+    assert r_fail.status == "failed"
     assert r_fail.error == "Rendering context broken"
 
     summary = CompanionExportSummary(results=[r_gen, r_skip, r_fail])

@@ -420,9 +420,12 @@ def translate(
     mode: Annotated[
         str,
         typer.Option(
+            # No ``-m`` here on purpose: ``--draft-model`` below also declares
+            # ``-m``, and click lets the later registration win, so a second
+            # ``-m`` would silently never reach this option while the help text
+            # still advertised one. ``-m`` means "draft model", not "mode".
             "--mode",
             "--document-mode",
-            "-m",
             help="Document scenario mode: 'paper' (academic paper layout, strict domain terminology, vector math, suppressed TOC & character mining), 'book' (long-form book, literary/fluent flow, Sliding Epoch continuous memory, TOC & character tracking, EPUB/book layout), or 'auto' (inferred from document archetype).",
         ),
     ] = "auto",
@@ -824,7 +827,12 @@ def translate(
         ),
     ] = False,
 ) -> None:
-    """Translate an entire book end-to-end with 4-layer defense and live dual dashboard."""
+    """Translate an entire book end-to-end.
+
+    With ``--interactive`` the Rich progress bar is replaced by the full-screen
+    workbench dashboard (status header above the selected tab view); without it
+    this is a plain progress-bar run that streams the pipeline to completion.
+    """
     # ``--profile auto`` probes the document (paper/fiction/semiconductor/…);
     # the shared resolver is the same one every other surface goes through, so
     # the CLI no longer owns the only copy of this rule.

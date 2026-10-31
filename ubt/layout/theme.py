@@ -231,14 +231,6 @@ class Theme:
     bilingual: BilingualStyle = field(default_factory=BilingualStyle)
 
     @property
-    def source_direction(self) -> Direction:
-        return direction_for(self.source_lang)
-
-    @property
-    def target_direction(self) -> Direction:
-        return direction_for(self.target_lang)
-
-    @property
     def font_stack(self) -> tuple[str, ...]:
         """The resolved stack, the user's override first when one is set."""
         if self.font_override:

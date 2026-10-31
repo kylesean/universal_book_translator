@@ -169,10 +169,6 @@ class CaseDrift(BaseModel):
     delta_avg_qe: float | None = None
     reasons: list[str] = Field(default_factory=list)
 
-    @property
-    def is_regression(self) -> bool:
-        return self.verdict == "REGRESSED"
-
 
 class BenchmarkDriftReport(BaseModel):
     """Comparative analysis of candidate benchmark run against baseline."""

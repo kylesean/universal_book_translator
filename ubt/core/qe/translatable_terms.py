@@ -1,13 +1,12 @@
 """Domain-aware translatable technical terms, universal acronyms, and compound matchers.
 
-Provides a structured, multi-domain taxonomy of universally translatable terms and
-acronyms (AI/ML, Systems/Architecture, Hardware, Networking, Science/Math, Organizations)
-that legitimate translations frequently expand or translate into the target language
-(e.g., "NLP" -> "自然语言处理", "CPU" -> "中央处理器", "DNA" -> "脱氧核糖核酸") rather than
-retaining verbatim.
+A term is *translatable* when a legitimate translation expands or translates it
+into the target language (e.g., "NLP" -> "自然语言处理", "CPU" -> "中央处理器",
+"DNA" -> "脱氧核糖核酸") rather than retaining it verbatim.
 
-Replaces brittle, ad-hoc allowlists with an extensible, cross-domain knowledge base
-and compound decomposition logic (e.g. "ext4formatted" -> "ext4" + "格式化", "microVMs" -> "微虚拟机").
+Replaces brittle, ad-hoc allowlists with an extensible knowledge base and
+compound decomposition logic (e.g. "ext4formatted" -> "ext4" + "格式化",
+"microVMs" -> "微虚拟机").
 """
 
 from __future__ import annotations
@@ -68,9 +67,7 @@ _COMMON_SUB_TERMS: Final[dict[str, tuple[str, ...]]] = {
 #: Comprehensive taxonomy of universal technical acronyms and translatable terms.
 #: Keys must be lower-case ASCII strings. Values are tuples of acceptable target surfaces.
 UNIVERSAL_TRANSLATABLE_TERMS: Final[dict[str, tuple[str, ...]]] = {
-    # -------------------------------------------------------------------------
     # Artificial Intelligence, NLP & Machine Learning
-    # -------------------------------------------------------------------------
     "nlp": ("自然语言处理", "自然语言", "NLP"),
     "ml": ("机器学习", "ML"),
     "ai": ("人工智能", "AI"),
@@ -104,9 +101,7 @@ UNIVERSAL_TRANSLATABLE_TERMS: Final[dict[str, tuple[str, ...]]] = {
     "pos": ("词性标注", "POS"),
     "bert": ("BERT", "BERT模型"),
     "gpt": ("GPT", "GPT模型"),
-    # -------------------------------------------------------------------------
     # Computer Systems, Virtualization, OS & Hardware
-    # -------------------------------------------------------------------------
     "cpu": ("中央处理器", "处理器", "CPU"),
     "cpus": ("中央处理器", "处理器", "CPUs"),
     "gpu": ("图形处理器", "图形处理单元", "显卡", "GPU"),
@@ -177,9 +172,7 @@ UNIVERSAL_TRANSLATABLE_TERMS: Final[dict[str, tuple[str, ...]]] = {
     "dma": ("直接内存访问", "DMA"),
     "nic": ("网络接口卡", "网卡", "NIC"),
     "nics": ("网络接口卡", "网卡", "NICs"),
-    # -------------------------------------------------------------------------
     # Networking & Protocols
-    # -------------------------------------------------------------------------
     "lan": ("局域网", "LAN"),
     "lans": ("局域网", "LANs"),
     "wan": ("广域网", "WAN"),
@@ -200,9 +193,7 @@ UNIVERSAL_TRANSLATABLE_TERMS: Final[dict[str, tuple[str, ...]]] = {
     "vpns": ("虚拟专用网络", "虚拟专网", "VPNs"),
     "nat": ("网络地址转换", "NAT"),
     "bgp": ("边界网关协议", "BGP"),
-    # -------------------------------------------------------------------------
     # Mathematics, Statistics & Natural Sciences
-    # -------------------------------------------------------------------------
     "dna": ("脱氧核糖核酸", "DNA"),
     "rna": ("核糖核酸", "RNA"),
     "mrna": ("信使核糖核酸", "mRNA"),
@@ -232,9 +223,7 @@ UNIVERSAL_TRANSLATABLE_TERMS: Final[dict[str, tuple[str, ...]]] = {
     "auc": ("曲线下面积", "AUC"),
     "sd": ("标准差", "SD"),
     "se": ("标准误", "SE"),
-    # -------------------------------------------------------------------------
     # UX, Metrics & Organizations
-    # -------------------------------------------------------------------------
     "ui": ("用户界面", "界面", "UI"),
     "ux": ("用户体验", "UX"),
     "fps": ("每秒帧数", "帧率", "FPS"),
@@ -265,7 +254,7 @@ UNIVERSAL_TRANSLATABLE_TERMS: Final[dict[str, tuple[str, ...]]] = {
     # 鳍式场效应晶体管 was quarantined as an omission — 15/22 failures on that
     # chapter were this single false-positive family)
     # -------------------------------------------------------------------------
-    "finfet": ("鳍式场效应晶体管", "鳍式场效应晶体管", "FinFET"),
+    "finfet": ("鳍式场效应晶体管", "FinFET"),
     "finfets": ("鳍式场效应晶体管", "FinFET"),
     "mosfet": ("金属氧化物半导体场效应晶体管", "MOSFET"),
     "mosfets": ("金属氧化物半导体场效应晶体管", "MOSFET"),

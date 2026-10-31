@@ -1,23 +1,22 @@
 """Section tree: a *view* over IRBlocks, not a second document model.
 
-RFC-2026-02 §3 sketched a ``DocumentTree`` with its own ``Node`` dataclass. That
-shape was written before this module's author read ``ubt/core/ir/models.py``,
-which already owns the document model:
+``ubt/core/ir/models.py`` already owns the document model:
 
 * ``IRBlock`` carries a typed ``element`` (single source of truth for
   structure — including a heading's ``level``), ``spine_index``, provenance and
   execution state;
 * ``ContentGraph`` already states the delivery contract over those blocks.
 
-Adding a parallel ``Node``/``DocumentTree`` would create a second source of
-truth for the same facts — the exact failure mode this rearchitecture exists to
-remove. So this module provides what was actually *missing*: a **grouping** of
-the existing blocks into sections, so translation can run at section scope
-(§2.3) instead of one block at a time.
+A parallel node-tree here would be a second source of truth for those same
+facts — the exact failure mode this rearchitecture exists to remove. So this
+module provides what was actually *missing*: a **grouping** of the existing
+blocks into sections, so translation can run at section scope
+(RFC-2026-02 §2.3 — the one citation this module carries; the reasons it asks
+for are written out at each rule below) instead of one block at a time.
 
 Nothing here is stored. The section list is derived on demand from a block
 sequence and holds no state of its own; the ledger keeps the block-level record
-that resume, billing and PE export depend on (RFC §7.2).
+that resume, billing and PE export depend on.
 """
 
 from __future__ import annotations
@@ -59,7 +58,7 @@ class Section:
     #: ``("2 Switch Transformer", "2.1 Simplifying Sparse Routing")``. This is
     #: what :func:`heading_trail` renders: a model that sees only the leaf title
     #: "2.1 Simplifying" cannot tell which chapter it sits in, which is the
-    #: antecedent a back-reference needs (RFC-2026-02 §2.3).
+    #: antecedent a back-reference needs.
     trail: tuple[str, ...] = ()
 
     @property
@@ -85,7 +84,7 @@ def _skips_translation(block: IRBlock) -> bool:
     if block.skip_translate:
         return True
     # The policy verdict is authoritative when it exists; ``skip_translate`` is
-    # only the extractor's default (see IRBlock's own docstring).
+    # only the extractor's default (see :attr:`IRBlock.policy_translate`).
     return block.policy_translate is False
 
 
@@ -109,7 +108,7 @@ def _effective_level(block: IRBlock, fallback: int) -> int:
     heading fall back to 1, so every heading opened a *new* section and no
     sub-section ever nested: a document's ``1.1`` read as a sibling of ``1``
     instead of a child, and the prompt's heading trail lost the ancestor
-    (RFC-2026-02 §2.3 is the whole reason this grouping exists). Found by
+    (keeping the ancestor is the whole reason this grouping exists). Found by
     replacing the duck-typed stand-in in this module's tests with a real
     ``IRBlock``, which is the only way a rename in the IR can be caught.
 
@@ -172,18 +171,13 @@ def build_section_tree(blocks: Sequence[IRBlock], *, max_level: int = 2) -> list
     return sections
 
 
-def section_texts(sections: Sequence[Section]) -> list[str]:
-    """The translation units: one source-text string per section."""
-    return [s.text for s in sections if s.text.strip()]
-
-
 def section_index(blocks: Sequence[IRBlock], *, max_level: int = 2) -> dict[str, Section]:
     """Map every block id to the section that contains it.
 
     Built once per batch and read per chunk. ``chunk_by_section`` guarantees a
     chunk never straddles a heading, but a chunk that does not itself contain
     the heading still needs to know which section it is in: the model otherwise
-    sees "this approach" with no antecedent (RFC-2026-02 §2.3).
+    sees "this approach" with no antecedent.
     """
     mapping: dict[str, Section] = {}
     for section in build_section_tree(blocks, max_level=max_level):
@@ -199,24 +193,25 @@ def heading_trail(section: Section) -> str:
     heading's own depth, so a skipped level in the source cannot leave a stale
     parent here either. The leaf title alone is not enough: a chunk under "2.1
     Simplifying" whose own heading is in an earlier chunk reaches the model with
-    no idea which chapter it is in, and a back-reference loses its antecedent
-    (RFC-2026-02 §2.3).
+    no idea which chapter it is in, and a back-reference loses its antecedent.
     """
     if section.heading is None:
         return ""
     return " > ".join(section.trail or (section.title,))
 
 
-#: A section whose heading opens the acknowledgments. Personal names live here
-#: denser than anywhere else in a document, and a name is the one string a
-#: translation must never invent: a transliterated "Yinqian Zhang" is a
-#: different person to everyone who searches for the author afterwards. The
-#: heading usually carries its own numbering ("9 Acknowledgments"), so the
-#: match is a search, not an anchor.
+#: A section whose heading opens the acknowledgments — ``Acknowledgments``,
+#: ``致谢``/``鸣谢`` or ``后记``, all of which carry the same personal-name risk.
+#: Personal names live here denser than anywhere else in a document, and a name
+#: is the one string a translation must never invent: a transliterated
+#: "Yinqian Zhang" is a different person to everyone who searches for the author
+#: afterwards. The heading usually carries its own numbering ("9
+#: Acknowledgments"), so the match is a search, not an anchor.
 _ACKNOWLEDGMENT_HEADING_RE = re.compile(r"acknowledg|致谢|鸣谢|后记", re.IGNORECASE)
-#: Publishing convention for the acknowledgments section: names stay in their
-#: source script (institutions and funding bodies may be translated; the people
-#: may not be renamed). Same register as the style rules in the prompt module.
+#: Publishing convention for an acknowledgments-shaped section: names stay in
+#: their source script (institutions and funding bodies may be translated; the
+#: people may not be renamed). Same register as the style rules in the prompt
+#: module.
 _PERSONAL_NAME_RULE = (
     "[Personal Names]: Every person's name in this section stays exactly as the "
     "source spells it, in its original script and order -- never transliterate, "
@@ -240,9 +235,10 @@ def section_context_for(
     is deliberate: the prompt is then identical for every chunk of a section,
     so the content-addressed cache key does not change halfway through.
 
-    A chunk inside the acknowledgments carries the personal-name rule appended
-    to the trail -- section-scoped like the trail itself, so the cache key
-    still stays stable for every chunk of the section.
+    A chunk inside a section :data:`_ACKNOWLEDGMENT_HEADING_RE` recognises
+    (English acknowledgments, ``致谢``/``鸣谢``, ``后记``) carries the personal-name
+    rule appended to the trail -- section-scoped like the trail itself, so the
+    cache key still stays stable for every chunk of the section.
     """
     if not chunk:
         return ""

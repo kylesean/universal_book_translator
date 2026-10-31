@@ -49,9 +49,8 @@ def test_the_html_view_carries_every_placed_text(tmp_path: Path) -> None:
     text = out.read_text(encoding="utf-8")
 
     assert text.startswith("<!DOCTYPE html")
-    # Total placement: every block got one, and nothing was kept in source.
+    # Total placement: every block got one.
     assert len(composition.placements) == len(blocks)
-    assert not composition.kept_source_ids
     for block in blocks:
         expected = html.escape(element_text(block, translations))
         assert expected and expected in text, block.id

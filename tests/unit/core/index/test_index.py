@@ -45,8 +45,6 @@ def test_index_entry_model_properties() -> None:
     )
     assert entry.source_initial == "C"
     assert entry.target_initial == "G"
-    assert entry.display_en_zh == "Consensus Algorithm (共识算法)"
-    assert entry.display_zh_en == "共识算法 (Consensus Algorithm)"
 
 
 def test_concordance_index_grouping_and_filtering() -> None:

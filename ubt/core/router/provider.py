@@ -389,10 +389,6 @@ class OpenAICompatibleProvider(BaseModelProvider):
         ):
             await self._shared_client.aclose()
 
-    async def close(self) -> None:
-        """Alias for aclose()."""
-        await self.aclose()
-
     async def __aenter__(self) -> OpenAICompatibleProvider:
         return self
 

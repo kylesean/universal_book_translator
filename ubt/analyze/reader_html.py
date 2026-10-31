@@ -296,18 +296,6 @@ def walk_markup_elements(
     return out
 
 
-def _walk(
-    node: Tag,
-    out: list[ElementT],
-    *,
-    page: int,
-    resolve_asset: Callable[[str], str],
-) -> None:
-    """Emit elements for one DOM node's block-level children, in reading order."""
-    pairs = walk_markup_elements(node, page=page, resolve_asset=resolve_asset)
-    out.extend(element for element, _ in pairs)
-
-
 def elements_from_markup(
     soup: BeautifulSoup,
     *,

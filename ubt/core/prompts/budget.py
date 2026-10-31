@@ -1,8 +1,9 @@
-"""Context budget calculation and prompt section truncation utilities.
+"""Token budgeting and section truncation for compiled prompts.
 
-Guarantees that terminology tables, conversation history, and reference
-materials respect bounded token windows so they never displace the primary
-source text or exceed provider context limits.
+Truncation here is structure-aware: a markdown table is cut on row boundaries so
+it stays a valid table, and plain text is cut in units the estimator agrees on.
+A section that gets trimmed therefore never becomes a section that gets
+malformed. The caps themselves belong to :class:`ContextBudget`.
 """
 
 from __future__ import annotations
@@ -39,21 +40,6 @@ class ContextBudget:
     max_neighbor_tokens: int = 1536  # ~6,000 characters
     max_few_shot_tokens: int = 1024  # ~4,000 characters
     reserve_source_tokens: int = 2048  # Guaranteed headroom for source & system
-
-    @classmethod
-    def from_context_window(cls, context_window: int) -> ContextBudget:
-        """Create a scaled budget tailored to a model's declared context window."""
-        if context_window <= 0:
-            return cls()
-        scale = max(0.25, min(context_window / 16384.0, 4.0))
-        return cls(
-            max_context_tokens=context_window,
-            max_terminology_tokens=max(512, int(3072 * scale)),
-            max_history_tokens=max(512, int(2048 * scale)),
-            max_neighbor_tokens=max(256, int(1536 * scale)),
-            max_few_shot_tokens=max(256, int(1024 * scale)),
-            reserve_source_tokens=max(1024, int(2048 * scale)),
-        )
 
 
 _TABLE_HEADER_SEP_RE = re.compile(r"^\|?(\s*:?-+:?\s*\|)+\s*$")

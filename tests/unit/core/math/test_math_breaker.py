@@ -1,4 +1,4 @@
-"""Unit tests for adaptive mathematical formula breaking, operator precedence, and audits."""
+"""Unit tests for adaptive mathematical formula breaking and audits."""
 
 from __future__ import annotations
 
@@ -10,21 +10,9 @@ from ubt.core.math.breaker import (
     audit_math_blocks,
     break_equation,
 )
-from ubt.core.math.cost import calculate_line_penalty
 from ubt.core.math.models import MathSyntax
 
 pytestmark = pytest.mark.fast
-
-
-def test_calculate_line_penalty_behavior() -> None:
-    # Depth > 0 penalty
-    nested_penalty = calculate_line_penalty(40, 50, 10.0, depth=1)
-    assert nested_penalty >= 2000.0
-
-    # Overrun penalty
-    normal_penalty = calculate_line_penalty(45, 50, 10.0, depth=0)
-    overrun_penalty = calculate_line_penalty(60, 50, 10.0, depth=0)
-    assert overrun_penalty > normal_penalty
 
 
 def test_break_equation_typst_nested_protection() -> None:

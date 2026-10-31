@@ -6,7 +6,6 @@ import pytest
 
 from ubt.core.cleaners.markup_cleanup import (
     clean_model_repair_text,
-    normalize_escaped_entities,
     strip_protocol_tags,
 )
 
@@ -26,7 +25,3 @@ def test_strip_protocol_tags_handles_final_translation() -> None:
 def test_clean_model_repair_text_strips_tags_and_decodes_entities() -> None:
     raw = "<final_translation>\n  AT&amp;T &lt;Bell Labs&gt; &quot;Innovations&quot;  \n</final_translation>"
     assert clean_model_repair_text(raw) == 'AT&T <Bell Labs> "Innovations"'
-
-
-def test_normalize_escaped_entities() -> None:
-    assert normalize_escaped_entities("Tom &amp; Jerry&#39;s house") == "Tom & Jerry's house"

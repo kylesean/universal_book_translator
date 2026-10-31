@@ -53,19 +53,6 @@ class JsToolchain:
     #: A package manager on ``PATH``, or ``None``.
     package_manager: str | None
 
-    @property
-    def can_build(self) -> bool:
-        """Whether ``build`` can run: local ``vite`` plus ``tsc``, or a manager."""
-        return (self._has_local("vite") and self._has_local("tsc")) or bool(self.package_manager)
-
-    @property
-    def can_dev(self) -> bool:
-        """Whether ``dev`` can run. Only ``vite`` is required."""
-        return self._has_local("vite") or bool(self.package_manager)
-
-    def _has_local(self, tool: str) -> bool:
-        return self.local(tool) is not None
-
     def local(self, tool: str) -> Path | None:
         """Absolute path to a local tool, or ``None`` when it is not installed.
 

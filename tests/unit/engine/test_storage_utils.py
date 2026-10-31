@@ -1,9 +1,8 @@
-"""Unit tests for storage utilities and SQLite WAL configuration."""
+"""Unit tests for the SQLite storage-path filesystem detection helpers."""
 
 from __future__ import annotations
 
 import logging
-import sqlite3
 import unittest.mock
 from pathlib import Path
 
@@ -11,7 +10,6 @@ import pytest
 
 from ubt.core.engine.storage_utils import (
     NETWORK_FILESYSTEMS,
-    configure_sqlite_wal,
     detect_filesystem_type,
     warn_if_network_filesystem,
 )
@@ -54,26 +52,3 @@ def test_warn_if_network_filesystem_logs_warning(caplog: pytest.LogCaptureFixtur
         res = warn_if_network_filesystem(Path("/mnt/nfs/ledger.db"), "Test ledger")
         assert res == "nfs4"
         assert "network filesystem 'nfs4'" in caplog.text
-
-
-def test_configure_sqlite_wal(tmp_path: Path) -> None:
-    db = tmp_path / "test.db"
-    conn = sqlite3.connect(db)
-    try:
-        configure_sqlite_wal(conn, timeout_sec=30.0, wal_mode=True)
-        # Verify row_factory is set
-        assert conn.row_factory == sqlite3.Row
-
-        # Verify busy_timeout is 30,000 ms
-        busy_timeout = conn.execute("PRAGMA busy_timeout;").fetchone()[0]
-        assert busy_timeout == 30000
-
-        # Verify journal_mode is WAL
-        journal_mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]
-        assert journal_mode.upper() == "WAL"
-
-        # Verify synchronous is NORMAL (1)
-        sync = conn.execute("PRAGMA synchronous;").fetchone()[0]
-        assert sync in (1, "NORMAL")
-    finally:
-        conn.close()

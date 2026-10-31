@@ -26,7 +26,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from ubt.core.config import DefaultsConfig, ProviderConfig, UBTConfigFile
+from ubt.core.config import DefaultsConfig, ProviderConfig
 from ubt.core.exceptions import UBTError
 
 logger = logging.getLogger(__name__)
@@ -435,18 +435,6 @@ def load_layer_config(
         return ProviderConfig.model_validate(fields)
     except ValidationError as exc:
         raise ProviderConfigError(f"provider layer error: {exc}") from exc
-
-
-def read_config_file(custom_path: Path | str | None = None) -> UBTConfigFile:
-    """Read the user configuration file into a typed UBTConfigFile model."""
-    raw = _read_toml(custom_path)
-    defaults = load_defaults_config(custom_path)
-    providers_raw = raw.get("providers", {})
-    providers_dict: dict[str, ProviderConfig] = {}
-    if isinstance(providers_raw, dict):
-        for name in providers_raw:
-            providers_dict[str(name)] = load_provider_config(str(name), custom_path)
-    return UBTConfigFile(defaults=defaults, providers=providers_dict)
 
 
 def merge_provider_under(

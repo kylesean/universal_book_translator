@@ -36,7 +36,10 @@ from ubt.model.span import CompositeSpan, PhysicalBox, boxes_to_provenance
 _PROSE_TYPES: frozenset[BlockType] = frozenset(
     {BlockType.NARRATIVE, BlockType.DIALOGUE, BlockType.LIST_ITEM}
 )
-#: End-of-sentence punctuation: a block ending on one of these is complete.
+#: Boundary punctuation: a block ending on one of these reads as finished, so
+#: nothing continues it. Sentence terminators plus the clause boundaries
+#: (``:``/``;`` and their CJK forms) that close a lead-in such as "Figure 3:" —
+#: a colon ends no sentence, but a paragraph does not resume mid-lead-in.
 _TERMINAL = ".!?。！？…:;：；"
 #: Closing marks that may trail the terminal punctuation.
 _CLOSERS = "\"')]}」』》】”’）〕»"
@@ -64,7 +67,7 @@ _FURNITURE_REGIONS = frozenset(
 
 
 @dataclass(frozen=True, slots=True)
-class ContinuationRun:
+class _ContinuationRun:
     """One element's reading-order chain: block ids plus the boxes they occupy."""
 
     block_ids: tuple[str, ...]
@@ -196,20 +199,20 @@ def _continues(previous: IRBlock, following: IRBlock) -> bool:
     return False
 
 
-def find_continuation_runs(blocks: Sequence[IRBlock]) -> tuple[ContinuationRun, ...]:
+def _find_continuation_runs(blocks: Sequence[IRBlock]) -> tuple[_ContinuationRun, ...]:
     """Group ``blocks`` (in reading order) into multi-box continuation runs.
 
     An empty tuple means every block stands alone -- the ordinary case. Only runs
     of two or more blocks are returned.
     """
-    runs: list[ContinuationRun] = []
+    runs: list[_ContinuationRun] = []
     run_ids: list[str] = []
     run_boxes: list[PhysicalBox] = []
     previous: IRBlock | None = None
 
     def flush() -> None:
         if len(run_ids) >= 2:
-            runs.append(ContinuationRun(tuple(run_ids), tuple(run_boxes)))
+            runs.append(_ContinuationRun(tuple(run_ids), tuple(run_boxes)))
 
     for block in blocks:
         if _is_furniture(block):
@@ -244,11 +247,11 @@ def fuse_continuation_blocks(blocks: Sequence[IRBlock]) -> list[IRBlock]:
     came from.
     """
     materialized = list(blocks)
-    runs = find_continuation_runs(materialized)
+    runs = _find_continuation_runs(materialized)
     if not runs:
         return materialized
 
-    run_by_first_id: dict[str, ContinuationRun] = {run.block_ids[0]: run for run in runs}
+    run_by_first_id: dict[str, _ContinuationRun] = {run.block_ids[0]: run for run in runs}
     subsumed_ids: set[str] = {block_id for run in runs for block_id in run.block_ids[1:]}
     by_id: dict[str, IRBlock] = {b.id: b for b in materialized}
 
@@ -302,8 +305,6 @@ def fuse_continuation_blocks(blocks: Sequence[IRBlock]) -> list[IRBlock]:
 
 
 __all__ = [
-    "ContinuationRun",
-    "find_continuation_runs",
     "fuse_continuation_blocks",
     "join_continuous_text",
 ]

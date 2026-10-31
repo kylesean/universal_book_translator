@@ -1,18 +1,15 @@
 """CELS Stage 1–2 geometry: column tracks, pinned obstacles, elastic segments.
 
-Design: ``docs/design/adaptive_delivery_prd.md`` §7.3. Staged plan:
-``docs/guides/ADAPTIVE_DELIVERY_TECH_DESIGN.md`` §7.1.
-
 This module is deliberately pure: measured line boxes in, tracks / pins /
 segments out. It opens no PDF, calls no measurement service and solves no
 constraint. That split is what lets Stage 1 be unit-tested against synthetic
 pages while Stage 5 does the content-stream surgery in the adapter.
 
-Why a projection profile, and why it needs three guards
+Why a projection profile, and why it needs four guards
 ------------------------------------------------------
 The only evidence CELS gets about the source page is its geometry, so Stage 1
 reads the page as what it physically is: columns of ink separated by empty
-bands. Three measured traps make a bare "widest empty band" split wrong, and
+bands. Four measured traps make a bare "widest empty band" split wrong, and
 each produces a refusal rather than a repair:
 
 * **blocking density** — a bin blocks a gutter only when the boxes crossing it
@@ -32,15 +29,17 @@ each produces a refusal rather than a repair:
 * **straddler budget** — a figure that genuinely spans both columns has no
   empty band around it, so it cannot be cut through. When the ink crossing a
   candidate gutter exceeds :data:`STRADDLER_MAX_SHARE` the split is refused
-  instead of guessed, and the figure is pinned by :func:`assign_lines`.
+  instead of guessed; the crossing boxes come back in the leftover bucket of
+  :func:`assign_lines`, and pinning them is the coordinator's job.
 
-Every refusal is returned with its reason. G3's acceptance is *"0 cross-column
-penetration"*, and the evidence that a page was **not** split is the accepted
-track count plus a reason for each near miss.
+Every refusal is returned with its reason. This module's acceptance criterion
+is *"0 cross-column penetration"*: a page only counts as split when no line
+reaches into a second track, and the evidence that a page was **not** split is
+the accepted track count plus a reason for each near miss.
 
 Scope limit: the cut is recursive up to :data:`MAX_TRACKS`, which covers 1–4
 column pages. Reading order is left-to-right per track; interleaving columns
-into one reading stream is Stage 1 work for G4 and is not assumed here.
+into one reading stream is later Stage 1 work and is not assumed here.
 """
 
 from __future__ import annotations
@@ -78,8 +77,10 @@ GUTTER_MIN_VERTICAL_OVERLAP: float = 0.5
 
 #: Ink crossing a candidate gutter may not exceed this share of the group's
 #: ink; above it, a spanning figure or table owns that band and the page is not
-#: split. Set below :data:`GUTTER_MIN_INK_SHARE` on purpose: one straddling
-#: element must not outweigh a side that is not there.
+#: split. The budget is measured against the same yardstick as
+#: :data:`GUTTER_MIN_INK_SHARE` and deliberately shares its value: crossing ink
+#: is allowed to weigh at most what a side a real column must reach weighs, so a
+#: straddling element can never outweigh a side that is not there.
 STRADDLER_MAX_SHARE: float = 0.15
 
 #: Recursion cap. 1 cut = 2 columns, 2 cuts = up to 4.
@@ -122,10 +123,6 @@ class Box:
     def area(self) -> float:
         return self.width * self.height
 
-    @property
-    def center_x(self) -> float:
-        return (self.x0 + self.x1) / 2.0
-
 
 @dataclass(frozen=True, slots=True)
 class ColumnTrack:
@@ -153,7 +150,7 @@ class ColumnTrack:
 
     @property
     def x_right(self) -> float:
-        """The right limit under the name used in the PRD's acceptance text."""
+        """Alias for :attr:`x1` under the name the acceptance rule is worded with."""
         return self.x1
 
     def contains_horizontally(self, box: Box, tol: float = EDGE_TOL_PT) -> bool:
@@ -164,10 +161,10 @@ class ColumnTrack:
 class InlineRigidBox:
     """Inline rigid obstacle (formula, superscript, unshrinkable unit).
 
-    Design: ``docs/design/adaptive_delivery_prd.md`` §8.2 & §1194. Resolves GAP-14.
     An unshrinkable rigid box embedded inside an elastic text line. It does not
-    scale with font size or tracking (Tz / Tc), and in Stage 5 is repositioned
-    via Form XObject translation: ``q 1 0 0 1 x y cm /Fm Do Q``.
+    scale with font size or tracking (Tz / Tc), so it is carried as its own
+    box: in Stage 5 it is repositioned via Form XObject translation
+    (``q 1 0 0 1 x y cm /Fm Do Q``) rather than re-flowed with the line.
     """
 
     token_id: str
@@ -214,9 +211,9 @@ class ElasticFlowSegment:
 class GutterCandidate:
     """A vertical non-blocking band and the verdict Stage 1 reached about it.
 
-    Reported even when rejected: the G3 acceptance is *"0 cross-column
-    penetration"*, and the evidence that a page was **not** split is an
-    accepted-track count plus the rejection reason for every near miss.
+    Reported even when rejected: refusing to split is a finding, so a page that
+    was **not** split still carries an accepted-track count and the rejection
+    reason for every near miss.
     """
 
     x0: float
@@ -260,8 +257,8 @@ class ColumnDetection:
 class TrackOverrun:
     """A line that paints past its track's right limit.
 
-    G3's acceptance is "左栏右借位不越过 ``x_right``"; this is the machine
-    check behind that sentence, and it is what G4's QA replays on every page.
+    This is the machine check behind the module's acceptance rule (no line may
+    borrow past ``x_right``), and it is what QA replays on every page.
     """
 
     track_index: int

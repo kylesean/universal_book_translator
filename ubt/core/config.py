@@ -684,29 +684,6 @@ class UBTConfig(BaseSettings):
             **{k: getattr(self, k) for k in EngineConfig.model_fields if hasattr(self, k)}
         )
 
-    def as_subdomains(self) -> tuple[RouterConfig, TypstConfig, QualityConfig, EngineConfig]:
-        """Unpack this configuration into its 4 decoupled typed domain sub-configs."""
-        return self.router, self.typst, self.quality, self.engine
-
-    @classmethod
-    def from_subdomains(
-        cls,
-        *,
-        router: RouterConfig | None = None,
-        typst: TypstConfig | None = None,
-        quality: QualityConfig | None = None,
-        engine: EngineConfig | None = None,
-        **extra_overrides: Any,
-    ) -> UBTConfig:
-        """Compose a unified UBTConfig directly from typed sub-domain configurations."""
-        return cls(
-            router=router,
-            typst=typst,
-            quality=quality,
-            engine=engine,
-            **extra_overrides,
-        )
-
     def model_copy(
         self, *, update: Mapping[str, Any] | None = None, deep: bool = False
     ) -> UBTConfig:

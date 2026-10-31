@@ -15,7 +15,6 @@ from ubt.adapters.pdf.pdf_profiler import (
     PDFDocumentProfile,
     PDFRoutePlan,
     inspect_pdf_profile,
-    inspect_pdf_route_plan,
 )
 from ubt.core.policy.layout_policy import PROBE_MIN_SIGNAL_PAGES, PROBE_SAMPLE_FRACTIONS
 
@@ -61,7 +60,7 @@ def test_probe_routes_every_document_to_docling(tmp_path: Path) -> None:
     ``auto`` takes the lossless engine regardless.
     """
     pdf = write_text_pdf(tmp_path / "prose.pdf", _prose_pages(10))
-    plan = inspect_pdf_route_plan(pdf)
+    plan = inspect_pdf_profile(pdf)
     assert not plan.has_formulas
     assert not plan.has_multicolumn
     # The signals are reported honestly (assess shows them to the operator)…
@@ -81,7 +80,7 @@ def test_probe_routes_two_column_to_docling(tmp_path: Path) -> None:
         for _ in range(10)
     ]
     pdf = write_two_column_pdf(tmp_path / "twocol.pdf", pages)
-    plan = inspect_pdf_route_plan(pdf)
+    plan = inspect_pdf_profile(pdf)
     assert plan.has_multicolumn
     assert plan.primary_engine == "docling"
 
@@ -91,7 +90,7 @@ def test_single_reference_page_does_not_veto_the_document(tmp_path: Path) -> Non
     # as formula debris on its own, but one page must not flip the whole book.
     pages = _prose_pages(9) + [[_REFERENCE, _REFERENCE, _REFERENCE, _REFERENCE]]
     pdf = write_text_pdf(tmp_path / "refs.pdf", pages)
-    plan = inspect_pdf_route_plan(pdf)
+    plan = inspect_pdf_profile(pdf)
     assert not plan.has_formulas, "one reference page must not read as formula-dense"
 
 
@@ -101,7 +100,7 @@ def test_single_formula_page_does_not_veto_the_document(tmp_path: Path) -> None:
     debris = "K = x plus V t h"
     pages = _prose_pages(9) + [[debris, debris, debris, debris]]
     pdf = write_text_pdf(tmp_path / "one_debris.pdf", pages)
-    plan = inspect_pdf_route_plan(pdf)
+    plan = inspect_pdf_profile(pdf)
     assert not plan.has_formulas
 
 
@@ -114,7 +113,7 @@ def test_two_formula_pages_route_to_docling(tmp_path: Path) -> None:
     pages[2] = [debris, debris, debris, debris]
     pages[7] = [debris, debris, debris, debris]
     pdf = write_text_pdf(tmp_path / "two_debris.pdf", pages)
-    plan = inspect_pdf_route_plan(pdf)
+    plan = inspect_pdf_profile(pdf)
     assert plan.has_formulas
     assert plan.primary_engine == "docling"
 
@@ -127,7 +126,7 @@ def test_majority_formula_debris_routes_to_docling(tmp_path: Path) -> None:
     debris = "K = x plus V t h"
     pages = [[debris, debris, debris, debris] for _ in range(10)]
     pdf = write_text_pdf(tmp_path / "all_debris.pdf", pages)
-    plan = inspect_pdf_route_plan(pdf)
+    plan = inspect_pdf_profile(pdf)
     assert plan.has_formulas
     assert plan.primary_engine == "docling"
 
@@ -143,12 +142,10 @@ def test_all_reference_pages_do_not_report_a_formula_signal(tmp_path: Path) -> N
 
 
 def test_alias_and_cache_parity(tmp_path: Path) -> None:
-    """Verify PDFRoutePlan alias and inspect_pdf_route_plan point to profile."""
+    """Verify the PDFRoutePlan alias still names the profile type."""
     assert PDFRoutePlan is PDFDocumentProfile
-    assert inspect_pdf_route_plan is inspect_pdf_profile
     assert PROFILE_CACHE_DIR.name == "profile_cache"
 
     pdf = write_text_pdf(tmp_path / "alias_test.pdf", _prose_pages(5))
     profile = inspect_pdf_profile(pdf)
-    alias_plan = inspect_pdf_route_plan(pdf)
-    assert profile == alias_plan
+    assert isinstance(profile, PDFRoutePlan)

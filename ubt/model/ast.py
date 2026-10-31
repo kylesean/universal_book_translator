@@ -96,10 +96,6 @@ class Element:
     font_size: float = 0.0
 
     @property
-    def is_text(self) -> bool:
-        return isinstance(self, TextElement)
-
-    @property
     def is_asset(self) -> bool:
         return isinstance(self, (Formula, Table, Figure))
 
@@ -222,10 +218,6 @@ class Region:
     id: str
     kind: RegionKind
     elements: tuple[ElementT, ...] = ()
-
-    @property
-    def text_elements(self) -> tuple[TextElement, ...]:
-        return tuple(el for el in self.elements if isinstance(el, TextElement))
 
 
 @dataclass(frozen=True, slots=True)

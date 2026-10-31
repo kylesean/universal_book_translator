@@ -1,4 +1,4 @@
-"""Unit tests for Typst adaptive layout auto-healing pass and multiline formula folding."""
+"""Unit tests for the Typst adaptive layout auto-healing pass."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from ubt.render.typst.auto_healing import (
     AutoHealingAction,
     AutoHealingReport,
     LayoutAutoHealer,
-    fold_multiline_math,
 )
 from ubt.render.typst.document_renderer import TypstDocumentRenderer, render_table
 from ubt.render.typst.layout_diagnostics import (
@@ -43,31 +42,6 @@ def _make_dummy_pdf(path: Path) -> None:
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(pdf_content)
-
-
-def test_fold_multiline_math_short_formula() -> None:
-    """Short formulas within max_chars remain unchanged."""
-    short = "y = a + b"
-    assert fold_multiline_math(short, max_chars=30) == short
-
-
-def test_fold_multiline_math_nested_groups_protected() -> None:
-    """Operators inside nested parentheses or brackets are never broken."""
-    formula = "f(x) = frac(a + b + c + d, e + f + g) + h"
-    # Even with small max_chars, it should NOT break inside frac(..., ...)
-    folded = fold_multiline_math(formula, max_chars=10)
-    assert "frac(a + b + c + d" in folded
-    # But breaks at the top-level ' + h'
-    assert "\\\n + h" in folded or " \\\n + h" in folded
-
-
-def test_fold_multiline_math_long_relation_and_binary() -> None:
-    """Long formulas fold at top-level relation and binary operators."""
-    formula = "L(theta) = E[log p(x | z)] - D_KL(q(z | x) || p(z)) + lambda * R(theta)"
-    folded = fold_multiline_math(formula, max_chars=25)
-    assert "\\\n" in folded
-    lines = folded.split("\\\n")
-    assert len(lines) >= 2
 
 
 def test_auto_healing_models_serialization() -> None:

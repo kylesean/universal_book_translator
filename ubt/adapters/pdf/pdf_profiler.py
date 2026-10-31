@@ -233,7 +233,3 @@ def inspect_pdf_profile(
             exc,
         )
         return default_docling
-
-
-# Backward compatibility alias
-inspect_pdf_route_plan = inspect_pdf_profile

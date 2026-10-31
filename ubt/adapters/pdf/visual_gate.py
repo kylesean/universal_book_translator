@@ -392,7 +392,13 @@ def translated_canvas_pages(blocks: Sequence[object]) -> set[int]:
 
 
 def pdf_page_count(pdf_path: Path) -> int:
-    """Return PDF page count via pikepdf, or -1 when unreadable."""
+    """Page count, with ``-1`` as the "could not read" sentinel.
+
+    Never raises: the gate runs on every export, and an artifact that will not
+    open has to be judged, not crash the judge. Callers must therefore branch on
+    the negative value (``blocking_gate_tripped`` fails closed on it) rather
+    than treating it as an empty document.
+    """
     try:
         return pdf_struct.page_count(pdf_path)
     except Exception as exc:
@@ -415,7 +421,12 @@ def page_bounds(pdf_path: Path) -> dict[int, tuple[float, float, float, float]]:
 
 
 def page_rotations(pdf_path: Path) -> dict[int, int]:
-    """Return 1-indexed {page_no: rotation_deg} via pikepdf."""
+    """1-indexed ``{page_no: /Rotate degrees}``, ``{}`` when the file cannot be read.
+
+    An empty map is not neutral: the geometry checks fall back to 0 for a page
+    they have no rotation for, so an unreadable page is measured as if it were
+    upright and its boxes can be judged against the wrong axes.
+    """
     try:
         return pdf_struct.page_rotations(pdf_path)
     except Exception as exc:
@@ -1364,17 +1375,16 @@ def text_occlusion_findings(
 #
 # **Warn-only here, fail-closed above.** This detector still reports
 # ``canvas_ink_collision`` (MAJOR) per page with the measured ratio rather than
-# re-rendering mid-flight. The v3.0 PRD (``docs/design/adaptive_delivery_prd.md``
-# §9) makes the *delivery* contract fail-closed: a critical finding blocks
-# export, and a major one blocks unless the caller explicitly opts in. Keeping
-# the measurement warn-only and the gate fail-closed separates "what happened"
-# from "may this ship" — the old design conflated them and shipped broken
-# pages.
+# re-rendering mid-flight. The delivery contract is the fail-closed layer: a
+# critical finding blocks the artifact, a major one blocks a strict delivery
+# unless the caller accepts it explicitly. Keeping the measurement warn-only
+# and the gate fail-closed separates "what happened" from "may this ship" — the
+# old design conflated them and shipped broken pages.
 
 #: Share of a page's translated-text pixels that may sit on pre-existing ink
-#: before the page is reported. 3% is the v2.1 design doc's number, retained as
-#: a measurement baseline; the v3.0 PRD makes the delivery gate fail-closed, so
-#: this threshold decides when a page is *reported*, not whether it may ship.
+#: before the page is reported. 3% is retained as a measurement baseline;
+#: whether a page may ship is the delivery contract's call, so this threshold
+#: decides when a page is *reported*, not whether it may ship.
 #: It is deliberately generous: a translated caption legitimately sits inside a figure
 #: box, a formula's own delimiters sit near its rule, and a page-furniture line
 #: can run under a short heading. What it is NOT generous enough to hide is a
@@ -1915,26 +1925,6 @@ def _collision_findings(
     return findings
 
 
-def canvas_ink_collision_findings(
-    background_pngs: Mapping[int, Path],
-    final_pngs: Mapping[int, Path],
-    *,
-    ratio_threshold: float = CANVAS_COLLISION_RATIO,
-) -> list[VisualFinding]:
-    """Measure and report in one call — the shape a caller with no ``stats`` wants.
-
-    ``run_visual_gate`` does not use this: it needs the ratios themselves for
-    the report, so it calls :func:`canvas_ink_collision_pages` and
-    :func:`_collision_findings` separately. This keeps the single-call entry
-    point available for scripts and for the tests, without making the gate pay
-    for a second raster diff.
-    """
-    return _collision_findings(
-        canvas_ink_collision_pages(background_pngs, final_pngs),
-        ratio_threshold=ratio_threshold,
-    )
-
-
 def detect_colliding_l1_pages(
     bg_pdf: Path,
     final_pdf: Path,
@@ -1949,7 +1939,7 @@ def detect_colliding_l1_pages(
     Used during ``_render_facsimile`` so any L1 page whose translated text
     collides with unstripped background rules, vector diagrams, or residual ink
     is automatically rerouted to Tier L2 (Page-Locked Reflow) before the
-    artifact ships (§9.1).
+    artifact ships.
     """
     pages = sorted({int(p) for p in l1_pages if int(p) >= 1})
     if not pages or not bg_pdf.exists() or not final_pdf.exists():
@@ -2109,8 +2099,8 @@ async def run_visual_gate(
     """Run T0+T1 always, pixel+T2 only when tools/judge are available.
 
     ``canvas_background_pdf`` turns on the canvas strategy of the ``faithful``
-    contract (§5.5 and §9 of ``docs/design/adaptive_delivery_prd.md``): the
-    stripped background the canvas renderer drew under the translation. When
+    contract: the stripped background the canvas renderer drew under the
+    translation. When
     given, every sampled page is rasterised a second time from it and the two
     rasters are diffed to measure how much of the translated text landed on
     pre-existing ink. When omitted the tier is skipped and the report says so —

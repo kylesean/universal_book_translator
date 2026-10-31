@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from ubt.core.ir.document_tree import build_section_tree, section_context_for, section_texts
+from ubt.core.ir.document_tree import build_section_tree, section_context_for
 from ubt.core.ir.models import BlockType, IRBlock, make_element
 
 pytestmark = pytest.mark.fast
@@ -78,7 +78,7 @@ def test_a_headingless_document_is_one_translatable_unit() -> None:
     assert len(sections) == 1
     assert sections[0].heading is None
     assert sections[0].title == ""
-    assert section_texts(sections) == ["para one\n\npara two"]
+    assert sections[0].text == "para one\n\npara two"
 
 
 def test_the_path_uses_the_sources_own_numbering() -> None:

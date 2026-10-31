@@ -12,13 +12,11 @@ from ubt.cli.workbench.models import JobControlStatus, WorkbenchState
 
 
 def _make_header(state: WorkbenchState) -> Panel:
-    """Build workbench top status header."""
     header_table = Table.grid(expand=True)
     header_table.add_column(justify="left", ratio=3)
     header_table.add_column(justify="center", ratio=4)
     header_table.add_column(justify="right", ratio=3)
 
-    # Status pill styling
     if state.status == JobControlStatus.RUNNING:
         status_text = "[bold green]● RUNNING[/]"
     elif state.status == JobControlStatus.PAUSED:
@@ -65,7 +63,6 @@ def _render_tab_overview(state: WorkbenchState) -> RenderableType:
     content.add_column(ratio=6)
     content.add_column(ratio=4)
 
-    # Left: Progress and Block Metrics
     left_table = Table(title="Document Pipeline Progress", expand=True, show_edge=False)
     left_table.add_column("Metric", style="cyan")
     left_table.add_column("Value", justify="right")
@@ -87,7 +84,6 @@ def _render_tab_overview(state: WorkbenchState) -> RenderableType:
         f"[bold red]{state.quarantined_count}[/]" if state.quarantined_count > 0 else "[green]0[/]",
     )
 
-    # Right: Live Event Ticker
     events_table = Table(title="Live Event Stream", expand=True, show_edge=False)
     events_table.add_column("Timestamp & Event", style="dim")
     if not state.recent_events:
@@ -263,9 +259,12 @@ def _make_help_overlay() -> Panel:
         "Cycle views backward",
     )
     table.add_row(
-        "R",
-        "Retry Quarantined",
-        "Re-queues blocked/quarantined blocks for targeted repair",
+        "r / R",
+        "Flag Quarantined Blocks",
+        "Records the request in the event ticker and nothing else: this UI has no "
+        "channel back into the running pipeline, so no block is re-dispatched. "
+        "Repair happens on the next run, which resumes this job's ledger with "
+        "'ubt translate <input> --job-id <id>'",
     )
     table.add_row(
         "Q / Ctrl-C",

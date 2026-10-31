@@ -1,20 +1,17 @@
-"""SQLite WAL-based atomic transactional job ledger with keyset pagination, a flat baseline schema, and cross-process job mutual exclusion (see engine/writer_lock.py).
+"""SQLite WAL-based atomic transactional job ledger with keyset pagination, a
+flat baseline schema, and cross-process job mutual exclusion
+(see :mod:`ubt.core.engine.writer_lock`).
 
-Facade module assembling the ledger subsystem:
-- :mod:`ubt.core.engine.ledger_base`: connection, transaction, and schema migrations.
-- :mod:`ubt.core.engine.ledger_mixins`: job lifecycle, block operations, and batch-API partitions.
-
-:class:`SQLiteJobLedger` is the one class that inherits ``LedgerBase``; the
-partitions are pure mixins (no base of their own).
+``SQLiteJobLedger`` is the one class that inherits :class:`LedgerBase`. The
+domain partitions in :mod:`ubt.core.engine.ledger_mixins` extend ``_LedgerHost``
+(``LedgerBase`` under ``TYPE_CHECKING``, plain ``object`` at runtime) rather
+than the base itself, so connection and transaction scope live in exactly one
+place.
 """
 
 from ubt.core.engine.ledger_base import (
-    _REQUIRED_BLOCK_COLUMNS,
     NON_TERMINAL_STATUSES,
-    TARGET_SCHEMA_VERSION,
     LedgerBase,
-    _upsert_blocks_batch,
-    logger,
 )
 from ubt.core.engine.ledger_mixins import (
     LedgerBatchMixin,
@@ -23,21 +20,11 @@ from ubt.core.engine.ledger_mixins import (
     _as_usage_totals,
     merge_usage_totals,
 )
-from ubt.core.exceptions import LedgerError
 
 __all__ = [
     "NON_TERMINAL_STATUSES",
-    "TARGET_SCHEMA_VERSION",
-    "LedgerBase",
-    "LedgerBatchMixin",
-    "LedgerBlocksMixin",
-    "LedgerError",
-    "LedgerJobsMixin",
     "SQLiteJobLedger",
-    "_REQUIRED_BLOCK_COLUMNS",
     "_as_usage_totals",
-    "_upsert_blocks_batch",
-    "logger",
     "merge_usage_totals",
 ]
 

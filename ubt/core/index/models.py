@@ -39,20 +39,6 @@ class IndexEntry:
         """Pinyin or Latin initial for Chinese/target sorting (A-Z, 0-9, #)."""
         return get_pinyin_initial(self.target_term)
 
-    @property
-    def display_en_zh(self) -> str:
-        """Standard English-first representation: 'Source Term (Target Term)'."""
-        if self.target_term and self.target_term.lower() != self.source_term.lower():
-            return f"{self.source_term} ({self.target_term})"
-        return self.source_term
-
-    @property
-    def display_zh_en(self) -> str:
-        """Standard Chinese-first representation: 'Target Term (Source Term)'."""
-        if self.source_term and self.source_term.lower() != self.target_term.lower():
-            return f"{self.target_term} ({self.source_term})"
-        return self.target_term or self.source_term
-
 
 @dataclass(slots=True)
 class ConcordanceIndex:

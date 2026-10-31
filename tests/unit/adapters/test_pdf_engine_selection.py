@@ -1,6 +1,6 @@
 """Engine selection: preset routing, the pdfium default, and scan escape.
 
-The probe (``inspect_pdf_route_plan``) reports layout facts; the factory
+The probe (``inspect_pdf_profile``) reports layout facts; the factory
 (``_resolve_pdf_adapter``) turns them into an adapter choice. These tests pin
 the factory half: which engine each entry point selects, and the one case
 that is a capability boundary rather than a preference — a scanned PDF
@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from pdf_builders import write_text_pdf, write_two_column_pdf
 
-from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile as inspect_pdf_route_plan
+from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile
 
 pytestmark = pytest.mark.fast
 
@@ -41,7 +41,7 @@ def test_scanned_pdf_reports_scan_signal(tmp_path: Path) -> None:
     import pypdfium2 as pdfium
 
     pdf = write_text_pdf(tmp_path / "blank.pdf", [[] for _ in range(10)])
-    plan = inspect_pdf_route_plan(pdf)
+    plan = inspect_pdf_profile(pdf)
     assert plan.has_scan
     pdfium.PdfDocument(str(pdf)).close()  # the fixture really is text-less
 
@@ -59,7 +59,7 @@ def test_pdfium_default_keeps_fast_path_on_layout_signal(tmp_path: Path) -> None
         for _ in range(10)
     ]
     pdf = write_two_column_pdf(tmp_path / "twocol.pdf", pages)
-    assert inspect_pdf_route_plan(pdf).has_multicolumn
+    assert inspect_pdf_profile(pdf).has_multicolumn
     assert isinstance(get_adapter_for_path(pdf, pdf_engine="pdfium"), PDFiumAdapter)
 
 

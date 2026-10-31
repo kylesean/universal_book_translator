@@ -40,21 +40,8 @@ def test_primary_lang_code(lang: str, expected: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# supported languages / keywords
+# language-specific keyword patterns
 # --------------------------------------------------------------------------- #
-
-
-def test_the_catalog_covers_the_declared_languages() -> None:
-    assert set(BoilerplateCatalog.get_supported_languages()) >= {
-        "en",
-        "fr",
-        "de",
-        "es",
-        "ja",
-        "ko",
-        "zh",
-        "ru",
-    }
 
 
 @pytest.mark.parametrize(

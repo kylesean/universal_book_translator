@@ -10,10 +10,9 @@ from __future__ import annotations
 import contextlib
 import os
 import tempfile
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
 
 
 @contextmanager
@@ -47,27 +46,13 @@ def atomic_write_path(dest: str | Path) -> Generator[Path, None, None]:
         raise
 
 
-def atomic_write_bytes(dest: str | Path, content: bytes) -> None:
-    """Atomically write binary content to dest."""
-    with atomic_write_path(dest) as tmp_path:
-        tmp_path.write_bytes(content)
-
-
 def atomic_write_text(dest: str | Path, content: str, encoding: str = "utf-8") -> None:
     """Atomically write text content to dest."""
     with atomic_write_path(dest) as tmp_path:
         tmp_path.write_text(content, encoding=encoding)
 
 
-def atomic_save(dest: str | Path, save_fn: Callable[[Path], Any]) -> None:
-    """Atomically run save_fn(tmp_path) and rename to dest."""
-    with atomic_write_path(dest) as tmp_path:
-        save_fn(tmp_path)
-
-
 __all__ = [
-    "atomic_save",
-    "atomic_write_bytes",
     "atomic_write_path",
     "atomic_write_text",
 ]

@@ -334,13 +334,6 @@ def test_get_l3_summary_skips_blank_epochs() -> None:
     assert manager.get_l3_summary() == "real"
 
 
-def test_format_l3_prompt_block() -> None:
-    manager = HierarchicalMemoryManager()
-    assert manager.format_l3_prompt_block("   ") == ""
-    rendered = manager.format_l3_prompt_block("  history  ")
-    assert rendered == "### Book Continuity (Compressed History)\nhistory"
-
-
 def test_get_l3_summary_sliding_window() -> None:
     manager = HierarchicalMemoryManager(sliding_window=True)
     manager._epochs = [

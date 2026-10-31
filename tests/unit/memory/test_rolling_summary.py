@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from ubt.core.memory.rolling_summary import (
-    build_summary_prompt,
+    _build_summary_prompt,
     collect_chapter_text,
     deterministic_summary,
     extract_chapter_id,
@@ -119,12 +119,12 @@ def test_deterministic_summary_honours_a_cjk_boundary() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# build_summary_prompt
+# _build_summary_prompt
 # --------------------------------------------------------------------------- #
 
 
 def test_build_summary_prompt_embeds_language_and_content() -> None:
-    system_prompt, user_prompt = build_summary_prompt("content here", "zh")
+    system_prompt, user_prompt = _build_summary_prompt("content here", "zh")
     assert "zh" in system_prompt
     assert "Output ONLY the summary text." in system_prompt
     assert "content here" in user_prompt

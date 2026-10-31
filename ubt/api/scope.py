@@ -59,11 +59,6 @@ class ApiScope:
             return self.source.config
         return self._boot_config
 
-    @property
-    def boot_config(self) -> UBTConfig:
-        """The configuration the process started with (deployment identity)."""
-        return self._boot_config
-
     def tenant_allows(self, job_id: str, tenant: str) -> bool:
         """False when a queued job exists but belongs to another tenant.
 

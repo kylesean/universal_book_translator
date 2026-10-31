@@ -50,10 +50,6 @@ from ubt.model.span import CompositeSpan, boxes_from_provenance
 #: fresh/legacy discrimination unambiguous.
 SCHEMA_VERSION = 1000
 
-#: Backwards-compatible alias. Older callers/modules import
-#: ``TARGET_SCHEMA_VERSION``; it now names the flat baseline.
-TARGET_SCHEMA_VERSION = SCHEMA_VERSION
-
 #: The authoritative schema. Fresh databases are created from this directly;
 #: it is the *only* definition of the tables (no incremental ALTERs).
 _SCHEMA_SQL = """
@@ -243,9 +239,7 @@ NON_TERMINAL_STATUSES: tuple[str, ...] = tuple(
 
 
 def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[IRBlock]) -> None:
-    """Batch upsert IRBlock entities into the blocks table using ON CONFLICT update.
-
-    One *append* must carry unique ids: a duplicate within the batch means the
+    """One *append* must carry unique ids: a duplicate within the batch means the
     extractor produced colliding ids, and the ``ON CONFLICT`` below would
     silently keep whichever row happened to be written last. That is how a TOC
     renumbering bug shipped a PDF with no title page — the contents rows
@@ -431,9 +425,10 @@ class LedgerBase:
         # past the writer-lock release the finally had just performed. Once
         # closed, the ledger refuses to reopen.
         self._closed = False
-        # Bumped by every committed write to a block row. :class:`StageContext`
-        # caches a block snapshot against this counter, so a later reader reloads
-        # without having to remember to manually invalidate. Valid
+        # Bumped by every committed write to a block row.
+        # :class:`~ubt.core.engine.blocks.BlockReader` caches a block snapshot
+        # against this counter, so a later reader reloads without having to
+        # remember to manually invalidate. Valid
         # within one process: a job's writer lock keeps other processes from
         # writing its ledger underneath it.
         self._blocks_seq = 0
@@ -465,7 +460,7 @@ class LedgerBase:
                 conn = sqlite3.connect(
                     str(self.db_path),
                     timeout=self.timeout,
-                    isolation_level=None,  # Autocommit mode for explicit manual transactions
+                    isolation_level=None,
                     check_same_thread=False,
                 )
                 conn.execute("PRAGMA journal_mode=WAL;")
@@ -502,7 +497,11 @@ class LedgerBase:
 
     @contextmanager
     def _get_conn(self) -> Iterator[sqlite3.Connection]:
-        """Provides thread-synchronized access to the persistent database connection."""
+        """The only way to reach the connection: one lock serializes every writer,
+        a closed ledger is refused, and a failed transaction is rolled back here
+        so a connection left "within a transaction" cannot poison the next
+        ``BEGIN IMMEDIATE``.
+        """
         with self._lock:
             if self._closed:
                 raise LedgerError(
@@ -800,7 +799,6 @@ class LedgerBase:
         row = conn.execute("SELECT job_id FROM job_meta WHERE job_id = ?", (job_id,)).fetchone()
         if row:
             return str(row["job_id"])
-        # If not found directly, check if it was a doc_id, picking only the most recent job:
         doc_row = conn.execute(
             "SELECT job_id FROM job_meta WHERE doc_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
             (job_id,),
@@ -810,7 +808,6 @@ class LedgerBase:
         return job_id
 
     def _row_to_block(self, row: sqlite3.Row) -> IRBlock:
-        """Convert a SQLite row to an IRBlock instance."""
         bbox = BoundingBox.model_validate_json(row["bbox_json"]) if row["bbox_json"] else None
         style = StyleMeta.model_validate_json(row["style_json"]) if row["style_json"] else None
         glossary_hits = json.loads(row["glossary_hits_json"]) if row["glossary_hits_json"] else []

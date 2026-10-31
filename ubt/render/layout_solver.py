@@ -1,9 +1,9 @@
-"""1:1 Facsimile 2D monotonic relaxation layout solver.
+"""Per-page 2D solver behind the 1:1 facsimile channel.
 
-Solves:
-1. Single uniform body size per page (s*) via monotonic binary search.
-2. Dynamic vertical leading allocation (leading_em) absorbing EN->ZH contraction without bottom gaps.
-3. Local overlap resolution and source overlap detection.
+A facsimile page has to hold the source geometry with translated text that usually
+occupies less vertical room (EN->ZH contraction), so this searches one uniform body
+size per page by monotonic binary search and then spends the leftover room on leading
+instead of shipping a gap at the foot of the page.
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ FLOOR_PT: float = 7.5
 CEILING_RATIO: float = 1.10
 MAX_BODY_PT: float = 12.0
 TOL_PT: float = 0.5
-DEFAULT_EN_PER_ZH: float = 3.53
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,7 +28,7 @@ class PageLayoutSolution:
     tracking_em: float
     fits: bool
     source_overlap: bool
-    delivery_tier: str  # "L1" | "L2" | "L3"
+    delivery_tier: str  # "L1" | "L2"
     bottleneck_seg_ids: list[str]
 
 
@@ -293,9 +292,12 @@ def solve_page_2d(
 ) -> PageLayoutSolution:
     """Solve uniform font size and leading for a facsimile page.
 
-    Step 1: Check source overlap. If resolve_overlaps is True, resolves micro-overlaps.
-    Step 2: Binary search for uniform font size s* in [floor_pt, ceiling].
-    Step 3: In contraction mode (EN->ZH), dynamically stretch leading to absorb whitespace.
+    The two overlap passes are not the same question: ``resolve_local_overlaps``
+    straightens the micro-jitter of adjacent source boxes when ``resolve_overlaps``
+    is on, while a box pair that still collides afterwards cannot be reproduced 1:1
+    at *any* size and returns L2 before the search runs. The numbered steps in the
+    body are the search proper — Step 1 the uniform size s*, Step 2 the leading
+    stretch that absorbs what Step 1 left over.
 
     Every returned solution is at or above ``floor_pt``. A ceiling below the
     floor (a mis-measured source size) routes to L2 rather than returning a
@@ -407,7 +409,6 @@ def solve_page_2d(
 
 __all__ = [
     "CEILING_RATIO",
-    "DEFAULT_EN_PER_ZH",
     "FLOOR_PT",
     "FitReport",
     "MAX_BODY_PT",

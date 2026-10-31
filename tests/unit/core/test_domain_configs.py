@@ -147,27 +147,6 @@ def test_ubt_config_constructor_unpacks_subdomains() -> None:
     assert cfg.engine.max_concurrency == 8
 
 
-def test_as_subdomains_and_from_subdomains_roundtrip() -> None:
-    original = UBTConfig(
-        draft_model="gemini-2.5-pro",
-        font_family="Noto Serif CJK SC",
-        qe_threshold=0.82,
-        max_concurrency=14,
-    )
-
-    r, t, q, e = original.as_subdomains()
-    assert isinstance(r, RouterConfig)
-    assert isinstance(t, TypstConfig)
-    assert isinstance(q, QualityConfig)
-    assert isinstance(e, EngineConfig)
-
-    recomposed = UBTConfig.from_subdomains(router=r, typst=t, quality=q, engine=e)
-    assert recomposed.draft_model == original.draft_model
-    assert recomposed.font_family == original.font_family
-    assert recomposed.qe_threshold == original.qe_threshold
-    assert recomposed.max_concurrency == original.max_concurrency
-
-
 def test_model_copy_supports_subdomain_updates() -> None:
     base = UBTConfig(
         draft_model="base-model",

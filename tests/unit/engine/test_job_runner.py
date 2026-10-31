@@ -11,14 +11,12 @@ the worker recomputes from its own key.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from ubt.core.config import UBTConfig
 from ubt.core.engine.dry_run import DryRunModelProvider
 from ubt.core.engine.events import TranslationProgressEvent
-from ubt.core.engine.job_runner import build_job_orchestrator, resolve_job_paths
+from ubt.core.engine.job_runner import build_job_orchestrator
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.qe.heuristic import MockQERunner
 
@@ -79,13 +77,3 @@ def test_the_finalize_hook_reaches_both_wirings() -> None:
             rehearse=rehearse,
         )
         assert orchestrator.finalize_job is hook
-
-
-def test_resolve_job_paths_reads_both_shapes(tmp_path: Path) -> None:
-    input_file = tmp_path / "in.pdf"
-    out_file = tmp_path / "out.pdf"
-    assert resolve_job_paths({"input_path": str(input_file)}) == (input_file, None)
-    assert resolve_job_paths({"input_path": str(input_file), "output_path": str(out_file)}) == (
-        input_file,
-        out_file,
-    )

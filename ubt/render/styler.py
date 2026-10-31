@@ -1,43 +1,16 @@
-"""Responsive styling and layout adapter for EPUB 3 and modern Web HTML views.
+"""Responsive stylesheets for the companion HTML and EPUB views.
 
-Provides multi-viewport responsive media queries, E-ink reader contrast tuning,
-bilingual stacked/split viewports, and mobile-friendly table/code containers.
+A reflowable view cannot inherit the PDF's fixed geometry: the reader's device, color
+scheme and bilingual mode decide what a paragraph, table or code block looks like, so
+the media queries, the ``--var`` theme tokens and the ``mode-target`` / ``mode-stacked``
+/ ``mode-split`` / ``mode-source`` class names the toolbar JS switches on are owned
+here and nowhere else.
 """
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Final
 
-
-class DeviceProfile(StrEnum):
-    """Target reader hardware and viewport profiles."""
-
-    MOBILE = "mobile"  # Smartphones (<768px)
-    TABLET = "tablet"  # Tablets and foldable screens (768px-1024px)
-    DESKTOP = "desktop"  # Desktop browsers (>1024px)
-    E_READER = "e_reader"  # E-ink devices (Kindle, Kobo)
-
-
-class ReadingTheme(StrEnum):
-    """Palette and contrast themes for electronic reading."""
-
-    LIGHT = "light"
-    DARK = "dark"
-    SEPIA = "sepia"
-    EINK = "eink"
-
-
-class BilingualMode(StrEnum):
-    """Layout modes for bilingual translated texts."""
-
-    TARGET_ONLY = "mode-target"
-    STACKED = "mode-stacked"
-    SPLIT = "mode-split"
-    SOURCE_ONLY = "mode-source"
-
-
-#: Modern responsive CSS for standalone HTML reading view
 MODERN_HTML_CSS: Final[str] = """
 :root {
   --bg: #ffffff;
@@ -546,12 +519,10 @@ blockquote {
 
 
 def generate_modern_html_css() -> str:
-    """Return the modern responsive stylesheet for HTML book viewing."""
     return MODERN_HTML_CSS
 
 
 def generate_epub_css() -> str:
-    """Return the high-fidelity EPUB 3 publication stylesheet."""
     return EPUB_CSS
 
 

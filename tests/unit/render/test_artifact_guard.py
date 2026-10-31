@@ -25,7 +25,6 @@ from ubt.render.typst.artifact_guard import (
     Sentinel,
     find_sentinels,
     has_sentinel,
-    sentinel_kinds,
 )
 
 pytestmark = pytest.mark.fast
@@ -53,7 +52,6 @@ pytestmark = pytest.mark.fast
 def test_every_family_is_recognised(token: str, kind: str) -> None:
     assert has_sentinel(token)
     assert find_sentinels(token) == [Sentinel(kind=kind, text=token)]
-    assert sentinel_kinds(token) == [kind]
 
 
 def test_the_registry_covers_every_masker_family() -> None:
@@ -85,7 +83,7 @@ def test_the_emphasis_sentinels_come_from_the_emphasis_module() -> None:
 
     for token in (BOLD_OPEN, BOLD_CLOSE, ITALIC_OPEN, ITALIC_CLOSE):
         assert has_sentinel(token), token
-    assert "emphasis" in sentinel_kinds(ITALIC_OPEN)
+    assert [s.kind for s in find_sentinels(ITALIC_OPEN)] == ["emphasis"]
 
 
 def test_a_latex_transcribed_italic_marker_is_a_sentinel() -> None:
@@ -118,7 +116,7 @@ def test_the_latex_transcription_of_the_emphasis_marker_is_recognised() -> None:
         r"\llbracket b \rrbracket",
     ):
         assert has_sentinel(text), text
-        assert sentinel_kinds(text) == ["emphasis"], text
+        assert [s.kind for s in find_sentinels(text)] == ["emphasis"], text
 
 
 # --------------------------------------------------------------------------- #

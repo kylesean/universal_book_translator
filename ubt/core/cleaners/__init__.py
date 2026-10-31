@@ -26,7 +26,6 @@ from ubt.core.cleaners.lnds_pruner import (
 )
 from ubt.core.cleaners.markup_cleanup import (
     clean_model_repair_text,
-    normalize_escaped_entities,
     strip_protocol_tags,
 )
 from ubt.core.cleaners.math_masker import MathMasker
@@ -51,7 +50,6 @@ __all__ = [
     "compress_cjk_punctuations",
     "detect_page_number_lines",
     "fix_kinsoku_prose",
-    "normalize_escaped_entities",
     "prevent_orphan_tails",
     "strip_protocol_tags",
 ]

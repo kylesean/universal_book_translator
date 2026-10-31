@@ -93,8 +93,9 @@ def deterministic_summary(chapter_text: str, max_chars: int = _DETERMINISTIC_CHA
     return cut
 
 
-def build_summary_prompt(chapter_text: str, target_lang: str) -> tuple[str, str]:
-    """Build the bulk chapter-continuation-summary prompt."""
+def _build_summary_prompt(chapter_text: str, target_lang: str) -> tuple[str, str]:
+    """The recap the next chapter's translation is conditioned on: key points,
+    established terminology renderings and tone, in the target language."""
     system_prompt = (
         f"You are a concise story-bible summarizer for a book being translated into {target_lang}.\n"
         "Output ONLY the summary text."
@@ -127,7 +128,7 @@ async def llm_summary(
     own :func:`deterministic_summary` fallback policy.
     """
     try:
-        system_prompt, user_prompt = build_summary_prompt(content, target_lang)
+        system_prompt, user_prompt = _build_summary_prompt(content, target_lang)
         raw = await complete(system_prompt, user_prompt)
         cleaned = (raw or "").strip().strip('"“”').strip()
         normalized = " ".join(cleaned.split())

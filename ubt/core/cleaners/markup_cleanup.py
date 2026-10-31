@@ -1,7 +1,9 @@
-"""Canonical markup hygiene and repair protocol cleaning.
+"""Canonical markup hygiene for model repair responses.
 
-Shared by cleaners and validators to eliminate duplicated regex passes and
-inconsistent entity unescaping when processing model repair responses.
+:mod:`ubt.core.validators.span_repair` is the only consumer: model repair and
+infilling output arrives wrapped in protocol scaffolding with entities still
+escaped, and without one canonical pass each loop re-implemented the pattern and
+they drifted.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ _PROTOCOL_TAGS_RE = re.compile(
 
 
 def strip_protocol_tags(text: str) -> str:
-    """Strip protocol XML/HTML tags emitted during repair and infilling loops."""
+    """Remove the ``error_span`` / ``correction`` / ``final_translation`` scaffolding."""
     return _PROTOCOL_TAGS_RE.sub("", text)
 
 
@@ -31,13 +33,7 @@ def clean_model_repair_text(text: str) -> str:
     return html.unescape(cleaned)
 
 
-def normalize_escaped_entities(text: str) -> str:
-    """Normalize HTML entity sequences in translated text."""
-    return html.unescape(text)
-
-
 __all__ = [
     "clean_model_repair_text",
-    "normalize_escaped_entities",
     "strip_protocol_tags",
 ]

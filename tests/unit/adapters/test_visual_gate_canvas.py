@@ -40,7 +40,6 @@ from ubt.adapters.pdf.visual_gate import (
     CANVAS_MIN_TEXT_PIXELS,
     InkCollisionPage,
     _collision_findings,
-    canvas_ink_collision_findings,
     canvas_ink_collision_pages,
     canvas_ink_collision_ratio,
 )
@@ -260,7 +259,7 @@ def test_a_colliding_page_produces_a_major_finding_naming_the_page(tmp_path: Pat
 
     bg_path, final_path = _page_pair(tmp_path, "fire", background=rule)
 
-    findings = canvas_ink_collision_findings({7: bg_path}, {7: final_path})
+    findings = _collision_findings(canvas_ink_collision_pages({7: bg_path}, {7: final_path}))
 
     assert len(findings) == 1
     finding = findings[0]
@@ -277,7 +276,7 @@ def test_a_colliding_page_produces_a_major_finding_naming_the_page(tmp_path: Pat
 def test_a_clean_page_produces_no_finding(tmp_path: Path) -> None:
     bg_path, final_path = _page_pair(tmp_path, "clean")
 
-    assert canvas_ink_collision_findings({1: bg_path}, {1: final_path}) == []
+    assert _collision_findings(canvas_ink_collision_pages({1: bg_path}, {1: final_path})) == []
 
 
 def test_pages_missing_from_one_side_are_skipped_not_invented(tmp_path: Path) -> None:
@@ -287,7 +286,7 @@ def test_pages_missing_from_one_side_are_skipped_not_invented(tmp_path: Path) ->
     measured = canvas_ink_collision_pages({1: bg_path}, {1: final_path, 2: final_path})
     assert [page.page for page in measured] == [1]
 
-    assert canvas_ink_collision_findings({1: bg_path}, {2: final_path}) == []
+    assert _collision_findings(canvas_ink_collision_pages({1: bg_path}, {2: final_path})) == []
 
 
 def test_every_measured_page_is_kept_even_when_it_is_under_the_threshold(
@@ -326,8 +325,9 @@ def test_a_lower_threshold_fires_on_a_page_the_default_allows(tmp_path: Path) ->
     assert measured is not None
     ratio = measured[0]
 
-    strict = canvas_ink_collision_findings(
-        {1: bg_path}, {1: final_path}, ratio_threshold=ratio - 0.001
+    strict = _collision_findings(
+        canvas_ink_collision_pages({1: bg_path}, {1: final_path}),
+        ratio_threshold=ratio - 0.001,
     )
     assert len(strict) == 1
 

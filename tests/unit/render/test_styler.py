@@ -5,40 +5,12 @@ from __future__ import annotations
 import pytest
 
 from ubt.render.styler import (
-    BilingualMode,
-    DeviceProfile,
-    ReadingTheme,
     generate_epub_css,
     generate_html_interactivity_script,
     generate_modern_html_css,
 )
 
 pytestmark = pytest.mark.fast
-
-
-def test_device_profile_and_theme_enums() -> None:
-    """The CSS values are the wire contract, so assert the values themselves.
-
-    These are ``StrEnum`` members, so ``DeviceProfile.MOBILE == "mobile"`` is
-    true at runtime but the comparison has no static meaning -- mypy reports it
-    as a non-overlapping equality between two unrelated literal types. Reading
-    ``.value`` states the same expectation about the exact strings that reach
-    the stylesheet, which is what the CSS generator actually depends on.
-    """
-    assert DeviceProfile.MOBILE.value == "mobile"
-    assert DeviceProfile.TABLET.value == "tablet"
-    assert DeviceProfile.DESKTOP.value == "desktop"
-    assert DeviceProfile.E_READER.value == "e_reader"
-
-    assert ReadingTheme.LIGHT.value == "light"
-    assert ReadingTheme.DARK.value == "dark"
-    assert ReadingTheme.SEPIA.value == "sepia"
-    assert ReadingTheme.EINK.value == "eink"
-
-    assert BilingualMode.TARGET_ONLY.value == "mode-target"
-    assert BilingualMode.STACKED.value == "mode-stacked"
-    assert BilingualMode.SPLIT.value == "mode-split"
-    assert BilingualMode.SOURCE_ONLY.value == "mode-source"
 
 
 def test_modern_html_css_contains_responsive_and_mobile_queries() -> None:

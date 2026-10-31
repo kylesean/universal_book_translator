@@ -212,7 +212,7 @@ def _load_prices_cached(signature: tuple[str | None, int, int]) -> dict[str, Pri
     return table
 
 
-def load_prices_table(custom_path: Path | str | None = None) -> dict[str, PriceEntry]:
+def _load_prices_table(custom_path: Path | str | None = None) -> dict[str, PriceEntry]:
     """Load pricing table, layering any user-defined prices.toml over the shipped table.
 
     Memoised on the resolved file's ``(path, mtime_ns, size)``. ``estimate_cost_usd``
@@ -224,19 +224,19 @@ def load_prices_table(custom_path: Path | str | None = None) -> dict[str, PriceE
 
 
 def _current_prices_table() -> dict[str, PriceEntry]:
-    """Get the currently active pricing table (shipped + user file if present)."""
-    return load_prices_table()
+    """The table this run prices against: shipped entries plus the user overlay."""
+    return _load_prices_table()
 
 
 # USD per 1M tokens: (input, output).
 #
 # Fallback table, NOT the primary source: ``ubt/resources/prices.toml`` is read
-# first (step 4 of ``resolve_model_prices``) and shadows any same-key entry
-# here (step 5 uses ``len(key) > len(best_key)``, which a same-length key can
-# never satisfy). A key that also exists in the TOML is therefore unreachable,
-# so only the models the TOML does not carry belong here,
-# kept so a missing/partial resource file degrades to a *priced* run instead
-# of an unpriced one. Add new rates to ``ubt/resources/prices.toml``, not here.
+# first and shadows any same-key entry here -- the longest-prefix walk only
+# replaces a match with a strictly longer key, so a same-length key can never
+# win. A key that also exists in the TOML is therefore unreachable, so only the
+# models the TOML does not carry belong here, kept so a missing/partial resource
+# file degrades to a *priced* run instead of an unpriced one.
+# Add new rates to ``ubt/resources/prices.toml``, not here.
 MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     # Gemini (the TOML carries the 1.5/2.5/3.1/3.8 families)
     "gemini-1.5-flash-8b": (0.0375, 0.15),
@@ -475,8 +475,13 @@ def _is_safe_prefix_match(cand: str, key: str) -> bool:
 def resolve_model_prices(model: str) -> tuple[float, float]:
     """Resolve ``(input, output)`` USD price per 1M tokens.
 
-    Exact match takes precedence over family prefix; longest-prefix match is used
-    as fallback so model families resolve without exhaustive enumeration.
+    The precedence ladder, stated once here and reused by
+    :func:`resolve_cached_input_price`: an exact match always beats a family
+    prefix, and a runtime custom price always beats a table entry, because the
+    operator set it for *this* run. Longest safe prefix is the fallback so model
+    families resolve without exhaustive enumeration; if nothing matches, the
+    price stays zero and is logged -- a model that is not priced must not be
+    billed at a relative's rate.
     """
     normalized = (model or "").strip().lower()
     candidates = [normalized]
@@ -486,20 +491,17 @@ def resolve_model_prices(model: str) -> tuple[float, float]:
         if last_segment not in candidates:
             candidates.append(last_segment)
 
-    # 1. Exact match in runtime custom prices:
     for cand in candidates:
         if cand in _CUSTOM_PRICES:
             return _CUSTOM_PRICES[cand]
 
     table = _current_prices_table()
 
-    # 2. Exact match in table:
     for cand in candidates:
         if cand in table:
             entry = table[cand]
             return (entry.input, entry.output)
 
-    # 3. Longest-prefix match in custom prices:
     best_key = ""
     best_prices = (0.0, 0.0)
     for cand in candidates:
@@ -508,14 +510,14 @@ def resolve_model_prices(model: str) -> tuple[float, float]:
                 best_key = key
                 best_prices = prices
 
-    # 4. Longest-prefix match in table:
     for cand in candidates:
         for key, entry in table.items():
             if _is_safe_prefix_match(cand, key) and len(key) > len(best_key):
                 best_key = key
                 best_prices = (entry.input, entry.output)
 
-    # 5. Longest-prefix fallback in legacy MODEL_PRICES_USD_PER_MTOK:
+    # Legacy constant maps: last, because they predate the table and carry no
+    # cached-rate or currency information.
     for cand in candidates:
         for key, prices in MODEL_PRICES_USD_PER_MTOK.items():
             if _is_safe_prefix_match(cand, key) and len(key) > len(best_key):
@@ -545,19 +547,18 @@ def resolve_cached_input_price(model: str) -> float:
         if last_segment not in candidates:
             candidates.append(last_segment)
 
-    # 1. Exact match in runtime custom cached prices:
+    # The same ladder as resolve_model_prices, walked against the cached-input
+    # fields instead of the (input, output) pairs.
     for cand in candidates:
         if cand in _CUSTOM_CACHED_PRICES:
             return _CUSTOM_CACHED_PRICES[cand]
 
     table = _current_prices_table()
 
-    # 2. Exact match in table:
     for cand in candidates:
         if cand in table:
             return table[cand].cached_input
 
-    # 3. Longest-prefix match in custom cached prices:
     best_key = ""
     best_cached = -1.0
     for cand in candidates:
@@ -566,14 +567,12 @@ def resolve_cached_input_price(model: str) -> float:
                 best_key = key
                 best_cached = cached_price
 
-    # 4. Longest-prefix match in table:
     for cand in candidates:
         for key, entry in table.items():
             if _is_safe_prefix_match(cand, key) and len(key) > len(best_key):
                 best_key = key
                 best_cached = entry.cached_input
 
-    # 5. Longest-prefix fallback in legacy CACHED_INPUT_PRICES_USD_PER_MTOK:
     for cand in candidates:
         for key, cached_price in CACHED_INPUT_PRICES_USD_PER_MTOK.items():
             if _is_safe_prefix_match(cand, key) and len(key) > len(best_key):

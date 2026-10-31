@@ -1,13 +1,11 @@
 """Typst layout spill and physical overflow diagnostics.
 
-Performs deterministic geometry scanning over delivered PDF artifacts to detect:
-1. Margin spills: text/tables/formulas extending beyond printable boundaries (left, right, bottom, top);
-2. Column overruns: multi-column content intruding across the central gutter;
-3. Block collisions: overlapping lines and elements (high IoU);
-4. Type collapse: font size shrunk below legibility floor (< 4.5pt);
-5. Typst compiler diagnostics: layout non-convergence and clipping warnings.
-
-Provides terminal ASCII/Rich layout heatmaps to pinpoint exact spatial spill coordinates.
+Geometry is measured on the *delivered PDF*, not on the source IR: a compile that
+succeeds says nothing about where the ink landed, and the spills this module exists
+for — a table crossing the gutter, an unbroken URL past the margin, footnote type
+squeezed under the legibility floor — are invisible to Typst itself. The scan reports
+margin spills, two-column gutter overruns and type collapse, with ASCII heatmaps that
+pin the offending coordinates.
 """
 
 from __future__ import annotations
@@ -26,41 +24,40 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
+# The academic audit specs read the template's own margins; restating them here is
+# how the auditor and the page drifted apart.
+from ubt.render.typst.academic import (
+    ACADEMIC_DUAL_MARGIN_X_CM,
+    ACADEMIC_DUAL_MARGIN_Y_CM,
+    ACADEMIC_SINGLE_MARGIN_X_CM,
+    ACADEMIC_SINGLE_MARGIN_Y_CM,
+)
+
 logger = logging.getLogger(__name__)
 
-# Standard points per unit
 PT_PER_CM = 28.3465
 
-# A4 dimensions in points
 A4_WIDTH_PT = 595.28
 A4_HEIGHT_PT = 841.89
 
-# Default tolerances
 DEFAULT_TOLERANCE_PT = 5.0
 SEVERE_SPILL_DELTA_PT = 15.0
 TYPE_COLLAPSE_FLOOR_PT = 4.0
 TYPE_WARN_FLOOR_PT = 4.8
 
-#: Page number pattern for footer page furniture
 _PAGE_NUMBER_RE = re.compile(r"^(?:[-–—]\s*)?(\d{1,5}|[ivxlcdm]{1,7})\s*(?:[-–—])?$", re.IGNORECASE)
 
 
 class AnomalyType(StrEnum):
-    """Categorized visual layout anomaly classes."""
-
     MARGIN_SPILL_RIGHT = "margin_spill_right"
     MARGIN_SPILL_LEFT = "margin_spill_left"
     MARGIN_SPILL_BOTTOM = "margin_spill_bottom"
     MARGIN_SPILL_TOP = "margin_spill_top"
     GUTTER_OVERRUN = "gutter_overrun"
-    BLOCK_COLLISION = "block_collision"
     TYPE_COLLAPSE = "type_collapse"
-    COMPILER_WARNING = "compiler_warning"
 
 
 class Severity(StrEnum):
-    """Severity rating of layout anomalies."""
-
     INFO = "info"
     WARN = "warn"
     FAIL = "fail"
@@ -68,7 +65,12 @@ class Severity(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class PageLayoutSpec:
-    """Printable page geometry specification in points (bottom-left origin)."""
+    """Printable page geometry specification in points (bottom-left origin).
+
+    ``safe_x0`` / ``safe_x1`` / ``safe_y0`` / ``safe_y1`` are the four printable
+    boundaries the margins imply; ink beyond them, past ``tolerance_pt`` slack,
+    is a spill.
+    """
 
     page_width: float
     page_height: float
@@ -83,31 +85,23 @@ class PageLayoutSpec:
 
     @property
     def safe_x0(self) -> float:
-        """Left safe printable boundary."""
         return self.margin_left
 
     @property
     def safe_x1(self) -> float:
-        """Right safe printable boundary."""
         return self.page_width - self.margin_right
 
     @property
     def safe_y0(self) -> float:
-        """Bottom safe printable boundary."""
         return self.margin_bottom
 
     @property
     def safe_y1(self) -> float:
-        """Top safe printable boundary."""
         return self.page_height - self.margin_top
 
     @property
     def printable_width(self) -> float:
         return max(0.0, self.safe_x1 - self.safe_x0)
-
-    @property
-    def printable_height(self) -> float:
-        return max(0.0, self.safe_y1 - self.safe_y0)
 
     @property
     def column_width(self) -> float:
@@ -118,9 +112,8 @@ class PageLayoutSpec:
 
     @classmethod
     def book(cls, paper: str = "a4", tolerance_pt: float = DEFAULT_TOLERANCE_PT) -> PageLayoutSpec:
-        """Standard monograph book specification: x: 2.2cm, y: 2.4cm."""
-        margin_x = 2.2 * PT_PER_CM  # ~62.36 pt
-        margin_y = 2.4 * PT_PER_CM  # ~68.03 pt
+        margin_x = 2.2 * PT_PER_CM
+        margin_y = 2.4 * PT_PER_CM
         return cls(
             page_width=A4_WIDTH_PT,
             page_height=A4_HEIGHT_PT,
@@ -137,9 +130,14 @@ class PageLayoutSpec:
     def academic_dual(
         cls, paper: str = "a4", tolerance_pt: float = DEFAULT_TOLERANCE_PT
     ) -> PageLayoutSpec:
-        """Academic two-column layout: x: 1.8cm, y: 2.0cm, gutter: ~29pt."""
-        margin_x = 1.8 * PT_PER_CM  # ~51.02 pt
-        margin_y = 2.0 * PT_PER_CM  # ~56.69 pt
+        """Audit spec for the academic two-column template.
+
+        The margins are read from ``ubt.render.typst.academic`` rather than spelled
+        out again: an audit that assumes a safe area the page never had reports
+        spills that are not there, and hides the ones that are.
+        """
+        margin_x = ACADEMIC_DUAL_MARGIN_X_CM * PT_PER_CM
+        margin_y = ACADEMIC_DUAL_MARGIN_Y_CM * PT_PER_CM
         return cls(
             page_width=A4_WIDTH_PT,
             page_height=A4_HEIGHT_PT,
@@ -157,9 +155,9 @@ class PageLayoutSpec:
     def academic_single(
         cls, paper: str = "a4", tolerance_pt: float = DEFAULT_TOLERANCE_PT
     ) -> PageLayoutSpec:
-        """Academic single-column layout: x: 2.5cm, y: 2.5cm."""
-        margin_x = 2.5 * PT_PER_CM  # ~70.87 pt
-        margin_y = 2.5 * PT_PER_CM  # ~70.87 pt
+        """Audit spec for the academic single-column template (same rule as two-column)."""
+        margin_x = ACADEMIC_SINGLE_MARGIN_X_CM * PT_PER_CM
+        margin_y = ACADEMIC_SINGLE_MARGIN_Y_CM * PT_PER_CM
         return cls(
             page_width=A4_WIDTH_PT,
             page_height=A4_HEIGHT_PT,
@@ -174,7 +172,6 @@ class PageLayoutSpec:
 
     @classmethod
     def from_name(cls, name: str, tolerance_pt: float = DEFAULT_TOLERANCE_PT) -> PageLayoutSpec:
-        """Resolve layout spec from template name."""
         norm = name.lower().replace("-", "_").strip()
         if norm in ("academic_dual", "dual", "two_column"):
             return cls.academic_dual(tolerance_pt=tolerance_pt)
@@ -190,8 +187,8 @@ class LayoutAnomaly:
     anomaly_type: AnomalyType
     severity: Severity
     page: int
-    bbox: tuple[float, float, float, float]  # (x0, y0, x1, y1)
-    delta_pt: float  # Points exceeding the safe limit
+    bbox: tuple[float, float, float, float]
+    delta_pt: float
     text_snippet: str
     font_size: float = 0.0
     details: str = ""
@@ -213,7 +210,7 @@ class LayoutAnomaly:
 
 @dataclass(slots=True)
 class PageLayoutReport:
-    """Layout audit findings for an individual document page."""
+    """One page's audit findings."""
 
     page: int
     page_width: float
@@ -243,7 +240,7 @@ class PageLayoutReport:
 
 @dataclass(slots=True)
 class DocumentLayoutReport:
-    """Full-document visual spill and physical layout report."""
+    """Whole-document spill report."""
 
     pdf_path: str
     total_pages: int
@@ -274,7 +271,7 @@ class DocumentLayoutReport:
 
     @property
     def passed(self) -> bool:
-        """Pass verdict: no ERROR/FAIL severity anomalies."""
+        """No FAIL-severity anomaly; warnings alone still pass."""
         return self.error_count == 0
 
     def to_dict(self) -> dict[str, Any]:
@@ -305,15 +302,12 @@ def is_page_furniture(
     stripped = text.strip()
     if not stripped:
         return True
-    # Footer page numbers
     if y1 <= margin_bottom + 12.0 and _PAGE_NUMBER_RE.match(stripped):
         return True
-    # Running header at top of page
     return bool(y0 >= page_height - 45.0 and len(stripped) < 70)
 
 
 def _suggest_action(text: str, anomaly_type: AnomalyType) -> str:
-    """Generate precise corrective guidance for resolving the layout defect."""
     if anomaly_type == AnomalyType.TYPE_COLLAPSE:
         return "Increase table cell scale or break dense multi-column cell text."
     if "$" in text or "\\" in text:
@@ -336,17 +330,20 @@ def scan_page_anomalies(
     page_no: int,
     spec: PageLayoutSpec,
 ) -> PageLayoutReport:
-    """Scan extracted lines of a single page against the layout specification."""
+    """Scan one page's extracted lines against the layout specification.
+
+    The horizontal and vertical checks are separate ``if``/``elif`` chains, so a
+    line that spills past both margins is reported once, while a line can still
+    carry a horizontal *and* a vertical finding.
+    """
     anomalies: list[LayoutAnomaly] = []
     tol = spec.tolerance_pt
 
-    # Safe boundaries
     safe_x0 = spec.safe_x0
     safe_x1 = spec.safe_x1
     safe_y0 = spec.safe_y0
     safe_y1 = spec.safe_y1
 
-    # Multi-column bounds
     is_dual = spec.columns == 2
     col1_x1 = safe_x0 + spec.column_width if is_dual else safe_x1
     col2_x0 = col1_x1 + spec.gutter if is_dual else safe_x0
@@ -358,15 +355,12 @@ def scan_page_anomalies(
         x0, y0, x1, y1 = float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3])
         snippet = text.strip()[:60]
 
-        # Ignore empty lines
         if not snippet:
             continue
 
-        # Skip legit page numbers & headers
         if is_page_furniture(snippet, y0, y1, spec.page_height, safe_y0):
             continue
 
-        # 1. Right Margin Spill
         if x1 > safe_x1 + tol:
             delta = x1 - safe_x1
             sev = (
@@ -388,7 +382,6 @@ def scan_page_anomalies(
                 )
             )
 
-        # 2. Left Margin Spill
         elif x0 < safe_x0 - tol:
             delta = safe_x0 - x0
             sev = Severity.FAIL if delta > SEVERE_SPILL_DELTA_PT or x0 < 8.0 else Severity.WARN
@@ -406,7 +399,6 @@ def scan_page_anomalies(
                 )
             )
 
-        # 3. Gutter Overrun in Multi-column
         if is_dual and safe_x0 - tol <= x0 < col1_x1 and x1 > col1_x1 + tol and x1 < col2_x0 + 40.0:
             delta = x1 - col1_x1
             sev = Severity.FAIL if delta > 12.0 else Severity.WARN
@@ -424,7 +416,6 @@ def scan_page_anomalies(
                 )
             )
 
-        # 4. Bottom Margin Spill (vertical overflow)
         if y0 < safe_y0 - tol:
             delta = safe_y0 - y0
             sev = Severity.FAIL if y0 < 15.0 else Severity.WARN
@@ -442,7 +433,6 @@ def scan_page_anomalies(
                 )
             )
 
-        # 5. Top Margin Spill
         elif y1 > safe_y1 + tol:
             delta = y1 - safe_y1
             sev = Severity.FAIL if y1 > spec.page_height - 10.0 else Severity.WARN
@@ -460,7 +450,6 @@ def scan_page_anomalies(
                 )
             )
 
-        # 6. Type Collapse Detection
         if 0.1 < font_sz < TYPE_WARN_FLOOR_PT and len(snippet) > 6:
             sev = Severity.FAIL if font_sz < TYPE_COLLAPSE_FLOOR_PT else Severity.WARN
             anomalies.append(
@@ -493,13 +482,17 @@ def diagnose_pdf_layout(
     tolerance_pt: float = DEFAULT_TOLERANCE_PT,
     compiler_stderr: str | None = None,
 ) -> DocumentLayoutReport:
-    """Diagnose physical layout spills, margin leaks, and overflows across a PDF artifact."""
+    """Scan a delivered PDF page by page.
+
+    ``compiler_stderr`` is the Typst stderr of the run that produced it: the
+    compiler's own non-convergence and clipping warnings are collected alongside
+    the measured geometry, since each catches spills the other cannot see.
+    """
     from ubt.adapters.pdf.textgeom import extract_lines
 
     if not pdf_path.exists():
         raise FileNotFoundError(f"PDF document not found: {pdf_path}")
 
-    # Determine total pages via pypdfium2
     import pypdfium2 as pdfium
 
     pdf = pdfium.PdfDocument(str(pdf_path))
@@ -564,7 +557,6 @@ def diagnose_pdf_layout(
         except Exception as exc:
             logger.debug("Failed to extract layout geometry for page %d: %s", p, exc)
 
-    # Parse compiler stderr for warnings
     comp_warnings: list[str] = []
     if compiler_stderr:
         for line in compiler_stderr.splitlines():
@@ -592,11 +584,9 @@ def render_ascii_heatmap(
     width_chars: int = 36,
     height_chars: int = 16,
 ) -> str:
-    """Render an ASCII/Rich coordinate heatmap diagram representing the page layout and anomalies."""
     pw, ph = report.page_width, report.page_height
     grid = [[" " for _ in range(width_chars)] for _ in range(height_chars)]
 
-    # Draw page boundaries
     for c in range(width_chars):
         grid[0][c] = "─"
         grid[height_chars - 1][c] = "─"
@@ -608,13 +598,11 @@ def render_ascii_heatmap(
     grid[height_chars - 1][0] = "└"
     grid[height_chars - 1][width_chars - 1] = "┘"
 
-    # Compute printable margin boundaries in grid space (row 0 is top)
     col_left = max(1, min(width_chars - 2, int((spec.safe_x0 / pw) * (width_chars - 1))))
     col_right = max(1, min(width_chars - 2, int((spec.safe_x1 / pw) * (width_chars - 1))))
     row_top = max(1, min(height_chars - 2, int(((ph - spec.safe_y1) / ph) * (height_chars - 1))))
     row_bottom = max(1, min(height_chars - 2, int(((ph - spec.safe_y0) / ph) * (height_chars - 1))))
 
-    # Dashed safe zone outlines
     for r in range(row_top, row_bottom + 1):
         if grid[r][col_left] == " ":
             grid[r][col_left] = "┆"
@@ -626,7 +614,6 @@ def render_ascii_heatmap(
         if grid[row_bottom][c] == " ":
             grid[row_bottom][c] = "┄"
 
-    # Multi-column gutter outline
     if spec.columns == 2:
         col1_max = spec.safe_x0 + spec.column_width
         col2_min = col1_max + spec.gutter
@@ -638,13 +625,13 @@ def render_ascii_heatmap(
             if grid[r][c_g2] == " ":
                 grid[r][c_g2] = "┊"
 
-    # Fill content area lightly
     for r in range(row_top + 1, row_bottom):
         for c in range(col_left + 1, col_right):
             if grid[r][c] == " ":
                 grid[r][c] = "·"
 
-    # Highlight anomalies with bold styled glyphs
+    # The cells hold Rich markup, not plain glyphs: the joined grid is printed
+    # through a Console, which interprets them.
     for a in report.anomalies:
         x0, y0, x1, y1 = a.bbox
         c0 = max(0, min(width_chars - 1, int((x0 / pw) * (width_chars - 1))))
@@ -672,7 +659,6 @@ def print_rich_layout_report(
     console: Console | None = None,
     show_heatmap: bool = True,
 ) -> None:
-    """Render a comprehensive diagnostic terminal report with summary cards and visual layout heatmaps."""
     out = console or Console()
 
     status_style = "bold green" if report.passed else "bold red"
@@ -697,7 +683,6 @@ def print_rich_layout_report(
         )
         return
 
-    # Anomalies summary table
     table = Table(title=f"Detected Layout Anomalies ({len(report.all_anomalies)} total)")
     table.add_column("Page", justify="right", style="cyan", no_wrap=True)
     table.add_column("Type", no_wrap=True)
@@ -726,7 +711,6 @@ def print_rich_layout_report(
 
     out.print(table)
 
-    # Optional Visual Heatmap per anomalous page
     if show_heatmap:
         out.print("\n[bold]Spatial Layout Heatmaps (spilling zones highlighted):[/bold]\n")
         for p in report.spill_pages:

@@ -1,7 +1,12 @@
-"""Unified prompt context assembler across Draft, Repair, and Consistency stages.
+"""Budgeted prompt context assembly shared by the prompt builders.
 
-Provides deterministic context budgeting, consistent terminology injection,
-and clean separation of system and user prompt roles across translation workflows.
+Every stage's builder needs the same three decisions before it can format a
+prompt: how much terminology to keep, how much continuity summary to keep, how
+many critique issues to list. Those helpers live here,
+:mod:`ubt.core.router.prompts` calls them from its draft and repair builders, and
+:class:`PromptContextAssembler` is the budget-aware entry point for the repair
+strategies. Keeping the budgeting in one module is what stops each stage from
+growing its own truncation rules that silently disagree.
 """
 
 from __future__ import annotations
@@ -26,10 +31,11 @@ def assemble_terminology_table(
     chunk_glossary: str = "",
     budget: ContextBudget | None = None,
 ) -> tuple[str, str]:
-    """Assemble and budget global and chunk terminology tables.
+    """Fit the global and chunk glossaries into ``max_terminology_tokens``.
 
-    Returns ``(budgeted_global, budgeted_chunk)``, ensuring neither exceeds
-    allocated token quotas.
+    A single glossary gets the whole quota; when both are present the quota is
+    divided evenly, because nothing at this point in the pipeline makes one more
+    valuable than the other, and an uneven rule would quietly starve one stage.
     """
     b = budget or ContextBudget()
     max_term_tokens = b.max_terminology_tokens
@@ -112,142 +118,17 @@ def assemble_critique_issues(
 
 
 class PromptContextAssembler:
-    """Unified coordinator for assembling prompt payloads across Draft, Repair, and Consistency.
+    """Budget-aware entry point for the three repair prompt strategies.
 
-    Enforces context budgeting, prevents token blowout, and standardizes terminology
-    and error critique structure across all stages.
+    One ``strategy`` string selects minimal, hybrid or rich; terminology is
+    budgeted once here so the strategies cannot differ from each other in how
+    much glossary they smuggle into the context. Draft and consistency prompts
+    are not routed through this class -- their builders call the same helpers
+    directly, which is why only repair has a wrapper.
     """
 
     def __init__(self, budget: ContextBudget | None = None) -> None:
         self.budget = budget or ContextBudget()
-
-    def assemble_draft(
-        self,
-        source_text: str,
-        *,
-        strategy: PromptStrategy | str = "hybrid",
-        glossary_table: str = "",
-        neighbor_context: str = "",
-        target_lang: str = "zh",
-        source_lang: str = "en",
-        genre_profile: str = "general",
-        rolling_summary: str = "",
-        global_glossary: str = "",
-        few_shot_reference: str = "",
-        epoch_summary: str = "",
-        domain: str | None = None,
-        block_type: str | None = None,
-    ) -> tuple[str, str]:
-        """Assemble a budgeted single-block draft prompt using the configured strategy."""
-        from ubt.core.router.prompts import (
-            build_hybrid_draft_prompt,
-            build_minimal_draft_prompt,
-            build_rich_draft_prompt,
-        )
-
-        b_global, b_chunk = assemble_terminology_table(
-            global_glossary=global_glossary,
-            chunk_glossary=glossary_table,
-            budget=self.budget,
-        )
-        b_epoch, b_rolling = assemble_continuity_context(
-            epoch_summary=epoch_summary,
-            rolling_summary=rolling_summary,
-            budget=self.budget,
-        )
-        b_neighbor = truncate_text_to_budget(neighbor_context, self.budget.max_neighbor_tokens)
-        b_few_shot = truncate_text_to_budget(few_shot_reference, self.budget.max_few_shot_tokens)
-
-        strat_str = str(strategy).lower()
-        if "minimal" in strat_str:
-            return build_minimal_draft_prompt(
-                source_text=source_text,
-                glossary_table=b_chunk,
-                target_lang=target_lang,
-                source_lang=source_lang,
-                global_glossary=b_global,
-                few_shot_reference=b_few_shot,
-                genre_profile=genre_profile,
-                domain=domain,
-                block_type=block_type,
-            )
-        if "hybrid" in strat_str:
-            return build_hybrid_draft_prompt(
-                source_text=source_text,
-                glossary_table=b_chunk,
-                neighbor_context=b_neighbor,
-                target_lang=target_lang,
-                source_lang=source_lang,
-                genre_profile=genre_profile,
-                rolling_summary=b_rolling,
-                global_glossary=b_global,
-                few_shot_reference=b_few_shot,
-                epoch_summary=b_epoch,
-                domain=domain,
-                block_type=block_type,
-            )
-        return build_rich_draft_prompt(
-            source_text=source_text,
-            glossary_table=b_chunk,
-            neighbor_context=b_neighbor,
-            target_lang=target_lang,
-            source_lang=source_lang,
-            genre_profile=genre_profile,
-            rolling_summary=b_rolling,
-            global_glossary=b_global,
-            few_shot_reference=b_few_shot,
-            epoch_summary=b_epoch,
-            domain=domain,
-            block_type=block_type,
-        )
-
-    def assemble_macro_chunk(
-        self,
-        blocks: list[tuple[str, str]],
-        *,
-        glossary_table: str = "",
-        neighbor_context: str = "",
-        target_lang: str = "zh",
-        source_lang: str = "en",
-        genre_profile: str = "general",
-        rolling_summary: str = "",
-        global_glossary: str = "",
-        few_shot_reference: str = "",
-        epoch_summary: str = "",
-        domain: str | None = None,
-        section_context: str = "",
-    ) -> tuple[str, str]:
-        """Assemble a budgeted multi-block macro-chunk draft prompt."""
-        from ubt.core.router.prompts import build_macro_chunk_draft_prompt
-
-        b_global, b_chunk = assemble_terminology_table(
-            global_glossary=global_glossary,
-            chunk_glossary=glossary_table,
-            budget=self.budget,
-        )
-        b_epoch, b_rolling = assemble_continuity_context(
-            epoch_summary=epoch_summary,
-            rolling_summary=rolling_summary,
-            budget=self.budget,
-        )
-        b_neighbor = truncate_text_to_budget(neighbor_context, self.budget.max_neighbor_tokens)
-        b_few_shot = truncate_text_to_budget(few_shot_reference, self.budget.max_few_shot_tokens)
-        b_section = truncate_text_to_budget(section_context, self.budget.max_neighbor_tokens)
-
-        return build_macro_chunk_draft_prompt(
-            blocks=blocks,
-            glossary_table=b_chunk,
-            neighbor_context=b_neighbor,
-            target_lang=target_lang,
-            source_lang=source_lang,
-            genre_profile=genre_profile,
-            rolling_summary=b_rolling,
-            global_glossary=b_global,
-            few_shot_reference=b_few_shot,
-            epoch_summary=b_epoch,
-            domain=domain,
-            section_context=b_section,
-        )
 
     def assemble_repair(
         self,
@@ -310,32 +191,6 @@ class PromptContextAssembler:
             annotated_draft=annotated_draft,
             has_error_spans=has_error_spans,
             global_glossary=b_global,
-        )
-
-    def assemble_consistency(
-        self,
-        source_text: str,
-        draft_text: str,
-        consistency_flags: list[str],
-        *,
-        strategy: PromptStrategy | str = "rich",
-        glossary_table: str = "",
-        global_glossary: str = "",
-        target_lang: str = "zh",
-        source_lang: str = "en",
-        prior_error_flags: list[str] | None = None,
-    ) -> tuple[str, str]:
-        """Assemble a consistency re-translation prompt with strict terminology enforcement."""
-        combined_flags = list(prior_error_flags or []) + list(consistency_flags)
-        return self.assemble_repair(
-            source_text=source_text,
-            draft_text=draft_text,
-            error_flags=combined_flags,
-            strategy=strategy,
-            glossary_table=glossary_table,
-            global_glossary=global_glossary,
-            target_lang=target_lang,
-            source_lang=source_lang,
         )
 
 

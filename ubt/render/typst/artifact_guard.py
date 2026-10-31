@@ -113,9 +113,4 @@ def has_sentinel(text: str) -> bool:
     return _SENTINEL_RE.search(text) is not None or _LATEX_EMPHASIS_RE.search(text) is not None
 
 
-def sentinel_kinds(text: str) -> list[str]:
-    """The distinct sentinel families in ``text`` (for a quality report)."""
-    return sorted({s.kind for s in find_sentinels(text)})
-
-
-__all__ = ["Sentinel", "find_sentinels", "has_sentinel", "sentinel_kinds"]
+__all__ = ["Sentinel", "find_sentinels", "has_sentinel"]

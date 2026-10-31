@@ -36,10 +36,5 @@ class Composition:
     output_path: Path
     placements: tuple[Placement, ...]
 
-    @property
-    def kept_source_ids(self) -> tuple[str, ...]:
-        """Elements kept as source rather than delivered (no drawing for their target)."""
-        return tuple(placement.element_id for placement in self.placements if placement.kept_source)
-
 
 __all__ = ["Composition", "Placement"]

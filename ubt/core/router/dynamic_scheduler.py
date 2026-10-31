@@ -21,7 +21,6 @@ Architecture:
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Sequence
 from enum import StrEnum
@@ -541,10 +540,6 @@ class DynamicParetoScheduler:
             lines.append(f"| `{t.upper()}` | {cnt} | {share:.1f}% |")
 
         return "\n".join(lines)
-
-    def render_simulation_json(self, report: DynamicRoutingSimulationReport) -> str:
-        """Render JSON format simulation results."""
-        return json.dumps(report.model_dump(), ensure_ascii=False, indent=2)
 
 
 __all__ = [

@@ -1282,17 +1282,3 @@ class TranslationMemory:
         if pair is not None and generation is not None:
             self._count_gen[pair] = generation
         return count
-
-    def get_use_count(self, src_lang: str, tgt_lang: str, source_text: str) -> int:
-        """Return the maximum use_count for a normalized source in a language pair."""
-        normalized = normalize_for_tm(source_text)
-        if not normalized:
-            return 0
-        key = _source_hash(normalized)
-        row = _read_one(
-            self._get_read_conn(),
-            "SELECT MAX(use_count) FROM tm_entries "
-            "WHERE src_lang = ? AND tgt_lang = ? AND src_hash = ?",
-            (src_lang, tgt_lang, key),
-        )
-        return int(row[0]) if row and row[0] is not None else 0

@@ -1,14 +1,11 @@
-"""Typst adaptive layout auto-healing pass and multiline formula folding.
+"""Typst adaptive layout auto-healing.
 
-Executes an auto-healing compilation loop (Auto-Healing Pass) when physical layout spills
-are detected in rendered PDF deliverables:
-1. Smart Multiline Formula Folding: Breaks long mathematical equations across lines at
-   top-level relation or binary operators (outside brackets/groupings);
-2. Adaptive Table Scaling: Proportionally scales table column allocations and cell font sizes;
-3. Adaptive Paragraph Spacing: Tightens paragraph spacing slightly when vertical page
-   bounds are breached;
-4. Iterative Recompilation & Verification: Compares layout diagnostics before and after,
-   accepting candidate only if spills and max overflow are strictly reduced.
+A page that compiles can still ship ink outside the margins, and the human fix is
+to shorten what overflowed. :meth:`LayoutAutoHealer.run_healing_loop` does the
+mechanical version: it reads the layout audit of the delivered PDF, rebuilds the
+document with tighter tables, formulas and paragraph spacing, recompiles, and
+promotes a candidate **only** when the measured spill strictly shrinks — a pass
+that made the page worse is thrown away rather than delivered.
 """
 
 from __future__ import annotations
@@ -28,19 +25,6 @@ from ubt.render.typst.layout_diagnostics import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def fold_multiline_math(math_body: str, max_chars: int = 50) -> str:
-    """Break a long Typst math expression across lines at top-level operators.
-
-    Operates only at bracket depth 0 (outside parentheses, brackets, or braces) so
-    fractions, matrices, and sub-expressions are preserved intact.
-    Inserts Typst math line breaks (`\\ `) immediately before operator tokens.
-    """
-    from ubt.core.math.breaker import break_equation
-    from ubt.core.math.models import MathSyntax
-
-    return break_equation(math_body, target_width=max_chars, syntax=MathSyntax.TYPST, align=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,8 +74,6 @@ class AutoHealingReport:
 
 
 class LayoutAutoHealer:
-    """Adaptive layout auto-healing pass manager."""
-
     def __init__(
         self,
         spec: PageLayoutSpec,
@@ -109,7 +91,6 @@ class LayoutAutoHealer:
         renderer_builder_fn: Callable[..., Any],
         compile_fn: Callable[[str, str], tuple[bool, str]],
     ) -> tuple[bool, AutoHealingReport]:
-        """Diagnose initial PDF deliverable and execute iterative auto-healing passes if needed."""
         initial_rep = diagnose_pdf_layout(output_path, spec=self.spec)
         initial_max_ov = max((a.delta_pt for a in initial_rep.all_anomalies), default=0.0)
 
@@ -139,7 +120,6 @@ class LayoutAutoHealer:
         for pass_num in range(1, self.max_passes + 1):
             report.passes_attempted = pass_num
 
-            # Classify primary anomaly triggers
             has_horizontal_spill = any(
                 a.anomaly_type
                 in (
@@ -158,7 +138,6 @@ class LayoutAutoHealer:
                 for a in current_rep.all_anomalies
             )
 
-            # Determine remediation parameters per pass
             if pass_num == 1:
                 table_scale_factor = 0.88 if has_horizontal_spill else 1.0
                 formula_scale = 0.90 if has_horizontal_spill else 1.0
@@ -194,7 +173,6 @@ class LayoutAutoHealer:
             healed_rep = diagnose_pdf_layout(healed_pdf, spec=self.spec)
             healed_max_ov = max((a.delta_pt for a in healed_rep.all_anomalies), default=0.0)
 
-            # Evaluate improvement
             improved = healed_rep.error_count < current_rep.error_count or (
                 healed_rep.error_count == current_rep.error_count
                 and healed_max_ov < current_max_ov - 1.0
@@ -214,7 +192,6 @@ class LayoutAutoHealer:
                 )
                 actions.append(action)
 
-                # Overwrite output PDF with healed artifact
                 shutil.copy2(healed_pdf, output_path)
                 current_rep = healed_rep
                 current_max_ov = healed_max_ov
@@ -244,5 +221,4 @@ __all__ = [
     "AutoHealingAction",
     "AutoHealingReport",
     "LayoutAutoHealer",
-    "fold_multiline_math",
 ]

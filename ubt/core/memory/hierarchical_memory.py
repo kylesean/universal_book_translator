@@ -1,13 +1,14 @@
-"""Hierarchical memory management for translation pipelines.
+"""Three tiers of translation context, each paid for differently.
 
-Provides three-tier context memory:
-1. L1 Micro-Context: Fast local neighbor sliding window (forward/backward within same semantic flow).
-2. L2 Macro-Step Snapshot: Rolling cumulative summary triggered by character/token step threshold
-   (default 3500 chars) or chapter transitions. Ensures continuity for both chaptered books and
-   unsegmented long documents (papers, reports) while maximizing prompt prefix cacheability.
-3. L3 Epoch Summary: every ``l3_epoch_steps`` L2 snapshots are compressed into one
-   epoch entry that rides the static prompt prefix right after the global glossary — chapter 30
-   finally knows what happened in chapters 1-10 without paying per-step cache invalidation.
+L1 is a local neighbour window around the block being drafted, L2 a rolling
+macro snapshot taken every ``step_chars`` or at a chapter boundary, L3 a
+deterministic compression of several L2 snapshots.
+
+The split is a cacheability trade, not a granularity preference: L3 is written
+once per closed epoch and rides the *static* prompt prefix right after the
+global glossary, so chapter 30 can know what happened in chapters 1-10 without
+paying per-step prefix-cache invalidation. L2 changes on every step, so it never
+enters the prefix.
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ class EpochSnapshot:
 
 
 class HierarchicalMemoryManager:
-    """Two-tier memory manager maintaining L1 neighbor context and L2 macro step snapshots.
+    """Three-tier memory: L1 neighbour context, L2 macro step snapshots, L3 epoch summaries.
 
     ``enabled`` is the draft policy's ``rolling_enabled`` decision (see
     :func:`ubt.core.engine.stages.draft.resolve_draft_policy`): a single-chapter
@@ -111,7 +112,13 @@ class HierarchicalMemoryManager:
         fallback_prev_text: str | None = None,
         fallback_next_text: str | None = None,
     ) -> str:
-        """Extract L1 micro neighbor context within the same semantic flow."""
+        """Neighbour context for ``target_block``, isolated to its own semantic flow.
+
+        The flow filter lives in
+        :meth:`NeighborContextBuilder.extract_from_blocks`; the fallbacks cover
+        the ends of a window the caller had to truncate (a chapter boundary, a
+        page slice), where the true neighbour is not in ``surrounding_blocks``.
+        """
         return self.neighbor_builder.extract_from_blocks(
             target_block=target_block,
             surrounding_blocks=surrounding_blocks,
@@ -148,7 +155,14 @@ class HierarchicalMemoryManager:
         return len(self._unsummarized_blocks)
 
     def should_trigger_snapshot(self, next_block: IRBlock | None = None) -> bool:
-        """Check if buffer has accumulated enough content or crossed a chapter boundary."""
+        """Whether the buffer must be recapped now.
+
+        Either the step threshold is reached, or ``next_block`` starts a new
+        chapter and the buffer already holds enough text to be worth cutting a
+        snapshot here — below :data:`_SNAPSHOT_MIN_BUFFER_CHARS` a boundary
+        simply folds into the next regular snapshot rather than producing a
+        recap of two blocks.
+        """
         if not self.enabled or not self._unsummarized_blocks:
             return False
 
@@ -289,15 +303,7 @@ class HierarchicalMemoryManager:
             kept.reverse()
         return "\n".join(kept)[: self.max_l3_chars]
 
-    def format_l3_prompt_block(self, summary_text: str) -> str:
-        """Render the L3 epoch block for prompt injection (static-prefix slot)."""
-        clean = summary_text.strip()
-        if not clean:
-            return ""
-        return f"### Book Continuity (Compressed History)\n{clean}"
-
     def get_latest_macro_summary(self) -> str:
-        """Get the most recent macro snapshot summary text."""
         if not self._snapshots:
             return ""
         return self._snapshots[-1].summary_text

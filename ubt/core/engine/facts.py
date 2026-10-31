@@ -1,4 +1,4 @@
-"""Values one stage produces and a later one consumes (explicit stage execution context).
+"""Values one stage produces and a later one consumes.
 
 The plan owns these values and hands each to the stage that reads it, so "what
 flows between stages" is a named, typed parameter rather than a mutable field
@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 from ubt.core.config import DualMode
 from ubt.core.engine.repair_loop import RepairLoop
-from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
+from ubt.core.ir.render_plan import RenderPlan
 from ubt.core.policy.bilingual_advisor import Advisory
 from ubt.core.qe.base import BaseQERunner
 
@@ -81,7 +81,6 @@ class RunFacts:
 
 __all__ = [
     "LayoutAdvisory",
-    "RenderOutcome",
     "RenderPlan",
     "RunFacts",
     "Scoring",

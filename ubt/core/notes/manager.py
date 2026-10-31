@@ -6,13 +6,10 @@ import html
 import re
 from collections.abc import Sequence
 
-from ubt.core.ir.models import BlockType, IRBlock, make_element
 from ubt.core.notes.models import (
     FootnoteItem,
     NoteNumberingStyle,
-    NotePlacement,
     NotesConfig,
-    NotesTopology,
 )
 
 
@@ -132,126 +129,7 @@ def inject_endnote_links_into_text(
 
 
 class FootnoteFlowManager:
-    """High-level orchestrator for footnote and endnote transformation across IR blocks."""
+    """Holds the note placement configuration used by the render legs."""
 
     def __init__(self, config: NotesConfig | None = None) -> None:
         self.config = config or NotesConfig()
-
-    def transform_blocks(self, blocks: Sequence[IRBlock], topology: NotesTopology) -> list[IRBlock]:
-        """Transform IRBlocks according to the configured note placement policy."""
-        if not topology.notes:
-            return list(blocks)
-
-        # Map source_block_id -> list of FootnoteItem
-        notes_by_source: dict[str, list[FootnoteItem]] = {}
-        for n in topology.notes:
-            if n.source_block_id:
-                notes_by_source.setdefault(n.source_block_id, []).append(n)
-
-        # Map chapter_index -> list of FootnoteItem
-        notes_by_chapter: dict[int, list[FootnoteItem]] = {}
-        for n in topology.notes:
-            notes_by_chapter.setdefault(n.chapter_index, []).append(n)
-
-        result: list[IRBlock] = []
-        current_chapter_idx = 1
-
-        for i, block in enumerate(blocks):
-            # Check if this block is a consumed footnote definition block
-            if block.id in topology.def_block_ids:
-                # Omit definition block from the main body stream
-                continue
-
-            b_type = str(getattr(block.block_type, "value", block.block_type) or "")
-            lvl = (
-                getattr(getattr(block, "element", None), "level", None)
-                or getattr(block, "level", None)
-                or 1
-            )
-            is_h1 = b_type == "heading" and lvl == 1
-
-            if is_h1 and self.config.placement == NotePlacement.CHAPTER_ENDNOTE and i > 0:
-                prev_notes = notes_by_chapter.get(current_chapter_idx, [])
-                if prev_notes:
-                    endnote_markup = render_endnote_section_typst(prev_notes, self.config)
-                    el = make_element(
-                        id=f"endnotes-ch{current_chapter_idx}",
-                        spine_index=1,
-                        block_type=BlockType.NARRATIVE,
-                        source_text=endnote_markup,
-                    )
-                    # Only ``element`` and the state fields are real inputs;
-                    # ``id``/``block_type``/``source_text`` are read-only
-                    # projections of it, so passing them was silently dropped by
-                    # ``extra="ignore"`` and made the call look like it could
-                    # disagree with its own element.
-                    result.append(IRBlock(element=el, target_text=endnote_markup))
-                current_chapter_idx += 1
-
-            # Inlining for page-bottom footnote placement in Typst
-            if self.config.placement == NotePlacement.FOOTNOTE and block.id in notes_by_source:
-                text = block.target_text or block.source_text or ""
-                transformed_text = inject_typst_footnotes_into_text(text, notes_by_source[block.id])
-                result.append(
-                    IRBlock(
-                        element=block.element,
-                        target_text=transformed_text,
-                        draft_text=block.draft_text,
-                        status=block.status,
-                        provenance=block.provenance,
-                    )
-                )
-                continue
-
-            # Inlining link anchors for endnote placement
-            if (
-                self.config.placement in (NotePlacement.CHAPTER_ENDNOTE, NotePlacement.BOOK_ENDNOTE)
-                and block.id in notes_by_source
-            ):
-                text = block.target_text or block.source_text or ""
-                transformed_text = text
-                for note in notes_by_source[block.id]:
-                    marker = note.formatted_marker(self.config.numbering_style)
-                    # Insert superscript link to note definition
-                    link_callout = f"[#metadata(()) <{note.note_id}-ref>]#link(<{note.note_id}>)[#super[{marker}]]"
-                    transformed_text = re.sub(
-                        re.escape(note.callout_marker), link_callout, transformed_text, count=1
-                    )
-                result.append(
-                    IRBlock(
-                        element=block.element,
-                        target_text=transformed_text,
-                        draft_text=block.draft_text,
-                        status=block.status,
-                        provenance=block.provenance,
-                    )
-                )
-                continue
-
-            result.append(block)
-
-        # Flush trailing endnotes
-        if self.config.placement == NotePlacement.CHAPTER_ENDNOTE:
-            last_notes = notes_by_chapter.get(current_chapter_idx, [])
-            if last_notes:
-                endnote_markup = render_endnote_section_typst(last_notes, self.config)
-                el = make_element(
-                    id=f"endnotes-ch{current_chapter_idx}",
-                    spine_index=1,
-                    block_type=BlockType.NARRATIVE,
-                    source_text=endnote_markup,
-                )
-                result.append(IRBlock(element=el, target_text=endnote_markup))
-        elif self.config.placement == NotePlacement.BOOK_ENDNOTE:
-            all_notes = topology.notes
-            if all_notes:
-                endnote_markup = render_endnote_section_typst(all_notes, self.config)
-                el = make_element(
-                    id="endnotes-book",
-                    spine_index=1,
-                    block_type=BlockType.NARRATIVE,
-                    source_text=endnote_markup,
-                )
-                result.append(IRBlock(element=el, target_text=endnote_markup))
-
-        return result

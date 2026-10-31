@@ -1,4 +1,11 @@
-"""Console subcommand to launch the UBT Operator Console Web UI."""
+"""The ``ubt console`` command: serve the UBT Operator Console.
+
+One product name, deliberately: it is the SPA window title, the startup banner
+and the command help. ``ubt web`` registers this same command as a short alias,
+so both spellings describe one thing — the API server with the built console
+served from it — and this module adds only the terminal concerns around it: the
+bind address, opening a browser, and the Vite dev-server path.
+"""
 
 from __future__ import annotations
 
@@ -166,7 +173,7 @@ def console_command(
         ),
     ] = False,
 ) -> None:
-    """Launch the UBT Operator Console & Review Workbench."""
+    """Serve the UBT Operator Console and open it in a browser."""
     from ubt import __version__
     from ubt.api.app import run_server
     from ubt.api.security import _no_auth_allowed, _strict_auth_from_env
@@ -192,7 +199,6 @@ def console_command(
     vite_proc: subprocess.Popen[str] | None = None
 
     if dev:
-        # Development mode: Launch Vite with Hot Module Replacement (HMR)
         if not (web_dir / "package.json").exists():
             console.print("[bold red]❌ Cannot start --dev: web/package.json not found.[/]")
             raise typer.Exit(1)
@@ -243,12 +249,10 @@ def console_command(
             if vite_proc and vite_proc.poll() is None:
                 vite_proc.terminate()
 
-        # Ensure Vite terminates on exit
         import atexit
 
         atexit.register(_cleanup_vite)
     else:
-        # Production mode: Serve compiled SPA from static_dir
         if not index_html.exists():
             console.print(
                 "[bold yellow]⚠️  Static web console assets not found in ubt/api/static.[/]"
@@ -315,7 +319,7 @@ def console_command(
         thread.start()
 
     try:
-        run_server(host=host, port=port)
+        run_server(host=host, port=port, reload=dev)
     finally:
         if vite_proc and vite_proc.poll() is None:
             vite_proc.terminate()

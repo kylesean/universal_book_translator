@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from ubt.adapters.pdf.extraction_witness import PageVerdict
     from ubt.adapters.pdf.font_probe import FontStack
     from ubt.adapters.pdf.page_profiler import PageKind
-    from ubt.adapters.pdf.pdf_profiler import PDFDocumentProfile, PDFRoutePlan
+    from ubt.adapters.pdf.pdf_profiler import PDFDocumentProfile
     from ubt.adapters.pdf.visual_gate import VisualGateResult
     from ubt.segment.placeholders import MaskedSource, PlaceholderEngine
     from ubt.translate.engine import TranslationEngine
@@ -519,11 +519,6 @@ def inspect_pdf_profile(input_path: Path) -> PDFDocumentProfile:
     from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile as _inspect
 
     return _inspect(input_path)
-
-
-def inspect_pdf_route_plan(input_path: Path) -> PDFRoutePlan:
-    """Backward compatibility alias for inspect_pdf_profile."""
-    return inspect_pdf_profile(input_path)
 
 
 def profile_pdf_pages(input_path: Path) -> list[Any]:

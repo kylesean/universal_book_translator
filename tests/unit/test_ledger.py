@@ -3,7 +3,7 @@
 The ledger is where every block's translation state survives a restart, so its
 contracts are load-bearing:
 
-- the schema lands exactly on ``TARGET_SCHEMA_VERSION`` and every column
+- the schema lands exactly on ``SCHEMA_VERSION`` and every column
   ``_row_to_block`` reads is present (a drift here corrupts resume silently);
 - block ids are content-derived and repeat across jobs, so a block write must be
   scoped by ``job_id`` (the composite-primary-key contract);
@@ -29,12 +29,11 @@ from typing import Any
 import pytest
 
 from ubt.core.engine.ledger import (
-    TARGET_SCHEMA_VERSION,
     SQLiteJobLedger,
     _as_usage_totals,
     merge_usage_totals,
 )
-from ubt.core.engine.ledger_base import _REQUIRED_BLOCK_COLUMNS
+from ubt.core.engine.ledger_base import _REQUIRED_BLOCK_COLUMNS, SCHEMA_VERSION
 from ubt.core.exceptions import LedgerError
 from ubt.core.ir.models import (
     BlockStatus,
@@ -102,7 +101,7 @@ def ledger(tmp_path: Path) -> Iterator[SQLiteJobLedger]:
 
 def test_fresh_ledger_lands_on_the_target_schema_version(ledger: SQLiteJobLedger) -> None:
     with ledger._get_conn() as conn:
-        assert conn.execute("PRAGMA user_version;").fetchone()[0] == TARGET_SCHEMA_VERSION
+        assert conn.execute("PRAGMA user_version;").fetchone()[0] == SCHEMA_VERSION
         columns = {str(r["name"]) for r in conn.execute("PRAGMA table_info(blocks);").fetchall()}
     assert columns.issuperset(_REQUIRED_BLOCK_COLUMNS)
 
@@ -114,7 +113,7 @@ def test_reopening_a_ledger_is_idempotent(tmp_path: Path) -> None:
     with SQLiteJobLedger(db_path) as second:
         assert second.get_job_status("job") == "initialized"
         with second._get_conn() as conn:
-            assert conn.execute("PRAGMA user_version;").fetchone()[0] == TARGET_SCHEMA_VERSION
+            assert conn.execute("PRAGMA user_version;").fetchone()[0] == SCHEMA_VERSION
 
 
 def test_read_only_ledger_on_a_missing_file_raises(tmp_path: Path) -> None:
@@ -303,6 +302,23 @@ def test_finalize_completed_refuses_with_non_terminal_blocks(ledger: SQLiteJobLe
     ledger.fail_non_terminal_blocks("job", "stage crashed")
     ledger.finalize_job("job", "completed")
     assert ledger.get_job_status("job") == "completed"
+
+
+def test_finalize_writes_artifact_pointers_with_the_status(ledger: SQLiteJobLedger) -> None:
+    """The download pointers must not be a second write.
+
+    The export hook persisted them after the terminal event, so a crash in that
+    window left a ``completed`` job with no ``output_file`` — undownloadable,
+    while every surface reported success. They commit with the status now.
+    """
+    _init(ledger)
+    ledger.finalize_job(
+        "job",
+        "completed",
+        artifacts={"output_file": "/out/book.pdf", "report_file": "/out/report.json"},
+    )
+    assert ledger.get_job_metadata_value("job", "output_file") == "/out/book.pdf"
+    assert ledger.get_job_metadata_value("job", "report_file") == "/out/report.json"
 
 
 def test_finalize_failed_is_permissive(ledger: SQLiteJobLedger) -> None:
@@ -870,7 +886,7 @@ def test_a_legacy_ledger_is_refused_not_silently_migrated(tmp_path: Path) -> Non
         SQLiteJobLedger(db_file)
     assert "flattened baseline" in str(excinfo.value)
     assert excinfo.value.details["db_version"] == 10
-    assert excinfo.value.details["baseline_version"] == TARGET_SCHEMA_VERSION
+    assert excinfo.value.details["baseline_version"] == SCHEMA_VERSION
     # The file is untouched: still at its old version.
     conn = sqlite3.connect(db_file)
     assert conn.execute("PRAGMA user_version;").fetchone()[0] == 10
@@ -879,7 +895,7 @@ def test_a_legacy_ledger_is_refused_not_silently_migrated(tmp_path: Path) -> Non
 
 def test_a_fresh_ledger_lands_on_the_flat_baseline_version(ledger: SQLiteJobLedger) -> None:
     with ledger._get_conn() as conn:
-        assert conn.execute("PRAGMA user_version;").fetchone()[0] == TARGET_SCHEMA_VERSION
+        assert conn.execute("PRAGMA user_version;").fetchone()[0] == SCHEMA_VERSION
 
 
 def test_a_file_missing_a_required_column_is_refused(tmp_path: Path) -> None:
@@ -889,7 +905,7 @@ def test_a_file_missing_a_required_column_is_refused(tmp_path: Path) -> None:
     conn.executescript(f"""
         CREATE TABLE job_meta (job_id TEXT PRIMARY KEY);
         CREATE TABLE blocks (block_id TEXT PRIMARY KEY, job_id TEXT NOT NULL);
-        PRAGMA user_version = {TARGET_SCHEMA_VERSION};
+        PRAGMA user_version = {SCHEMA_VERSION};
     """)
     conn.commit()
     conn.close()
@@ -1007,7 +1023,7 @@ def test_fresh_resets_a_legacy_ledger_instead_of_refusing(tmp_path: Path) -> Non
     ledger = SQLiteJobLedger(db_file, fresh=True)
     try:
         with ledger._get_conn() as c:
-            assert c.execute("PRAGMA user_version;").fetchone()[0] == TARGET_SCHEMA_VERSION
+            assert c.execute("PRAGMA user_version;").fetchone()[0] == SCHEMA_VERSION
         assert ledger.get_job_status("nope") is None
     finally:
         ledger.close()

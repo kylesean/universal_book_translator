@@ -212,10 +212,7 @@ def test_simulate_document_routing() -> None:
     assert report.savings_percentage >= 0.0
     assert "deepseek-chat" in report.model_counts
 
-    # Test markdown and JSON generation
+    # Test markdown generation
     md = scheduler.render_simulation_markdown(report)
     assert "# Dynamic Pareto Routing Simulation Report" in md
     assert "Total Blocks" in md
-
-    js = scheduler.render_simulation_json(report)
-    assert '"total_blocks": 3' in js

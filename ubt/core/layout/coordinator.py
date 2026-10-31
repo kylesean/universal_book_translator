@@ -1,14 +1,18 @@
-"""CELS layout coordinator: chains Stage 1 column tracks to Stage 3B Cassowary solve.
+"""CELS layout coordinator: chains Stage 1 column tracks to the Stage 3B solve.
 
-Design: ``docs/design/adaptive_delivery_prd.md`` §7.4 & §8.0–§8.10.
-Tech design: ``docs/guides/ADAPTIVE_DELIVERY_TECH_DESIGN.md`` §7.1.
+The CELS modules are each pure and each refuses to know about the others:
+:func:`~ubt.core.layout.cels.detect_columns` turns boxes into tracks,
+:func:`~ubt.core.layout.solver.solve_vertical` turns a track into block
+positions, :func:`~ubt.core.layout.distortion.compute_page_distortion` scores
+the result. This module is where they meet, and it owns the wiring only -- which
+blocks may be flowed, which are pinned instead, which track each segment belongs
+to, and when a solved deficit above :data:`DEFICIT_TRIGGER_PT` becomes a
+:class:`Stage4CondensationItem` carrying a ``char_budget`` for condensation.
 
-Pipeline flow:
-  1. Stage 1: ``detect_columns`` (profile bins + 4 refusal guards).
-  2. Stage 2: Partition lines/blocks into ``ColumnTrack``s and ``PinnedObstacle``s.
-  3. Stage 3B: For each track, run ``solve_vertical`` via Cassowary kiwisolver.
-  4. Stage 4: Extract ``condensation_char_budget`` when ``deficit > 1.5pt``.
-  5. QA & Distortion: Compute ``PageDistortionScore`` (resolving GAP-17).
+Keeping the chaining here is what lets the geometry be tested against synthetic
+pages and the solver against an injected measure function; the coordinator is the
+only piece that needs both at once, so it is the only one that takes a renderer's
+numbers.
 """
 
 from __future__ import annotations
@@ -156,8 +160,8 @@ def solve_page_cels(
             stage4_requests=(),
         )
 
-    # 1. Stage 1: Detect column tracks using horizontal projection profile
-    # Flowable text boxes determine column tracks; pinned blocks (figures, titles) are preserved.
+    # Only flowable text may decide the tracks: a pinned block is not evidence of
+    # a column.
     # A block wider than 60% of the page cannot fit into one column of a
     # multi-column page and would poison gutter detection, so it rides as a
     # pinned straddler obstacle -- but only when the narrower flow actually
@@ -182,15 +186,20 @@ def solve_page_cels(
     ] + spanning_pinned
     detection = detect_columns(flowable_boxes, page_width=page_width, page_height=page_height)
 
-    # 2. Assign lines to tracks and extract pinned straddler obstacles
+    # A box touching two tracks -- or none -- has no column to belong to, so it is
+    # pinned and the flow routes around it instead of a guess being made.
     lines_by_track, straddler_boxes = assign_lines(flowable_boxes, detection.tracks)
     straddler_pinned = [pin_from(box, kind="other") for box in straddler_boxes]
     all_pinned = tuple(explicit_pinned) + tuple(straddler_pinned)
 
-    # Map box id back to PageLayoutBlock
+    # The geometry modules trade in ``Box``es, not blocks, and they hand back the
+    # same objects they were given -- never copies -- so identity is a safe key for
+    # recovering the block a box came from.
     block_by_box_id = {id(b.box): b for b in blocks}
 
-    # 3. For each column track, form segments and solve vertical layout
+    # Solve one track at a time: a column's vertical budget is its own, and
+    # borrowing space across a gutter would be the overlap this layout exists to
+    # avoid.
     track_solutions: list[TrackLayoutSolution] = []
     total_deficit = 0.0
     needs_condensation = False
@@ -220,7 +229,7 @@ def solve_page_cels(
             VerticalBlockInput(
                 index=i,
                 required_height_pt=b.required_height_pt,
-                source_height_pt=b.box.height,
+                source_height_pt=b.required_height_pt if not b.is_pinned else b.box.height,
                 source_top_pt=b.box.y1,
             )
             for i, b in enumerate(track_blocks)
@@ -251,7 +260,10 @@ def solve_page_cels(
             total_deficit += spec.deficit_pt
             if spec.needs_stage4 or spec.deficit_pt > DEFICIT_TRIGGER_PT:
                 needs_condensation = True
-                # Stage 4 budget: PRD §7.4.4 & §8.6
+                # Two independent estimates of how much text the granted height can
+                # hold -- the block's own share of its source text, and what the
+                # track's geometry can carry -- and the smaller one wins, because
+                # Stage 4 must be given a budget that neither estimate would break.
                 ratio = max(0.1, min(1.0, spec.height_pt / max(1.0, b.required_height_pt)))
                 proportional_budget = max(1, math.floor(len(b.text) * ratio * 0.92))
                 from ubt.render.typst.container_repair import (
@@ -308,11 +320,12 @@ def solve_page_cels(
             )
         )
 
-    # Include pinned obstacles in distortion calculation
+    # A pinned obstacle is still ink on the delivered page, so the score has to
+    # see it: a page that "solved" itself by pinning half its content would
+    # otherwise score as clean.
     for p in all_pinned:
         solved_boxes_for_distortion.append(p.box)
 
-    # 4. Compute PageDistortionScore
     distortion = compute_page_distortion(
         page_no=page_no,
         boxes=solved_boxes_for_distortion,

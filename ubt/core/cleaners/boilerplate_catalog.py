@@ -21,10 +21,6 @@ class LanguageBoilerplate(NamedTuple):
     header_keywords: tuple[str, ...] = ()
 
 
-# -----------------------------------------------------------------------------
-# Declarative Catalog Definitions
-# -----------------------------------------------------------------------------
-#
 # ReDoS hardening: the running-header word runs use DISJOINT
 # character classes — ``WORD+`` and horizontal whitespace ``[^\S\n]+`` never
 # overlap, so the regex engine cannot thrash exponentially between them on a
@@ -199,11 +195,6 @@ def _primary_lang_code(lang: str) -> str:
 
 class BoilerplateCatalog:
     """Access compiled regex patterns for a given ISO language code."""
-
-    @classmethod
-    def get_supported_languages(cls) -> tuple[str, ...]:
-        """Return tuple of supported ISO language codes."""
-        return tuple(_CATALOG.keys())
 
     @classmethod
     @lru_cache(maxsize=32)

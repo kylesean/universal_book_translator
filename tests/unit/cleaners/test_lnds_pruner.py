@@ -497,14 +497,6 @@ def test_cleaner_honours_strip_all_page_numbers() -> None:
     )
 
 
-def test_clean_block_returns_a_cleaned_copy() -> None:
-    block = _block("b1", "Hello {.calibre9}world")
-    cleaned = LNDSPageCleaner().clean_block(block)
-    assert cleaned is not block
-    assert cleaned.source_text == "Hello world"
-    assert block.source_text == "Hello {.calibre9}world"
-
-
 def test_clean_chapter_blocks_handles_no_blocks() -> None:
     assert LNDSPageCleaner().clean_chapter_blocks([]) == []
 

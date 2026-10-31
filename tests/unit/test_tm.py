@@ -407,18 +407,16 @@ def test_a_conflicting_writeback_keeps_the_domain_in_sync_with_the_target(
 def test_writeback_does_not_count_as_reuse(tm: TranslationMemory) -> None:
     _store(tm, "Alpha.", "\u7532\u3002")
     _store(tm, "Alpha.", "\u75322\u3002")
-    assert tm.get_use_count("en", "zh", "Alpha.") == 0
+    row = next(entry for entry in tm.scan() if entry.source_text == "Alpha.")
+    assert row.use_count == 0
 
 
 def test_exact_lookup_increments_the_reuse_counter(tm: TranslationMemory) -> None:
     _store(tm, "Alpha.", "\u7532\u3002")
     tm.lookup_exact("en", "zh", "Alpha.")
     tm.lookup_exact("en", "zh", "Alpha.")
-    assert tm.get_use_count("en", "zh", "Alpha.") == 2
-
-
-def test_get_use_count_of_an_unknown_source_is_zero(tm: TranslationMemory) -> None:
-    assert tm.get_use_count("en", "zh", "never stored") == 0
+    row = next(entry for entry in tm.scan() if entry.source_text == "Alpha.")
+    assert row.use_count == 2
 
 
 # --- identity rows --------------------------------------------------------- #

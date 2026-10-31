@@ -90,8 +90,8 @@ def test_no_toolchain_fails_with_an_actionable_message(tmp_path: Path) -> None:
     with patch.object(shutil, "which", return_value=None):
         toolchain = detect_js_toolchain(web)
 
-    assert not toolchain.can_dev
-    assert not toolchain.can_build
+    assert toolchain.local("vite") is None
+    assert toolchain.package_manager is None
     with pytest.raises(JsToolchainError) as excinfo:
         toolchain.dev_argv()
     message = str(excinfo.value)
@@ -115,8 +115,8 @@ def test_vite_alone_is_enough_for_dev_but_not_for_build(tmp_path: Path) -> None:
     with patch.object(shutil, "which", return_value=None):
         toolchain = detect_js_toolchain(web)
 
-    assert toolchain.can_dev is True
-    assert toolchain.can_build is False
+    assert toolchain.local("vite") is not None
+    assert toolchain.local("tsc") is None
     assert toolchain.dev_argv() == [str(web / "node_modules" / ".bin" / "vite")]
     with pytest.raises(JsToolchainError):
         toolchain.build_steps()
@@ -134,8 +134,9 @@ def test_the_repository_itself_resolves_without_pnpm() -> None:
         pytest.skip("web dependencies are not installed in this checkout")
 
     toolchain = detect_js_toolchain(web)
-    assert toolchain.can_build, "the repository cannot build its own console"
+    # build_steps() raises JsToolchainError when the console cannot be built.
     argv = toolchain.build_steps()
+    assert argv
     assert all("pnpm" not in part for step in argv for part in step) or (
         toolchain.local("vite") is None
     )
@@ -160,7 +161,7 @@ def test_windows_prefers_the_cmd_stub(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     assert toolchain.local("vite") == bin_dir / "vite.cmd"
     assert toolchain.dev_argv() == [str(bin_dir / "vite.cmd")]
-    assert toolchain.can_build
+    assert toolchain.local("tsc") == bin_dir / "tsc.cmd"
 
 
 def test_windows_falls_back_to_the_plain_stub_without_a_batch_file(
