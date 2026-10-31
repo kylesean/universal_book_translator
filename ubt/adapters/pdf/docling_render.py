@@ -22,6 +22,7 @@ from ubt.core.content.nodes import ReconstructionRecord
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, BookManifest, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
+from ubt.render.inline_spans import block_runs
 
 if TYPE_CHECKING:
     from ubt.model.span import PhysicalBox
@@ -30,18 +31,11 @@ logger = logging.getLogger(__name__)
 
 
 def _physical_box_region(pbox: PhysicalBox, page_width: float) -> tuple[int, int]:
-    """The ``(page, column)`` region one physical box belongs to.
-
-    ``page_width`` is a parameter, not a closed-over loop variable. The caller
-    walks pages inside a loop, so a nested definition that captured ``pw`` would
-    bind whatever width the loop last happened to hold -- and the column test
-    (``w > 0.65 * page_width``) is a comparison against *this* page's measure.
-    A box wider than 65% of the measure spans the gutter by construction, and so
-    does one whose midpoint sits left of it; both are the left column.
-    """
+    """The ``(page, column)`` region one physical box belongs to."""
     bw = pbox.bbox[2] - pbox.bbox[0]
     bmid = (pbox.bbox[0] + pbox.bbox[2]) / 2.0
-    bcol = 0 if bw > 0.65 * page_width or bmid < page_width * 0.50 else 1
+    straddles_center = pbox.bbox[0] < page_width * 0.50 < pbox.bbox[2]
+    bcol = 0 if bw > 0.50 * page_width or straddles_center or bmid < page_width * 0.50 else 1
     return (int(pbox.page), bcol)
 
 
@@ -570,6 +564,7 @@ class DoclingRenderStrategy:
         from ubt.render.flow import approximate_measure, solve_flow
         from ubt.render.layout_solver import FitReport, fit_at_size, solve_page_2d
         from ubt.render.typst.artifact_guard import has_sentinel
+        from ubt.render.typst.elastic_solver import TypeElasticitySolver
         from ubt.render.typst.facsimile_renderer import (
             FacsimileBlockPlacement,
             FacsimilePageSpec,
@@ -779,6 +774,16 @@ class DoclingRenderStrategy:
             records_by_column: dict[int, list[dict[str, Any]]] = {}
             obstacles_by_column: dict[int, list[float]] = {}
             page_preserved: list[IRBlock] = []
+            # Precompute column right boundaries from non-heading blocks
+            col_rights: dict[int, float] = {}
+            for ob in page_blocks:
+                if ob.bbox and ob.block_type != BlockType.HEADING:
+                    ow = max(0.0, float(ob.bbox.x1) - float(ob.bbox.x0))
+                    omid_x = (float(ob.bbox.x0) + float(ob.bbox.x1)) / 2.0
+                    ocol = 0 if ow > 0.65 * pw or omid_x < pw * 0.50 else 1
+                    col_rights[ocol] = max(
+                        col_rights.get(ocol, float(ob.bbox.x1)), float(ob.bbox.x1)
+                    )
             other_page_texts = [
                 (delivered_text(other) or other.source_text or "")
                 for other in page_blocks
@@ -925,6 +930,8 @@ class DoclingRenderStrategy:
                                     text_color_hex=color,
                                     font_weight=weight,
                                     font_size_pt=block_size,
+                                    src_y0=fl_y0,
+                                    src_y1=fl_y1,
                                 )
                             )
                         if page_slice_texts and page_slice_boxes:
@@ -964,6 +971,24 @@ class DoclingRenderStrategy:
 
                 page_l2_blocks.append(b)
 
+                # Expand heading width to the column boundary if the right space is clear
+                if is_hdr:
+                    mid_x = (bx0 + bx1) / 2.0
+                    col_idx = 0 if w > 0.65 * pw or mid_x < pw * 0.50 else 1
+                    target_x1 = col_rights.get(col_idx, bx1)
+                    if target_x1 > bx1:
+                        has_obstacle = any(
+                            other_b is not b
+                            and other_b.bbox
+                            and float(other_b.bbox.x1) > bx1
+                            and float(other_b.bbox.x0) < target_x1
+                            and max(by0, float(other_b.bbox.y0)) < min(by1, float(other_b.bbox.y1))
+                            for other_b in page_blocks
+                        )
+                        if not has_obstacle:
+                            bx1 = target_x1
+                            w = max(0.0, bx1 - bx0)
+
                 # Heading font size scaling: ensure multi-line heading fits in its allocated vertical box
                 if is_hdr and block_size:
                     glyphs = len(target_content.strip())
@@ -972,7 +997,7 @@ class DoclingRenderStrategy:
                     if needed_h > h + 2.0:
                         fitted_size = math.sqrt((w * h) / (max(1, glyphs) * 1.25))
                         block_size = max(
-                            source_size_pt * 1.1, min(block_size, round(fitted_size, 2))
+                            source_size_pt * 0.85, min(block_size, round(fitted_size, 2))
                         )
 
                 # Column bucket for the 2D solver: a left-column paragraph must
@@ -1021,6 +1046,9 @@ class DoclingRenderStrategy:
                         font_size_pt=block_size,
                         is_table=is_table,
                         is_code=b.block_type == BlockType.CODE,
+                        runs=tuple(block_runs(b)),
+                        src_y0=by0,
+                        src_y1=by1,
                     )
                 )
 
@@ -1110,7 +1138,7 @@ class DoclingRenderStrategy:
                             if lines_count <= 1
                             else float(lines_count) * body_group.pitch * eff_size
                         )
-                        needed_h = max(pl_h, target_h)
+                        needed_h = max(eff_size * 1.15, target_h)
                     else:
                         needed_h = pl_h
                     cels_blocks.append(
@@ -1427,6 +1455,16 @@ class DoclingRenderStrategy:
             else:
                 for pb in page_preserved:
                     skipped.append((pb.id, "facsimile_preserved_opaque"))
+
+                elastic_stretch = 100.0
+                if pno in page_fits and not page_fits[pno].fits and page_fits[pno].deficit_pt > 0:
+                    deficit_ratio = page_fits[pno].deficit_pt / max(100.0, ph - 100.0)
+                    elastic_style = TypeElasticitySolver.resolve_params(
+                        base_font_size=body_group.size_pt,
+                        deficit_ratio=deficit_ratio,
+                    )
+                    elastic_stretch = elastic_style.stretch_pct
+
                 pages_spec.append(
                     FacsimilePageSpec(
                         page_no=pno,
@@ -1435,6 +1473,7 @@ class DoclingRenderStrategy:
                         uniform_size_pt=body_group.size_pt,
                         leading_em=body_group.leading_em,
                         tracking_em=body_group.tracking_em,
+                        stretch_pct=elastic_stretch,
                         placements=placements,
                         tier="L1",
                     )
@@ -1521,7 +1560,11 @@ class DoclingRenderStrategy:
             )
             manifest.metadata["delivery_mode"] = "page_locked"
         else:
-            renderer = FacsimileRenderer(font_stack=font_stack, math_gate=math_probe.check)
+            renderer = FacsimileRenderer(
+                font_stack=font_stack,
+                math_gate=math_probe.check,
+                enable_column_flow=True,
+            )
             renderer.render_document(
                 pages_spec,
                 bg_stripped,

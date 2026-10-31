@@ -1280,7 +1280,7 @@ def test_dual_column_wide_table_spanning() -> None:
 async def test_render_facsimile_rescues_bottleneck_container(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When a 2D layout would fail solely due to a bottleneck segment, ContainerFitRepair rescues to L1."""
+    """When a 2D layout would fail solely due to a bottleneck segment, the solver rescues the page to L1."""
     import pikepdf
 
     from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
@@ -1427,3 +1427,52 @@ def test_facsimile_table_respects_its_source_box_height() -> None:
     ]
     assert scales, "expected a shrunk table text size in the markup"
     assert min(scales) < 0.84
+
+
+def test_facsimile_page_level_stretch_emitted() -> None:
+    """A page with stretch_pct < 100% emits the stretch parameter in #set text."""
+    placement = FacsimileBlockPlacement(
+        block_id="b001",
+        page=1,
+        x0=50.0,
+        y0=100.0,
+        x1=300.0,
+        y1=150.0,
+        text="Normal paragraph text.",
+    )
+    page_spec = FacsimilePageSpec(
+        page_no=1,
+        page_w=500.0,
+        page_h=700.0,
+        uniform_size_pt=10.0,
+        leading_em=0.35,
+        stretch_pct=90.0,
+        placements=[placement],
+    )
+    markup = FacsimileRenderer().build_markup([page_spec], "bg.pdf", target_lang="zh")
+    assert "#set text(size: 10.0pt, stretch: 90%)" in markup
+
+
+def test_facsimile_block_level_stretch_emitted() -> None:
+    """A block with custom stretch_pct emits stretch in its #text invocation."""
+    placement = FacsimileBlockPlacement(
+        block_id="b002",
+        page=1,
+        x0=50.0,
+        y0=100.0,
+        x1=300.0,
+        y1=150.0,
+        text="Dense squeezed heading.",
+        is_heading=True,
+        stretch_pct=95.0,
+    )
+    page_spec = FacsimilePageSpec(
+        page_no=1,
+        page_w=500.0,
+        page_h=700.0,
+        uniform_size_pt=10.0,
+        leading_em=0.35,
+        placements=[placement],
+    )
+    markup = FacsimileRenderer().build_markup([page_spec], "bg.pdf", target_lang="zh")
+    assert "stretch: 95%" in markup

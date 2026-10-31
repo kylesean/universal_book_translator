@@ -1,9 +1,8 @@
 """1:1 Facsimile (Canvas) Typst Document Renderer.
 
-Renders translated documents with 100% visual and structural isomorphism:
-- Background: text-stripped vector PDF (bg.pdf) carrying original diagrams, lines, and colors
-- Text: typeset with Typst over original bounding box coordinates using `#place(top + left, dx, dy)`
-- Typography: page-level uniform font size and dynamic leading from layout_solver.py
+Typst draws the translated text over a text-stripped vector page (``bg.pdf``), so the
+source's diagrams, rules and colors survive and only the ink is replaced; geometry and
+type size come from ``layout_solver.py``.
 
 A placed block is drawn at the *page's* uniform body size unless it carries its
 own ``font_size_pt``. That exception is what makes a heading look like a heading:
@@ -72,6 +71,13 @@ class FacsimileBlockPlacement:
     #: The block is a code listing and must be typeset in a monospace face with
     #: its line structure intact.
     is_code: bool = False
+    #: Styled inline runs (superscripts, citations, bold, color) located by substring
+    runs: tuple[Any, ...] = ()
+    #: Original unrelaxed source bounding box vertical coordinates (used for layout stream continuity)
+    src_y0: float | None = None
+    src_y1: float | None = None
+    #: Horizontal glyph stretch percentage (e.g. 90.0, 95.0, 100.0) for variable font elastic compaction
+    stretch_pct: float = 100.0
 
 
 @dataclass(slots=True)
@@ -84,6 +90,7 @@ class FacsimilePageSpec:
     uniform_size_pt: float
     leading_em: float
     tracking_em: float = 0.0
+    stretch_pct: float = 100.0
     placements: list[FacsimileBlockPlacement] = None  # type: ignore[assignment]
     tier: str = "L1"  # "L1" (canvas) or "L2" (page-locked reflow)
     l2_spec: PageLockedPageSpec | None = None
@@ -119,8 +126,10 @@ class FacsimileRenderer:
         font_stack: Sequence[str] | None = None,
         *,
         math_gate: Callable[[str], bool] | None = None,
+        enable_column_flow: bool = False,
     ) -> None:
         self.font_stack = tuple(font_stack) if font_stack else DEFAULT_FONT_STACK
+        self.enable_column_flow = enable_column_flow
         #: The Typst compile gate for a transpiled math body, forwarded to the L2
         #: pages it owns. A body the transpiler accepts but Typst rejects (
         #: ``frac(a, )``) fails the whole document at the single compile below, so
@@ -134,6 +143,7 @@ class FacsimileRenderer:
         *,
         width_pt: float,
         target_lang: str,
+        base_font_size_pt: float | None = None,
     ) -> str:
         """Typst markup for one placement's text, sized and styled by its block type."""
         if pl.is_table:
@@ -154,6 +164,7 @@ class FacsimileRenderer:
                 page_columns=1,
                 content_width_pt=width_pt,
                 content_height_pt=max(0.0, float(pl.y1) - float(pl.y0)),
+                base_font_size_pt=base_font_size_pt,
                 target_lang=target_lang,
                 enable_continuation=True,
                 table_uid=f"src-{pl.block_id}",
@@ -191,21 +202,24 @@ class FacsimileRenderer:
         # ``render_prose`` covers the whole escape set this branch needs: the
         # mid-line structural characters and the line-initial ``=``/``-``/``N.``
         # markers (verified: ``"= 5 and $\\psi_1$ ok"`` -> ``"\\= 5 and $psi_1$ ok"``).
-        escaped = render_prose(text, is_math_ok=self._math_gate)
+        escaped = render_prose(text, runs=pl.runs, is_math_ok=self._math_gate)
         size = f"size: {pl.font_size_pt}pt, " if pl.font_size_pt else ""
+        stretch = (
+            f"stretch: {pl.stretch_pct:.0f}%, " if pl.stretch_pct and pl.stretch_pct < 100.0 else ""
+        )
 
         if pl.is_heading:
             weight = _normalise_weight(pl.font_weight, is_heading=True, bold=True)
             return (
                 f"#set par(justify: false)\n"
-                f'    #text({size}weight: "{weight}", '
+                f'    #text({size}{stretch}weight: "{weight}", '
                 f'fill: rgb("{pl.text_color_hex}"))[{escaped}]'
             )
 
-        if size or pl.font_weight not in ("", "regular"):
+        if size or stretch or pl.font_weight not in ("", "regular"):
             weight = _normalise_weight(pl.font_weight, is_heading=False, bold=False)
             fill = f'fill: rgb("{pl.text_color_hex}"), ' if pl.text_color_hex != "#000000" else ""
-            return f'#text({size}{fill}weight: "{weight}")[{escaped}]'
+            return f'#text({size}{stretch}{fill}weight: "{weight}")[{escaped}]'
         return escaped
 
     def build_markup(
@@ -227,6 +241,7 @@ class FacsimileRenderer:
         prose in its place.
         """
         fonts_formatted = ", ".join(f'"{f}"' for f in self.font_stack)
+        is_cjk = target_lang.lower().startswith(("zh", "ja", "ko"))
         lines: list[str] = [
             "// Universal Book Translator - 1:1 Facsimile Canvas Document",
             f'#set text(font: ({fonts_formatted}), lang: "{target_lang}", overhang: true, cjk-latin-spacing: auto)',
@@ -260,39 +275,132 @@ class FacsimileRenderer:
                 f"#page(width: {p.page_w}pt, height: {p.page_h}pt, margin: 0pt, "
                 f'background: image("{bg_pdf_filename}", page: {p.page_no}, width: 100%, height: 100%))['
             )
-            # ``tracking`` is part of the document body group (G4 Stage 3A): the
-            # planner's height estimate already assumed it, so leaving it out of
-            # the markup made the estimate and the artifact disagree on every
-            # page the ladder compressed.
-            tracking = f", tracking: {p.tracking_em}em" if p.tracking_em else ""
-            lines.append(f"  #set text(size: {p.uniform_size_pt}pt{tracking})")
+            # CJK characters have zero side-bearings; negative tracking causes
+            # ideograph stroke collisions. Clamp negative tracking to 0 for CJK.
+            effective_tracking = 0.0 if (is_cjk and p.tracking_em < 0) else p.tracking_em
+            tracking = f", tracking: {effective_tracking}em" if effective_tracking else ""
+            stretch = (
+                f", stretch: {p.stretch_pct:.0f}%"
+                if p.stretch_pct and p.stretch_pct < 100.0
+                else ""
+            )
+            lines.append(f"  #set text(size: {p.uniform_size_pt}pt{tracking}{stretch})")
             # ``p.leading_em`` is a *ratio* (solver contract); Typst wants the
             # *gap* on top of the font's own line height. Without the
             # subtraction a 1.35 line height arrives as ~1.08 and captions
             # overlap.
             leading_gap = leading_gap_em(1.0 + p.leading_em)
+            if is_cjk:
+                # Chinese characters lack Latin ascender/descender padding; a 0.35em leading
+                # results in glyph stroke claustrophobia. Enforce minimum 0.55em leading for CJK.
+                leading_gap = max(0.55, leading_gap)
             lines.append(
                 f'  #set par(justify: true, linebreaks: "optimized", leading: {leading_gap:.3f}em)'
             )
 
+            # Extract placement records with top-down coordinates
+            valid_items = []
             for pl in p.placements:
                 if pl.skip_render or not pl.text.strip():
                     continue
-
                 dx = round(pl.x0, 2)
                 dy = round(p.page_h - pl.y1, 2)
                 width = round(max(10.0, pl.x1 - pl.x0), 2)
                 height = round(max(10.0, pl.y1 - pl.y0), 2)
-
-                content = self._placement_content(pl, width_pt=width, target_lang=target_lang)
-
-                lines.append(f"  // bbox: {dx} {dy} {width} {height}")
-                lines.append(
-                    f"  #place(top + left, dx: {dx}pt, dy: {dy}pt, "
-                    f"block(width: {width}pt, height: {height}pt, clip: true)[\n"
-                    f"    {content}\n"
-                    f"  ])"
+                content = self._placement_content(
+                    pl,
+                    width_pt=width,
+                    target_lang=target_lang,
+                    base_font_size_pt=p.uniform_size_pt,
                 )
+                valid_items.append((pl, dx, dy, width, height, content))
+
+            # Group contiguous narrative/heading prose within the same column into a flow group
+            groups: list[list[Any]] = []
+            for item in valid_items:
+                pl, dx, dy, width, height, content = item
+                if not groups:
+                    groups.append([item])
+                    continue
+
+                prev_group = groups[-1]
+                prev_item = prev_group[-1]
+                prev_pl, prev_dx, prev_dy, prev_w, prev_h, _ = prev_item
+
+                # Criteria for intra-column natural flow:
+                # 1. Neither block is a table or code block
+                # 2. Neither block spans full page width
+                # 3. Both blocks sit in the same column (left or right)
+                # 4. Reading order descends down the column
+                # 5. In the source document, they were adjacent paragraphs in the same text flow (src_gap <= 22pt)
+                is_spanning = width > 0.65 * p.page_w
+                prev_is_spanning = prev_w > 0.65 * p.page_w
+                col = 0 if dx < 0.5 * p.page_w else 1
+                prev_col = 0 if prev_dx < 0.5 * p.page_w else 1
+
+                orig_prev_y0 = prev_pl.src_y0 if prev_pl.src_y0 is not None else prev_pl.y0
+                orig_curr_y1 = pl.src_y1 if pl.src_y1 is not None else pl.y1
+                src_gap = orig_prev_y0 - orig_curr_y1
+
+                can_group = (
+                    self.enable_column_flow
+                    and not pl.is_table
+                    and not prev_pl.is_table
+                    and not pl.is_code
+                    and not prev_pl.is_code
+                    and not is_spanning
+                    and not prev_is_spanning
+                    and col == prev_col
+                    and dy >= prev_dy
+                    and 0.0 <= src_gap <= 22.0
+                )
+
+                if can_group:
+                    prev_group.append(item)
+                else:
+                    groups.append([item])
+
+            for grp in groups:
+                if len(grp) == 1:
+                    pl, dx, dy, width, height, content = grp[0]
+                    lines.append(f"  // bbox: {dx} {dy} {width} {height}")
+                    # Table mask: paint a white background to completely eliminate ghost vector rules
+                    if pl.is_table:
+                        lines.append(
+                            f"  #place(top + left, dx: {dx}pt, dy: {dy}pt, "
+                            f'block(width: {width}pt, height: {height}pt, fill: rgb("#ffffff"), clip: false, outset: (top: 2.5pt, bottom: 2.5pt))[\n'
+                            f"    {content}\n"
+                            f"  ])"
+                        )
+                    else:
+                        lines.append(
+                            f"  #place(top + left, dx: {dx}pt, dy: {dy}pt, "
+                            f"block(width: {width}pt, height: {height}pt, clip: true, outset: (top: 2.5pt, bottom: 2.5pt))[\n"
+                            f"    {content}\n"
+                            f"  ])"
+                        )
+                else:
+                    # Flow group of contiguous paragraphs in column
+                    grp_dx = round(min(it[1] for it in grp), 2)
+                    grp_dy = round(grp[0][2], 2)
+                    grp_width = round(max(it[3] for it in grp), 2)
+                    grp_height = round((grp[-1][2] + grp[-1][4]) - grp[0][2], 2)
+                    lines.append(
+                        f"  // flow-group: {len(grp)} blocks dx={grp_dx} dy={grp_dy} w={grp_width} h={grp_height}"
+                    )
+                    flow_body = []
+                    for idx, (it_pl, _, _, _, _, it_content) in enumerate(grp):
+                        if idx > 0:
+                            v_gap = "#v(0.4em)" if it_pl.is_heading else "#v(0.65em)"
+                            flow_body.append(f"    {v_gap}")
+                        flow_body.append(f"    #block[\n      {it_content}\n    ]")
+                    flow_content_str = "\n".join(flow_body)
+                    lines.append(
+                        f"  #place(top + left, dx: {grp_dx}pt, dy: {grp_dy}pt, "
+                        f"block(width: {grp_width}pt, height: {grp_height}pt, clip: true, outset: (top: 3.0pt, bottom: 3.0pt))[\n"
+                        f"{flow_content_str}\n"
+                        f"  ])"
+                    )
 
             lines.append("]")
             lines.append("")
