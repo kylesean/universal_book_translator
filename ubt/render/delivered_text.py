@@ -19,6 +19,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from ubt.render.table_compiler import normalize_table_to_source
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ubt.core.ir.models import IRBlock
 
@@ -234,9 +236,16 @@ def delivered_text(block: IRBlock, *, sanitize_sentinels: bool = True) -> str:
     raw = _delivered_surface(block)
     if not sanitize_sentinels:
         return raw
-    return normalize_list_marker(
+    text = normalize_list_marker(
         block.block_type, strip_stray_html_tags(strip_pipeline_sentinels(raw))
     )
+    if block.block_type.value == "table":
+        # A model re-chunking one source cell into several target cells ships a
+        # ragged grid the renderer lays out broken; the source's own row widths
+        # are the contract, so the delivered surface is re-shaped to them
+        # (content merged, never dropped) before any consumer sees it.
+        text = normalize_table_to_source(block.source_text, text)
+    return text
 
 
 def _delivered_surface(block: IRBlock) -> str:

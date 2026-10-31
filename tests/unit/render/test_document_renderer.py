@@ -1018,14 +1018,15 @@ def test_a_table_rebuild_that_dropped_a_column_is_corrupt(tmp_path: Path) -> Non
     assert "column_count_mismatch" in record.reason
 
 
-def test_a_table_row_that_gained_a_cell_is_corrupt_not_verified(tmp_path: Path) -> None:
-    r"""A translated row that OVERFILLED the grid is a corrupt reconstruction.
+def test_a_table_row_that_gained_a_cell_ships_merged_and_verified(tmp_path: Path) -> None:
+    r"""An overfilled row is repaired losslessly before it can ship.
 
-    The old oracle compared the *parsed* grids, and :func:`parse_markdown_table`
-    pads/truncates rows into a rectangle before returning them — so a row the
-    model overfilled was silently truncated (``四`` dropped) AND the shape
-    check blessed the result ``verified``. The comparison now runs on raw cell
-    counts, so the extra cell is visible corruption.
+    The old oracle flagged the extra cell as corrupt and shipped the ragged
+    grid anyway. The delivered surface now re-shapes the row to the source's
+    width first -- the fourth cell merges into the third, nothing dropped --
+    so the shipped grid is a real, verified reconstruction. A row that LOST a
+    column is a different case: nothing can be merged back, so it stays
+    corrupt (see the table-compiler tests).
     """
     source_grid = "| A | B | C |\n|---|---|---|\n| 1 | 2 | 3 |"
     target_grid = "| 甲 | 乙 | 丙 |\n|---|---|---|\n| 一 | 二 | 三 | 四 |"
@@ -1035,9 +1036,8 @@ def test_a_table_row_that_gained_a_cell_is_corrupt_not_verified(tmp_path: Path) 
     renderer.build_source([block], tmp_path / "build")
 
     (record,) = renderer.table_reconstructions
-    assert record.corrupt is True
-    assert record.verified is False
-    assert "row_1_cell_count_mismatch:3->4" in record.reason
+    assert record.corrupt is False
+    assert record.verified is True
 
 
 def test_a_table_that_fell_back_to_source_is_unverified_not_corrupt(tmp_path: Path) -> None:

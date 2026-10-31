@@ -157,6 +157,92 @@ def count_table_cells(markup: str) -> tuple[int, list[int]] | None:
     return header_cells, row_cells
 
 
+def normalize_table_to_source(source_markup: str, target_markup: str) -> str:
+    """Re-shape the translated grid to the source grid's row widths, content kept.
+
+    A model translating a dense grid sometimes re-chunks one source cell into
+    several target cells: the ATC'25 replay's API table carried each row's API
+    signatures in one cell, and the translation came back with the descriptions
+    split into their own cells (a 2-column row delivered as 6). The renderer
+    then lays a ragged grid under a 2-column spec and the reconstruction check
+    reports a shattered table.
+
+    The repair keeps every character: cells beyond the source row's width are
+    merged back into that row's last cell (CJK text joins with ``；``, Latin
+    with ``; ``), and anything the source grid does not define -- a short row
+    whose column the translation *dropped*, rows beyond the source's set --
+    passes through untouched so the shape check still reports the loss. Applied
+    to the delivered text itself, so the render, the HTML/EPUB companions and
+    the shape verification all see one repaired grid.
+    """
+    source_counts = count_table_cells(source_markup)
+    if source_counts is None:
+        return target_markup
+    source_header_cells, source_row_cells = source_counts
+    lines = target_markup.splitlines()
+    table_indexes = [
+        i
+        for i, line in enumerate(lines)
+        if line.strip().startswith("|") and line.strip().endswith("|")
+    ]
+    if len(table_indexes) < 2:
+        return target_markup
+
+    def _is_separator(line: str) -> bool:
+        cells = [c.strip() for c in _split_row(line.strip())]
+        return bool(cells) and all(re.match(r"^:?-+:?$", c) for c in cells)
+
+    def _merge(cells: list[str], width: int) -> list[str]:
+        if width <= 0:
+            return cells
+        if len(cells) > width:
+            head, tail = cells[: width - 1], cells[width - 1 :]
+            pieces = [piece for piece in tail if piece.strip()]
+            if not pieces:
+                return head + [""]
+            # The target's script picks the glue: a CJK deliverable reads
+            # full-width semicolons, Latin reads "; ".
+            joined_text = "".join(pieces)
+            glue = (
+                "；" if any("＀" <= ch <= "﹏" or "一" <= ch <= "鿿" for ch in joined_text) else "; "
+            )
+            return head + [glue.join(piece.strip() for piece in pieces)]
+        return cells + [""] * (width - len(cells))
+
+    body_position = -1  # -1 = header not yet passed
+    repaired: list[str] = []
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if idx not in table_indexes:
+            repaired.append(line)
+            continue
+        if _is_separator(stripped):
+            repaired.append(line)
+            continue
+        cells = _split_row(stripped)
+        desired: int | None
+        if body_position == -1:
+            desired = source_header_cells
+            body_position = 0
+        else:
+            desired = (
+                source_row_cells[body_position] if body_position < len(source_row_cells) else None
+            )
+            body_position += 1
+        # Only an OVERFILLED row is repaired, and the repair is lossless:
+        # merging cannot drop content. A short row lost a column at
+        # translation time -- padding it would bless real data loss, so it
+        # ships unchanged and the shape check reports the shortfall.
+        if desired is None or len(cells) <= desired:
+            repaired.append(line)
+            continue
+        merged = _merge(cells, desired)
+        lead = stripped[: len(stripped) - len(stripped.lstrip("|"))]
+        trail = stripped[len(stripped.rstrip("|")) :]
+        repaired.append(f"{lead} " + " | ".join(cell.strip() for cell in merged) + f" {trail}")
+    return "\n".join(repaired)
+
+
 @dataclass(frozen=True, slots=True)
 class TableReconstruction:
     """The structural outcome of rebuilding a table grid for the page.

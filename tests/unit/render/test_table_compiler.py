@@ -8,8 +8,10 @@ import pytest
 
 from ubt.render.table_compiler import (
     TableComplexity,
+    normalize_table_to_source,
     parse_markdown_table,
     probe_table_complexity,
+    verify_table_reconstruction,
 )
 
 pytestmark = pytest.mark.fast
@@ -149,3 +151,50 @@ def test_probe_table_complexity_narrow_width_suggests_landscape() -> None:
     assert comp.is_complex is True
     assert comp.suggests_landscape is True
     assert comp.contingency == "landscape"
+
+
+def test_normalize_table_to_source_merges_a_shattered_row() -> None:
+    """A model re-chunking one source cell into several target cells is repaired.
+
+    Measured on the ATC'25 replay: the API table carried each row's signatures
+    in one cell and the translation came back with the descriptions split into
+    their own cells (a 2-column row delivered as 6). The renderer then lays a
+    ragged grid under a 2-column spec and the reconstruction check reports a
+    shattered table. The repair keeps every character.
+    """
+    source = (
+        "| APIs | Descriptions |\n|---|---|\n"
+        "| Scheduler::enqueue(&self, task) | 放入任务并访问队列 |\n"
+        "| FrameAlloc::alloc(&self, layout) | 分配帧 |"
+    )
+    target = (
+        "| APIs | 描述 |\n|---|---|\n"
+        "| Scheduler::enqueue(&self, task) | 放入任务 | 访问本地运行队列 |\n"
+        "| FrameAlloc::alloc(&self, layout) | 分配帧 |"
+    )
+    normalized = normalize_table_to_source(source, target)
+
+    ok = verify_table_reconstruction(source, normalized)
+    assert ok.ok, ok.reason
+    # Nothing was dropped: both fragments of the shattered cell survive, joined
+    # in the row's last cell.
+    assert "放入任务" in normalized and "访问本地运行队列" in normalized
+
+
+def test_normalize_table_to_source_leaves_a_clean_grid_alone() -> None:
+    source = "| A | B |\n|---|---|\n| 一 | 二 |"
+    assert normalize_table_to_source(source, source) == source
+
+
+def test_normalize_table_to_source_never_pads_a_dropped_column() -> None:
+    """A short row lost a column at translation time -- real data loss.
+
+    Padding it with empty cells would bless the loss as ``verified``; the row
+    ships unchanged and the shape check reports the shortfall.
+    """
+    source = "| A | B | C |\n|---|---|---|\n| 一 | 二 | 三 |"
+    target = "| A | B | C |\n|---|---|---|\n| 一 | 二 |"
+    normalized = normalize_table_to_source(source, target)
+    assert normalized == target
+    ok = verify_table_reconstruction(source, normalized)
+    assert not ok.ok and "row_1_cell_count_mismatch" in ok.reason
