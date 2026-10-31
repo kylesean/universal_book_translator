@@ -546,6 +546,25 @@ def test_cross_page_prose_run_with_footer_page_number_and_zwsp_is_accepted() -> 
     assert not report.findings
 
 
+def test_smart_quotes_and_typographic_apostrophes_are_accepted() -> None:
+    """Typographical quotes and apostrophes emitted by Typst (e.g. ’ / ′ / “ / ”)
+
+    must match source ASCII quotes (' / \") without triggering false-positive clipped_overflow.
+    """
+    block_text = "In SOSP'23, Kimi-K2.5's Agent Swarm used OpenAI's \"Code Interpreter\" framework."
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b0042", block_text, page=1, allow_cross_page=True),),
+            page_texts=(
+                "In SOSP’23, Kimi-K2.5′s Agent Swarm used OpenAI’s “Code Interpreter” framework.1",
+            ),
+            contract="readable",
+        )
+    )
+    assert report.passed, report.summary_line()
+    assert not report.findings
+
+
 def test_page_level_overflow_record_is_not_dropped() -> None:
     """Page-level OverflowRecord(block_id='page:1') must emit overflow_recorded."""
     report = evaluate_delivery_contract(

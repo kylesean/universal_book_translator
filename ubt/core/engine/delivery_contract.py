@@ -1,4 +1,7 @@
-"""The delivery contract: one verdict over eight artifact invariants.
+"""The delivery contract: one verdict over the artifact invariants.
+
+The invariants are the named entries in the report's ``checks`` tuple, built in
+:func:`evaluate_delivery_contract` -- not a number to keep in sync here.
 
 The export path already writes a quality report, an attestation sidecar and a
 visual report. Those three can disagree, and the 26-page BSIM-CMG job is the
@@ -199,8 +202,8 @@ class ContractEvidence:
     font_issues: tuple[str, ...] = ()
     overflow_records: tuple[OverflowRecord, ...] = ()
     style_samples: tuple[StyleSample, ...] = ()
-    #: The document body group the renderer *declared* before drawing (G4 Stage
-    #: 3A). Membership and exceptions come from here; the sizes come from the
+    #: The document body group the renderer *declared* before drawing.
+    #: Membership and exceptions come from here; the sizes come from the
     #: artifact. ``None`` keeps the pre-group behaviour for older artifacts.
     style_group: StyleGroupPlan | None = None
     #: The renderer declared, before drawing, that a squeezed page holds the
@@ -221,7 +224,7 @@ class ContractFinding:
     #: ``…context⟦token⟧context…`` excerpt. A single message cannot answer
     #: "how many are left": on the 26-page replay a repair loop that fixed one
     #: ``placeholder_leak`` then re-read the *same first* message was
-    #: indistinguishable from a defect that cannot be fixed (AD-022). Empty for
+    #: indistinguishable from a defect that cannot be fixed. Empty for
     #: faults that are inherently single (page count, unreadable artifact).
     occurrences: tuple[str, ...] = ()
 
@@ -287,12 +290,16 @@ class ContractReport:
 
 _ZERO_WIDTH_RE = re.compile(r"[\u200b\u200c\u200d\ufeff\u00ad]")
 _HYPHEN_LIKE_RE = re.compile(r"[\u2212\u2010\u2011\u2012\u2013\u2014\u2015\uff0d\ufffe]")
+_QUOTE_LIKE_RE = re.compile(r"[\u0027\u2018\u2019\u201a\u201b\u2032\u0060\u00b4\u02bc]")
+_DQUOTE_LIKE_RE = re.compile(r"[\u0022\u201c\u201d\u201e\u00ab\u00bb]")
 
 
 def _normalize(text: str) -> str:
     """Whitespace-free text, so a reflowed line break is not a mismatch."""
     cleaned = _ZERO_WIDTH_RE.sub("", (text or ""))
     cleaned = _HYPHEN_LIKE_RE.sub("-", cleaned)
+    cleaned = _QUOTE_LIKE_RE.sub("'", cleaned)
+    cleaned = _DQUOTE_LIKE_RE.sub('"', cleaned)
     return "".join(cleaned.split())
 
 
@@ -461,7 +468,7 @@ def _group_style_findings(
     plan: StyleGroupPlan,
     evidence: ContractEvidence,
 ) -> list[ContractFinding]:
-    """The group-aware style check (G4 Stage 3A).
+    """The group-aware style check.
 
     Two separate questions, deliberately not merged:
 
@@ -969,7 +976,7 @@ def _placeholder_findings(joined: str) -> list[ContractFinding]:
 
     The message names the count and the first site; ``occurrences`` carries one
     excerpt per site so a reviewer can work through them without re-running the
-    export after each single repair (AD-022).
+    export after each single repair.
 
     Stray HTML formatting tags sit in the same family: the sanitizer deletes
     them before render, so a tag measured in the artifact is a bypass, and the
