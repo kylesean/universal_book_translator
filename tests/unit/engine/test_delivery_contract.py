@@ -92,6 +92,7 @@ def _evidence(
     font_issues: tuple[str, ...] = (),
     overflow_records: tuple[OverflowRecord, ...] = (),
     style_samples: tuple[StyleSample, ...] = (),
+    declared_page_expansion: bool = False,
 ) -> ContractEvidence:
     pages = page_count if page_count is not None else len(page_texts)
     return ContractEvidence(
@@ -106,6 +107,7 @@ def _evidence(
         font_issues=font_issues,
         overflow_records=overflow_records,
         style_samples=style_samples,
+        declared_page_expansion=declared_page_expansion,
     )
 
 
@@ -599,3 +601,55 @@ def test_large_box_edge_overlap_is_not_exempted_as_aggregate() -> None:
         )
     )
     assert "text_overlap" in _codes(report)
+
+
+def test_a_declared_flow_expansion_passes_with_more_pages() -> None:
+    """The middle contract: a squeezed page holds the body size and flows.
+
+    The renderer declared the expansion before drawing, so a faithful artifact
+    with MORE pages than the source is the contract holding -- the one thing
+    that regenerates freely (page count) traded for the two that do not (type
+    size and content). Fewer pages stays critical in every case.
+    """
+    common_blocks = (_block("b1", "第一段完整译文。"), _block("b2", "第二段完整译文。"))
+    common_texts = ("第一段完整译文。", "第二段完整译文。", "延续页上的后续内容。")
+
+    declared = evaluate_delivery_contract(
+        _evidence(
+            blocks=common_blocks,
+            page_texts=common_texts,
+            expected_page_count=2,
+            contract="faithful",
+            declared_page_expansion=True,
+        )
+    )
+    assert declared.passed
+    assert "page_count_mismatch" not in _codes(declared)
+    assert any(
+        c["name"] == "page_count" and "flow-expanded" in str(c.get("status", ""))
+        for c in declared.checks
+    )
+
+    undeclared = evaluate_delivery_contract(
+        _evidence(
+            blocks=common_blocks,
+            page_texts=common_texts,
+            expected_page_count=2,
+            contract="faithful",
+        )
+    )
+    assert not undeclared.passed
+    assert "page_count_mismatch" in _codes(undeclared)
+
+    shrunk = evaluate_delivery_contract(
+        _evidence(
+            blocks=common_blocks,
+            page_texts=("第一段完整译文。",),
+            page_count=1,
+            expected_page_count=2,
+            contract="faithful",
+            declared_page_expansion=True,
+        )
+    )
+    assert not shrunk.passed
+    assert "page_count_mismatch" in _codes(shrunk)

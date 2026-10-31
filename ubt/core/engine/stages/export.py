@@ -1339,6 +1339,13 @@ def _delivery_contract_evidence(
             contract = "readable"
 
     blocks: list[ContractBlock] = []
+    # The renderer's flow-expansion declarations, read before the blocks: a
+    # page that held the body group's size and flowed onto continuation pages
+    # shifts every later block's output page, so faithful's per-page pinning
+    # yields to the declared expansion (the page-count check carries it).
+    declared_page_expansion = any(
+        bool(pg.get("flow_expanded")) for pg in getattr(adapter, "last_page_geometry", None) or []
+    )
     # Table grids are verified as assets, not as text blocks -- but the style
     # sampler needs their delivered text to recognize a grid's own characters
     # on the page and keep them out of the body-size vote (a grid is its own
@@ -1380,8 +1387,12 @@ def _delivery_contract_evidence(
                 kind=str(block.block_type.value),
                 # A reflow may move a block to another page; a faithful page
                 # must keep it where the source put it, except when the source
-                # block itself spans multiple physical pages.
-                allow_cross_page=(contract == "readable") or has_multi_page_boxes,
+                # block itself spans multiple physical pages -- or when a
+                # declared flow expansion shifted later content onto
+                # continuation pages.
+                allow_cross_page=(
+                    (contract == "readable") or has_multi_page_boxes or declared_page_expansion
+                ),
             )
         )
 
@@ -1441,6 +1452,7 @@ def _delivery_contract_evidence(
         overflow_records=overflow_records,
         style_samples=style_samples,
         read_geometry=True,
+        declared_page_expansion=declared_page_expansion,
     )
 
     # The renderer declares the document body group before it draws (G4 Stage

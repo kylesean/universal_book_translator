@@ -345,6 +345,7 @@ def read_artifact_evidence(
     overflow_records: Iterable[OverflowRecord] = (),
     style_samples: Iterable[StyleSample] = (),
     read_geometry: bool = True,
+    declared_page_expansion: bool = False,
 ) -> ContractEvidence:
     """Read a delivered PDF into ``ContractEvidence``.
 
@@ -472,6 +473,7 @@ def read_artifact_evidence(
             font_issues=tuple(font_issues),
             overflow_records=tuple(overflow_records),
             style_samples=tuple(style_samples),
+            declared_page_expansion=declared_page_expansion,
         )
 
     return ContractEvidence(
@@ -497,6 +499,7 @@ def read_artifact_evidence(
         style_samples=tuple(style_samples)
         or measured
         or _exact_body_sizes(pdf_path, page_exhibits or None, body_pages or None),
+        declared_page_expansion=declared_page_expansion,
     )
 
 

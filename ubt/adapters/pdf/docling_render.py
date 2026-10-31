@@ -581,7 +581,7 @@ class DoclingRenderStrategy:
             extract_page_geometry,
             make_asset_copier,
             make_formula_cropper,
-            solve_page_lock,
+            solve_page_lock_flow,
         )
 
         source_path = Path(
@@ -1344,7 +1344,7 @@ class DoclingRenderStrategy:
                 geom = extract_page_geometry(
                     pw, ph, page_l2_blocks, default_theme_color=style_profile.primary_heading_hex
                 )
-                l2_size, l2_leading, l2_spacing, l2_tracking = solve_page_lock(
+                l2_size, l2_leading, l2_spacing, l2_tracking, l2_flows = solve_page_lock_flow(
                     geom,
                     page_l2_blocks,
                     target_lang=target_lang,
@@ -1358,6 +1358,7 @@ class DoclingRenderStrategy:
                     par_spacing_em=l2_spacing,
                     tracking_em=l2_tracking,
                     blocks=page_l2_blocks,
+                    flow_expanded=l2_flows,
                 )
                 pages_spec.append(
                     FacsimilePageSpec(
@@ -1372,7 +1373,12 @@ class DoclingRenderStrategy:
                         l2_spec=l2_page,
                     )
                 )
-                if l2_size < body_group.size_pt - 0.01:
+                if l2_flows:
+                    # The middle contract held the group's size and let the
+                    # excess flow onto continuation pages: the body group is
+                    # intact, the page count absorbed the squeeze.
+                    page_fits[pno] = FitReport(fits=True, reason="l2_flow_holds_group")
+                elif l2_size < body_group.size_pt - 0.01:
                     # The page-locked reflow is the last placement strategy, and
                     # it had to go under the group to hold this page. That is a
                     # style exception with its own reason: the page is readable,
@@ -1404,6 +1410,7 @@ class DoclingRenderStrategy:
                         "style_group_id": body_group.group_id,
                         "style_group_size_pt": round(body_group.size_pt, 3),
                         "style_exception": not page_fits[pno].fits,
+                        "flow_expanded": l2_flows,
                         **(
                             {
                                 "cels_distortion_score": round(cels_sol.distortion.score, 4),
@@ -1584,11 +1591,13 @@ class DoclingRenderStrategy:
                             import dataclasses
 
                             geom = dataclasses.replace(geom, columns=cels_tracks)
-                        l2_size, l2_leading, l2_spacing, l2_tracking = solve_page_lock(
-                            geom,
-                            page_blocks,
-                            target_lang=target_lang,
-                            preferred_pt=body_group.size_pt,
+                        l2_size, l2_leading, l2_spacing, l2_tracking, l2_flows = (
+                            solve_page_lock_flow(
+                                geom,
+                                page_blocks,
+                                target_lang=target_lang,
+                                preferred_pt=body_group.size_pt,
+                            )
                         )
                         l2_page = PageLockedPageSpec(
                             page_no=pno,
@@ -1598,6 +1607,7 @@ class DoclingRenderStrategy:
                             par_spacing_em=l2_spacing,
                             tracking_em=l2_tracking,
                             blocks=page_blocks,
+                            flow_expanded=l2_flows,
                         )
                         pages_spec[idx] = FacsimilePageSpec(
                             page_no=pno,
@@ -1617,10 +1627,15 @@ class DoclingRenderStrategy:
                                     "delivered_leading_em": round(l2_leading, 4),
                                     "tracking_em": round(l2_tracking, 4),
                                     "tier": "L2",
-                                    "style_exception": l2_size < body_group.size_pt - 0.01,
+                                    "style_exception": (
+                                        l2_size < body_group.size_pt - 0.01 and not l2_flows
+                                    ),
+                                    "flow_expanded": l2_flows,
                                 }
                             )
-                        if l2_size < body_group.size_pt - 0.01:
+                        if l2_flows:
+                            page_fits[pno] = FitReport(fits=True, reason="l2_flow_holds_group")
+                        elif l2_size < body_group.size_pt - 0.01:
                             page_fits[pno] = FitReport(
                                 fits=False,
                                 deficit_pt=round(body_group.size_pt - l2_size, 3),

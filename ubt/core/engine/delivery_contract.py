@@ -203,6 +203,11 @@ class ContractEvidence:
     #: 3A). Membership and exceptions come from here; the sizes come from the
     #: artifact. ``None`` keeps the pre-group behaviour for older artifacts.
     style_group: StyleGroupPlan | None = None
+    #: The renderer declared, before drawing, that a squeezed page holds the
+    #: body group's size and flows onto continuation pages (the middle
+    #: contract). A faithful artifact may then carry MORE pages than the
+    #: source -- never fewer -- without failing the page-count promise.
+    declared_page_expansion: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -1024,17 +1029,27 @@ def evaluate_delivery_contract(evidence: ContractEvidence) -> ContractReport:
             )
             checks.append({"name": "page_count", "status": "unmeasured"})
         elif evidence.page_count != evidence.expected_page_count:
-            findings.append(
-                ContractFinding(
-                    severity="critical",
-                    code="page_count_mismatch",
-                    message=(
-                        f"faithful artifact has {evidence.page_count} pages; "
-                        f"the source has {evidence.expected_page_count}"
-                    ),
+            if (
+                evidence.declared_page_expansion
+                and evidence.page_count > evidence.expected_page_count
+            ):
+                # A declared flow expansion holds the body group's size and
+                # lets a squeezed page flow onto continuation pages: more
+                # pages is the contract holding, never fewer. The renderer
+                # declared it before drawing, so this is not a silent trade.
+                checks.append({"name": "page_count", "status": "pass (flow-expanded)"})
+            else:
+                findings.append(
+                    ContractFinding(
+                        severity="critical",
+                        code="page_count_mismatch",
+                        message=(
+                            f"faithful artifact has {evidence.page_count} pages; "
+                            f"the source has {evidence.expected_page_count}"
+                        ),
+                    )
                 )
-            )
-            checks.append({"name": "page_count", "status": "fail"})
+                checks.append({"name": "page_count", "status": "fail"})
         else:
             checks.append({"name": "page_count", "status": "pass"})
     else:

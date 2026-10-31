@@ -110,6 +110,12 @@ class PageLockedPageSpec:
     par_spacing_em: float
     tracking_em: float = 0.0
     blocks: list[IRBlock] = field(default_factory=list)
+    #: The middle contract: this page's content could not hold the body
+    #: group's size in one page, so the group size is held and the excess
+    #: flows onto continuation pages (Typst repeats the page setup for them).
+    #: ``False`` keeps the strict 1:1 promise; ``True`` downgrades it to
+    #: "at least one output page per source page, in order".
+    flow_expanded: bool = False
 
 
 def _central_band_is_occupied(
@@ -390,6 +396,61 @@ def page_overflow_at_floor(
         if running > capacity:
             return block_id, round(running - capacity, 2)
     return None
+
+
+#: A shrink within this distance of the group size is inside the style group's
+#: own tolerance (the PRD's 0.5pt body promise) and keeps the strict 1:1 page.
+#: Below it, the middle contract prefers holding the group exactly and flowing
+#: the excess onto continuation pages.
+_FLOW_EXPANSION_TOLERANCE_PT = 0.5
+
+
+def solve_page_lock_flow(
+    geometry: PageGeometry,
+    blocks: Sequence[IRBlock],
+    *,
+    target_lang: str = "zh",
+    preferred_pt: float,
+    max_body_pt: float = 11.5,
+) -> tuple[float, float, float, float, bool]:
+    """Solve with the middle contract: hold the group size, flow when squeezed.
+
+    The strict solve runs first. Three outcomes:
+
+    - The group size fits: single page, ``flows=False`` (the common case --
+      identical to :func:`solve_page_lock`).
+    - The strict solve shrank less than :data:`_FLOW_EXPANSION_TOLERANCE_PT`
+      below the group: keep that size, ``flows=False`` -- the shrink is inside
+      the group's own tolerance, and an extra page is not worth 0.25pt.
+    - The strict solve shrank further (or the floor itself overflowed): pin
+      the size at the group and let Typst flow the excess onto continuation
+      pages, ``flows=True``. Continuation pages repeat the page setup, so the
+      design language -- margins, columns, type size -- survives the flow.
+
+    This is the honest answer to a page a huge table squeezes: the old choices
+    were "shrink the whole page toward the floor" (unreadable type, style
+    exception) or "let it run long" (content past the page edge). Holding the
+    group and adding a page trades the one thing that regenerates freely --
+    page count -- for the two that do not: type size and content.
+    """
+    size, leading, spacing, tracking = solve_page_lock(
+        geometry,
+        blocks,
+        target_lang=target_lang,
+        preferred_pt=preferred_pt,
+        max_body_pt=max_body_pt,
+    )
+    if size >= preferred_pt - _FLOW_EXPANSION_TOLERANCE_PT:
+        return size, leading, spacing, tracking, False
+    pinned_size, pinned_leading, pinned_spacing, pinned_tracking = solve_page_lock(
+        geometry,
+        blocks,
+        target_lang=target_lang,
+        preferred_pt=preferred_pt,
+        max_body_pt=max(max_body_pt, preferred_pt),
+        floor_pt=preferred_pt,
+    )
+    return pinned_size, pinned_leading, pinned_spacing, pinned_tracking, True
 
 
 def solve_page_lock(
@@ -960,47 +1021,76 @@ class PageLockedReflowRenderer:
             with pikepdf.open(output_path) as pdf:
                 actual_pages = len(pdf.pages)
                 expected_pages = len(pages)
+                # A flow-expanded page *declared* that its content spans more
+                # than one output page: extra pages are the contract holding,
+                # not a defect. Only an undeclared mismatch -- or a document
+                # that LOST pages -- is a fault.
+                declared_expansion = any(spec.flow_expanded for spec in pages)
                 if actual_pages != expected_pages:
-                    worst = None
-                    worst_deficit = 0.0
-                    overflow_page: int | None = None
-                    for spec in pages:
-                        found = page_overflow_at_floor(
-                            spec.geometry,
-                            spec.blocks,
-                            size_pt=spec.uniform_size_pt,
-                            leading_em=spec.leading_em,
-                            par_spacing_em=spec.par_spacing_em,
-                            tracking_em=spec.tracking_em,
+                    if declared_expansion and actual_pages > expected_pages:
+                        expanded_sources = [spec.page_no for spec in pages if spec.flow_expanded]
+                        self.last_page_overflow.append(
+                            {
+                                "kind": "flow_expansion",
+                                "expected_pages": expected_pages,
+                                "actual_pages": actual_pages,
+                                "expanded_source_pages": expanded_sources,
+                            }
                         )
-                        if found is None:
-                            continue
-                        block_id, block_deficit = found
-                        if overflow_page is None:
-                            overflow_page = spec.page_no
-                        if block_deficit > worst_deficit:
-                            worst, worst_deficit = block_id, block_deficit
-                    self.last_page_overflow.append(
-                        {
-                            "page_no": overflow_page,
-                            "expected_pages": expected_pages,
-                            "actual_pages": actual_pages,
-                            "deficit_pt": round(worst_deficit, 2) if worst else None,
-                            "block_id": worst,
-                        }
-                    )
-                    logger.warning(
-                        "Page-locked reflow overflowed the 1:1 page count (expected %d, "
-                        "got %d) and the body floor (%.1fpt) forbids shrinking further. "
-                        "Worst block %s is over budget by %s pt on page %s. The book ships "
-                        "with an extra page rather than unreadable type.",
-                        expected_pages,
-                        actual_pages,
-                        FLOOR_PT,
-                        worst or "<not attributed>",
-                        f"{worst_deficit:.2f}" if worst else "unknown",
-                        overflow_page if overflow_page is not None else "unknown",
-                    )
+                        logger.info(
+                            "Page-locked flow expansion: %d source page(s) %s held "
+                            "the body group's size and flowed onto %d output pages.",
+                            len(expanded_sources),
+                            expanded_sources,
+                            actual_pages,
+                        )
+                    else:
+                        worst = None
+                        worst_deficit = 0.0
+                        overflow_page: int | None = None
+                        for spec in pages:
+                            if spec.flow_expanded:
+                                # Its extra pages are declared; the deficit
+                                # search would re-report the expansion as if
+                                # it were an accident.
+                                continue
+                            found = page_overflow_at_floor(
+                                spec.geometry,
+                                spec.blocks,
+                                size_pt=spec.uniform_size_pt,
+                                leading_em=spec.leading_em,
+                                par_spacing_em=spec.par_spacing_em,
+                                tracking_em=spec.tracking_em,
+                            )
+                            if found is None:
+                                continue
+                            block_id, block_deficit = found
+                            if overflow_page is None:
+                                overflow_page = spec.page_no
+                            if block_deficit > worst_deficit:
+                                worst, worst_deficit = block_id, block_deficit
+                        self.last_page_overflow.append(
+                            {
+                                "kind": "overflow",
+                                "page_no": overflow_page,
+                                "expected_pages": expected_pages,
+                                "actual_pages": actual_pages,
+                                "deficit_pt": round(worst_deficit, 2) if worst else None,
+                                "block_id": worst,
+                            }
+                        )
+                        logger.warning(
+                            "Page-locked reflow overflowed the 1:1 page count (expected %d, "
+                            "got %d) and the body floor (%.1fpt) forbids shrinking further. "
+                            "Worst block %s is over budget by %s pt on page %s. The book ships "
+                            "with an extra page rather than unreadable type.",
+                            expected_pages,
+                            actual_pages,
+                            FLOOR_PT,
+                            worst or "<not attributed>",
+                            f"{worst_deficit:.2f}" if worst else "unknown",
+                            overflow_page if overflow_page is not None else "unknown",
+                        )
         except Exception as exc:
             logger.debug("Page count verification skipped or failed: %s", exc)
 
@@ -1017,4 +1107,5 @@ __all__ = [
     "make_formula_cropper",
     "page_overflow_at_floor",
     "solve_page_lock",
+    "solve_page_lock_flow",
 ]

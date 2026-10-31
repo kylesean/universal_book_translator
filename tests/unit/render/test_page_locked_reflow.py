@@ -29,6 +29,7 @@ from ubt.render.typst.page_locked_renderer import (
     extract_page_geometry,
     page_overflow_at_floor,
     solve_page_lock,
+    solve_page_lock_flow,
 )
 
 pytestmark = pytest.mark.fast
@@ -547,3 +548,84 @@ def test_page_locked_anchors_the_note_flow_at_the_bottom() -> None:
     )
     markup = PageLockedReflowRenderer().build_page_markup(spec, target_lang="zh")
     assert markup.index("正文段落。") < markup.index("第二段正文。") < markup.index("这是页脚注。")
+
+
+def test_solve_page_lock_flow_holds_the_group_when_squeezed() -> None:
+    """The middle contract: type size never trades for page count.
+
+    A page whose content cannot hold the body group's size pins the solve at
+    the group size and lets Typst flow the excess onto continuation pages --
+    the two things that do not regenerate freely (type size, content) are kept,
+    and the one that does (page count) absorbs the squeeze.
+    """
+    geom = PageGeometry(
+        page_w=595.0,
+        page_h=842.0,
+        margin_top=36.0,
+        margin_bottom=36.0,
+        margin_left=36.0,
+        margin_right=36.0,
+        columns=1,
+        theme_color_hex="#000000",
+    )
+    # Far more text than one page holds at the group size.
+    squeezed = [
+        _make_block(f"p{i}", "这是一段足够长的正文内容，用来把页面挤到无法容纳。" * 6)
+        for i in range(30)
+    ]
+    size, leading, spacing, tracking, flows = solve_page_lock_flow(geom, squeezed, preferred_pt=9.5)
+    assert flows is True
+    assert size == pytest.approx(9.5)
+
+    # A roomy page holds the group without flowing: the common case.
+    roomy = [_make_block("p0", "短段落。")]
+    size, leading, spacing, tracking, flows = solve_page_lock_flow(geom, roomy, preferred_pt=9.5)
+    assert flows is False
+
+
+def test_render_document_records_a_declared_flow_expansion(tmp_path: Path) -> None:
+    """A flow-expanded spec's extra output page is the contract holding.
+
+    The 1:1 conservation check must not report the declared expansion as an
+    accident: the spec said so before drawing, and the artifact carries the
+    continuation pages it promised.
+    """
+    geom = PageGeometry(
+        page_w=595.0,
+        page_h=842.0,
+        margin_top=36.0,
+        margin_bottom=36.0,
+        margin_left=36.0,
+        margin_right=36.0,
+        columns=1,
+        theme_color_hex="#000000",
+    )
+    spec = PageLockedPageSpec(
+        page_no=1,
+        geometry=geom,
+        uniform_size_pt=9.5,
+        leading_em=0.33,
+        par_spacing_em=0.60,
+        blocks=[_make_block("p1", "这一页的正文内容。"), _make_block("p2", "更多正文。")],
+        flow_expanded=True,
+    )
+
+    def two_page_compile(src: str, dst: str, lang: str) -> tuple[bool, str]:
+        import pikepdf
+
+        with pikepdf.Pdf.new() as pdf:
+            pdf.add_blank_page(page_size=(595, 842))
+            pdf.add_blank_page(page_size=(595, 842))
+            pdf.save(dst)
+        return True, ""
+
+    out = tmp_path / "flowed.pdf"
+    renderer = PageLockedReflowRenderer()
+    renderer.render_document(
+        [spec],
+        out,
+        tmp_path / "build",
+        target_lang="zh",
+        compile_fn=two_page_compile,
+    )
+    assert (renderer.last_page_overflow or [{}])[-1].get("kind") == "flow_expansion"
