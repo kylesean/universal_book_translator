@@ -45,6 +45,12 @@ from ubt.core.engine.ledger_mixins import (
     AGENT_SESSION_KEY,
     agent_package_accepted_blocks,
 )
+from ubt.core.engine.ledger_reading import (
+    ledger_event_factory,
+    manifest_from_ledger,
+    require_output_suffix,
+    terminology_from_ledger,
+)
 from ubt.core.engine.repair_loop import RepairLoop
 from ubt.core.engine.services import RunServices
 from ubt.core.engine.stage_context import StageContext
@@ -58,7 +64,6 @@ from ubt.core.engine.writer_lock import LedgerWriterLock, keep_lease_fresh
 from ubt.core.exceptions import (
     LedgerError,
     UBTError,
-    UnsupportedDocumentFormatError,
 )
 from ubt.core.ir.document_tree import section_context_for
 from ubt.core.ir.emphasis import parse_emphasis
@@ -654,7 +659,7 @@ class AgentTranslationService:
             source_lang=request.source_lang,
             target_lang=request.target_lang,
             profile_name=request.profile,
-            create_event=self._event_factory(ledger, job_id),
+            create_event=ledger_event_factory(ledger, job_id),
             fast_lane=False,
             lease_lost=lease_lost,
         )
@@ -895,36 +900,6 @@ class AgentTranslationService:
             effective_dual_mode=config.dual_mode if config.dual_mode != "auto" else "mono",
         )
 
-    @staticmethod
-    def _event_factory(ledger: SQLiteJobLedger, job_id: str) -> Any:
-        async def _create(
-            event_type: EventType,
-            job_id_arg: str,
-            ledger_arg: SQLiteJobLedger,
-            message: str = "",
-            active_block_id: str | None = None,
-            artifact_path: str | None = None,
-        ) -> TranslationProgressEvent:
-            stats = await asyncio.to_thread(ledger_arg.get_job_stats, job_id_arg)
-            return TranslationProgressEvent(
-                event_type=event_type,
-                job_id=job_id_arg,
-                total_blocks=int(stats.get("total", 0) or 0),
-                skipped_blocks=int(stats.get("skipped", 0) or 0),
-                completed_blocks=int(stats.get("completed", 0) or 0),
-                drafted_blocks=int(stats.get("drafted", 0) or 0),
-                repair_pending_blocks=int(stats.get("repair_pending", 0) or 0),
-                repaired_blocks=int(stats.get("repaired", 0) or 0),
-                failed_blocks=int(stats.get("failed", 0) or 0),
-                needs_human_blocks=int(stats.get("needs_human", 0) or 0),
-                blocked_human_blocks=int(stats.get("blocked_human", 0) or 0),
-                message=message,
-                active_block_id=active_block_id,
-                artifact_path=artifact_path,
-            )
-
-        return _create
-
     # ------------------------------------------------------------------
     # claim / submit
     # ------------------------------------------------------------------
@@ -1022,7 +997,7 @@ class AgentTranslationService:
         kind_value = package_meta.get("kind")
         kind: Literal["translate", "repair"] = "repair" if kind_value == "repair" else "translate"
         all_blocks = await asyncio.to_thread(ledger.get_all_blocks, request.job_id)
-        terminology = await self._terminology(ledger, request.job_id)
+        terminology = await asyncio.to_thread(terminology_from_ledger, ledger, request.job_id)
         global_glossary = build_global_glossary_table(terminology.glossary_dicts, max_entries=80)
         work_blocks = [
             self._block_work(
@@ -1357,7 +1332,7 @@ class AgentTranslationService:
                     ),
                 )
             self._lease_lost = lease_lost
-            manifest = await asyncio.to_thread(self._manifest_from_ledger, ledger, request.job_id)
+            manifest = await asyncio.to_thread(manifest_from_ledger, ledger, request.job_id)
             config = await asyncio.to_thread(self._config_from_agent_metadata, manifest)
             blocks = await asyncio.to_thread(ledger.get_all_blocks, request.job_id)
             # Submitted packages leave blocks in DRAFTED so a later finish can
@@ -1467,7 +1442,7 @@ class AgentTranslationService:
         manifest: BookManifest,
         config: UBTConfig,
     ) -> None:
-        terminology = await self._terminology(ledger, job_id)
+        terminology = await asyncio.to_thread(terminology_from_ledger, ledger, job_id)
         blocks = await asyncio.to_thread(ledger.get_all_blocks, job_id)
         candidates = [
             b for b in blocks if b.status in (BlockStatus.DRAFTED, BlockStatus.REPAIR_PENDING)
@@ -1575,7 +1550,7 @@ class AgentTranslationService:
             concurrency_sem=asyncio.Semaphore(1),
             tm=tm,
         )
-        terminology = await self._terminology(ledger, job_id)
+        terminology = await asyncio.to_thread(terminology_from_ledger, ledger, job_id)
         source_path = Path(manifest.source_path)
         output_path = Path(
             str(
@@ -1584,11 +1559,12 @@ class AgentTranslationService:
             )
         )
         adapter = resolve_adapter(source_path, pdf_engine=render_config.pdf_engine)
-        allowed: frozenset[str] = getattr(type(adapter), "output_suffixes", frozenset())
-        if allowed and output_path.suffix and output_path.suffix.lower() not in allowed:
-            raise UnsupportedDocumentFormatError(
-                f"{type(adapter).__name__} writes {'/'.join(sorted(allowed))}, not {output_path.suffix}"
-            )
+        require_output_suffix(
+            adapter,
+            output_path,
+            subject="writing",
+            remedy="Choose an output name with a supported suffix.",
+        )
         render_plan = await asyncio.to_thread(self._render_plan, manifest, config)
         ctx = StageContext(
             config=render_config,
@@ -1606,7 +1582,7 @@ class AgentTranslationService:
                     "profile", "general"
                 )
             ),
-            create_event=self._event_factory(ledger, job_id),
+            create_event=ledger_event_factory(ledger, job_id),
             lease_lost=self._lease_lost,
         )
         return _RenderStage(
@@ -1660,17 +1636,6 @@ class AgentTranslationService:
         )
         return terminal
 
-    async def _terminology(self, ledger: SQLiteJobLedger, job_id: str) -> Terminology:
-        raw = await asyncio.to_thread(ledger.get_job_metadata_value, job_id, "bible_cache")
-        if not isinstance(raw, dict):
-            return Terminology()
-        return Terminology(
-            glossary_dicts=[dict(e) for e in raw.get("glossary_dicts", []) if isinstance(e, dict)],
-            abbreviation_entries=[
-                dict(e) for e in raw.get("abbreviation_entries", []) if isinstance(e, dict)
-            ],
-        )
-
     def _config_from_agent_metadata(self, manifest: BookManifest) -> UBTConfig:
         """Reconstruct the prepare-time config that affects finish/render."""
         raw = manifest.metadata.pop("_agent_config", None)
@@ -1697,57 +1662,6 @@ class AgentTranslationService:
         from ubt.core.job_options import apply_config_overrides
 
         return apply_config_overrides(self.config, overrides)
-
-    @staticmethod
-    def _manifest_from_ledger(ledger: SQLiteJobLedger, job_id: str) -> BookManifest:
-        from ubt.core.ir.models import ChapterMeta
-        from ubt.core.ir.run_metadata import RunMetadata
-
-        snapshot = ledger.get_job_snapshot(job_id)
-        if snapshot is None:
-            raise UBTError(f"no such job: {job_id}")
-        chapters_raw = ledger.get_job_metadata_value(job_id, "chapters") or []
-
-        chapters = []
-        if isinstance(chapters_raw, list):
-            for entry in chapters_raw:
-                if isinstance(entry, dict):
-                    with suppress(Exception):
-                        chapters.append(ChapterMeta.model_validate(entry))
-        metadata = ledger.get_job_metadata(job_id)
-        artifact_metadata = {
-            key: value
-            for key, value in metadata.items()
-            if key
-            in {
-                "author",
-                "chapter_translations",
-                "opf_path",
-                "pdf_parser_engine",
-                "boilerplate_footers",
-                "is_page_slice_epub",
-                "page_kinds",
-                "typst_version",
-            }
-        }
-        run = RunMetadata()
-        for field in RunMetadata.model_fields:
-            if field in metadata:
-                setattr(run, field, metadata[field])
-        manifest = BookManifest(
-            doc_id=str(snapshot["doc_id"]),
-            title=str(ledger.get_job_metadata_value(job_id, "title") or ""),
-            source_path=str(snapshot["source_path"]),
-            source_lang=str(ledger.get_job_metadata_value(job_id, "source_lang") or "en"),
-            target_lang=str(snapshot["target_lang"]),
-            chapters=chapters,
-            metadata=artifact_metadata,
-            run=run,
-        )
-        agent_config = metadata.get("agent_config")
-        if isinstance(agent_config, dict):
-            manifest.metadata["_agent_config"] = agent_config
-        return manifest
 
     @staticmethod
     async def _refuse_if_another_writer(job_id: str, db_path: Path) -> None:

@@ -30,19 +30,22 @@ import asyncio
 import logging
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ubt.core.engine.events import EventType, TranslationProgressEvent
-from ubt.core.engine.facts import Terminology
 from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.engine.ledger_reading import (
+    ledger_event_factory,
+    manifest_from_ledger,
+    require_output_suffix,
+    terminology_from_ledger,
+)
 from ubt.core.engine.stage_context import StageContext
-from ubt.core.engine.stages.bible import _BIBLE_CACHE_KEY
 from ubt.core.engine.stages.export import run_export_stage
 from ubt.core.engine.writer_lock import LedgerWriterLock, keep_lease_fresh
-from ubt.core.exceptions import LedgerWriterLeaseLostError, UnsupportedDocumentFormatError
-from ubt.core.ir.models import BookManifest, ChapterMeta
+from ubt.core.exceptions import LedgerWriterLeaseLostError
+from ubt.core.ir.models import BookManifest
 from ubt.core.ir.render_plan import RenderPlan
-from ubt.core.ir.run_metadata import RunMetadata
 from ubt.core.ports import adapter_runtime_config, apply_runtime_config, resolve_adapter
 from ubt.core.qe.fast_pass import FastPassFilter
 
@@ -57,70 +60,6 @@ logger = logging.getLogger(__name__)
 
 class ReExportError(RuntimeError):
     """A job cannot be re-exported (no ledger, no source, no adapter, no output)."""
-
-
-def _manifest_from_ledger(ledger: SQLiteJobLedger, job_id: str) -> BookManifest:
-    """Rebuild the run's manifest from the ledger's persisted metadata.
-
-    ``init_job_from_manifest`` stored doc_id, source_path, target_lang, title,
-    source_lang, the chapter list and the run metadata, so the manifest a
-    re-export renders from is the one the original run used — not a
-    reconstruction that could disagree with it.
-    """
-    source_path = ledger.get_job_source_path(job_id) or ""
-    target_lang = ledger.get_job_target_lang(job_id) or "zh"
-    title = str(ledger.get_job_metadata_value(job_id, "title") or "")
-    source_lang = str(ledger.get_job_metadata_value(job_id, "source_lang") or "en")
-    metadata = ledger.get_job_metadata(job_id)
-    raw_chapters = ledger.get_job_metadata_value(job_id, "chapters") or []
-    chapters: list[ChapterMeta] = []
-    if isinstance(raw_chapters, list):
-        for entry in raw_chapters:
-            if isinstance(entry, dict):
-                try:
-                    chapters.append(ChapterMeta.model_validate(entry))
-                except Exception:  # a malformed chapter row must not sink the export
-                    logger.debug("Skipping malformed chapter metadata for %s: %r", job_id, entry)
-    run = RunMetadata()
-    for field in RunMetadata.model_fields:
-        if field in metadata:
-            setattr(run, field, metadata[field])
-    return BookManifest(
-        doc_id=job_id,
-        title=title,
-        source_path=source_path,
-        source_lang=source_lang,
-        target_lang=target_lang,
-        chapters=chapters,
-        metadata={
-            key: value
-            for key, value in metadata.items()
-            if key
-            in {
-                "author",
-                "chapter_translations",
-                "opf_path",
-                "pdf_parser_engine",
-                "boilerplate_footers",
-                "is_page_slice_epub",
-                "page_kinds",
-                "typst_version",
-                "delivery_mode",
-                "delivery_plan",
-                "delivery_mode_requested",
-                "delivery_mode_effective",
-                "delivery_mode_legacy",
-                "document_mode",
-                "has_scan",
-                "page_count",
-                "confirmed_font_damage_pages",
-                "font_damage_pages",
-                "document_style_group",
-                "document_style_profile",
-            }
-        },
-        run=run,
-    )
 
 
 def _render_plan_from_ledger(ledger: SQLiteJobLedger, job_id: str) -> RenderPlan:
@@ -140,28 +79,6 @@ def _render_plan_from_ledger(ledger: SQLiteJobLedger, job_id: str) -> RenderPlan
         translate_chrome=stored.get("translate_chrome"),
         bilingual_advisory=stored.get("bilingual_advisory"),
         emit_secondary_mode=stored.get("emit_secondary_mode"),
-    )
-
-
-def _terminology_from_ledger(ledger: SQLiteJobLedger, job_id: str) -> Terminology:
-    """The glossary the run enforced, from its persisted bible cache.
-
-    Read from ``bible_cache`` rather than re-reading the config's glossary file,
-    so the re-export enforces exactly the terms the quality gate judged — a fix
-    cannot disagree with the flag the reviewer saw.
-    """
-    payload = ledger.get_job_metadata_value(job_id, _BIBLE_CACHE_KEY)
-    if not isinstance(payload, dict):
-        return Terminology()
-    return Terminology(
-        glossary_dicts=[
-            dict(entry) for entry in payload.get("glossary_dicts", []) if isinstance(entry, dict)
-        ],
-        abbreviation_entries=[
-            dict(entry)
-            for entry in payload.get("abbreviation_entries", [])
-            if isinstance(entry, dict)
-        ],
     )
 
 
@@ -207,37 +124,6 @@ def _build_services(
         adaptive_policy=adaptive_policy,
         concurrency_sem=asyncio.Semaphore(config.max_concurrency),
     )
-
-
-def _make_event_factory(ledger: SQLiteJobLedger, job_id: str) -> Any:
-    """A minimal event factory: the export stage builds one terminal event.
-
-    The real orchestrator's factory folds live ledger stats and billing; a
-    re-export only needs the terminal event to carry the artifact path, so this
-    reads the stats cheaply and leaves the spend fields at their defaults (a
-    re-export spends nothing).
-    """
-
-    async def _create(
-        event_type: EventType,
-        job_id_arg: str,
-        ledger_arg: SQLiteJobLedger,
-        message: str = "",
-        active_block_id: str | None = None,
-        artifact_path: str | None = None,
-    ) -> TranslationProgressEvent:
-        stats = await asyncio.to_thread(ledger_arg.get_job_stats, job_id_arg)
-        return TranslationProgressEvent(
-            event_type=event_type,
-            job_id=job_id_arg,
-            total_blocks=int(stats.get("total", 0)),
-            completed_blocks=int(stats.get("completed", 0)),
-            message=message,
-            active_block_id=active_block_id,
-            artifact_path=artifact_path,
-        )
-
-    return _create
 
 
 def _default_collaborators(
@@ -412,7 +298,7 @@ async def re_export_job(
         # router needs a configured provider, and a job with no source or no
         # output path must fail with its own reason rather than a "no draft
         # model" error from an unnecessary provider construction.
-        manifest = _manifest_from_ledger(ledger, job_id)
+        manifest = manifest_from_ledger(ledger, job_id)
         delivery_mode = _apply_delivery_override(
             manifest,
             delivery,
@@ -427,6 +313,10 @@ async def re_export_job(
         target = output_path
         if target is None:
             stored_output = ledger.get_job_metadata_value(job_id, "output_file")
+            if not stored_output:
+                submitted = ledger.get_job_metadata_value(job_id, "submitted_request")
+                if isinstance(submitted, dict) and submitted.get("output_path"):
+                    stored_output = submitted["output_path"]
             if not stored_output:
                 raise ReExportError(
                     f"job {job_id} has no recorded output path; pass one explicitly"
@@ -444,15 +334,12 @@ async def re_export_job(
         # be refused before the render, not after a broken file is written (a
         # PDF engine into ``.md`` would also leak quarantine ``<mark>`` wrappers
         # verbatim into the deliverable).
-        allowed_suffixes: frozenset[str] = getattr(type(adapter), "output_suffixes", frozenset())
-        out_suffix = target.suffix.lower()
-        if allowed_suffixes and out_suffix and out_suffix not in allowed_suffixes:
-            wanted = "/".join(sorted(allowed_suffixes))
-            raise UnsupportedDocumentFormatError(
-                f"{type(adapter).__name__} writes {wanted}, so re-exporting to "
-                f"{target.name} would not be a readable {out_suffix.lstrip('.')}. "
-                f"Drop --output (the ledger's own path is kept) or choose one of {wanted}."
-            )
+        require_output_suffix(
+            adapter,
+            target,
+            subject="re-exporting to",
+            remedy="Drop --output (the ledger's own path is kept) or choose a supported suffix.",
+        )
         # The zero-spend contract, enforced: the visual gate is driven by the
         # config bound on the ctx, and this path bills nothing (it binds no
         # usage sink), so a paid judge here would spend invisibly to every
@@ -475,7 +362,11 @@ async def re_export_job(
         # override is skipped and the adapter's own default stands — the
         # renderer still writes the mode it actually used into
         # ``manifest.metadata`` for the contract to read.
-        recorded_mode = str((manifest.metadata or {}).get("delivery_mode") or "")
+        recorded_mode = str(
+            (manifest.metadata or {}).get("delivery_mode")
+            or (manifest.metadata or {}).get("delivery_mode_effective")
+            or ""
+        )
         if delivery_mode is not None or recorded_mode:
             apply_runtime_config(
                 adapter,
@@ -486,7 +377,7 @@ async def re_export_job(
         # Created before the ctx so the export stage's own boundary checks can
         # observe a reclaimed lease mid-render, not only at the two event
         # boundaries (a whole-book render plus the visual gate routinely
-        # outlives the 300 s default lease).
+        # outlives the default lease).
         lease_lost = asyncio.Event()
         ctx = StageContext(
             config=export_config,
@@ -500,11 +391,11 @@ async def re_export_job(
             source_lang=manifest.source_lang,
             target_lang=manifest.target_lang,
             profile_name="general",
-            create_event=_make_event_factory(ledger, job_id),
+            create_event=ledger_event_factory(ledger, job_id),
             lease_lost=lease_lost,
         )
         # Renew the lease for the life of the re-export. A whole-book Typst render
-        # plus the visual gate routinely outlives the 300 s default lease, and
+        # plus the visual gate routinely outlives the default lease, and
         # without renewal another process may legally reclaim the job mid-render:
         # both then write the same ledger and the same output file, the later
         # writer silently winning. The live run has always renewed; a re-export
@@ -519,7 +410,7 @@ async def re_export_job(
                 ctx,
                 services,
                 render_plan,
-                _terminology_from_ledger(ledger, job_id),
+                terminology_from_ledger(ledger, job_id),
                 claims_finality=False,
             ):
                 if lease_lost.is_set():
