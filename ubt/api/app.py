@@ -80,16 +80,14 @@ from ubt.core.router.router import ModelRouter
 logger = logging.getLogger(__name__)
 
 
-# Backwards-compatible names: the split moved the shared helpers to
-# ubt.api.routes.shared, and tests (plus the console contract) import them from
-# here. Kept as explicit aliases, not a star re-export.
+# Backwards-compatible aliases: the split moved these helpers to
+# ubt.api.routes.shared, and tests plus the console contract still import them
+# from here. The leading-underscore entries in ``__all__`` declare that
+# dependency rather than leaving it accidental.
 _deliverable_paths = deliverable_paths
 _is_own_prior_output = is_own_prior_output
 _output_path_claimant = output_path_claimant
 
-#: The leading-underscore entries are not oversights: the test suite and the
-#: console contract import those two helpers from this module, and a name in
-#: ``__all__`` is how that dependency stays declared rather than accidental.
 __all__ = [
     "JobManager",
     "JobRecord",

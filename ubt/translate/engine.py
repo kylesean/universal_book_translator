@@ -110,7 +110,7 @@ class TranslationEngine:
         memory context, so that context must enter the key or a changed prompt
         would reuse a stale draft (content-addressed cache layer).
 
-        ``run_kind`` is folded in **only when it is not ``"real"```, so the real
+        ``run_kind`` is folded in **only when it is not ``"real"``**, so the real
         namespace keeps the exact keys it had before this field existed. That
         matters because the store holds real translations that cost real money:
         folding the default in unconditionally would have made every one of them

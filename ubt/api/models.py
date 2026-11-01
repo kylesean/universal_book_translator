@@ -525,7 +525,7 @@ class SegmentEditRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    target_text: str = Field(..., min_length=1, description="Revised target text")
+    target_text: str = Field(..., min_length=1)
 
 
 class GlossaryTermRequest(BaseModel):

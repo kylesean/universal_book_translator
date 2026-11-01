@@ -1202,12 +1202,6 @@ def render_table(
     )
     widths = _alloc(table_scale)
 
-    # (The scale-based ``too_wide`` / ``full_page`` / ``shrink`` trio that used to
-    # be computed here was dead: the run-length measurement below recomputes all
-    # three and nothing read the earlier values in between. Kept only where the
-    # measurement decides, so there is one answer rather than two to keep in
-    # sync.)
-
     # Reserve a hairline of slack: the widths are rounded to 0.1pt for the
     # emitted spec, and a run that needs 124.4pt against a 124.1pt column
     # overflowed by 0.3pt -- enough for ``metadata.openclaw.requires`` to cross
@@ -1630,15 +1624,6 @@ class ReflowStats:
     #: block and the delivery contract reported ``missing_assets=0`` for a page
     #: whose figure had been replaced by a placeholder.
     assets_missing: list[tuple[str, str]] = field(default_factory=list)
-
-
-#: The mark-wrapper predicates and the delivered-text rule now live in
-#: :mod:`ubt.render.delivered_text` so the companion HTML/EPUB views and this
-#: module cannot disagree about them: the HTML view took ``target_text``
-#: verbatim and shipped ``<mark class="ubt-failed-draft" title="…">`` (with the
-#: provider's exception text) to the reader as escaped markup, while this
-#: renderer stripped it. Re-exported here under the names the rest of this module
-#: already calls.
 
 
 def _keeps_source(block: IRBlock) -> bool:

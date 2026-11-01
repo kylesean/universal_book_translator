@@ -545,22 +545,11 @@ def compile_typst_booktabs(
     enable_continuation: bool = False,
     table_uid: str = "",
 ) -> str:
-    """Compile a Markdown table into an academic Typst booktabs (#table) structure.
+    """Compile a Markdown table into an academic Typst booktabs (``#table``).
 
-    Features:
-    - Standard 3-line academic booktabs formatting:
-      - 1.2pt top rule
-      - 0.5pt mid rule below header
-      - 1.2pt bottom rule
-      - stroke: none (no vertical rules)
-    - Adaptive column widths based on font advance measurements and unbreakable runs.
-    - Cell clipping and overlap defense:
-      - Micro insets (x: 3.5pt, y: 2.0pt, adaptively reduced if height-constrained).
-      - Elastic variable font stretch (stretch_pct: 90%~100%).
-      - Dynamic font scale down to min_font_size_pt (floor 7.5pt).
-    - Math formulas ($...$) and line breaks (<br>) cleanly transpiled.
-    - Table header bolding ([*Header*]).
-    - Continuation support when enabled.
+    Three-line booktabs with no vertical rules, column widths from measured
+    advance runs, cell clipping with adaptive insets and variable-font stretch,
+    and font scaling down to ``min_font_size_pt`` as the last resort.
     """
     parsed = parse_markdown_table(markup, escape=False)
     if parsed is None:

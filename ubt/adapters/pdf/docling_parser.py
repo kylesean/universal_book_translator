@@ -2158,7 +2158,11 @@ def annotate_page_kinds(path: Path, blocks: list[IRBlock]) -> dict[int, str]:
 
 
 def _has_text_content(blocks: list[IRBlock]) -> bool:
-    """Return True if the parsed blocks contain any actual readable/translatable text."""
+    """Whether any block carries translatable text.
+
+    IMAGE blocks do not count: a page image is exactly the scanned page OCR is
+    supposed to read.
+    """
     for b in blocks:
         if b.block_type == BlockType.IMAGE:
             continue

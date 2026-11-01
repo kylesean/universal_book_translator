@@ -397,11 +397,10 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         return "docling"
 
     def is_docling_installed(self) -> bool:
-        """Check if docling package is available in the current Python environment."""
+        """Whether docling can be imported, without paying for the import."""
         return importlib.util.find_spec("docling") is not None
 
     async def extract_manifest(self, input_path: Path) -> BookManifest:
-        """Extract lightweight PDF book manifest (delegates to docling_parser)."""
         # Off-loop: compute doc_id sha in thread pool to avoid blocking the event loop on multi-megabyte PDFs.
         return await asyncio.to_thread(
             parser_extract_manifest, input_path, is_docling_installed=self.is_docling_installed()
@@ -409,7 +408,6 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
 
     @staticmethod
     def _annotate_page_kinds(path: Path, blocks: list[IRBlock]) -> dict[int, str]:
-        """Stamp per-page provenance onto blocks (delegates to docling_parser)."""
         return annotate_page_kinds(path, blocks)
 
     async def _post_extract_blocks(
@@ -419,7 +417,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         page_range: tuple[int, int] | None,
         page_scope: Sequence[int] | None = None,
     ) -> list[IRBlock]:
-        """Textless/weak-page VLM fallback (tier from UBTConfig.ocr_fallback, default off)."""
+        # Tier comes from UBTConfig.ocr_fallback (default off).
         return await asyncio.to_thread(
             self._vlm_fallback_missing_pages,
             path,
@@ -506,7 +504,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         page_scope: Sequence[int] | None = None,
         ocr_fallback: str | None = None,
     ) -> list[IRBlock]:
-        """Transcribe missing/weak pages via vlm/ core (delegates to docling_parser)."""
+        """Transcribe missing/weak pages through the vlm core."""
         return vlm_fallback_missing_pages(
             path,
             blocks,
@@ -521,13 +519,12 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         )
 
     def _resolve_formula_enrichment(self) -> bool:
-        """Resolve effective formula enrichment policy (delegates to docling_parser)."""
         return resolve_formula_enrichment(self.formula_enrichment)
 
     def _extract_with_docling(
         self, path: Path, page_range: tuple[int, int] | None = None
     ) -> list[IRBlock]:
-        """Extract structured blocks using IBM Docling (delegates to docling_parser)."""
+        """Extract structured blocks with Docling, then cross-check against pdfium."""
         from ubt.adapters.pdf.docling_crosscheck import (
             cross_check_blocks_with_pdfium,
             repair_heading_numbers_with_lines,

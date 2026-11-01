@@ -355,14 +355,8 @@ def optimize_pdf(
 ) -> PdfOptimizationResult:
     """Optimize, deduplicate, and compress a PDF file.
 
-    Parameters:
-        input_path: Path to the source PDF.
-        output_path: Destination path. If None or equals input_path, performs
-            an atomic in-place replacement.
-        options: Custom optimization options. Defaults to LOSSLESS settings.
-
-    Returns:
-        PdfOptimizationResult with before/after measurements and operational status.
+    ``output_path=None`` (or the input path) replaces the source atomically;
+    the result carries before/after measurements.
     """
     src = Path(input_path)
     if not src.exists() or not src.is_file():

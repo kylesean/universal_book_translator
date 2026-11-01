@@ -834,17 +834,10 @@ class PageLockedReflowRenderer:
             # ``facsimile_renderer._placement_content`` imports ``render_table``
             # lazily.
             #
-            # THE DELIVERY BUG THIS FIXES: a translated page of a technical book
-            # carries inline math the model wrote as LaTeX, and this branch used
-            # to run ``typst_escape`` over the WHOLE block -- a route with no math
-            # branch at all. ``$`` and ``_`` are both in the escape set, so
-            # ``$\psi_1$`` shipped as the literal ``\$\\psi\_1\$``: measured on a
-            # 26-page BSIM-CMG chapter, 265 escaped ``\$`` across 44 lines and
-            # 93 raw LaTeX macro leaks (``\text`` 35, ``\beta`` 33, ``\psi`` 16,
-            # ``\mu`` 4, ``\frac`` 3, ``\epsilon`` 2) in a file billed as a
-            # finished translation. Escaping is correct for prose punctuation and
-            # catastrophic for a formula, which is exactly the distinction
-            # ``render_prose`` was written to make.
+            # Escaping a whole block is correct for prose punctuation and
+            # catastrophic for a formula: ``$`` and ``_`` are in the escape set,
+            # so inline LaTeX shipped as ``\$\\psi\_1\$``. ``render_prose``
+            # draws the math/prose distinction this branch previously lacked.
             from ubt.render.typst.document_renderer import render_prose, render_table
 
             escaped = typst_escape(txt)

@@ -538,7 +538,10 @@ def read_pdf_blocks(
     pages: Iterable[int] | None = None,
     doc_id: str = "",
 ) -> list[IRBlock]:
-    """Read a digital PDF directly into a list of IRBlock entities (single model path)."""
+    """Project the native reader's ``Document`` back into pipeline ``IRBlock``s.
+
+    The reader owns typing and reading order; this does not re-classify.
+    """
     from ubt.core.ir.models import IRBlock
 
     doc = read_pdf(path, pages=pages, doc_id=doc_id)

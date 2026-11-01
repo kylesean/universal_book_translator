@@ -7449,8 +7449,7 @@
           "target_text": {
             "type": "string",
             "minLength": 1,
-            "title": "Target Text",
-            "description": "Revised target text"
+            "title": "Target Text"
           }
         },
         "additionalProperties": false,

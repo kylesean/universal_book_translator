@@ -395,7 +395,7 @@ def collect_page_facts(pdf_path: Path) -> list[PageFacts]:
 
 
 # Bump when ``PageFacts`` fields or ``classify_page`` thresholds change. The
-# The key must cover the profiler *logic*, not just the PDF bytes: an
+# key must cover the profiler *logic*, not just the PDF bytes: an
 # mtime-only key silently reused profiles from older rules for any PDF that
 # had not been edited. Version 3 names the sharded DiskCacheStore layout;
 # version 5 drops ``n_text_rows``, which the gate no longer reads (a v4 payload

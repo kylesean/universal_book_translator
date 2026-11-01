@@ -2496,10 +2496,7 @@ export interface components {
          * @description A human post-edit of one block's target text (L3 workbench).
          */
         SegmentEditRequest: {
-            /**
-             * Target Text
-             * @description Revised target text
-             */
+            /** Target Text */
             target_text: string;
         };
         /**
