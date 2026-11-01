@@ -78,7 +78,6 @@ def test_the_recorded_background_reaches_the_gate(
 
     import ubt.core.engine.visual_verify_loop as loop_module
 
-    # ``type: ignore`` that then has to be kept in step with the import. The
     monkeypatch.setattr(loop_module, "get_visual_gate_runner", lambda: _runner)
     asyncio.run(loop._evaluate_gate(tmp_path / "artifact.pdf", []))
 

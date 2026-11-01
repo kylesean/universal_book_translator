@@ -55,10 +55,8 @@ async def test_router_circuit_breaker_tripping_and_skip() -> None:
         assert fails == 3
         assert cooldown > time.monotonic()
 
-        # 4th call: failing-model is in cooldown, so effective_chain only has healthy-model!
         res4 = await router._execute_with_retry("sys", "user", "failing-model", 0.3)
         assert res4 == "translated by healthy-model"
-        # failing-model was NOT called on 4th call!
         assert call_counts["failing-model"] == 3
         assert call_counts["healthy-model"] == 4
 

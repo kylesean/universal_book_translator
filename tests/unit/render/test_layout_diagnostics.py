@@ -76,7 +76,6 @@ def test_page_furniture_recognition() -> None:
     assert is_page_furniture("xiv", 40.0, 50.0, ph, margin_b)
     assert is_page_furniture("", 40.0, 50.0, ph, margin_b)
 
-    # Regular body text in footer zone is NOT furniture (it is a spill!)
     assert not is_page_furniture(
         "This is an overflowing paragraph that leaked into the bottom margin.",
         40.0,

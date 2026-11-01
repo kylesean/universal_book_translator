@@ -67,7 +67,6 @@ def test_solve_horizontal_reserves_rigid_box_budget() -> None:
     assert fit_shrink.width_pt <= 43.001
     assert fit_shrink.width_pt >= 42.0
 
-    # Available = 20.0pt < rigid width 25.0pt -> Deficit!
     fit_fail = solve_horizontal(text, metrics, size_pt, available_pt=20.0, rigid_boxes=[rigid])
     assert not fit_fail.fits
     assert fit_fail.deficit_pt > 0.0

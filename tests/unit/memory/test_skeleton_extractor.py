@@ -235,7 +235,6 @@ async def test_run_bible_stage_feeds_ir_blocks_to_skeleton_extractor() -> None:
         pass
 
     assert received_input is not None
-    # and skip_translate block "Ignored intro prose" was excluded!
     assert "[H] Quantum Computing" in received_input
     assert "Ignored intro prose" not in received_input
     assert "Valid intro prose" in received_input

@@ -246,7 +246,6 @@ def test_inject_hyperlinks_protects_code_and_math() -> None:
     ]
     topology = build_citation_topology(blocks)
 
-    # In math mode and code block, [1] must NOT be replaced!
     text = "Citation [1] is valid, but $x \\in [1, 2]$ and `code [1]` must stay intact."
     linked = inject_hyperlinks(text, topology, target_format="typst")
 

@@ -212,7 +212,6 @@ def test_fuse_table_markups_headless() -> None:
 
 
 def test_stitch_multipage_tables_cascading() -> None:
-    # A table that spans 3 consecutive pages!
     t1 = _make_table_block("t1", "| Param | Value |\n| --- | --- |\n| P1 | 10 |", page=1)
     footer = _make_narrative_block("foot", "Page 1 of 50", page=1, region=RegionKind.FOOTER)
     header = _make_narrative_block("head", "Chapter 2: Methods", page=2, region=RegionKind.HEADER)
@@ -223,7 +222,6 @@ def test_stitch_multipage_tables_cascading() -> None:
     blocks = [t1, footer, header, t2, cont_cap, t3]
     stitched = stitch_multipage_tables(blocks, drop_absorbed=True)
 
-    # t2, cont_cap, and t3 should be absorbed into t1!
     table_blocks = [b for b in stitched if b.block_type is BlockType.TABLE]
     assert len(table_blocks) == 1
     fused_tbl = table_blocks[0]
@@ -242,7 +240,6 @@ def test_typst_rendering_for_stitched_multipage_table() -> None:
 
     rendered = render_table(markup, is_multipage=True, page_columns=2)
 
-    # Must NOT contain #place(..., float: true) because floats cannot split across pages in Typst!
     assert "#place" not in rendered
     assert "table.header(" in rendered
     assert "repeat: true" in rendered

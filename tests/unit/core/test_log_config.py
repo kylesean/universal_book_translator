@@ -147,7 +147,6 @@ def test_access_noise_filter_filters_polling_requests() -> None:
         is True
     )
 
-    # Non-200 responses on polling endpoints must pass so failures are visible!
     assert (
         filt.filter(
             _make_record(

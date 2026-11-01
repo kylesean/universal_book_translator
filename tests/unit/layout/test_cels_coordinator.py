@@ -85,7 +85,6 @@ def test_two_column_page_partitions_tracks_and_solves_independently() -> None:
 
 def test_overfull_track_flags_condensation_and_reports_deficit() -> None:
     printable = Box(x0=50.0, y0=50.0, x1=500.0, y1=250.0)
-    # 5 blocks requiring 50pt each = 250pt + gaps > 200pt -> deficit!
     blocks = [
         PageLayoutBlock(
             block_id=f"b{i}",
@@ -182,7 +181,6 @@ def test_stage4_condensation_loop_resolves_deficit() -> None:
         realized_body_size_pt=10.0,
     )
 
-    # Deficit completely resolved!
     assert sol2.total_deficit_pt == 0.0
     assert not sol2.requires_llm_condensation
     assert len(sol2.stage4_requests) == 0

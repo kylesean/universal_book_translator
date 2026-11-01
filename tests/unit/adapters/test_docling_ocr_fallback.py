@@ -112,7 +112,6 @@ def test_vlm_fallback_auto_promotes_to_missing_for_textless_scans() -> None:
     fake_path = Path("fake_scan.pdf")
     img = _make_block(BlockType.IMAGE, "pic1.png", page=1, skip=True)
 
-    # When fallback mode is OFF, but PDF has NO text content and ocr_mode != 'off',
     mock_doc = MagicMock()
     mock_doc.__len__.return_value = 1
     with (

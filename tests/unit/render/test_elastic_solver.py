@@ -38,7 +38,6 @@ def test_tier_1_reduces_leading_only() -> None:
 
 
 def test_tier_2_compresses_variable_font_stretch_preserves_font_size() -> None:
-    # Medium deficit 18% -> compresses font_stretch to 95%, preserves base_font_size!
     style = TypeElasticitySolver.resolve_params(base_font_size=10.0, deficit_ratio=0.18)
     assert style.font_size_pt == 10.0
     assert style.leading_em == 0.48
@@ -53,7 +52,6 @@ def test_tier_3_clamps_at_minimum_scale_envelope() -> None:
     assert style.stretch_pct == 90.0
     assert style.scale == 0.92
 
-    # Extreme deficit 100% -> still clamps strictly at 0.92 (never collapses into ant text!)
     extreme = TypeElasticitySolver.resolve_params(base_font_size=10.0, deficit_ratio=1.0)
     assert extreme.font_size_pt == 9.2
     assert extreme.scale == 0.92

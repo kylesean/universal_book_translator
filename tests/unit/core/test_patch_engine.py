@@ -227,13 +227,11 @@ async def test_patch_engine_apply_patch(tmp_path: Path) -> None:
     unchanged_blocks = [b for b in all_blocks if b.status == BlockStatus.MTQE_PASSED]
     pending_blocks = [b for b in all_blocks if b.status == BlockStatus.PENDING]
 
-    # Two blocks must be already finalized/reused with preserved target text!
     assert len(unchanged_blocks) == 2
     for ub in unchanged_blocks:
         assert ub.target_text is not None
         assert ub.target_text.startswith("已译: ")
 
-    # Two blocks must be pending for translation!
     assert len(pending_blocks) == 2
     for pb in pending_blocks:
         assert pb.target_text is None

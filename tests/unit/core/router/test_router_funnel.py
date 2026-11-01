@@ -269,6 +269,5 @@ async def test_content_refusal_fails_fast_and_does_not_trip_circuit_breaker() ->
     with pytest.raises(ModelProviderError, match="refused"):
         await router.complete_raw("sys", "translate this text")
 
-    # Only 1 call was made to primary_model; fallback_model was never called!
     assert len(provider.calls) == 1
     assert router._model_circuit.get("primary_model", (0, 0.0))[0] == 0

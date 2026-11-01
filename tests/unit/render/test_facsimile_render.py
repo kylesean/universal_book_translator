@@ -1082,7 +1082,6 @@ async def test_render_facsimile_rescues_bottleneck_container(
     out_pdf = tmp_path / "out_rescue.pdf"
     await strategy.render_blocks(manifest, blocks, "zh", out_pdf)
 
-    # Repaired container should have allowed page to render as L1!
     assert len(rendered_pages) == 1
     assert rendered_pages[0].tier == "L1"
     assert ("b_tight", "container_fit_repaired") in strategy.last_render_flags

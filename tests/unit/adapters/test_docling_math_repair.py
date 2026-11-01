@@ -86,17 +86,13 @@ def test_repair_math_symbols_with_lines_end_to_end() -> None:
 
 
 def test_math_symbol_repair_unlocks_space_repair() -> None:
-    # When symbols are corrupted ('∅'), text_chars != witness_chars so space repair fails.
-    # Repairing math symbols first makes the character streams agree and allows space repair!
     doc_text = "ASandboxwith 17 mod 5 ∅ 2"
     wit_text = "A Sandbox with 17 mod 5 = 2"
 
-    # Direct space repair fails because '∅' != '='
     assert reinsert_missing_spaces(doc_text, wit_text) is None
 
     symbol_repaired = repair_math_symbol_corruptions(doc_text, wit_text)
     assert symbol_repaired == "ASandboxwith 17 mod 5 = 2"
 
-    # Step 2: Space repair now succeeds!
     space_repaired = reinsert_missing_spaces(symbol_repaired, wit_text)
     assert space_repaired == "A Sandbox with 17 mod 5 = 2"

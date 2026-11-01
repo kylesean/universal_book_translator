@@ -16,16 +16,6 @@ def _prose_pages(n: int) -> list[list[str]]:
     return [[_PROSE, _PROSE, _PROSE, _PROSE, _PROSE, _PROSE] for _ in range(n)]
 
 
-def _two_column_pages() -> list[tuple[list[str], list[str]]]:
-    return [
-        (
-            ["left column line one", "left column line two", "left column three"],
-            ["right column line one", "right column line two", "right column three"],
-        )
-        for _ in range(10)
-    ]
-
-
 def test_scanned_pdf_reports_scan_signal(tmp_path: Path) -> None:
     import pypdfium2 as pdfium
 

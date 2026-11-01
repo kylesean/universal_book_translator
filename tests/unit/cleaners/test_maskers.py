@@ -155,7 +155,6 @@ def test_math_span_helpers() -> None:
 
 
 def test_math_mapping_is_ordered_by_textual_position() -> None:
-    # Delimiters are masked display-first, so index order != textual order; the
     masked, mapping = MathMasker().mask(r"\(first\) then $second$")
     positions = [masked.index(token) for token in mapping]
     assert positions == sorted(positions)
