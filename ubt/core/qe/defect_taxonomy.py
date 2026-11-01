@@ -558,7 +558,7 @@ SEMANTIC_ONLY_MARKERS: tuple[str, ...] = (
 def classify_defect(flags: Iterable[str], *, score: float | None, threshold: float) -> str:
     """The pipeline's only routing decision for a scored block.
 
-    Returns one of :data:`~ubt.core.qe.heuristic.DEFECT_OUTCOMES`:
+    Returns exactly one of three outcome strings:
 
     ``PASS``
         Nothing deterministic failed and the score clears ``threshold``.

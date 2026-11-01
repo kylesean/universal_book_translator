@@ -2,10 +2,10 @@
 
 Honesty note: the heuristic runner does NOT produce a calibrated quality score.
 It maps a deterministic fast-pass rejection reason — plus the terminology signal
-below — to a **discrete defect class** (see ``QE_DEFECT_CLASS_LEGEND``): a routing
-signal, not a measurement. The ``0.92`` "pass" value carries no quality
-information beyond "no deterministic invariant failed". Downstream surfaces
-(report, progress events) must present it as such.
+below — to a **discrete defect class** (one of the ``QE_SCORE_*`` constants
+below): a routing signal, not a measurement. The ``0.92`` "pass" value carries
+no quality information beyond "no deterministic invariant failed". Downstream
+surfaces (report, progress events) must present it as such.
 
 A fluent translation can use the WRONG enforced glossary term and pass every
 structural check. The heuristic path therefore also checks the translation
@@ -24,9 +24,9 @@ from ubt.core.validators.consistency import GlossaryConsistencyValidator
 
 # The exact score values the heuristic emits, and what each band
 # actually means. Twelve discrete values — nothing between them is reachable.
-# Single source of truth: the named constants below feed BOTH
-# this legend and ``HeuristicQERunner.score_from_decision_reason`` so the two
-# can never drift apart.
+# These constants are the only definition of the bands:
+# ``HeuristicQERunner.score_from_decision_reason`` maps reasons onto them and
+# nothing else restates the table.
 #
 # IMPORTANT: these numbers are DIAGNOSTIC LABELS, not routing weights. The
 # pipeline decides what to do with a block from its ``error_flags`` (see
@@ -53,41 +53,6 @@ QE_SCORE_EMPTY = 0.0
 #: gate's existing ``has_structural_defect`` check keeps such a block out of
 #: auto-pass even when a neural runner returns a high score.
 GLOSSARY_VIOLATION_MARKER = "Glossary term violation"
-
-#: The three outcomes the pipeline actually has, and the only three a consumer
-#: should branch on. Everything else is a label on a report.
-#:
-#: ``PASS``                  — no deterministic invariant failed; ship it.
-#: ``DETERMINISTIC_DEFECT``  — a named, re-checkable invariant failed (numeric
-#:                             loss, dropped term, markup corruption, empty
-#:                             target). Repair is *verifiable*: re-running the
-#:                             same check decides whether the repair worked.
-#: ``SEMANTIC_DOUBT``        — only a probabilistic judge disliked it. Repair is
-#:                             *not* verifiable (the judge has its own noise), so
-#:                             the block goes to a human queue instead of an
-#:                             automatic rewrite.
-DEFECT_OUTCOMES: tuple[str, ...] = ("PASS", "DETERMINISTIC_DEFECT", "SEMANTIC_DOUBT")
-
-QE_DEFECT_CLASS_LEGEND: tuple[tuple[float, str], ...] = (
-    (QE_SCORE_PASS, "pass — no deterministic invariant failed (NOT a quality estimate)"),
-    (QE_SCORE_STRUCTURAL_OTHER, "other structural rejection (no specific classifier matched)"),
-    (QE_SCORE_LENGTH, "suspicious length ratio (truncated or inflated target)"),
-    (QE_SCORE_NUMERIC, "numeric fidelity failure (missing/altered figures)"),
-    (QE_SCORE_SCRIPT_DENSITY, "script density anomaly (target not in expected script)"),
-    (
-        QE_SCORE_OMISSION,
-        "omission suspected (dropped sentences / missing identifier terms / truncated residue)",
-    ),
-    (QE_SCORE_HTML_DELTA, "HTML tag delta failure (markup corrupted or dropped)"),
-    (
-        QE_SCORE_GLOSSARY_VIOLATION,
-        "enforced glossary term dropped or altered in the target (terminology violation)",
-    ),
-    (QE_SCORE_REPETITION, "repetition-loop hallucination"),
-    (QE_SCORE_FABRICATED, "untranslated residue / fabricated content vs empty source"),
-    (QE_SCORE_LEAK, "prompt-template leak / empty-target via rejection path"),
-    (QE_SCORE_EMPTY, "empty target (short-circuit in score_pairs)"),
-)
 
 
 def glossary_violation_flag(
@@ -158,12 +123,11 @@ class HeuristicQERunner(BaseQERunner):
 
     Provides a production-grade default score (0.0 ~ 1.0) without requiring PyTorch or HuggingFace models.
 
-    the score is a **discrete defect-class proxy** (see
-    ``QE_DEFECT_CLASS_LEGEND``), not a calibrated quality estimate — there
-    are only twelve reachable values and the gaps between them are
-    meaningless. Use it for routing/repair triggering; use the tiered
-    LLM judge (``LLMJudgeQERunner``) when an assessment of gray-zone candidates is
-    needed.
+    the score is a **discrete defect-class proxy** (one of the twelve
+    ``QE_SCORE_*`` values), not a calibrated quality estimate — the
+    gaps between the values are meaningless. Use it for routing/repair
+    triggering; use the tiered LLM judge (``LLMJudgeQERunner``) when an
+    assessment of gray-zone candidates is needed.
 
     When constructed with the run's ``glossary``, a target that drops or
     alters an enforced term scores ``QE_SCORE_GLOSSARY_VIOLATION`` instead of
@@ -317,8 +281,8 @@ class HeuristicQERunner(BaseQERunner):
         return self._glossary_validator is not None
 
     def is_calibrated(self) -> bool:
-        """Always False: the twelve legend bands are a routing class, not a
-        graded quality estimate, so they must never rank repair candidates."""
+        """Always False: the twelve defect-class bands are a routing class, not
+        a graded quality estimate, so they must never rank repair candidates."""
         return False
 
     def score_source(self) -> str:
@@ -340,7 +304,7 @@ class HeuristicQERunner(BaseQERunner):
 
         despite the "score" name this is a classification, not a
         graded measurement — each rejection reason maps to one of the fixed
-        bands in ``QE_DEFECT_CLASS_LEGEND``.
+        ``QE_SCORE_*`` bands above.
         """
         r = reason.lower()
         if "empty" in r or "leak" in r:

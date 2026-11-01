@@ -70,8 +70,8 @@ ApiMode = Literal["openai-chat", "openai-responses", "anthropic-messages", "gemi
 # ubt.adapters.factory._resolve_pdf_adapter.
 PdfEngine = str
 # "heuristic" emits a discrete defect-class proxy (12 fixed bands),
-# NOT a calibrated quality score — see QE_DEFECT_CLASS_LEGEND in
-# ubt/core/qe/heuristic.py. A calibrated neural score (CometKiwi) was retired
+# NOT a calibrated quality score — the bands are the ``QE_SCORE_*`` constants
+# in ubt/core/qe/heuristic.py. A calibrated neural score (CometKiwi) was retired
 # for commercial-license compliance; the tiered mix adds an opt-in LLM judge.
 QeEngine = Literal["heuristic", "tiered"]
 #: What the reader receives: target only, or source beside target.

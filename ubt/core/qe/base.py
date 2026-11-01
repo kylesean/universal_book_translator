@@ -62,7 +62,7 @@ class BaseQERunner(ABC):
 
         A score is only a measurement when the engine behind it was validated
         against human quality judgements. The heuristic runner emits discrete
-        defect classes (see ``QE_DEFECT_CLASS_LEGEND``) — a tie among candidates
+        defect classes (the ``QE_SCORE_*`` values) — a tie among candidates
         that all cleared the same gate would be broken at random and presented
         as a measured preference — and the judge is a probabilistic opinion.
 

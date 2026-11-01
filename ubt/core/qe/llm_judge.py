@@ -342,9 +342,9 @@ class LLMJudgeQERunner(BaseQERunner):
 class TieredQERunner(BaseQERunner):
     """Heuristic scores every pair; the judge runs only where a second opinion informs.
 
-    The heuristic emits twelve discrete values, and each one *is* a defect class
-    (:data:`QE_DEFECT_CLASS_LEGEND`), so routing on the score routes on the
-    class. Two groups get the judge:
+    The heuristic emits twelve discrete values, and each one *is* a defect
+    class, so routing on the score routes on the class. Two groups get the
+    judge:
 
     * the unclassified structural class (and anything else inside the configured
       ambiguous class) — by definition ambiguous;
