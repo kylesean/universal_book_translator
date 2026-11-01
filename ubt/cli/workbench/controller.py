@@ -34,8 +34,6 @@ class WorkbenchController:
         self._pause_event.set()  # Running by default
         self._cancel_token = cancel_token or asyncio.Event()
         self._subscribers: list[Callable[[WorkbenchState], None]] = []
-        self._last_cpu_time = time.process_time()
-        self._last_sample_time = time.time()
 
     @property
     def is_paused(self) -> bool:
@@ -195,7 +193,6 @@ class WorkbenchController:
 
     def sample_resources(self) -> ResourceSnapshot:
         """Sample local process resource utilization (zero external dependencies)."""
-        now = time.time()
         cpu_now = time.process_time()
 
         # On Linux, ru_maxrss is in KiB
@@ -209,9 +206,6 @@ class WorkbenchController:
         res.rss_mb = round(rss_mb, 1)
         res.cpu_time_s = round(cpu_now, 2)
         res.concurrency_limit = self.state.concurrency
-
-        self._last_cpu_time = cpu_now
-        self._last_sample_time = now
         return res
 
     def update_from_event(self, event_type: str, message: str, meta: dict[str, Any]) -> None:

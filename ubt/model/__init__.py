@@ -17,8 +17,6 @@ An element's *type* is its structure; the region it sits in is its layout.
 from __future__ import annotations
 
 from ubt.model.ast import (
-    ASSET_ELEMENTS,
-    TEXT_ELEMENTS,
     Caption,
     CodeBlock,
     Confidence,
@@ -50,8 +48,6 @@ from ubt.model.span import (
 )
 
 __all__ = [
-    "ASSET_ELEMENTS",
-    "TEXT_ELEMENTS",
     "BBox",
     "CanonicalSource",
     "Caption",

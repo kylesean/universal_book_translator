@@ -257,11 +257,6 @@ def is_own_prior_output(
     return own_prior_deliverable(target_candidate, prior_output_of(prior), input_path=input_path)
 
 
-#: Local-only bind addresses. Anything else exposes the service to the network
-#: and therefore requires the isolation guards in ubt.api.app.
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "::ffff:127.0.0.1"})
-
-
 def is_nonloopback_bind(host: str) -> bool:
     """True only for a literal, non-loopback IP bind (``0.0.0.0``, a LAN IP).
 

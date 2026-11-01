@@ -37,9 +37,6 @@ class ContextBudget:
     max_context_tokens: int = 16384
     max_terminology_tokens: int = 3072  # ~12,000 characters
     max_history_tokens: int = 2048  # ~8,000 characters (epoch + rolling context)
-    max_neighbor_tokens: int = 1536  # ~6,000 characters
-    max_few_shot_tokens: int = 1024  # ~4,000 characters
-    reserve_source_tokens: int = 2048  # Guaranteed headroom for source & system
 
 
 _TABLE_HEADER_SEP_RE = re.compile(r"^\|?(\s*:?-+:?\s*\|)+\s*$")

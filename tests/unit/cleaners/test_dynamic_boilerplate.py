@@ -158,9 +158,7 @@ def test_clean_strips_both_ends() -> None:
 
 
 def test_fingerprint_defaults_have_no_patterns() -> None:
-    fingerprint = BoilerplateFingerprint()
-    assert fingerprint.footer_disclaimers == ()
-    assert fingerprint.header_patterns == ()
+    assert BoilerplateFingerprint().footer_disclaimers == ()
 
 
 def _footer_samples(count: int) -> list[str]:
@@ -179,11 +177,3 @@ def test_harvest_needs_at_least_three_valid_samples() -> None:
     harvester = DynamicBoilerplateHarvester(min_sample_length=50)
     assert harvester.harvest([]).footer_disclaimers == ()
     assert harvester.harvest(["a" * 100, "b" * 100]).footer_disclaimers == ()
-
-
-def test_harvest_does_not_learn_headers() -> None:
-    # Header harvesting is not implemented; the field is reserved and stays empty.
-    result = DynamicBoilerplateHarvester(min_sample_length=50, min_match_size=20).harvest(
-        _footer_samples(6)
-    )
-    assert result.header_patterns == ()

@@ -231,15 +231,12 @@ async def _restore_resumable_record(
             detail=f"Job not found: {job_id}",
         ) from exc
 
-    if stored_status == JobStatus.COMPLETED:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Job is {stored_status}; only a failed or cancelled job can resume.",
-        )
     if stored_status not in (JobStatus.FAILED, JobStatus.CANCELLED, "initialized"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Job is {stored_status}; only a failed or cancelled job can resume.",
+            detail=(
+                f"Job is {stored_status}; only a failed, cancelled, or initialized job can resume."
+            ),
         )
 
     holder = await asyncio.to_thread(LedgerWriterLock.lease_holder, db_path, job_id)

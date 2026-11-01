@@ -48,12 +48,10 @@ _RUNNING_HEADER_PATTERN = re.compile(
 class BoilerplateFingerprint:
     """Consensus boilerplate fingerprint learned dynamically for a specific book.
 
-    ``header_patterns`` is reserved for a future consensus header learner and is
-    currently always empty; headers are stripped by :meth:`clean_head`.
+    Headers are not harvested; :meth:`clean_head` strips them by pattern.
     """
 
     footer_disclaimers: tuple[str, ...] = ()
-    header_patterns: tuple[str, ...] = ()
 
     def clean_tail(self, text: str) -> tuple[str, str]:
         """Strip dynamically discovered footer disclaimer and photo credits from text tail.

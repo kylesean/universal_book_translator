@@ -174,19 +174,6 @@ ElementT = (
     Heading | Paragraph | Dialogue | ListItem | Caption | CodeBlock | Formula | Table | Figure
 )
 
-#: Element classes that carry translatable text.
-TEXT_ELEMENTS: tuple[type[Element], ...] = (
-    Heading,
-    Paragraph,
-    Dialogue,
-    ListItem,
-    Caption,
-    CodeBlock,
-)
-
-#: Element classes that are immutable assets.
-ASSET_ELEMENTS: tuple[type[Element], ...] = (Formula, Table, Figure)
-
 
 def source_slice(element: Element, source: CanonicalSource) -> str:
     """The exact source text one element carries, from its character span.
@@ -233,8 +220,6 @@ class Document:
 
 
 __all__ = [
-    "ASSET_ELEMENTS",
-    "TEXT_ELEMENTS",
     "Caption",
     "CodeBlock",
     "Confidence",

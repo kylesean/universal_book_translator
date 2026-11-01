@@ -12,7 +12,6 @@ class WorkbenchMode(StrEnum):
     """Operation mode for the interactive workbench."""
 
     SINGLE_JOB = "single_job"
-    QUEUE_WORKER = "queue_worker"
     QUEUE_MONITOR = "queue_monitor"
 
 
@@ -49,13 +48,11 @@ class ResourceSnapshot:
     rss_mb: float = 0.0
     cpu_time_s: float = 0.0
     concurrency_limit: int = 1
-    active_workers: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cached_tokens: int = 0
     cost_usd: float = 0.0
     cache_hit_rate: float = 0.0
-    throughput_wps: float = 0.0
 
 
 @dataclass
@@ -72,8 +69,6 @@ class JobViewItem:
     quarantined_count: int = 0
     repaired_count: int = 0
     error: str | None = None
-    started_at: float | None = None
-    elapsed_s: float = 0.0
     lease_expires_in: float | None = None
 
 
