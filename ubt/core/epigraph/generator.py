@@ -163,12 +163,8 @@ def render_epigraph_html(
     )
 
 
-def render_abstract_html(
-    abstract: ChapterAbstract,
-    config: EpigraphConfig | None = None,
-) -> str:
+def render_abstract_html(abstract: ChapterAbstract) -> str:
     """Render a chapter abstract into semantic HTML5 aside container."""
-    _ = config or EpigraphConfig()
     t_esc = html.escape(abstract.title.strip())
     b_esc = html.escape(abstract.text.strip())
 

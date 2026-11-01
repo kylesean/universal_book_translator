@@ -41,7 +41,7 @@ def merged_target_classes(dom_node: Tag, target_css_class: str) -> list[str]:
     return [target_css_class]
 
 
-def _copy_fragment(soup: BeautifulSoup, markup: str, container: Tag) -> None:
+def _copy_fragment(markup: str, container: Tag) -> None:
     """Append a parsed markup fragment's children onto ``container``."""
     parsed = BeautifulSoup(markup, "html.parser")
     for child in list(parsed.contents):
@@ -199,7 +199,7 @@ def _inject_prose(
         last_node: Tag = dom_node
         for i, p_text in enumerate(paras):
             container = dom_node if i == 0 else soup.new_tag(node_name)
-            _copy_fragment(soup, p_text, container)
+            _copy_fragment(p_text, container)
             if i > 0:
                 last_node.insert_after(container)
             last_node = container
@@ -211,7 +211,7 @@ def _inject_prose(
         for p_text in paras:
             target_tag = soup.new_tag(node_name)
             target_tag["class"] = AttributeValueList(target_classes)
-            _copy_fragment(soup, p_text, target_tag)
+            _copy_fragment(p_text, target_tag)
             last_node.insert_after(target_tag)
             last_node = target_tag
     return len(paras)

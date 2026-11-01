@@ -165,17 +165,13 @@ def crop_lossy_code_asset(
     assets_dir: Path,
     pdf_path: Path | None,
     ordinal: int,
-    text: str,
 ) -> IRBlock | None:
     """Recover a line-structure-destroyed code listing by cropping its region.
 
     A listing whose text layer lost its line structure must be cropped rather
     than delivered as one wrapped prose paragraph; the crop becomes an IMAGE
     block, which the renderer places and the delivery contract already counts.
-
-    ``text`` is accepted for call-site symmetry with :func:`code_text_layer_is_lossy`
-    but is not read: the decision was already made by the caller, and the size
-    floor (60 × 24pt) is what rejects a one-line fragment.
+    The size floor (60 × 24pt) is what rejects a one-line fragment.
     """
     return crop_region_asset(
         item,

@@ -111,7 +111,7 @@ class PageLayoutSpec:
         return max(0.0, (self.printable_width - total_gutters) / self.columns)
 
     @classmethod
-    def book(cls, paper: str = "a4", tolerance_pt: float = DEFAULT_TOLERANCE_PT) -> PageLayoutSpec:
+    def book(cls, tolerance_pt: float = DEFAULT_TOLERANCE_PT) -> PageLayoutSpec:
         margin_x = 2.2 * PT_PER_CM
         margin_y = 2.4 * PT_PER_CM
         return cls(
@@ -127,9 +127,7 @@ class PageLayoutSpec:
         )
 
     @classmethod
-    def academic_dual(
-        cls, paper: str = "a4", tolerance_pt: float = DEFAULT_TOLERANCE_PT
-    ) -> PageLayoutSpec:
+    def academic_dual(cls, tolerance_pt: float = DEFAULT_TOLERANCE_PT) -> PageLayoutSpec:
         """Audit spec for the academic two-column template.
 
         The margins are read from ``ubt.render.typst.academic`` rather than spelled
@@ -152,9 +150,7 @@ class PageLayoutSpec:
         )
 
     @classmethod
-    def academic_single(
-        cls, paper: str = "a4", tolerance_pt: float = DEFAULT_TOLERANCE_PT
-    ) -> PageLayoutSpec:
+    def academic_single(cls, tolerance_pt: float = DEFAULT_TOLERANCE_PT) -> PageLayoutSpec:
         """Audit spec for the academic single-column template (same rule as two-column)."""
         margin_x = ACADEMIC_SINGLE_MARGIN_X_CM * PT_PER_CM
         margin_y = ACADEMIC_SINGLE_MARGIN_Y_CM * PT_PER_CM

@@ -1969,7 +1969,6 @@ def detect_colliding_l1_pages(
 
 def _tier_coverage(
     vlm_pages: Sequence[int],
-    skip_notes: Sequence[str],
     *,
     rendered_pages: int,
     sampled_pages: int,
@@ -1984,10 +1983,10 @@ def _tier_coverage(
     geometry and type tiers ran and the semantic tier was never asked. This line
     makes the distinction explicit and is part of every report.
 
-    The list used to be the hardcoded constant ``["geometry", "type", "pixel"]``
-    that ignored ``skip_notes``, so a report whose own skipped-reason read
-    "page render failed (pdf_oxide); pixel checks skipped" also claimed, in the
-    same string, that the pixel tier had run. When *every* page failed to render
+    The list used to be the hardcoded constant ``["geometry", "type", "pixel"]``,
+    so a report whose own skipped-reason read "page render failed (pdf_oxide);
+    pixel checks skipped" also claimed, in the same string, that the pixel tier
+    had run. When *every* page failed to render
     the findings were empty, ``passed`` was True, and the report was internally
     contradictory. Each tier is now derived from what actually happened:
 
@@ -2392,7 +2391,6 @@ async def run_visual_gate(
     )
     coverage = _tier_coverage(
         vlm_pages,
-        skip_notes,
         rendered_pages=len(pngs),
         sampled_pages=len(sampled),
         source_available=typ_text is not None,

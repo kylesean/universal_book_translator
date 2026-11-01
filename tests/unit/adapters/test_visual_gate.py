@@ -459,7 +459,6 @@ def test_the_report_names_the_tiers_that_ran_and_the_one_that_did_not() -> None:
     # ambiguous.
     default_run = _tier_coverage(
         (),
-        ["vlm judge disabled"],
         rendered_pages=5,
         sampled_pages=5,
         canvas_available=True,
@@ -473,7 +472,7 @@ def test_the_report_names_the_tiers_that_ran_and_the_one_that_did_not() -> None:
 def test_a_run_with_the_vlm_judge_reports_three_tiers() -> None:
     from ubt.adapters.pdf.visual_gate import _tier_coverage
 
-    full = _tier_coverage((1, 2), [], rendered_pages=5, sampled_pages=5, canvas_available=True)
+    full = _tier_coverage((1, 2), rendered_pages=5, sampled_pages=5, canvas_available=True)
     assert "vlm" in full
     assert "not run" not in full
 
@@ -488,7 +487,7 @@ def test_the_canvas_tier_is_reported_as_skipped_when_no_background_was_supplied(
     """
     from ubt.adapters.pdf.visual_gate import _tier_coverage, _tier_lists
 
-    reflow = _tier_coverage((), [], rendered_pages=5, sampled_pages=5)
+    reflow = _tier_coverage((), rendered_pages=5, sampled_pages=5)
     assert "not run: canvas, vlm" in reflow
 
     _, skipped = _tier_lists((), rendered_pages=5)
@@ -517,7 +516,6 @@ def test_a_report_never_claims_a_tier_that_did_not_run() -> None:
 
     nothing_rendered = _tier_coverage(
         (),
-        ["page render failed (pdf_oxide); pixel checks skipped"],
         rendered_pages=0,
         sampled_pages=5,
     )

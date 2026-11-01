@@ -1697,9 +1697,7 @@ def map_iterated_items(
             # Crop the region — the same recovery the unreadable-formula branch
             # below already applies — instead of shipping a wrapped prose blob.
             if code_text_layer_is_lossy(text):
-                code_asset = crop_lossy_code_asset(
-                    item, assets_dir, pdf_path, len(blocks) + 1, text
-                )
+                code_asset = crop_lossy_code_asset(item, assets_dir, pdf_path, len(blocks) + 1)
                 if code_asset is not None:
                     blocks.append(code_asset)
                     continue
@@ -2245,7 +2243,7 @@ def _driver_can_transcribe_scans(driver: Any) -> bool:
     return bool(getattr(driver, "measured_boxes", True))
 
 
-def _ocr_unavailable_hint(mode: str) -> str:
+def _ocr_unavailable_hint() -> str:
     """Accurate remediation when no OCR driver is available for scanned pages.
 
     The vision-LLM route (``--ocr cloud``) is deliberately NOT offered: it
@@ -2526,7 +2524,7 @@ def vlm_fallback_missing_pages(
             "Pluggable OCR is currently unavailable (mode='%s').\n%s",
             sorted(set(missing) | proofread_pages),
             effective_mode,
-            _ocr_unavailable_hint(effective_mode),
+            _ocr_unavailable_hint(),
         )
         return _reject_empty_book(path, blocks, f"{effective_mode}: no OCR driver available")
 

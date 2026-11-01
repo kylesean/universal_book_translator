@@ -209,7 +209,7 @@ def epigraph_generate_command(
         if fmt == "typst":
             markup = render_abstract_typst(ab, config=cfg)
         elif fmt == "html":
-            markup = render_abstract_html(ab, config=cfg)
+            markup = render_abstract_html(ab)
         else:
             console.print(
                 f"[bold red]Unsupported format '{output_format}': use 'typst' or 'html'.[/bold red]"

@@ -285,7 +285,6 @@ def _toc_label_text(text: str) -> str:
 def _parse_chapter_blocks(
     zf: zipfile.ZipFile,
     chapter: ChapterMeta,
-    block_names: set[str],
     fp: BoilerplateFingerprint,
     is_page_slice: bool,
     global_spine: int,
@@ -458,7 +457,6 @@ class EPUBAdapter(BaseDocumentAdapter):
     ) -> AsyncIterator[ChapterIR]:
         """Stream EPUB documents partitioned by chapter spine items."""
         manifest = await self.extract_manifest(input_path)
-        block_names = set(BLOCK_TAGS)
         global_spine = 1
 
         footers = manifest.metadata.get("boilerplate_footers")
@@ -488,7 +486,6 @@ class EPUBAdapter(BaseDocumentAdapter):
                     _parse_chapter_blocks,
                     zf,
                     chapter,
-                    block_names,
                     fp,
                     is_page_slice,
                     global_spine,

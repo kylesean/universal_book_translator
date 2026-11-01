@@ -48,9 +48,7 @@ def test_short_prose_is_never_lossy() -> None:
 def test_a_lossy_listing_is_recovered_as_a_source_crop(tmp_path: Path) -> None:
     pdf = write_text_pdf(tmp_path / "code.pdf", [["def load balance loss(p):", "    return p"]])
     assets = tmp_path / "assets"
-    block = crop_lossy_code_asset(
-        _item(1, 54.0, 600.0, 400.0, 700.0), assets, pdf, ordinal=3, text="x " * 200
-    )
+    block = crop_lossy_code_asset(_item(1, 54.0, 600.0, 400.0, 700.0), assets, pdf, ordinal=3)
     assert block is not None
     assert block.block_type is BlockType.IMAGE
     assert block.skip_translate is True
@@ -62,6 +60,6 @@ def test_a_lossy_listing_is_recovered_as_a_source_crop(tmp_path: Path) -> None:
 
 def test_an_unusable_region_keeps_the_text_block(tmp_path: Path) -> None:
     # No bbox, no source file, or a degenerate region all keep the text.
-    assert crop_lossy_code_asset(_item(1, 0, 0, 0, 0), tmp_path, None, 1, "x " * 200) is None
+    assert crop_lossy_code_asset(_item(1, 0, 0, 0, 0), tmp_path, None, 1) is None
     pdf = write_text_pdf(tmp_path / "tiny.pdf", [["x"]])
-    assert crop_lossy_code_asset(_item(1, 0.0, 0.0, 5.0, 5.0), tmp_path, pdf, 1, "x " * 200) is None
+    assert crop_lossy_code_asset(_item(1, 0.0, 0.0, 5.0, 5.0), tmp_path, pdf, 1) is None
