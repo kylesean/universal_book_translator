@@ -163,8 +163,9 @@ one machine.
 ## Rendering
 
 There is one export pipeline, and the run's delivery mode picks the renderer
-behind it. A `readable` delivery — what `auto` resolves to for a book or a paper
-— rebuilds the document from the IR and lets Typst lay it out: uniform body type
+behind it. A `readable` delivery — `auto`'s choice for long books and mobile,
+and its fallback when a structured paper cannot go faithful — rebuilds the
+document from the IR and lets Typst lay it out: uniform body type
 (10.5pt), translated table headers, and native math from LaTeX→Typst conversion.
 It is reading-grade, not DTP-grade — text reflows and the page count changes, so
 that artifact is a new document rather than a copy of the source layout. A

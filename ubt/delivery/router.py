@@ -89,7 +89,10 @@ def route_delivery(
 
     ``AUTO`` is deliberately conservative:
 
-    - academic / technical / long-book / mobile -> ``readable``;
+    - native academic / technical documents at MEDIUM or HIGH layout
+      complexity upgrade to ``faithful`` when eligible, carrying
+      ``ALLOW_DEGRADE`` so a contract failure falls back to readable;
+    - long books and mobile stay ``readable``;
     - contract / form / design -> ``faithful`` only if eligible, otherwise
       infeasible unless ``allow_degrade`` is set;
     - unknown class -> ``readable`` (the safe default, never an accidental
