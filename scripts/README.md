@@ -97,6 +97,3 @@ the test files they drove: the live-model tiers they invoked
 `--math-backend` is a retired knob no renderer reads. Capability probing is
 `ubt doctor --probe`, which covers the same ground without a shell duplicate.
 `scripts/mathjax/` went with the MathJax backend it rendered for.
-
-`tests/unit/test_reference_resolvability.py` now fails when a harness under
-`scripts/` names a pytest file that no longer exists, so this cannot recur.
