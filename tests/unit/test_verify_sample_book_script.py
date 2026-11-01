@@ -84,7 +84,6 @@ def test_verification_result_passed_logic() -> None:
     res.math_formula_count = 1
     res.table_count = 1
     res.typst_markup_bytes = 100
-    res.contract_errors = 0
     assert res.passed
 
     res.errors.append("Something went wrong")
