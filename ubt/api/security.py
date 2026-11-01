@@ -177,8 +177,8 @@ def verify_api_key(
 
 # The sensitive-name deny list itself lives in ``ubt.core.fs_perms`` and is
 # re-exported above: the MCP tools run the same check and must not import this
-# package (``ubt.api``'s ``__init__`` builds the FastAPI app on import). The
-# list is casefolded at comparison time — see ``resolve_secure_path``.
+# package (``ubt.api`` is a PEP 562 lazy-export package). The list is casefolded
+# at comparison time — see ``resolve_secure_path``.
 
 
 def validate_job_id(job_id: str) -> str:

@@ -515,7 +515,9 @@ class SystemInfoResponse(BaseModel):
     disk_free_gb: float | None = Field(
         default=None, description="Free disk space in GB on the db_dir volume"
     )
-    wal_status: str | None = Field(default=None, description="SQLite WAL health status string")
+    wal_status: str | None = Field(
+        default=None, description="Journal mode the ledger runs with (not a live probe)"
+    )
 
 
 class SegmentEditRequest(BaseModel):

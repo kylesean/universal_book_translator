@@ -137,7 +137,7 @@ _DEFAULT_TRUSTED_HOSTS = _LOOPBACK_HOSTS | {"testserver"}
 def _trusted_host_names(cfg: UBTConfig) -> frozenset[str]:
     """The Host-header names this server answers for (lowercased).
 
-    ``UBT_TRUSTED_HOSTS`` (comma- or os.pathsep-separated) extends the loopback
+    ``UBT_TRUSTED_HOSTS`` (comma- or whitespace-separated) extends the loopback
     defaults, so a self-hosted console on a LAN name or a real domain is reachable
     without disabling the DNS-rebinding guard.
     """

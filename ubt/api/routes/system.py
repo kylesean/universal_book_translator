@@ -527,5 +527,7 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
             "db_dir": sanitize_display_path(app_config.db_dir),
             "job_mode": app_config.job_mode,
             "disk_free_gb": disk_free_gb,
-            "wal_status": "ONLINE (WAL Mode Active)",
+            # The ledger's configured journal mode, not a live probe: it is set
+            # when a connection is opened, and this route never opens one.
+            "wal_status": "WAL",
         }

@@ -2633,7 +2633,7 @@ export interface components {
             disk_free_gb?: number | null;
             /**
              * Wal Status
-             * @description SQLite WAL health status string
+             * @description Journal mode the ledger runs with (not a live probe)
              */
             wal_status?: string | null;
         };
