@@ -74,23 +74,10 @@ _OUT_OF_BOUNDS_TOLERANCE_PT = 1.0
 #: in the style-group module so the planner cannot widen it by editing one file.
 _STYLE_DRIFT_PT = DRIFT_TOLERANCE_PT
 
-_PLACEHOLDER_RE = re.compile(r"⟦|⟧|⟨missing⟩|SOUP_MASK|\[SENTINEL_|<v>|<m>")
-
-#: Stray HTML formatting tags in the artifact text. The delivered-text sanitizer
-#: (``ubt.render.delivered_text.STRAY_HTML_TAG_RE``) deletes these before render;
-#: a tag in the *rendered artifact* means that strip was bypassed — a model
-#: echoed a converter's link span straight into its translation and the page
-#: printed machinery. Same family as a sentinel leak, same severity. Imported
-#: lazily (see the engine's established lazy-import convention for ubt.render)
-#: so the detector cannot drift from the sanitizer's definition.
-
-#: Character-level detection (above) is what decides pass/fail — a lone bracket
-#: is already enough evidence that the machinery leaked. Reporting needs the
-#: opposite shape: *one entry per leak site*, not one per character, or
-#: ``⟦SOUP_MASK_0001-f2d⟧`` would count as three findings and the count would
-#: overstate the work left. The paired alternative comes first so a bracketed
-#: token is consumed as a unit; the lone-bracket alternatives stay last as the
-#: fallback that keeps the site list from ever being empty when detection fired.
+#: One entry per leak *site*, not per character: ``⟦SOUP_MASK_0001-f2d⟧`` would
+#: otherwise count as three findings and overstate the work left. The paired
+#: alternative comes first so a bracketed token is consumed as a unit; the
+#: lone-bracket alternatives stay last so a single stray bracket still matches.
 _PLACEHOLDER_SITE_RE = re.compile(r"⟦[^⟦⟧\n]{0,80}⟧|⟨missing⟩|<v>|<m>|SOUP_MASK|\[SENTINEL_|⟦|⟧")
 
 #: Inline math and sentinel spans are not prose: a correct render draws the
@@ -982,11 +969,11 @@ def _placeholder_findings(joined: str) -> list[ContractFinding]:
     them before render, so a tag measured in the artifact is a bypass, and the
     page printed machinery the reader paid not to see.
     """
+    # Lazy (the engine's rule for ubt.render) so the detector cannot drift from
+    # the sanitizer's own definition.
     from ubt.render.delivered_text import STRAY_HTML_TAG_RE
 
     sites = list(_PLACEHOLDER_SITE_RE.finditer(joined))
-    if not sites and _PLACEHOLDER_RE.search(joined) is not None:  # pragma: no cover
-        sites = list(_PLACEHOLDER_RE.finditer(joined))
     sites.extend(STRAY_HTML_TAG_RE.finditer(joined))
     if not sites:
         return []

@@ -862,10 +862,9 @@ class PipelineOrchestrator:
         artifact_path: str | None = None,
     ) -> TranslationProgressEvent:
         """The stats query (including an ``ORDER BY mtqe_score`` over all scored
-        blocks) is synchronous SQLite; it must run in a worker thread, not
-        scored blocks) is synchronous SQLite; it must run in a worker thread, not
-        on the event loop where every SSE subscriber and concurrent job shares
-        the same thread. All stage call sites therefore ``await`` this method.
+        blocks) is synchronous SQLite; it must run in a worker thread, not on
+        the event loop every SSE subscriber and concurrent job shares. All stage
+        call sites therefore ``await`` this method.
         """
         stats = await asyncio.to_thread(ledger.get_job_stats, job_id)
         total = int(stats.get("total", 0))
