@@ -1336,7 +1336,6 @@ export function MissionControl() {
         typeToConfirmMismatch={t.mission.reparseTypeMismatch}
       />
 
-      {/* Header bar: Clean, precise, and un-bloated */}
       <div className="flex flex-col justify-between gap-3 border-b border-border/80 pb-5 sm:flex-row sm:items-end">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
@@ -1403,7 +1402,6 @@ export function MissionControl() {
           )}
         </div>
 
-        {/* Compact action buttons */}
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           {currentJobId && isCompleted && (
             <div className="inline-flex items-center rounded-md shadow-xs">
@@ -1656,9 +1654,7 @@ export function MissionControl() {
               <div className="py-12 text-center text-sm text-muted-foreground">
                 {jobs.length === 0 ? t.mission.queueEmpty : t.mission.queueNoMatch}
               </div>
-      ) : null}
-
-      {statusMissing ? null : (
+            ) : (
               <JobQueueTable
                 jobs={filteredJobs}
                 currentJobId={currentJobId}
@@ -1745,8 +1741,7 @@ export function MissionControl() {
             </div>
           </Card>
 
-          {/* Four compact facts. Each tile has one label, one value and one
-              supporting line; terminal states do not repeat the header badge. */}
+          {/* Four compact facts: one label, one value, one supporting line. */}
           <Card className="grid grid-cols-2 md:grid-cols-4 shrink-0 shadow-sm overflow-hidden p-0 border-border">
             <div className="flex min-w-0 flex-col justify-between border-b border-border p-3.5 sm:p-4 md:border-b-0 md:border-r">
               <div className="flex items-center justify-between type-group">
@@ -1944,7 +1939,6 @@ export function MissionControl() {
                 </Card>
               ) : (
               <Card className="flex w-full flex-col overflow-hidden border-border shadow-sm">
-                {/* Activity Timeline */}
                 <div className="max-h-[500px] min-h-24 flex-1 overflow-y-auto bg-card px-4 py-3 select-text">
                   {activeLogs.length === 0 ? (
                     <div className="py-8 text-center space-y-2">
@@ -2021,7 +2015,6 @@ export function MissionControl() {
                   )}
                 </div>
 
-                {/* Activity Footer */}
                 <div className="flex shrink-0 flex-col gap-2 border-t border-border/70 bg-muted/25 px-3.5 py-2.5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex min-w-0 items-center gap-2.5">
                     {isCompleted ? (
@@ -2070,7 +2063,6 @@ export function MissionControl() {
               )}
             </TabsContent>
 
-            {/* Tab 2: Deliverables List */}
             <TabsContent value="deliverables" className="mt-0">
               <Card className="overflow-hidden shadow-sm border-border">
                 <CardContent className="p-0">
@@ -2181,67 +2173,6 @@ export function MissionControl() {
               </Card>
             </TabsContent>
 
-            {/* Tab 3: Global Queue Table */}
-            <TabsContent value="queue" className="mt-0">
-              <Card className="overflow-hidden shadow-sm border-border">
-                <div className="h-11 px-4 border-b border-border/70 bg-muted/25 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-xs font-semibold tracking-wide text-foreground">
-                      {t.mission.queueTitle}
-                    </span>
-                    <span className="text-xs font-mono font-medium text-muted-foreground px-2 py-0.5 rounded-full bg-border/60 tabular-nums">
-                      {t.mission.runsCount.replace('{filtered}', String(filteredJobs.length)).replace('{total}', String(jobs.length))}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder={t.mission.searchJobsPlaceholder}
-                        value={queueSearch}
-                        onChange={(e) => setQueueSearch(e.target.value)}
-                        className="h-7 text-xs pl-7 pr-2.5 rounded-md bg-card border border-border text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring w-36 sm:w-48 transition-all"
-                      />
-                      <Search className="size-3.5 text-muted-foreground absolute left-2 top-2 pointer-events-none" />
-                    </div>
-
-                    <Tabs
-                      value={queueFilter}
-                      onValueChange={(val) => setQueueFilter(val as QueueFilter)}
-                      className="hidden sm:inline-flex w-auto"
-                    >
-                      <TabsList className="h-7 p-0.5">
-                        {filterOptions.map((opt) => (
-                          <TabsTrigger
-                            key={opt.key}
-                            value={opt.key}
-                            className="text-xs h-6 px-2.5 font-medium"
-                          >
-                            {opt.label}
-                          </TabsTrigger>
-                        ))}
-                      </TabsList>
-                    </Tabs>
-                  </div>
-                </div>
-
-                <div className="max-h-[460px] overflow-y-auto">
-                  {filteredJobs.length === 0 ? (
-                    <div className="py-8 text-center text-sm text-muted-foreground">
-                      {jobs.length === 0 ? t.mission.queueEmpty : t.mission.queueNoMatch}
-                    </div>
-                  ) : (
-                    <JobQueueTable
-                      jobs={filteredJobs}
-                      currentJobId={currentJobId}
-                      t={t}
-                      onOpen={onSelectJob}
-                    />
-                  )}
-                </div>
-              </Card>
-            </TabsContent>
           </Tabs>
         </>
       )}

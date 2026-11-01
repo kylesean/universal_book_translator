@@ -15,7 +15,7 @@ sidebar with a mobile Sheet drawer and a command palette; Geist and Geist Mono
 are self-hosted. Route-level code splitting keeps each workbench independent.
 
 - **Wizard (`src/views/wizard`)**: Document drag-and-drop ingest, instant preflight inspection, budget estimation, and profile/preset configuration.
-- **Mission Control (`src/views/mission-control`)**: Real-time compilation monitor with live SSE progress, stage indicators, log streaming, and artifact download / re-export.
+- **Mission Control (`src/views/mission-control`)**: Real-time compilation monitor with live SSE progress, stage indicators, a live activity timeline derived from progress frames, and artifact download / re-export.
 - **Review Workbench (`src/views/review`)**: Professional CAT-style review interface with bilingual comparison, MQM / MTQE error flagging, continuous bilingual proofing (`view=flow`), live editing with ledger writeback under writer lock, and TM recycling.
 - **Quality Gate (`src/views/quality-gate`)**: Verification report viewer displaying FastPass metrics, formula validation, and delivery verdicts.
 - **Language Assets (`src/views/language-assets`)**: Shared glossary and translation-memory browser, editor, and importer.

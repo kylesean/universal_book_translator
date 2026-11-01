@@ -219,7 +219,7 @@
           "System"
         ],
         "summary": "System Runtime Config",
-        "description": "Model/provider configuration actually in force (read-only).\n\nThe console used to render ``/model-profiles`` here, which is the\nengine's capability *preset* table \u2014 fourteen hard-coded name patterns,\nnone of which is a configured model. This endpoint reports what the\nengine will really call, which preset (if any) that model matches, and\nthe declared providers with credentials filtered out.",
+        "description": "Model/provider configuration actually in force (read-only).\n\nThe console used to render ``/model-profiles`` here, which was the old\ncapability *preset* table \u2014 fourteen hard-coded name patterns, none of\nwhich was a configured model. That table is gone. This endpoint reports\nwhat the engine will really call, the capability declared by the\nprovider block, and the declared providers with credentials filtered\nout.",
         "operationId": "system_runtime_config_system_runtime_config_get",
         "parameters": [
           {

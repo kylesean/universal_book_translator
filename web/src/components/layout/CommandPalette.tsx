@@ -22,7 +22,6 @@ import {
   CommandEmpty,
   CommandGroup,
   CommandItem,
-  CommandShortcut,
   CommandSeparator,
 } from '@/components/ui/command'
 
@@ -78,7 +77,6 @@ export function CommandPalette({
               </div>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              <CommandShortcut>G W</CommandShortcut>
               <ArrowRight className="size-3 text-muted-foreground opacity-40 ml-1" />
             </div>
           </CommandItem>
@@ -98,7 +96,6 @@ export function CommandPalette({
               </div>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              <CommandShortcut>G J</CommandShortcut>
               <ArrowRight className="size-3 text-muted-foreground opacity-40 ml-1" />
             </div>
           </CommandItem>
@@ -118,7 +115,6 @@ export function CommandPalette({
               </div>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              <CommandShortcut>G A</CommandShortcut>
               <ArrowRight className="size-3 text-muted-foreground opacity-40 ml-1" />
             </div>
           </CommandItem>
@@ -138,7 +134,6 @@ export function CommandPalette({
               </div>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              <CommandShortcut>G D</CommandShortcut>
               <ArrowRight className="size-3 text-muted-foreground opacity-40 ml-1" />
             </div>
           </CommandItem>
@@ -164,7 +159,6 @@ export function CommandPalette({
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <CommandShortcut>G R</CommandShortcut>
                   <ArrowRight className="size-3 text-muted-foreground opacity-40 ml-1" />
                 </div>
               </CommandItem>
@@ -184,7 +178,6 @@ export function CommandPalette({
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <CommandShortcut>G Q</CommandShortcut>
                   <ArrowRight className="size-3 text-muted-foreground opacity-40 ml-1" />
                 </div>
               </CommandItem>

@@ -769,7 +769,6 @@ export function NewJobWizard() {
     void handleSubmit()
   }
 
-  // Keyboard shortcut: ⌘⏎ or Ctrl+Enter to compile
   const handleSubmitRef = useRef(handleSubmit)
   const requestSubmitRef = useRef(requestSubmit)
   useEffect(() => {

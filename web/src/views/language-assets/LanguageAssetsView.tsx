@@ -217,7 +217,7 @@ function FilterSelect<T extends string>({
   )
 }
 
-/** Row actions stay visible: a destructive action must never hide under a hover. */
+/** Row actions sit behind a menu so a destructive item is not one stray click away. */
 function RowActions({
   label,
   deleteLabel,

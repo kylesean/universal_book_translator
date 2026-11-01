@@ -206,11 +206,9 @@ function writeDrafts(jobId: string | null, drafts: Record<string, string>): void
   }
 }
 
-//: Segments fetched per request. The backend caps a single page at 500, so this
-//: is also the hard ceiling on one request; the list pages past it via
-//: ``offset`` and the "load more" affordance rather than silently dropping the
-//: tail of a long book (which is what a fixed 500-row fetch used to do — every
-//: fault past the cut was invisible to the F8 fault walk).
+//: Segments fetched per request, below the backend's 500-row page cap. The list
+//: pages past it via ``offset`` and the "load more" affordance rather than
+//: silently dropping the tail of a long book.
 const PAGE_LIMIT = 200
 
 export function ReviewWorkbench() {
@@ -383,7 +381,6 @@ export function ReviewWorkbench() {
   }
 
   const flowScrollRef = useRef<HTMLDivElement>(null)
-  // Virtualize Reading Flow with dynamic height measurement and persistent cache snapshot
   // oxlint-disable-next-line react/incompatible-library
   const flowVirtualizer = useVirtualizer({
     count: segments.length,
@@ -781,7 +778,6 @@ export function ReviewWorkbench() {
   return (
     <div className="flex-1 flex min-h-0 overflow-hidden bg-background text-foreground">
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      {/* Precision Top Toolbar: Single-line fixed height 56px (h-14) */}
       <div className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/80 bg-card px-4 py-2 shadow-2xs md:px-5">
         {/* Left: Workbench Title + Count + Issue Navigation */}
         <div className="flex min-w-0 flex-[1_1_18rem] flex-wrap items-center gap-3">
@@ -916,7 +912,6 @@ export function ReviewWorkbench() {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Re-export indicator button if needed */}
           {reExportPending && (
             <Button
               variant="outline"
@@ -937,7 +932,6 @@ export function ReviewWorkbench() {
         </div>
       </div>
 
-      {/* Issue Sub-Toolbar: Filter pills that never wrap or break the top header */}
       <div className="h-10 px-4 md:px-6 border-b border-border bg-muted/20 flex items-center gap-2 overflow-x-auto shrink-0 text-xs">
         <div className="flex items-center gap-1.5 text-muted-foreground shrink-0 font-medium">
           <Filter className="h-3.5 w-3.5" />
@@ -1675,20 +1669,11 @@ export function ReviewWorkbench() {
 }
 
 /**
- * A textarea that is exactly as tall as the text it holds.
+ * A textarea exactly as tall as its text.
  *
- * The review pane sized its editor with `rows={3}`. Measured on the reference
- * job, the translation of `pdf_main#b0005` occupies 351px beside 718 characters
- * of source, but opening the editor replaced it with a 58.5px box showing three
- * lines — so reviewing a paragraph meant scrolling inside a sliver that showed
- * a sixth of the text it was editing. The read view and the edit view of the
- * same block must be the same size, or the pane appears to shrink the moment
- * the operator starts working.
- *
- * Height is re-measured whenever the value changes (including the mount commit,
- * where the node and the text arrive together). `height` is reset to `auto`
- * first: without it a textarea that grew once can never shrink back after the
- * operator deletes a line.
+ * The read and edit views of a block must be the same height, or the pane
+ * appears to shrink when the operator starts editing. Height is re-measured on
+ * every value change from `auto`, so the box can shrink as well as grow.
  */
 function AutoGrowTextarea({
   className,
@@ -1741,10 +1726,10 @@ interface TermPanelProps {
 }
 
 /**
- * Terminology recommendations for one segment (PRD §5.2.2). Fetches lazily on
- * mount so only the virtualizer's visible window hits the backend, and provides
- * a 3-way Scope Selector ('block' | 'subsequent' | 'all') with diff preview and
- * TM feedback indicators.
+ * Terminology recommendations for one segment (PRD §5.2.2). Each mounted
+ * segment issues its own request on mount, and the panel provides a 3-way Scope
+ * Selector ('block' | 'subsequent' | 'all') with diff preview and TM feedback
+ * indicators.
  */
 function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
   const { t } = useI18n()

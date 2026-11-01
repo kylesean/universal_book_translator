@@ -21,7 +21,8 @@ interface ErrorBoundaryState {
  * single bad report payload or a null field in one screen left the operator
  * staring at a white page — with a 30-minute job still running behind it and no
  * way back. The boundary confines the failure to the view and offers a retry
- * that remounts it (``key`` bump) without reloading the app.
+ * that clears the error without reloading the app; the route's ``key`` remounts
+ * the subtree.
  *
  * The notice is read from the i18n tables directly rather than through
  * ``useI18n`` (a class component cannot use hooks) and the language is read

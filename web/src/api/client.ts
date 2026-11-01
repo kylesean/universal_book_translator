@@ -12,7 +12,6 @@ export type JobSubmitResponse = paths['/jobs/submit']['post']['responses']['202'
 export type JobStatusResponse = paths['/jobs/{job_id}/status']['get']['responses']['200']['content']['application/json']
 export type JobUploadResponse = paths['/jobs/upload']['post']['responses']['201']['content']['application/json']
 export type JobSummary = paths['/jobs']['get']['responses']['200']['content']['application/json']['jobs'][number]
-export type ModelProfile = paths['/api/v1/model-profiles']['get']['responses']['200']['content']['application/json'][number]
 export type RuntimeConfig = paths['/system/runtime-config']['get']['responses']['200']['content']['application/json']
 /** The quality-estimation gate actually in force, and which fields an env var overrides. */
 export type QESettings = paths['/system/qe-config']['get']['responses']['200']['content']['application/json']
@@ -582,18 +581,6 @@ export function triggerBrowserDownload(url: string, filename?: string): void {
 }
 
 
-/**
- * The raw bytes of one deliverable as text, for in-console previews that need
- * to parse content (XLIFF segment tables, JSON digests). Binary deliverables
- * (PDF, EPUB) are previewed via the `?inline=1` URL instead — the browser
- * streams those itself.
- */
-export async function fetchDeliverableText(jobId: string, key: string): Promise<string> {
-  const res = await apiFetch(deliverableDownloadUrl(jobId, key))
-  if (!res.ok) throw await apiError(res, "Failed to load preview")
-  return res.text()
-}
-
 // --------------------------------------------------------------------------- //
 // Language assets
 // --------------------------------------------------------------------------- //
@@ -965,12 +952,6 @@ export async function getDoctor(probe = false): Promise<DoctorReport> {
   const url = `${BASE_URL}/system/doctor` + (probe ? '?probe=true' : '')
   const res = await apiFetch(url)
   if (!res.ok) throw await apiError(res, "Doctor check failed")
-  return res.json()
-}
-
-export async function listModelProfiles(): Promise<ModelProfile[]> {
-  const res = await apiFetch(`${BASE_URL}/api/v1/model-profiles`)
-  if (!res.ok) throw await apiError(res, "Failed to load model profiles")
   return res.json()
 }
 

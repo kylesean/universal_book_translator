@@ -46,29 +46,7 @@
     --radix-select-trigger-height: 2.25rem;
     --radix-select-trigger-width: 8rem;
     --radix-dropdown-menu-content-available-height: 100vh;
-
-    /* Paper/ink aliases retained for proofreading typography and status affordances. */
-    --paper-bg: #faf8f5;
-    --paper-surface: #ffffff;
-    --paper-subsurface: #f4f1ea;
-    --paper-border: #e6e2d8;
-    --paper-border-hover: #d5cfc2;
-
-    --ink-primary: #18181b;
-    --ink-secondary: #52525b;
-    --ink-muted: #68635b;
-    --ink-highlight: #16a34a;
-    --ink-amber: #d97706;
-    --ink-rose: #dc2626;
-    --ink-info: #0284c7;
-
-    --btn-bg: #18181b;
-    --btn-fg: #fafafa;
-    --btn-hover: #27272a;
-
-    --shadow-subtle: 0 1px 2px 0 rgba(28, 25, 23, 0.03);
     --shadow-card: 0 1px 2px rgba(28, 25, 23, 0.04), 0 8px 24px -18px rgba(28, 25, 23, 0.22);
-    --shadow-card-hover: 0 2px 4px rgba(28, 25, 23, 0.05), 0 14px 32px -20px rgba(28, 25, 23, 0.28);
     --shadow-floating: 0 18px 48px -20px rgba(28, 25, 23, 0.28), 0 2px 8px rgba(28, 25, 23, 0.06);
 
     color-scheme: light;
@@ -103,24 +81,6 @@
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 240 4.9% 83.9%;
-
-    --paper-bg: #09090b;
-    --paper-surface: #121215;
-    --paper-subsurface: #18181b;
-    --paper-border: #27272a;
-    --paper-border-hover: #3f3f46;
-
-    --ink-primary: #f4f4f5;
-    --ink-secondary: #a1a1aa;
-    --ink-muted: #71717a;
-    --ink-highlight: #22c55e;
-    --ink-amber: #f59e0b;
-    --ink-rose: #ef4444;
-    --ink-info: #38bdf8;
-
-    --btn-bg: #f4f4f5;
-    --btn-fg: #18181b;
-    --btn-hover: #e4e4e7;
 
     color-scheme: dark;
   }
@@ -181,41 +141,7 @@ samp {
   background: hsl(var(--muted-foreground) / 0.5);
 }
 
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
 /* Typography */
-.type-label {
-  font-size: 12px;
-  line-height: 1.4;
-  color: hsl(var(--foreground));
-  font-weight: 500;
-}
-
-.type-value {
-  font-size: 13px;
-  line-height: 1.5;
-  color: hsl(var(--foreground));
-}
-
-.type-help {
-  font-size: 12px;
-  line-height: 1.5;
-  color: hsl(var(--muted-foreground));
-}
-
-.type-step {
-  font-size: 13px;
-  line-height: 1.4;
-  color: hsl(var(--foreground));
-  font-weight: 600;
-}
-
 .type-group {
   font-size: 12px;
   line-height: 1.4;
@@ -234,40 +160,6 @@ samp {
   background: hsl(var(--muted) / 0.28);
 }
 
-.reading-segment-active {
-  border-color: hsl(var(--border));
-  background: hsl(var(--card));
-  box-shadow: var(--shadow-subtle);
-}
-
-.btn-tactile {
-  transition: transform 120ms cubic-bezier(0.16, 1, 0.3, 1), opacity 120ms ease, box-shadow 120ms ease;
-}
-.btn-tactile:active {
-  transform: scale(0.98);
-}
-
-.card-tactile {
-  transition: border-color 160ms ease, box-shadow 160ms ease;
-}
-.card-tactile:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-}
-
-@keyframes breathe {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.6;
-  }
-}
-
-.animate-breathe {
-  animation: breathe 2.4s ease-in-out infinite;
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -283,23 +175,16 @@ samp {
    tables and `$...$` math from translation memory. Keep the typography close
    to the surrounding editorial serif without letting headings inherit the
    app's display scale. */
-.review-markdown > :first-child,
 .rich-text > :first-child {
   margin-top: 0;
 }
-.review-markdown > :last-child,
 .rich-text > :last-child {
   margin-bottom: 0;
 }
-.review-markdown p,
 .rich-text p {
   margin: 0 0 0.75em;
   line-height: 1.75;
 }
-.review-markdown h1,
-.review-markdown h2,
-.review-markdown h3,
-.review-markdown h4,
 .rich-text h1,
 .rich-text h2,
 .rich-text h3,
@@ -310,32 +195,25 @@ samp {
   font-weight: 600;
   line-height: 1.4;
 }
-.review-markdown ul,
-.review-markdown ol,
 .rich-text ul,
 .rich-text ol {
   margin: 0.5em 0 0.75em;
   padding-left: 1.4em;
 }
-.review-markdown ul,
 .rich-text ul {
   list-style: disc;
 }
-.review-markdown ol,
 .rich-text ol {
   list-style: decimal;
 }
-.review-markdown li + li,
 .rich-text li + li {
   margin-top: 0.25em;
 }
-.review-markdown a,
 .rich-text a {
   color: var(--primary);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.review-markdown code,
 .rich-text code {
   border-radius: 0.25rem;
   background: hsl(var(--muted));
@@ -343,7 +221,6 @@ samp {
   font-family: var(--font-mono, monospace);
   font-size: 0.9em;
 }
-.review-markdown pre,
 .rich-text pre {
   margin: 0.6em 0;
   overflow-x: auto;
@@ -351,27 +228,22 @@ samp {
   background: hsl(var(--muted));
   padding: 0.75rem;
 }
-.review-markdown pre code,
 .rich-text pre code {
   background: transparent;
   padding: 0;
 }
-.review-markdown blockquote,
 .rich-text blockquote {
   margin: 0.6em 0;
   border-left: 2px solid hsl(var(--border));
   padding-left: 0.85rem;
   color: hsl(var(--muted-foreground));
 }
-.review-markdown table,
 .rich-text table {
   width: 100%;
   border-collapse: collapse;
   margin: 0.6em 0;
   font-size: 0.875rem;
 }
-.review-markdown th,
-.review-markdown td,
 .rich-text th,
 .rich-text td {
   border: 1px solid hsl(var(--border));
@@ -379,12 +251,10 @@ samp {
   text-align: left;
   vertical-align: top;
 }
-.review-markdown th,
 .rich-text th {
   background: hsl(var(--muted));
   font-weight: 600;
 }
-.review-markdown .katex-display,
 .rich-text .katex-display {
   margin: 0.75em 0;
   overflow-x: auto;

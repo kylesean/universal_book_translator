@@ -152,11 +152,12 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
     async def system_runtime_config(http_request: Request) -> RuntimeConfigResponse:
         """Model/provider configuration actually in force (read-only).
 
-        The console used to render ``/model-profiles`` here, which is the
-        engine's capability *preset* table — fourteen hard-coded name patterns,
-        none of which is a configured model. This endpoint reports what the
-        engine will really call, which preset (if any) that model matches, and
-        the declared providers with credentials filtered out.
+        The console used to render ``/model-profiles`` here, which was the old
+        capability *preset* table — fourteen hard-coded name patterns, none of
+        which was a configured model. That table is gone. This endpoint reports
+        what the engine will really call, the capability declared by the
+        provider block, and the declared providers with credentials filtered
+        out.
         """
         from ubt.api.provider_editor import credential_write_allowed
         from ubt.api.runtime_config import describe_runtime_config
