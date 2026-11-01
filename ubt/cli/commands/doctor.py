@@ -32,8 +32,6 @@ from ubt.core.router.pricing import (
 
 console = Console()
 
-#: Render order for the human checklist. Every check is tagged with one of
-#: these when recorded, so the flat probe sequence below still groups.
 #: Render order for the human checklist, as ``(code, English label)``. The code is
 #: what a localized console switches on; the label is what the CLI prints.
 _GROUPS: tuple[tuple[str, str], ...] = (
@@ -287,10 +285,15 @@ def _emit_json(checks: list[_Check]) -> None:
         "checks": [
             {
                 "group": check.group,
+                "group_code": check.group_code,
                 "name": check.name,
+                "code": check.code,
                 "status": check.status,
                 "detail": check.detail,
+                "detail_code": check.detail_code,
                 "fix": check.fix,
+                "fix_code": check.fix_code,
+                "params": check.params or {},
             }
             for check in checks
         ],
@@ -382,11 +385,12 @@ def doctor_command(
 ) -> None:
     """Self-check configuration, credentials, and local environment.
 
-    Read-only and offline: validates env values, credential presence,
-    directory writability, and optional-dependency availability. Exits 1 when
-    any check FAILs (WARNs never fail the command). ``--json`` emits one object
-    with ``status``/``summary``/``checks`` so a CI gate need not scrape the
-    human checklist.
+    Read-only and offline by default: validates env values, credential
+    presence, directory writability, and optional-dependency availability.
+    ``--probe`` adds live network calls; ``--fix-script`` writes a remediation
+    script. Exits 1 when any check FAILs (WARNs never fail the command).
+    ``--json`` emits one object with ``status``/``summary``/``checks`` so a CI
+    gate need not scrape the human checklist.
     """
     try:
         config = UBTConfig.from_env()

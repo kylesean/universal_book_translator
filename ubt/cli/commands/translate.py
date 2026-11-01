@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 
+from ubt.adapters.factory import supported_suffixes
 from ubt.cli.ui import ui_msg
 from ubt.core.config import (
     ApiMode,
@@ -402,7 +403,10 @@ def _find_companion_paths(
 
 
 def translate(
-    input_path: Annotated[Path, typer.Argument(help="Path to input document (.epub, .md, .pdf)")],
+    input_path: Annotated[
+        Path,
+        typer.Argument(help=f"Path to input document ({', '.join(supported_suffixes())})"),
+    ],
     output: Annotated[
         Path | None,
         typer.Option(
@@ -933,7 +937,6 @@ def translate(
     # here so a run cannot deliver a single-chapter book under a "success"
     # banner; a malformed --pages is refused before ingestion begins. Both are
     # usage errors: exit 2.
-    # any work starts.
     if start_chapter < 1:
         _usage_error(f"--start-chapter must be >= 1 (got {start_chapter})", json_output)
     if max_chapters is not None and max_chapters < 1:
@@ -1160,9 +1163,9 @@ def translate(
             console.print(
                 _ui_msg(
                     "  [dim]Resume with: [bold]ubt translate <input> --job-id <id>[/] "
-                    "(the Job ID line above lists it; `ubt status` also lists recent jobs).[/]",
+                    "(the Job ID line above lists it).[/]",
                     "  [dim]续跑：[bold]ubt translate <input> --job-id <id>[/]"
-                    "（即上方 Job ID 行；`ubt status` 也会列出最近的 job）。[/]",
+                    "（即上方 Job ID 行）。[/]",
                 )
             )
         raise typer.Exit(code=130) from None
