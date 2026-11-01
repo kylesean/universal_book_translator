@@ -30,6 +30,19 @@ from ubt.render.typst.page_locked_renderer import (
 
 logger = logging.getLogger(__name__)
 
+#: Smallest font scale the canvas will apply to make a box's text fit.
+#:
+#: The canvas places translated text into the source block's rectangle; when the
+#: translation is longer than the space (Chinese reference lists rendered at the
+#: body group's size are the measured case: 615pt of flow in a 460pt box) Typst
+#: clips at the block height, so the tail of the text is drawn but cut — and the
+#: clipped glyphs stay in the text layer, which the delivery contract reads as
+#: text overlapping whatever the next block drew there. Shrinking the font is the
+#: only in-box remedy: below this floor the page genuinely cannot hold its text
+#: at a readable size and clipping (with the contract's block) is the honest
+#: outcome. 0.6 keeps a 10.9pt page at ~6.5pt, still legible.
+_MIN_FIT_SCALE = 0.6
+
 #: Font weights the renderer will pass through to Typst verbatim. Anything else
 #: falls back to the block's own bold/regular classification rather than being
 #: interpolated into the markup unchecked (a measured ``"semibold condensed"``
@@ -232,6 +245,47 @@ class FacsimileRenderer:
             return f'#text({size}{stretch}{fill}weight: "{weight}")[{escaped}]'
         return escaped
 
+    def _fit_to_box(
+        self,
+        *,
+        dx: float,
+        dy: float,
+        width: float,
+        height: float,
+        base_size_pt: float,
+        outset: str,
+        content: str,
+    ) -> str:
+        """Place *content* in its source box, shrinking it until the flow fits.
+
+        ``#block(height: ..., clip: true)`` does not bound the *text*: Typst
+        lays the overflow out past the block and only clips the drawing, so the
+        glyphs remain in the PDF text layer below the block. Two consequences
+        were measured on a real faithful run: the delivery contract's overlap
+        check compared that invisible text with the next block's visible line
+        (8 critical findings on a bibliography page), and the cut line itself
+        rendered as a half-height sliver.
+
+        ``measure`` runs in a ``context`` so it sees the page's own font stack
+        and ``#set par`` (leading, justification). The ratio is length/length,
+        applied as a font-scale; reflow makes the result slightly shorter than
+        the box, which is the safe direction. Content that pins its own size
+        (headings, captions) keeps it, and the flow is measured around it.
+        """
+        return (
+            "  #context {\n"
+            f"    let box-h = {height}pt\n"
+            f"    let natural = measure(block(width: {width}pt)[\n{content}\n    ]).height\n"
+            "    let ratio = if natural > 0pt { box-h / natural } else { 1.0 }\n"
+            f"    let fit = calc.max({_MIN_FIT_SCALE}, calc.min(1.0, ratio))\n"
+            f"    place(top + left, dx: {dx}pt, dy: {dy}pt, "
+            f"block(width: {width}pt, height: {height}pt, clip: true, outset: {outset})[\n"
+            f"      #set text(size: {base_size_pt}pt * fit)\n"
+            f"{content}\n"
+            "    ])\n"
+            "  }"
+        )
+
     def build_markup(
         self,
         pages: Sequence[FacsimilePageSpec],
@@ -254,7 +308,17 @@ class FacsimileRenderer:
         is_cjk = target_lang.lower().startswith(("zh", "ja", "ko"))
         lines: list[str] = [
             "// Universal Book Translator - 1:1 Facsimile Canvas Document",
-            f'#set text(font: ({fonts_formatted}), lang: "{target_lang}", overhang: true, cjk-latin-spacing: auto)',
+            # ``ligatures: false`` is a text-layer decision, not a cosmetic one.
+            # The delivered PDF is read back by the delivery contract, the
+            # review workbench and copy/paste; a ligature glyph has to carry a
+            # character mapping. Measured on a 31-page run, Typst's ligature
+            # glyph for "ffi" extracted as ``Ï`` (U+00CF) once the document was
+            # large enough to subset the font, so a ledger sentence
+            # "a flexible and efficient ..." no longer appeared in the page text
+            # and the contract reported the block as a truncated 88-char prefix.
+            # Without ligatures the extracted text is exactly what was written.
+            f'#set text(font: ({fonts_formatted}), lang: "{target_lang}", overhang: true, '
+            "cjk-latin-spacing: auto, ligatures: false)",
             "",
         ]
 
@@ -419,10 +483,15 @@ class FacsimileRenderer:
                             )
                         else:
                             lines.append(
-                                f"  #place(top + left, dx: {dx}pt, dy: {dy}pt, "
-                                f"block(width: {width}pt, height: {height}pt, clip: true, outset: (top: 2.5pt, bottom: 2.5pt))[\n"
-                                f"    {content}\n"
-                                f"  ])"
+                                self._fit_to_box(
+                                    dx=dx,
+                                    dy=dy,
+                                    width=width,
+                                    height=height,
+                                    base_size_pt=p.uniform_size_pt,
+                                    outset="(top: 2.5pt, bottom: 2.5pt)",
+                                    content=f"        {content}",
+                                )
                             )
                 else:
                     # Flow group of contiguous paragraphs in column
@@ -456,10 +525,15 @@ class FacsimileRenderer:
                         )
                     else:
                         lines.append(
-                            f"  #place(top + left, dx: {grp_dx}pt, dy: {grp_dy}pt, "
-                            f"block(width: {grp_width}pt, height: {grp_height}pt, clip: true, outset: (top: 3.0pt, bottom: 3.0pt))[\n"
-                            f"{flow_content_str}\n"
-                            f"  ])"
+                            self._fit_to_box(
+                                dx=grp_dx,
+                                dy=grp_dy,
+                                width=grp_width,
+                                height=grp_height,
+                                base_size_pt=p.uniform_size_pt,
+                                outset="(top: 3.0pt, bottom: 3.0pt)",
+                                content=flow_content_str,
+                            )
                         )
 
             lines.append("]")
