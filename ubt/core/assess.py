@@ -64,11 +64,14 @@ SCHEMA_VERSION = 1
 APPROX_BLOCK_CHARS = 350
 # Expected characters per scanned page when OCR is active (~300 tokens/page).
 EXPECTED_SCANNED_PAGE_CHARS = 1200
-# Repair fan-out: the gate repairs the bottom 15% of MTQE scores, up to
-# max_repair_rounds passes (mirrors the ledger status page's "Bottom 15%" line).
+# Repair quoting: assume the bottom 15% of blocks need repair, matching the
+# "Bottom 15%" line ``ubt status`` prints. The repair loop selects candidates by
+# ``defect_taxonomy.classify_defect`` (see ``bottom_percentile``), so this
+# constant changes the estimate, never which blocks get repaired.
 REPAIR_DEFECT_FRACTION = 0.15
-# QE-judge fan-out: only gray-band blocks reach the LLM judge (subprocess/tiered
-# engines); a quarter of blocks is the gray-band width the thresholds allow.
+# QE-judge quoting: the judge is offered every STRUCTURAL_OTHER block plus the
+# ``qe_judge_pass_sample`` share of clean passes; a quarter of blocks is a
+# deliberately conservative ceiling for that fan-out.
 QE_GRAY_FRACTION = 0.25
 #: Assumed characters per judge *call* when the judge scores sentence by
 #: sentence (``qe_judge_sentences``, the default). The quote bills one call per
@@ -770,7 +773,7 @@ def _runtime_estimate(
         if preset in ("high_fidelity", "vector_math"):
             local_overhead += pages * 0.5
 
-        # PDF compilation baseline (Typst / WeasyPrint)
+        # PDF compilation baseline (Typst)
         local_overhead += 4.0
     elif format_ext in ("epub", "docx") and pages > 0:
         local_overhead += 2.0 + pages * 0.02
