@@ -38,9 +38,6 @@ _ASSET_KIND: dict[BlockType, AssetKind] = {
 }
 
 _SKIP_PREFIXES = ("render_skip:",)
-#: Skip reasons naming decorative chrome, not a meaning-bearing asset. Reused
-#: from the artifact-parity vocabulary so the two gates cannot drift.
-_DECORATIVE_SKIP_REASONS = frozenset({"decorative_banner", "cover_asset_missing"})
 #: Skip reasons that mean the asset's ink is carried by the delivery's
 #: background layer (the facsimile channel keeps formulas/figures as untouched
 #: source ink under the translation, and protects their boxes in the strip
@@ -179,13 +176,7 @@ def _asset_node(
     reasons = {_skip_reason(f) for f in flags}
     verified = False
     corrupt = False
-    # A non-text node that was neither dropped on purpose nor lost to a render
-    # skip survived whole: the renderer placed the extracted asset (a figure) or
-    # rebuilt it from its own markup (a table).
-    if reasons & _DECORATIVE_SKIP_REASONS:
-        integrity = AssetIntegrity.DROPPED
-        detail = "intentional:" + ",".join(sorted(reasons & _DECORATIVE_SKIP_REASONS))
-    elif reasons & _PRESERVED_OPAQUE_SKIP_REASONS:
+    if reasons & _PRESERVED_OPAQUE_SKIP_REASONS:
         # Facsimile background preservation is *carried*, not lost: the strip
         # plan protects the asset's box and the delivered page draws the
         # source ink. Classifying it MISSING made every preserved formula and
