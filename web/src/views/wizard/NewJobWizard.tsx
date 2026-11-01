@@ -1079,7 +1079,9 @@ export function NewJobWizard() {
             <div className="space-y-3">
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 <div className="space-y-1.5">
-                  <FieldLabel htmlFor="wizard-source-lang">{t.wizard.sourceLang}</FieldLabel>
+                  <div className="flex items-center gap-1.5">
+                    <FieldLabel htmlFor="wizard-source-lang">{t.wizard.sourceLang}</FieldLabel>
+                  </div>
                   <ChoiceSelect
                     id="wizard-source-lang"
                     value={sourceLang}
@@ -1091,7 +1093,9 @@ export function NewJobWizard() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <FieldLabel htmlFor="wizard-target-lang">{t.wizard.targetLang}</FieldLabel>
+                  <div className="flex items-center gap-1.5">
+                    <FieldLabel htmlFor="wizard-target-lang">{t.wizard.targetLang}</FieldLabel>
+                  </div>
                   <ChoiceSelect
                     id="wizard-target-lang"
                     value={targetLang}
