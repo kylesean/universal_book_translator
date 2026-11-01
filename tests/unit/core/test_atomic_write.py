@@ -1,5 +1,3 @@
-"""Unit tests for atomic write utilities."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,7 +18,6 @@ def test_atomic_write_text_success(tmp_path: Path) -> None:
 
     assert dest.exists()
     assert dest.read_text(encoding="utf-8") == "hello world 123"
-    # Ensure no lingering temp files
     assert list(tmp_path.glob(".*.tmp")) == []
 
 
@@ -32,7 +29,5 @@ def test_atomic_write_cleans_up_on_failure(tmp_path: Path) -> None:
         tmp.write_text("corrupted content", encoding="utf-8")
         raise RuntimeError("simulated failure")
 
-    # Destination retains old content
     assert dest.read_text(encoding="utf-8") == "existing content"
-    # Temp file cleaned up
     assert list(tmp_path.glob(".*.tmp")) == []

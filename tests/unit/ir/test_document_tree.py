@@ -1,19 +1,3 @@
-"""Section grouping: the translation unit for the semantic reflow path.
-
-RFC-2026-02 §2.3 calls for section-scope translation (one unit per section)
-instead of the per-block drafting that produced the pronoun-broken output the
-old path shipped. These tests pin the grouping rules, because a wrong grouping
-is invisible in a rendered artifact — it just produces subtly worse prose:
-
-- a top-level heading opens a section; deeper headings stay inside it;
-- a heading-less document still yields one translatable unit (an EPUB chapter,
-  a plain article);
-- the heading path reflects the source's own numbering, so a skipped level in
-  the source cannot leave a stale ancestor in the path;
-- blocks the policy marked ``skip_translate`` are excluded from the
-  translatable view but stay in the section (reading order is preserved).
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -38,10 +22,6 @@ def _Block(  # noqa: N802 - mirrors the IR constructor the tests read as a noun
     policy_translate: bool | None = None,
     id: str = "",
 ) -> IRBlock:
-    """A real ``IRBlock``; a stand-in cannot catch a rename in the IR.
-
-    Kept as a function rather than a dataclass so the call sites read unchanged.
-    """
     element = make_element(
         id=id or f"b{abs(hash(source_text)) % 10_000}",
         spine_index=0,
@@ -67,7 +47,6 @@ def test_deeper_headings_stay_inside_the_open_section() -> None:
         "2 Switch Transformer",
         "2.1 Simplifying Sparse Routing",
     ]
-    # The parent section holds only its own heading; the child opened a new one.
     assert len(sections[1]) == 1
     assert len(sections[2]) == 2
 
@@ -90,7 +69,6 @@ def test_the_path_uses_the_sources_own_numbering() -> None:
     sections = build_section_tree(blocks, max_level=2)
     assert sections[0].path == ("2",)
     assert sections[1].path == ("2", "2.1")
-    # A new level-1 heading replaces the path rather than appending to it.
     assert sections[2].path == ("3",)
 
 
@@ -98,7 +76,6 @@ def test_a_skipped_level_does_not_leave_a_stale_ancestor() -> None:
     blocks = [
         _Block("heading", "2 Parent", level=1),
         _Block("heading", "2.1 Child", level=2),
-        # Jump straight back to level 1: the child must not survive in the path.
         _Block("heading", "3 Sibling", level=1),
     ]
     sections = build_section_tree(blocks, max_level=2)
@@ -115,7 +92,6 @@ def test_skip_translate_blocks_are_excluded_from_the_translatable_view() -> None
     sections = build_section_tree(blocks)
     translatable = sections[0].translatable
     assert [b.source_text for b in translatable] == ["1 Introduction", "translate me"]
-    # ...but they stay in the section, so reading order is untouched.
     assert len(sections[0]) == 4
 
 
@@ -123,20 +99,7 @@ def test_an_empty_block_list_yields_no_sections() -> None:
     assert build_section_tree([]) == []
 
 
-# --- section context (RFC-2026-02 §2.3) ------------------------------------
-
-
 def test_section_context_gives_a_headingless_chunk_its_section() -> None:
-    """A chunk that does not hold the heading still learns *where* it is.
-
-    ``chunk_by_section`` guarantees a chunk never straddles a heading, but a
-    long section spans several chunks and only the first holds the heading.
-    Without the trail, the model meets "this approach" with no antecedent.
-
-    The answer carries the **whole ancestry**, not just the leaf title: "2.1
-    Simplifying Sparse Routing" alone does not say which chapter "2.1" belongs
-    to, and that is the fact a back-reference needs.
-    """
     blocks = [
         _Block("heading", "2 Switch Transformer", level=1, id="b1"),
         _Block("narrative", "intro", id="b2"),
@@ -144,7 +107,6 @@ def test_section_context_gives_a_headingless_chunk_its_section() -> None:
         _Block("narrative", "routing one", id="b4"),
         _Block("narrative", "routing two", id="b5"),
     ]
-    # b5 is a later chunk of the 2.1 section: it carries no heading of its own.
     assert (
         section_context_for(blocks, [blocks[4]])
         == "2 Switch Transformer > 2.1 Simplifying Sparse Routing"
@@ -152,23 +114,16 @@ def test_section_context_gives_a_headingless_chunk_its_section() -> None:
 
 
 def test_section_context_keeps_the_whole_ancestry_for_a_deep_section() -> None:
-    """Three levels deep, the trail names every ancestor in order."""
     blocks = [
         _Block("heading", "1 Introduction", level=1, id="h1"),
         _Block("heading", "1.1 Background", level=2, id="h2"),
         _Block("heading", "1.1.1 Details", level=3, id="h3"),
         _Block("narrative", "prose", id="p1"),
     ]
-    # ``1.1.1`` is deeper than ``max_level=2``, so it folds into ``1.1``.
     assert section_context_for(blocks, [blocks[3]]) == "1 Introduction > 1.1 Background"
 
 
 def test_the_leaf_only_shortcut_is_not_used_when_an_ancestor_exists() -> None:
-    """A one-level section needs no separator; a nested one must have it.
-
-    Pins the regression directly: the old implementation returned
-    ``section.title``, which for the nested case is the leaf alone.
-    """
     blocks = [
         _Block("heading", "2 Method", level=1, id="h1"),
         _Block("heading", "2.1 Sub", level=2, id="h2"),
@@ -180,11 +135,6 @@ def test_the_leaf_only_shortcut_is_not_used_when_an_ancestor_exists() -> None:
 
 
 def test_section_context_is_stable_across_a_sections_chunks() -> None:
-    """Same string for every chunk of a section, so the cache key cannot flip.
-
-    The content-addressed prompt cache keys on the prompt text; if the context
-    changed halfway through a section, the second half would always miss.
-    """
     blocks = [
         _Block("heading", "2.1 Simplifying Sparse Routing", level=2, id="b1"),
         _Block("narrative", "a", id="b2"),
@@ -205,19 +155,7 @@ def test_section_context_is_empty_for_an_empty_chunk() -> None:
     assert section_context_for([], []) == ""
 
 
-# --------------------------------------------------------------------------- #
-# A skipped heading level must not nest siblings under each other
-# --------------------------------------------------------------------------- #
-
-
 def test_a_skipped_level_does_not_nest_a_sibling_under_its_sibling() -> None:
-    """The trail stack is keyed by *level*, not by how many ancestors it holds.
-
-    A source that jumps ``1`` -> ``1.0.1`` leaves two stack entries for a
-    level-3 heading, so trimming by ``len(stack)`` never popped the previous
-    sibling and ``1.0.2`` became a child of ``1.0.1``. The error compounds on
-    every following heading.
-    """
     blocks = [
         _Block("heading", "1 Intro", level=1),
         _Block("heading", "1.0.1 Sub", level=3),
@@ -226,13 +164,11 @@ def test_a_skipped_level_does_not_nest_a_sibling_under_its_sibling() -> None:
     sections = build_section_tree(blocks, max_level=3)
     paths = {s.title: s.path for s in sections}
 
-    # 1.0.2 is a sibling of 1.0.1, so it replaces it rather than nesting under it.
     assert paths["1.0.1 Sub"] == ("1", "1.0.1")
     assert paths["1.0.2 Sub2"] == ("1", "1.0.2")
 
 
 def test_a_deeper_heading_still_nests() -> None:
-    # The fix must not flatten real nesting.
     blocks = [
         _Block("heading", "1 A", level=1),
         _Block("heading", "1.1 B", level=2),
@@ -247,13 +183,6 @@ def test_a_deeper_heading_still_nests() -> None:
 
 
 def test_the_acknowledgments_section_carries_the_personal_name_rule() -> None:
-    """A name is the one string a translation must never invent.
-
-    The acknowledgments section transliterates densest: the ATC'25 replay
-    shipped "Yinqian Zhang" as an invented 张-something because no rule told
-    the model names are off-limits. The rule rides the section trail, so it
-    reaches the prompt for every chunk of the section and nothing else.
-    """
     blocks = [
         _Block("heading", "9 Acknowledgments", id="h1"),
         _Block("narrative", "We thank Yinqian Zhang for the discussions.", id="p1"),
@@ -267,5 +196,4 @@ def test_the_acknowledgments_section_carries_the_personal_name_rule() -> None:
     assert "Personal Names" in ack
     assert "never transliterate" in ack
     assert ack.startswith("9 Acknowledgments")
-    # The rule is section-scoped: the appendix trail carries no such rule.
     assert "Personal Names" not in appendix

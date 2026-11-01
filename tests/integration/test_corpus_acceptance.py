@@ -1,20 +1,3 @@
-"""The corpus acceptance harness, wired into the ``slow`` tier.
-
-``scripts/shadow_reader.py`` is a CLI acceptance harness the ``fast`` tier cannot
-carry: it reads the real corpus PDFs (gitignored -- only the baselines under
-``corpus/baseline/`` and the thresholds in ``corpus/cases.json`` are tracked)
-and run parser/render subprocesses. The tier rule parks them here: ``fast`` has
-to stay offline and cheap enough to run on every edit, so anything that spawns a
-renderer belongs to ``slow``/``legacy_drift``. This module is that parking spot
--- each harness runs in a subprocess, because a harness that wedges must not
-wedge the session, and must exit 0. The final test runs the corpus gate
-itself, ``ubt verify --run``: the real pipeline over every document, each
-delivery contract reconciled against its ``cases.json`` thresholds.
-
-Everything cheap enough to run on synthetic fixtures was already converted
-into ``tests/unit`` tests; what remains here needs the real documents.
-"""
-
 from __future__ import annotations
 
 import subprocess
@@ -27,20 +10,12 @@ pytestmark = pytest.mark.slow
 
 _REPO = Path(__file__).resolve().parents[2]
 
-#: (harness, extra args). ``shadow_reader``'s synthetic-free gate defaults to a
-#: 0.98 character-coverage floor; the scanned-heavy book chapter tops out at
-#: 0.973 while still round-tripping losslessly, so the floor is the documented
-#: knob (a fraction), not a skipped contract.
 _CASES: tuple[tuple[str, tuple[str, ...]], ...] = (("shadow_reader", ("--min-coverage", "0.97")),)
 
 
 def _skip_without_corpus() -> None:
     documents = sorted((_REPO / "corpus" / "documents").glob("*.pdf"))
     if not documents:
-        # ``corpus/documents`` is gitignored: the acceptance gate cannot run in
-        # CI by construction. The skip says so, because a silent skip here reads
-        # in the CI log as "the gate passed" and the harness has been dead on
-        # CI for as long as the corpus has been uncommitted.
         pytest.skip(
             "corpus/documents is not present (gitignored by design), so the "
             "acceptance harness measured nothing. Place the benchmark PDFs named "
@@ -69,13 +44,6 @@ def test_the_corpus_acceptance_harness_passes(script: str, extra: tuple[str, ...
 
 @pytest.mark.timeout(900)
 def test_the_ubt_verify_corpus_gate_passes() -> None:
-    """``ubt verify --run``: the corpus README's full gate, in the suite.
-
-    The harness above checks components; this one runs the *real
-    pipeline* over every corpus document (dry-run provider, no API key) and
-    reconciles each delivery contract against its ``cases.json`` thresholds —
-    the ground truth the corpus was created for.
-    """
     _skip_without_corpus()
     proc = subprocess.run(  # noqa: S603
         [

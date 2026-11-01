@@ -1,13 +1,3 @@
-"""Currency-aware inline ``$...$`` math detection.
-
-A naive ``\\$[^\\$\\n]+\\$`` pairs the first ``$`` with the next one on the line,
-so ``"$5 and $10"`` becomes a "math" span and every term inside it is shielded
-from glossary enforcement and CJK spacing. Three callers used to carry their own
-copy of the rule and drifted; this module is the single home, so its two-part
-contract (delimiters must not touch whitespace; the interior must not be
-currency/prose) is what keeps all of them consistent.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -19,11 +9,6 @@ from ubt.core.cleaners.inline_math import (
 )
 
 pytestmark = pytest.mark.fast
-
-
-# --------------------------------------------------------------------------- #
-# is_math_content
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize("content", ["", "   "])
@@ -56,18 +41,11 @@ def test_ordinary_math_interiors_are_math(content: str) -> None:
 
 @pytest.mark.parametrize("content", [")prose", "prose("])
 def test_bracket_glued_prose_is_not_math(content: str) -> None:
-    # A stray dollar pairs a table header's prose row into a fake span.
     assert is_math_content(content) is False
 
 
 def test_bracket_glued_content_with_a_latex_signal_is_still_math() -> None:
-    # A shattered formula can end with '(' but carries \commands.
     assert is_math_content("\\psi = V \\ln(") is True
-
-
-# --------------------------------------------------------------------------- #
-# inline_math_spans / iter_inline_math
-# --------------------------------------------------------------------------- #
 
 
 def test_a_simple_span_is_found() -> None:
@@ -79,7 +57,6 @@ def test_a_latex_command_span_is_found() -> None:
 
 
 def test_a_currency_pair_is_not_a_span() -> None:
-    # The second '$' is preceded by a space, so this is not a math pair.
     assert inline_math_spans("price $5 and $10 total") == []
 
 
@@ -106,7 +83,6 @@ def test_multiple_spans_are_all_returned() -> None:
 
 
 def test_a_rejected_candidate_does_not_hide_a_later_span() -> None:
-    # The currency '$5$' is rejected; scanning resumes and finds '$x$'.
     assert inline_math_spans("$5$ and $x$") == [(8, 11)]
 
 

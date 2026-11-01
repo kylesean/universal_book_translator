@@ -1,5 +1,3 @@
-"""Contract tests for the Translation Bible entry cleaning and merging."""
-
 from __future__ import annotations
 
 import pytest
@@ -7,11 +5,6 @@ import pytest
 from ubt.core.memory.bible import BibleEntry, BookBible, clean_bible_entry, merge_bible_entries
 
 pytestmark = pytest.mark.fast
-
-
-# --------------------------------------------------------------------------- #
-# Models
-# --------------------------------------------------------------------------- #
 
 
 def test_bible_entry_defaults() -> None:
@@ -32,11 +25,6 @@ def test_book_bible_defaults() -> None:
     assert bible.tone == ""
     assert bible.glossary == []
     assert bible.system_instruction == ""
-
-
-# --------------------------------------------------------------------------- #
-# clean_bible_entry
-# --------------------------------------------------------------------------- #
 
 
 def test_clean_strips_source_and_translation() -> None:
@@ -94,11 +82,6 @@ def test_clean_passes_kind_through() -> None:
     assert entry.kind == "person"
 
 
-# --------------------------------------------------------------------------- #
-# merge_bible_entries
-# --------------------------------------------------------------------------- #
-
-
 def test_merge_empty_list() -> None:
     assert merge_bible_entries([]) == []
 
@@ -111,8 +94,8 @@ def test_merge_is_case_insensitive_on_source() -> None:
         ]
     )
     assert len(merged) == 1
-    assert merged[0].source == "Foo"  # first-seen casing
-    assert merged[0].translation == "甲"  # first translation wins
+    assert merged[0].source == "Foo"
+    assert merged[0].translation == "甲"
     assert merged[0].aliases == ["F", "G"]
     assert merged[0].frequency == 5
 
@@ -167,15 +150,6 @@ def test_merge_keeps_distinct_sources_separate() -> None:
     assert [e.source for e in merged] == ["Bar", "Foo"]
 
 
-# ---------------------------------------------------------------------------
-# Canonical glossary typography (arXiv 2101.03961 autopsy): a rendering mined
-# without the CJK<->Latin space ("切换Transformer") fought the document's own
-# Pangu-spaced convention ("切换 Transformer") for the whole book — three
-# blocks burned repair rounds for "drifting" away from a form the exporter
-# itself would rewrite.
-# ---------------------------------------------------------------------------
-
-
 def test_clean_bible_entry_normalizes_cjk_latin_boundary_spacing() -> None:
     entry = clean_bible_entry(source="Switch Transformer", translation="切换Transformer")
     assert entry is not None
@@ -189,8 +163,6 @@ def test_clean_bible_entry_normalizes_both_boundaries_of_a_mixed_rendering() -> 
 
 
 def test_clean_bible_entry_never_spaces_full_width_punctuation() -> None:
-    # 多头注意力（MHA） keeps its full-width bracket glued, matching the
-    # Pangu rules the export stage applies (half-width brackets DO space).
     glued = clean_bible_entry(source="MHA", translation="多头注意力（MHA）")
     assert glued is not None
     assert glued.translation == "多头注意力（MHA）"
@@ -208,13 +180,10 @@ def test_clean_bible_entry_leaves_latin_latin_spacing_alone() -> None:
 def test_clean_bible_entry_preserves_an_already_spaced_boundary() -> None:
     entry = clean_bible_entry(source="Switch Transformer", translation="切换 Transformer")
     assert entry is not None
-    assert entry.translation == "切换 Transformer"  # not doubled
+    assert entry.translation == "切换 Transformer"
 
 
 def test_the_space_normalized_entry_still_catches_a_real_drift() -> None:
-    # End to end: the canonical spaced form accepts both spellings on the
-    # target side (detection is space-tolerant) but a target that keeps the
-    # English leak is still drift.
     from ubt.core.validators.consistency import GlossaryConsistencyValidator
 
     entry = clean_bible_entry(source="Switch Transformer", translation="切换Transformer")
@@ -231,19 +200,6 @@ def test_the_space_normalized_entry_still_catches_a_real_drift() -> None:
     ).is_valid
 
 
-# --------------------------------------------------------------------------- #
-# Concept-level merging: one concept, one entry, every approved rendering kept
-#
-# Measured on arXiv 2606.23344: the bible carried BOTH
-#   state-of-the-art -> 当前最先进的          (aliases: SOTA)
-#   state-of-the-art (SOTA) -> 当前最优（SOTA）
-# The first came from the abbreviation miner + backfill, the second from the
-# LLM skeleton extractor. Each judged the other's correct rendering as drift, so
-# no translation could satisfy both: b0002 wrote 当前最优（SOTA） and scored 0.25,
-# b0006 wrote 当前最先进的 and scored 0.35. Both were correct.
-# --------------------------------------------------------------------------- #
-
-
 def test_an_attested_acronym_folds_onto_its_expansion() -> None:
     from ubt.core.memory.bible import concept_key
 
@@ -255,11 +211,6 @@ def test_an_attested_acronym_folds_onto_its_expansion() -> None:
 
 
 def test_a_parenthetical_that_does_not_spell_its_base_stays_a_separate_concept() -> None:
-    """The fold must be earned by the initials, not by the shape.
-
-    ``Transformer (XL)`` and ``GPT (4)`` are not acronym attestations; folding
-    them would silently merge unrelated terms.
-    """
     from ubt.core.memory.bible import concept_key
 
     assert concept_key("Transformer (XL)") != concept_key("Transformer")
@@ -277,8 +228,6 @@ def test_two_renderings_of_one_concept_become_preferred_plus_admitted() -> None:
     )
     assert len(merged) == 1
     entry = merged[0]
-    # The bare expansion is the preferred term even though the attestation was
-    # seen more often: steering every sentence to embed "（SOTA）" is wrong.
     assert entry.source == "state-of-the-art"
     assert entry.translation == "当前最先进的"
     assert "当前最优（SOTA）" in entry.inflected_variants
@@ -286,7 +235,6 @@ def test_two_renderings_of_one_concept_become_preferred_plus_admitted() -> None:
 
 
 def test_a_merged_concept_accepts_both_rendering_in_the_gate() -> None:
-    """The end the merge exists for: neither rendering may read as drift."""
     from ubt.core.qe.term_drift import detect_term_drift
 
     glossary = [
@@ -310,7 +258,6 @@ def test_a_merged_concept_accepts_both_rendering_in_the_gate() -> None:
 
 
 def test_an_admitted_rendering_is_never_rewritten_by_the_enforcer() -> None:
-    """Admitted means accepted in place, not accepted-then-replaced."""
     from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
 
     glossary = [
@@ -345,26 +292,16 @@ def test_merge_does_not_invent_admitted_variants_for_a_single_entry() -> None:
 
 
 def test_the_concept_fold_runs_again_after_backfill_fills_a_mined_entry() -> None:
-    """The fold only sees a contradiction once BOTH sides carry a rendering.
-
-    Ordering defect, measured on arXiv 2606.23344: the LLM skeleton supplied
-    ``state-of-the-art (SOTA) -> 当前最优（SOTA）`` while the miner supplied
-    ``state-of-the-art -> ""``. The single merge pass ran before backfill filled
-    the empty side, so there was no contradiction to fold yet, and the two rules
-    survived into the glossary — where they fought over every block.
-    """
     from ubt.core.memory.bible import merge_bible_entries
 
-    # State at the first merge pass: the mined side is still untranslated.
     before_backfill = merge_bible_entries(
         [
             BibleEntry(source="state-of-the-art", translation="", aliases=["SOTA"]),
             BibleEntry(source="state-of-the-art (SOTA)", translation="当前最优（SOTA）"),
         ]
     )
-    assert len(before_backfill) == 2  # nothing to fold yet
+    assert len(before_backfill) == 2
 
-    # Backfill fills the mined entry, then the stage merges again.
     filled = [
         before_backfill[0].model_copy(update={"translation": "当前最先进的"}),
         before_backfill[1],
@@ -373,17 +310,6 @@ def test_the_concept_fold_runs_again_after_backfill_fills_a_mined_entry() -> Non
     assert len(after_backfill) == 1
     assert after_backfill[0].translation == "当前最先进的"
     assert "当前最优（SOTA）" in after_backfill[0].inflected_variants
-
-
-# --------------------------------------------------------------------------- #
-# Terminology conflicts: record the decision, never hide it
-#
-# A conflict is two renderings for one concept. The merge resolves it by
-# PRECEDENCE (user glossary > seed, bare expansion > acronym attestation) — not
-# by meaning — so the choice is recorded for review. This replaces an earlier
-# check that scanned the MERGED glossary, which by construction holds one
-# rendering per concept, so it could never fire.
-# --------------------------------------------------------------------------- #
 
 
 def test_an_acronym_fold_is_recorded_as_resolved() -> None:
@@ -399,12 +325,10 @@ def test_an_acronym_fold_is_recorded_as_resolved() -> None:
     conflict = conflicts[0]
     assert conflict.preferred == "当前最先进的"
     assert conflict.superseded == (("当前最优（SOTA）", "state-of-the-art (SOTA)"),)
-    # The loser becomes an admitted variant, so delivery is unaffected.
     assert conflict.resolved is True
 
 
 def test_one_surface_with_two_renderings_is_unresolved() -> None:
-    """No fold is possible: one rendering wins and the other is enforced against."""
     from ubt.core.memory.bible import detect_terminology_conflicts
 
     conflicts = detect_terminology_conflicts(
@@ -420,13 +344,6 @@ def test_one_surface_with_two_renderings_is_unresolved() -> None:
 
 
 def test_the_conflict_scan_would_be_empty_after_the_merge() -> None:
-    """Pin the ordering defect: this check must run BEFORE merge, not after.
-
-    The earlier version scanned the merged glossary and therefore reported
-    nothing on the document it was written for (arXiv 2606.23344, two renderings
-    of ``state-of-the-art``). If this assertion ever starts failing because the
-    merged output carries two renderings, the merge itself has regressed.
-    """
     from ubt.core.memory.bible import detect_terminology_conflicts
 
     entries = [
@@ -452,7 +369,6 @@ def test_no_conflict_when_every_concept_has_one_rendering() -> None:
 
 
 def test_untranslated_entries_do_not_count_as_conflicts() -> None:
-    """A mined entry awaiting backfill has no rendering to disagree with."""
     from ubt.core.memory.bible import detect_terminology_conflicts
 
     assert (
@@ -486,16 +402,6 @@ def test_a_conflict_serializes_for_the_report_and_status() -> None:
 
 
 def test_an_acronym_attestation_mid_term_also_folds() -> None:
-    """The acronym need not be the last token.
-
-    Measured on arXiv 2606.23344 (a real run, not a fixture): the LLM skeleton
-    extractor supplied ``state-of-the-art (SOTA) performance ->
-    当前最优（SOTA）性能`` beside the mined ``state-of-the-art -> 当前最先进的``.
-    The fold required the acronym to END the string, declined this one, and the
-    two entries fought exactly as the trailing case did — b0002 went to 0.25
-    with ``repair_structural_failure`` after two rounds and landed in the human
-    queue, on a translation that was correct.
-    """
     from ubt.core.memory.bible import concept_key
 
     assert concept_key("state-of-the-art (SOTA) performance") == concept_key("state-of-the-art")
@@ -514,7 +420,6 @@ def test_an_acronym_attestation_mid_term_also_folds() -> None:
 
 
 def test_a_mid_term_parenthetical_that_does_not_spell_the_base_stays_separate() -> None:
-    """Widening the fold must not swallow unrelated qualifiers."""
     from ubt.core.memory.bible import concept_key
 
     assert concept_key("Transformer (XL) model") != concept_key("Transformer")

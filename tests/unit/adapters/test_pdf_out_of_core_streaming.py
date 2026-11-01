@@ -1,5 +1,3 @@
-"""Unit tests for out-of-core PDF page streaming and memory eviction."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -47,12 +45,6 @@ def test_compute_pdf_page_chunks_fallback_on_zero() -> None:
 
 
 def test_the_env_knob_sets_the_default_chunk_size(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``UBT_PDF_STREAM_CHUNK_SIZE`` must reach the adapter's chunk loop.
-
-    The adapter binds ``get_pdf_page_chunk_size`` at import time, so a test that
-    patches the defining module proves nothing about the wiring. Driving the
-    real environment variable exercises the path production uses.
-    """
     monkeypatch.setenv("UBT_PDF_STREAM_CHUNK_SIZE", "10")
 
     assert get_pdf_page_chunk_size() == 10
@@ -116,9 +108,6 @@ async def test_pdfium_adapter_out_of_core_streaming(tmp_path: Path) -> None:
     with (
         patch.object(adapter, "extract_manifest", return_value=manifest),
         patch.object(adapter, "_extract_blocks_sync", side_effect=fake_extract_blocks),
-        # Patch the name the adapter bound at import. Patching the defining
-        # module is a no-op, which let this test pass on the default value
-        # without ever exercising the wiring.
         patch("ubt.adapters.pdf.docling_adapter.get_pdf_page_chunk_size", return_value=50),
         patch("gc.collect") as mock_gc,
     ):
@@ -130,7 +119,6 @@ async def test_pdfium_adapter_out_of_core_streaming(tmp_path: Path) -> None:
         assert yielded_chapters[0].chapter_id == "c0001"
         assert yielded_chapters[1].chapter_id == "c0002"
 
-        # Check block ID uniqueness and monotonic spine index across chunks
         ch1_blocks = yielded_chapters[0].blocks
         ch2_blocks = yielded_chapters[1].blocks
 
@@ -147,7 +135,6 @@ async def test_pdfium_adapter_out_of_core_streaming(tmp_path: Path) -> None:
         assert ch2_blocks[1].id == "pdf_main#b0004"
         assert ch2_blocks[1].spine_index == 4
 
-        # Eviction called after each chunk
         assert mock_gc.call_count == 2
 
 
@@ -193,9 +180,6 @@ async def test_docling_adapter_out_of_core_streaming(tmp_path: Path) -> None:
             adapter, "_vlm_fallback_missing_pages", side_effect=lambda *args, **kw: args[1]
         ),
         patch.object(adapter, "_annotate_page_kinds", return_value={1: "body"}),
-        # Patch the name the adapter bound at import. Patching the defining
-        # module is a no-op, which let this test pass on the default value
-        # without ever exercising the wiring.
         patch("ubt.adapters.pdf.docling_adapter.get_pdf_page_chunk_size", return_value=50),
         patch("gc.collect") as mock_gc,
     ):
@@ -214,13 +198,6 @@ async def test_docling_adapter_out_of_core_streaming(tmp_path: Path) -> None:
 def test_a_non_contiguous_page_selection_is_not_widened_to_its_range(
     tmp_path: Path,
 ) -> None:
-    """``--pages 1,4`` must require pages 1 and 4, not 1 through 4.
-
-    ``parse_stream`` extracts one chunk whose range is ``(1, 4)``, and the
-    coverage guard used to treat that interval as the requirement: pages 2-3
-    were never asked for, had no blocks, and the run was refused as a partial
-    read of a document it had read completely.
-    """
     from pdf_builders import write_text_pdf
 
     from ubt.adapters.pdf.docling_parser import _pages_without_text
@@ -242,24 +219,15 @@ def test_a_non_contiguous_page_selection_is_not_widened_to_its_range(
         for page in (1, 4)
     ]
 
-    # Range only (the pre-fix behaviour): the pages in between look unread.
     widened, total = _pages_without_text(pdf, blocks, (1, 4))
     assert total == 4
     assert widened == [2, 3], "the range form is what produced the false gap"
 
-    # The actual selection: nothing is missing.
     exact, _ = _pages_without_text(pdf, blocks, (1, 4), page_scope=[1, 4])
     assert exact == []
 
 
 def test_a_genuinely_blank_page_is_not_a_missing_page(tmp_path: Path) -> None:
-    """A blank verso has no text layer to lose and nothing for OCR to read.
-
-    Counting it as missing refused the whole book (``_reject_empty_book``)
-    unless the operator enabled OCR, which would transcribe nothing. Only a
-    page with zero page objects is exempt: a scanned or figure-only page still
-    carries an image object and stays reported.
-    """
     from pdf_builders import write_text_pdf
 
     from ubt.adapters.pdf.docling_parser import _pages_without_text

@@ -1,17 +1,3 @@
-"""The document index behind the omission gate's table-label discriminator.
-
-Pinned here:
-
-* :func:`document_vocabulary` / :func:`identifier_terms_in` answer exactly what
-  the historical per-call whole-document scan answered;
-* the index is built once per run, not once per stage or per block — the defect
-  this replaced re-scanned the whole book for every tracked term of every block
-  (143 ms/block on a 3.9M-character book, 5581 s across a 20k-block run);
-* ``OmissionGate.evaluate(document_text=...)`` actually honours its argument,
-  which the documented "an explicit argument wins" promise did not;
-* ``SourceDocumentIndex`` reads the book once and shares one vocabulary.
-"""
-
 from __future__ import annotations
 
 import re
@@ -46,12 +32,6 @@ pytestmark = pytest.mark.fast
 
 
 def _legacy_identifier_terms(source_text: str, document_text: str) -> set[str]:
-    """The pre-index implementation, verbatim, as the equivalence oracle.
-
-    Kept as the reference the new set-membership path must match: it is the
-    code that produced every historical verdict (a whole-document ``re.sub``
-    plus one boundary-aware ``re.search`` per candidate term).
-    """
     runs = [
         match.group(0)
         for match in _LATIN_RUN_RE.finditer(source_text.strip())
@@ -71,10 +51,6 @@ def _legacy_identifier_terms(source_text: str, document_text: str) -> set[str]:
         )
     }
 
-
-# --------------------------------------------------------------------------- #
-# Equivalence with the algorithm this replaced
-# --------------------------------------------------------------------------- #
 
 _BOOK = (
     "The mask is applied uniformly. Same as before. We use a random round.\n"
@@ -112,23 +88,11 @@ def test_the_verdict_is_identical_against_a_prepared_vocabulary() -> None:
 
 
 def test_an_acronym_written_in_capitals_in_prose_is_not_evidence() -> None:
-    """Stripping every all-caps run before indexing is what keeps this honest."""
     vocabulary = document_vocabulary("The MHA layer and the LSTM block differ.")
     assert identifier_terms_in("| MHA | LSTM |", vocabulary) == {"MHA", "LSTM"}
 
 
-# --------------------------------------------------------------------------- #
-# evaluate(document_text=...) must honour its argument
-# --------------------------------------------------------------------------- #
-
-
 def test_an_explicit_document_argument_wins_over_the_bound_context() -> None:
-    """The docstring promised this and the implementation read ``self`` instead.
-
-    A caller that passes ``document_text=`` gets the verdict for *that* text.
-    Reading the bound context here made the public parameter inert: the two
-    calls below were indistinguishable before this was fixed.
-    """
     source = "Table 2: MASK | SAME | RND strategies. The model uses MHA layers."
     translation = "表2：掩码策略。模型使用 MHA 层。"
     book = "We apply a mask. The same token. Random choice. An MHA layer exists."
@@ -142,8 +106,6 @@ def test_an_explicit_document_argument_wins_over_the_bound_context() -> None:
         without_argument.reason,
     )
 
-    # ... and an explicit argument that differs from the bound context changes
-    # the verdict (this is the half that was inert).
     unrelated = OmissionGate(target_lang="zh")
     unrelated.set_document_context("Nothing relevant here at all.")
     overridden = unrelated.evaluate(source, translation, document_text=book)
@@ -164,11 +126,6 @@ def test_a_prepared_vocabulary_may_be_passed_instead_of_raw_text() -> None:
 
 
 def test_rebinding_the_same_document_does_not_reindex_the_book() -> None:
-    """The chapter-streaming draft stage binds once per chapter.
-
-    Re-indexing a 3.9M-character book per chapter cost 130 ms x chapters; the
-    guard is that the second bind is a no-op, observable as the same object.
-    """
     gate = OmissionGate(target_lang="zh")
     gate.set_document_context(_BOOK)
     first = gate._document_vocabulary
@@ -176,20 +133,7 @@ def test_rebinding_the_same_document_does_not_reindex_the_book() -> None:
     assert gate._document_vocabulary is first
 
 
-# --------------------------------------------------------------------------- #
-# The per-block cost this exists to remove
-# --------------------------------------------------------------------------- #
-
-
 def test_the_per_block_cost_no_longer_scales_with_the_book() -> None:
-    """A 4000-block book must not make each evaluation scan it.
-
-    Before the index, one ``evaluate`` did a whole-document ``re.sub`` plus a
-    boundary search per candidate term, so the cost grew with the *book* while
-    the question stayed per *block*. The ratio, not an absolute time, is pinned:
-    a same-machine regression to rescanning the book per block blows it up by
-    three orders of magnitude, while normal timing noise does not.
-    """
     small_book = "\n".join(f"Paragraph {i} mentions MASK and MHA alike." for i in range(50))
     large_book = "\n".join(f"Paragraph {i} mentions MASK and MHA alike." for i in range(4_000))
     block = "Paragraph 7 mentions MASK and MHA alike."
@@ -198,7 +142,7 @@ def test_the_per_block_cost_no_longer_scales_with_the_book() -> None:
         vocabulary = document_vocabulary(document)
         gate = OmissionGate(target_lang="zh")
         gate.bind_document_vocabulary(vocabulary)
-        gate.evaluate(block, "第 7 段同时提到掩码和 MHA。")  # warm
+        gate.evaluate(block, "第 7 段同时提到掩码和 MHA。")
         started = time.perf_counter()
         for _ in range(repeats):
             gate.evaluate(block, "第 7 段同时提到掩码和 MHA。")
@@ -206,16 +150,10 @@ def test_the_per_block_cost_no_longer_scales_with_the_book() -> None:
 
     small = measure(small_book)
     large = measure(large_book)
-    # An 80x larger book must not make the per-block question materially slower.
     assert large < max(small * 4.0, 2e-3), (
         f"per-block cost scales with the book ({small * 1e3:.3f} ms vs "
         f"{large * 1e3:.3f} ms): the whole-document scan is back"
     )
-
-
-# --------------------------------------------------------------------------- #
-# SourceDocumentIndex: read once, index once
-# --------------------------------------------------------------------------- #
 
 
 def _block(index: int) -> IRBlock:
@@ -255,13 +193,10 @@ def test_the_source_index_reads_the_book_exactly_once(tmp_path: Path) -> None:
         assert index.bound is True
         assert "Paragraph 0" in first_text
 
-        # Every later chapter's load is a no-op on the same objects.
         for _ in range(10):
             index.load(ledger, "job")
         assert index.text() is first_text
         assert index.vocabulary() is first_vocab
-        # The vocabulary holds ordinary-case words only: every all-caps run is
-        # stripped before indexing, or an acronym in prose would excuse itself.
         assert "mentions" in first_vocab.words
         assert "mha" not in first_vocab.words
     finally:
@@ -269,7 +204,6 @@ def test_the_source_index_reads_the_book_exactly_once(tmp_path: Path) -> None:
 
 
 def test_the_index_survives_a_concurrent_load(tmp_path: Path) -> None:
-    """Two chapter workers may race the first load; exactly one must read."""
     import threading
 
     ledger = SQLiteJobLedger(tmp_path / "job.sqlite")

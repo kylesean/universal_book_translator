@@ -1,17 +1,3 @@
-"""Masking cleaners: the protect-restore contract and its integrity verdict.
-
-Math, code and citation maskers all follow one contract: replace a verbatim
-span with a checksum-tagged token before drafting, then restore it afterwards
-*and verify* the echo. The verification is what makes the roundtrip safe -- a
-model that rewrites an index, drops a token, leaks the protected text, or swaps
-two tokens must be caught, because the alternative is publishing corrupted
-math/code/citations.
-
-The math/code/citation families share :mod:`ubt.core.cleaners.mask_tokens`; the
-roundtrip and integrity cases are parametrized over all three, and the
-family-specific delimiters are tested per masker.
-"""
-
 from __future__ import annotations
 
 import re
@@ -50,11 +36,6 @@ _MASKER_CASES: list[tuple[str, Callable[[], _Masker], str]] = [
 ]
 
 
-# --------------------------------------------------------------------------- #
-# The shared contract: mask -> unmask is identity, and a faithful echo is clean.
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(("name", "make_masker", "text"), _MASKER_CASES)
 def test_mask_unmask_roundtrip_is_identity(
     name: str, make_masker: Callable[[], _Masker], text: str
@@ -81,11 +62,6 @@ def test_faithful_echo_restores_clean(
     assert report.duplicated == []
 
 
-# --------------------------------------------------------------------------- #
-# Integrity verdicts: each corruption is caught by exactly one bucket.
-# --------------------------------------------------------------------------- #
-
-
 def test_rewritten_checksum_is_mismatched_and_never_restores_the_wrong_span() -> None:
     masker = MathMasker()
     masked, mapping = masker.mask("Value $a+b$ here")
@@ -94,8 +70,8 @@ def test_rewritten_checksum_is_mismatched_and_never_restores_the_wrong_span() ->
     report = masker.unmask_checked(masked.replace(token, tampered), mapping)
     assert report.mismatched == [1]
     assert not report.clean
-    assert "$a+b$" not in report.text  # the wrong span must not be published
-    assert report.mutated  # the token survives as residue
+    assert "$a+b$" not in report.text
+    assert report.mutated
 
 
 def test_deleted_token_is_missing() -> None:
@@ -122,17 +98,12 @@ def test_swapped_tokens_are_reordered() -> None:
     first, second = list(mapping)
     swapped = masked.replace(first, "@@").replace(second, first).replace("@@", second)
     report = masker.unmask_checked(swapped, mapping)
-    # Both spans restore intact and moved: reordering is tracked for metrics but is clean.
     assert report.reordered == [1, 2]
     assert report.clean
     assert report.text == "A $y$ B $x$ C"
 
 
 def test_swapped_checksumless_tokens_fail_closed() -> None:
-    # The same swap with the checksums dropped is indistinguishable from a
-    # rewritten index (a renumbered echo), and the rewrite variant restores the
-    # wrong span silently. Those indices must land in ``mismatched`` so the
-    # block repairs instead of shipping crossed math on trusted digits.
     masker = MathMasker()
     masked, mapping = masker.mask("A $x^2$ B $y^3$ C")
     first, second = list(mapping)
@@ -144,9 +115,6 @@ def test_swapped_checksumless_tokens_fail_closed() -> None:
 
 
 def test_checksumless_echo_restores_for_math_but_not_for_citation() -> None:
-    # A faithful model may drop the optional checksum suffix. Math restores it
-    # (reported as unverified, which does not fail ``clean``); a citation refuses
-    # to re-publish an unverifiable marker and records it as mutated.
     def _strip_checksum(token: str) -> str:
         return re.sub(r"-[0-9a-z]{3}⟧$", "⟧", token)
 
@@ -163,14 +131,9 @@ def test_checksumless_echo_restores_for_math_but_not_for_citation() -> None:
     cite_token = next(iter(cite_mapping))
     cite_stripped = cite_masked.replace(cite_token, _strip_checksum(cite_token))
     cite_report = CitationMasker().unmask_checked(cite_stripped, cite_mapping)
-    assert cite_report.text == cite_stripped  # not restored
+    assert cite_report.text == cite_stripped
     assert cite_report.mutated
     assert not cite_report.clean
-
-
-# --------------------------------------------------------------------------- #
-# Family-specific delimiters.
-# --------------------------------------------------------------------------- #
 
 
 def test_math_masks_every_delimiter_form() -> None:
@@ -193,7 +156,6 @@ def test_math_span_helpers() -> None:
 
 def test_math_mapping_is_ordered_by_textual_position() -> None:
     # Delimiters are masked display-first, so index order != textual order; the
-    # returned mapping must carry the order the model actually saw.
     masked, mapping = MathMasker().mask(r"\(first\) then $second$")
     positions = [masked.index(token) for token in mapping]
     assert positions == sorted(positions)
@@ -232,19 +194,15 @@ def test_citation_masks_multi_and_organisation_author_year() -> None:
 
 
 def test_citation_leaves_non_reference_parentheses_alone() -> None:
-    # An acronym, a numbered reference, and a numbered table are not citations.
     text = "Use (DSH) and (RL), see (3.1) and (Section 2, 2024) and (Table 3, 2024)."
     _, mapping = CitationMasker().mask(text)
     assert mapping == {}
 
 
 def test_citation_leaves_code_subscripts_and_link_text_alone() -> None:
-    # ``arr[0]`` / ``matrix[12]`` are subscripts, ``[1](url)`` is link text; none
-    # is a citation, and masking them made the model's necessary edit read as
-    # cite corruption.
     text = "Set arr[0] and matrix[12] to x; see [1](https://example.com) and cite [7]."
     masked, mapping = CitationMasker().mask(text)
-    assert len(mapping) == 1  # only [7]
+    assert len(mapping) == 1
     assert "arr[0]" in masked
     assert "matrix[12]" in masked
     assert "[1](https://example.com)" in masked
@@ -258,7 +216,6 @@ def test_email_masks_addresses_and_urls_but_keeps_trailing_punctuation() -> None
         "research@deepseek.com",
         "https://openreview.net/forum?id=VTF8yNQM66",
     }
-    # The sentence's comma/period stay in the prose, not inside the token.
     assert "research@deepseek.com" not in masked
     assert masked.endswith(".")
     assert EmailMasker().unmask(masked, mapping) == text
@@ -282,11 +239,6 @@ def test_inline_math_guard_rejects_bare_numbers() -> None:
     assert inline_math_spans("a $x$ b") == [(2, 5)]
 
 
-# --------------------------------------------------------------------------- #
-# Shared helpers.
-# --------------------------------------------------------------------------- #
-
-
 def test_token_checksum_is_deterministic_and_input_bound() -> None:
     assert token_checksum(1, "a") == token_checksum(1, "a")
     assert token_checksum(1, "a") != token_checksum(2, "a")
@@ -306,7 +258,7 @@ def test_order_by_position_sorts_by_textual_occurrence() -> None:
 def test_find_reordered_reports_both_sides_of_an_inversion() -> None:
     assert find_reordered([1, 2], [2, 1]) == [1, 2]
     assert find_reordered([1, 2], [1, 2]) == []
-    assert find_reordered([1, 2], [9, 1, 2]) == []  # unknown index skipped
+    assert find_reordered([1, 2], [9, 1, 2]) == []
 
 
 def test_unmask_report_clean_allows_reordered_and_unverified() -> None:
@@ -335,32 +287,20 @@ def test_citation_masker_array_subscript_coexistence_is_clean() -> None:
 
 
 def test_truncated_checksum_is_not_clean_and_leaves_no_debris() -> None:
-    """A token whose checksum the model truncated must fail closed, not half-restore.
-
-    The masker emits a 3-char checksum (``⟦MATH_MASK_0001-d42⟧``); a model can
-    truncate it (``-d4``). The fuzzy pattern's checksum group used to require
-    exactly three chars, so it matched only the token's *index*, restored the
-    span, and left the ``-d4⟧`` tail as literal text in the delivered draft —
-    with every integrity bucket empty, so the block counted ``clean`` and a
-    quality gate reported "Flawless". The pattern now accepts a 1-3 char suffix,
-    so a truncated token matches whole and is seen as present-but-wrong.
-    """
     masker = MathMasker()
     masked, mapping = masker.mask("In 46 trials the energy $E = mc^2$ held.")
     token = next(iter(mapping))
-    assert token.endswith("⟧") and len(token.split("-")[-1]) == 4  # 3 chars + ⟧
-    truncated = masked.replace(token, token[:-2] + "⟧")  # drop one checksum char
+    assert token.endswith("⟧") and len(token.split("-")[-1]) == 4
+    truncated = masked.replace(token, token[:-2] + "⟧")
 
     report = masker.unmask_checked(truncated, mapping)
 
     assert not report.clean
     assert report.mismatched, "a truncated checksum is present-but-wrong, not absent"
-    # The token is left intact (residue), not half-restored into ``...$E=mc^2$-d4⟧``.
     assert token[:-2] + "⟧" in report.text
 
 
 def test_full_and_bare_checksum_tokens_still_restore() -> None:
-    """The tighter pattern must not regress the two faithful-echo spellings."""
     masker = MathMasker()
     masked, mapping = masker.mask("The formula $E=mc^2$ is famous.")
     token = next(iter(mapping))
@@ -368,8 +308,6 @@ def test_full_and_bare_checksum_tokens_still_restore() -> None:
     full = masker.unmask_checked(masked, mapping)
     assert full.clean and full.text == "The formula $E=mc^2$ is famous."
 
-    # A checksum-less echo (bare index) is still restored for math
-    # (``checksumless_restores=True``), reported as unverified only.
     bare = masked.replace(token, token.split("-")[0] + "⟧")
     bare_report = masker.unmask_checked(bare, mapping)
     assert bare_report.clean

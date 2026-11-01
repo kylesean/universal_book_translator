@@ -1,11 +1,3 @@
-"""Tests for the layout spill appendix and graceful degradation export companion.
-
-When translations overflow their target boxes even after font shrinking (spill/overflow),
-the 'appendix' policy ensures that:
-1. Space failures are downgraded to WARNING in the reconciliation report with an audit trail tag.
-2. A companion .spill_appendix.json and .spill_appendix.md are generated for the displaced blocks.
-"""
-
 from __future__ import annotations
 
 import json

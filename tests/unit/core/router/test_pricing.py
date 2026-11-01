@@ -1,5 +1,3 @@
-"""Unit tests for router pricing table resolution and budget safety."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -39,25 +37,20 @@ def test_safe_date_snapshot_prefix_matching() -> None:
 
 
 def test_unsafe_tier_keywords_do_not_match_base_model() -> None:
-    # o1-pro is a 10x more expensive tier than o1; must not silently resolve to o1
     assert not has_price_entry("o1-pro")
     assert resolve_model_prices("o1-pro") == (0.0, 0.0)
 
-    # gpt-4-32k has 2x higher rates than gpt-4; must not silently match gpt-4
     assert not has_price_entry("gpt-4-32k")
     assert resolve_model_prices("gpt-4-32k") == (0.0, 0.0)
 
 
 def test_bare_family_keys_do_not_swallow_arbitrary_unpriced_variants() -> None:
-    # gemini-3.8-pro is not in shipped prices.toml; must not silently resolve to bare 'gemini'
     assert not has_price_entry("gemini-3.8-pro")
     assert resolve_model_prices("gemini-3.8-pro") == (0.0, 0.0)
 
-    # claude-novel-variant must not fall back to bare 'claude'
     assert not has_price_entry("claude-future-model")
     assert resolve_model_prices("claude-future-model") == (0.0, 0.0)
 
-    # But verbatim exact match on bare key remains functional
     assert has_price_entry("gemini")
     assert resolve_model_prices("gemini") == (0.10, 0.40)
 
@@ -67,23 +60,10 @@ def test_price_is_known_reports_false_for_unpriced_cloud_models() -> None:
     assert not price_is_known(
         "gemini-3.8-pro", base_url="https://generativelanguage.googleapis.com"
     )
-    # Self-hosted / local endpoints are treated as free/known
     assert price_is_known("any-model", base_url="http://127.0.0.1:11434/v1")
 
 
-# --------------------------------------------------------------------------- #
-# The config's own prices file must reach the resolver
-# --------------------------------------------------------------------------- #
-
-
 def test_a_prices_file_set_in_config_is_used(tmp_path: Path) -> None:
-    """``UBTConfig.prices_file`` must behave like ``UBT_PRICES_FILE``.
-
-    The field's own docstring names the env var as its counterpart, but the
-    resolver only read the environment: a config-file path was silently ignored
-    and the model stayed unpriced (measured), while the env var priced it. A
-    documented knob that does nothing is worse than an absent one.
-    """
     from ubt.core.config import UBTConfig
     from ubt.core.router.pricing import declare_custom_prices_file
 
@@ -100,7 +80,6 @@ def test_a_prices_file_set_in_config_is_used(tmp_path: Path) -> None:
         assert has_price_entry("ubt-test-model-xyz")
         assert resolve_model_prices("ubt-test-model-xyz") == (1.0, 2.0)
     finally:
-        # Module-level state: clear it so the test cannot leak into another.
         declare_custom_prices_file(None)
         from ubt.core.router import pricing
 
@@ -108,25 +87,16 @@ def test_a_prices_file_set_in_config_is_used(tmp_path: Path) -> None:
 
 
 def test_a_missing_custom_prices_file_is_ignored() -> None:
-    """A bad custom path is ignored, not fatal — same as a bad ``UBT_PRICES_FILE``.
-
-    The name used to claim a fallback "to the shipped table", which is not what
-    happens: ``find_prices_file`` returns ``None`` (the shipped table is loaded
-    separately by ``resolve_model_prices``). Pinning the real contract keeps a
-    future refactor from making a typo'd path fatal at import time.
-    """
     from ubt.core.router.pricing import declare_custom_prices_file
 
     declare_custom_prices_file("/nonexistent/definitely-not-here.toml")
     try:
         assert find_prices_file() is None
-        # The shipped table still answers, which is what the reader relies on.
         assert resolve_model_prices("gpt-4o-mini") == (0.15, 0.6)
     finally:
         declare_custom_prices_file(None)
 
 
 def test_an_explicit_prices_path_that_is_missing_raises() -> None:
-    """An operator-supplied path must fail loudly; a config default may not."""
     with pytest.raises(FileNotFoundError, match="Prices file not found"):
         find_prices_file("/nonexistent/definitely-not-here.toml")

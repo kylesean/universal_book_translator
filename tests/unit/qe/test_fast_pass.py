@@ -1,21 +1,3 @@
-"""The 0-token fast-pass gate: deterministic structural checks, no model.
-
-The gate decides whether a draft passes without spending a token. Passing means
-no empty target, no prompt-template leak, no untranslated echo, no repetition
-loop, no lossless-HTML/ numeric / script anomaly. It is deliberately conservative
-in both directions, and the helpers below carry contracts worth pinning:
-
-- an *exact* echo is exempt when the block is short or wordless (page numbers,
-  ``Fig. 3``, DOIs legitimately survive) -- so the echo check needs a real word;
-- a *near* echo exists because the exact check is blind to a one-character
-  difference, but a target written in a CJK script (for a different-script
-  source) is translated by definition, and a ``--dry-run`` rehearsal is not a
-  defect;
-- a repetition loop is a hallucination only when it is not aligned to a source
-  repetition (a target refrain no longer than the source's is faithful, but a
-  runaway loop that repeats far more lines than the source is still caught).
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -50,11 +32,6 @@ _CJK_OTHER = (
 )
 
 
-# --------------------------------------------------------------------------- #
-# Exact echo.
-# --------------------------------------------------------------------------- #
-
-
 def test_a_long_prose_echo_is_detected() -> None:
     assert is_verbatim_echo(_ECHO, _ECHO) is True
 
@@ -68,7 +45,6 @@ def test_a_different_target_is_not_an_echo() -> None:
 
 
 def test_a_short_block_is_exempt_from_the_echo_check() -> None:
-    # "Fig. 3" and page numbers legitimately survive the trip unchanged.
     assert is_verbatim_echo("Fig. 3", "Fig. 3") is False
 
 
@@ -84,40 +60,23 @@ def test_an_empty_source_is_not_an_echo() -> None:
     assert is_verbatim_echo("", "") is False
 
 
-# --------------------------------------------------------------------------- #
-# Near echo.
-# --------------------------------------------------------------------------- #
-
-
 def test_an_identical_latin_pair_is_a_near_echo() -> None:
     assert is_near_verbatim_echo(_ECHO, _ECHO, target_is_cjk=False) is True
 
 
 def test_a_rehearsal_marker_alone_does_not_exempt_a_near_echo() -> None:
-    # The marker is NOT a gate bypass: a target that echoes its source (with or
-    # without the marker) is still an echo. The rehearsal exemption is an
-    # explicit run flag (``evaluate(rehearsal=True)``), not a text substring, so
-    # a real translation that happens to contain the marker still faces the gate.
     target = f"{REHEARSAL_MARKER} {_ECHO}"
     assert is_near_verbatim_echo(_ECHO, target, target_is_cjk=False) is True
 
 
 def test_the_rehearsal_exemption_is_an_explicit_flag_not_a_substring() -> None:
-    # A real (non-rehearsal) run whose text merely contains the marker string
-    # must still be gated: the exempt path is ``rehearsal=True``.
     gate = FastPassFilter()
     echo_text = f"{REHEARSAL_MARKER} {_ECHO}"
-    # Not marked as a rehearsal: the echo is rejected.
     assert gate.evaluate(_ECHO, echo_text, block_type=None).passed is False
-    # Marked as a rehearsal: the language heuristics are skipped.
     assert gate.evaluate(_ECHO, echo_text, block_type=None, rehearsal=True).passed is True
 
 
 def test_a_cjk_target_for_a_different_script_source_is_exempt() -> None:
-    # A target written in a CJK script is translated by definition. The exemption
-    # matters for a technical paper: the correct translation still carries eight
-    # Latin proper nouns, so without it the Latin retention test reads ~1.0 and
-    # quarantines a translated paragraph.
     source = "FlashAttention Transformer BERT RoBERTa GPT LLaMA ViT ResNet models improve accuracy."
     target = (
         "FlashAttention Transformer BERT RoBERTa GPT LLaMA ViT ResNet "
@@ -127,8 +86,6 @@ def test_a_cjk_target_for_a_different_script_source_is_exempt() -> None:
 
 
 def test_a_same_script_cjk_copy_is_a_near_echo() -> None:
-    # zh<->ja/ko: a CJK target is NOT translated by definition, so bigram
-    # retention catches a copied sentence.
     assert is_near_verbatim_echo(_CJK_SOURCE, _CJK_SOURCE, target_is_cjk=True, source_is_cjk=True)
 
 
@@ -151,30 +108,17 @@ def test_a_same_script_cjk_translation_is_not_a_near_echo() -> None:
     ],
 )
 def test_a_source_wrapped_in_quotes_is_still_a_near_echo(target: str) -> None:
-    # The quoted-span mask exists so a preserved citation does not dominate a
-    # real translation's tokens. When the quote *is* the whole target, masking
-    # left nothing to judge and the retention test abstained: the same sentence
-    # bare was caught but quote-wrapped ("<source>") shipped as Flawless. The
-    # exact-echo check cannot see it either -- the quote characters make the
-    # strings unequal -- so the near-echo check must unwrap a fully-quoted
-    # target. Every delimiter style the mask knows is an evasion vector.
     src = "The machine relies on attention and runs a forward pass."
     assert is_near_verbatim_echo(src, target, target_is_cjk=False) is True
 
 
 def test_a_quote_inside_real_prose_keeps_the_mask() -> None:
-    # The mirror of the rule above: a target with translation words outside the
-    # quote is judged on those words, not on the quotation it faithfully kept.
     src = "The machine relies on attention and runs a forward pass."
     target = 'Cette machine repose sur "the machine relies on attention".'
     assert is_near_verbatim_echo(src, target, target_is_cjk=False) is False
 
 
 def test_a_preserved_quotation_does_not_read_as_a_near_echo() -> None:
-    # A translation legitimately keeps a quoted string verbatim (the echo repair
-    # hint tells the model to), so the quote's words must be masked before the
-    # retention test: otherwise the quote dominates the target's Latin tokens and
-    # a faithful translation reads as an untranslated echo.
     quote = (
         '"Please keep your hands and arms inside the vehicle '
         'at all times while the ride is in motion"'
@@ -183,11 +127,6 @@ def test_a_preserved_quotation_does_not_read_as_a_near_echo() -> None:
         is_near_verbatim_echo(f"The sign reads {quote}", f"Es steht {quote}", target_is_cjk=False)
         is False
     )
-
-
-# --------------------------------------------------------------------------- #
-# Markdown grid shape.
-# --------------------------------------------------------------------------- #
 
 
 def test_grid_columns_counts_cells_and_ignores_edge_pipes() -> None:
@@ -201,33 +140,24 @@ def test_a_line_with_fewer_than_two_pipes_is_not_a_grid() -> None:
 
 
 def test_a_line_without_a_leading_pipe_is_not_a_grid_row() -> None:
-    # Inline pipes in prose are not cell separators.
     assert grid_columns("The x | y | z") is None
 
 
 def test_markdown_grid_shape_needs_at_least_two_rows() -> None:
     assert markdown_grid_shape("| a | b |\n| c | d |") == [2, 2]
-    # A lone pipe row is prose unless a GFM delimiter row marks it as a table.
     assert markdown_grid_shape("| a | b |") == []
     assert markdown_grid_shape("plain text") == []
 
 
 def test_a_single_row_table_is_a_grid_when_it_has_a_delimiter_row() -> None:
-    # Header-only tables occur (a one-row comparison) and used to read as prose,
-    # which skipped both the dropped-table and the shape checks.
     assert markdown_grid_shape("| Model | Acc |\n|---|---|") == [2, 2]
 
 
 def test_prose_with_inline_pipes_is_not_a_grid() -> None:
-    # Two prose lines that each happen to carry two pipes are not a table; else a
-    # faithful translation without pipes is rejected as a dropped table.
     assert markdown_grid_shape("The options are A | B | C\nand D | E | F are also valid") == []
 
 
 def test_a_ragged_run_of_pipe_lines_is_a_grid_with_reported_raggedness() -> None:
-    # A ragged run has to *count* as a table: returning [] made the shape checks
-    # skip exactly the grids a model mangled. The per-row counts expose the
-    # inconsistency to the caller's source/target comparison.
     assert markdown_grid_shape("| a | b |\n| c |") == [2, 1]
 
 
@@ -244,13 +174,7 @@ def test_a_ragged_target_is_a_grid_mismatch_not_a_dropped_table() -> None:
 
 
 def test_a_grid_without_a_trailing_pipe_is_still_a_grid() -> None:
-    # Only the opening pipe anchors a row; the trailing one is optional.
     assert markdown_grid_shape("| a | b\n| c | d") == [2, 2]
-
-
-# --------------------------------------------------------------------------- #
-# Math span equivalence.
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -283,11 +207,6 @@ def test_different_math_content_is_not_equivalent() -> None:
     assert _math_spans_equivalent([r"x^{2}+y"], [r"y + x^{2}"]) is False
 
 
-# --------------------------------------------------------------------------- #
-# Line-repetition loops.
-# --------------------------------------------------------------------------- #
-
-
 def test_a_run_of_identical_lines_is_a_loop() -> None:
     loop = "This is a repeated hallucination line.\n" * 4
     assert _repeated_line_runs(loop)[0][0] == "This is a repeated hallucination line."
@@ -298,18 +217,11 @@ def test_non_contiguous_repeats_are_not_a_loop() -> None:
 
 
 def test_a_blank_line_resets_the_run() -> None:
-    # Legitimate stanzas separated by whitespace stay exempt.
     assert _repeated_line_runs("same\nsame\n\nsame\nsame") == []
 
 
 def test_a_run_without_word_content_is_not_a_loop() -> None:
-    # Sparse numeric table rows like "| 0 | 0 |" must not trip the detector.
     assert _repeated_line_runs("| 0 | 0 |\n| 0 | 0 |\n| 0 | 0 |\n| 0 | 0 |") == []
-
-
-# --------------------------------------------------------------------------- #
-# FastPassFilter.evaluate: the gate end to end.
-# --------------------------------------------------------------------------- #
 
 
 def _filter() -> FastPassFilter:
@@ -351,9 +263,6 @@ def test_a_repetition_loop_is_rejected() -> None:
 
 
 def test_a_runaway_loop_is_rejected_even_when_the_source_repeats_elsewhere() -> None:
-    # The source carries an unrelated 4-line refrain; the target repeats its own
-    # line 8 times. The old blanket "source repeats anything -> skip every
-    # repetition check" let this hallucination loop through.
     src = "refrain here\n" * 4 + "A completely different closing sentence about the topic."
     tgt = "This is a repeated hallucination line.\n" * 8
     assert _max_repeated_line_run(src) == 4
@@ -364,8 +273,6 @@ def test_a_runaway_loop_is_rejected_even_when_the_source_repeats_elsewhere() -> 
 
 
 def test_a_faithful_refrain_is_not_a_line_loop() -> None:
-    # Source and target repeat the same number of lines: a preserved refrain.
-    # The line-run gate must not fire (the run is not longer than the source's).
     src = "refrain here\n" * 4 + "closing line"
     tgt = "副歌在此\n" * 4 + "结尾行"
     assert _max_repeated_line_run(src) == 4
@@ -380,25 +287,15 @@ def test_emails_and_author_lines_not_rejected_as_near_verbatim_echo() -> None:
     assert is_near_verbatim_echo(src, tgt, target_is_cjk=True) is False
 
 
-# --------------------------------------------------------------------------- #
-# Verbatim-term residue stripping.
-# --------------------------------------------------------------------------- #
-
-
 def test_verbatim_term_strip_keeps_letter_boundaries() -> None:
-    # A bare substring strip would eat the PRI|OR|ITY of an untranslated word.
     residue = _strip_verbatim_term("PRIORITY data", "OR")
     assert "PRIORITY" in residue
     assert _strip_verbatim_term("low OR high", "OR") == "low  high"
-    # CJK-adjacent carry-overs still strip: the guard is letter-only, and a
-    # CJK character is not a letter boundary blocker.
     assert _strip_verbatim_term("内存PagedAttention池", "PagedAttention") == "内存池"
-    # Identifier-shaped terms carrying digits keep plain replacement.
     assert _strip_verbatim_term("GQA-8 blocks", "GQA-8") == " blocks"
 
 
 def test_repetition_detectors_agree() -> None:
-    # _max_repeated_line_run and the raw run list agree on repetitive runs
     loop = "This is a repeated hallucination line.\n" * 4
     assert _max_repeated_line_run(loop) >= 4
     assert _repeated_line_runs(loop) != []
@@ -408,9 +305,6 @@ def test_repetition_detectors_agree() -> None:
 
 
 def test_a_blank_separated_repetition_loop_is_rejected() -> None:
-    # A model loop often separates its repeats with a blank line, which the
-    # contiguous detector resets on (to spare stanzas). A run this long is a
-    # runaway loop, not a refrain.
     src = "Agentic sandbox workloads have several properties that shape the platform design:"
     tgt = "代理型沙箱工作负载具备若干特性，这些特性直接影响了平台的设计：\n\n" * 8
     decision = _filter().evaluate(src, tgt)
@@ -419,7 +313,6 @@ def test_a_blank_separated_repetition_loop_is_rejected() -> None:
 
 
 def test_a_short_blank_separated_refrain_is_not_a_loop() -> None:
-    # Below the runaway threshold the stanza exemption still holds.
     src = "A source line."
     tgt = "同一行\n\n同一行\n\n同一行\n\n同一行"
     decision = _filter().evaluate(src, tgt)
@@ -428,16 +321,10 @@ def test_a_short_blank_separated_refrain_is_not_a_loop() -> None:
 
 def test_half_translated_all_caps_heading_is_rejected_for_insufficient_script_density() -> None:
     src = "THE SUMMARY AND OVERVIEW"
-    # THE and SUMMARY are left untranslated; only OVERVIEW is translated
     tgt = "THE SUMMARY AND 概述"
     decision = _filter().evaluate(src, tgt)
     assert not decision.passed
     assert "Insufficient zh script density" in decision.reason
-
-
-# --------------------------------------------------------------------------- #
-# Reasoning / chat-template scaffolding is the same defect as the XML pair
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -455,11 +342,6 @@ def test_half_translated_all_caps_heading_is_rejected_for_insufficient_script_de
     ],
 )
 def test_model_scaffolding_is_a_fatal_leak(leaked: str) -> None:
-    """A model echoing its envelope must not ship, whatever the envelope was.
-
-    The check named two XML tags and nothing else, so a model that leaked its
-    reasoning or a chat-template token passed every gate and reached the reader.
-    """
     decision = FastPassFilter().validate_structural_invariants(
         source_text="The model is trained end to end.",
         target_text=leaked,
@@ -478,13 +360,6 @@ def test_model_scaffolding_is_a_fatal_leak(leaked: str) -> None:
     ],
 )
 def test_a_residual_mask_token_is_a_structural_failure(token: str) -> None:
-    """A protected span that was never restored must not pass as repaired.
-
-    Repair validates its candidate with this same gate. Before this check a
-    candidate that still carried the raw token was accepted, the block left
-    repair as REPAIRED, and the renderer printed ``⟨missing⟩`` where the span
-    belonged.
-    """
     decision = FastPassFilter().validate_structural_invariants(
         source_text="The model is trained end to end.",
         target_text=f"该模型{token}经过端到端训练。",
@@ -495,7 +370,6 @@ def test_a_residual_mask_token_is_a_structural_failure(token: str) -> None:
 
 
 def test_emphasis_markers_are_not_mask_tokens() -> None:
-    """``⟦B⟧``/``⟦I⟧`` carry meaning the renderer consumes; only _MASK_ leaks are fatal."""
     decision = FastPassFilter().validate_structural_invariants(
         source_text="The model is trained end to end.",
         target_text="该模型⟦B⟧经过⟦/B⟧端到端训练。",
@@ -513,18 +387,7 @@ def test_ordinary_prose_is_not_a_leak() -> None:
     assert decision.passed
 
 
-# ---------------------------------------------------------------------------
-# arXiv 2101.03961 regression batch (real-run quarantine autopsy, 2026-10-14):
-# four gate families quarantined correct work or missed real defects on that
-# paper. Each test below pins one block from the run.
-# ---------------------------------------------------------------------------
-
-
 def test_a_fully_translated_benchmark_table_passes_the_density_gate() -> None:
-    # b0142: the body is numerals and model names; only the header cells are
-    # translatable, so the prose floor (0.25) read the correct table as
-    # untranslated residue. Table blocks hold a near-zero identity floor —
-    # an untouched table still fails (residue pure Latin, ratio 0.0).
     src = (
         "| Model | GLUE | SQuAD | SuperGLUE | Winogrande (XL) |\n"
         "|---|---|---|---|---|\n"
@@ -544,8 +407,6 @@ def test_an_untouched_table_still_fails_the_density_gate() -> None:
 
 
 def test_a_heading_that_drops_its_appendix_letter_fails_with_a_label_reason() -> None:
-    # b0028: "C Encouraging Exploration Across Experts" -> "鼓励跨专家探索".
-    # The letter orders the document; no other gate saw the loss.
     decision = FastPassFilter().validate_structural_invariants(
         source_text="C Encouraging Exploration Across Experts",
         target_text="鼓励跨专家探索",
@@ -592,17 +453,12 @@ def test_an_unlabelled_heading_is_not_label_gated() -> None:
 
 
 def test_a_partial_label_match_does_not_satisfy_a_deeper_label() -> None:
-    # "4.1" must not be satisfied by "4" or by a fragment of "14.1".
     assert _missing_heading_label("4.1 Fine-Tuning", "4 微调") == "4.1"
     assert _missing_heading_label("4.1 Fine-Tuning", "14.1 微调") == "4.1"
     assert _missing_heading_label("4.1 Fine-Tuning", "4.1 微调") is None
 
 
 def test_a_flattened_math_source_gets_the_reconstruction_hint() -> None:
-    # b0068: the extractor flattened "N_{i=1}" into "N_i =1" and "W_r" into
-    # "W r". The old instruction demanded full LaTeX re-emission the text
-    # cannot support; three repair rounds shipped the block unchanged. The
-    # flattened-source hint caps the ambition at what the fragments imply.
     src = (
         "Mixture of Expert Routing. Shazeer et al. (2017) proposed a natural "
         "language Mixtureof-Experts (MoE) layer which takes as an input a token "
@@ -622,11 +478,6 @@ def test_a_flattened_math_source_gets_the_reconstruction_hint() -> None:
 
 
 def test_a_real_math_source_keeps_the_full_redelimit_hint() -> None:
-    # A source with genuine LaTeX evidence ($..$) still asks for full
-    # re-delimitation. (Delimited sources route through the 3b span gate, so
-    # the full hint here is exercised via a source whose markers are braces
-    # and escapes without $..$ — the shape extraction leaves when it eats the
-    # dollars but keeps the braces.)
     src = "The threshold F_{th,SI} governs the transition and \\tau bounds the device."
     tgt = "阈值 F_th,SI 控制转变过程，tau 限制器件。"
     decision = FastPassFilter().evaluate(src, tgt, block_type="narrative")
@@ -635,10 +486,6 @@ def test_a_real_math_source_keeps_the_full_redelimit_hint() -> None:
 
 
 def test_length_ratio_is_cjk_weighted_not_raw() -> None:
-    # b0028 pre-fix: a correct 41-char heading translated to 7 Han glyphs read
-    # ratio 0.17 (< floor 0.2) on raw characters. The CJK-weighted ratio puts
-    # correct short translations above the floor while a genuinely truncated
-    # prose block still fails.
     decision = FastPassFilter().evaluate(
         "C Encouraging Exploration Across Experts",
         "C 跨专家探索的激励机制",
@@ -659,12 +506,9 @@ def test_length_ratio_is_cjk_weighted_not_raw() -> None:
 
 
 def test_fast_pass_escaped_pipe_handling() -> None:
-    r"""Verify table checker does not treat escaped pipes \| as cell separators."""
-    # Row with 3 columns, middle column contains escaped pipe
     row = r"| Col 1 | Col \| 2 | Col 3 |"
     assert grid_columns(row) == 3
 
-    # Multi-row markdown grid shape
     text = (
         r"| Col 1 | Col \| 2 | Col 3 |" + "\n"
         r"|---|---|---|" + "\n"
@@ -674,56 +518,33 @@ def test_fast_pass_escaped_pipe_handling() -> None:
     assert shape == [3, 3, 3]
 
 
-# --------------------------------------------------------------------------- #
-# The mismatch message must say what actually differs
-#
-# ``markdown_grid_shape`` returns one column count per row and guarantees they
-# are all equal. The message printed that list verbatim and called it
-# "columns", so a dropped ROW read as an oscillating COLUMN count — and this
-# string is carried into the reviewer's XLIFF notes, where it is the only
-# explanation they get for why a block was flagged.
-# --------------------------------------------------------------------------- #
-
-
 def test_the_grid_label_counts_rows_and_columns_separately() -> None:
     from ubt.core.qe.fast_pass import _grid_label
 
     assert _grid_label([5, 5, 5]) == "a 3-row x 5-column grid"
     assert _grid_label([2]) == "a 1-row x 2-column grid"
     assert _grid_label([]) == "an empty grid"
-    # Ragged shapes must not pretend to a single column count.
     assert _grid_label([3, 4]) == "a ragged 2-row grid (3, 4 columns per row)"
 
 
 @pytest.mark.asyncio
 async def test_a_dropped_table_row_is_reported_as_a_row_difference() -> None:
-    """The real case: 11 rows in, 10 out, both 5 columns wide."""
     from ubt.core.qe.fast_pass import FastPassFilter
 
     header = "| a | b | c | d | e |"
     sep = "| --- | --- | --- | --- | --- |"
     row = "| 1 | 2 | 3 | 4 | 5 |"
-    source = "\n".join([header, sep, *[row] * 9])  # 11 pipe rows
-    target = "\n".join([header, sep, *[row] * 8])  # 10 pipe rows
+    source = "\n".join([header, sep, *[row] * 9])
+    target = "\n".join([header, sep, *[row] * 8])
 
     decision = FastPassFilter().evaluate(source, target, block_type="table")
     assert decision.passed is False
     assert "Table grid mismatch" in decision.reason
-    # Both sides are 5 columns; only the row count differs, and the message must
-    # say so instead of printing the per-row list as if it were the column count.
     assert "11-row x 5-column" in decision.reason
     assert "10-row x 5-column" in decision.reason
 
 
 def test_an_article_led_title_is_not_read_as_a_dropped_appendix_letter() -> None:
-    """`A Survey of …` and `I Introduction` are prose, not labels.
-
-    The label regex accepted any capital as an appendix letter, so the English
-    article "A" and pronoun "I" were read as section labels: the ordinary title
-    "A Survey of Transformer Models" was flagged for dropping label 'A' and
-    "I Introduction" for dropping 'I'. Prose headings start that way constantly
-    and the false flag reached the quality report and the human queue.
-    """
     for src, tgt in (
         ("A Survey of Transformer Models", "Transformer 模型综述"),
         ("A Survey of Large Language Models", "大语言模型综述"),
@@ -738,11 +559,6 @@ def test_an_article_led_title_is_not_read_as_a_dropped_appendix_letter() -> None
 
 
 def test_a_real_bare_appendix_label_is_still_gated() -> None:
-    """The arXiv convention `C Encouraging Exploration …` must still be caught.
-
-    The regression above must not cost the case the gate exists for: a paper's
-    appendix letter orders the document and no other check sees it vanish.
-    """
     decision = FastPassFilter().validate_structural_invariants(
         source_text="C Encouraging Exploration Across Experts",
         target_text="鼓励跨专家探索",
@@ -754,12 +570,6 @@ def test_a_real_bare_appendix_label_is_still_gated() -> None:
 
 
 def test_a_dropped_heading_label_is_classified_as_a_deterministic_defect() -> None:
-    """The flag had no taxonomy branch, so it scored as "other structural" (0.70).
-
-    ``classify_defect`` fell through to a generic bucket, which a permissive QE
-    threshold could release and the report could not group. Registering the
-    marker makes it a first-class deterministic defect.
-    """
     from ubt.core.qe.defect_taxonomy import classify_defect, has_structural_defect
 
     flag = (
@@ -770,15 +580,7 @@ def test_a_dropped_heading_label_is_classified_as_a_deterministic_defect() -> No
     assert classify_defect([flag], score=None, threshold=0.75) == "DETERMINISTIC_DEFECT"
 
 
-# --------------------------------------------------------------------------- #
-# Language-identity gates: dialogue, symbol-only targets, verbatim blocks.
-# --------------------------------------------------------------------------- #
-
-
 def test_dialogue_is_prose_not_a_table() -> None:
-    """DIALOGUE is outside ``PROSE_BLOCK_TYPES``, and FastPass reads "not prose"
-    as "table": the sentence-drop gate switched off and the density floor fell to
-    0.02, so a line of dialogue with one translated word passed every check."""
     fp = FastPassFilter(source_lang="en", target_lang="zh")
     source = "Transformers rely on attention mechanisms to model long range dependencies."
     half = "Transformers rely on 注意力 mechanisms to model long range dependencies."
@@ -789,8 +591,6 @@ def test_dialogue_is_prose_not_a_table() -> None:
 
 
 def test_a_target_with_no_letters_is_not_a_translation() -> None:
-    """The residue strip removed every symbol, leaving an empty string that the
-    density check read as ratio 1.0. ``!!!@@@###%%%`` then passed every gate."""
     fp = FastPassFilter(source_lang="en", target_lang="zh")
     decision = fp.evaluate(
         "Attention is all you need in this paper about transformers", "!!!@@@###%%%"
@@ -800,7 +600,6 @@ def test_a_target_with_no_letters_is_not_a_translation() -> None:
 
 
 def test_a_numeric_only_table_body_still_passes() -> None:
-    """The no-letters rejection must not fire on a legitimately letter-free target."""
     fp = FastPassFilter(source_lang="en", target_lang="zh")
     decision = fp.evaluate(
         "| Model | Acc |\n|---|---|\n| T5 | 84.3 |",
@@ -812,10 +611,6 @@ def test_a_numeric_only_table_body_still_passes() -> None:
 
 @pytest.mark.parametrize("block_type", ["formula", "code"])
 def test_a_verbatim_block_is_exempt_from_language_identity(block_type: str) -> None:
-    """``skip_translate`` means "ship the source", so script density is not a
-    signal. ``repair_loop`` re-runs this gate over each candidate, and the old
-    unconditional check rejected every correct "leave the LaTeX alone" answer at
-    ratio 0.00."""
     fp = FastPassFilter(source_lang="en", target_lang="zh")
     decision = fp.evaluate("E = mc^2", "E = mc^2", block_type=block_type, skip_translate=True)
     assert decision.passed

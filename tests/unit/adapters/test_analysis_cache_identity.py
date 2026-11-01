@@ -1,5 +1,3 @@
-"""The analyze cache must invalidate when any block-shaping module changes."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,43 +18,22 @@ def _file_identity(module: object) -> str:
 
 
 def test_docling_identity_covers_the_style_probe_modules() -> None:
-    # ``docling_crosscheck`` writes block style (inline runs, first-line indent)
-    # and ``textgeom`` supplies the pdfium probes it reads; keying only the parser
-    # served stale blocks whose inline_runs were empty.
     identity = docling_identity()
     assert _file_identity(docling_crosscheck) in identity
     assert _file_identity(textgeom) in identity
 
 
 def test_docling_identity_covers_the_math_pruner() -> None:
-    """P2-6: the parser runs every title/body through the LNDS math pruner.
-
-    ``normalize_academic_pdf_math`` (``ubt.core.cleaners.lnds_pruner``) shapes
-    the cached text, so a pruner fix must invalidate the cached blocks. It was
-    absent from the identity, so a fix was invisible on a cached re-run.
-    """
     assert _file_identity(lnds_pruner) in docling_identity()
 
 
 def test_docling_identity_covers_the_toc_synthesis() -> None:
-    """The TOC rows are synthesized (and sorted) in ``docling_outline``.
-
-    ``_toc_sort_key``/``_extract_outline_only_blocks`` live there, not in the
-    parser, so a tie-break fix delivered the pre-fix contents order on every
-    cached re-run — the ``4.1`` above ``4`` regression on arXiv 2101.03961.
-    """
     import ubt.adapters.pdf.docling_outline as outline
 
     assert _file_identity(outline) in docling_identity()
 
 
 def test_the_docling_cache_dir_is_under_the_shared_cache_root() -> None:
-    """P2-6: the Docling cache must not be CWD-relative.
-
-    ``.ubt/docling_cache`` forked the cache per working directory (re-converting
-    the same PDF in each) and landed the cached manuscript text inside a shared
-    checkout. It belongs under ``cache_root()`` like every other disk cache.
-    """
     from ubt.adapters.pdf.docling_parser import DOCLING_CACHE_DIR
     from ubt.cache.dirs import cache_root
 
@@ -67,14 +44,6 @@ def test_the_docling_cache_dir_is_under_the_shared_cache_root() -> None:
 
 
 def test_a_requested_enrichment_is_not_served_from_the_block_cache(tmp_path: Path) -> None:
-    """P2-6: a degraded enrichment run must not be cached as a healthy one.
-
-    When enrichment is requested and Docling's ladder degrades (VLM OOM -> CPU
-    or plain extraction), the blocks carry the same ``enrich=True`` key as a
-    healthy run. Caching them made the degradation permanent. The outer block
-    cache is bypassed for a requested enrichment; the inner conversion cache
-    (keyed on the *effective* options) still dedupes the expensive conversion.
-    """
     from unittest.mock import patch
 
     from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter

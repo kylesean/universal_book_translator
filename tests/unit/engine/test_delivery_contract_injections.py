@@ -1,15 +1,3 @@
-"""G1 delivery-contract injection suite.
-
-One case per failure the PRD says must block export: deleted block, duplicated
-block, overlap, out-of-bounds, sentinel leak, page-count mismatch, missing
-asset. These are pure evidence tests (no compiler/render), so a red case names
-the exact invariant that stopped protecting the artifact.
-
-The 26-page replay (``output/adaptive_delivery/g0/26p_replay_20261030.md``)
-uses the same evaluator; this suite is the deterministic matrix that must stay
-green when a detector changes.
-"""
-
 from __future__ import annotations
 
 import pytest

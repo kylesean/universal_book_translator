@@ -1,18 +1,3 @@
-"""The 0-token omission gate — dropped sentences, terms and truncated residue.
-
-Three deterministic signals, each with a "must strictly exceed" floor and each
-armed only when the source has enough signal to be meaningful:
-
-* sentence-count ratio (armed at >= ``min_source_sentences``);
-* proper-noun (identifier-shaped) recall (armed at >= ``min_identifier_terms``);
-* char n-gram recall over verbatim residue (armed at >= ``min_chrf_ngrams``).
-
-Pinned here: the acceptance ladder for identifier surfaces (exact -> plural/
-singular -> LaTeX variant -> source-attested digit gluing -> source-attested
-merge -> camel decomposition), the identifier/hyphen-ghost extraction rule, the
-table exemption, and the gate's per-signal verdicts.
-"""
-
 from __future__ import annotations
 
 from collections import Counter
@@ -37,31 +22,21 @@ from ubt.core.qe.omission import (
 pytestmark = pytest.mark.fast
 
 
-# --------------------------------------------------------------------------- #
-# singular_variant
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("term", "expected"),
     [
         ("FinFETs", "FinFET"),
         ("cats", "cat"),
-        ("class", None),  # ends with 'ss'
-        ("bus", None),  # ends with 'us'
-        ("axis", None),  # ends with 'is'
-        ("s", None),  # too short
-        ("as", None),  # too short
-        ("cat", None),  # not plural
+        ("class", None),
+        ("bus", None),
+        ("axis", None),
+        ("s", None),
+        ("as", None),
+        ("cat", None),
     ],
 )
 def test_singular_variant(term: str, expected: str | None) -> None:
     assert singular_variant(term) == expected
-
-
-# --------------------------------------------------------------------------- #
-# digit gluing / merge candidates
-# --------------------------------------------------------------------------- #
 
 
 def test_digit_glued_detects_a_trailing_digit() -> None:
@@ -82,11 +57,6 @@ def test_merge_candidates_attest_a_left_merge() -> None:
 
 def test_merge_candidates_without_a_neighbour_are_empty() -> None:
     assert _merge_candidates("DS", "a b") == []
-
-
-# --------------------------------------------------------------------------- #
-# hyphen ghost / identifier_terms
-# --------------------------------------------------------------------------- #
 
 
 def test_a_single_unhyphenated_run_is_a_ghost_of_a_repeated_hyphenated_run() -> None:
@@ -111,60 +81,26 @@ def test_identifier_terms_drop_a_hyphen_ghost() -> None:
     assert identifier_terms(text) == set()
 
 
-# --------------------------------------------------------------------------- #
-# A word capitalised for a table label is not an identifier
-# --------------------------------------------------------------------------- #
-
-
 def test_a_table_capitalised_word_is_not_tracked_when_used_in_lower_case() -> None:
-    """`MASK`/`SAME` in a table are prose, not terms.
-
-    Measured on ``bert`` ``pdf_main#b0256``: the header is
-    ``MASK | SAME | RND`` (labels for the BERT masking strategies) and the draft
-    correctly rendered them 掩码/相同/随机. Treating them as identifiers demanded
-    the English surface survive, so ``evaluate(source, draft)`` returned
-    "Omission suspected: identifier term(s) missing from target: ['MASK', 'RND',
-    'SAME']" while ``evaluate(source, source)`` passed — the repair then adopted
-    the untranslated source over the correct translation.
-    """
     document = (
         "The mask is applied uniformly. Same as before. We use a random round.\n"
         "| MASK | SAME | RND |"
     )
-    # `rnd` never appears spelled out, so it stays tracked; the other two do not.
     assert identifier_terms("| MASK | SAME | RND |", document) == {"RND"}
 
 
 def test_a_genuine_acronym_is_still_tracked() -> None:
-    """The exemption must not swallow a real term.
-
-    ``MHA``/``LSTM``/``GQA`` are written in capitals *everywhere*, including in
-    prose, so no lower-case occurrence exists and they stay identifiers. This is
-    the whole discriminator: usage, not shape.
-    """
     document = "We use MHA and LSTM and GQA layers here.\n| MHA | LSTM | GQA |"
     assert identifier_terms("| MHA | LSTM | GQA |", document) == {"MHA", "LSTM", "GQA"}
 
 
 def test_an_all_caps_prose_occurrence_is_not_evidence_of_a_word() -> None:
-    """An acronym written in capitals in prose must not excuse itself.
-
-    Stripping every all-caps token before the test is what makes this work; a
-    plain lower-case search would find ``MHA`` (case-folded) in the prose it
-    appears in and wrongly exempt it.
-    """
     document = "The MHA layer and the LSTM block differ.\n| MHA | LSTM |"
     assert identifier_terms("| MHA | LSTM |", document) == {"MHA", "LSTM"}
 
 
 def test_without_a_document_the_shape_rule_is_unchanged() -> None:
-    """The default keeps the old behaviour, so existing callers are unaffected."""
     assert identifier_terms("| MASK | SAME | MHA |") == {"MASK", "SAME", "MHA"}
-
-
-# --------------------------------------------------------------------------- #
-# math variants
-# --------------------------------------------------------------------------- #
 
 
 def test_math_variants_for_an_underscore_term() -> None:
@@ -177,11 +113,6 @@ def test_math_variants_for_a_letter_digit_term() -> None:
 
 def test_math_variants_for_a_letter_word_term() -> None:
     assert _math_term_variants("Vch") == ["V_{ch}", "V_{CH}", "V_ch"]
-
-
-# --------------------------------------------------------------------------- #
-# _match_term_surfaces acceptance ladder
-# --------------------------------------------------------------------------- #
 
 
 def test_match_exact() -> None:
@@ -213,15 +144,11 @@ def test_match_camel_decomposition_parts() -> None:
 
 
 def test_a_hyphenated_qualifier_verifies_via_its_acronym_head() -> None:
-    # Camel-splitting the whole term shears the acronym ("Qo" + "S-aware"), so
-    # a target that kept "QoS" verbatim failed the gate and a correct
-    # translation was quarantined. Hyphen components are taken whole.
     assert _match_term_surfaces("QoS-aware", "QoS感知的CPU调度", "QoS-aware CPU") == ["QoS"]
     assert _match_term_surfaces("eBPF-based", "基于eBPF的隔离", "eBPF-based isolation") == ["eBPF"]
 
 
 def test_a_hyphenated_term_still_demands_its_digit_component() -> None:
-    # "GQA-8" must not pass on a bare "GQA": the version digit is content.
     assert _match_term_surfaces("GQA-8", "GQA配置", "GQA-8 config") is None
     assert _match_term_surfaces("GQA-8", "GQA-8 配置", "GQA-8 config") == ["GQA-8"]
 
@@ -234,10 +161,6 @@ def test_an_unmatched_term_is_none() -> None:
     assert _match_term_surfaces("FinFET", "无") is None
 
 
-# --------------------------------------------------------------------------- #
-# glossary-aware identifier recall
-# --------------------------------------------------------------------------- #
-
 _FN_CALL_GLOSSARY = [
     {"source": "FnCall", "translation": "函数调用接口", "aliases": []},
     {"source": "software development kit", "translation": "软件开发工具包", "aliases": ["SDK"]},
@@ -245,13 +168,10 @@ _FN_CALL_GLOSSARY = [
 
 
 def test_a_glossary_rendering_counts_as_keeping_the_term() -> None:
-    # The Bible demands 函数调用接口; the verbatim recall demanded FnCall.
-    # A block can satisfy one or the other, never both — the glossary wins.
     src = "It exposes FnCall and an SDK for tools."
     tgt = "它提供函数调用接口与软件开发工具包（SDK）。"
     gate = OmissionGate(target_lang="zh", glossary=_FN_CALL_GLOSSARY)
     assert gate.evaluate(src, tgt).passed
-    # Without the glossary bound, FnCall reads as a dropped identifier.
     assert not OmissionGate(target_lang="zh").evaluate(src, tgt).passed
 
 
@@ -268,11 +188,6 @@ def test_a_glossary_term_absent_from_the_target_is_still_missing() -> None:
     tgt = "它提供接口与工具包。"
     gate = OmissionGate(target_lang="zh", glossary=_FN_CALL_GLOSSARY)
     assert not gate.evaluate(src, tgt).passed
-
-
-# --------------------------------------------------------------------------- #
-# _char_ngrams / _is_table_content
-# --------------------------------------------------------------------------- #
 
 
 def test_char_ngrams_counts_each_size() -> None:
@@ -297,11 +212,6 @@ def test_is_table_content(text: str, expected: bool) -> None:
     assert _is_table_content(text) is expected
 
 
-# --------------------------------------------------------------------------- #
-# OmissionGate
-# --------------------------------------------------------------------------- #
-
-
 def test_the_metrics_dataclass_carries_all_signals() -> None:
     metrics = OmissionMetrics(4, 1, 0.25, 0.0, 1.0, 0.4)
     assert metrics.source_sentences == 4
@@ -318,8 +228,6 @@ def test_a_dropped_sentence_run_is_flagged() -> None:
 
 
 def test_a_short_source_is_not_sentence_gated() -> None:
-    # 2 sentences < min_source_sentences (3); the ratio (0.5) would otherwise
-    # trip the floor, so this pins that the arming gate is what exempts it.
     decision = OmissionGate().evaluate("One. Two.", "一句。")
     assert decision.metrics.sentence_ratio == 0.5
     assert decision.passed is True
@@ -393,17 +301,10 @@ def test_ocr_glued_prose_not_tracked_as_identifier() -> None:
 
 
 def test_identifier_terms_drops_a_table_capitalised_word() -> None:
-    """A word set in caps as a table label is dropped when used lower-case.
-
-    Also pins P2-15: the document-scan is hoisted out of the per-term loop, so
-    the verdict must be unchanged (the strip happens once, not once per term).
-    """
     from ubt.core.qe.omission import identifier_terms
 
     doc = "MASK | SAME | RND\nWe apply a mask to each token; the same value is reused."
     terms = identifier_terms("The MASK is same.", doc)
-    # MASK/SAME read as ordinary words elsewhere -> not tracked; RND is absent
-    # here but present in doc; a true acronym would survive.
     assert "MASK" not in terms
     assert "SAME" not in terms
 
@@ -431,19 +332,11 @@ def test_clause_merged_sentences_with_full_recall_pass() -> None:
 
 
 def test_an_unanchored_prose_run_that_drops_sentences_is_flagged() -> None:
-    """P2-3: the sentence-drop exemption must not fire on vacuous recall.
-
-    With no identifiers and no numbers the exemption's three recall terms are
-    all trivially 1.0 (there is nothing to recall), so a paragraph that
-    translated only its tail read ``Flawless``. The exemption must be earned by
-    at least one signal that had something to preserve.
-    """
     src = (
         "Alpha beta gamma delta epsilon zeta eta theta. Iota kappa lambda mu nu xi "
         "omicron pi. Rho sigma tau upsilon phi chi psi omega. Beta gamma delta epsilon "
         "zeta eta theta iota."
     )
-    # Only the last two of the four source sentences are translated.
     tgt = "Rho sigma tau upsilon phi chi psi omega. Beta gamma delta epsilon zeta eta theta iota."
     decision = OmissionGate().evaluate(src, tgt)
     assert decision.metrics.source_sentences == 4
@@ -453,9 +346,6 @@ def test_an_unanchored_prose_run_that_drops_sentences_is_flagged() -> None:
 
 
 def test_a_translated_range_delimiter_does_not_deflate_recall() -> None:
-    # "10-50" and "10至50" (Chinese "to") state the same interval; without
-    # folding the delimiter the range's grams share nothing and verbatim
-    # recall drops below the floor for a correct translation.
     src = (
         "Figure 12 | Host memory usage (left) and CPU utilization (right) across the four "
         "Firecracker configurations under a real agentic RL workload. The CPU panel uses an "
@@ -469,13 +359,6 @@ def test_a_translated_range_delimiter_does_not_deflate_recall() -> None:
     decision = OmissionGate().evaluate(src, tgt)
     assert decision.passed is True
     assert decision.metrics.verbatim_chrf_recall >= 0.7
-
-
-# ---------------------------------------------------------------------------
-# Universally-expanded acronyms (arXiv 2101.03961 b0110/b0133): 'the common NLP
-# approach' -> '自然语言处理领域一种常见的方法' is a complete translation; the
-# literal-acronym demand quarantined two correct blocks.
-# ---------------------------------------------------------------------------
 
 
 def test_a_universally_expanded_acronym_counts_as_carried() -> None:
@@ -495,8 +378,6 @@ def test_a_universally_expanded_acronym_counts_as_carried() -> None:
 
 
 def test_a_domain_acronym_without_an_expansion_is_still_demanded() -> None:
-    # A paper-internal acronym (no universal expansion) must still survive:
-    # the fix does not loosen the channel for genuinely identifier-shaped terms.
     gate = OmissionGate(target_lang="zh")
     decision = gate.evaluate(
         "The MHA mechanism and the FFN block both consume parameters. The MHA path"
@@ -504,7 +385,6 @@ def test_a_domain_acronym_without_an_expansion_is_still_demanded() -> None:
         " are measured. The benchmark covers both paths across scales.",
         "MHA 机制与 FFN 块都会消耗参数。前者跨头路由，后者逐位置变换。基准测试覆盖了两个路径。",
     )
-    # Both acronyms kept → passes for the right reason; a dropped one must fail.
     assert decision.passed
     dropped = gate.evaluate(
         "The MHA mechanism and the FFN block both consume parameters. The MHA path"
@@ -516,7 +396,6 @@ def test_a_domain_acronym_without_an_expansion_is_still_demanded() -> None:
 
 
 def test_cross_domain_acronyms_pass_when_translated_into_chinese() -> None:
-    """Universal cross-domain acronyms (hardware, AI, biology) legitimately expand into Chinese."""
     gate = OmissionGate(target_lang="zh")
     decision = gate.evaluate(
         "The CPU and GPU architectures accelerate LLM inference and deep learning.",
@@ -527,7 +406,6 @@ def test_cross_domain_acronyms_pass_when_translated_into_chinese() -> None:
 
 
 def test_plural_acronym_matches_singular_expansion() -> None:
-    """Plural acronyms like CPUs and GPUs match their singular canonical expansions."""
     gate = OmissionGate(target_lang="zh")
     decision = gate.evaluate(
         "Modern data centers deploy clusters of CPUs, GPUs, and TPUs.",
@@ -538,7 +416,6 @@ def test_plural_acronym_matches_singular_expansion() -> None:
 
 
 def test_biological_terms_translated_into_chinese_pass() -> None:
-    """Biological and medical terms like DNA, RNA, and CRISPR expand into Chinese correctly."""
     gate = OmissionGate(target_lang="zh")
     decision = gate.evaluate(
         "The study applies CRISPR techniques to edit both DNA and RNA sequences.",
@@ -549,7 +426,6 @@ def test_biological_terms_translated_into_chinese_pass() -> None:
 
 
 def test_compound_glued_ext4_term_decomposition() -> None:
-    """Alphanumeric glued terms like ext4formatted decompose and verify properly."""
     gate = OmissionGate(target_lang="zh")
     decision = gate.evaluate(
         "The worker mounts an ext4formatted partition for fast scratch I/O.",

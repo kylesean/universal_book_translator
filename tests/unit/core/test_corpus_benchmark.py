@@ -1,5 +1,3 @@
-"""Unit tests for corpus automated benchmark runner, models, drift detection, and reporters."""
-
 from __future__ import annotations
 
 import json
@@ -42,7 +40,6 @@ pytestmark = pytest.mark.fast
 
 
 def _make_dummy_pdf(path: Path) -> None:
-    """Create a minimal valid 1-page PDF binary for layout diagnostics."""
     pdf_content = (
         b"%PDF-1.4\n"
         b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
@@ -60,7 +57,6 @@ def _make_dummy_pdf(path: Path) -> None:
 
 
 def test_benchmark_models_and_serialization(tmp_path: Path) -> None:
-    """Verify data model construction, validation, and JSON roundtrip."""
     c_metrics = ContractBenchmarkMetrics(
         total_text=100,
         delivered_text=80,
@@ -130,7 +126,6 @@ def test_benchmark_models_and_serialization(tmp_path: Path) -> None:
 
 
 def test_select_layout_spec_for_case() -> None:
-    """Verify correct layout specification mapping based on case name."""
     s1 = select_layout_spec_for_case("twocol-paper-2609")
     assert s1.columns == 2
     assert s1.name == "academic_dual"
@@ -145,13 +140,10 @@ def test_select_layout_spec_for_case() -> None:
 
 
 def test_extract_quality_and_cost_metrics(tmp_path: Path) -> None:
-    """Verify parsing of quality report and usage stats."""
-    # When report does not exist
     q_empty = extract_quality_metrics(tmp_path / "nonexistent_quality_report.json")
     assert q_empty.qe_measured is False
     assert q_empty.avg_qe == 0.0
 
-    # With valid report
     rep_file = tmp_path / "test_quality_report.json"
     payload = {
         "summary": {
@@ -183,7 +175,6 @@ def test_extract_quality_and_cost_metrics(tmp_path: Path) -> None:
     assert q_parsed.pass_rate == 0.98
     assert q_parsed.term_precision == 0.91
 
-    # Extract cost from usage dict
     usage_dict = {
         "deepseek-chat": {
             "prompt_tokens": 1000,
@@ -200,7 +191,6 @@ def test_extract_quality_and_cost_metrics(tmp_path: Path) -> None:
 
 
 def test_drift_detection_regression_and_improvement() -> None:
-    """Verify drift detection logic accurately flags regressions and improvements."""
     base_case_1 = CaseBenchmarkResult(
         id="case-1",
         status="pass",
@@ -230,8 +220,6 @@ def test_drift_detection_regression_and_improvement() -> None:
         cases=[base_case_1, base_case_2],
     )
 
-    # Candidate: case-1 regressed (delivered ratio dropped by 5%, errors introduced)
-    # Candidate: case-2 improved (delivered ratio up)
     cand_case_1 = CaseBenchmarkResult(
         id="case-1",
         status="fail",
@@ -281,7 +269,6 @@ def test_drift_detection_regression_and_improvement() -> None:
 
 
 def test_benchmark_runner_in_process_execution(tmp_path: Path) -> None:
-    """Test BenchmarkRunner end-to-end using an in-process mock runner."""
     corpus_dir = tmp_path / "corpus"
     corpus_dir.mkdir()
     docs_dir = corpus_dir / "documents"
@@ -314,9 +301,6 @@ def test_benchmark_runner_in_process_execution(tmp_path: Path) -> None:
             delivered_text=8,
             verbatim_text=2,
             missing_assets=0,
-            # ``violations`` is a tuple (frozen model) and there is no
-            # ``target_lang``/``source_lang`` field: language is not part of
-            # the delivery contract, so passing them was silently dropped.
             violations=(),
         )
         c_path = contract_path_for_artifact(out_pdf)
@@ -354,7 +338,6 @@ def test_benchmark_runner_in_process_execution(tmp_path: Path) -> None:
 
 
 def test_benchmark_reporters(tmp_path: Path) -> None:
-    """Verify all report rendering formats: Rich terminal, Markdown, HTML, and JSON."""
     case_res = CaseBenchmarkResult(
         id="twocol-paper-test",
         description="Two-column test paper",
@@ -395,7 +378,6 @@ def test_benchmark_reporters(tmp_path: Path) -> None:
         cases=[case_res],
     )
 
-    # 1. Terminal Dashboard
     test_console = Console(record=True, width=120)
     render_terminal_dashboard(report, console=test_console)
     term_text = test_console.export_text()
@@ -403,20 +385,17 @@ def test_benchmark_reporters(tmp_path: Path) -> None:
     assert "twocol-paper-test" in term_text
     assert "80.0%" in term_text
 
-    # 2. Markdown Report
     md_text = render_markdown_report(report)
     assert "# UBT Corpus Benchmark Report" in md_text
     assert "| `twocol-paper-test` |" in md_text
     assert "80.0%" in md_text
 
-    # 3. HTML Dashboard
     html_text = render_html_dashboard(report)
     assert "<!DOCTYPE html>" in html_text
     assert "UBT Corpus Benchmark Dashboard" in html_text
     assert "twocol-paper-test" in html_text
     assert "meter-bar" in html_text
 
-    # 4. JSON Report
     json_text = render_json_report(report)
     data = json.loads(json_text)
     assert "report" in data

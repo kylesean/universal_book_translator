@@ -105,5 +105,4 @@ def test_print_report_smoke() -> None:
         pdf_page_count=2,
         spill_count=0,
     )
-    # Smoke test: formatting does not raise
     verifier.print_report(res)

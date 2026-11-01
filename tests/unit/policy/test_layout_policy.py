@@ -1,5 +1,3 @@
-"""Contract tests for the unified policy/knob registry (``layout_policy``)."""
-
 from __future__ import annotations
 
 import pytest
@@ -22,11 +20,6 @@ from ubt.core.policy.layout_policy import (
 )
 
 pytestmark = pytest.mark.fast
-
-
-# --------------------------------------------------------------------------- #
-# Calibration registry
-# --------------------------------------------------------------------------- #
 
 
 def test_calibration_enum_values() -> None:
@@ -52,23 +45,16 @@ def test_every_calibration_key_resolves_to_a_module_attribute() -> None:
     assert missing == []
 
 
-# --------------------------------------------------------------------------- #
-# formula_debris_share
-# --------------------------------------------------------------------------- #
-
-
 def test_formula_debris_no_tokens_is_zero() -> None:
     assert formula_debris_share("") == 0.0
     assert formula_debris_share("123 456") == 0.0
 
 
 def test_formula_debris_counts_isolated_letters() -> None:
-    # 2 singles (K, x) among 3 ASCII word tokens ("=" is not a word).
     assert formula_debris_share("K = x plus") == pytest.approx(2 / 3)
 
 
 def test_formula_debris_excludes_prose_single_letters() -> None:
-    # a / A / I are legitimate English words, not equation debris.
     assert formula_debris_share("a A I cat") == 0.0
 
 
@@ -78,27 +64,17 @@ def test_formula_debris_prose_stays_low() -> None:
 
 
 def test_formula_debris_ignores_non_ascii_tokens() -> None:
-    assert formula_debris_share("x 中文 中") == 1.0  # only "x" is an ASCII word token
+    assert formula_debris_share("x 中文 中") == 1.0
 
 
 def test_formula_debris_excludes_name_initials() -> None:
-    # A bibliography is not a formula page. Reference entries are dense with
-    # isolated single-letter initials (P. Zijlstra, D. Guo), the same shape a
-    # shattered equation sheds; counting them routed arXiv 2609.22978 to Docling
-    # on its reference pages (0.18) while its body peaked at 0.067.
     assert formula_debris_share("P. Zijlstra, J. Fernandes, and V. Pillai.") < 0.05
     assert formula_debris_share("D. Guo, D. Yang, H. Zhang, J. Song, P. Wang") < 0.05
     assert formula_debris_share("J. K. Rowling wrote this") < 0.05
 
 
 def test_formula_debris_still_catches_real_debris() -> None:
-    # Regression guard: the name-initial strip must not blunt real detection.
     assert formula_debris_share("K = x plus") == pytest.approx(2 / 3)
-
-
-# --------------------------------------------------------------------------- #
-# is_non_prose_degradable
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -131,15 +107,7 @@ def test_block_type_accepts_bare_strings() -> None:
     assert is_non_prose_degradable("narrative", []) is False
 
 
-# --------------------------------------------------------------------------- #
-# Vocabulary sets
-# --------------------------------------------------------------------------- #
-
-
 def test_block_type_vocabularies_are_pinned() -> None:
-    # DIALOGUE is prose. It was excluded, and FastPass reads "not prose" as
-    # "table", which switched off the sentence-drop gate and dropped the script
-    # density floor to 0.02 for every line of dialogue.
     assert {BlockType.HEADING, BlockType.NARRATIVE, BlockType.LIST_ITEM, BlockType.DIALOGUE} == (
         PROSE_BLOCK_TYPES
     )
@@ -166,17 +134,11 @@ def test_pair_terminal_punct_membership() -> None:
     assert "," not in PAIR_TERMINAL_PUNCT
 
 
-# --------------------------------------------------------------------------- #
-# Text-normalization mechanics
-# --------------------------------------------------------------------------- #
-
-
 def test_ws_re_collapses_runs() -> None:
     assert lp.WS_RE.sub(" ", "a\t  b\n c") == "a b c"
 
 
 def test_fold_map_folds_quotes_dashes_ligatures_and_nbsp() -> None:
-    # Only fi/fl ligatures are folded (ﬀ is deliberately not in FOLD_MAP).
     folded = "‘a’ “b” c–d—e ﬁ ﬂ\u00a0g".translate(lp.FOLD_MAP)
     assert folded == "'a' \"b\" c-d-e fi fl g"
 
@@ -194,17 +156,12 @@ def test_unicode_word_re_matches_cjk() -> None:
     assert lp.UNICODE_WORD_RE.findall("中 文 abc") == ["中", "文", "abc"]
 
 
-# --------------------------------------------------------------------------- #
-# Verdict / continuation regexes
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("value", "matches"),
     [
-        ("0306406152", True),  # ISBN-10
-        ("9780306406157", True),  # ISBN-13
-        ("978030640615X", True),  # check digit X
+        ("0306406152", True),
+        ("9780306406157", True),
+        ("978030640615X", True),
         ("12345", False),
         ("97803064061570", False),
     ],
@@ -330,9 +287,6 @@ def test_cont_sentence_end_re(value: str, matches: bool) -> None:
         ("Equation 2", True),
         ("Section 4", True),
         ("Chapter 5", True),
-        # NOTE: the ``fig\.``/``eq\.`` alternatives are unreachable — the
-        # trailing ``\b`` sits between two non-word chars ("." then " ") and
-        # never matches, so the abbreviated forms fall through to no-match.
         ("Fig. 3", False),
         ("Fig 3", False),
         ("Eq. 3", False),
@@ -352,7 +306,7 @@ def test_cont_label_barrier_re(value: str, matches: bool) -> None:
         ("• item", True),
         ("- item", True),
         ("(a) item", True),
-        ("3、item", False),  # the marker requires following whitespace
+        ("3、item", False),
         ("plain", False),
     ],
 )
@@ -363,6 +317,3 @@ def test_cont_list_marker_re(value: str, matches: bool) -> None:
 def test_cont_upper_start_re() -> None:
     assert lp.CONT_UPPER_START_RE.match("Word") is not None
     assert lp.CONT_UPPER_START_RE.match("word") is None
-
-
-# --------------------------------------------------------------------------- #

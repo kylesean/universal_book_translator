@@ -1,24 +1,3 @@
-"""Triage's severity → status routing, and the fail-open rule for quality defects.
-
-The triage stage is the last net before export: it decides whether a block that
-survived (or failed) repair ships its machine draft, ships its source, or is
-handed to a human. That decision is invisible to the render e2e (which only
-drives clean blocks), so it is pinned here.
-
-The load-bearing rule is the split introduced for RFC-2026-02:
-
-- a **quality** verdict (numeric fidelity, math drift, glossary, omission) keeps
-  the machine draft and routes to ``NEEDS_HUMAN`` — the reader gets a usable
-  sentence, and the flag stays on the record;
-- a **must-not-ship leak** (system prompt / template scaffolding) still
-  quarantines as ``BLOCKED_HUMAN`` with the machine output stripped.
-
-The rule exists because the arXiv 2101.03961 run quarantined 18 blocks, all of
-them quality verdicts, 17 of them *correct* Chinese drafts rejected by a
-false-positive numeric check. The old behaviour published English where good
-Chinese existed.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -64,8 +43,6 @@ def _block(
 
 @dataclass
 class _Ledger:
-    """Minimal ledger: records the triage batch and serves the candidates."""
-
     candidates: list[IRBlock]
     batches: list[list[dict[str, Any]]] = field(default_factory=list)
 
@@ -79,8 +56,6 @@ class _Ledger:
 
 @dataclass
 class _RepairLoop:
-    """Repair that never fixes anything, so every block reaches the verdict."""
-
     span_annotator: Any = None
 
     def __post_init__(self) -> None:
@@ -165,7 +140,6 @@ async def _run(
 
 
 def test_a_quality_defect_keeps_the_draft_and_routes_to_human() -> None:
-    """A critical *quality* verdict must not replace the draft with the source."""
     block = _block(
         "b1",
         error_flags=["Numeric fidelity failure: Unauthorized numeric tokens in translation: ['2']"],
@@ -176,14 +150,12 @@ def test_a_quality_defect_keeps_the_draft_and_routes_to_human() -> None:
     assert len(updates) == 1
     update = updates[0]
     assert update["status"] is BlockStatus.NEEDS_HUMAN
-    # The draft survives — this is the whole point of the rule.
     assert update["target_text"] == "一个正确的草稿"
     assert FLAG_NEEDS_HUMAN_REVIEW in update["error_flags"]
     assert FLAG_MQM_CRITICAL_BLOCKED in update["error_flags"]
 
 
 def test_a_must_not_ship_leak_is_still_quarantined() -> None:
-    """Prompt/template leakage keeps the hard quarantine with the source shown."""
     block = _block("b2", error_flags=["Prompt scaffold: <|system|> leaked"])
     ledger = _Ledger([block])
     updates = asyncio.run(_run(ledger, _RepairLoop()))
@@ -191,13 +163,11 @@ def test_a_must_not_ship_leak_is_still_quarantined() -> None:
     assert len(updates) == 1
     update = updates[0]
     assert update["status"] is BlockStatus.BLOCKED_HUMAN
-    # The machine output is stripped: the placeholder wraps the *source*.
     assert "一个正确的草稿" not in update["target_text"]
     assert "A correct source sentence." in update["target_text"]
 
 
 def test_a_correct_draft_after_repair_passes() -> None:
-    """A block the escalated repair resolves is released, not flagged."""
     block = _block("b3", error_flags=["Numeric fidelity failure: missing ['2']"])
 
     class _Fixing(_RepairLoop):
@@ -214,14 +184,11 @@ def test_a_correct_draft_after_repair_passes() -> None:
 
 
 class _NeverCalled(_RepairLoop):
-    """Fails the test if the stage reaches for a model call."""
-
     async def repair_single_block(self, *, block: IRBlock, **_kw: Any) -> IRBlock:
         raise AssertionError("host-driven triage must not call the model")
 
 
 def test_host_driven_triage_returns_a_critical_block_for_repair() -> None:
-    """escalate=False gives the host the escalated round instead of spending it."""
     block = _block("b4", error_flags=["Numeric fidelity failure: missing ['2']"])
     ledger = _Ledger([block])
     updates = asyncio.run(_run(ledger, _NeverCalled(), escalate=False))
@@ -230,17 +197,10 @@ def test_host_driven_triage_returns_a_critical_block_for_repair() -> None:
     update = updates[0]
     assert update["status"] is BlockStatus.REPAIR_PENDING
     assert update["target_text"] == "一个正确的草稿"
-    # The classification still lands on the record for the review workbench.
     assert update["mqm_severity"] == "critical"
 
 
 def test_host_driven_triage_routes_terminal_once_the_repair_budget_is_spent() -> None:
-    """At the repair ceiling the block must route terminal, or finish deadlocks.
-
-    A still-critical block at ``max_repair_rounds`` cannot be claimed (the claim
-    query applies the same cap), so handing it back again would leave ``finish``
-    reporting ``repair_required`` for work nothing can take.
-    """
     block = _block("b5", error_flags=["Numeric fidelity failure: missing ['2']"])
     block = block.model_copy(update={"repair_rounds": 2})
     ledger = _Ledger([block])

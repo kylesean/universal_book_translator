@@ -1,11 +1,3 @@
-"""A heading whose draft appended a paragraph is trimmed to its translation.
-
-Regression (``pdf_main#b0003``): a 96-char paper title was drafted as the
-title translation plus an abstract-summary paragraph, which the QE length gate
-flagged as "suspiciously inflated" and quarantined. ``trim_heading_expansion``
-keeps the leading paragraph so the title still ships translated.
-"""
-
 from __future__ import annotations
 
 import pytest

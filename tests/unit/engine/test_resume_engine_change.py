@@ -1,5 +1,3 @@
-"""A provider fix must not strand a paid ledger behind the old model identity."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -36,12 +34,6 @@ def _ledger(tmp_path: Path, *, status: str) -> SQLiteJobLedger:
 def test_a_terminal_job_may_resume_after_the_provider_model_changes(
     tmp_path: Path,
 ) -> None:
-    """The first job failed because its model was missing; fixing it is the fix.
-
-    Refusing the resume made the operator's only recovery a destructive
-    re-parse, even though every pending block and the source fingerprint were
-    still valid.
-    """
     with _ledger(tmp_path, status="failed") as ledger:
         _guard_run_identity(
             ledger,

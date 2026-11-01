@@ -1,13 +1,3 @@
-"""Glossary markdown tables: the retrieval table and the capped decision sheet.
-
-The book-level sheet cannot be retrieved (an alias-only mention, a deliberate
-non-obvious rendering), so it is truncated by rank: proper names first, then
-attest frequency, then source text as a deterministic tie-break -- the sheet
-the prompt carries and the sheet the TM context fingerprint records must be the
-same bytes. The chunk table is the retrieval path and unions local hits with
-the global top-N.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -21,14 +11,8 @@ pytestmark = pytest.mark.fast
 
 
 def _sources(table: str) -> list[str]:
-    """The first cell of each data row (skipping the header and separator)."""
     rows = table.splitlines()[2:]
     return [line.split("|")[1].strip() for line in rows]
-
-
-# --------------------------------------------------------------------------- #
-# build_global_glossary_table
-# --------------------------------------------------------------------------- #
 
 
 def test_global_table_of_no_terms_is_empty() -> None:
@@ -73,11 +57,6 @@ def test_source_text_breaks_frequency_ties_deterministically() -> None:
     assert _sources(build_global_glossary_table(terms, 10)) == ["aaa", "bbb"]
 
 
-# --------------------------------------------------------------------------- #
-# build_chunk_glossary_table
-# --------------------------------------------------------------------------- #
-
-
 def test_chunk_table_of_nothing_is_empty() -> None:
     assert build_chunk_glossary_table([], [], "x") == ""
 
@@ -103,7 +82,6 @@ def test_chunk_table_appends_a_local_abbreviation_block() -> None:
         gloss, abbrevs, "\u8fd9\u662f\u6a21\u578b\u548c CNN \u7684\u4ecb\u7ecd"
     )
     assert "| CNN | Convolutional Neural Network |" in table
-    # The abbreviation block follows the term table.
     assert table.index("\u6a21\u578b") < table.index("CNN")
 
 

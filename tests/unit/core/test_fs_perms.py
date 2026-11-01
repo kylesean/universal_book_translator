@@ -1,5 +1,3 @@
-"""ensure_private_dir: tighten only a directory UBT itself creates."""
-
 from __future__ import annotations
 
 import stat
@@ -21,8 +19,6 @@ def test_ensure_private_dir_restricts_a_new_directory(tmp_path: Path) -> None:
 
 
 def test_ensure_private_dir_leaves_an_existing_directory_mode_alone(tmp_path: Path) -> None:
-    # A user-chosen db_dir that already exists (a shared workspace) must not be
-    # silently rewritten to owner-only.
     shared = tmp_path / "shared"
     shared.mkdir()
     shared.chmod(0o755)
@@ -51,17 +47,11 @@ def test_sanitize_display_path() -> None:
 
 
 def test_world_readable_scan_skips_non_traversable_subtrees(tmp_path: Path) -> None:
-    """Exposure needs traversal: a 0700 build dir walls off its contents.
-
-    UBT's build directories are born owner-only precisely so the manuscripts
-    inside stay private; the scan must not list files it cannot be opened for,
-    or every private build dir would read as a leak.
-    """
     from ubt.core.fs_perms import world_readable_files
 
     private = restrict_dir_to_owner(tmp_path / "build")
     (private / "manuscript.txt").write_text("全书译文", encoding="utf-8")
-    (private / "manuscript.txt").chmod(0o644)  # mode says readable; the dir says no
+    (private / "manuscript.txt").chmod(0o644)
 
     shared = tmp_path / "shared"
     shared.mkdir(mode=0o755)

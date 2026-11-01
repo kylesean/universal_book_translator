@@ -1,5 +1,3 @@
-"""Unit tests for IRBlock.model_copy override supporting structural and state updates."""
-
 from __future__ import annotations
 
 import pytest
@@ -28,8 +26,7 @@ def test_ir_block_model_copy_source_text() -> None:
 
     copied = block.model_copy(update={"source_text": "Updated Text"})
     assert copied.source_text == "Updated Text"
-    assert block.source_text == "Original Text"  # original untouched
-    # Ensure with_source_text produces identical outcome
+    assert block.source_text == "Original Text"
     assert block.with_source_text("Updated Text").source_text == "Updated Text"
 
 
@@ -84,8 +81,6 @@ def test_ir_block_model_copy_mixed_structural_and_execution_state() -> None:
 
 
 def test_ir_block_model_copy_isolates_mutable_state() -> None:
-    # A shallow copy shares error_flags/provenance, so a later append on the
-    # copy mutated the original block. The default is deep now.
     el = make_element(id="b1", spine_index=1, block_type=BlockType.NARRATIVE, source_text="Hi")
     block = IRBlock(element=el)
     block.error_flags.append("orig")

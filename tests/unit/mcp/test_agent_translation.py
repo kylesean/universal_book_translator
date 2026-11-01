@@ -1,5 +1,3 @@
-"""Agent translation workflow: zero model calls, leases, idempotency, rendering."""
-
 from __future__ import annotations
 
 import asyncio
@@ -59,13 +57,6 @@ def _translate(masked: str) -> str:
 
 @pytest.mark.asyncio
 async def test_claim_refuses_while_a_pipeline_holds_the_job_lease(tmp_path: Path) -> None:
-    """A claim must not race a provider pipeline that owns the job.
-
-    Concurrent *Agent* claims stay supported (they are serialized by the atomic
-    package lease, see ``test_concurrent_claims_never_lease_the_same_block``),
-    so the fix cannot be "claim takes the job lease" — that would turn a second
-    host's claim into a conflict. It detects the foreign writer instead.
-    """
     from ubt.core.engine.writer_lock import LedgerWriterLock
     from ubt.core.exceptions import UBTError
 
@@ -142,7 +133,6 @@ async def test_prepare_claim_submit_finish_without_any_model_call(tmp_path: Path
 
 
 async def _drive_to_terminal(service: AgentTranslationService, job_id: str) -> None:
-    """Claim and submit every package with the fixture translation."""
     while True:
         claim = await service.claim(AgentClaimRequest(job_id=job_id))
         if claim.package is None:
@@ -165,14 +155,6 @@ async def _drive_to_terminal(service: AgentTranslationService, job_id: str) -> N
 
 @pytest.mark.asyncio
 async def test_finish_runs_triage_and_writes_the_tm(tmp_path: Path) -> None:
-    """Finish closes out the same quality loop as the provider plan, zero-token.
-
-    A block a repair path left ``FAILED`` used to strand ``finish`` in
-    ``needs_attention`` forever: only triage — which the Agent path skipped —
-    classifies it. Here triage hands it back to the host (critical, one repair
-    round of budget left), the host repairs it, and the second finish renders
-    and writes the accepted pairs into the shared TM.
-    """
     source = _write_book(tmp_path)
     config = _config(tmp_path)
     service = AgentTranslationService(config=config)
@@ -194,10 +176,6 @@ async def test_finish_runs_triage_and_writes_the_tm(tmp_path: Path) -> None:
                 {
                     "block_id": broken.id,
                     "status": BlockStatus.FAILED,
-                    # One of the two configured rounds is already spent, so the
-                    # single host repair below reaches the ceiling and the
-                    # screen can route the block terminal instead of asking
-                    # again (its stale defect flag is never cleared by submit).
                     "repair_rounds": 1,
                     "error_flags": [
                         "Numeric fidelity failure: Unauthorized numeric tokens in translation: ['3']"
@@ -253,12 +231,6 @@ async def test_prepare_same_id_with_different_inputs_is_rejected(tmp_path: Path)
 
 @pytest.mark.asyncio
 async def test_prepare_refuses_an_unrelated_existing_output(tmp_path: Path) -> None:
-    """A pre-existing file at the deliverable path is not the job's to clobber.
-
-    The rejection must land before any block is parsed, and a completed run's
-    own artifact stays re-renderable: the exemption reads the job's own
-    recorded ``output_file``, not the ``fresh`` flag.
-    """
     source = _write_book(tmp_path)
     service = AgentTranslationService(config=_config(tmp_path))
     victim = tmp_path / "translated.md"
@@ -289,8 +261,6 @@ async def test_prepare_replay_may_re_render_its_own_deliverable(tmp_path: Path) 
             job_id="agent_own_output",
         )
     )
-    # A crashed render may have left a partial artifact; the job that recorded
-    # the path owns it.
     Path(prepared.output_path).write_text("partial", encoding="utf-8")
     replayed = await service.prepare(
         AgentPrepareRequest(
@@ -335,7 +305,6 @@ async def test_claim_is_exclusive_and_expired_lease_is_recoverable(tmp_path: Pat
                 ],
             )
         )
-    # Simulate elapsed leases and prove their blocks become claimable again.
     db_path = tmp_path / "db" / f"{prepared.job_id}.sqlite"
     with SQLiteJobLedger(db_path) as ledger:
         session = ledger.get_job_metadata_value(prepared.job_id, "agent_session")
@@ -477,9 +446,6 @@ async def test_repair_rounds_are_consumed_and_stop_at_human_gate(tmp_path: Path)
         assert saved is not None
         assert saved.repair_rounds == expected_round
 
-    # Past the gate the block must not be re-leased: the claim query had no
-    # rounds bound, so an Agent host could re-claim a hopeless block forever
-    # (and pay for every attempt) instead of finishing into the human queue.
     exhausted = await service.claim(AgentClaimRequest(job_id=prepared.job_id))
     assert exhausted.package is None, "an exhausted repair must not be re-leasable"
 
@@ -678,17 +644,6 @@ def test_agent_session_survives_as_awaiting_agent_in_catalog(tmp_path: Path) -> 
 async def test_submitted_packages_compact_and_replay_reports_their_count(
     tmp_path: Path,
 ) -> None:
-    """A submitted package keeps its identity, not its per-block payload.
-
-    Every claim and submit rewrites the whole ``agent_session`` metadata, so a
-    package that kept ``block_ids`` and ``expected_statuses`` made each write
-    re-serialize every prior package's blocks — O(n²) in blocks across a run.
-    Compaction drops exactly those two fields at submit time; everything the
-    replay surface reads (``state``, ``lease_token_hash``, ``submission_hash``)
-    stays, and ``block_count`` preserves the count the replay report shows.
-    A two-block package pins that count instead of stumbling on a 1-block
-    coincidence.
-    """
     source = _write_book(tmp_path)
     service = AgentTranslationService(config=_config(tmp_path))
     prepared = await service.prepare(
@@ -713,7 +668,6 @@ async def test_submitted_packages_compact_and_replay_reports_their_count(
         )
         result = await service.submit(request)
         accepted.append(result.accepted_blocks)
-        # The replay must survive compaction: same request, same verdict.
         replay = await service.submit(request)
         assert replay.idempotent_replay is True
         assert replay.accepted_blocks == result.accepted_blocks
@@ -731,8 +685,6 @@ async def test_submitted_packages_compact_and_replay_reports_their_count(
             assert package["block_count"] == 2
             assert package["lease_token_hash"], "replay needs the stored token digest"
             assert package["submission_hash"], "replay needs the stored submission digest"
-        # And the metadata the next claim rewrites is payload-free: the raw
-        # JSON carries no per-block list for any submitted package.
         import json as _json
 
         raw = _json.dumps(session, ensure_ascii=False)

@@ -1,19 +1,3 @@
-"""Artifact I/O: one value names the delivered artifact's files.
-
-The export stage carries two artifact identities at once -- ``target_output``
-(the path the primary render was *asked* for, which the PE queue keys on) and
-``rendered_path`` (the file the adapter *returned*, which every sidecar and
-companion keys on). ``DeliveredArtifact`` holds both so a caller never picks the
-wrong one; the sibling/companion naming has a single owner instead of ad-hoc
-``with_name`` calls spread through the stage.
-
-The other half pinned here is the *probe* that decides whether the artifact
-carries a realization: a reflowing backend re-breaks lines, so an exact match
-would report elements it actually placed -- token overlap is the measure.
-``check_artifact`` itself needs a real PDF, so the pure token logic it depends
-on is pinned directly.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -36,11 +20,6 @@ from ubt.model.ast import RegionKind
 pytestmark = pytest.mark.fast
 
 
-# --------------------------------------------------------------------------- #
-# DeliveredArtifact: the two identities and what hangs off each.
-# --------------------------------------------------------------------------- #
-
-
 def test_delivered_artifact_keeps_both_identities() -> None:
     artifact = delivered_artifact("/out/book_bilingual_mono.pdf", "/out/book_bilingual.pdf")
     assert artifact.rendered_path == Path("/out/book_bilingual_mono.pdf")
@@ -48,15 +27,12 @@ def test_delivered_artifact_keeps_both_identities() -> None:
 
 
 def test_sidecars_and_companions_key_on_the_returned_file() -> None:
-    # The visual gate may rewrite the returned file, so sidecars follow *it*,
-    # not the requested target.
     artifact = delivered_artifact("/out/book_mono.pdf", "/out/book.pdf")
     assert artifact.sidecar("contract.json") == Path("/out/book_mono_pdf_contract.json")
     assert artifact.companion(".xliff") == Path("/out/book_mono_pdf.xliff")
 
 
 def test_siblings_key_on_the_requested_target() -> None:
-    # A companion *render* is named beside the requested target.
     artifact = delivered_artifact("/out/book_bilingual_mono.pdf", "/out/book_bilingual.pdf")
     assert artifact.sibling("_mono") == Path("/out/book_bilingual_mono.pdf")
     assert artifact.sibling("_secondary") == Path("/out/book_bilingual_secondary.pdf")
@@ -71,11 +47,6 @@ def test_delivered_artifact_accepts_str_or_path(tmp_path: Path) -> None:
     artifact = delivered_artifact(tmp_path / "r.pdf", str(tmp_path / "t.pdf"))
     assert isinstance(artifact, DeliveredArtifact)
     assert artifact.rendered_path == tmp_path / "r.pdf"
-
-
-# --------------------------------------------------------------------------- #
-# Tokenization: what counts as a probe unit.
-# --------------------------------------------------------------------------- #
 
 
 def test_latin_words_are_probe_units_and_hyphenated_words_stay_whole() -> None:
@@ -94,13 +65,7 @@ def test_normalize_collapses_whitespace_including_line_breaks() -> None:
     assert _normalize("a  b\n c") == "a b c"
 
 
-# --------------------------------------------------------------------------- #
-# The presence probe: overlap, with a noise floor for short strings.
-# --------------------------------------------------------------------------- #
-
-
 def test_expected_text_shorter_than_the_probe_floor_is_always_present() -> None:
-    # A bullet or lone glyph is noise; the check says nothing either way.
     assert _present("abc", frozenset()) is True
 
 
@@ -114,26 +79,19 @@ def test_full_token_overlap_is_present() -> None:
 
 
 def test_overlap_at_the_threshold_is_present() -> None:
-    # Exactly 3/5 == 0.6: the boundary is inclusive (>=).
     tokens = frozenset(_tokenize("the quick brown fox jumps"))
     assert _present("the quick brown zebra yak", tokens) is True
 
 
 def test_overlap_below_the_threshold_is_absent() -> None:
     tokens = frozenset(_tokenize("the quick brown fox jumps"))
-    assert _present("the quick zebra yak", tokens) is False  # 2/4 == 0.5
+    assert _present("the quick zebra yak", tokens) is False
 
 
 def test_cjk_realization_is_probed_per_glyph() -> None:
-    # Four glyphs clears the probe floor, so overlap is actually measured.
     tokens = frozenset(_tokenize("\u4e2d\u6587\u5b57"))
-    assert _present("\u4e2d\u6587\u5b57\u7532", tokens) is True  # 3/4
-    assert _present("\u4e2d\u4e8c\u4e09\u56db", tokens) is False  # 1/4
-
-
-# --------------------------------------------------------------------------- #
-# ArtifactReport: the verdict.
-# --------------------------------------------------------------------------- #
+    assert _present("\u4e2d\u6587\u5b57\u7532", tokens) is True
+    assert _present("\u4e2d\u4e8c\u4e09\u56db", tokens) is False
 
 
 def _check(element_id: str, present: bool) -> ElementCheck:
@@ -159,11 +117,6 @@ def test_summary_line_states_how_many_realizations_were_carried() -> None:
     assert passing.summary_line() == "[PASS] artifact carries 1/1 text realization(s)"
 
 
-# --------------------------------------------------------------------------- #
-# The rehearsal prefix: the renderer strips it, so the audit must not demand it.
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     "prefix",
     [REHEARSAL_MARKER, "[Mock Translation]", "[mock translation]", "[Mock  Translation]"],
@@ -174,10 +127,6 @@ def test_strip_rehearsal_marker_removes_every_spelling(prefix: str) -> None:
 
 
 def test_a_rehearsal_heading_is_found_in_an_artifact_without_the_marker() -> None:
-    # Regression: the PDF renderer strips the dry-run's prefix before placing
-    # text, so the artifact never carries it. Before this was shared, a 3-token
-    # heading needed the marker's 4 CJK tokens inside the overlap floor
-    # (3/7 < 0.6) and every rehearsal delivery reported the heading "missing".
     element = make_element(
         id="e1",
         spine_index=1,
@@ -192,14 +141,6 @@ def test_a_rehearsal_heading_is_found_in_an_artifact_without_the_marker() -> Non
     assert _present(expected, frozenset(_tokenize("The Attention Machine"))) is True
 
 
-# --------------------------------------------------------------------------- #
-# Dropped page furniture: the audit must not demand a realization the
-# renderer deliberately omits. Regression for the false
-# "[FAIL] artifact carries 280/281 (missing: pdf_main#b0003)" on a submission-date
-# heading the renderer drops as running chrome.
-# --------------------------------------------------------------------------- #
-
-
 def _heading(block_id: str, text: str, *, source_text: str | None = None) -> IRBlock:
     element = make_element(
         id=block_id,
@@ -211,41 +152,26 @@ def _heading(block_id: str, text: str, *, source_text: str | None = None) -> IRB
 
 
 def test_chrome_heading_is_dropped_page_furniture() -> None:
-    # Defined in delivered_text; the renderer only re-exports it for
-    # existing callers, and mypy --strict rejects that indirection.
     from ubt.render.delivered_text import dropped_page_furniture
 
-    # The exact block that produced the false FAIL on the paper run.
     assert dropped_page_furniture(_heading("b3", "Submitted 8/21; Revised 3/22; Published 4/22"))
     assert dropped_page_furniture(_heading("b1", "arXiv:2101.03961v3 [cs.LG] 16 Jun 2022"))
     assert dropped_page_furniture(_heading("b2", "Journal of Machine Learning Research 23 (2022)"))
 
 
 def test_a_running_author_head_is_furniture_through_its_source_text() -> None:
-    """The all-caps author running head is chrome even when translated.
-
-    "FEDUS, ZOPH AND SHAZEER" arrived as "Fedus、Zoph与Shazeer", which the
-    delivered-text pattern never caught: the header survived and opened the
-    body on the paper's author line. The source text is the fingerprint.
-    """
-    # Defined in delivered_text; the renderer only re-exports it for
-    # existing callers, and mypy --strict rejects that indirection.
     from ubt.render.delivered_text import dropped_page_furniture
 
     head = _heading("b7", "Fedus、Zoph与Shazeer", source_text="FEDUS, ZOPH AND SHAZEER")
     assert dropped_page_furniture(head)
     assert dropped_page_furniture(_heading("b8", "FEDUS, ZOPH AND SHAZEER"))
 
-    # Genuine headings never match, in any capitalization.
     for text in ("1 引言", "相关工作", "Abstract", "INTRODUCTION AND RELATED WORK"):
         assert not dropped_page_furniture(_heading(f"keep-{text}", text)), text
-    # A one-word all-caps heading is a heading, not an author list.
     assert not dropped_page_furniture(_heading("caps", "EXPERIMENTS"))
 
 
 def test_a_real_heading_is_not_page_furniture() -> None:
-    # Defined in delivered_text; the renderer only re-exports it for
-    # existing callers, and mypy --strict rejects that indirection.
     from ubt.render.delivered_text import dropped_page_furniture
 
     assert not dropped_page_furniture(_heading("b4", "Switch Transformers"))
@@ -253,9 +179,6 @@ def test_a_real_heading_is_not_page_furniture() -> None:
 
 
 def test_a_kept_in_source_non_heading_is_not_page_furniture() -> None:
-    """A bibliography entry is kept verbatim but still placed, so not furniture."""
-    # Defined in delivered_text; the renderer only re-exports it for
-    # existing callers, and mypy --strict rejects that indirection.
     from ubt.render.delivered_text import dropped_page_furniture
 
     element = make_element(
@@ -269,10 +192,8 @@ def test_a_kept_in_source_non_heading_is_not_page_furniture() -> None:
 
 
 def test_check_artifact_skips_dropped_furniture(tmp_path: Path) -> None:
-    """A dropped chrome heading is not a text claim; a normal heading still is."""
     from ubt.adapters.pdf.artifact_text import check_artifact
 
-    # A minimal one-page PDF whose text is only "Hello world".
     pdf = tmp_path / "art.pdf"
     _write_one_line_pdf(pdf, "Hello world")
 
@@ -282,14 +203,12 @@ def test_check_artifact_skips_dropped_furniture(tmp_path: Path) -> None:
     ]
     report = check_artifact(blocks, {}, pdf)
 
-    # The furniture block was excluded from the claim set entirely.
     assert report.total == 1
     assert [c.element_id for c in report.checks] == ["real"]
     assert report.passed
 
 
 def _write_one_line_pdf(path: Path, text: str) -> None:
-    """Write a minimal, valid one-page PDF carrying ``text`` (no external deps)."""
     content = f"BT /F1 24 Tf 72 700 Td ({text}) Tj ET".encode("latin-1")
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -315,15 +234,6 @@ def _write_one_line_pdf(path: Path, text: str) -> None:
     path.write_bytes(bytes(out))
 
 
-# --- running heads are not chapter headings --------------------------------
-# A header-band block that the policy left in the source language is running
-# chrome: typesetting it emitted "3.2 Unified FinFET compact model" (and
-# "Appendix Explicit surface potential model", and "References") as level-1
-# headings in the middle of the chapter, once per page the head spans — six
-# untranslated H1s on the reference chapter. The chrome opt-in must still work,
-# so the drop is conditioned on the block having been left untranslated.
-
-
 def _header_heading(*, skip_translate: bool) -> IRBlock:
     element = make_element(
         id="hdr",
@@ -343,20 +253,12 @@ def test_an_untranslated_running_head_is_not_typeset_as_a_heading() -> None:
 
 
 def test_the_chrome_opt_in_still_places_the_translated_head() -> None:
-    """``--translate-chrome`` clears ``skip_translate``; do not discard it."""
     from ubt.render.delivered_text import dropped_page_furniture
 
     assert not dropped_page_furniture(_header_heading(skip_translate=False))
 
 
-# --------------------------------------------------------------------------- #
-# Page-scoped presence: a lost paragraph must not be "found" in the rest of
-# the book, and a wrapper must not make a placed paragraph "missing".
-# --------------------------------------------------------------------------- #
-
-
 def _page_probe_pages(lost: str, lost_page: int, total: int = 40) -> list[frozenset[str]]:
-    """A book whose glyphs are spread across pages, with ``lost`` absent at its page."""
     chars = list(dict.fromkeys(lost))
     pages: list[frozenset[str]] = []
     for index in range(total):
@@ -370,18 +272,12 @@ def _page_probe_pages(lost: str, lost_page: int, total: int = 40) -> list[frozen
 
 
 def test_the_whole_book_probe_misses_a_lost_paragraph() -> None:
-    """The old behaviour, pinned so the reason for the page scope stays visible."""
     lost = "这是一段完全丢失的中文段落内容用于检测误报"
     pages = _page_probe_pages(lost, lost_page=20)
     assert _present(lost, frozenset().union(*pages)) is True
 
 
 def test_expected_strips_a_quarantine_wrapper_from_the_source_fallback() -> None:
-    """A BLOCKED_HUMAN target is a wrapper around the source, not a translation.
-
-    Probing its markup tokens (``mark``, ``class``, ``title``) asked the artifact
-    for text no renderer draws, so a placed block was reported missing.
-    """
     element = make_element(
         id="b1", spine_index=1, block_type=BlockType.NARRATIVE, source_text="Hello world."
     )

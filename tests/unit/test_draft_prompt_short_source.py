@@ -1,17 +1,3 @@
-"""A heading/label source must carry a "do not expand" prompt clause.
-
-Regression: a local model expanded a heading ("2.1. Effects") into a whole
-paragraph, which the QE length gate then quarantined. The draft builders append
-an in-kind constraint for a short, punctuation-free source, and
-``draft_source_from_prompt`` must still recover the source span (the clause is
-placed after the anchor the parser reads).
-
-A second regression (``pdf_main#b0003``): a 96-char paper title passed the
-60-char heuristic untouched, so the model expanded it into a title plus an
-abstract summary. The block's own ``heading`` type now fires the clause
-regardless of length, up to a cap that still protects a mislabelled paragraph.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -35,9 +21,6 @@ _BUILDERS: tuple[_Builder, ...] = (
 )
 _SHORT = "2.1. Effects"
 _LONG = "Failure. The effects a component installs reach outside the context that tracks them."
-#: A real paper title (96 chars, no terminal punctuation) that the character
-#: heuristic misses: the model expanded it into a title-plus-abstract-summary
-#: draft, which the QE length gate quarantined.
 _TITLE = (
     "DeepSeek Elastic Compute (DSec): A Sandbox Infrastructure "
     "for Effective Agentic Training at Scale"
@@ -58,7 +41,6 @@ def test_a_full_sentence_does_not_get_the_clause(build: _Builder) -> None:
 
 @pytest.mark.parametrize("build", _BUILDERS)
 def test_a_long_title_without_a_type_still_misses_the_clause(build: _Builder) -> None:
-    """Documents the gap the block type closes: >60 chars, no punctuation."""
     system, user = build(source_text=_TITLE)
     assert "equally short" not in system + user
 

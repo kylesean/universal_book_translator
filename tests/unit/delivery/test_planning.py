@@ -1,5 +1,3 @@
-"""Planning adapter tests: facts -> signals -> plan -> effective renderer mode."""
-
 from __future__ import annotations
 
 import logging

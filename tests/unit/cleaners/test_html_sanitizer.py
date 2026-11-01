@@ -1,18 +1,3 @@
-"""The HTML sanitizer: stored-XSS defense for untrusted markup.
-
-Two halves, one allowlist:
-
-- :func:`sanitize_html_fragment` / :func:`sanitize_inline_html` guard
-  *LLM-produced* target text (a prompt-injected response can carry ``<script>``
-  or an inline event handler into a stored EPUB/Markdown artifact);
-- :func:`scrub_source_document` guards *source* markup that is copied into the
-  deliverable largely verbatim.
-
-Both must remove executable constructs while preserving legitimate bilingual
-markup and plain technical prose (``List<T>``), and both must be idempotent. A
-clean document must come back byte-for-byte.
-"""
-
 from __future__ import annotations
 
 import re
@@ -39,11 +24,6 @@ def _has_active_danger(html: str) -> bool:
         or "javascript:" in lowered
         or re.search(r"\son[a-z]+\s*=", lowered) is not None
     )
-
-
-# --------------------------------------------------------------------------- #
-# Fragment sanitizer: LLM-produced target text.
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -94,8 +74,6 @@ def test_fragment_allows_data_urls_for_embedded_images() -> None:
 
 
 def test_fragment_escapes_decoded_angle_brackets() -> None:
-    # HTMLParser decodes character references before handle_data; if the text
-    # were emitted verbatim, `&lt;script&gt;` would reconstitute a real element.
     result = sanitize_html_fragment("&lt;script&gt;alert(1)&lt;/script&gt;")
     assert "<script" not in result
     assert result == "&lt;script&gt;alert(1)&lt;/script&gt;"
@@ -121,19 +99,7 @@ def test_fragment_is_idempotent() -> None:
     assert sanitize_html_fragment(once) == once
 
 
-# --------------------------------------------------------------------------- #
-# Inline sanitizer: tags only, text left verbatim (Markdown / LaTeX survive).
-# --------------------------------------------------------------------------- #
-
-
 def test_inline_drops_a_script_with_its_body() -> None:
-    """``DROP_WITH_CONTENT`` means the element, not just its tags.
-
-    The old assertion pinned ``"xtext"`` — the script's *body* surviving as
-    prose. That is a real leak into the Markdown deliverable: a stylesheet's
-    ``p{color:red}`` or a script's payload is not book content, and the
-    docstring already promised the element was dropped.
-    """
     assert sanitize_inline_html("<script>x</script>text") == "text"
     assert sanitize_inline_html("<style>p{color:red}</style>text") == "text"
 
@@ -165,11 +131,6 @@ def test_inline_is_idempotent() -> None:
     assert sanitize_inline_html(once) == once
 
 
-# --------------------------------------------------------------------------- #
-# Source-document scrubber.
-# --------------------------------------------------------------------------- #
-
-
 def test_scrub_clean_document_is_byte_exact() -> None:
     clean = '<p class="x">Hello <b>world</b></p>'
     assert scrub_source_document(clean) == clean
@@ -197,17 +158,6 @@ def test_scrub_is_idempotent() -> None:
     assert scrub_source_document(once) == once
 
 
-# --------------------------------------------------------------------------- #
-# RAWTEXT bodies are inert under BOTH parsers
-# --------------------------------------------------------------------------- #
-#
-# `<style>`, `<textarea>` and `<title>` bodies are RAWTEXT to an HTML5 parser, so
-# a `<` inside them is literal text there. An EPUB content document is XHTML —
-# XML, where those elements have no such special case and `<style><script>` is a
-# real `script` child that executes. The scrubber must be safe under the stricter
-# parser, because the same code path guards source EPUB members and source HTML.
-
-
 @pytest.mark.parametrize(
     "markup",
     [
@@ -217,7 +167,6 @@ def test_scrub_is_idempotent() -> None:
     ],
 )
 def test_a_rawtext_body_cannot_carry_a_live_element(markup: str) -> None:
-    """No child element may survive inside a RAWTEXT body."""
     import xml.etree.ElementTree as ET
 
     out = scrub_source_document(markup)
@@ -228,7 +177,6 @@ def test_a_rawtext_body_cannot_carry_a_live_element(markup: str) -> None:
 
 
 def test_a_clean_rawtext_body_is_byte_exact() -> None:
-    """Escaping must not rewrite CSS or titles that never had a tag-open char."""
     for markup in (
         "<style>p{color:red}</style>",
         "<title>Chapter 1</title>",
@@ -238,20 +186,8 @@ def test_a_clean_rawtext_body_is_byte_exact() -> None:
 
 
 def test_a_style_body_still_gets_the_css_gate_after_neutralising() -> None:
-    """Neutralising `<` must not skip the remote-import policy."""
     out = scrub_source_document("<style>@import url(https://evil/x.css);p{}</style>")
     assert "@import" not in out
-
-
-# --------------------------------------------------------------------------- #
-# Remote resources: a loading attribute must not phone home
-# --------------------------------------------------------------------------- #
-#
-# The scrubber already dropped a remote `<link>` and a remote `@import`, on the
-# stated grounds that "remote targets go". Every other *loading* attribute
-# shipped its URL verbatim, so a source EPUB could carry a tracking pixel, a
-# video poster beacon, or a credential-harvesting `<form action>` into the
-# deliverable. A hyperlink is deliberately different: it fetches only on click.
 
 
 @pytest.mark.parametrize(
@@ -284,25 +220,16 @@ def test_an_in_package_resource_is_kept(markup: str) -> None:
 
 
 def test_an_external_hyperlink_is_kept() -> None:
-    """A link only fetches when the reader clicks it — that is their decision."""
     markup = '<a href="https://example.com/ref">ref</a>'
     assert scrub_source_document(markup) == markup
 
 
 def test_a_remote_css_url_is_neutralised() -> None:
-    """`@import` was gated; a plain `url()` was not, despite the docstring."""
     assert "evil" not in scrub_css_text("p{background:url(https://evil/x.png)}")
     assert "images/x.png" in scrub_css_text("p{background:url(images/x.png)}")
 
 
 def test_a_prose_lt_before_a_close_tag_does_not_eat_the_close() -> None:
-    """``<b on the other hand</p>`` is prose, not a tag with attributes.
-
-    ``_scan_tag_end`` stopped at the ``>`` of ``</p>`` and handed the whole
-    region to the attribute reader, which re-rendered the close into ``< p>`` and
-    deleted the words between. The ``<`` is now recognised as literal prose (a
-    bare ``<`` inside an unquoted tag region) and escaped in place.
-    """
     assert scrub_source_document("<b on the other hand</p>") == "&lt;b on the other hand</p>"
     assert (
         scrub_source_document("prose <b on the other hand</p> more")
@@ -311,26 +238,15 @@ def test_a_prose_lt_before_a_close_tag_does_not_eat_the_close() -> None:
 
 
 def test_a_real_tag_with_lt_inside_a_quoted_value_is_untouched() -> None:
-    """The prose guard must not fire on a ``<`` inside a quoted attribute value."""
     markup = '<img alt="a < b">'
     assert scrub_source_document(markup) == markup
     assert scrub_source_document("<div title='x < y'>z</div>") == "<div title='x < y'>z</div>"
 
 
 def test_an_unterminated_lt_escapes_the_remainder_instead_of_dropping_it() -> None:
-    """A ``<`` with no closing ``>`` must not delete the rest of the member.
-
-    Dropping the remainder shipped a truncated member; escaping the tail keeps
-    every following block (the ``<`` renders as literal text).
-    """
     out = scrub_source_document("<p>unterminated <b bold")
     assert out == "<p>unterminated &lt;b bold"
-    assert "bold" in out  # the tail survived
-
-
-# --------------------------------------------------------------------------- #
-# CSS and <mark> handling.
-# --------------------------------------------------------------------------- #
+    assert "bold" in out
 
 
 def test_scrub_css_drops_remote_import_and_keeps_relative() -> None:

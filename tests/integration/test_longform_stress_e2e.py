@@ -1,15 +1,3 @@
-"""End-to-end long-form PDF stress and memory benchmark: 45-page synthetic book.
-
-This module validates that:
-1. A 45-page synthetic PDF book runs end-to-end through PDFium Ingest,
-   Sliding Epoch Memory, MTQE, Consistency, and Typst compilation.
-2. Typst renderer produces valid PDF output (%PDF-) and delivers all chapters.
-3. Companion artifacts (XLIFF, HTML, EPUB, Attestation) are 100% generated
-   with non-zero sizes and valid durations.
-4. Process RSS memory remains strictly bounded without runaway leaks across
-   multi-page Typst compiles and long-form translation.
-"""
-
 from __future__ import annotations
 
 import shutil
@@ -37,7 +25,6 @@ pytestmark = [
 
 
 def _build_45_page_pdf(path: Path) -> Path:
-    """Build a synthetic 45-page PDF book where each page is an independent chapter."""
     pages = []
     for i in range(1, 46):
         title = f"Chapter {i}: Foundations of Geometry {i}"
@@ -51,7 +38,6 @@ def _build_45_page_pdf(path: Path) -> Path:
 
 
 async def test_45_page_pdf_e2e_stress_and_companion_attestation(tmp_path: Path) -> None:
-    """Run full 45-page synthetic PDF book through the entire pipeline and verify contracts."""
     book_pdf = _build_45_page_pdf(tmp_path / "book_45.pdf")
     output_pdf = tmp_path / "book_45_es.pdf"
     job_id = "longform-pdf-stress-45"
@@ -81,26 +67,21 @@ async def test_45_page_pdf_e2e_stress_and_companion_attestation(tmp_path: Path) 
     rss_end = proc.memory_info().rss
     rss_growth_mb = (rss_end - rss_start) / (1024 * 1024)
 
-    # 1. Pipeline reaches export completion
     assert len(events) > 0
     assert events[0].event_type is EventType.JOB_STARTED
     assert events[-1].event_type is EventType.EXPORT_COMPLETED
     assert not any(e.event_type is EventType.PIPELINE_FAILED for e in events)
 
-    # 2. Delivered PDF artifact validity
     assert output_pdf.exists()
     assert output_pdf.read_bytes()[:5] == b"%PDF-", "Delivered artifact is not a valid PDF"
 
-    # 3. Delivered text verification across sample pages
     delivered = " ".join(oxide_render.extract_page_texts(output_pdf))
     for i in (1, 10, 25, 45):
         assert f"In chapter {i}, mathematician Gauss and Archimedes" in delivered
         assert f"[模拟翻译] In chapter {i}" in delivered
 
-    # 4. Memory stability (< 250 MB RSS growth across 45-page Typst render)
     assert rss_growth_mb < 250.0, f"Excessive RSS growth during PDF run: {rss_growth_mb:.2f} MB"
 
-    # 5. Ledger invariants: all 45 blocks terminal
     mock_db = rehearsal_db_dir(tmp_path / "ledgers") / f"{job_id}.sqlite"
     ledger = SQLiteJobLedger(mock_db)
     try:
@@ -111,7 +92,6 @@ async def test_45_page_pdf_e2e_stress_and_companion_attestation(tmp_path: Path) 
         failed_blocks = [b.id for b in blocks if b.status.value in ("failed", "needs_human")]
         assert failed_blocks == []
 
-        # 6. Companion artifacts: all 4 kinds (including attestation) generated
         meta = ledger.get_job_metadata(job_id)
         companion_summary = meta.get("companion_artifacts")
         assert companion_summary is not None
@@ -123,7 +103,6 @@ async def test_45_page_pdf_e2e_stress_and_companion_attestation(tmp_path: Path) 
             assert results[kind]["size_bytes"] is not None and results[kind]["size_bytes"] > 0
             assert results[kind]["duration_ms"] is not None and results[kind]["duration_ms"] >= 0
 
-        # Physical attestation shadow file exists
         shadow = companion_path(output_pdf, "_attestations.json")
         assert shadow.exists()
     finally:

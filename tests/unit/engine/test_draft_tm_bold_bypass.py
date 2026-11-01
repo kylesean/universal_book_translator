@@ -1,11 +1,3 @@
-"""Exact TM hits and preserved emphasis.
-
-A TM entry can carry the target-side emphasis runs the marker mechanism produced
-(see ``ubt.core.ir.emphasis``). A hit that carries them restores the bold without
-a model call; an entry that predates runs is refused for a partial-bold block so
-the block is re-drafted instead of losing its bold.
-"""
-
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -111,7 +103,7 @@ async def test_a_bold_block_rejects_a_hit_without_emphasis_runs() -> None:
     tm = _TM(hit=SimpleNamespace(target_text="旧译文", runs_json=""))
     result, _ = await _prepare(_bold_block(), tm)
     assert tm.exact_calls == 1
-    assert result is not None  # falls through to the LLM draft
+    assert result is not None
 
 
 @pytest.mark.asyncio
@@ -119,7 +111,7 @@ async def test_a_bold_block_uses_a_hit_that_carries_runs() -> None:
     runs_json = runs_to_json((InlineRun(text="50.0%", bold=True),))
     tm = _TM(hit=SimpleNamespace(target_text="旧译文 50.0%", runs_json=runs_json))
     result, updates = await _prepare(_bold_block(), tm)
-    assert result is None  # served from TM
+    assert result is None
     assert len(updates) == 1
     assert updates[0]["tm_hit"] is True
     assert [r.text for r in updates[0]["style"].target_runs] == ["50.0%"]
@@ -130,4 +122,4 @@ async def test_a_plain_block_still_uses_the_exact_hit() -> None:
     tm = _TM(hit=SimpleNamespace(target_text="旧译文", runs_json=""))
     result, _ = await _prepare(_block("plain source"), tm)
     assert tm.exact_calls == 1
-    assert result is None  # served from TM
+    assert result is None

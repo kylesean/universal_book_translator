@@ -1,16 +1,3 @@
-"""The single-page preview must use the same compile gate as the delivery render.
-
-``page_preview`` reuses ``TypstDocumentRenderer`` for one page's blocks so the L3
-workbench can show a human edit without re-rendering the book. It used to build
-the renderer with no ``math_gate``, so a malformed formula the real delivery
-render would degrade to readable text reached the preview's compile verbatim and
-failed the *whole* preview (503) — the workbench could not show a page the
-deliverable renders fine.
-
-These tests pin the wiring without a compiler: the renderer is replaced with a
-spy that records its constructor kwargs and short-circuits before any rasterize.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -49,8 +36,6 @@ def test_preview_renderer_receives_the_math_gate(
         def build_source(
             self, blocks: list[IRBlock], build_dir: Path, target_lang: str
         ) -> tuple[str, Any]:
-            # Stop before the real compile/rasterize: the assertion is about how
-            # the renderer was constructed, not about Typst being installed.
             raise page_preview.PagePreviewUnavailable("spy: constructed")
 
     monkeypatch.setattr("ubt.render.typst.document_renderer.TypstDocumentRenderer", _SpyRenderer)

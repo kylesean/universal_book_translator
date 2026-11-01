@@ -1,18 +1,3 @@
-"""REST contract tripwire: the API surface's guarantees, pinned as fast tests.
-
-The REST surface was the one delivery path with zero coverage; these tests are
-the minimal defense — the *contract*, not the implementation:
-
-- the auth gate (``X-API-Key``, opt-in, ``/health`` exempt, docs closed when keyed);
-- the path sandbox (traversal, system dirs, sensitive names, allowlist containment);
-- the job intake contract (202 shape, rehearsal auto-labelling, sandbox rejection
-  before creation, output-conflict 409, idempotent resubmit, terminal status).
-
-Everything runs in-process over the ASGI transport with injected configuration —
-no network, no provider key, no model spend (keyless submission auto-runs as a
-zero-token rehearsal, which is itself one of the pinned contracts).
-"""
-
 from __future__ import annotations
 
 import time
@@ -59,23 +44,16 @@ def _write_doc(tmp_path: Path, name: str = "input.md") -> Path:
 
 @pytest.fixture()
 def authed(tmp_path: Path) -> Iterator[TestClient]:
-    """The keyed app: auth enforced, docs surface closed."""
     with TestClient(create_app(config=_config(tmp_path))) as client:
         yield client
 
 
 @pytest.fixture()
 def open_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
-    """The named escape hatch: no key + ``UBT_ALLOW_NO_AUTH`` boots open."""
     monkeypatch.setenv("UBT_ALLOW_NO_AUTH", "1")
     config = UBTConfig(db_dir=tmp_path / "db", allowed_dirs=str(tmp_path))
     with TestClient(create_app(config=config)) as client:
         yield client
-
-
-# --------------------------------------------------------------------------- #
-# Path sandbox (pure guard — no HTTP).
-# --------------------------------------------------------------------------- #
 
 
 def test_sandbox_rejects_traversal(tmp_path: Path) -> None:
@@ -86,9 +64,6 @@ def test_sandbox_rejects_traversal(tmp_path: Path) -> None:
 
 
 def test_sandbox_rejects_system_dirs_by_default(tmp_path: Path) -> None:
-    # No operator allowlist: the fallback sandbox (cwd + db_dir) plus the
-    # hard-coded system deny list protect /etc even though the containment
-    # rule alone would also refuse it.
     config = UBTConfig(db_dir=tmp_path / "db")
     with pytest.raises(HTTPException) as err:
         resolve_secure_path("/etc/passwd", config=config)
@@ -97,8 +72,6 @@ def test_sandbox_rejects_system_dirs_by_default(tmp_path: Path) -> None:
 
 
 def test_sandbox_sensitive_names_beat_the_allowlist(tmp_path: Path) -> None:
-    # An allowlist is a scope decision, not a licence to serve secrets that
-    # live beside the books (.ssh/.env/credentials.json, casefolded).
     with pytest.raises(HTTPException) as err:
         resolve_secure_path(tmp_path / "project" / ".env", config=_config(tmp_path))
     assert err.value.status_code == 403
@@ -118,11 +91,6 @@ def test_sandbox_missing_file_is_400(tmp_path: Path) -> None:
     assert "Source file not found" in str(err.value.detail)
 
 
-# --------------------------------------------------------------------------- #
-# Auth gate.
-# --------------------------------------------------------------------------- #
-
-
 def test_health_is_exempt_from_auth(authed: TestClient) -> None:
     response = authed.get("/health")
     assert response.status_code == 200
@@ -140,23 +108,16 @@ def test_missing_and_wrong_keys_are_401(authed: TestClient) -> None:
 
 
 def test_correct_key_reaches_the_route(authed: TestClient) -> None:
-    # Auth passes and the request reaches the handler. Assert on a route that
-    # must succeed for a valid key: an unknown-id 404 also holds when the whole
-    # authenticated surface is broken (e.g. a router that 404s everything), so
-    # it proves nothing about the gate letting a request through.
     response = authed.get("/health", headers=_AUTH)
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
 
-    # And an authenticated route answers as its handler intends (404 for an
-    # unknown job, with the handler's detail rather than the auth gate's).
     missing = authed.get("/jobs/does-not-exist/status", headers=_AUTH)
     assert missing.status_code == 404
     assert "Job not found" in missing.json()["detail"]
 
 
 def test_docs_surface_closes_when_keyed(authed: TestClient) -> None:
-    # A keyed server must not publish its schema to unauthenticated readers.
     assert authed.get("/openapi.json").status_code == 404
     assert authed.get("/docs").status_code == 404
 
@@ -169,9 +130,6 @@ def test_open_server_boots_and_serves_docs(open_client: TestClient) -> None:
 def test_blank_key_is_a_500_not_silent_open(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A set-but-whitespace key is a misconfiguration: refuse requests instead
-    # of silently dropping the gate the operator believes is on. (Non-health
-    # route: /health is exempt from the gate entirely.)
     monkeypatch.setenv("UBT_ALLOW_NO_AUTH", "1")
     config = UBTConfig(
         db_dir=tmp_path / "db", allowed_dirs=str(tmp_path), service_api_key=SecretStr("   ")
@@ -197,10 +155,6 @@ def test_boot_strict_mode_with_no_key_fails_fast(tmp_path: Path) -> None:
 def test_boot_strict_mode_wins_over_the_no_auth_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Strict mode is a deployment promise; UBT_ALLOW_NO_AUTH is a process
-    # convenience that tools set implicitly (``ubt console`` exports it). The
-    # override winning let a strict production server boot open whenever
-    # anything set the variable.
     monkeypatch.setenv("UBT_ALLOW_NO_AUTH", "1")
     config = UBTConfig(db_dir=tmp_path / "db", strict_auth=True)
     with pytest.raises(SystemExit):
@@ -208,18 +162,13 @@ def test_boot_strict_mode_wins_over_the_no_auth_override(
 
 
 def test_the_session_cookie_is_a_digest_never_the_key(tmp_path: Path) -> None:
-    # The cookie rides requests a browser cannot attach headers to (SSE,
-    # previews, downloads). It must not be a replayable copy of the key.
     key = "the-service-key"
     value = session_cookie_value(key)
     assert value != key and key not in value
-    assert len(value) == 64  # sha256 hexdigest
+    assert len(value) == 64
 
 
 def test_session_round_trip_authenticates_headerless_requests(tmp_path: Path) -> None:
-    # Sign in with the header, then drop it: the cookie alone must carry an
-    # SSE-stream request (the exact case EventSource cannot header-authenticate)
-    # and a normal API call, and clearing it must close the gate again.
     client = TestClient(create_app(_config(tmp_path)))
     assert client.get("/jobs", headers=_AUTH).status_code == 200
 
@@ -232,12 +181,8 @@ def test_session_round_trip_authenticates_headerless_requests(tmp_path: Path) ->
     client.cookies.clear()
     client.cookies.set("ubt_session", cookie)
     assert client.get("/jobs").status_code == 200
-    assert client.get("/jobs/nosuchjob00/stream").status_code == 404  # past the gate
+    assert client.get("/jobs/nosuchjob00/stream").status_code == 404
 
-    # Logout is a client-side clear: the response must expire the cookie on the
-    # browser. (The value is a deterministic digest of the key, so the server
-    # cannot invalidate a copied cookie -- rotating the key is the revocation
-    # path, exactly as it is for the header itself.)
     dropped = client.delete("/system/session")
     assert dropped.status_code == 200
     expired = dropped.headers["set-cookie"]
@@ -253,11 +198,6 @@ def test_session_sign_in_requires_a_valid_key(authed: TestClient) -> None:
 def test_a_forged_session_cookie_is_rejected(authed: TestClient) -> None:
     authed.cookies.set("ubt_session", "0" * 64)
     assert authed.get("/jobs").status_code == 401
-
-
-# --------------------------------------------------------------------------- #
-# Job intake contract.
-# --------------------------------------------------------------------------- #
 
 
 def test_submit_rejects_traversal_before_creating_a_job(authed: TestClient) -> None:
@@ -282,8 +222,6 @@ def test_invalid_payload_is_422(authed: TestClient) -> None:
 
 
 def test_submit_response_shape_and_rehearsal_labelling(authed: TestClient, tmp_path: Path) -> None:
-    # No injected router and no provider key: the intake must auto-label the
-    # run as a rehearsal so a keyless server can never report a mock as real.
     doc = _write_doc(tmp_path)
     response = authed.post("/jobs/submit", json={"input_path": str(doc)}, headers=_AUTH)
     assert response.status_code == 202
@@ -307,7 +245,6 @@ def test_status_reaches_a_terminal_state(authed: TestClient, tmp_path: Path) -> 
         if status in _TERMINAL_STATUSES:
             break
         time.sleep(0.2)
-    # A zero-token rehearsal over a two-line markdown must finish cleanly.
     assert status == "completed", f"rehearsal job ended as {status!r}"
 
 
@@ -328,7 +265,6 @@ def _ids(body: str) -> list[int]:
 def test_stream_frames_carry_ids_and_replay_from_a_cursor(
     authed: TestClient, tmp_path: Path
 ) -> None:
-    # A finished rehearsal job gives a bounded, deterministic stream.
     doc = _write_doc(tmp_path)
     job_id = authed.post("/jobs/submit", json={"input_path": str(doc)}, headers=_AUTH).json()[
         "job_id"
@@ -342,11 +278,10 @@ def test_stream_frames_carry_ids_and_replay_from_a_cursor(
     ids = _ids(first.text)
     assert ids, "the stream must stamp each frame with an id: cursor"
 
-    # Reconnecting with a cursor replays the missed frames before the snapshot.
     replayed = authed.get(f"/jobs/{job_id}/stream?last_event_id=0", headers=_AUTH)
     replay_ids = _ids(replayed.text)
     assert replay_ids[: len(ids)] == ids
-    assert len(replay_ids) > len(ids)  # ...then a fresh snapshot follows
+    assert len(replay_ids) > len(ids)
 
 
 def test_stream_rejects_an_unknown_job(authed: TestClient) -> None:
@@ -359,17 +294,12 @@ def test_resume_rejects_a_completed_job(authed: TestClient, tmp_path: Path) -> N
         "job_id"
     ]
     _await_terminal(authed, job_id)
-    # Only a failed/cancelled job resumes; a completed one is a 409.
     assert authed.post(f"/jobs/{job_id}/resume", headers=_AUTH).status_code == 409
 
 
 def test_resume_keeps_the_output_path_claim_that_submit_guards(
     authed: TestClient, tmp_path: Path
 ) -> None:
-    # While a job sits failed/cancelled its output path is up for grabs, so a
-    # fresh submit may already own it. Resuming anyway would run two pipelines
-    # into one deliverable (last writer wins) — the same collision submit
-    # refuses. The claim is re-checked at resume.
     doc = _write_doc(tmp_path)
     out = tmp_path / "shared_deliverable.md"
     submitted = authed.post(
@@ -388,7 +318,6 @@ def test_resume_keeps_the_output_path_claim_that_submit_guards(
 
     assert response.status_code == 409
     assert "output_path already claimed by live job sharedpath01" in response.json()["detail"]
-    # The refusal left the record resumable, like the capacity check.
     refused = manager.get_job("sharedpath02")
     assert refused is not None and refused.status == JobStatus.FAILED
 
@@ -396,13 +325,9 @@ def test_resume_keeps_the_output_path_claim_that_submit_guards(
 def test_resume_ignores_terminal_holders_of_the_output_path(
     authed: TestClient, tmp_path: Path
 ) -> None:
-    # The mirror of the guard: a failed/cancelled holder does not block, else
-    # re-running a failed job would be impossible once any earlier job failed.
     doc = _write_doc(tmp_path)
     out = tmp_path / "serial_deliverable.md"
     manager: JobManager = authed.app.state.job_manager  # type: ignore[attr-defined]
-    # dry_run mirrors what the keyed app itself would set for a keyless submit
-    # (zero-token rehearsal), so the resumed run completes without a provider.
     first = manager.create_job(
         JobSubmitRequest(input_path=str(doc), output_path=str(out), dry_run=True),
         job_id="serialpath1",
@@ -427,14 +352,6 @@ def test_resume_unknown_job_is_404(authed: TestClient) -> None:
 def test_resume_after_restart_restores_the_request_from_the_ledger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A restart must not turn a resumable ledger into a 404.
-
-    The manager is process memory; the ledger is the durable record. The
-    accepted request is persisted with the placeholder, so the restarted app can
-    reconstruct the exact model/profile/output choices and continue rather than
-    asking the operator to resubmit and potentially mix a different run into the
-    same checkpoints.
-    """
     from ubt.core.engine.ledger import SQLiteJobLedger
 
     resumed_requests: list[JobSubmitRequest] = []
@@ -486,7 +403,6 @@ def test_resume_after_restart_restores_the_request_from_the_ledger(
 def test_resume_reconstructs_an_old_ledger_without_a_request_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Pre-snapshot ledgers remain resumable when their run identity is complete."""
     from ubt.core.engine.ledger import SQLiteJobLedger
 
     started: list[JobSubmitRequest] = []
@@ -543,7 +459,6 @@ def test_resume_reconstructs_an_old_ledger_without_a_request_snapshot(
 def test_resume_refuses_a_live_ledger_writer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A restart must not become a second writer of a live job."""
     from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.engine.writer_lock import LedgerWriterLock
 
@@ -598,8 +513,6 @@ def test_submit_conflicting_output_is_409(authed: TestClient, tmp_path: Path) ->
 def test_submit_fresh_does_not_overwrite_an_unrelated_existing_file(
     authed: TestClient, tmp_path: Path
 ) -> None:
-    # ``fresh`` resumes the ledger; it must not license clobbering an arbitrary
-    # file inside the sandbox (ubt.toml, job_queue.sqlite, another job's output).
     doc = _write_doc(tmp_path)
     secret = tmp_path / "ubt.toml"
     secret.write_text("[provider]\napi_key = 'do-not-lose-me'\n", encoding="utf-8")
@@ -610,7 +523,6 @@ def test_submit_fresh_does_not_overwrite_an_unrelated_existing_file(
     )
     assert response.status_code == 409
     assert "output_path already exists" in response.json()["detail"]
-    # The colliding file must be untouched.
     assert "do-not-lose-me" in secret.read_text(encoding="utf-8")
 
 
@@ -638,9 +550,7 @@ def test_is_own_prior_output_requires_the_same_job(tmp_path: Path) -> None:
     prior = _Prior({"input_path": str(doc), "output_path": str(out)})
     target = resolve_target_output(out, doc)
     assert _is_own_prior_output("job-1", target, _Queue(prior), _Manager()) is True
-    # A different job id may not overwrite another job's output.
     assert _is_own_prior_output("job-2", target, _Queue(None), _Manager()) is False
-    # No job id at all is never authorized.
     assert _is_own_prior_output(None, target, _Queue(prior), _Manager()) is False
 
 
@@ -657,18 +567,6 @@ def test_resubmit_with_same_id_is_idempotent(authed: TestClient, tmp_path: Path)
 def test_a_repeated_submit_reports_that_it_reused_the_job(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``reused`` is how a caller tells "I started this" from "it already existed".
-
-    The status code and the job id are identical either way, so without this flag
-    a double-clicked submit is indistinguishable from a fresh run — and the
-    console navigated to a progress page for a job whose bar was already at 60%.
-
-    The record is held non-terminal by stubbing ``execute_job``: a real
-    ``TestClient`` cancels the background task when the request scope ends, and a
-    ``cancelled`` id is deliberately *re-runnable* (resubmitting a dead id is a
-    request to run it again), so it would take the fresh-run branch and prove
-    nothing about reuse.
-    """
 
     async def _stay_running(self: JobManager, record: JobRecord, config: Any) -> None:
         record.status = JobStatus.RUNNING
@@ -690,12 +588,6 @@ def test_a_repeated_submit_reports_that_it_reused_the_job(
 def test_resubmit_with_different_arguments_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The id is an idempotency key for one request, not one input file.
-
-    Before this guard, reusing a live id with a different target language
-    returned the first job, so the caller's second request (a different
-    language) was silently answered by the first run's artifact.
-    """
 
     async def _stay_running(self: JobManager, record: JobRecord, config: Any) -> None:
         record.status = JobStatus.RUNNING
@@ -731,13 +623,6 @@ def test_resubmit_with_different_arguments_is_refused(
 def test_an_accepted_job_survives_a_restart_before_ingest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Submit must leave a durable row before the background task can be lost.
-
-    The SOCKS-proxy failure happened after intake but before ingest created a
-    ledger. Restarting the console erased the only in-memory record, so the id
-    the client had just received answered 404 forever. The placeholder must
-    survive and report a terminal failure instead.
-    """
 
     async def _stay_running(self: JobManager, record: JobRecord, config: Any) -> None:
         record.status = JobStatus.RUNNING
@@ -781,14 +666,6 @@ def test_submit_capacity_exceeded_is_429(
 
 
 def test_a_cancelled_job_holds_its_slot_until_its_task_settles(tmp_path: Path) -> None:
-    """The cancel window must not free a capacity slot.
-
-    ``cancel_job`` flips the status to CANCELLED and cancels the task, but the
-    coroutine unwinds asynchronously (releasing the writer lock, closing
-    provider connections). ``ensure_capacity`` counted by status alone, so a
-    submit landing in that window saw a free slot and could start a pipeline
-    while the cancelled one was still tearing down — breaching the cap.
-    """
     from ubt.core.exceptions import ServerCapacityError
 
     class _Unwinding:
@@ -806,7 +683,6 @@ def test_a_cancelled_job_holds_its_slot_until_its_task_settles(tmp_path: Path) -
     with pytest.raises(ServerCapacityError):
         manager.ensure_capacity()
 
-    # Once the cancelled task has actually settled, the slot is genuinely free.
     record.task = _Settled()  # type: ignore[assignment]
     manager.ensure_capacity()
 
@@ -814,13 +690,6 @@ def test_a_cancelled_job_holds_its_slot_until_its_task_settles(tmp_path: Path) -
 def test_default_output_lands_in_per_job_outputs_dir(
     authed: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No ``output_path`` → the API derives ``db_dir/outputs/<job_id>/<stem>_bilingual<ext>``.
-
-    Deliverables must not sit beside the staged upload (sources and
-    translations mixed in one directory) nor silently in the caller's cwd —
-    the per-job directory is the contract the console's deliverable links and
-    the operator's cleanup scripts both rely on.
-    """
     from ubt.api.manager import JobManager
     from ubt.core.exceptions import DocumentParseError
 
@@ -840,10 +709,6 @@ def test_default_output_lands_in_per_job_outputs_dir(
     assert isinstance(job_id, str) and job_id.startswith("job_")
     out = Path(captured["request"].output_path)
     assert out == (tmp_path / "db" / "outputs" / job_id).resolve()
-    # A rejected submit (400 here) must not leave the per-job directory behind:
-    # the directory is created only once the submit is accepted, so a refused
-    # job id leaves no ghost in the outputs tree. The source staging area stays
-    # free of deliverables either way.
     assert not out.is_dir()
     assert "uploads" not in out.parts
 
@@ -916,9 +781,6 @@ def test_job_submit_request_carries_emit_both() -> None:
 
 
 def test_output_path_claimant_sees_a_job_still_sitting_in_the_queue(tmp_path: Path) -> None:
-    # ``manager.jobs`` only knows what this process started; in queue mode the
-    # rival claimant is usually still QUEUED, and the in-memory scan alone let
-    # both submissions through.
     from ubt.api.app import _output_path_claimant
     from ubt.core.engine.job_queue import JobStatus as QueueStatus
 
@@ -949,13 +811,10 @@ def test_output_path_claimant_sees_a_job_still_sitting_in_the_queue(tmp_path: Pa
     queued = _Queue([_Queued("queued0001", QueueStatus.QUEUED, str(target))])
     assert _output_path_claimant(_Manager([]), queued, "newjob0001", target) == "queued0001"
 
-    # A retired row's claim is up for grabs, and the submitter's own id is not a
-    # rival to itself.
     done = _Queue([_Queued("donejob001", QueueStatus.COMPLETED, str(target))])
     assert _output_path_claimant(_Manager([]), done, "newjob0001", target) is None
     assert _output_path_claimant(_Manager([]), queued, "queued0001", target) is None
 
-    # The in-memory map still wins its own case.
     live = _Manager([_Record("livejob001", str(target))])
     assert _output_path_claimant(live, _Queue([]), "newjob0001", target) == "livejob001"
 
@@ -988,14 +847,6 @@ def test_submit_in_queue_mode_refuses_a_path_a_queued_job_already_claims(tmp_pat
 
 
 def test_queue_mode_stream_serves_a_terminal_job_without_polling_threads(tmp_path: Path) -> None:
-    """The queue-mode stream routes through the shared broadcaster, not a poll pool.
-
-    A terminal job must answer immediately with its terminal frame: the
-    broadcaster fans the row out from its own poll loop and the subscriber's
-    first frame is the snapshot the route already read. This pins the route's
-    wiring to ``QueueSseBroadcaster`` (the per-stream ``job_queue.get`` polling
-    and the 4-thread pool are gone).
-    """
     from ubt.core.engine.job_queue import JobQueue, JobStatus
 
     queue = JobQueue(tmp_path / "db" / "job_queue.sqlite")
@@ -1018,14 +869,6 @@ def test_queue_mode_stream_serves_a_terminal_job_without_polling_threads(tmp_pat
 def test_is_own_prior_output_directory_licenses_only_the_derived_deliverable(
     tmp_path: Path,
 ) -> None:
-    """A prior run that named a *directory* licenses only its derived deliverable.
-
-    The reported defect: ``_is_own_prior_output``'s directory branch compared
-    only the parent directory, so a job id that once ran with
-    ``output_path='/books/'`` could then overwrite ``/books/anything.md`` — a
-    sibling job's output or a human's manuscript. The licence is now the exact
-    derived deliverable name(s), never the whole tree.
-    """
     from ubt.api.app import _is_own_prior_output
 
     class _Prior:
@@ -1050,17 +893,14 @@ def test_is_own_prior_output_directory_licenses_only_the_derived_deliverable(
     prior = _Prior({"input_path": str(doc), "output_path": f"{books}/"})
     queue, manager = _Queue(prior), _Manager()
 
-    # The derived deliverable inside the directory IS the job's own output.
     own = resolve_target_output(books, doc)
     assert _is_own_prior_output("job-1", own, queue, manager) is True
-    # A different file in that directory is NOT.
     victim = books / "someone_elses_manuscript.md"
     assert _is_own_prior_output("job-1", victim, queue, manager) is False
 
 
 @pytest.mark.asyncio
 async def test_job_manager_safe_error_formatting(tmp_path: Path) -> None:
-    """Verify safe domain errors (e.g. BudgetExceededError) are exposed directly while generic ones are masked."""
     manager = JobManager()
     dummy_input = tmp_path / "dummy.md"
     dummy_input.write_text("hello", encoding="utf-8")
@@ -1072,7 +912,6 @@ async def test_job_manager_safe_error_formatting(tmp_path: Path) -> None:
         service_api_key=SecretStr(_API_KEY),
     )
 
-    # 1. BudgetExceededError should be directly readable in record.error
     with patch("ubt.core.engine.job_runner.PipelineOrchestrator") as mock_orch_cls:
 
         async def mock_run_budget(*args: object, **kwargs: object) -> AsyncGenerator[Any, None]:
@@ -1086,7 +925,6 @@ async def test_job_manager_safe_error_formatting(tmp_path: Path) -> None:
     assert record.status == "failed"
     assert record.error == "BudgetExceededError: Budget cap of $5.00 exceeded"
 
-    # 2. Sensitive internal exceptions must be masked to prevent data/credential leaks
     with patch("ubt.core.engine.job_runner.PipelineOrchestrator") as mock_orch_cls:
 
         async def mock_run_secret(*args: object, **kwargs: object) -> AsyncGenerator[Any, None]:
@@ -1102,7 +940,6 @@ async def test_job_manager_safe_error_formatting(tmp_path: Path) -> None:
 
 
 def test_job_submit_request_accepts_pdf_engine() -> None:
-    """Verify JobSubmitRequest validates and accepts pdf_engine."""
     req = JobSubmitRequest(input_path="book.pdf", pdf_engine="pdfium")
     assert req.pdf_engine == "pdfium"
 
@@ -1113,15 +950,6 @@ def test_job_submit_request_accepts_pdf_engine() -> None:
 def test_reparse_is_the_one_way_a_finished_job_is_parsed_again(
     authed: TestClient, tmp_path: Path
 ) -> None:
-    """Re-rendering and resuming both keep the old parse; only this discards it.
-
-    A parse-stage fix (block splitting, table reconstruction, figure and formula
-    crops) cannot reach a finished job any other way: ``resume`` explicitly
-    refuses to re-fresh because that would throw away the checkpoints it exists
-    to keep, and a re-export re-runs only the export stage over the text the
-    ledger already holds — so the delivered file keeps the artefacts the old
-    code cut, however many times it is rendered.
-    """
     doc = _write_doc(tmp_path)
     job_id = authed.post("/jobs/submit", json={"input_path": str(doc)}, headers=_AUTH).json()[
         "job_id"
@@ -1132,19 +960,16 @@ def test_reparse_is_the_one_way_a_finished_job_is_parsed_again(
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["job_id"] == job_id
-    # It starts a new run rather than returning the finished one.
     assert body["status"] in ("submitted", "queued", "running")
 
     _await_terminal(authed, job_id)
 
 
 def test_reparse_refuses_a_job_that_is_still_running(authed: TestClient, tmp_path: Path) -> None:
-    """Discarding a live run's ledger would corrupt it from underneath."""
     doc = _write_doc(tmp_path)
     job_id = authed.post("/jobs/submit", json={"input_path": str(doc)}, headers=_AUTH).json()[
         "job_id"
     ]
-    # Submit and re-parse immediately: the run is certainly not finished yet.
     res = authed.post(f"/jobs/{job_id}/reparse", headers=_AUTH)
     assert res.status_code == 409
     assert "only a finished job" in res.json()["detail"].lower()
@@ -1152,8 +977,5 @@ def test_reparse_refuses_a_job_that_is_still_running(authed: TestClient, tmp_pat
 
 
 def test_reparse_refuses_an_unknown_job(authed: TestClient) -> None:
-    """A job with no in-session record must be resubmitted, not silently
-    reconstructed: the ledger does not carry the model/preset/output choices,
-    so a rebuilt request would run a different job than the one asked for."""
     res = authed.post("/jobs/unknownjob99/reparse", headers=_AUTH)
     assert res.status_code == 404

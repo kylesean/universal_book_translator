@@ -1,27 +1,3 @@
-"""The delivery contract: eight invariants, one verdict, no self-grading.
-
-The current export path writes a quality report, an attestation sidecar and a
-visual report, and then ships even when they disagree with each other. The
-26-page BSIM-CMG job is the measured example: 151/155 text realizations, 43
-missing assets, seven ``needs_human`` rows, pages that visibly overlap — and a
-report that says ``passed: true`` with ``needs_human_blocks: 0``.
-
-This module is the single verdict those separate reports were missing. It reads
-*evidence* (page text, artifact text boxes, page bounds, asset/font findings,
-render overflow records) and returns one report. The tests below are pure data:
-they pin each invariant without a compiler, so a red test names the exact
-contract that failed rather than a page number.
-
-Two rules are deliberate and are asserted here:
-
-* **Unmeasured is not clean.** A check that could not run must say so; silence
-  must never be reported as a pass. The old visual gate's ``passed: true`` on a
-  page it never sampled is the failure this rule exists to prevent.
-* **A clipped block is not a smaller block.** ``clip: true`` stops ink from
-  painting outside its box, which is correct, but the text that did not fit is
-  still lost. ``clipped_overflow`` is therefore critical, not cosmetic.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -148,7 +124,6 @@ def test_a_missing_block_is_critical() -> None:
 
 
 def test_a_duplicated_block_is_critical() -> None:
-    """The p2/p3 defect: one paragraph appended to both pages."""
     report = evaluate_delivery_contract(
         _evidence(
             blocks=(_block("b1", "跨页段落必须只出现一次，不能在两页重复。"),),
@@ -163,7 +138,6 @@ def test_a_duplicated_block_is_critical() -> None:
 
 
 def test_partial_text_is_clipped_overflow_not_a_pass() -> None:
-    """``clip: true`` hides the ink; it must not hide the missing text."""
     expected = "在鳍片表面任意位置处的表面电势是通过在鳍片表面评估两个分量之和得到的完整句子。"
     clipped = expected[:18]
     report = evaluate_delivery_contract(
@@ -177,7 +151,6 @@ def test_partial_text_is_clipped_overflow_not_a_pass() -> None:
 
 
 def test_an_overflow_record_with_full_text_is_major_not_critical() -> None:
-    """A recorded overflow that did not actually cut text is still not clean."""
     report = evaluate_delivery_contract(
         _evidence(
             blocks=(_block("b1", "完整译文仍然在页面上。"),),
@@ -193,16 +166,13 @@ def test_an_overflow_record_with_full_text_is_major_not_critical() -> None:
 
 
 def test_large_text_overlap_is_critical_but_formula_fragments_are_not() -> None:
-    """p2's heading-on-body overlap is large; formula superscripts are not."""
     report = evaluate_delivery_contract(
         _evidence(
             blocks=(_block("b1", "正文完整译文。"), _block("b2", "标题完整译文。")),
             page_texts=("正文完整译文。标题完整译文。",),
             boxes=(
-                # A heading box and a body box genuinely on top of each other.
                 _box(1, 120.0, 500.0, 420.0, 540.0, block_id="b2"),
                 _box(1, 120.0, 495.0, 420.0, 535.0, block_id="b1"),
-                # Formula debris: tiny fragments that legitimately stack.
                 _box(1, 300.0, 200.0, 312.0, 204.0, font_size_pt=None),
                 _box(1, 300.0, 201.0, 316.0, 205.0, font_size_pt=None),
             ),
@@ -215,12 +185,6 @@ def test_large_text_overlap_is_critical_but_formula_fragments_are_not() -> None:
 
 
 def test_nested_formula_aggregate_is_not_an_overlap() -> None:
-    """PDFium returns the whole formula rect and the glyph rects inside it.
-
-    The 26-page replay produced 47 ``text_overlap`` findings from these
-    aggregate/child pairs. A parent whose text is a superset of the child is
-    one formula, not two blocks on top of each other.
-    """
     report = evaluate_delivery_contract(
         _evidence(
             blocks=(),
@@ -235,7 +199,6 @@ def test_nested_formula_aggregate_is_not_an_overlap() -> None:
 
 
 def test_formula_subfragment_outside_aggregate_is_not_an_overlap() -> None:
-    """A formula subscript can extend past the aggregate rect's bottom edge."""
     report = evaluate_delivery_contract(
         _evidence(
             blocks=(),
@@ -250,7 +213,6 @@ def test_formula_subfragment_outside_aggregate_is_not_an_overlap() -> None:
 
 
 def test_equal_sized_duplicate_boxes_are_still_an_overlap() -> None:
-    """The aggregate exception must not hide a real duplicate text layer."""
     report = evaluate_delivery_contract(
         _evidence(
             blocks=(),
@@ -314,12 +276,6 @@ def test_a_placeholder_leak_is_critical() -> None:
 
 
 def test_every_placeholder_occurrence_is_reported() -> None:
-    """AD-022: one message hid two more leaks behind the first one.
-
-    The 26-page replay needed three separate repairs, and after each one the
-    report showed the *same shape* of message — indistinguishable from a defect
-    that cannot be fixed. The finding now counts them and lists each excerpt.
-    """
     report = evaluate_delivery_contract(
         _evidence(
             blocks=(_block("b1", "完整译文。"),),
@@ -344,14 +300,6 @@ def test_every_placeholder_occurrence_is_reported() -> None:
 
 
 def test_a_stray_markup_tag_in_the_artifact_is_critical() -> None:
-    """A tag measured in the rendered artifact means the strip was bypassed.
-
-    The 18-page ATC'25 replay shipped ``RustyHermit-MPK [59]</span>`` nine
-    times: a model echoed a converter's link span straight into its
-    translation. The sanitizer deletes the tag before render, so the contract
-    only ever sees one when some path skipped the sanitizer — and that is
-    exactly when the page is printing machinery.
-    """
     report = evaluate_delivery_contract(
         _evidence(
             blocks=(_block("b1", "完整译文。"),),
@@ -378,14 +326,6 @@ def test_a_clean_artifact_carries_no_occurrence_list() -> None:
 
 
 def test_formula_subscript_cluster_is_not_an_overlap() -> None:
-    """The readable replay's shape: ``𝑉t`` 7.5pt under ``𝑉tm`` 4.66pt.
-
-    pdfium's rect for the base glyph carries the shorter text and the
-    subscript's rect the longer one, so the *containment* points from the larger
-    area to the smaller. Same glyph cluster at two sizes, printed once — not two
-    blocks colliding. A same-size duplicate of the same text must still be
-    flagged, because that one is a real double layer.
-    """
     report = evaluate_delivery_contract(
         _evidence(
             blocks=(_block("b1", "正文。"),),
@@ -458,7 +398,6 @@ def test_style_drift_is_major() -> None:
 
 
 def test_unmeasured_style_is_not_clean() -> None:
-    """A contract that could not measure style must say so, not pass silently."""
     report = evaluate_delivery_contract(
         _evidence(
             blocks=(_block("b1", "完整译文。"),),
@@ -486,16 +425,10 @@ def test_report_serializes_to_a_stable_payload() -> None:
 
 
 def test_mixed_cjk_latin_prose_run_clipping_and_duplication_are_caught() -> None:
-    """Regression for the _run_present loophole (the old bag-of-words fallback):
-    A CJK paragraph containing ASCII tokens (e.g. (3.1), GCA, DG) must not fall
-    into whitespace-tokenized Latin matching or single-character bag-of-words
-    matching across the book.
-    """
     full_text = (
         "其中 $V_{ch}$ 是沟道的准费米电势，它仅具有 $y$ 方向的空间依赖性。"
         "请注意，方程 (3.1) 是一个一维的泊松方程，其他两个维度被忽略是由于沟道长度较长（GCA 条件）以及 DG 结构。"
     )
-    # 1. Clipped second run (even when characters appear scattered elsewhere)
     clipped_rep = evaluate_delivery_contract(
         _evidence(
             blocks=(_block("b0050", full_text, page=1, allow_cross_page=False),),
@@ -510,7 +443,6 @@ def test_mixed_cjk_latin_prose_run_clipping_and_duplication_are_caught() -> None
     )
     assert "clipped_overflow" in _codes(clipped_rep)
 
-    # 2. Duplicated first run across page 1 and page 2 (GAP-4 b0014 regression)
     dup_rep = evaluate_delivery_contract(
         _evidence(
             blocks=(_block("b0014", full_text, page=1, allow_cross_page=False),),
@@ -527,10 +459,6 @@ def test_mixed_cjk_latin_prose_run_clipping_and_duplication_are_caught() -> None
 
 
 def test_cross_page_prose_run_with_footer_page_number_and_zwsp_is_accepted() -> None:
-    """A reflowed paragraph wrapping from page 1 to page 2 across a trailing
-    page-number footer and zero-width space after hyphen is recognized as
-    present without weakening contiguous run verification.
-    """
     block_text = "求解漂移-扩散方程与圆柱形全环绕栅极 Cy-GAA 的核心模型基于对掺杂双栅极鳍式场效应晶体管的泊松方程解。"
     report = evaluate_delivery_contract(
         _evidence(
@@ -547,10 +475,6 @@ def test_cross_page_prose_run_with_footer_page_number_and_zwsp_is_accepted() -> 
 
 
 def test_smart_quotes_and_typographic_apostrophes_are_accepted() -> None:
-    """Typographical quotes and apostrophes emitted by Typst (e.g. ’ / ′ / “ / ”)
-
-    must match source ASCII quotes (' / \") without triggering false-positive clipped_overflow.
-    """
     block_text = "In SOSP'23, Kimi-K2.5's Agent Swarm used OpenAI's \"Code Interpreter\" framework."
     report = evaluate_delivery_contract(
         _evidence(
@@ -566,7 +490,6 @@ def test_smart_quotes_and_typographic_apostrophes_are_accepted() -> None:
 
 
 def test_page_level_overflow_record_is_not_dropped() -> None:
-    """Page-level OverflowRecord(block_id='page:1') must emit overflow_recorded."""
     report = evaluate_delivery_contract(
         _evidence(
             blocks=(_block("b1", "正文内容。"),),
@@ -587,16 +510,11 @@ def test_page_level_overflow_record_is_not_dropped() -> None:
 
 
 def test_large_box_edge_overlap_is_not_exempted_as_aggregate() -> None:
-    """A body paragraph box (> 300pt²) colliding at its edge with a smaller
-    label box whose characters happen to appear in the paragraph must still be
-    flagged as text_overlap when geometric containment < 80%.
-    """
     report = evaluate_delivery_contract(
         _evidence(
             blocks=(_block("b1", "正文。"),),
             page_texts=("正文。",),
             boxes=(
-                # Large paragraph box: 300pt x 50pt = 15,000pt²
                 _box(
                     1,
                     100.0,
@@ -606,7 +524,6 @@ def test_large_box_edge_overlap_is_not_exempted_as_aggregate() -> None:
                     text="这里讨论了 FIG 3.1 的核心结构与参数设置。",
                     font_size_pt=9.5,
                 ),
-                # Small caption/heading box (50pt x 10pt = 500pt²) overlapping by 25% (y: 145..150 -> 5pt * 50pt = 250 / 500 = 50% < 80%)
                 _box(
                     1,
                     120.0,
@@ -623,13 +540,6 @@ def test_large_box_edge_overlap_is_not_exempted_as_aggregate() -> None:
 
 
 def test_a_declared_flow_expansion_passes_with_more_pages() -> None:
-    """The middle contract: a squeezed page holds the body size and flows.
-
-    The renderer declared the expansion before drawing, so a faithful artifact
-    with MORE pages than the source is the contract holding -- the one thing
-    that regenerates freely (page count) traded for the two that do not (type
-    size and content). Fewer pages stays critical in every case.
-    """
     common_blocks = (_block("b1", "第一段完整译文。"), _block("b2", "第二段完整译文。"))
     common_texts = ("第一段完整译文。", "第二段完整译文。", "延续页上的后续内容。")
 

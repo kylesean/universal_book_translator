@@ -1,13 +1,3 @@
-"""Tests for the Docling accelerator-device knob (``UBT_DOCLING_DEVICE``).
-
-Whether Docling *runs* and whether it touches the *GPU* are separate decisions.
-A local LLM sharing one card fails to load its weights when Docling holds a
-~1.6 GB CUDA context, so ``UBT_DOCLING_DEVICE=cpu`` must keep Docling off the
-card without changing which engine was chosen.
-
-See docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md §L4.
-"""
-
 from __future__ import annotations
 
 import os
@@ -25,11 +15,10 @@ pytestmark = pytest.mark.fast
 
 
 class _ConverterBuilt(RuntimeError):
-    """Sentinel: the wiring under test completed, stop before real conversion."""
+    pass
 
 
 def test_default_docling_device_is_auto() -> None:
-    # ``auto`` keeps Docling's own probe, i.e. existing behaviour.
     os.environ.pop("UBT_DOCLING_DEVICE", None)
     assert UBTConfig.from_env().docling_device == "auto"
 
@@ -67,7 +56,6 @@ def test_runtime_config_carries_device_to_adapter() -> None:
 
 
 def test_device_reaches_extract_with_docling() -> None:
-    # The adapter must forward the resolved device, not a hardcoded default.
     import ubt.adapters.pdf.docling_adapter as da
 
     captured: dict[str, object] = {}
@@ -87,13 +75,6 @@ def test_device_reaches_extract_with_docling() -> None:
 
 
 def test_cpu_device_pins_docling_pipeline_options(tmp_path: Path) -> None:
-    # End-to-end through the parser: the device must land on the Docling
-    # pipeline options the converter is built from. ``auto`` leaves Docling's
-    # own probe in charge (no assignment).
-    #
-    # ``docling`` lives in the ``pdf`` / ``academic`` extras, not in ``dev`` —
-    # the install README/CONTRIBUTING document — so a missing Docling must skip
-    # this test, not fail the whole fast tier.
     pytest.importorskip("docling", reason="needs the `pdf` or `academic` extra")
     from pdf_builders import write_text_pdf
 
@@ -109,18 +90,12 @@ def test_cpu_device_pins_docling_pipeline_options(tmp_path: Path) -> None:
     original_init = converter_cls.__init__
 
     def spy_init(self: object, *args: object, **kwargs: object) -> None:
-        # ``format_options`` is Docling's own mapping; ``isinstance`` narrows the
-        # ``object`` a ``**kwargs`` lookup yields so this stays typed without an
-        # ignore (the symbols hook is deliberately ``Any``-typed).
         format_options = kwargs.get("format_options") or (args[0] if args else None)
         if isinstance(format_options, dict):
             for value in format_options.values():
                 options = getattr(value, "pipeline_options", None)
                 if options is not None:
                     seen["device"] = options.accelerator_options.device
-        # The device is pinned onto the options *before* the converter is built,
-        # so stop here: constructing a real converter pulls model weights
-        # (network) and would test Docling, not this wiring.
         raise _ConverterBuilt
 
     converter_cls.__init__ = spy_init
@@ -135,17 +110,6 @@ def test_cpu_device_pins_docling_pipeline_options(tmp_path: Path) -> None:
     assert seen.get("device") == "cpu"
 
 
-# --------------------------------------------------------------------------- #
-# VRAM pre-flight
-#
-# A local LLM server sharing the card can hold 9+ GiB while it swaps models. The
-# old path discovered the shortage the expensive way: initialise Docling on cuda,
-# OOM on the first 20 MiB allocation, tear the converter down, and re-run the
-# whole conversion on CPU -- paying twice and discarding whatever the first
-# attempt produced. On an 83-page document that is minutes of wasted work.
-# --------------------------------------------------------------------------- #
-
-
 def test_a_crowded_card_is_detected_before_the_converter_is_built() -> None:
     from ubt.adapters.pdf.docling_parser import _docling_vram_verdict
 
@@ -153,7 +117,6 @@ def test_a_crowded_card_is_detected_before_the_converter_is_built() -> None:
         device, note = _docling_vram_verdict("auto")
     assert device == "cpu"
     assert note is not None
-    # The number alone leaves the operator guessing what to close.
     assert "0.06 GiB" in note
 
 
@@ -166,7 +129,6 @@ def test_a_roomy_card_keeps_docling_on_its_own_probe() -> None:
 
 @pytest.mark.parametrize("pinned", ["cpu", "cuda"])
 def test_an_explicit_device_is_never_overridden(pinned: str) -> None:
-    """An operator who pinned a device has made the decision already."""
     from ubt.adapters.pdf.docling_parser import _docling_vram_verdict
 
     with patch("ubt.adapters.pdf.docling_parser._free_vram_gib", return_value=0.01):

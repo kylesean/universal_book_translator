@@ -1,16 +1,3 @@
-"""Tests for the formula VLM crop-margin knob (``UBT_FORMULA_CROP_MARGIN``).
-
-Docling crops each formula with an ``expansion_factor`` margin before the
-CodeFormulaV2 VLM reads it; its default of 0.18 reaches into the equation
-number and the neighbouring prose line on a tight academic layout, so the model
-transcribes that text into the LaTeX (docling#4548). The parser lowers the
-margin and enables Docling's repetition guard through Docling's own preset API.
-
-These tests use a stub ``symbols`` hook so they assert *our* wiring — which
-preset, which kwargs, and that nothing is set when enrichment is off — without
-depending on the installed Docling exposing the newer preset kwargs.
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -26,8 +13,6 @@ pytestmark = pytest.mark.fast
 
 
 class _StubCodeFormulaOptions:
-    """Stand-in for ``docling``'s ``CodeFormulaVlmOptions`` preset factory."""
-
     calls: list[tuple[str, dict[str, Any]]] = []
     preset_id: str
     overrides: dict[str, Any]
@@ -42,8 +27,6 @@ class _StubCodeFormulaOptions:
 
 
 class _StubPipelineOptions:
-    """Minimal ``PdfPipelineOptions`` shape the parser assigns onto."""
-
     def __init__(self) -> None:
         self.accelerator_options = type("Accel", (), {"device": "auto"})()
         self.code_formula_options: Any = None
@@ -73,9 +56,8 @@ def _stub_symbols() -> tuple[Any, Any, Any, Any, Any]:
 
 
 def _run_extract(tmp_path: Path, *, enrich: bool, margin: float = 0.08) -> _StubPipelineOptions:
-    """Drive ``extract_with_docling`` far enough to inspect the options it built."""
     pdf = tmp_path / "page.pdf"
-    pdf.write_bytes(b"%PDF-1.4\n")  # content never parsed by the stub
+    pdf.write_bytes(b"%PDF-1.4\n")
 
     captured: dict[str, _StubPipelineOptions] = {}
     symbols = _stub_symbols()
@@ -89,8 +71,6 @@ def _run_extract(tmp_path: Path, *, enrich: bool, margin: float = 0.08) -> _Stub
                 captured["options"] = value.pipeline_options
 
     symbols = (symbols[0], real_pipeline_cls, _CapturingConverter, symbols[3], symbols[4])
-    # The stub conversion fails once it is past the options we assert on; the
-    # build itself (which happens before conversion) is what matters here.
     with contextlib.suppress(Exception):
         dp.extract_with_docling(
             pdf, None, symbols=lambda: symbols, enrich=enrich, formula_crop_margin=margin
@@ -105,9 +85,7 @@ def test_enrich_sets_lowered_crop_margin_and_repetition_guard(tmp_path: Path) ->
     assert options.code_formula_options is not None
     preset_id, overrides = _StubCodeFormulaOptions.calls[-1]
     assert preset_id == "codeformulav2"
-    # The margin must reach Docling, not silently keep its 0.18 default.
     assert overrides["expansion_factor"] == 0.08
-    # Repetition guard rides along: a tighter crop can otherwise loop.
     assert overrides["stop_on_repetition"] is True
 
 

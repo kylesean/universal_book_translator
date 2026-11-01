@@ -1,5 +1,3 @@
-"""Unit tests for typst_compile adapter."""
-
 from __future__ import annotations
 
 import shutil
@@ -31,8 +29,6 @@ def test_typst_compile_subprocess_success(monkeypatch: pytest.MonkeyPatch) -> No
         ok, err = typst_compile.typst_compile("input.typ", "output.pdf")
         assert ok is True
         assert err == ""
-        # The timestamp is pinned so two compiles of one source are identical
-        # bytes (Typst otherwise stamps the wall clock into /CreationDate).
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "/bin/typst"
         assert cmd[1] == "compile"
@@ -104,13 +100,6 @@ def test_typst_version_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.skipif(shutil.which("typst") is None, reason="typst is not installed")
 def test_two_compiles_of_one_source_are_byte_identical(tmp_path: Path) -> None:
-    """The artifact is a function of the source, not of when it was built.
-
-    Typst stamps ``/CreationDate`` and ``/ModDate`` with the wall clock unless
-    told otherwise, so the same document compiled twice produced different
-    bytes — which contradicted ``ARCHITECTURE.md``'s "same blocks in, same bytes
-    out" and made every artifact diff a false positive.
-    """
     import hashlib
 
     source = tmp_path / "a.typ"

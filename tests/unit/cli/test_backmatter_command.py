@@ -1,5 +1,3 @@
-"""Unit tests for the 'ubt backmatter' CLI command suite."""
-
 from __future__ import annotations
 
 import json
@@ -32,7 +30,6 @@ def sample_backmatter_doc(tmp_path: Path) -> Path:
 
 
 def test_backmatter_inspect_command(sample_backmatter_doc: Path) -> None:
-    # Text mode
     result = runner.invoke(app, ["backmatter", "inspect", str(sample_backmatter_doc)])
     assert result.exit_code == 0
     assert "Total Backmatter Sections: 3" in result.output
@@ -40,7 +37,6 @@ def test_backmatter_inspect_command(sample_backmatter_doc: Path) -> None:
     assert "APPENDIX" in result.output
     assert "BIBLIOGRAPHY" in result.output
 
-    # JSON mode
     json_res = runner.invoke(app, ["backmatter", "inspect", str(sample_backmatter_doc), "--json"])
     assert json_res.exit_code == 0
     data = json.loads(json_res.output)
@@ -52,7 +48,6 @@ def test_backmatter_inspect_command(sample_backmatter_doc: Path) -> None:
 
 
 def test_backmatter_generate_command(sample_backmatter_doc: Path, tmp_path: Path) -> None:
-    # Typst format
     res_typst = runner.invoke(
         app,
         ["backmatter", "generate", str(sample_backmatter_doc), "--format", "typst"],
@@ -63,7 +58,6 @@ def test_backmatter_generate_command(sample_backmatter_doc: Path, tmp_path: Path
     assert "附录 A" in res_typst.output
     assert "numbering: none" in res_typst.output
 
-    # HTML format
     res_html = runner.invoke(
         app,
         ["backmatter", "generate", str(sample_backmatter_doc), "--format", "html"],
@@ -72,7 +66,6 @@ def test_backmatter_generate_command(sample_backmatter_doc: Path, tmp_path: Path
     assert '<section class="ubt-backmatter ubt-appendix"' in res_html.output
     assert 'role="doc-appendix"' in res_html.output
 
-    # Write to file
     out_file = tmp_path / "backmatter_skel.md"
     res_file = runner.invoke(
         app,
@@ -94,12 +87,10 @@ def test_backmatter_generate_command(sample_backmatter_doc: Path, tmp_path: Path
 
 
 def test_backmatter_validate_command(sample_backmatter_doc: Path, tmp_path: Path) -> None:
-    # Passing validation
     res_pass = runner.invoke(app, ["backmatter", "validate", str(sample_backmatter_doc)])
     assert res_pass.exit_code == 0
     assert "PASS" in res_pass.output
 
-    # Failing validation (out of sequence letters, e.g. Appendix C directly without A/B)
     bad_doc = tmp_path / "bad_backmatter.md"
     bad_doc.write_text("# 附录 C：跳跃编号的附录\n\n正文。\n", encoding="utf-8")
 

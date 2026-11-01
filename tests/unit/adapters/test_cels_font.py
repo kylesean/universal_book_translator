@@ -1,13 +1,3 @@
-"""The Stage 5 font pipeline: Type0 + Identity-H + a real /ToUnicode.
-
-AD-018 is why these exist: the corpus fonts are single-byte Type1 with no
-``/ToUnicode``, so a CJK translation has to bring its own subsetted font. The
-tests use whatever CJK TrueType face the machine has (the pipeline refuses CFF),
-and skip when there is none — the structural assertions are what pin the PDF
-contract, and the extraction round-trip lives in ``scripts/cels_cjk_spike.py``
-because it needs the whole render stack.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -76,7 +66,6 @@ def test_embed_subset_font_builds_a_type0_with_tounicode(tmp_path: Path) -> None
         assert descendant["/FontDescriptor"].get("/FontFile2") is not None
         cmap = bytes(installed["/ToUnicode"].read_bytes()).decode("ascii")
         assert "beginbfchar" in cmap
-        # The CMap maps CIDs to Unicode, which is what makes copy/search work.
         assert f"<{font.gids[text[0]]:04X}>" in cmap
 
 

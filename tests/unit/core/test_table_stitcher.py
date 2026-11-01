@@ -1,5 +1,3 @@
-"""Unit tests for multi-page table continuity inspection and stitching."""
-
 from __future__ import annotations
 
 import pytest
@@ -77,14 +75,11 @@ def test_header_row_similarity() -> None:
     h2 = ["Model", "Accuracy (%)", "Latency (ms)", "Cost ($)"]
     assert header_row_similarity(h1, h2) == 1.0
 
-    # Minor normalization diffs
     h3 = ["**Model**", "accuracy", "latency (ms)", "cost"]
     assert header_row_similarity(h1, h3) > 0.85
 
-    # Column count mismatch
     assert header_row_similarity(h1, ["Model", "Accuracy"]) == 0.0
 
-    # Completely different
     assert header_row_similarity(h1, ["A", "B", "C", "D"]) < 0.40
 
 
@@ -145,12 +140,7 @@ def test_can_stitch_headless_continuation() -> None:
         "| Baseline | 82.4 | 1.0x |\n"
         "| Ours-Lite | 85.1 | 1.4x |"
     )
-    # Fragment on page 2 parsed with first data row as header
-    tbl_b_markup = (
-        "| 88.7 | 2.1x | Ours-Full |\n"  # data row treated as header
-        "| --- | --- | --- |\n"
-        "| Ours-XL | 90.3 | 2.8x |"
-    )
+    tbl_b_markup = "| 88.7 | 2.1x | Ours-Full |\n| --- | --- | --- |\n| Ours-XL | 90.3 | 2.8x |"
     tbl_a = _make_table_block("tbl_a", tbl_a_markup, page=5)
     tbl_b = _make_table_block("tbl_b", tbl_b_markup, page=6)
 
@@ -204,7 +194,7 @@ def test_fuse_table_markups_duplicate_header() -> None:
     )
     fused = fuse_table_markups(markup_a, markup_b, match_type="matched_header")
     lines = [line.strip() for line in fused.strip().splitlines() if line.strip()]
-    assert len(lines) == 6  # 1 header + 1 separator + 4 rows
+    assert len(lines) == 6
     assert "Model A" in lines[2]
     assert "Model B" in lines[3]
     assert "Model C" in lines[4]
@@ -216,7 +206,7 @@ def test_fuse_table_markups_headless() -> None:
     markup_b = "| Val3 | Val4 |\n| --- | --- |\n| Val5 | Val6 |"
     fused = fuse_table_markups(markup_a, markup_b, match_type="headless_continuation")
     lines = [line.strip() for line in fused.strip().splitlines() if line.strip()]
-    assert len(lines) == 5  # 1 header + 1 separator + 3 data rows (Val1, Val3, Val5)
+    assert len(lines) == 5
     assert "Val3" in lines[3]
     assert "Val5" in lines[4]
 
@@ -250,11 +240,9 @@ def test_typst_rendering_for_stitched_multipage_table() -> None:
     rows = "\n".join(f"| Item {i} | Category {i % 3} | {i * 10} |" for i in range(25))
     markup = f"| Item Name | Category | Score |\n| :--- | :---: | ---: |\n{rows}"
 
-    # Multi-page table rendered with is_multipage=True
     rendered = render_table(markup, is_multipage=True, page_columns=2)
 
     # Must NOT contain #place(..., float: true) because floats cannot split across pages in Typst!
     assert "#place" not in rendered
-    # Must contain native table.header(repeat: true)
     assert "table.header(" in rendered
     assert "repeat: true" in rendered

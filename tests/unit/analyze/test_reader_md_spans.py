@@ -1,17 +1,3 @@
-"""The native Markdown reader.
-
-The reader's core promises, over a fixture exercising every block construct:
-
-- every element's ``Span.chars`` slices exactly its own text out of
-  ``CanonicalSource.text`` (a verifiable span);
-- the ``Document`` round-trips through the bridge losslessly (element count
-  and text preserved), so the typed model can replace the ``IRBlock`` detour;
-- the reader loses no text relative to the existing Markdown adapter, compared
-  as a whitespace-normalized token multiset (the reader splits headings and
-  list items the adapter keeps inside paragraphs -- splitting changes block
-  boundaries, not the tokens the document carries).
-"""
-
 from __future__ import annotations
 
 import re
@@ -94,12 +80,9 @@ def test_the_reader_structure_covers_every_construct(tmp_path: Path) -> None:
 
 
 async def test_the_reader_loses_nothing_the_adapter_had(tmp_path: Path) -> None:
-    # The old IR path (MarkdownAdapter) and the native reader must agree on the
-    # document's token content, whatever way each splits the blocks.
     book = tmp_path / "book.md"
     book.write_text(_BOOK, encoding="utf-8")
     document = read_md(book)
-    # element_text covers every kind (a Table carries its markup, not .text).
     reader_tokens = _tokens(" ".join(element_text(e) for e in document.elements))
 
     adapter = MarkdownAdapter()

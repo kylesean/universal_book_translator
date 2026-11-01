@@ -1,5 +1,3 @@
-"""Unit tests for the responsive EPUB/HTML styler engine."""
-
 from __future__ import annotations
 
 import pytest
@@ -21,14 +19,10 @@ def test_modern_html_css_contains_responsive_and_mobile_queries() -> None:
     assert "--accent:" in css
     assert 'data-theme="dark"' in css
     assert 'data-theme="sepia"' in css
-    # Mobile breakpoint
     assert "@media (max-width: 768px)" in css
-    # Mobile split collapse to stacked
     assert "body.mode-split .bilingual-pair" in css
-    # Table responsive wrapper
     assert ".table-responsive" in css
     assert "overflow-x: auto" in css
-    # Code block copy button
     assert ".ubt-copy-btn" in css
 
 
@@ -39,11 +33,9 @@ def test_epub_css_contains_eink_and_cjk_rules() -> None:
     assert "text-align: justify;" in css
     assert "text-justify: inter-ideograph;" in css
     assert "word-break: break-all;" in css
-    # Bilingual pairs in EPUB
     assert ".bilingual-pair" in css
     assert ".source-row" in css
     assert ".target-row" in css
-    # Night/dark mode in e-readers
     assert "@media (prefers-color-scheme: dark)" in css
 
 

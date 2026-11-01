@@ -1,26 +1,3 @@
-"""Property tests: the mask round-trip and the LaTeX→Typst transpiler.
-
-The unit tests pin specific spans; these tests pin the *invariants* over a
-generated corpus, which is where the maskers have actually broken: a masker
-that swallowed a neighbouring character, a restore that echoed a stale token,
-a transpiler that emitted unbalanced Typst delimiters. Both properties are
-checked over several hundred deterministic pseudo-random inputs per run (seeded
-``random.Random`` — no new dependency, and a failure prints its seed so it
-reproduces exactly).
-
-Property 1 (mask round-trip): for any text, ``restore(mask(text))`` returns the
-original text byte-for-byte and every family report is clean. A sentinel token
-the model could echo is simulated by re-restoring the *masked* text unchanged —
-the same call the draft stage makes on a verbatim echo.
-
-Property 2 (LaTeX→Typst emission): for any generated math body the transpiler
-converts (returns non-``None``), the output never contains an odd number of
-``$`` and never contains a LaTeX command the transpiler was supposed to
-translate (``\\frac``, ``\\sqrt``, ``\\binom``), and it is idempotent-safe: a
-second pass over the output either returns the same string or ``None``, never
-mangles it further.
-"""
-
 from __future__ import annotations
 
 import random
@@ -33,16 +10,9 @@ from ubt.segment.placeholders import default_placeholder_engine
 
 pytestmark = pytest.mark.fast
 
-#: One seed per property per run; a failure message carries it.
 SEEDS = (20261013, 7, 424242)
 
 
-# --------------------------------------------------------------------------- #
-# Property 1: mask round-trip
-# --------------------------------------------------------------------------- #
-
-#: Span templates the generators draw from: every family the maskers protect,
-#: plus plain prose and adversarial neighbours (brackets, dollars, CJK).
 _SPAN_TEMPLATES = [
     "contact me at {email} today",
     "see {email} or mail {email2}",
@@ -73,7 +43,6 @@ def _random_span(rng: random.Random, kind: str) -> str:
         return rng.choice(["\\int_0^1 f(x) dx", "\\sum_i a_i = b", "\\frac{1}{2}"])
     if kind == "cite":
         return f"[{rng.randrange(1, 60)}]"
-    # soup: the detector needs a multi-symbol run (a lone ω_k is a variable).
     return rng.choice(["φ + γ ≤ Σ × 2", "λ_k ≈ 3.14", "μ ≥ 0.05 且 σ² ≤ 1"])
 
 
@@ -93,12 +62,6 @@ def _generate(rng: random.Random) -> str:
 
 @pytest.mark.parametrize("seed", SEEDS)
 def test_mask_round_trip_is_lossless(seed: int) -> None:
-    """``restore(mask(text)) == text`` over the generated corpus.
-
-    The draft stage's verbatim-echo path is the same call with the masked text
-    returned unchanged, so a loss here means a masker ate a neighbour or the
-    restore mangled an original — both shipped corrupted text to the reader.
-    """
     rng = random.Random(seed)
     engine = default_placeholder_engine()
     for _ in range(300):
@@ -116,15 +79,6 @@ def test_mask_round_trip_is_lossless(seed: int) -> None:
 
 
 def test_a_mutated_token_fails_clean_instead_of_restoring_wrong_span() -> None:
-    """The checksum must catch an echoed token with a rewritten index.
-
-    The load-bearing half of the property: a model that echoes
-    ``⟦MATH_MASK_0002-<span 1's checksum>⟧`` where it saw span 1 must not
-    restore span 2's content into span 1's slot — and must not ship claiming
-    clean. Two spans with distinct originals are required: a forged index into
-    a one-span mapping is simply unknown and lands in ``mutated`` regardless of
-    how the checksum is computed, which would make this test pass vacuously.
-    """
     engine = default_placeholder_engine()
     text = "first $x_i^2$ then $\\frac{a}{b}$ end"
     masked = engine.mask(text)
@@ -134,8 +88,6 @@ def test_a_mutated_token_fails_clean_instead_of_restoring_wrong_span() -> None:
     index_1 = re.search(r"(\d+)", token_1)
     index_2 = re.search(r"(\d+)", token_2)
     assert index_1 and index_2, "token shape does not carry an index"
-    # The vandal rewrites span 1's index to span 2's but keeps the checksum it
-    # saw — exactly what a sloppy model rewrite produces.
     forged = token_1.replace(index_1.group(1), index_2.group(1), 1)
     echoed = masked.text.replace(token_1, forged)
     outcome = engine.restore(echoed, masked)
@@ -143,16 +95,10 @@ def test_a_mutated_token_fails_clean_instead_of_restoring_wrong_span() -> None:
         f"a rewritten index must fail the integrity check: "
         f"reports={[name for name, report in outcome.reports if not report.clean]}"
     )
-    # Fail-closed means the wrong span's content was never published: the
-    # forged slot keeps token debris, so span 2 still appears exactly once.
     assert outcome.text.count(original_2) == 1, (
         f"span 2's content was restored into the forged slot: {outcome.text!r}"
     )
 
-
-# --------------------------------------------------------------------------- #
-# Property 2: LaTeX→Typst emission invariants
-# --------------------------------------------------------------------------- #
 
 _MATH_ATOMS = [
     "x",
@@ -187,12 +133,6 @@ def _random_math(rng: random.Random, depth: int = 0) -> str:
 
 @pytest.mark.parametrize("seed", SEEDS)
 def test_transpiled_math_never_emits_unbalanced_or_untranslated_output(seed: int) -> None:
-    """Every accepted body converts to delimited, command-free, balanced Typst.
-
-    The renderer wraps the converted body in ``$ … $`` and hands it to the Typst
-    compiler as part of the *whole document*: one unbalanced ``$`` or an
-    untranspiled ``\\frac`` fails the entire book, not one formula.
-    """
     rng = random.Random(seed)
     engine = default_placeholder_engine()
     converted_count = 0
@@ -207,17 +147,12 @@ def test_transpiled_math_never_emits_unbalanced_or_untranslated_output(seed: int
             assert untranslated not in out, (
                 f"seed={seed} {untranslated!r} leaked into output: {body!r} -> {out!r}"
             )
-        # Negative absence is not enough: a regression that only strips the
-        # backslash (``\frac{a}{b}`` -> ``frac{a}{b}``) is still broken Typst.
-        # Pin the positive conversion for the structural commands the generated
-        # bodies carry.
         if "\\frac" in body:
             assert "frac(" in out, f"seed={seed} \\frac not converted: {body!r} -> {out!r}"
         if "\\binom" in body:
             assert "binom(" in out, f"seed={seed} \\binom not converted: {body!r} -> {out!r}"
         if "\\sqrt{" in body:
             assert "sqrt(" in out, f"seed={seed} \\sqrt{{}} not converted: {body!r} -> {out!r}"
-        # A masked token fed through the transpiler must never lose its ⟦…⟧ shape.
         masked = engine.mask(f"v ${body}$ w")
         if masked.math_map:
             (token, original) = next(iter(masked.math_map.items()))

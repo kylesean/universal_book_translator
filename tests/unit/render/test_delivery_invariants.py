@@ -1,35 +1,6 @@
-"""Delivery invariants: the three assertions the PRD's §9 contract rests on.
-
-These are deliberately *red first*. Each one pins a property the current
-renderer does not have, and each failure names the exact page shape that
-produced it in the 26-page BSIM-CMG job:
-
-1. **Column detection.** A single-column page whose formulas are centred must
-   not be read as two columns. Page 12 of ``chapter-3.pdf`` has two short
-   left-edge labels and six centred display formulas; the ``x0 >= mid - 15``
-   heuristic counted the formulas as a right column and reflowed the page into
-   two columns, which is the "single column became two" defect.
-
-2. **L1 placement bounds.** A canvas placement must declare the source box's
-   height and clip overflow. The current ``#place(... block(width: ...))``
-   declares only width, so a heading measured at the wrong width paints over
-   the paragraph below (page 2) and a long paragraph is cut by the page edge
-   with no continuation (page 6).
-
-3. **Leading semantics.** ``solve_page_2d`` returns ``leading_em = em_used -
-   1.0`` and the renderer passes it to Typst's ``par(leading:)``, which is a
-   *gap* on top of the font's own line height, not a ratio. On Noto Serif CJK
-   SC the base line height is ~0.733em, so a 1.35 line-height intent ships as
-   ~1.083em: captions overlap and the solver believes it has more room than it
-   has.
-
-The tests read the compiled artifact or the emitted markup, not the solver's
-own estimate. A model that grades itself is how the current job shipped with
-``fits=1`` on pages that visibly overlap.
-"""
-
 from __future__ import annotations
 
+import re
 import shutil
 import statistics
 from pathlib import Path
@@ -49,10 +20,6 @@ from ubt.render.typst.page_locked_renderer import extract_page_geometry
 pytestmark = pytest.mark.fast
 
 
-#: Page-12 boxes of the 26-page BSIM-CMG chapter, in PDF points. Two short
-#: left-edge labels, six centred display formulas, and the body paragraphs that
-#: span the full measure. Reproduced here rather than read from ``.ubt`` so the
-#: regression runs on a clean checkout.
 _P12_BOXES: tuple[tuple[float, float, float, float], ...] = (
     (121.5496, 576.8129528888888, 372.18135767999973, 586.3199916),
     (251.6598, 549.3276003555557, 456.3269808000001, 570.0092558),
@@ -72,14 +39,6 @@ _P12_BOXES: tuple[tuple[float, float, float, float], ...] = (
 
 
 def _blocks(boxes: tuple[tuple[float, float, float, float], ...], page: int) -> list[IRBlock]:
-    """Real ``IRBlock``s, not stand-ins.
-
-    ``extract_page_geometry`` is typed against ``Sequence[IRBlock]`` and reads the
-    block's derived ``bbox``/``block_type``/``style`` properties, which only a
-    real element provides. A duck-typed namespace silently keeps the production
-    signature unchecked, so the geometry helper's contract is tested against an
-    object no caller ever passes.
-    """
     out: list[IRBlock] = []
     for index, (x0, y0, x1, y1) in enumerate(boxes, 1):
         element = make_element(
@@ -94,14 +53,6 @@ def _blocks(boxes: tuple[tuple[float, float, float, float], ...], page: int) -> 
 
 
 def test_p12_style_single_column_with_centred_formulas_is_not_two_columns() -> None:
-    """A centred formula is not a right column.
-
-    Page 12 has two short left labels (``b0105``/``b0106``) and six display
-    formulas whose boxes start near the page midpoint. Counting ``x0 >= mid``
-    as "right column" makes the page two-column, so the L2 renderer sorts the
-    body into a left track and the formulas into a right track. The source page
-    is single-column; the delivered page is not.
-    """
     geometry = extract_page_geometry(540.0, 665.97, _blocks(_P12_BOXES, 12))
     assert geometry.columns == 1, (
         "page 12 is single-column; centred display formulas must not be counted "
@@ -110,7 +61,6 @@ def test_p12_style_single_column_with_centred_formulas_is_not_two_columns() -> N
 
 
 def test_a_true_two_column_page_is_still_two_columns() -> None:
-    """The guard must not be bought by making column detection always 1."""
     boxes: list[tuple[float, float, float, float]] = []
     for index in range(4):
         top = 600.0 - index * 120.0
@@ -122,14 +72,6 @@ def test_a_true_two_column_page_is_still_two_columns() -> None:
 
 
 def test_l1_placement_markup_declares_height_and_clips_overflow() -> None:
-    """A canvas placement must be bounded, not just positioned.
-
-    The source box has a height; the translation may be taller. Declaring only
-    ``width`` lets the extra lines paint over the next block (page 2) or run off
-    the page edge (page 6). The placement must carry the box height and clip
-    what does not fit, so the overflow is visible to QA and can be routed to
-    another strategy instead of silently colliding.
-    """
     placement = FacsimileBlockPlacement(
         block_id="b0010",
         page=2,
@@ -152,11 +94,7 @@ def test_l1_placement_markup_declares_height_and_clips_overflow() -> None:
 
     markup = FacsimileRenderer().build_markup([page], "bg_stripped.pdf", target_lang="zh")
 
-    # Scope the assertion to the placement itself. ``height:`` also appears on
-    # the enclosing ``#page(...)``, and a test that accepts the page's height
-    # would pass while the placement stayed unbounded — the same "assert on the
-    # shape of markup" trap this file exists to avoid.
-    placement_markup = markup.split("#place(", 1)[1]
+    placement_markup = markup.split("// bbox:", 1)[1]
     assert "width:" in placement_markup
     assert "height:" in placement_markup, (
         "the placement must declare the source box height; width alone lets a "
@@ -170,21 +108,7 @@ def test_l1_placement_markup_declares_height_and_clips_overflow() -> None:
 
 @pytest.mark.skipif(shutil.which("typst") is None, reason="typst is not installed")
 def test_solver_leading_is_a_pitch_ratio_not_a_gap_multiplier(tmp_path: Path) -> None:
-    """The leading the solver chooses must be the pitch the artifact delivers.
-
-    ``solve_page_2d`` documents ``leading_em`` as ``em_used - 1.0``, i.e. a
-    ratio. The renderer passes it to Typst's ``par(leading:)``, which is a gap
-    *added to the font's line height*. On Noto Serif CJK SC the measured base is
-    ~0.733em, so a 1.35 line-height intent arrives as ~1.083em. This test
-    compiles the solver's own output and measures the baseline pitch in the
-    artifact; it must equal the source's 1.35 ratio.
-    """
-    records = [
-        # At 11pt this needs 8 lines and does not fit; at 10pt it needs 7 and
-        # does. The solver therefore stops below the ceiling and keeps the
-        # source 1.35 ratio instead of stretching it.
-        {"id": "p1", "top": 600.0, "bot": 500.0, "w": 300.0, "glyphs": 200.0, "n": 3}
-    ]
+    records = [{"id": "p1", "top": 600.0, "bot": 500.0, "w": 300.0, "glyphs": 200.0, "n": 3}]
     solution = solve_page_2d([records], source_size_pt=10.0, source_leading_pt=13.5)
     assert solution.fits
     assert solution.uniform_size_pt < 11.0 - 0.05, (
@@ -219,15 +143,28 @@ def test_solver_leading_is_a_pitch_ratio_not_a_gap_multiplier(tmp_path: Path) ->
     out = tmp_path / "delivered.pdf"
     FacsimileRenderer().render_document([page], bg, out, tmp_path / ".build", target_lang="zh")
 
-    pitch_ratio = _measured_pitch_ratio(out, solution.uniform_size_pt)
+    delivered_size = _delivered_font_size(out)
+    pitch_ratio = _measured_pitch_ratio(out, delivered_size)
     assert pitch_ratio == pytest.approx(1.35, abs=0.03), (
         "the solver's 1.35 line-height intent must arrive as a 1.35 pitch; "
-        f"the artifact measures {pitch_ratio:.3f}"
+        f"the artifact measures {pitch_ratio:.3f} at {delivered_size:.2f}pt"
+    )
+    assert delivered_size == pytest.approx(solution.uniform_size_pt, rel=0.15), (
+        "a box that only needed a line-breaker correction must not lose more "
+        f"than 15% of the solver's size ({solution.uniform_size_pt:.2f}pt -> "
+        f"{delivered_size:.2f}pt)"
     )
 
 
+def _delivered_font_size(pdf: Path) -> float:
+    with pikepdf.open(pdf) as doc:
+        data = doc.pages[0].Contents.read_bytes().decode("latin-1")
+    sizes = [float(size) for size in re.findall(r"/\w+\s+([\d.]+)\s+Tf", data)]
+    assert sizes, "the compiled page must contain a Tf operator"
+    return max(sizes)
+
+
 def _measured_pitch_ratio(pdf: Path, size_pt: float) -> float:
-    """Median baseline pitch / font size, read from the compiled PDF."""
     import pypdfium2 as pdfium
 
     doc = pdfium.PdfDocument(str(pdf))

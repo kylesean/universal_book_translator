@@ -1,5 +1,3 @@
-"""Unit tests for CJK Kinsoku Shori and punctuation compression engine."""
-
 from __future__ import annotations
 
 import pytest

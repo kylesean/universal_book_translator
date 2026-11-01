@@ -1,5 +1,3 @@
-"""Unit tests for Typst physical layout spill and overflow diagnostics."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -38,7 +36,6 @@ def _make_line(
 
 
 def test_layout_spec_geometry_defaults() -> None:
-    """Verify standard page layout specifications and safe boundaries."""
     book = PageLayoutSpec.book()
     assert book.name == "book"
     assert book.columns == 1
@@ -70,11 +67,9 @@ def test_layout_spec_geometry_defaults() -> None:
 
 
 def test_page_furniture_recognition() -> None:
-    """Ensure footer page numbers and top running headers are recognized as furniture."""
     ph = A4_HEIGHT_PT
     margin_b = 68.0
 
-    # Legitimate page numbers in footer
     assert is_page_furniture("1", 40.0, 50.0, ph, margin_b)
     assert is_page_furniture("14", 42.0, 52.0, ph, margin_b)
     assert is_page_furniture("- 42 -", 38.0, 48.0, ph, margin_b)
@@ -90,17 +85,15 @@ def test_page_furniture_recognition() -> None:
         margin_b,
     )
 
-    # Running header at top of page
     assert is_page_furniture("Chapter 3: Semiconductor Physics", ph - 30.0, ph - 20.0, ph, margin_b)
 
 
 def test_scan_page_clean_layout() -> None:
-    """A page with well-behaved text within safe margins emits no anomalies."""
     spec = PageLayoutSpec.book()
     lines = [
         _make_line("First body paragraph perfectly placed", 70.0, 700.0, 450.0, 712.0),
         _make_line("Second body paragraph within margins", 70.0, 680.0, 500.0, 692.0),
-        _make_line("1", 290.0, 40.0, 305.0, 50.0),  # Footer page number
+        _make_line("1", 290.0, 40.0, 305.0, 50.0),
     ]
     report = scan_page_anomalies(lines, 1, spec)
     assert not report.has_errors
@@ -109,9 +102,7 @@ def test_scan_page_clean_layout() -> None:
 
 
 def test_scan_page_detects_right_margin_spill() -> None:
-    """Text spilling horizontally beyond the right margin boundary is flagged."""
     spec = PageLayoutSpec.book(tolerance_pt=5.0)
-    # safe_x1 is ~532.9pt. A line reaching 545pt is a moderate WARN; reaching 560pt is a FAIL.
     warn_line = _make_line("Slight table spill", 70.0, 600.0, 545.0, 612.0)
     fail_line = _make_line("Massive math overflow \\int_0^\\infty ...", 70.0, 550.0, 570.0, 562.0)
 
@@ -129,11 +120,8 @@ def test_scan_page_detects_right_margin_spill() -> None:
 
 
 def test_scan_page_detects_left_and_bottom_spills() -> None:
-    """Left margin breaches and bottom footer leaks are detected."""
     spec = PageLayoutSpec.book(tolerance_pt=5.0)
-    # safe_x0 is ~62.4pt; left edge at 40pt
     left_spill = _make_line("Shifted table column", 40.0, 600.0, 400.0, 612.0)
-    # safe_y0 is ~68.0pt; bottom edge at 10pt (critical overflow off page bottom)
     bottom_spill = _make_line("Trailing line clipped at page bottom", 70.0, 8.0, 400.0, 18.0)
 
     report = scan_page_anomalies([left_spill, bottom_spill], 3, spec)
@@ -145,10 +133,7 @@ def test_scan_page_detects_left_and_bottom_spills() -> None:
 
 
 def test_scan_page_dual_column_gutter_overrun() -> None:
-    """In multi-column mode, text overflowing from Column 1 into the central gutter is caught."""
     spec = PageLayoutSpec.academic_dual(tolerance_pt=4.0)
-    # safe_x0 = 51.02, col1_width = 232.12 -> col1_x1 = 283.14. Gutter is [283.14, 312.14]
-    # Line starting at 55pt and ending at 305pt overruns into gutter by ~21pt without spanning Col 2
     gutter_line = _make_line("Column 1 line overrunning into gutter", 55.0, 600.0, 305.0, 610.0)
 
     report = scan_page_anomalies([gutter_line], 4, spec)
@@ -159,7 +144,6 @@ def test_scan_page_dual_column_gutter_overrun() -> None:
 
 
 def test_scan_page_detects_type_collapse() -> None:
-    """Text shrunk below readable font threshold is flagged as type collapse."""
     spec = PageLayoutSpec.book()
     collapsed_line = _make_line(
         "Microscopic unreadable text", 70.0, 500.0, 300.0, 505.0, font_size=3.2
@@ -174,7 +158,6 @@ def test_scan_page_detects_type_collapse() -> None:
 
 
 def test_ascii_heatmap_generation() -> None:
-    """ASCII heatmap rendering produces valid 2D grid containing boundary glyphs and anomaly highlights."""
     spec = PageLayoutSpec.book()
     spill_line = _make_line("Spill line", 70.0, 550.0, 580.0, 562.0)
     report = scan_page_anomalies([spill_line], 1, spec)
@@ -182,12 +165,11 @@ def test_ascii_heatmap_generation() -> None:
     heatmap = render_ascii_heatmap(report, spec, width_chars=30, height_chars=12)
     assert "┌" in heatmap
     assert "┘" in heatmap
-    assert "┆" in heatmap  # Margin outline
-    assert "█" in heatmap  # Critical anomaly highlight
+    assert "┆" in heatmap
+    assert "█" in heatmap
 
 
 def test_diagnose_pdf_layout_real_document() -> None:
-    """End-to-end diagnosis over real corpus PDF file."""
     doc_path = Path("corpus/documents/chapter-3.pdf")
     if not doc_path.is_file():
         pytest.skip("chapter-3.pdf not available")
@@ -206,6 +188,5 @@ def test_diagnose_pdf_layout_real_document() -> None:
 
 
 def test_diagnose_pdf_layout_non_existent_file() -> None:
-    """Missing PDF raises FileNotFoundError."""
     with pytest.raises(FileNotFoundError):
         diagnose_pdf_layout(Path("non_existent_12345.pdf"))

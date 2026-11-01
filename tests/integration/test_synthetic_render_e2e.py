@@ -1,25 +1,3 @@
-"""Synthetic-PDF render e2e: a dry run carries a PDF all the way to a PDF.
-
-``test_pipeline_smoke.py`` proves the stage plan over Markdown; this proves the
-*PDF* half of the same plan -- the real pdfium adapter, the IR/AST bridge, the
-translation stages, and the Typst renderer -- on a PDF this test builds itself
-(:mod:`tests.pdf_builders`), so it needs neither the gitignored corpus nor an API
-key. It is the synthetic companion to the real-document corpus gate
-(``tests/integration/test_corpus_acceptance.py``): the corpus gate covers real
-pagination and geometry, this covers the same code path deterministically in CI.
-
-Why ``slow`` and not ``fast``: every PDF render path shells out to the external
-``typst`` compiler -- a heavy subprocess, per
-the project testing strategy -- so it cannot be in the inner loop. CI
-installs a checksum-pinned ``typst`` and runs the slow tier (``pytest -m slow``);
-locally the module skips when ``typst`` is absent. The pure-Python ingest half
-runs in the ``fast`` tier instead (``tests/unit/adapters/test_pdf_adapter_e2e.py``).
-
-The target language is ``es`` (Latin) on purpose: it keeps the render off any
-CJK font the runner may not have, and the rehearsal echo (English) still satisfies
-the target-script check.
-"""
-
 from __future__ import annotations
 
 import json
@@ -57,7 +35,6 @@ _PAGE_TWO = (
     "The second chapter widens the lens to every descendant of the first model.",
 )
 
-#: Paragraphs that must survive extraction from the delivered PDF (titles too).
 _PARAGRAPHS = (
     "The machine relies on attention. Each layer runs a forward pass over the batch.",
     "Euler wrote a formula linking five constants of analysis.",
@@ -67,7 +44,6 @@ _PARAGRAPHS = (
 
 
 def _config(tmp_path: Path) -> UBTConfig:
-    """A hermetic config: ledgers under tmp, no page-image egress."""
     return UBTConfig().model_copy(
         update={
             "db_dir": tmp_path / "ledgers",
@@ -90,7 +66,6 @@ async def _run(tmp_path: Path) -> tuple[list[TranslationProgressEvent], Path, st
 
 
 def _flat(text: str) -> str:
-    """Whitespace-insensitive form: PDF extraction reflows lines, so match flat."""
     return " ".join(text.split())
 
 
@@ -126,7 +101,6 @@ async def test_the_delivered_contract_is_balanced(tmp_path: Path) -> None:
     assert contract.missing_assets == 0
     assert contract.source_kept_text == 0
     assert contract.total_text > 0
-    # The rehearsal echo delivers every translatable text node.
     assert contract.delivered_text == contract.total_text
 
 
@@ -148,10 +122,6 @@ async def test_the_ledger_records_a_completed_job(tmp_path: Path) -> None:
 async def test_the_render_wires_the_run_target_language_into_the_typesetter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Regression: the renderer was constructed without the run's ``target_lang``,
-    # so it fell back to the "zh" default and a non-Chinese render applied
-    # Chinese CJK-spacing and line-breaking rules. The run's target language must
-    # reach the renderer.
     from ubt.render.typst import document_renderer as dr
 
     seen: list[str | None] = []
@@ -170,9 +140,6 @@ async def test_the_render_wires_the_run_target_language_into_the_typesetter(
 
 
 async def test_the_attestation_artifact_check_finds_every_realization(tmp_path: Path) -> None:
-    # Regression: the renderer strips the rehearsal prefix, so the artifact check
-    # must compare against the rendered text. When only one side knew the prefix,
-    # every rehearsal reported short elements (headings) as "missing".
     _, output, _ = await _run(tmp_path)
 
     shadow = companion_path(output, "_attestations.json")

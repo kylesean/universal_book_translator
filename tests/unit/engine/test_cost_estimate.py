@@ -1,5 +1,3 @@
-"""Unit tests for pre-flight draft cost estimation."""
-
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -20,30 +18,23 @@ pytestmark = pytest.mark.fast
 
 def test_count_text_tokens() -> None:
     assert count_text_tokens("") == 0
-    # Pure ASCII: ~4 chars per token
     assert count_text_tokens("abcd") == 1
     assert count_text_tokens("abcdefgh") == 2
 
-    # CJK: ~0.85 tokens per char
     cjk_text = " universal book translator 深度学习测试"
     cjk_tokens = count_text_tokens(cjk_text)
     assert cjk_tokens > 0
 
 
 def test_resolve_output_token_ratio() -> None:
-    # None fallback
     assert resolve_output_token_ratio(None, None) == 1.5
 
-    # Same language
     assert resolve_output_token_ratio("en", "en") == 1.0
 
-    # Non-CJK to CJK
     assert resolve_output_token_ratio("en", "zh") == 1.25
 
-    # CJK to CJK
     assert resolve_output_token_ratio("zh", "ja") == 1.05
 
-    # High expansion targets
     assert resolve_output_token_ratio("en", "de") == 1.40
     assert resolve_output_token_ratio("zh", "ru") == 1.05
 
@@ -120,7 +111,6 @@ def test_estimate_draft_cost_from_ir_blocks() -> None:
         draft_model="gpt-4o",
         prefix_tokens=100,
     )
-    # Only b1 is billable
     assert quote.billable_blocks == 1
 
 
@@ -135,21 +125,10 @@ def test_measure_prefix_tokens() -> None:
     assert tokens is not None
     assert tokens > 0
 
-    # Failed router prompt build
     router.build_draft_prompt.side_effect = ValueError("prompt build error")
     assert measure_prefix_tokens(router, target_lang="zh", source_lang="en") is None
 
 
-# --- the script-aware heuristic's per-script constants ----------------------
-#
-# ``count_text_tokens`` is a character heuristic, not a tokenizer (it must run
-# without loading a tokenizer). Its constants therefore need pinning to
-# measurements, or they drift: the non-ASCII constant sat at 0.55 while the
-# XLM-RoBERTa tokenizer measured ~0.31, over-quoting Cyrillic and Arabic by
-# 50-67%. These bounds are loose enough to survive a tokenizer refresh and
-# tight enough to catch a constant that is simply wrong.
-
-#: (text, expected tokens under XLM-RoBERTa, allowed relative error)
 _SCRIPT_SAMPLES: tuple[tuple[str, str, int], ...] = (
     (
         "en",
@@ -192,12 +171,6 @@ _SCRIPT_SAMPLES: tuple[tuple[str, str, int], ...] = (
 def test_the_script_heuristic_stays_within_25_percent_of_a_real_tokenizer(
     lang: str, text: str, xlmr_tokens: int
 ) -> None:
-    """Every script must land within 25% of XLM-RoBERTa's own count.
-
-    The bound is 25% because no character heuristic can do better across model
-    families — the same English sentence is 29 tokens to XLM-R and 19 to
-    DeepSeek — but a constant that is off by 50%+ is a bug, not a tolerance.
-    """
     estimated = count_text_tokens(text)
     error = (estimated - xlmr_tokens) / xlmr_tokens
     assert abs(error) <= 0.25, (
@@ -207,24 +180,15 @@ def test_the_script_heuristic_stays_within_25_percent_of_a_real_tokenizer(
 
 
 def test_non_ascii_scripts_are_not_over_quoted_by_half() -> None:
-    """The specific regression: 0.55 tokens/char for Cyrillic/Arabic.
-
-    A ru/ar source quoted at 0.55 per character came out 50-67% above the real
-    count, which inflated every budget check and could refuse an affordable
-    run. Pinned as a ratio rather than a constant so the fix can be tuned
-    without rewriting the test.
-    """
     from ubt.core.engine import cost_estimate
 
     assert 0.25 <= cost_estimate._NON_ASCII_TOKENS_PER_CHAR <= 0.40, (
         "non-ASCII tokens/char drifted away from the measured ~0.31"
     )
-    # CJK was already correct and must not have moved with it.
     assert pytest.approx(0.85) == cost_estimate._CJK_TOKENS_PER_CHAR
 
 
 def test_the_heuristic_documents_that_it_is_not_a_tokenizer() -> None:
-    """A caller that reads this as exact will quote an invoice it cannot meet."""
     doc = count_text_tokens.__doc__ or ""
     assert "not a tokenizer" in doc.lower() or "heuristic" in doc.lower()
     assert "estimate" in doc.lower()

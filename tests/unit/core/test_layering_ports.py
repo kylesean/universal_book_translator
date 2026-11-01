@@ -1,10 +1,3 @@
-"""Tests for core layering and the ports boundary invariant.
-
-Ensures that ubt.core does not have forbidden reverse edges into adapters or
-compiler packages (ubt.segment, ubt.translate), and that only
-ubt/core/ports.py is permitted to hold lazy bridge forwarders.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,7 +13,6 @@ _CORE_DIR = _REPO_ROOT / "ubt" / "core"
 
 
 def test_core_has_no_module_level_compiler_or_adapter_edges() -> None:
-    """Zero module-level imports of pipeline/segment/translate or adapters in core."""
     forbidden_compiler: list[tuple[str, int, str]] = []
     forbidden_adapters: list[tuple[str, int, str]] = []
 
@@ -39,7 +31,6 @@ def test_core_has_no_module_level_compiler_or_adapter_edges() -> None:
 
 
 def test_only_ports_may_hold_lazy_bridge_imports_in_core() -> None:
-    """Non-ports.py modules in core must not lazy-import adapters or compiler packages."""
     leaks: list[tuple[str, int, str]] = []
     forbidden_targets = (
         "ubt.adapters",
@@ -62,7 +53,6 @@ def test_only_ports_may_hold_lazy_bridge_imports_in_core() -> None:
 
 
 def test_dump_compiler_edges_script_exits_cleanly(capsys: pytest.CaptureFixture[str]) -> None:
-    """scripts/dump_compiler_edges.py executes without error and reports 0 leaks."""
     exit_code = dce.main()
     captured = capsys.readouterr()
     assert exit_code == 0, f"dump_compiler_edges failed:\n{captured.out}"

@@ -1,13 +1,3 @@
-"""The semantic HTML/EPUB views.
-
-The view lowers the delivered blocks: it must carry each block's placed text
-(the delivered translation where one was placed, the source slice where it was
-kept) and place every block. The EPUB view is the same body wrapped in a valid
-OCF container (mimetype first and stored, container/OPF/nav/text present).
-Fixtures are synthetic text elements; the real-PDF path stays with the corpus
-harness in the slow tier.
-"""
-
 from __future__ import annotations
 
 import html
@@ -49,7 +39,6 @@ def test_the_html_view_carries_every_placed_text(tmp_path: Path) -> None:
     text = out.read_text(encoding="utf-8")
 
     assert text.startswith("<!DOCTYPE html")
-    # Total placement: every block got one.
     assert len(composition.placements) == len(blocks)
     for block in blocks:
         expected = html.escape(element_text(block, translations))
@@ -59,12 +48,8 @@ def test_the_html_view_carries_every_placed_text(tmp_path: Path) -> None:
 def test_ordered_list_items_keep_their_numbering_in_the_companion_view(
     tmp_path: Path,
 ) -> None:
-    """The companion HTML/EPUB views must not flatten a numbered list to bullets:
-    the marker decides ``<ol>`` vs ``<ul>``, the same single owner the Typst
-    renderer asks, so the same job's PDF and companion views agree."""
     from ubt.model.ast import ListItem
 
-    # TextElement variants only: every one of these carries ``.text``.
     elements: tuple[Paragraph | ListItem, ...] = (
         Paragraph(id="p0", spine_index=0, span=Span(page=1), text="Steps:"),
         ListItem(id="li1", spine_index=1, span=Span(page=1), text="First step.", marker="1."),
@@ -78,7 +63,6 @@ def test_ordered_list_items_keep_their_numbering_in_the_companion_view(
     text = out.read_text(encoding="utf-8")
     assert "<ol>\n<li>First step.</li>" in text
     assert "<li>Second step.</li>" in text
-    # A bullet item after the run closes the <ol> and opens a <ul>.
     assert "</ol>\n<ul>" in text
     assert "<ul>\n<li>A bullet aside.</li>" in text
 
@@ -106,8 +90,6 @@ def test_the_epub_view_is_a_valid_ocf_container(tmp_path: Path) -> None:
 
 def test_a_block_kept_in_source_shows_its_source_text(tmp_path: Path) -> None:
     blocks, translations = _blocks()
-    # A render-skip means the source shipped; the view must show the source, not
-    # the (unplaced) translation.
     blocks[1].error_flags = ["render_skip:space_failure"]
     out = tmp_path / "view.html"
     compose_html(blocks, translations, out)
@@ -117,12 +99,6 @@ def test_a_block_kept_in_source_shows_its_source_text(tmp_path: Path) -> None:
 
 
 def test_a_quarantined_block_shows_source_not_the_marker(tmp_path: Path) -> None:
-    """A BLOCKED_HUMAN target is a marker around the source, not a translation.
-
-    The view's private copy of ``kept_in_source`` only checked skip flags, so it
-    rendered the raw ``<mark>【待人工审校】…`` text into the HTML/EPUB. It now
-    delegates to the single owner, which names BLOCKED_HUMAN explicitly.
-    """
     blocks, translations = _blocks()
     blocks[1].status = BlockStatus.BLOCKED_HUMAN
     blocks[1].target_text = (
@@ -138,13 +114,7 @@ def test_a_quarantined_block_shows_source_not_the_marker(tmp_path: Path) -> None
     assert "ubt-blocked-human" not in text
 
 
-# --------------------------------------------------------------------------- #
-# Styled runs ship as markup, not dropped by the escape
-# --------------------------------------------------------------------------- #
-
-
 def _styled_block(block_id: str, text: str, **run_kwargs: object) -> IRBlock:
-    """A paragraph whose target carries one styled run over ``run_kwargs``."""
     from ubt.core.ir.models import InlineRun, StyleMeta
 
     run = InlineRun(text=text, **run_kwargs)  # type: ignore[arg-type]
@@ -156,12 +126,6 @@ def _styled_block(block_id: str, text: str, **run_kwargs: object) -> IRBlock:
 
 
 def test_a_bold_source_run_ships_as_strong_in_the_html_view(tmp_path: Path) -> None:
-    """``html.escape`` of the whole text used to flatten every styled run.
-
-    The probe records ``StyleMeta.inline_runs`` (a bold span, a coloured
-    citation); the view must locate each run in the delivered text and wrap it,
-    exactly as the Typst renderer does with ``#strong``.
-    """
     blocks = [_styled_block("b1", "key phrase", bold=True)]
     translations = {b.id: b.target_text or "" for b in blocks}
     out = tmp_path / "view.html"
@@ -195,7 +159,6 @@ def test_an_ital_run_ships_as_em_and_a_rewritten_run_stays_plain(tmp_path: Path)
             target_text="The term stays styled.",
             style=StyleMeta(inline_runs=(InlineRun(text="term", italic=True),)),
         ),
-        # The translation rewrote this span: it finds no match and draws plain.
         IRBlock(
             element=Paragraph(id="gone", spine_index=2, span=Span(page=1), text="src"),
             target_text="The rewritten wording.",
@@ -223,16 +186,11 @@ def test_the_epub_view_carries_the_same_strong_markup(tmp_path: Path) -> None:
 
 
 def test_a_run_surviving_only_after_cjk_normalization_still_locates(tmp_path: Path) -> None:
-    """The target's CJK pass inserts a space the draft-time run text lacks.
-
-    The tolerant matcher folds whitespace, so the run must still be found and
-    wrapped rather than drawn plain.
-    """
     from ubt.core.ir.models import InlineRun, StyleMeta
 
     block = IRBlock(
         element=Paragraph(id="cjk", spine_index=1, span=Span(page=1), text="src"),
-        target_text="关键 短语 位于此处。",  # run text has no space
+        target_text="关键 短语 位于此处。",
         style=StyleMeta(inline_runs=(InlineRun(text="关键短语", bold=True),)),
     )
     translations = {block.id: block.target_text or ""}
@@ -244,12 +202,6 @@ def test_a_run_surviving_only_after_cjk_normalization_still_locates(tmp_path: Pa
 
 
 def test_a_table_grid_lowers_to_a_real_table(tmp_path: Path) -> None:
-    r"""The view used to wrap the delivered grid in ``<pre class="table">``.
-
-    A table block's delivered text is a Markdown pipe grid; a screen reader read
-    the pipes and the text reflowed as code. It now parses through the renderer's
-    own parser into a semantic table (2026-10-14 review, W3-7).
-    """
     from ubt.model.ast import Table
 
     block = IRBlock(
@@ -272,7 +224,6 @@ def test_a_table_grid_lowers_to_a_real_table(tmp_path: Path) -> None:
 
 
 def test_an_unparseable_table_grid_stays_a_pre_not_dropped(tmp_path: Path) -> None:
-    """A grid the renderer would also have to fall back on keeps the pre form."""
     from ubt.model.ast import Table
 
     block = IRBlock(
@@ -287,13 +238,6 @@ def test_an_unparseable_table_grid_stays_a_pre_not_dropped(tmp_path: Path) -> No
 
 
 def test_a_formula_block_carries_latex_and_a_readable_fallback(tmp_path: Path) -> None:
-    r"""A formula span's content is delimited LaTeX; the readable form is the tooltip.
-
-    KaTeX auto-render parses the element's text content, so it must be the LaTeX
-    (``$$\frac{a}{b} \le \sum_i x_i$$``). The readable Unicode fallback — the form
-    the PDF would draw — rides the ``title``/``aria-label`` for when the CDN is
-    unreachable or the reader hovers.
-    """
     from ubt.model.ast import Formula
 
     block = IRBlock(
@@ -306,15 +250,11 @@ def test_a_formula_block_carries_latex_and_a_readable_fallback(tmp_path: Path) -
     text = out.read_text(encoding="utf-8")
 
     assert '<span class="math-tex"' in text
-    # The span content is the delimited LaTeX KaTeX typesets.
     assert "\\frac{a}{b}" in text
-    # The readable fallback is carried as the tooltip.
     assert "a/b ≤ ∑_i x_i" in text
 
 
 def test_a_figure_with_a_resolvable_asset_ships_an_img(tmp_path: Path) -> None:
-    """The figure was an empty ``<figure data-asset>`` box; it now carries the
-    image (data URI in HTML so the single file stays portable)."""
     from ubt.model.ast import Figure
 
     asset = tmp_path / "fig.png"
@@ -325,7 +265,6 @@ def test_a_figure_with_a_resolvable_asset_ships_an_img(tmp_path: Path) -> None:
     text = out.read_text(encoding="utf-8")
 
     assert '<img src="data:image/png;base64,' in text
-    # The delivered file must not carry the host path.
     assert str(tmp_path) not in text
     assert 'data-asset="fig.png"' in text
 
@@ -350,8 +289,6 @@ def test_a_figure_with_a_missing_asset_degrades_to_a_labelled_placeholder(
 
 
 def test_the_epub_packages_figures_with_manifest_entries(tmp_path: Path) -> None:
-    """The EPUB dropped every figure; now each resolvable asset is packaged,
-    listed in the OPF manifest, and referenced by the content document."""
     from ubt.model.ast import Figure
 
     first = tmp_path / "a.png"
@@ -400,20 +337,6 @@ def test_the_epub_deduplicates_identical_figure_bytes(tmp_path: Path) -> None:
 
 
 def test_a_failed_draft_wrapper_never_reaches_the_companion_views(tmp_path: Path) -> None:
-    """The HTML/EPUB views must strip the pipeline's <mark> wrappers, as the PDF does.
-
-    ``element_text`` used to return ``target_text`` verbatim, so a block whose
-    repair call failed shipped
-    ``&lt;mark class="ubt-failed-draft" title="REPAIR ERROR RuntimeError: …"&gt;``
-    — wrapper, exception text and all — as visible escaped markup, while the PDF
-    renderer showed the clean translated sentence for the same block.
-
-    The map entry is left *in place* deliberately. An earlier version of this
-    test popped it, which exercised ``element_text``'s fallback while the export
-    stage's real map still carried the raw ``target_text`` — so the wrapper kept
-    reaching both companions and this test stayed green. The map is an override
-    that wins over the fallback, so it is the entry that must be clean.
-    """
     blocks, translations = _blocks()
     wrapped = (
         '<mark class="ubt-failed-draft" title="REPAIR ERROR RuntimeError: boom">你好世界。</mark>'
@@ -440,13 +363,6 @@ def test_a_failed_draft_wrapper_never_reaches_the_companion_views(tmp_path: Path
 
 
 def test_toc_rows_and_running_heads_are_not_promoted_to_section_headings(tmp_path: Path) -> None:
-    """The companion views must apply the PDF renderer's two omissions.
-
-    A running head (an arXiv stamp or a journal author line) was emitted as an
-    ``<h1>`` opener, and every ``toc_entry`` row became a real section heading —
-    inventing sections with no body and dropping the recovered page numbers. Both
-    were decisions only ``document_renderer`` made.
-    """
     from ubt.core.ir.models import BlockType, FlowID, make_element
 
     stamp = IRBlock(
@@ -486,7 +402,6 @@ def test_toc_rows_and_running_heads_are_not_promoted_to_section_headings(tmp_pat
 
 
 def _figure_block(tmp_path: Path) -> tuple[list[IRBlock], dict[str, str]]:
-    """One IMAGE block pointing at a real PNG the EPUB can package."""
     from ubt.core.ir.models import BlockType, FlowID, make_element
 
     image = tmp_path / "figure.png"
@@ -506,12 +421,6 @@ def _figure_block(tmp_path: Path) -> tuple[list[IRBlock], dict[str, str]]:
 
 
 def test_an_epub_with_a_figure_is_well_formed_xml(tmp_path: Path) -> None:
-    """XHTML has no void elements: an unterminated ``<img>`` breaks the package.
-
-    ``OEBPS/text.xhtml`` is ``application/xhtml+xml``, so a reader parses it as
-    XML. HTML5's ``<img ...>`` is legal markup but not well-formed XML, and a
-    strict reading system rejects the whole book.
-    """
     import xml.etree.ElementTree as ET
 
     blocks, translations = _figure_block(tmp_path)
@@ -521,5 +430,4 @@ def test_an_epub_with_a_figure_is_well_formed_xml(tmp_path: Path) -> None:
     with zipfile.ZipFile(out) as archive:
         text_xhtml = archive.read("OEBPS/text.xhtml").decode("utf-8")
     assert "<img" in text_xhtml
-    # The assertion that failed before the fix: this raises ParseError.
     ET.fromstring(text_xhtml)

@@ -1,11 +1,3 @@
-"""CELS Stage 1 geometry: gulter refusal, track assignment, overrun reporting.
-
-The two guards under test are the ones measured on ``chapter-3.pdf`` p12 — a
-margin fragment that looks like a gutter by width alone, and a lone right-side
-box with no vertical overlap. Synthetic pages pin the behaviour so a future
-threshold change has to face the same cases the corpus did.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -64,12 +56,6 @@ def test_genuine_two_column_page_is_split_at_the_gutter() -> None:
 
 
 def test_margin_fragment_is_refused_because_one_side_has_no_ink() -> None:
-    """p12's trap: a wide band in the right margin has nothing on its right.
-
-    Accepting it would split one column into a body column plus a 4% strip,
-    and every translated line would then be forced into that strip, so the
-    guard has to refuse it and say why.
-    """
     boxes = [_line(84.0, 600.0 - row * 12.0, 333.4) for row in range(20)]
     boxes.append(_line(434.8, 556.4, 21.1))
 
@@ -84,7 +70,6 @@ def test_margin_fragment_is_refused_because_one_side_has_no_ink() -> None:
 
 
 def test_narrow_sidebar_is_refused_by_ink_share() -> None:
-    """A narrow column of numbers is a binder, not a second text column."""
     body = [_line(84.0, 600.0 - row * 12.0, 200.0) for row in range(20)]
     sidebar = [_line(320.0, 600.0 - row * 12.0, 30.0) for row in range(6)]
 
@@ -97,7 +82,6 @@ def test_narrow_sidebar_is_refused_by_ink_share() -> None:
 
 
 def test_gutter_without_vertical_overlap_is_refused() -> None:
-    """Two bands stacked vertically are two blocks, not two columns."""
     left = [_line(84.0, 600.0 - row * 12.0, 200.0) for row in range(20)]
     right = [_line(320.0, 260.0 - row * 12.0, 200.0) for row in range(10)]
 
@@ -108,7 +92,6 @@ def test_gutter_without_vertical_overlap_is_refused() -> None:
 
 
 def test_full_width_title_does_not_erase_the_gutter() -> None:
-    """A title spanning both columns would fill the gutter's empty bins."""
     boxes = _two_column_page()
     boxes.append(_line(84.0, 640.0, 448.0, height=16.0))
 

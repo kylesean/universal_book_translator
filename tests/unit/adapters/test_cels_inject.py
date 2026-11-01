@@ -1,11 +1,3 @@
-"""CELS Stage 5 mechanism tests: metrics, fit search, and stream surgery.
-
-These run against a synthetic page built here, so they pin the *arithmetic* and
-the *operator rewriting* without a corpus. The end-to-end geometry claims
-(extraction, raster diff, TL twin) are the spike script's job — see
-``output/adaptive_delivery/g3`` — because they need a real producer's fonts.
-"""
-
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -28,9 +20,6 @@ from ubt.adapters.pdf.cels_inject import (
 
 pytestmark = pytest.mark.fast
 
-#: Every code in the synthetic font advances 0.6 em, so an expected width is
-#: ``0.6 · size · glyph_count`` and a wrong formula cannot hide behind real
-#: font metrics.
 _SYNTHETIC_ADVANCE_EM: float = 0.6
 
 
@@ -89,7 +78,6 @@ def _numeric_operands(pdf: pikepdf.Pdf, data: bytes, names: tuple[str, ...]) -> 
 
 
 def _parse(pdf: pikepdf.Pdf, data: bytes) -> list[Any]:
-    """Parse rewritten stream bytes back into instructions."""
     return list(pikepdf.parse_content_stream(pdf.make_stream(data)))
 
 
@@ -101,9 +89,7 @@ def test_advance_width_follows_the_pdf_displacement_formula() -> None:
     scaled = advance_width("A A", metrics, 10.0, horizontal_scale=0.9, word_spacing=3.0)
 
     assert plain == pytest.approx(30.0)
-    # Tc applies to every glyph; Tw only to the space, and there is none here.
     assert tracked == pytest.approx(30.0 + 5 * 2.0)
-    # Tz multiplies both the glyph advances and the word spacing (spec Th).
     assert scaled == pytest.approx((18.0 + 3.0) * 0.9)
 
 
@@ -140,7 +126,6 @@ def test_scan_lines_carries_tz_and_tc_for_the_rewrite_to_restore() -> None:
 
     assert line.horizontal_scale == pytest.approx(0.9)
     assert line.char_spacing == pytest.approx(1.5)
-    # width = 0.9 · (5 · 6 + 5 · 1.5) = 33.75
     assert line.width == pytest.approx(33.75)
 
 
@@ -156,7 +141,6 @@ def test_tj_kerning_adjustments_are_in_the_measured_width() -> None:
 
     line = scan_lines(page)[0]
 
-    # 4 glyphs × 6pt; a positive TJ number moves the pen back (tightens).
     assert line.width == pytest.approx(24.0 - 5.0)
 
 
@@ -303,13 +287,6 @@ def test_scan_reports_a_missing_font_resource() -> None:
 
 
 def test_text_space_operands_are_converted_to_device_space() -> None:
-    """``Tf 1`` + ``Tm 9.96``: Tc and TL operands are text-space, not device.
-
-    The corpus writes the real size into ``Tm`` and leaves ``Tf`` at 1, so a
-    ``Tc`` computed in device points has to be divided by the matrix scale or
-    the line silently compresses (or explodes) by 9.96×. This is the defect G3
-    found; the conversion is what fixes it.
-    """
     body: list[tuple[list[Any], str]] = [
         ([], "BT"),
         (["/F1", 1], "Tf"),
@@ -337,7 +314,6 @@ def test_text_space_operands_are_converted_to_device_space() -> None:
 
 
 def test_fit_evidence_stays_asdict_able() -> None:
-    """The spike serialises ``HorizontalFit`` straight into ``evidence.json``."""
     assert asdict(HorizontalFit(1.0, 0.0, 10.0, True, 0.0)) == {
         "horizontal_scale": 1.0,
         "char_spacing": 0.0,

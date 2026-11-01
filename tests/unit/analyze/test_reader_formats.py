@@ -1,12 +1,3 @@
-"""The native HTML/EPUB/DOCX readers.
-
-Each reader must give every element a real ``Span.chars`` that slices exactly
-its own text out of ``CanonicalSource.text`` -- the reader's core promise, a
-*verifiable* span -- and the ``Document`` must round-trip through the bridge
-losslessly. The fixtures are built here (a minimal DOCX via python-docx, an
-EPUB via zipfile, an HTML string), so the tests need no external sample files.
-"""
-
 from __future__ import annotations
 
 import zipfile
@@ -25,7 +16,6 @@ from ubt.model.ast import Document, Table
 
 pytestmark = pytest.mark.fast
 
-#: A 1x1 transparent PNG, for the DOCX picture fixture.
 _PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
     "0000000d49444154789c6360606060000000050001a5f645400000000049454e44ae426082"
@@ -191,9 +181,6 @@ def test_the_expected_structure_is_present(
 
 
 def test_docx_vertically_merged_cell_is_emitted_once(tmp_path: Path) -> None:
-    # python-docx resolves a vMerge continuation row's cell to the restart cell
-    # above, so a per-row dedup repeated the merged value on every row. A
-    # table-scoped set emits it once and blanks the continuations.
     from docx import Document as DocxDocument
 
     path = tmp_path / "vmerge.docx"
@@ -216,16 +203,6 @@ def test_docx_vertically_merged_cell_is_emitted_once(tmp_path: Path) -> None:
 
 
 def test_a_markdown_blockquote_marker_never_reaches_the_text(tmp_path: Path) -> None:
-    """`>` is Markdown syntax, not prose.
-
-    Every other Markdown construct had a structural branch; a blockquote fell
-    through to ``paragraph.append(line)``, so "> quoted" was sent to the model
-    with its marker. The target then carried a stray angle bracket, and the
-    delivered paragraph had a callout the renderers never understood. The
-    element union has no quote type, so the faithful minimum is to translate the
-    content and drop the marker — including inside a quote, where a heading or
-    list must still be recognised.
-    """
     from ubt.analyze.reader_md import read_md
 
     path = tmp_path / "quoted.md"
@@ -238,10 +215,6 @@ def test_a_markdown_blockquote_marker_never_reaches_the_text(tmp_path: Path) -> 
     texts = [getattr(el, "text", "") for el in elements]
     assert texts[0] == "引用的句子\n第二行"
     assert not any(text.strip().startswith(">") for text in texts), texts
-    # Structure inside the quote survives. ``elements`` is a union of every
-    # element type and only some carry ``text``, so the type is asserted first
-    # and the attribute read through ``getattr`` (mypy --strict rejects a bare
-    # ``elements[1].text`` on the union).
     assert type(elements[1]).__name__ == "Heading"
     assert getattr(elements[1], "text", None) == "引用里的标题"
     assert type(elements[2]).__name__ == "ListItem"
@@ -261,7 +234,6 @@ def test_nested_and_spaced_blockquote_markers_are_stripped(tmp_path: Path) -> No
 
 
 def _minimal_epub(path: Path, *, with_nav: bool = True, repeated: bool = False) -> Path:
-    """A minimal but valid EPUB 3 container, written by hand."""
     import zipfile
 
     nav_item = (
@@ -307,14 +279,6 @@ def _minimal_epub(path: Path, *, with_nav: bool = True, repeated: bool = False) 
 
 
 def test_the_native_reader_and_the_adapter_agree_on_the_spine() -> None:
-    """One spine rule, not two.
-
-    The adapter's copy filtered the navigation document and collapsed repeated
-    spine members; the native reader's copy did neither. The same minimal EPUB
-    therefore produced three pages through ``read_epub`` — the nav document
-    counted as prose — and two chapters through the adapter. Both now call
-    ``spine_chapters``.
-    """
     import asyncio
     import tempfile
     import zipfile
@@ -324,10 +288,8 @@ def test_the_native_reader_and_the_adapter_agree_on_the_spine() -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         path = _minimal_epub(Path(tmp) / "nav.epub", with_nav=True)
-        # The reader sees exactly the two chapters.
         assert len(read_epub(path).elements) == 2
 
-        # The adapter names exactly the same members, in the same order.
         with zipfile.ZipFile(path) as archive:
             shared = spine_chapters(archive, "OEBPS/content.opf")
         manifest = asyncio.run(EPUBAdapter().extract_manifest(path))
@@ -337,7 +299,6 @@ def test_the_native_reader_and_the_adapter_agree_on_the_spine() -> None:
 
 
 def test_a_repeated_spine_member_contributes_one_chapter() -> None:
-    """The same file twice would clone identical blocks and be paid twice."""
     import tempfile
     import zipfile
 

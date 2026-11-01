@@ -1,5 +1,3 @@
-"""A VLM proofread upgrade must not shove a page's table/figure to its tail."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,9 +29,6 @@ def _make_block(
 
 
 def test_a_leading_table_keeps_its_place_when_the_page_is_upgraded() -> None:
-    # Page 1 is [table, short prose]; "weak" mode upgrades it. The transcribed
-    # prose must be spliced into the prose slot, keeping the table above it —
-    # not appended after it (which put the table at the page tail).
     table = _make_block(BlockType.TABLE, "a | b", page=1, spine_index=1)
     prose = _make_block(BlockType.NARRATIVE, "Short.", page=1, spine_index=2)
     fresh = _make_block(BlockType.NARRATIVE, "Transcribed prose.", page=1, spine_index=99)
@@ -64,5 +59,4 @@ def test_a_leading_table_keeps_its_place_when_the_page_is_upgraded() -> None:
 
     ids = [b.id for b in result]
     assert ids == [table.id, fresh.id]
-    # The original prose was replaced, the table survived.
     assert prose.id not in ids

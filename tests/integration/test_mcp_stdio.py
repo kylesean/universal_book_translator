@@ -1,5 +1,3 @@
-"""Official MCP stdio client integration: initialize, list, call, structured output."""
-
 from __future__ import annotations
 
 import os
@@ -30,8 +28,6 @@ async def test_official_stdio_client_lists_and_calls_agent_tools(tmp_path: Path)
         env=env,
         cwd=str(Path(__file__).resolve().parents[2]),
     )
-    # No sampling callback/capability is supplied. Agent mode must work through
-    # ordinary tool calls only.
     async with Client(params) as client:
         listed = await client.list_tools()
         names = {tool.name for tool in listed.tools}
@@ -92,7 +88,6 @@ async def test_official_stdio_client_lists_and_calls_agent_tools(tmp_path: Path)
         assert submitted.structured_content is not None
         assert submitted.structured_content["accepted_blocks"] == len(package["blocks"])
 
-        # Invalid input is an MCP error, not a protocol crash.
         invalid = await client.call_tool(
             "ubt_agent_prepare",
             {"input_path": str(source), "package_size": 999},

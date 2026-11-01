@@ -1,22 +1,3 @@
-"""LNDS page-number pruning, Calibre cleanup, academic-PDF math repair, block dedup.
-
-The cleaner is a bag of pure line/text transforms plus two IR-level entry
-points. The load-bearing facts pinned here:
-
-* the ASCII-digit gate is deliberately narrower than ``str.isdigit()`` (Unicode
-  digits crash ``int()`` and, historically, the whole chapter's ingestion);
-* a monotonic page sequence is only recognised when it is both long enough and
-  covers a large enough share of the digit lines (LNDS length / ratio gates);
-* ordered-list markers introduced by a colon are protected *as a run*, so a
-  four-item list of full sentences is not mistaken for page numbers;
-* the CMap ``¼ -> =`` repair is evidence-gated, so genuine prose fractions
-  (``¼ cup``) and currency (``paid $5``) survive;
-* textbook cleanup strips boilerplate/page/header noise while a math/protected
-  span only disables the CMap normalizer, never the boilerplate stripping;
-* duplicate extraction fragments are removed only on identical normalized text
-  *and* near-coincident boxes, keeping the larger fragment.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -72,11 +53,6 @@ def _bbox(page: int, x0: float, y0: float, x1: float, y1: float) -> BoundingBox:
     return BoundingBox(page=page, x0=x0, y0=y0, x1=x1, y1=y1)
 
 
-# --------------------------------------------------------------------------- #
-# _has_dollar_math
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("content", "expected"),
     [
@@ -84,17 +60,12 @@ def _bbox(page: int, x0: float, y0: float, x1: float, y1: float) -> BoundingBox:
         ("no dollars here", False),
         ("$$E = mc^2$$", True),
         ("the value $x^2$ grows", True),
-        ("$5 and $10", False),  # unpaired currency, not math
+        ("$5 and $10", False),
         ("price $5", False),
     ],
 )
 def test_has_dollar_math(content: str, expected: bool) -> None:
     assert _has_dollar_math(content) is expected
-
-
-# --------------------------------------------------------------------------- #
-# is_ascii_digit_line
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -109,9 +80,9 @@ def test_has_dollar_math(content: str, expected: bool) -> None:
         ("12.3", False),
         ("-1", False),
         ("12a", False),
-        ("\u00b2", False),  # superscript two: isdigit() True, int() raises
-        ("\uff11", False),  # full-width one: isdigit() True
-        ("\u0661\u0662", False),  # Arabic-Indic digits
+        ("\u00b2", False),
+        ("\uff11", False),
+        ("\u0661\u0662", False),
     ],
 )
 def test_is_ascii_digit_line(line: str, expected: bool) -> None:
@@ -122,11 +93,6 @@ def test_is_ascii_digit_line(line: str, expected: bool) -> None:
 def test_the_int_digit_limit_is_enforced() -> None:
     assert is_ascii_digit_line("1" * _MAX_INT_DIGITS) is True
     assert is_ascii_digit_line("1" * (_MAX_INT_DIGITS + 1)) is False
-
-
-# --------------------------------------------------------------------------- #
-# detect_page_number_lines (LNDS)
-# --------------------------------------------------------------------------- #
 
 
 def test_a_short_run_is_not_a_page_sequence() -> None:
@@ -151,23 +117,16 @@ def test_min_length_is_honoured() -> None:
 
 
 def test_a_mostly_monotonic_run_still_qualifies() -> None:
-    # LNDS = [3, 4, 5, 6] over 5 digit lines -> ratio 0.8 >= 0.5.
     assert detect_page_number_lines(["10", "3", "4", "5", "6"]) == {1, 2, 3, 4}
 
 
 def test_a_sequence_shorter_than_half_the_digit_lines_is_rejected() -> None:
-    # Values 5,4,3,2,1,2,3,4,0: LNDS = [1,2,3,4], n = 9 -> ratio 0.444 < 0.5.
     assert detect_page_number_lines(["5", "4", "3", "2", "1", "2", "3", "4", "0"]) == set()
 
 
 def test_the_ratio_gate_is_configurable() -> None:
     lines = ["5", "4", "3", "2", "1", "2", "3", "4", "0"]
     assert detect_page_number_lines(lines, min_ratio=0.4) == {4, 5, 6, 7}
-
-
-# --------------------------------------------------------------------------- #
-# strip_calibre_markup
-# --------------------------------------------------------------------------- #
 
 
 def test_calibre_pseudo_classes_are_removed() -> None:
@@ -187,11 +146,6 @@ def test_plain_markdown_bold_is_untouched() -> None:
     assert strip_calibre_markup("**bold**") == "**bold**"
 
 
-# --------------------------------------------------------------------------- #
-# is_calibre_noise_line
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("line", "expected"),
     [
@@ -207,11 +161,6 @@ def test_plain_markdown_bold_is_untouched() -> None:
 )
 def test_is_calibre_noise_line(line: str, expected: bool) -> None:
     assert is_calibre_noise_line(line) is expected
-
-
-# --------------------------------------------------------------------------- #
-# is_likely_heading_or_list_item
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -246,11 +195,6 @@ def test_is_likely_heading_or_list_item(line: str, expected: bool) -> None:
 def test_calibre_noise_is_never_a_heading() -> None:
     assert is_likely_heading_or_list_item("::: heading") is False
     assert is_likely_heading_or_list_item("title .ct}") is False
-
-
-# --------------------------------------------------------------------------- #
-# collect_dropped_line_indices
-# --------------------------------------------------------------------------- #
 
 
 def test_a_monotonic_page_run_is_dropped() -> None:
@@ -324,20 +268,15 @@ def test_a_digit_after_calibre_noise_is_dropped() -> None:
     assert collect_dropped_line_indices(["bar .ct}", "5", "A sentence."]) == {0, 1}
 
 
-# --------------------------------------------------------------------------- #
-# _has_cmap_equation_evidence / normalize_academic_pdf_math
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("content", "expected"),
     [
         ("plain text", False),
         ("x \u00bc 5", True),
         ("vG \u00bc VG", True),
-        ("the \u00bc value", False),  # stopword guard
-        ("\u00bc cup", False),  # no flanking identifier at all
-        ("x \u00bc cup", False),  # measure-noun guard
+        ("the \u00bc value", False),
+        ("\u00bc cup", False),
+        ("x \u00bc cup", False),
     ],
 )
 def test_cmap_equation_evidence(content: str, expected: bool) -> None:
@@ -402,7 +341,6 @@ def test_a_power_without_a_unit_is_rebuilt() -> None:
 
 
 def test_the_currency_gate_requires_cmap_evidence() -> None:
-    # Without equation-shaped ¼, a currency amount must survive untouched.
     assert normalize_academic_pdf_math("paid $5") == "paid $5"
     assert normalize_academic_pdf_math("x \u00bc 5 paid $5") == "x = 5 paid -5"
 
@@ -410,11 +348,6 @@ def test_the_currency_gate_requires_cmap_evidence() -> None:
 def test_the_parenthesis_cmap_repair_requires_evidence() -> None:
     assert normalize_academic_pdf_math("\u00f0x\u00de") == "\u00f0x\u00de"
     assert normalize_academic_pdf_math("x \u00bc 5 \u00f0a\u00de") == "x = 5 (a)"
-
-
-# --------------------------------------------------------------------------- #
-# strip_textbook_ocr_artifacts
-# --------------------------------------------------------------------------- #
 
 
 def test_strip_textbook_handles_empty_input() -> None:
@@ -463,11 +396,6 @@ def test_horizontal_whitespace_is_collapsed() -> None:
     assert strip_textbook_ocr_artifacts("a   b\tc") == "a b c"
 
 
-# --------------------------------------------------------------------------- #
-# clean_calibre_and_lnds_pages
-# --------------------------------------------------------------------------- #
-
-
 def test_clean_removes_calibre_markup() -> None:
     assert clean_calibre_and_lnds_pages("Hello {.calibre9}world") == "Hello world"
 
@@ -479,11 +407,6 @@ def test_clean_drops_a_monotonic_page_run() -> None:
 
 def test_clean_collapses_blank_line_runs() -> None:
     assert clean_calibre_and_lnds_pages("A\n\n\n\nB") == "A\n\nB"
-
-
-# --------------------------------------------------------------------------- #
-# LNDSPageCleaner
-# --------------------------------------------------------------------------- #
 
 
 def test_cleaner_clean_delegates_to_the_pure_cleaner() -> None:
@@ -536,14 +459,8 @@ def test_clean_chapter_blocks_never_blanks_a_protected_block_type() -> None:
         _block("b8", "5", block_type=BlockType.HEADING),
     ]
     cleaned = LNDSPageCleaner().clean_chapter_blocks(blocks)
-    # b8's lone digit is part of the global sequence but its block is a heading.
     assert cleaned[8].source_text == "5"
     assert cleaned[1].source_text == ""
-
-
-# --------------------------------------------------------------------------- #
-# _norm_text / _area / _iou
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -568,11 +485,6 @@ def test_iou() -> None:
     assert _iou((0.0, 0.0, 2.0, 2.0), (0.0, 0.0, 2.0, 2.0)) == 1.0
     assert _iou((0.0, 0.0, 2.0, 2.0), (5.0, 5.0, 7.0, 7.0)) == 0.0
     assert _iou((0.0, 0.0, 2.0, 2.0), (1.0, 0.0, 3.0, 2.0)) == pytest.approx(2.0 / 6.0)
-
-
-# --------------------------------------------------------------------------- #
-# dedup_duplicate_blocks
-# --------------------------------------------------------------------------- #
 
 
 def test_dedup_leaves_short_input_untouched() -> None:

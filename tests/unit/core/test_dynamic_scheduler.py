@@ -1,5 +1,3 @@
-"""Unit tests for the Pareto dynamic routing scheduler and block complexity classifier."""
-
 from __future__ import annotations
 
 import pytest
@@ -30,7 +28,6 @@ def _make_block(
 
 
 def test_classify_heading_as_trivial() -> None:
-    """Verify section headings are classified as TRIVIAL complexity."""
     classifier = BlockComplexityClassifier()
     block = _make_block("blk-h1", "# Chapter 1: Introduction", BlockType.HEADING)
     metrics = classifier.classify_block(block)
@@ -41,7 +38,6 @@ def test_classify_heading_as_trivial() -> None:
 
 
 def test_classify_standard_narrative() -> None:
-    """Verify ordinary expository text is classified as STANDARD."""
     classifier = BlockComplexityClassifier()
     text = (
         "This chapter introduces fundamental architectural concepts. "
@@ -56,10 +52,8 @@ def test_classify_standard_narrative() -> None:
 
 
 def test_classify_math_complexity_and_extreme() -> None:
-    """Verify formulas and LaTeX equations elevate complexity to COMPLEX and EXTREME."""
     classifier = BlockComplexityClassifier()
 
-    # Inline math paragraph
     text_inline = (
         "The loss function is defined as $L(\\theta) = \\frac{1}{N} \\sum_{i=1}^N (y_i - \\hat{y}_i)^2$ "
         "where $\\theta$ denotes the parameter vector."
@@ -69,7 +63,6 @@ def test_classify_math_complexity_and_extreme() -> None:
     assert metrics_inline.tier in (ComplexityTier.COMPLEX, ComplexityTier.EXTREME)
     assert metrics_inline.math_inline_count >= 1
 
-    # Pure display formula block
     text_display = "$$\\int_{-\\infty}^{+\\infty} e^{-x^2} dx = \\sqrt{\\pi}$$"
     block_display = _make_block("blk-m2", text_display, BlockType.FORMULA)
     metrics_display = classifier.classify_block(block_display)
@@ -78,7 +71,6 @@ def test_classify_math_complexity_and_extreme() -> None:
 
 
 def test_classify_code_block() -> None:
-    """Verify programming code listing is elevated in complexity."""
     classifier = BlockComplexityClassifier()
     code_text = (
         "```python\n"
@@ -97,7 +89,6 @@ def test_classify_code_block() -> None:
 
 
 def test_classify_with_glossary_density() -> None:
-    """Verify dense domain terminology increases complexity score."""
     classifier = BlockComplexityClassifier()
     text = "The kernel driver configures the memory buffer via the bus controller."
     glossary = ["kernel", "driver", "memory buffer", "bus controller"]
@@ -111,7 +102,6 @@ def test_classify_with_glossary_density() -> None:
 
 
 def test_pareto_scheduler_model_assignment() -> None:
-    """Verify DynamicParetoScheduler assigns models based on tier and policy."""
     scheduler = DynamicParetoScheduler(
         policy=DynamicRoutingPolicy.PARETO,
         budget_model="deepseek-chat",
@@ -119,13 +109,11 @@ def test_pareto_scheduler_model_assignment() -> None:
         flagship_model="claude-3-7-sonnet",
     )
 
-    # Trivial heading -> budget model
     block_h = _make_block("h1", "## References", BlockType.HEADING)
     assign_h = scheduler.resolve_model_for_block(block_h)
     assert assign_h.assigned_model == "deepseek-chat"
     assert assign_h.tier == ComplexityTier.TRIVIAL
 
-    # Extreme math formula -> flagship model
     block_m = _make_block(
         "m1",
         "$$\\nabla \\times \\mathbf{B} = \\mu_0 \\mathbf{J} + \\mu_0 \\epsilon_0 \\frac{\\partial \\mathbf{E}}{\\partial t}$$",
@@ -137,7 +125,6 @@ def test_pareto_scheduler_model_assignment() -> None:
 
 
 def test_pareto_scheduler_retry_escalation() -> None:
-    """Verify that failure / retry escalates model assignment to higher tier."""
     scheduler = DynamicParetoScheduler(
         policy=DynamicRoutingPolicy.PARETO,
         budget_model="deepseek-chat",
@@ -145,7 +132,6 @@ def test_pareto_scheduler_retry_escalation() -> None:
         flagship_model="claude-3-7-sonnet",
     )
 
-    # Standard block on first attempt -> budget model
     block = _make_block(
         "p1",
         "This is an ordinary paragraph describing network protocols.",
@@ -155,7 +141,6 @@ def test_pareto_scheduler_retry_escalation() -> None:
     assert initial_assign.assigned_model == "deepseek-chat"
     assert not initial_assign.is_escalated
 
-    # Standard block on retry/repair -> escalated to COMPLEX -> gpt-4o-mini
     retry_assign = scheduler.resolve_model_for_block(block, is_retry_or_repair=True)
     assert retry_assign.is_escalated
     assert retry_assign.tier == ComplexityTier.COMPLEX
@@ -163,7 +148,6 @@ def test_pareto_scheduler_retry_escalation() -> None:
 
 
 def test_quality_first_and_cost_first_policies() -> None:
-    """Verify QUALITY_FIRST and COST_FIRST routing policies."""
     scheduler_quality = DynamicParetoScheduler(
         policy=DynamicRoutingPolicy.QUALITY_FIRST,
         budget_model="deepseek-chat",
@@ -176,7 +160,6 @@ def test_quality_first_and_cost_first_policies() -> None:
         BlockType.CODE,
     )
     assign_q = scheduler_quality.resolve_model_for_block(block_code)
-    # Quality first assigns flagship for complex/extreme
     assert assign_q.assigned_model == "claude-3-7-sonnet"
 
     scheduler_cost = DynamicParetoScheduler(
@@ -186,12 +169,10 @@ def test_quality_first_and_cost_first_policies() -> None:
         flagship_model="claude-3-7-sonnet",
     )
     assign_c = scheduler_cost.resolve_model_for_block(block_code)
-    # Cost first uses budget for complex
     assert assign_c.assigned_model == "deepseek-chat"
 
 
 def test_simulate_document_routing() -> None:
-    """Verify simulate_document_routing computes metrics and savings."""
     scheduler = DynamicParetoScheduler(
         policy=DynamicRoutingPolicy.PARETO,
         budget_model="deepseek-chat",
@@ -212,7 +193,6 @@ def test_simulate_document_routing() -> None:
     assert report.savings_percentage >= 0.0
     assert "deepseek-chat" in report.model_counts
 
-    # Test markdown generation
     md = scheduler.render_simulation_markdown(report)
     assert "# Dynamic Pareto Routing Simulation Report" in md
     assert "Total Blocks" in md

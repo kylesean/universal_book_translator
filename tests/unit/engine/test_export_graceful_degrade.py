@@ -1,5 +1,3 @@
-"""Unit tests for export stage graceful delivery contract degradation."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,10 +13,6 @@ pytestmark = pytest.mark.fast
 
 @pytest.mark.asyncio
 async def test_export_degrade_to_reflow_on_faithful_failure(tmp_path: Path) -> None:
-    """When faithful delivery contract fails and degrade_policy is allow_degrade,
-
-    the export stage should seamlessly fall back to reflow without raising IntegrityViolationError.
-    """
     rendered_pdf = tmp_path / "book_mono.pdf"
     rendered_pdf.write_bytes(b"%PDF-1.4 minimal")
     reflow_companion = tmp_path / "book_mono_reflow.pdf"
@@ -63,21 +57,18 @@ async def test_export_degrade_to_reflow_on_faithful_failure(tmp_path: Path) -> N
         summary_line=lambda: "[PASSED] readable",
     )
 
-    # Simulate evaluate_delivery: first returns failed faithful, second returns passed readable
     eval_mock = MagicMock(side_effect=[failed_faithful_report, passed_readable_report])
     build_reports_mock = AsyncMock(return_value=(MagicMock(), tmp_path / "qr.json"))
 
     adapter = MagicMock()
     adapter._renderer = MagicMock(delivery_mode="facsimile")
 
-    # Call the logic under test
     from ubt.core.engine.stages import export
 
     with (
         patch.object(export, "_evaluate_delivery", eval_mock),
         patch.object(export, "_build_reports", build_reports_mock),
     ):
-        # Emulate the block in export.py
         delivery_report = eval_mock(ctx, adapter, [], rendered_pdf, {})
         contract_ok = delivery_report.deliverable
 
@@ -110,7 +101,6 @@ async def test_export_degrade_to_reflow_on_faithful_failure(tmp_path: Path) -> N
                 delivery_report = eval_mock(ctx, adapter, [], rendered_pdf, {})
                 contract_ok = delivery_report.deliverable
 
-        # Assertions
         assert contract_ok is True
         assert delivery_report.contract == "readable"
         assert ctx.manifest.metadata["delivery_mode"] == "reflow"

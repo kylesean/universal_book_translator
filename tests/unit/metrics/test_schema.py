@@ -1,5 +1,3 @@
-"""Contract tests for the versioned KPI schema (definitions + artifact model)."""
-
 from __future__ import annotations
 
 import pytest
@@ -62,7 +60,7 @@ def test_the_defect_bounds_are_the_expected_ones() -> None:
 
 def test_kpi_set_defaults_to_an_unknown_version() -> None:
     kpi_set = KpiSet()
-    assert kpi_set.schema_version == 0  # 0 = legacy/unknown
+    assert kpi_set.schema_version == 0
     assert kpi_set.job == {}
     assert kpi_set.kpis == {}
     assert kpi_set.details == {}

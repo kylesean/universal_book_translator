@@ -1,15 +1,3 @@
-"""The upload staging area must not grow forever.
-
-``/jobs/upload`` stages a copy of every document a console submits under
-``<db_dir>/uploads`` and hands back its path; that copy is the job's input.
-No other code path ever removed one, so an instance used for a while keeps
-every document ever uploaded. The API sweeps the directory at startup.
-
-The sweep is deliberately conservative: a file is only deleted when it is a
-regular file, older than the window, and not named as the ``input_path`` of a
-queue job that has not finished.
-"""
-
 from __future__ import annotations
 
 import os
@@ -49,18 +37,12 @@ def _config(tmp_path: Path, **overrides: object) -> UBTConfig:
 
 
 def _stage(directory: Path, name: str, *, age_days: float) -> Path:
-    """Write a staged upload whose mtime says how long ago it arrived."""
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / name
     path.write_bytes(b"%PDF-1.4 staged upload")
     stamp = time.time() - age_days * _DAY
     os.utime(path, (stamp, stamp))
     return path
-
-
-# --------------------------------------------------------------------------- #
-# The sweep itself
-# --------------------------------------------------------------------------- #
 
 
 def test_an_upload_past_the_window_is_removed(tmp_path: Path) -> None:
@@ -86,8 +68,6 @@ def test_the_window_is_measured_from_now_not_from_the_newest_file(tmp_path: Path
 
 
 def test_a_window_of_zero_disables_the_sweep(tmp_path: Path) -> None:
-    # The knob an operator turns to keep every staged document (a submission
-    # archive) rather than have the API decide when it is done with it.
     uploads = tmp_path / "uploads"
     kept = _stage(uploads, "ancient.pdf", age_days=3650)
 
@@ -97,8 +77,6 @@ def test_a_window_of_zero_disables_the_sweep(tmp_path: Path) -> None:
 
 
 def test_a_missing_staging_directory_is_not_created(tmp_path: Path) -> None:
-    # The sweep is housekeeping, not setup: an operator who never uploaded
-    # anything must not find an empty uploads/ tree planted in db_dir.
     uploads = tmp_path / "uploads"
 
     assert prune_stale_uploads(uploads, max_age_days=_WINDOW_DAYS) == 0
@@ -119,8 +97,6 @@ def test_a_directory_in_the_staging_area_is_left_alone(tmp_path: Path) -> None:
 
 
 def test_a_symlink_is_left_alone(tmp_path: Path) -> None:
-    # A link's mtime is the link's, not its target's, and following it would
-    # turn an old-looking link into a delete of whatever it points at.
     uploads = tmp_path / "uploads"
     uploads.mkdir(parents=True)
     target = _stage(tmp_path, "outside.pdf", age_days=30)
@@ -143,14 +119,7 @@ def test_an_unreadable_entry_does_not_stop_the_sweep(tmp_path: Path) -> None:
     assert list(uploads.iterdir()) == []
 
 
-# --------------------------------------------------------------------------- #
-# What a live job protects
-# --------------------------------------------------------------------------- #
-
-
 def test_a_queued_job_spares_the_upload_it_will_read(tmp_path: Path) -> None:
-    # Age says nothing about whether the input is still wanted: a job can sit
-    # QUEUED across a restart, and its staged copy is still what it will read.
     uploads = tmp_path / "uploads"
     claimed = _stage(uploads, "queued.pdf", age_days=30)
     orphan = _stage(uploads, "abandoned.pdf", age_days=30)
@@ -164,8 +133,6 @@ def test_a_queued_job_spares_the_upload_it_will_read(tmp_path: Path) -> None:
 
 
 def test_a_finished_jobs_upload_is_reaped(tmp_path: Path) -> None:
-    # Only a job that still has work to do protects its input. Once the job is
-    # COMPLETED the staged copy is by definition no longer needed.
     uploads = tmp_path / "uploads"
     done = _stage(uploads, "done.pdf", age_days=30)
 
@@ -190,13 +157,10 @@ def test_a_queue_job_without_an_input_path_protects_nothing(tmp_path: Path) -> N
 
 
 def test_embedded_mode_protects_nothing(tmp_path: Path) -> None:
-    # Without a queue there is no durable record of a pending run to consult,
-    # and the sweep must not invent one.
     assert staged_uploads_in_use(None) == set()
 
 
 def test_a_failed_embedded_job_protects_its_source_for_resume(tmp_path: Path) -> None:
-    """The ledger, not the in-memory manager, names what a resume still needs."""
     config = _config(tmp_path)
     uploads = config.db_dir / "uploads"
     resumable = _stage(uploads, "resumable.pdf", age_days=30)
@@ -227,7 +191,6 @@ def test_a_completed_embedded_job_does_not_pin_its_source(tmp_path: Path) -> Non
 
 
 def test_a_service_database_is_not_mistaken_for_a_job_ledger(tmp_path: Path) -> None:
-    """``tm.sqlite``/``job_queue.sqlite`` live beside ledgers but have no job_meta."""
     import sqlite3
 
     config = _config(tmp_path)
@@ -245,8 +208,6 @@ def test_a_service_database_is_not_mistaken_for_a_job_ledger(tmp_path: Path) -> 
 
 
 def test_in_use_paths_are_resolved_not_spelled(tmp_path: Path) -> None:
-    # A relative or dot-filled spelling in a payload must still match the
-    # resolved path the directory walk produces, or the file gets reaped.
     uploads = tmp_path / "uploads"
     staged = _stage(uploads, "relative.pdf", age_days=30)
     spelled = f"{tmp_path}/./uploads/../uploads/relative.pdf"
@@ -256,11 +217,6 @@ def test_in_use_paths_are_resolved_not_spelled(tmp_path: Path) -> None:
         assert reap_stale_uploads(uploads, max_age_days=_WINDOW_DAYS, job_queue=queue) == 0
 
     assert staged.exists()
-
-
-# --------------------------------------------------------------------------- #
-# Startup
-# --------------------------------------------------------------------------- #
 
 
 def test_the_api_sweeps_the_staging_area_at_startup(tmp_path: Path) -> None:

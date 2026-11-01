@@ -1,5 +1,3 @@
-"""Unit tests for `ubt re-export` CLI subcommand."""
-
 from __future__ import annotations
 
 from pathlib import Path

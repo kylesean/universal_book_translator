@@ -1,16 +1,3 @@
-"""Content-addressed translate cache: key stability and fail-open behaviour.
-
-The cache wraps the pure translate step. Its whole safety argument is the key:
-the masked source *plus* the model, prompt version and prompt context. A key
-that missed any of those would serve a draft produced under different inputs --
-a silent, stale mistranslation. The complementary rule is fail-open: an absent
-store, a corrupt entry or an unreadable file must compute through the provider,
-because a cache must never break a translation.
-
-The provider is a fake coroutine, so the tests observe *whether* the cache hit
-by counting calls -- no network, no model.
-"""
-
 from __future__ import annotations
 
 import json
@@ -27,14 +14,7 @@ from ubt.translate.engine import TranslationEngine
 pytestmark = pytest.mark.fast
 
 
-# --------------------------------------------------------------------------- #
-# Doubles
-# --------------------------------------------------------------------------- #
-
-
 class _Provider:
-    """A fake generate step: counts calls, returns a deterministic draft."""
-
     def __init__(self) -> None:
         self.calls = 0
 
@@ -47,8 +27,6 @@ class _Provider:
 
 
 class _BrokenStore:
-    """A store whose every operation fails -- the cache must not break a run."""
-
     def get(self, key: str) -> str | None:
         raise OSError("disk gone")
 
@@ -76,11 +54,6 @@ def store() -> Iterator[DiskCacheStore]:
         yield DiskCacheStore(tmp)
 
 
-# --------------------------------------------------------------------------- #
-# step_key: the identity of one step invocation.
-# --------------------------------------------------------------------------- #
-
-
 def test_step_key_is_stable_across_calls() -> None:
     assert step_key("translate", ["a", "b"], {"x": 1}) == step_key(
         "translate", ["a", "b"], {"x": 1}
@@ -90,17 +63,17 @@ def test_step_key_is_stable_across_calls() -> None:
 def test_step_key_is_a_sha256_hex_digest() -> None:
     key = step_key("k", ["v"], {})
     assert len(key) == 64
-    int(key, 16)  # parses as hex, or raises
+    int(key, 16)
 
 
 @pytest.mark.parametrize(
     "other",
     [
-        step_key("other_kind", ["a", "b"], {"x": 1}),  # kind
-        step_key("translate", ["b", "a"], {"x": 1}),  # input order
-        step_key("translate", ["a", "b", "c"], {"x": 1}),  # extra input
-        step_key("translate", ["a", "b"], {"x": 2}),  # param value
-        step_key("translate", ["a", "b"], {"y": 1}),  # extra param
+        step_key("other_kind", ["a", "b"], {"x": 1}),
+        step_key("translate", ["b", "a"], {"x": 1}),
+        step_key("translate", ["a", "b", "c"], {"x": 1}),
+        step_key("translate", ["a", "b"], {"x": 2}),
+        step_key("translate", ["a", "b"], {"y": 1}),
     ],
 )
 def test_step_key_changes_with_every_identity_bearing_part(other: str) -> None:
@@ -109,11 +82,6 @@ def test_step_key_changes_with_every_identity_bearing_part(other: str) -> None:
 
 def test_step_key_ignores_param_mapping_order() -> None:
     assert step_key("t", ["v"], {"a": 1, "b": 2}) == step_key("t", ["v"], {"b": 2, "a": 1})
-
-
-# --------------------------------------------------------------------------- #
-# DiskCacheStore: fail-open IO.
-# --------------------------------------------------------------------------- #
 
 
 def test_missing_key_is_a_miss(store: DiskCacheStore) -> None:
@@ -153,11 +121,6 @@ def test_get_or_compute_computes_once_then_serves_the_cache(store: DiskCacheStor
     assert store.get_or_compute(key, _compute) == "COMPUTED"
     assert store.get_or_compute(key, _compute) == "COMPUTED"
     assert calls == [1]
-
-
-# --------------------------------------------------------------------------- #
-# TranslationEngine: what the key covers.
-# --------------------------------------------------------------------------- #
 
 
 async def test_without_a_cache_the_provider_runs_every_time() -> None:
@@ -211,14 +174,9 @@ async def test_the_prompt_context_is_part_of_the_key(store: DiskCacheStore) -> N
     provider = _Provider()
     await engine.translate_text("e1", "hello world", provider.translate(), context="ctx-A")
     await engine.translate_text("e1", "hello world", provider.translate(), context="ctx-A")
-    assert provider.calls == 1  # same context: hit
+    assert provider.calls == 1
     await engine.translate_text("e1", "hello world", provider.translate(), context="ctx-B")
-    assert provider.calls == 2  # changed context: miss
-
-
-# --------------------------------------------------------------------------- #
-# Fail-open: corruption and an unavailable store compute through.
-# --------------------------------------------------------------------------- #
+    assert provider.calls == 2
 
 
 async def test_a_corrupt_entry_is_recomputed(store: DiskCacheStore) -> None:
@@ -233,8 +191,6 @@ async def test_a_corrupt_entry_is_recomputed(store: DiskCacheStore) -> None:
 
 
 async def test_an_envelope_with_a_mismatched_key_is_a_miss(store: DiskCacheStore) -> None:
-    # The stored key must match the file it lives under, so a split-brain entry
-    # cannot be served as if it were this unit's draft.
     key = step_key("translate", ["m1", "v1", "hello world"], {})
     path = Path(store.root) / key[:2] / f"{key}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -251,11 +207,6 @@ async def test_an_unavailable_store_falls_back_to_the_provider() -> None:
     out = await _engine(_BrokenStore()).translate_text("e1", "hello world", provider.translate())
     assert provider.calls == 1
     assert out.target == "[hello world]"
-
-
-# --------------------------------------------------------------------------- #
-# The non-draft value cache (macro chunks) shares the store, keyed by kind.
-# --------------------------------------------------------------------------- #
 
 
 def test_unwritten_value_is_a_miss(store: DiskCacheStore) -> None:
@@ -280,11 +231,6 @@ def test_value_cache_is_absent_without_a_store() -> None:
     assert engine.cached_value("chunk-A", kind="translate_chunk") is None
 
 
-# --------------------------------------------------------------------------- #
-# Bounded store: the cache never deleted an entry, so it grew without bound.
-# --------------------------------------------------------------------------- #
-
-
 def test_disk_cache_prunes_oldest_entries_past_the_cap() -> None:
     import time
 
@@ -295,7 +241,6 @@ def test_disk_cache_prunes_oldest_entries_past_the_cap() -> None:
             time.sleep(0.01)
         assert len(list(Path(root).rglob("*.json"))) == 3
 
-        # Writing past the cap prunes the oldest down to the hysteresis target.
         store.put(step_key("k", ["new"], {}), "vnew")
         store.prune()
         remaining = sorted(p.name for p in Path(root).rglob("*.json"))
@@ -309,12 +254,6 @@ def test_disk_cache_prune_never_raises_on_a_missing_root() -> None:
 
 
 def test_construction_prune_is_throttled_per_root() -> None:
-    """P2-15: a fresh store per chapter must not re-walk the cache tree each time.
-
-    ``profile_pdf`` builds a ``DiskCacheStore`` per call and ``annotate_page_kinds``
-    runs it once per chapter, so an unthrottled construct-prune scanned the whole
-    cache directory once per chapter. The throttle is per-root.
-    """
     import ubt.cache.store as store_mod
 
     with tempfile.TemporaryDirectory() as root:
@@ -328,11 +267,10 @@ def test_construction_prune_is_throttled_per_root() -> None:
 
         DiskCacheStore.prune = counting_prune  # type: ignore[method-assign]
         try:
-            DiskCacheStore(root, max_entries=10)  # first: prunes
-            DiskCacheStore(root, max_entries=10)  # throttled within the window
+            DiskCacheStore(root, max_entries=10)
+            DiskCacheStore(root, max_entries=10)
             DiskCacheStore(root, max_entries=10)
             assert len(calls) == 1
-            # A different root is throttled independently.
             other = tempfile.mkdtemp()
             try:
                 store_mod._prune_clock.pop(other, None)

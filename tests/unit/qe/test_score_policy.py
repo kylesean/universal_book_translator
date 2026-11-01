@@ -1,12 +1,3 @@
-"""QE scoring policy: which blocks count toward aggregate scores.
-
-Exclusion is by *provenance*, not by a magic score value: verbatim skips
-(``skip_translate``) and exact TM hits (``tm_hit``) carry a pass stamp, not a
-measurement, so they must be kept out of averages — while a genuine ``1.0`` from
-a real scorer must stay in. The SQL predicate mirrors the Python predicate for
-the ledger's direct ``AVG``.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -29,11 +20,6 @@ class _B:
     mtqe_score: float | None = None
     skip_translate: bool = False
     tm_hit: bool = False
-
-
-# --------------------------------------------------------------------------- #
-# is_qe_scored
-# --------------------------------------------------------------------------- #
 
 
 def test_an_unscored_block_is_not_qe_scored() -> None:
@@ -59,11 +45,6 @@ def test_an_ordinary_score_is_qe_scored() -> None:
 def test_a_block_without_a_tm_hit_attribute_is_scored() -> None:
     block: Any = SimpleNamespace(mtqe_score=0.5, skip_translate=False)
     assert is_qe_scored(block) is True
-
-
-# --------------------------------------------------------------------------- #
-# qe_scored_values
-# --------------------------------------------------------------------------- #
 
 
 def test_values_are_ascending_and_filtered() -> None:

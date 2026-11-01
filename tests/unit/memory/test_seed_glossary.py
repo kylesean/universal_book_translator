@@ -1,5 +1,3 @@
-"""Contract tests for the curated seed glossaries and external glossary loader."""
-
 from __future__ import annotations
 
 import json
@@ -24,11 +22,6 @@ def _write(tmp_path: Path, name: str, content: str) -> Path:
     return path
 
 
-# --------------------------------------------------------------------------- #
-# Built-in seed registry
-# --------------------------------------------------------------------------- #
-
-
 def test_seed_frequency_outranks_mined_entries() -> None:
     assert _SEED_FREQUENCY == 10_000
 
@@ -46,14 +39,9 @@ def test_semiconductor_profiles_share_the_same_seed_tuple() -> None:
 
 def test_seed_tuple_contains_keep_latin_blockers_and_canonical_terms() -> None:
     seeds = dict(_SEMICONDUCTOR_SEEDS)
-    assert seeds["MOSFET"] == "MOSFET"  # transliteration blocker
+    assert seeds["MOSFET"] == "MOSFET"
     assert seeds["subthreshold swing"] == "亚阈值摆幅"
     assert seeds["gate dielectric"] == "栅介质"
-
-
-# --------------------------------------------------------------------------- #
-# seed_entries_for_profile
-# --------------------------------------------------------------------------- #
 
 
 def test_packaged_glossary_is_loaded_for_semiconductor() -> None:
@@ -89,7 +77,6 @@ def test_profile_prefix_resolves_the_packaged_directory(
         return sentinel
 
     monkeypatch.setattr("ubt.core.memory.seed_glossary.load_external_glossary", fake)
-    # semiconductor_paper resolves to the "semiconductor" directory.
     assert seed_entries_for_profile("semiconductor_paper") == sentinel
     assert seen and "semiconductor/en-zh.json" in seen[0]
 
@@ -117,11 +104,6 @@ def test_builtin_seeds_fall_back_when_external_yields_nothing(
     assert any("yielded no entries" in r.message for r in caplog.records)
 
 
-# --------------------------------------------------------------------------- #
-# load_external_glossary — missing / malformed
-# --------------------------------------------------------------------------- #
-
-
 def test_missing_file_returns_empty(tmp_path: Path) -> None:
     assert load_external_glossary(tmp_path / "nope.json") == []
 
@@ -133,11 +115,6 @@ def test_directory_path_returns_empty(tmp_path: Path) -> None:
 def test_malformed_json_returns_empty(tmp_path: Path) -> None:
     path = _write(tmp_path, "bad.json", "{not json")
     assert load_external_glossary(path) == []
-
-
-# --------------------------------------------------------------------------- #
-# load_external_glossary — JSON
-# --------------------------------------------------------------------------- #
 
 
 def test_json_mapping_form(tmp_path: Path) -> None:
@@ -161,11 +138,6 @@ def test_json_list_form_accepts_alternate_keys(tmp_path: Path) -> None:
 def test_json_list_skips_items_missing_a_side(tmp_path: Path) -> None:
     payload = [{"source": "a"}, {"translation": "乙"}, "not-a-dict"]
     assert load_external_glossary(_write(tmp_path, "g.json", json.dumps(payload))) == []
-
-
-# --------------------------------------------------------------------------- #
-# load_external_glossary — CSV / TSV
-# --------------------------------------------------------------------------- #
 
 
 def test_csv_without_header_uses_first_two_columns(tmp_path: Path) -> None:
@@ -203,26 +175,15 @@ def test_txt_is_parsed_as_comma_csv(tmp_path: Path) -> None:
 
 
 def test_loaded_entries_pass_clean_guardrails(tmp_path: Path) -> None:
-    # A slogan-length source is dropped by clean_bible_entry.
     path = _write(tmp_path, "g.csv", "one two three four five,太长口号\n")
     assert load_external_glossary(path) == []
 
 
 def test_the_paper_profile_carries_the_formal_abbreviation_seeds(tmp_path: Path) -> None:
-    """``paper`` ships formal-writing conventions the model kept guessing at.
-
-    Measured on the ATC'25 replay: the same \"Inv. N:\" abbreviation rendered
-    three ways across eleven blocks -- \"图 1：\" (mistranslated as figure),
-    \"不变量 N：\" and a bare \"Inv. 5:\". A seed glossary under the profile
-    auto-probing already picks for academic papers makes the mapping reach the
-    chunk table whenever the abbreviation appears, so one document renders it
-    one way.
-    """
     entries = seed_entries_for_profile("paper")
     by_source = {e.source: e for e in entries}
 
     assert by_source["Inv."].translation == "不变量"
     assert by_source["Theorem"].translation == "定理"
-    # The proper nouns a paper may not rename stay Latin.
     assert by_source["Rust"].translation == "Rust"
     assert by_source["TCB"].translation == "TCB"

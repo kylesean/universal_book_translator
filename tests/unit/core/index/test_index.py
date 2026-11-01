@@ -1,5 +1,3 @@
-"""Unit tests for bilingual concordance index extraction, phonetics, and rendering."""
-
 from __future__ import annotations
 
 import pytest
@@ -18,14 +16,12 @@ pytestmark = pytest.mark.fast
 
 
 def test_phonetics_initials() -> None:
-    # Latin initial calculation
     assert get_latin_initial("Consensus") == "C"
     assert get_latin_initial("  algorithm  ") == "A"
     assert get_latin_initial("123 numbers") == "0-9"
     assert get_latin_initial("Éléphant") == "E"
     assert get_latin_initial("$$math$$") == "#"
 
-    # Pinyin initial calculation
     assert get_pinyin_initial("共识算法") == "G"
     assert get_pinyin_initial("拜占庭") == "B"
     assert get_pinyin_initial("网络") == "W"
@@ -58,23 +54,19 @@ def test_concordance_index_grouping_and_filtering() -> None:
     assert idx.total_terms == 4
     assert idx.total_occurrences == 27
 
-    # Grouped by EN initial
     en_groups = idx.grouped_by_source_initial()
     assert list(en_groups.keys()) == ["A", "B", "C", "D"]
     assert len(en_groups["C"]) == 1
     assert en_groups["C"][0].source_term == "Consensus"
 
-    # Grouped by ZH (Pinyin) initial: "算法"->S, "拜占庭"->B, "共识"->G, "数据"->S
     zh_groups = idx.grouped_by_target_initial()
     assert set(zh_groups.keys()) == {"B", "G", "S"}
-    assert len(zh_groups["S"]) == 2  # 算法, 数据
+    assert len(zh_groups["S"]) == 2
 
-    # Filtering by min_occurrences
     filtered = idx.filter(min_occurrences=5)
     assert filtered.total_terms == 2
     assert {e.source_term for e in filtered.entries} == {"Algorithm", "Consensus"}
 
-    # Top terms
     top = idx.top_terms(2)
     assert len(top) == 2
     assert top[0].source_term == "Consensus"
@@ -148,9 +140,6 @@ def test_extract_index_from_blocks_with_supplied_glossary() -> None:
     ]
 
     idx = extract_index_from_blocks(blocks, glossary=glossary)
-    # Vector Clock matched both in source ('Vector Clock') and target ('向量时钟') -> count = 2
-    # Raft matched in source ('Raft') -> count = 1
-    # Paxos not mentioned -> count = 0
     assert idx.total_terms == 2
     term_names = {e.source_term for e in idx.entries}
     assert term_names == {"Vector Clock", "Raft"}
@@ -184,14 +173,12 @@ def test_render_index_typst_html_markdown() -> None:
     ]
     idx = ConcordanceIndex(entries=entries)
 
-    # Typst
     typst_code = render_index_typst(idx, language_first="en", columns=3)
     assert "#heading(level: 1, numbering: none)[索引 (Index)]" in typst_code
     assert "#columns(3" in typst_code
     assert "*Consensus* (共识)" in typst_code
     assert "#link(<sec-1>)[12]" in typst_code
 
-    # HTML
     html_code = render_index_html(idx, language_first="en", columns=3)
     assert '<section class="ubt-concordance-index">' in html_code
     assert '<nav class="index-quick-jump">' in html_code
@@ -199,7 +186,6 @@ def test_render_index_typst_html_markdown() -> None:
     assert "<strong>Consensus</strong>" in html_code
     assert '<a href="#sec-1" class="index-link">12</a>' in html_code
 
-    # Markdown
     md_code = render_index_markdown(idx, language_first="zh")
     assert "## 📑 术语索引 (Index)" in md_code
     assert "**拜占庭** (Byzantine)" in md_code

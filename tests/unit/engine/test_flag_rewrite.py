@@ -1,15 +1,3 @@
-"""Rewriting stored flag text: only the sentence, never the verdict.
-
-The defect being repaired: ``FastPassFilter`` printed the per-row column list and
-called it "columns". ``markdown_grid_shape`` guarantees every row shares one
-column count, so a shape difference is always a ROW count -- the old text told a
-reviewer the column count oscillated when a row had been dropped.
-
-These pin the two properties that make the rewrite safe to run on a real ledger:
-it changes nothing but the message, and it is idempotent and conservative (an
-unrecognised flag is left untouched rather than guessed at).
-"""
-
 from __future__ import annotations
 
 import json
@@ -39,9 +27,7 @@ def test_a_mismatch_is_restated_as_rows_and_columns() -> None:
     assert fixed is not None
     assert "the source is a 11-row x 5-column grid" in fixed
     assert "the target is a 10-row x 5-column grid" in fixed
-    # The instruction half of the message is preserved verbatim.
     assert fixed.endswith("translate only the text inside each cell")
-    # And the misleading phrasing is gone.
     assert "rows hold" not in fixed
     assert "[5, 5" not in fixed
 
@@ -54,7 +40,6 @@ def test_a_dropped_table_is_restated_too() -> None:
 
 
 def test_a_repair_prefixed_flag_keeps_its_prefix() -> None:
-    """The repair prompt puts the reason in error_flags verbatim under a label."""
     prefixed = f"repair_structural_failure: {_OLD_MISMATCH}"
     fixed = rewrite_flag(prefixed)
     assert fixed is not None
@@ -63,12 +48,6 @@ def test_a_repair_prefixed_flag_keeps_its_prefix() -> None:
 
 
 def test_a_ragged_shape_keeps_its_raw_widths() -> None:
-    """A misaligned table must not be flattened into a uniform description.
-
-    History recorded ``[2, 3, 2]`` for a genuinely ragged target. Saying "a
-    3-row x 2-column grid" would erase the row that made it wrong, which is the
-    same class of error this rewrite exists to fix.
-    """
     ragged = (
         "Table grid mismatch: the source rows hold [2, 2, 2] columns, the target "
         "holds [2, 3, 2] — keep the row and column count identical"
@@ -90,24 +69,20 @@ def test_a_ragged_shape_keeps_its_raw_widths() -> None:
     ],
 )
 def test_an_unrecognised_flag_is_left_alone(flag: str) -> None:
-    """Conservative by construction: no match means no change, not a guess."""
     assert rewrite_flag(flag) is None
 
 
 def test_rewriting_twice_changes_nothing_the_second_time(tmp_path: Path) -> None:
-    """Idempotent, so an operator can re-run it without checking first."""
     db = _ledger(tmp_path, {"b1": [_OLD_MISMATCH, "Glossary term violation: A -> B"]})
     first = plan(tmp_path)
     assert len(first) == 1
     assert apply(first) == 1
 
     assert plan(tmp_path) == []
-    # The untouched flag on the same block is byte-identical.
     assert _flags(db, "b1")[1] == "Glossary term violation: A -> B"
 
 
 def test_a_rewrite_does_not_touch_anything_but_the_flags(tmp_path: Path) -> None:
-    """The property that makes this safe on a delivered job's ledger."""
     db = _ledger(
         tmp_path,
         {"b1": [_OLD_MISMATCH]},
@@ -123,7 +98,6 @@ def test_a_rewrite_does_not_touch_anything_but_the_flags(tmp_path: Path) -> None
 
 
 def test_a_database_without_a_blocks_table_is_skipped(tmp_path: Path) -> None:
-    """``tm.sqlite`` lives beside the ledgers and has no blocks table."""
     conn = sqlite3.connect(tmp_path / "tm.sqlite")
     conn.execute("CREATE TABLE tm (id TEXT)")
     conn.commit()

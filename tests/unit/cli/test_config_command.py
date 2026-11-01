@@ -1,5 +1,3 @@
-"""Unit tests for the `ubt config` CLI command with sub-domain filtering and validation."""
-
 from __future__ import annotations
 
 import json
@@ -15,7 +13,6 @@ runner = CliRunner()
 
 
 def _output(result: object) -> str:
-    """stdout+stderr: typer.echo(err=True) lands on stderr under click >= 8.2."""
     text = getattr(result, "output", "") or ""
     return text + (getattr(result, "stderr", "") or "")
 
@@ -38,7 +35,6 @@ def test_config_command_subdomain_router() -> None:
     assert "router" in out.lower()
     assert "draft_model" in out
     assert "rate_limit_rpm" in out
-    # Typst / engine fields should not be in router sub-domain view
     assert "font_family" not in out
     assert "db_dir" not in out
 
@@ -50,7 +46,6 @@ def test_config_command_subdomain_typst() -> None:
     assert "typst" in out.lower()
     assert "dual_mode" in out
     assert "emit_xliff_companion" in out
-    # Router fields should not be in typst sub-domain view
     assert "rate_limit_rpm" not in out
 
 
@@ -123,7 +118,6 @@ def test_config_validate_json_mode() -> None:
 
 
 def test_config_validate_detects_invalid_values(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Set invalid URL scheme (e.g. ftp:// instead of http/https)
     monkeypatch.setenv("UBT_BASE_URL", "ftp://invalid-endpoint/v1")
     result = runner.invoke(app, ["config", "--validate", "--domain", "router"])
     assert result.exit_code == 1

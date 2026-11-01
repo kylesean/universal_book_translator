@@ -1,5 +1,3 @@
-"""Unit tests for the isolated Docling worker process pool and warm converter lifecycle."""
-
 from __future__ import annotations
 
 import concurrent.futures
@@ -21,10 +19,6 @@ from ubt.adapters.pdf.docling_worker import (
     get_docling_worker_pool,
     is_docling_process_isolation_enabled,
 )
-
-# ``Paragraph``/``Span`` are defined in ``ubt.model`` and only re-imported by
-# ``ubt.core.ir.models``; importing them from the defining module keeps the
-# dependency explicit instead of relying on an incidental re-export.
 from ubt.core.ir.models import IRBlock
 from ubt.core.ports import AdapterRuntimeConfig
 from ubt.model.ast import Paragraph
@@ -52,17 +46,14 @@ def test_docling_worker_pool_lifecycle() -> None:
     assert pool._closed is False
     assert pool._executor is None
 
-    # Getting executor creates it
     executor = pool._ensure_executor()
     assert isinstance(executor, concurrent.futures.ProcessPoolExecutor)
     assert pool._ensure_executor() is executor
 
-    # Closing shuts down executor
     pool.close()
     assert pool._closed is True
     assert pool._executor is None
 
-    # Re-using closed pool raises RuntimeError
     with pytest.raises(RuntimeError, match="DoclingWorkerPool is closed"):
         pool._ensure_executor()
 
@@ -94,7 +85,6 @@ def test_docling_worker_task_invalidation(tmp_path: Path) -> None:
         "ubt.adapters.pdf.docling_parser.convert_docling_document",
         return_value=(mock_doc, mock_converter, "fake-cache-key-123"),
     ) as mock_convert:
-        # Run task with different key (enrich=True) -> should invalidate old converter
         key = _worker_convert_task(
             path_str=str(tmp_path / "doc.pdf"),
             page_range=(1, 10),
@@ -104,12 +94,10 @@ def test_docling_worker_task_invalidation(tmp_path: Path) -> None:
             file_sha256="abc1234",
         )
         assert key == "fake-cache-key-123"
-        # Notice existing_converter passed to convert_docling_document was None because it was invalidated
         assert mock_convert.call_args.kwargs["existing_converter"] is None
         assert dw._WORKER_CONVERTER is mock_converter
         assert dw._WORKER_CONVERTER_KEY == (True, "cuda", 0.08)
 
-        # Second call with same key -> reuses warm converter
         key2 = _worker_convert_task(
             path_str=str(tmp_path / "doc.pdf"),
             page_range=(11, 20),
@@ -121,7 +109,6 @@ def test_docling_worker_task_invalidation(tmp_path: Path) -> None:
         assert key2 == "fake-cache-key-123"
         assert mock_convert.call_args.kwargs["existing_converter"] is mock_converter
 
-    # Clean up worker globals
     dw._WORKER_CONVERTER = None
     dw._WORKER_CONVERTER_KEY = None
 
@@ -143,7 +130,6 @@ def test_docling_worker_pool_crash_handling(tmp_path: Path) -> None:
             formula_crop_margin=0.08,
             file_sha256="sha-xyz",
         )
-    # Pool marked itself closed on BrokenProcessPool
     assert pool._closed is True
 
 
@@ -155,7 +141,6 @@ def test_extract_with_docling_worker_fallback(tmp_path: Path) -> None:
         element=Paragraph(id="p1", spine_index=1, span=Span(page=1), text="Fallback text")
     )
 
-    # Mock pool to simulate crash, and mock in-process convert_docling_document to succeed
     mock_pool = MagicMock()
     mock_pool.convert.side_effect = RuntimeError("Worker process failed")
 
@@ -177,8 +162,6 @@ def test_extract_with_docling_worker_fallback(tmp_path: Path) -> None:
             isolate_process=True,
         )
         assert len(blocks) == 1
-        # ``IRBlock.source_text`` dispatches by element class; ``element.text``
-        # exists only on prose and mypy cannot narrow the union here.
         assert blocks[0].source_text == "Fallback text"
 
 
@@ -186,7 +169,6 @@ def test_docling_adapter_lifecycle_and_teardown() -> None:
     adapter = DoclingPDFAdapter()
     assert adapter.docling_isolate_process is True
 
-    # apply_config updates docling_isolate_process
     runtime_config = AdapterRuntimeConfig(
         ocr_mode="off",
         ocr_endpoint=None,

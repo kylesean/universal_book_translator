@@ -1,12 +1,3 @@
-"""Overlapping formula crops merge without ever concatenating asset paths.
-
-The merge exists because Docling emits two vertically overlapping boxes for one
-equation, and rendering both duplicates the region on the page. It only ever
-merged *text* correctly: an ``IMAGE`` block's ``source_text`` is an asset path,
-so the old ``f"{prev}\n{cur}"`` produced a value that named no file and the
-renderer drew "[missing figure]" where the equation belonged.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -33,7 +24,6 @@ def _block(block_type: BlockType, payload: str, y0: float, y1: float) -> IRBlock
 
 
 def test_two_crops_merge_to_one_and_keep_a_real_path() -> None:
-    """Both sides are crops: the survivor must name exactly one file."""
     merged = resolve_overlapping_formula_blocks(
         [
             _block(BlockType.IMAGE, "/cache/a.png", 100.0, 140.0),
@@ -49,7 +39,6 @@ def test_two_crops_merge_to_one_and_keep_a_real_path() -> None:
 
 
 def test_a_read_formula_wins_over_an_overlapping_crop() -> None:
-    """Native math re-typesets; a raster of the same region cannot."""
     merged = resolve_overlapping_formula_blocks(
         [
             _block(BlockType.IMAGE, "/cache/a.png", 100.0, 140.0),
@@ -74,7 +63,6 @@ def test_a_crop_after_a_read_formula_does_not_corrupt_the_latex() -> None:
 
 
 def test_two_read_formulas_still_concatenate_their_text() -> None:
-    """The original behaviour, which was right for two text formulas."""
     merged = resolve_overlapping_formula_blocks(
         [
             _block(BlockType.FORMULA, "a + b", 100.0, 140.0),

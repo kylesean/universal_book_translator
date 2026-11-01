@@ -1,5 +1,3 @@
-"""Unit tests for Tier L2 Page-Locked Reflow Renderer (P2-15)."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -82,15 +80,14 @@ def test_extract_page_geometry_single_column() -> None:
     assert geom.page_w == 595.0
     assert geom.page_h == 842.0
     assert geom.margin_left == 50.0
-    assert geom.margin_right == 95.0  # 595 - 500
-    assert geom.margin_top == 62.0  # 842 - 780
-    assert geom.margin_bottom == 108.0  # clamped to max 108pt
+    assert geom.margin_right == 95.0
+    assert geom.margin_top == 62.0
+    assert geom.margin_bottom == 108.0
     assert geom.columns == 1
     assert geom.theme_color_hex == "#1a56db"
 
 
 def test_extract_page_geometry_two_column() -> None:
-    # 2-column layout on A4 (595pt width): midpoint is 297.5pt
     blocks = [
         _make_block("b1", "Left 1", bbox=(40.0, 700.0, 270.0, 750.0)),
         _make_block("b2", "Left 2", bbox=(40.0, 620.0, 270.0, 680.0)),
@@ -101,7 +98,7 @@ def test_extract_page_geometry_two_column() -> None:
 
     assert geom.columns == 2
     assert geom.margin_left == 40.0
-    assert geom.margin_right == 45.0  # 595 - 550
+    assert geom.margin_right == 45.0
     assert geom.column_gutter_pt == 14.0
 
 
@@ -112,7 +109,6 @@ def test_extract_page_geometry_empty_blocks() -> None:
     assert geom.margin_left == 36.0
     assert geom.margin_right == 36.0
     assert geom.columns == 1
-    # No measured color: the neutral fallback, never a brand accent.
     assert geom.theme_color_hex == "#000000"
 
 
@@ -147,7 +143,6 @@ def test_solve_page_lock_tight() -> None:
         margin_right=40.0,
         columns=1,
     )
-    # Long text that requires compression to fit
     heavy_text = "这是一段非常非常长的文字内容，用于模拟高密度排版和边界收敛场景。" * 25
     blocks = [_make_block(f"p{i}", heavy_text) for i in range(5)]
     size, leading, spacing, tracking = solve_page_lock(geom, blocks, target_lang="zh")
@@ -156,15 +151,6 @@ def test_solve_page_lock_tight() -> None:
 
 
 def test_solve_page_lock_never_returns_below_the_body_floor() -> None:
-    """A page that cannot fit is typeset AT the floor and reported, not shrunk.
-
-    The renderer used to default ``floor_pt`` to 7.0 and its page-count guard
-    then subtracted 0.6pt per round down to a hard 6.8pt. Both are below
-    ``FLOOR_PT`` (7.5), the size every other layout path refuses to cross, so
-    the 1:1 page promise was being paid for with unreadable type. This test
-    feeds a page overloaded far beyond the old 6.8pt floor: the solver must
-    stop at 7.5 exactly.
-    """
     geom = PageGeometry(
         page_w=300.0,
         page_h=360.0,
@@ -174,7 +160,6 @@ def test_solve_page_lock_never_returns_below_the_body_floor() -> None:
         margin_right=36.0,
         columns=1,
     )
-    # ~20x the page's capacity at any legal size.
     blocks = [_make_block(f"p{i}", "这段文字在页面上绝对放不下。" * 60) for i in range(8)]
     size, _, _, _ = solve_page_lock(geom, blocks, target_lang="zh")
     assert size == FLOOR_PT, f"solver returned {size}pt, below the {FLOOR_PT}pt floor"
@@ -195,7 +180,6 @@ def test_solve_page_lock_floor_is_configurable_but_still_a_floor() -> None:
 
 
 def test_page_overflow_at_floor_names_the_block_and_the_deficit() -> None:
-    """The replacement for the silent shrink: which block breaks the page, by how much."""
     geom = PageGeometry(
         page_w=300.0,
         page_h=360.0,
@@ -218,8 +202,6 @@ def test_page_overflow_at_floor_names_the_block_and_the_deficit() -> None:
     )
     assert found is not None
     block_id, deficit = found
-    # The page is attributed to the block that crosses the capacity line, and
-    # the deficit is positive and measured in points.
     assert block_id == "overflowing"
     assert deficit > 0.0
 
@@ -278,10 +260,6 @@ def test_build_page_markup() -> None:
     assert "height: 842.0pt" in markup
     assert "columns: 2" in markup
     assert "size: 9.5pt" in markup
-    # ``leading_em`` is a pitch ratio (1.33 = 1.33x the font size); Typst's
-    # ``par(leading:)`` is a gap on top of the font's own 0.733em line height,
-    # so the emitted value is 1.33 - 0.733 = 0.597, not 0.33. Asserting the
-    # ratio here is what shipped a 1.08 pitch while the solver believed 1.33.
     assert "leading: 0.597em" in markup
     assert "Quantum Field Theory" in markup
     assert "Introduction to particle physics." in markup
@@ -289,15 +267,6 @@ def test_build_page_markup() -> None:
 
 
 def test_page_locked_markup_carries_the_blocks_styled_runs() -> None:
-    """A raised citation marker stays raised on the page-locked tier.
-
-    The reflow channel locates a block's inline runs and wraps them
-    (``#super``/``#strong``/fill); the page-locked channel renders the same
-    block through the same ``render_prose`` -- but only if the runs are handed
-    over. Measured on the ATC'25 replay: the author line's affiliation markers
-    shipped as full-size inline digits on this tier while the same runs styled
-    correctly on the reflow tier.
-    """
     geom = PageGeometry(
         page_w=595.0,
         page_h=842.0,
@@ -421,12 +390,11 @@ def test_facsimile_renderer_hybrid_l1_l2() -> None:
     renderer = FacsimileRenderer()
     markup = renderer.build_markup([page1, page2], "bg.pdf", target_lang="zh")
 
-    # Page 1 has background image and #place
     assert 'background: image("bg.pdf", page: 1' in markup
-    assert "#place(top + left" in markup
+    assert "#context" in markup
+    assert "place(top + left" in markup
     assert "Clean L1 Canvas Text" in markup
 
-    # Page 2 is L2 page-locked without background image
     assert "Collided page reflowed" in markup
     assert 'background: image("bg.pdf", page: 2' not in markup
 
@@ -443,7 +411,6 @@ async def test_docling_render_page_locked_routing(
     strategy = DoclingRenderStrategy(delivery_mode="page_locked")
     assert strategy.delivery_mode == "page_locked"
 
-    # Create dummy source PDF
     src_pdf = tmp_path / "src.pdf"
     pdf = pikepdf.Pdf.new()
     pdf.add_blank_page(page_size=(595, 842))
@@ -473,13 +440,6 @@ async def test_docling_render_page_locked_routing(
 
 
 def test_page_locked_table_carries_continuation_notices() -> None:
-    """A tall grid the column will split carries its own continuation notices.
-
-    ``render_table`` already repeats the header row on a page break; the
-    notices ("（续下页）" under the first fragment, "（续表）" atop the next)
-    are what tell the reader the fragments are one exhibit -- measured missing
-    on the ATC'25 SQLite results table.
-    """
     geom = PageGeometry(
         page_w=595.0,
         page_h=842.0,
@@ -508,12 +468,6 @@ def test_page_locked_table_carries_continuation_notices() -> None:
 
 
 def test_page_locked_anchors_the_note_flow_at_the_bottom() -> None:
-    """Footnote-flow blocks print after the body, never between body blocks.
-
-    A note the extractor read out of vertical order used to land wherever the
-    sort put it -- between two paragraphs mid-page. Publishing convention (and
-    the source's own layout) puts the page's notes under the text column.
-    """
     geom = PageGeometry(
         page_w=595.0,
         page_h=842.0,
@@ -551,13 +505,6 @@ def test_page_locked_anchors_the_note_flow_at_the_bottom() -> None:
 
 
 def test_solve_page_lock_flow_holds_the_group_when_squeezed() -> None:
-    """The middle contract: type size never trades for page count.
-
-    A page whose content cannot hold the body group's size pins the solve at
-    the group size and lets Typst flow the excess onto continuation pages --
-    the two things that do not regenerate freely (type size, content) are kept,
-    and the one that does (page count) absorbs the squeeze.
-    """
     geom = PageGeometry(
         page_w=595.0,
         page_h=842.0,
@@ -568,7 +515,6 @@ def test_solve_page_lock_flow_holds_the_group_when_squeezed() -> None:
         columns=1,
         theme_color_hex="#000000",
     )
-    # Far more text than one page holds at the group size.
     squeezed = [
         _make_block(f"p{i}", "这是一段足够长的正文内容，用来把页面挤到无法容纳。" * 6)
         for i in range(30)
@@ -577,19 +523,12 @@ def test_solve_page_lock_flow_holds_the_group_when_squeezed() -> None:
     assert flows is True
     assert size == pytest.approx(9.5)
 
-    # A roomy page holds the group without flowing: the common case.
     roomy = [_make_block("p0", "短段落。")]
     size, leading, spacing, tracking, flows = solve_page_lock_flow(geom, roomy, preferred_pt=9.5)
     assert flows is False
 
 
 def test_render_document_records_a_declared_flow_expansion(tmp_path: Path) -> None:
-    """A flow-expanded spec's extra output page is the contract holding.
-
-    The 1:1 conservation check must not report the declared expansion as an
-    accident: the spec said so before drawing, and the artifact carries the
-    continuation pages it promised.
-    """
     geom = PageGeometry(
         page_w=595.0,
         page_h=842.0,

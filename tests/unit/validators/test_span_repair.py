@@ -1,5 +1,3 @@
-"""Contract tests for span-level error annotation and deterministic splicing."""
-
 from __future__ import annotations
 
 import pytest
@@ -18,19 +16,14 @@ from ubt.core.validators.span_repair import (
 pytestmark = pytest.mark.fast
 
 
-# --------------------------------------------------------------------------- #
-# Severity ladder
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("error_type", "expected"),
     [
         ("numeric", "critical"),
         ("terminology", "major"),
         ("terminology_leak", "major"),
-        ("numeric_drift", "critical"),  # substring fallback
-        ("Terminology Issue", "major"),  # case-insensitive substring
+        ("numeric_drift", "critical"),
+        ("Terminology Issue", "major"),
         ("other", "minor"),
         ("", "minor"),
     ],
@@ -45,7 +38,7 @@ def test_max_severity_picks_the_highest_tier() -> None:
     assert max_severity(["minor", "major"]) == "major"
     assert max_severity(["major", "critical"]) == "critical"
     assert max_severity(["critical", "minor"]) == "critical"
-    assert max_severity(["bogus", "major"]) == "major"  # unknown treated as minor
+    assert max_severity(["bogus", "major"]) == "major"
 
 
 def test_severity_order_is_a_total_ladder() -> None:
@@ -66,31 +59,18 @@ def test_span_to_dict_round_trips_every_field() -> None:
     }
 
 
-# --------------------------------------------------------------------------- #
-# CJK compound guard
-# --------------------------------------------------------------------------- #
-
-
 def test_cjk_expansion_blocked_when_surface_is_cjk_flanked() -> None:
-    # surface 网络 expands into 神经网络 and sits inside a CJK run.
     assert _is_cjk_expansion_blocked("网络层", 0, 2, "网络", "神经网络") is True
     assert _is_cjk_expansion_blocked("网网络", 1, 3, "网络", "神经网络") is True
 
 
 def test_cjk_expansion_not_blocked_when_not_flanked() -> None:
-    # Latin neighbour on the only side that exists.
     assert _is_cjk_expansion_blocked("网络x", 0, 2, "网络", "神经网络") is False
 
 
 def test_cjk_expansion_requires_a_strict_expansion() -> None:
-    # Same length / not a superset: never blocked.
     assert _is_cjk_expansion_blocked("abc", 0, 2, "ab", "abc") is False
     assert _is_cjk_expansion_blocked("网络", 0, 2, "网络", "网络") is False
-
-
-# --------------------------------------------------------------------------- #
-# MQMSpanAnnotator
-# --------------------------------------------------------------------------- #
 
 
 def test_annotate_empty_draft_is_a_noop() -> None:
@@ -203,17 +183,11 @@ def test_a_correct_number_is_never_flagged() -> None:
 
 
 def test_overlapping_alias_spans_are_collapsed_to_the_first() -> None:
-    # '网络' matches at (0, 2); the longer '网络层' at (0, 3) overlaps and is dropped.
     glossary = [{"source": "NetworkTerm", "translation": "Y", "aliases": ["网络", "网络层"]}]
     annotated, spans = MQMSpanAnnotator().annotate_draft("x", "网络层", [], glossary)
     assert [(s.erroneous_text, s.start_pos, s.end_pos) for s in spans] == [("网络", 0, 2)]
     assert annotated.startswith('<error_span id="1"')
     assert annotated.endswith("层")
-
-
-# --------------------------------------------------------------------------- #
-# SpanRepairSplicer
-# --------------------------------------------------------------------------- #
 
 
 _ONE_SPAN = [MQMErrorSpan("1", "numeric", "r", "42", 9, 11, "99", "critical")]
@@ -289,15 +263,13 @@ def test_splicer_never_blindly_appends_an_end_insertion() -> None:
 
 
 def test_splicer_returns_a_large_end_replacement_wholesale() -> None:
-    big = "z" * 20  # > 50% of the draft length
+    big = "z" * 20
     assert SpanRepairSplicer().splice_repairs(
         "the value", _END_SPAN, f'<correction id="1">{big}</correction>'
     ) == (big, False)
 
 
 def test_splicer_prefers_the_original_draft_over_unspliced_protocol() -> None:
-    # A correction for an id that is not among the spans cannot be spliced; the
-    # raw <correction> protocol must never ship as the translation.
     assert SpanRepairSplicer().splice_repairs(
         "draft", _END_SPAN, '<correction id="2">x</correction>'
     ) == ("draft", False)
@@ -332,26 +304,21 @@ def test_correction_pattern_tolerates_extra_attributes() -> None:
 
 
 def test_splicer_does_not_wholesale_replace_if_multiple_spans() -> None:
-    # When multiple spans exist, an end insertion must not abort other splices
     spans = [
         MQMErrorSpan("1", "numeric", "r", "11", 2, 4, "11", "critical"),
         MQMErrorSpan("2", "numeric", "r", "42", 8, 8, "", "critical"),
     ]
-    # Span 2 is an end insertion with a long text (>50%), span 1 is mid-text
     output = '<correction id="1">X</correction><correction id="2">very long trailing explanation</correction>'
     result, spliced = SpanRepairSplicer().splice_repairs("a 11 end", spans, output)
-    # Span 1 is spliced in place; end insertion is not wholesale replaced
     assert spliced is True
     assert result == "a X end"
 
 
 def test_splicer_does_not_wholesale_replace_on_short_fragment() -> None:
-    # Draft is 100 chars, end replacement is 55 chars (no shared prefix, <80%)
     draft = "a" * 100
     end_span = [MQMErrorSpan("1", "numeric", "r", "42", 100, 100, "42", "critical")]
     fragment = "b" * 55
     output = f'<correction id="1">{fragment}</correction>'
     result, spliced = SpanRepairSplicer().splice_repairs(draft, end_span, output)
-    # Must NOT replace 100 chars with 55 chars
     assert spliced is False
     assert result == draft

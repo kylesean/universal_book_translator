@@ -1,16 +1,3 @@
-"""The preamble must COMPILE, not merely look right (W3-5 regression).
-
-The string assertions in ``test_preamble_fonts.py`` could not catch the bug
-this file exists for: rewriting the heading blocks' font argument left an
-extra ``)`` (``text(..., font: (...)))[#it.body]``). Every heading broke and
-every real render failed at compile with "missing argument: body" — but the
-fast tier never compiles a document with a heading, so it stayed green until
-the slow tier ran.
-
-Slow tier: it shells out to ``typst``. The preamble's language and direction
-lines are part of the same emission path, so an RTL target is covered too.
-"""
-
 from __future__ import annotations
 
 import shutil

@@ -1,5 +1,3 @@
-"""Docling's dropped inter-word spaces repaired from the page's pdfium lines."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -47,12 +45,7 @@ def _lines(lines: list[LineBox]) -> tuple[list[LineBox], tuple[float, float]]:
     return lines, (595.0, 842.0)
 
 
-# -- the witness itself ------------------------------------------------------- #
-
-
 def test_a_tracked_label_is_not_split_into_two_words() -> None:
-    # pdfium splits "Chronus" into two runs 0.3pt apart on a 22pt label; gluing
-    # them with a space (as textgeom does) would give "Chr onus".
     line = LineBox(
         "Chr onus",
         (433.7, 391.7, 470.7, 398.8),
@@ -95,16 +88,11 @@ def test_witness_lines_drop_a_line_break_hyphen() -> None:
 
 
 def test_an_unmapped_hyphen_glyph_at_a_line_end_dehyphenates() -> None:
-    # A custom-font hyphen reaches pdfium as a control glyph (\x02); it is a
-    # line-break hyphen, so the two halves join without a space.
     lines = [
         LineBox("about 3 million sand\x02", (70.6, 148.5, 526.0, 159.6)),
         LineBox("boxes per day", (70.7, 134.2, 524.4, 145.2)),
     ]
     assert join_witness_lines(lines) == "about 3 million sandboxes per day"
-
-
-# -- the merge ---------------------------------------------------------------- #
 
 
 def test_a_dropped_space_between_words_is_re_inserted() -> None:
@@ -121,8 +109,6 @@ def test_a_dropped_space_between_words_is_re_inserted() -> None:
 
 
 def test_pdfium_punctuation_spacing_is_never_imported() -> None:
-    # pdfium widens the space around parentheses and commas; only gaps between
-    # two word characters may be filled, so the text stays untouched.
     text = "a filesystem (Gao et al., 2019), designed for reads"
     witness = "a filesystem ( Gao et al. ,2019 ), designed for reads"
     assert reinsert_missing_spaces(text, witness) == text
@@ -145,9 +131,6 @@ def test_a_letter_spaced_witness_is_not_used(monkeypatch: pytest.MonkeyPatch) ->
     out = repair_missing_spaces_with_lines([block], Path("/does/not/matter.pdf"))
     assert out[0].source_text == "Data Blocks"
     assert out[0].provenance.space_repair is None
-
-
-# -- the driver --------------------------------------------------------------- #
 
 
 def test_the_title_is_repaired_from_the_page_lines(monkeypatch: pytest.MonkeyPatch) -> None:

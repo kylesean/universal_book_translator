@@ -1,13 +1,3 @@
-"""The multilingual boilerplate catalog: language-keyed compiled patterns.
-
-The catalog is the single source of publisher-disclaimer, running-header, page
-marker and photo-credit patterns. Two facts are load-bearing: lookups are keyed
-by the *primary* language subtag (a valid ``zh-Hans`` must not silently fall
-back to English), and an unknown language falls back to the English set rather
-than returning nothing. Running headers also carry a literal keyword used as a
-cheap prefilter, which is why the keyword lookup exists at all.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -15,11 +5,6 @@ import pytest
 from ubt.core.cleaners.boilerplate_catalog import BoilerplateCatalog, _primary_lang_code
 
 pytestmark = pytest.mark.fast
-
-
-# --------------------------------------------------------------------------- #
-# _primary_lang_code
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -37,11 +22,6 @@ pytestmark = pytest.mark.fast
 )
 def test_primary_lang_code(lang: str, expected: str) -> None:
     assert _primary_lang_code(lang) == expected
-
-
-# --------------------------------------------------------------------------- #
-# language-specific keyword patterns
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -77,11 +57,6 @@ def test_a_region_subtag_uses_the_primary_languages_patterns() -> None:
     assert regional.pattern == base.pattern
 
 
-# --------------------------------------------------------------------------- #
-# legal disclaimers
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("lang", "text"),
     [
@@ -110,11 +85,6 @@ def test_an_unknown_language_falls_back_to_english_disclaimers(lang: str) -> Non
     assert pattern.search("Copyright 2020 Pearson Education") is not None
 
 
-# --------------------------------------------------------------------------- #
-# running headers
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     "text",
     ["CHAPTER 3 Introduction 42", "Overview CHAPTER 5 42", "42 CHAPTER 3 Overview"],
@@ -126,7 +96,6 @@ def test_running_headers_match(text: str) -> None:
 
 
 def test_a_chapter_line_without_a_page_number_is_not_a_running_header() -> None:
-    # The shape requires the trailing page number; a real chapter title is kept.
     pattern = BoilerplateCatalog.get_running_header_pattern("en")
     assert pattern is not None
     assert pattern.search("CHAPTER 3") is None
@@ -140,11 +109,6 @@ def test_chinese_running_headers_match() -> None:
 
 def test_an_unknown_language_still_gets_a_running_header_pattern() -> None:
     assert BoilerplateCatalog.get_running_header_pattern("xx") is not None
-
-
-# --------------------------------------------------------------------------- #
-# page markers / photo credits
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -170,11 +134,6 @@ def test_photo_credits_match(lang: str, text: str) -> None:
     pattern = BoilerplateCatalog.get_photo_credit_pattern(lang)
     assert pattern is not None
     assert pattern.search(text) is not None
-
-
-# --------------------------------------------------------------------------- #
-# caching
-# --------------------------------------------------------------------------- #
 
 
 def test_repeated_lookups_return_the_same_compiled_object() -> None:

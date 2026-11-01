@@ -1,24 +1,3 @@
-"""The facsimile Typst source is what the canvas tier reads the page map from.
-
-``VisualVerifyLoop`` runs a whole stage after the render, so it holds the
-manifest and nothing from the render call. It supplies ``run_visual_gate`` with
-two things:
-
-* the stripped background, recorded by the facsimile renderer on the manifest;
-* the artifact's **Typst source**, which is the only place the artifact-page ->
-  background-page map is written down.
-
-The second is easy to lose and expensive to lose silently. The source lookup
-originally knew two spellings — ``.<stem>_typst/main.typ`` (publication) and a
-``.typ`` sibling — and the facsimile renderer writes a third,
-``.build_<stem>_facsimile/facsimile.typ``. The gate therefore never saw a canvas
-page map on any facsimile delivery, reported "no canvas pages recorded", and
-green-lit every page: a check that cannot fail.
-
-Every failure of this thread reads exactly like a book with no ink collisions,
-which is why each spelling is pinned separately.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -89,8 +68,6 @@ def test_the_recorded_background_reaches_the_gate(
     manifest = _manifest(tmp_path, background=background)
     loop = _loop(tmp_path, manifest)
 
-    # The reader is a method on the loop, not on the runner: assert on it first
-    # so a failure names the actual break.
     assert loop._canvas_background_path() == background
 
     captured: dict[str, Any] = {}
@@ -101,11 +78,7 @@ def test_the_recorded_background_reaches_the_gate(
 
     import ubt.core.engine.visual_verify_loop as loop_module
 
-    # ``monkeypatch.setattr`` rather than a hand-rolled save/restore: the module
-    # imports ``get_visual_gate_runner`` from ``ubt.core.ports`` for its own
-    # use and does not re-export it, so assigning the attribute needs a
     # ``type: ignore`` that then has to be kept in step with the import. The
-    # fixture does the same thing without weakening the type of the module.
     monkeypatch.setattr(loop_module, "get_visual_gate_runner", lambda: _runner)
     asyncio.run(loop._evaluate_gate(tmp_path / "artifact.pdf", []))
 
@@ -113,57 +86,29 @@ def test_the_recorded_background_reaches_the_gate(
 
 
 def test_no_recorded_background_passes_none(tmp_path: Path) -> None:
-    """A reflow delivery has no background; the gate must be told so explicitly.
-
-    Not by omitting the kwarg: ``run_visual_gate``'s default is also ``None``, so
-    a dropped kwarg and a reflow delivery are indistinguishable from the report.
-    The argument is always passed, which is why the assertion is on the value.
-    """
     loop = _loop(tmp_path, _manifest(tmp_path, background=None))
     assert loop._canvas_background_path() is None
 
 
 def test_a_recorded_background_that_no_longer_exists_passes_none(tmp_path: Path) -> None:
-    """Stale metadata from a cleaned build directory must not crash the gate.
-
-    The path lives under the hidden ``.build_*`` directory. A resumed job whose
-    build directory was removed still has the metadata; handing the dead path to
-    the gate would make ``render_pages_to_png`` return nothing and report the
-    tier as failed, which is a scarier report than the truth.
-    """
     manifest = _manifest(tmp_path, background=tmp_path / "gone_bg_stripped.pdf")
     assert _loop(tmp_path, manifest)._canvas_background_path() is None
 
 
 def test_a_manifest_without_a_metadata_mapping_is_tolerated(tmp_path: Path) -> None:
-    """``metadata`` is optional on ``BookManifest``; the reader must not assume it."""
     manifest = _manifest(tmp_path, background=None)
     manifest.metadata = None  # type: ignore[assignment]
     assert _loop(tmp_path, manifest)._canvas_background_path() is None
 
 
 def test_a_directory_is_not_a_background(tmp_path: Path) -> None:
-    """A recorded path that happens to be a directory is not a readable page."""
     directory = tmp_path / "bg_dir.pdf"
     directory.mkdir()
     manifest = _manifest(tmp_path, background=directory)
     assert _loop(tmp_path, manifest)._canvas_background_path() is None
 
 
-# --------------------------------------------------------------------------- #
-# The Typst source lookup — the map the canvas tier reads
-# --------------------------------------------------------------------------- #
-
-
 def test_the_facsimile_source_is_found(tmp_path: Path) -> None:
-    """**The spelling that was missing, and the reason the tier never ran.**
-
-    ``FacsimileRenderer.render_document`` writes
-    ``build_dir / "facsimile.typ"`` where ``build_dir`` is
-    ``output.parent / ".build_<stem>_facsimile"``. Nothing else writes that path,
-    and until it was added here the gate saw no source, no map, and reported
-    every facsimile delivery green.
-    """
     artifact = tmp_path / "book.pdf"
     artifact.write_bytes(b"%PDF-1.4\n%%EOF\n")
     build = tmp_path / ".build_book_facsimile"
@@ -175,7 +120,6 @@ def test_the_facsimile_source_is_found(tmp_path: Path) -> None:
 
 
 def test_the_publication_source_is_still_found(tmp_path: Path) -> None:
-    """The reflow renderer's spelling must keep working."""
     artifact = tmp_path / "book.pdf"
     artifact.write_bytes(b"%PDF-1.4\n%%EOF\n")
     build = tmp_path / ".book_typst"
@@ -187,7 +131,6 @@ def test_the_publication_source_is_still_found(tmp_path: Path) -> None:
 
 
 def test_a_typ_sibling_is_still_found(tmp_path: Path) -> None:
-    """The last-resort spelling, for a PDF moved out of its build directory."""
     artifact = tmp_path / "book.pdf"
     artifact.write_bytes(b"%PDF-1.4\n%%EOF\n")
     typ = tmp_path / "book.typ"
@@ -197,13 +140,6 @@ def test_a_typ_sibling_is_still_found(tmp_path: Path) -> None:
 
 
 def test_the_newest_source_wins_when_a_stale_one_is_left_behind(tmp_path: Path) -> None:
-    """A resumed job that changed delivery mode leaves the old build directory.
-
-    Both spellings can therefore exist at once, and the older source describes a
-    document that was never delivered — reading it would make the gate look for
-    a canvas page map in markup for a different artifact. The rule is newest
-    wins; the tuple order is only a tie-break.
-    """
     import os
     import time
 
@@ -212,7 +148,6 @@ def test_the_newest_source_wins_when_a_stale_one_is_left_behind(tmp_path: Path) 
     stale = tmp_path / ".book_typst"
     stale.mkdir()
     (stale / "main.typ").write_text("#set text(size: 9pt)\n", encoding="utf-8")
-    # Make the stale file unambiguously older than the facsimile one.
     old = time.time() - 3600
     os.utime(stale / "main.typ", (old, old))
 
@@ -225,7 +160,6 @@ def test_the_newest_source_wins_when_a_stale_one_is_left_behind(tmp_path: Path) 
 
 
 def test_no_source_at_all_is_none_rather_than_an_error(tmp_path: Path) -> None:
-    """A delivery with no reachable source must degrade, never raise."""
     artifact = tmp_path / "book.pdf"
     artifact.write_bytes(b"%PDF-1.4\n%%EOF\n")
 

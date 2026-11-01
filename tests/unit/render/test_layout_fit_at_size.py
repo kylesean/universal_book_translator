@@ -1,12 +1,3 @@
-"""Fixed-size feasibility, right-edge borrowing, and the group-aware page lock.
-
-``solve_page_2d`` used to be the only question ("how big can this page be?",
-asked once per page, which is what produced the 2.29pt drift). Stage 3A splits
-it: the size is the document's decision, so the per-page question becomes "does
-this page hold it?" (:func:`fit_at_size`) and must come back with the numbers a
-reviewer needs, not just a boolean.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -51,8 +42,6 @@ def test_a_page_that_holds_the_size_reports_fits_and_no_deficit() -> None:
 
 
 def test_a_shortfall_is_quantified_with_the_blocks_that_missed() -> None:
-    # 40 glyphs at 400pt width / (8.4 x 1.0 x 1.0) advance = 2 lines at 8.4 x 1.09
-    # = 18.3pt, while the box only offers 6pt.
     report = fit_at_size([[_record(top=700.0, bot=694.0)]], size_pt=8.4, pitch=1.09)
     assert not report.fits
     assert report.block_ids == ("b1",)
@@ -60,13 +49,13 @@ def test_a_shortfall_is_quantified_with_the_blocks_that_missed() -> None:
 
 
 def test_width_borrowing_never_passes_the_columns_own_right_edge() -> None:
-    records = [_record(width=340.0, right_budget=392.0)]  # x1 = 380, so 12pt of room
+    records = [_record(width=340.0, right_budget=392.0)]
     widened, used = apply_width_borrow([records], 6.0)
     assert widened[0][0]["w"] == pytest.approx(346.0)
     assert used == pytest.approx(6.0)
 
     widened, used = apply_width_borrow([records], 20.0)
-    assert widened[0][0]["w"] == pytest.approx(352.0)  # clamped by the budget
+    assert widened[0][0]["w"] == pytest.approx(352.0)
     assert used == pytest.approx(12.0)
 
 
@@ -90,7 +79,6 @@ def _block(block_id: str, text: str) -> IRBlock:
 
 
 def test_the_page_lock_never_exceeds_the_group_size() -> None:
-    """A roomy page must not inflate past the document's body group."""
     geom = PageGeometry(
         page_w=595.0,
         page_h=842.0,
@@ -106,7 +94,6 @@ def test_the_page_lock_never_exceeds_the_group_size() -> None:
 
 
 def test_the_page_lock_still_goes_below_the_group_when_it_must() -> None:
-    """L2 is the last placement strategy: it may shrink, and the caller records it."""
     geom = PageGeometry(
         page_w=200.0,
         page_h=120.0,

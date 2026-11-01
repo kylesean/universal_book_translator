@@ -1,11 +1,3 @@
-"""``ubt.core.cjk_ranges`` is the single source of CJK codepoint ranges.
-
-The invariant that makes it a *source* rather than another copy: each regex
-class fragment renders exactly the tuple list it was built from (a parse of
-the fragment text round-trips to the same (lo, hi) pairs), and the canonical
-predicate agrees with the fragment on every block edge.
-"""
-
 from __future__ import annotations
 
 import re
@@ -35,7 +27,6 @@ _ESCAPE_RE = re.compile(r"(\\u)([0-9a-f]{4})|(\\U)([0-9a-f]{8})")
 
 
 def _parse_class(fragment: str) -> list[tuple[int, int]]:
-    """Decode a class fragment back into its (lo, hi) pairs."""
     pairs: list[tuple[int, int]] = []
     lows: list[int] = []
     for match in _ESCAPE_RE.finditer(fragment):
@@ -56,7 +47,6 @@ _TIER_CLASSES = {
     "CJK_FULL": (CJK_FULL_CLASS, CJK_RANGES),
 }
 
-# Every block edge of every tier, plus representative non-CJK codepoints.
 _EDGES = (
     [lo for pair in CJK_WIDE_RANGES for lo in pair]
     + [hi for pair in CJK_RANGES for hi in pair]
@@ -82,9 +72,9 @@ def test_predicate_and_canonical_class_agree_on_edges() -> None:
 def test_predicate_edge_cases() -> None:
     assert is_cjk_char("") is False
     assert is_cjk_char("一") is True
-    assert is_cjk_char("\U0002a6df") is True  # Ext-C edge
-    assert is_cjk_char("\U0002b740") is False  # first codepoint past Ext C
-    assert is_cjk_char("\u4dc0") is False  # Yijing gap: between Ext A and Unified
+    assert is_cjk_char("\U0002a6df") is True
+    assert is_cjk_char("\U0002b740") is False
+    assert is_cjk_char("\u4dc0") is False
     assert contains_cjk("plain text") is False
     assert contains_cjk("北京 Beijing") is True
 

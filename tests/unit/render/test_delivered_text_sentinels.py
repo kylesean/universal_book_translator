@@ -1,24 +1,3 @@
-"""A leaked masker token must never reach a reader-visible surface.
-
-Measured on a real 26-page BSIM-CMG chapter (``chapter-3.pdf``, local
-``gemma4-e4b``): the draft stage masked two spans, the model echoed one token
-with a checksum bound to the *other* span's index, the restore pass refused the
-substitution -- correctly, because restoring would have printed the wrong
-formula mid-sentence -- and left ``⟦SOUP_MASK_0001-f2d⟧`` in the draft. Nothing
-downstream removed it, so the token was printed in the delivered PDF's text
-layer and in its HTML, EPUB and XLIFF companions.
-
-Two things must both survive the fix, and they pull in opposite directions:
-
-* the **reader** gets prose with a neutral ``⟨missing⟩`` bracket in place of the
-  internal token, and keeps the rest of the sentence (the sentence was
-  translated; only the protected span was unrecoverable);
-* the **operator** keeps the ``sentinel_leaked`` / ``soup_token_corrupt`` flags,
-  so the block still lands in the post-edit queue. A diagnostic written against
-  the sanitized surface would go silent at exactly the moment it is needed, so
-  :func:`delivered_text` exposes ``sanitize_sentinels=False`` for it.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -43,7 +22,6 @@ def _block(
     target: str = "",
     draft: str = "",
 ) -> IRBlock:
-    """An IRBlock whose ``id``/``source_text`` come from its element, as always."""
     element = make_element(
         id=block_id,
         spine_index=1,
@@ -54,13 +32,10 @@ def _block(
 
 
 def _masked_token(family: str, index: int = 1, original: str = "x") -> str:
-    """A token in the exact shape ``TokenFactory.next`` emits."""
     return f"⟦{family}_MASK_{index:04d}-{token_checksum(index, original)}⟧"
 
 
 class TestStripIsNarrowAndComplete:
-    """Every masker family blanks; meaning-carrying sentinels do not."""
-
     @pytest.mark.parametrize("family", ["SOUP", "MATH", "CITE", "CODE", "EMAIL"])
     def test_every_masker_family_blanks(self, family: str) -> None:
         token = _masked_token(family)
@@ -68,32 +43,16 @@ class TestStripIsNarrowAndComplete:
         out = strip_pipeline_sentinels(text)
         assert token not in out
         assert SENTINEL_PLACEHOLDER in out
-        # The surrounding prose is the reader's, and survives untouched.
         assert out.startswith("它仅依赖于 y 方向，且")
         assert out.endswith("= Vtm ln(Nch/ni)。")
 
     def test_typst_escaped_variant_blanks(self) -> None:
-        r"""The measured leak shape from a *later* block: ``SOUP\_MASK\_0001``.
-
-        Typst escaping turns ``_`` into ``\_``; a pattern keyed on the raw
-        underscore would leave the escaped spelling on the page.
-        """
         text = r"见 ⟦SOUP\_MASK\_0001-644⟧ 与 ⟦CITE\_MASK\_0002-e09⟧ 之间"
         out = strip_pipeline_sentinels(text)
         assert "MASK" not in out
         assert out.count(SENTINEL_PLACEHOLDER) == 2
 
     def test_latex_bracket_wrapped_variant_blanks(self) -> None:
-        r"""The measured leak shape from 26-page replay block ``b0058``.
-
-        A model rewrote the mask as ``$\\llbracket SOUP\\_MASK\\_0001-2a3
-        \\rrbracket$``. The token is intact, but the delimiter is a LaTeX macro,
-        so a stripper keyed on the ``⟦`` glyph missed it and Typst rendered the
-        macros back into exactly the glyphs the artifact contract flags as a
-        ``placeholder_leak``. The surrounding dollars go with the token: the
-        replacement is prose, and leaving them would make Typst read the
-        placeholder as a math variable.
-        """
         text = (
             "双栅鳍式场效应晶体管的移动电子电荷密度随 $V_G$ 的变化"
             r"（在 $\llbracket SOUP\_MASK\_0001-2a3 \rrbracket$ 下），分别由所提出的模型获得。"
@@ -103,7 +62,6 @@ class TestStripIsNarrowAndComplete:
         assert "MASK" not in out
         assert "llbracket" not in out and "rrbracket" not in out
         assert SENTINEL_PLACEHOLDER in out
-        # No orphan math delimiters left behind, and the prose survives.
         assert out.count("$") == 2, "the $V_G$ span keeps its own dollars"
         assert out.startswith("双栅鳍式场效应晶体管的移动电子电荷密度随 $V_G$ 的变化（在 ")
         assert out.endswith(" 下），分别由所提出的模型获得。")
@@ -113,7 +71,6 @@ class TestStripIsNarrowAndComplete:
         assert SENTINEL_PLACEHOLDER in strip_pipeline_sentinels("【SOUP_MASK_0001-f2d】")
 
     def test_a_token_without_a_checksum_blanks(self) -> None:
-        """A model that drops the checksum suffix still leaks the index."""
         assert SENTINEL_PLACEHOLDER in strip_pipeline_sentinels("前 ⟦SOUP_MASK_0004⟧ 后")
 
     @pytest.mark.parametrize(
@@ -128,16 +85,9 @@ class TestStripIsNarrowAndComplete:
         ],
     )
     def test_meaning_bearing_and_non_tokens_are_untouched(self, text: str) -> None:
-        """Emphasis markers carry content the renderer still needs.
-
-        ``parse_emphasis`` turns ``⟦B⟧`` into a bold run and the bifurcation
-        token splits a block; blanking either would destroy translation, not
-        hide machinery.
-        """
         assert strip_pipeline_sentinels(text) == text
 
     def test_a_lone_closer_is_not_swallowed_backward(self) -> None:
-        """A stray ``⟧`` must not turn unrelated later text into a "token"."""
         text = "句子甲 ⟧ 句子乙 MASK_0001 结尾"
         assert strip_pipeline_sentinels(text) == text
 
@@ -147,8 +97,6 @@ class TestStripIsNarrowAndComplete:
 
 
 class TestDiagnosticStaysAlive:
-    """The operator must still be told, even though the reader no longer sees it."""
-
     def test_delivered_text_sanitizes_by_default(self) -> None:
         token = _masked_token("SOUP")
         block = _block(target=f"其中 εch 是介电常数，且 {token} = Vtm ln(Nch/ni)。")
@@ -157,13 +105,11 @@ class TestDiagnosticStaysAlive:
         assert SENTINEL_PLACEHOLDER in out
 
     def test_unsanitized_surface_keeps_the_token_for_diagnosis(self) -> None:
-        """``sanitize_sentinels=False`` is the diagnostic's view, not the page's."""
         token = _masked_token("SOUP")
         block = _block(target=f"且 {token} = 0")
         assert delivered_text(block, sanitize_sentinels=False) == f"且 {token} = 0"
 
     def test_the_draft_fallback_is_sanitized_too(self) -> None:
-        """A failed block delivers its *draft*, which is where leaks were found."""
         token = _masked_token("SOUP")
         block = _block(target="", draft=f"草稿里也带着 {token}")
         assert token not in delivered_text(block)
@@ -175,7 +121,6 @@ class TestDiagnosticStaysAlive:
         assert token not in delivered_text(block)
 
     def test_a_quarantine_marker_still_falls_back_to_the_draft(self) -> None:
-        """The wrapper rules and the sentinel rules must not interfere."""
         token = _masked_token("SOUP")
         block = _block(
             target='<mark class="ubt-blocked-human">原始英文</mark>',
@@ -188,17 +133,8 @@ class TestDiagnosticStaysAlive:
 
 
 class TestGuardParity:
-    """The render-layer guard and this substitution must agree on "is a leak"."""
-
     @pytest.mark.parametrize("family", ["SOUP", "MATH", "CITE", "CODE", "EMAIL"])
     def test_a_blanked_text_no_longer_trips_the_guard(self, family: str) -> None:
-        """Whatever this module blanks, ``artifact_guard`` must have recognised.
-
-        ``has_sentinel`` is what makes the renderer escape a span as prose
-        instead of feeding it to the math transpiler (where ``_`` is subscript
-        and the compile dies). If ``strip_pipeline_sentinels`` removed a shape the
-        guard still flags, that shape would reach the transpiler unescaped.
-        """
         token = _masked_token(family)
         assert has_sentinel(token), "guard must recognise the token it protects against"
         assert not has_sentinel(strip_pipeline_sentinels(f"x {token} y")), (
@@ -206,16 +142,12 @@ class TestGuardParity:
         )
 
     def test_delivered_output_can_never_trip_the_guard_on_a_masker_token(self) -> None:
-        """One block per family: the shipped surface carries no masker token."""
         for family in ("SOUP", "MATH", "CITE", "CODE", "EMAIL"):
             block = _block(block_id=family.lower(), target=_masked_token(family))
             assert not has_sentinel(delivered_text(block)), family
 
 
 class TestMeasuredRegression:
-    """The literal block from the real chapter, kept as the end-to-end anchor."""
-
-    # pdf_main#b0014 of chapter-3.pdf, en->zh, draft+repair on local gemma4-e4b.
     MEASURED_TARGET = (
         "其中 ψ(x, y) 是沟道中的静电势，q 是电子电荷的量，ni 是本征载流子浓度，"
         "εch 是沟道（鳍）的介电常数，Vtm 是由 $k_B T/q$ 给出的热电压，"
@@ -227,18 +159,12 @@ class TestMeasuredRegression:
         out = delivered_text(block)
         assert "SOUP_MASK" not in out
         assert "⟦" not in out
-        # And the block is not lost: its prose and its math both still ship.
         assert "$k_B T/q$" in out
         assert "$V_{tm} \\ln(N_{ch}/n_i)$" in out
         assert "沟道掺杂浓度" in out
 
 
 class TestStrayHtmlTagsNeverReachThePage:
-    """A model that saw a converter's link spans echoed the closing tag into
-    its translation: the 18-page ATC'25 replay printed ``RustyHermit-MPK
-    [59]</span>`` nine times across two blocks. The tag is machinery — no
-    content is owed for it — so the delivered surface deletes it outright."""
-
     MEASURED_TARGET = (
         "内核内部的权限分离。RustyHermit-MPK [59]</span>、CubicleOS [56]</span> "
         "和 KDPM [36]</span> 利用 Intel MPK 进行隔离。"
@@ -249,7 +175,6 @@ class TestStrayHtmlTagsNeverReachThePage:
         out = delivered_text(block)
         assert "</span>" not in out
         assert "<span" not in out
-        # And the prose around the tags is untouched.
         assert out == (
             "内核内部的权限分离。RustyHermit-MPK [59]、CubicleOS [56] 和 KDPM [36] "
             "利用 Intel MPK 进行隔离。"
@@ -260,8 +185,6 @@ class TestStrayHtmlTagsNeverReachThePage:
         assert delivered_text(block) == "引用 之后继续。"
 
     def test_math_like_comparisons_survive(self) -> None:
-        """Single-letter tags (``a``/``b``/``i``) are not in the strip list:
-        ``x<a>y`` is plausible prose and must survive untouched."""
         block = _block(target="当 x<a>y 成立时继续。")
         assert delivered_text(block) == "当 x<a>y 成立时继续。"
 
@@ -271,12 +194,6 @@ class TestStrayHtmlTagsNeverReachThePage:
 
 
 class TestDegradedListMarkersAreTypedAsBullets:
-    """The source's filled bullet arrives from extraction as a middle dot
-    ("· Redis. We use ..."), and the model copies it verbatim into its
-    translation — often dropping the space ("·Redis。"). The reader gets a
-    shrunken dot glued to the first word where the source had a bullet. For
-    list-shaped blocks the marker is furniture: normalize it."""
-
     def test_a_degraded_marker_is_normalized(self) -> None:
         block = _block(
             kind=BlockType.LIST_ITEM,
@@ -289,7 +206,5 @@ class TestDegradedListMarkersAreTypedAsBullets:
         assert delivered_text(block) == "• 已有空格的条目。"
 
     def test_prose_middle_dot_survives(self) -> None:
-        """A middle dot between clauses is a legitimate typographic character:
-        only list-shaped blocks get the normalization."""
         block = _block(kind=BlockType.NARRATIVE, target="条目一 · 条目二 · 条目三。")
         assert delivered_text(block) == "条目一 · 条目二 · 条目三。"

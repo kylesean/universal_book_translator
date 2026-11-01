@@ -1,5 +1,3 @@
-"""Pipeline failures must leave a durable, operator-safe terminal reason."""
-
 from __future__ import annotations
 
 import asyncio
@@ -16,12 +14,6 @@ pytestmark = pytest.mark.fast
 
 
 def test_abort_persists_the_safe_error_before_the_terminal_status(tmp_path: Path) -> None:
-    """A restart must still be able to explain why the job failed.
-
-    The in-memory ``JobRecord.error`` disappears with the process. Before this,
-    the pipeline wrote only ``failed`` to the ledger, so ``/status`` fell back
-    to a generic "server restarted" message after a restart.
-    """
     db_path = tmp_path / "job.sqlite"
     with SQLiteJobLedger(db_path) as ledger:
         ledger.init_job_from_manifest(
@@ -65,13 +57,6 @@ def test_a_completed_job_is_never_downgraded_by_the_abort_path(tmp_path: Path) -
 
 
 def test_completion_clears_the_previous_attempts_error(tmp_path: Path) -> None:
-    """A resumed job that finishes must not keep the old failure attached.
-
-    ``last_error`` drives the console's failure banner. Leaving it on a
-    completed job made the operator read an outdated IntegrityViolationError
-    beside a delivered artifact, with no way to tell whether recovery had
-    actually worked.
-    """
     db_path = tmp_path / "job.sqlite"
     with SQLiteJobLedger(db_path) as ledger:
         ledger.init_job_from_manifest(
@@ -87,7 +72,6 @@ def test_completion_clears_the_previous_attempts_error(tmp_path: Path) -> None:
 
 
 def test_config_failure_is_retryable_but_source_failure_is_not(tmp_path: Path) -> None:
-    """A fixed model route must not leave 30 blocks permanently poisoned."""
     from ubt.core.engine.stages.draft import _draft_failure_prefix
     from ubt.core.exceptions import ModelProviderError
     from ubt.core.qe.defect_taxonomy import NON_RETRYABLE_DRAFT_PREFIX

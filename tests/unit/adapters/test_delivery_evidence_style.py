@@ -1,12 +1,3 @@
-"""The style sample must be the font size, not the ink height.
-
-``_body_size_from_charboxes`` (the ink-height proxy) conflates script with size:
-a CJK glyph fills its em box, a Latin one does not. That is why the exact
-content-stream reader was added, and these tests pin it: a page set entirely at
-10pt must sample as 10.0 even when its glyphs are taller than its x-height, and
-a smaller caption must not become the page's body size.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -65,8 +56,6 @@ def test_body_size_is_the_character_weighted_mode_of_the_content_stream(tmp_path
 
     assert [sample.page for sample in samples] == [1, 2]
     assert [sample.size_pt for sample in samples] == pytest.approx([10.0, 12.0])
-    # A caption on the page does not become the page's body size: 20 body
-    # characters outweigh 3 caption characters.
     assert samples[0].role == "body"
 
 
@@ -79,8 +68,6 @@ def test_the_reader_prefers_exact_sizes_over_the_ink_proxy(tmp_path: Path) -> No
     evidence = read_artifact_evidence(path, contract="faithful", blocks=(), read_geometry=True)
 
     assert len(evidence.style_samples) == 1
-    # The proxy would report an ink height (≈5-8pt for Helvetica); the exact
-    # reader reports the size the page was actually set at.
     assert evidence.style_samples[0].size_pt == pytest.approx(10.0)
 
 
@@ -103,14 +90,6 @@ def test_an_unreadable_artifact_falls_back_without_raising(tmp_path: Path) -> No
 
 
 def test_a_table_dominated_page_samples_the_body_not_the_grid(tmp_path: Path) -> None:
-    """The replay's blocker, as a fixture: a grid whose characters dominate.
-
-    The lmbench page's grid characters (5.3pt) outnumbered the prose three to
-    one, the page's size statistic became the *grid's*, and the document read
-    as a 4.18pt body drift that blocked the export. A grid is its own style
-    group (PRD FR-L4): its long cells text-match the table block, its size
-    leaves the vote, and the page samples as the body it also carries.
-    """
     body_text = "The body text carries the reading experience across many paragraphs."
     table_rows = "\n".join(f"| row{i} | 0.050 | 0.066 |" for i in range(6))
     path = tmp_path / "table_page.pdf"
@@ -133,8 +112,6 @@ def test_a_table_dominated_page_samples_the_body_not_the_grid(tmp_path: Path) ->
         )
         ops: list[Any] = [([], pikepdf.Operator("BT"))]
         y = 260.0
-        # The grid: more characters than the body, at a smaller size. Each
-        # row names itself so the rendered rects text-match the table block.
         for row in range(6):
             ops.append((["/F1", 1], pikepdf.Operator("Tf")))
             ops.append(([8.0, 0, 0, 8.0, 50, y], pikepdf.Operator("Tm")))
@@ -142,7 +119,6 @@ def test_a_table_dominated_page_samples_the_body_not_the_grid(tmp_path: Path) ->
                 ([pikepdf.String(f"| row{row} | 0.050 | 0.066 |".encode())], pikepdf.Operator("Tj"))
             )
             y -= 14.0
-        # The body prose, at the body size.
         ops.append((["/F1", 1], pikepdf.Operator("Tf")))
         ops.append(([10.0, 0, 0, 10.0, 50, y], pikepdf.Operator("Tm")))
         ops.append(([pikepdf.String(body_text.encode())], pikepdf.Operator("Tj")))

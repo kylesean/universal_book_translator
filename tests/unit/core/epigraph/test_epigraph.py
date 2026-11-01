@@ -1,5 +1,3 @@
-"""Unit tests for chapter epigraph and abstract parsing, detection, and rendering."""
-
 from __future__ import annotations
 
 import pytest
@@ -34,8 +32,6 @@ def _make_block(btype: BlockType, text: str, block_id: str = "b1", level: int = 
         source_text=text,
         level=level,
     )
-    # Only ``element`` and ``target_text`` are fields of ``IRBlock``; the rest
-    # were silently ignored by ``extra="ignore"``.
     return IRBlock(element=elem, target_text=text)
 
 
@@ -113,19 +109,16 @@ def test_render_epigraph_typst_styles() -> None:
         source="Albert Einstein",
     )
 
-    # Classic right
     cfg_classic = EpigraphConfig(style=EpigraphStyle.CLASSIC_RIGHT)
     out_classic = render_epigraph_typst(epi, config=cfg_classic)
     assert "#align(right)[" in out_classic
     assert "width: 75%" in out_classic
     assert "Albert Einstein" in out_classic
 
-    # Border left
     cfg_border = EpigraphConfig(style=EpigraphStyle.BORDER_LEFT)
     out_border = render_epigraph_typst(epi, config=cfg_border)
     assert "stroke: (left: 2.5pt + luma(160))" in out_border
 
-    # Callout box
     cfg_box = EpigraphConfig(style=EpigraphStyle.CALLOUT_BOX)
     out_box = render_epigraph_typst(epi, config=cfg_box)
     assert "fill: luma(250)" in out_box

@@ -1,22 +1,3 @@
-"""The sentinel guard: what a pipeline artifact looks like, and that it is caught.
-
-The bug class these tests pin is one shape: a string the pipeline was supposed to
-consume before delivery reaches :func:`typstify_math`, and Typst's math mode
-mangles it into a compile failure that loses the **whole document** (the renderer
-compiles as one unit). Measured on the gold corpus:
-
-* ``⟦SOUP_MASK_0001⟧`` inside ``$…$`` → ``unknown variable: SOUP``
-  (alphafold2, attention-is-all-you-need);
-* a leaked ``⟦/B⟧`` → ``unexpected slash`` (mamba, neural-ode);
-* a model's ``\\llbracket B \\rrbracket`` transcription → ``unknown variable:
-  lbracket`` (mamba, neural-ode).
-
-The registry is a list of literals rather than an import from each masker (so the
-guard has no dependency). :func:`test_the_registry_covers_every_masker_family`
-is what keeps that list from falling behind: it reads each masker's own
-``default_prefix`` and asserts the guard recognises a token made from it.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -28,11 +9,6 @@ from ubt.render.typst.artifact_guard import (
 )
 
 pytestmark = pytest.mark.fast
-
-
-# --------------------------------------------------------------------------- #
-# Recognising each family
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -55,13 +31,6 @@ def test_every_family_is_recognised(token: str, kind: str) -> None:
 
 
 def test_the_registry_covers_every_masker_family() -> None:
-    """Each masker's own ``default_prefix`` must yield a recognised token.
-
-    This is the anti-drift assertion. The guard's prefixes are literals (it is
-    imported by the renderer, which should not pull in the cleaner stack), so
-    nothing would fail if a new masker chose a prefix the guard never heard of —
-    and that is exactly how the original bug hid, one family at a time.
-    """
     from ubt.segment.placeholders import default_placeholder_engine
 
     engine = default_placeholder_engine()
@@ -87,11 +56,6 @@ def test_the_emphasis_sentinels_come_from_the_emphasis_module() -> None:
 
 
 def test_a_latex_transcribed_italic_marker_is_a_sentinel() -> None:
-    """A model may rewrite either marker as ``\\llbracket … \\rrbracket``.
-
-    ``I`` was missing, so an italic marker escaping into a formula reached the
-    math transpiler and failed the whole document compile.
-    """
     assert has_sentinel(r"\llbracket I \rrbracket")
     assert has_sentinel(r"\llbracket /I \rrbracket")
     assert has_sentinel(r"\\llbracket i \\rrbracket")
@@ -104,11 +68,6 @@ def test_the_semantic_break_token_is_covered() -> None:
 
 
 def test_the_latex_transcription_of_the_emphasis_marker_is_recognised() -> None:
-    """A model reading ``⟦B⟧`` as a math bracket writes ``\\llbracket``.
-
-    Both spellings are the same marker — ``parse_bold`` accepts both — so the
-    guard must too, or it misses precisely the case that lost mamba.
-    """
     for text in (
         r"\llbracket B \rrbracket",
         r"\llbracket /B \rrbracket",
@@ -117,11 +76,6 @@ def test_the_latex_transcription_of_the_emphasis_marker_is_recognised() -> None:
     ):
         assert has_sentinel(text), text
         assert [s.kind for s in find_sentinels(text)] == ["emphasis"], text
-
-
-# --------------------------------------------------------------------------- #
-# Ordinary text must not be flagged
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -142,19 +96,8 @@ def test_ordinary_text_is_not_flagged(text: str) -> None:
 
 
 def test_a_stray_open_bracket_does_not_swallow_the_paragraph() -> None:
-    """A lone ``⟦`` is not a token, and may not consume to the next ``⟧``.
-
-    The pattern is bounded to one line for exactly this reason: a paragraph with
-    an unmatched open bracket and a later ``⟧`` far away must not read as one
-    enormous sentinel.
-    """
     text = "before ⟦ here\nlots of ordinary prose\nafter ⟧ end"
     assert find_sentinels(text) == []
-
-
-# --------------------------------------------------------------------------- #
-# Ordering and composition
-# --------------------------------------------------------------------------- #
 
 
 def test_sentinels_are_reported_in_order_with_their_text() -> None:
@@ -177,7 +120,6 @@ def test_both_spellings_of_the_emphasis_marker_are_found_together() -> None:
 
 
 def test_a_token_inside_a_formula_is_found_by_scanning_the_inner_text() -> None:
-    # The renderer passes the span's *inner* text, so this is the exact input.
     assert has_sentinel(r"(\Delta, ⟦ B ⟧ A ⟦ /B ⟧)")
     assert has_sentinel("a_i : ⟦SOUP_MASK_0001-551⟧ b_j")
     assert has_sentinel(r"(\Delta, \llbracket B \rrbracket A)")

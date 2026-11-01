@@ -1,5 +1,3 @@
-"""Unit tests for the 'ubt epigraph' CLI command suite."""
-
 from __future__ import annotations
 
 import json
@@ -29,14 +27,12 @@ def sample_epigraph_doc(tmp_path: Path) -> Path:
 
 
 def test_epigraph_inspect_command(sample_epigraph_doc: Path) -> None:
-    # Text mode
     result = runner.invoke(app, ["epigraph", "inspect", str(sample_epigraph_doc)])
     assert result.exit_code == 0
     assert "Total Epigraphs Found: 1" in result.output
     assert "Total Abstracts Found: 1" in result.output
     assert "Niklaus Wirth" in result.output
 
-    # JSON mode
     json_res = runner.invoke(app, ["epigraph", "inspect", str(sample_epigraph_doc), "--json"])
     assert json_res.exit_code == 0
     data = json.loads(json_res.output)

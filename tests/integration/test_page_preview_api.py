@@ -1,11 +1,3 @@
-"""Single-page preview endpoint over a real synthetic PDF.
-
-Renders one page of a job's source PDF with the current ledger text through the
-delivery compositor, and rasterizes it. Needs the external ``typst`` compiler
-(the same dependency as the synthetic render e2e), so it lives in the slow tier
-and skips when typst is absent.
-"""
-
 from __future__ import annotations
 
 import shutil
@@ -79,7 +71,6 @@ def test_page_preview_without_source_is_409(tmp_path: Path) -> None:
         service_api_key=SecretStr(_API_KEY),
     )
     config.db_dir.mkdir(parents=True, exist_ok=True)
-    # A ledger row with an empty source_path: nothing to compose onto.
     with SQLiteJobLedger(config.db_dir / f"{_JOB}.sqlite") as ledger:
         ledger.init_job_from_manifest(
             _JOB, BookManifest(doc_id=_JOB, title="t", source_path="", target_lang="es")
@@ -90,8 +81,6 @@ def test_page_preview_without_source_is_409(tmp_path: Path) -> None:
 
 
 def test_source_page_returns_png(tmp_path: Path) -> None:
-    # The "before" half of the pixel-witness view: the source PDF page, no
-    # composition. Needs only pdf_oxide (not typst).
     source = write_text_pdf(tmp_path / "book.pdf", [["Source page one."], ["Source page two."]])
 
     config = UBTConfig(

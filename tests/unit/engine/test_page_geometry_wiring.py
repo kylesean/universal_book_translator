@@ -1,17 +1,3 @@
-"""Page geometry reaches the ledger from a real facsimile render.
-
-``test_page_geometry.py`` pins the table and its accessors in isolation. This
-file pins the *wiring*, which is a different claim and the one that has silently
-failed in this project before: a correct storage layer with nothing writing to
-it reads as done while the audited fact stays lost.
-
-The Typst compile is stubbed for the same reason as in
-``test_outline_wiring.py``: a preview compile is a subprocess, this module is
-``fast``-marked, and ``test_marker_hygiene`` forbids that pairing. Nothing about
-geometry depends on Typst's output — it depends on the solver's decision and the
-source page's measured size, both of which run for real here.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -94,7 +80,6 @@ def test_a_facsimile_render_records_one_row_per_page(tmp_path: Path, stub_compil
     for row in geometry:
         assert row["page_w_pt"] == 400.0
         assert row["page_h_pt"] == 600.0
-        # Both halves of the story: what the source measured and what shipped.
         assert isinstance(row["measured_size_pt"], float)
         assert isinstance(row["delivered_size_pt"], float)
         assert row["tier"] in {"L1", "L2"}
@@ -103,14 +88,6 @@ def test_a_facsimile_render_records_one_row_per_page(tmp_path: Path, stub_compil
 def test_the_delivered_size_is_the_group_decision_not_a_per_page_search(
     tmp_path: Path, stub_compile: None
 ) -> None:
-    """G4 Stage 3A moved the body size decision to the document.
-
-    A per-page search let roomy pages climb to ``source x 1.10`` while tight
-    pages fell to the 7.5pt floor, which is the 2.29pt drift the 26-page replay
-    measured. The ledger must now describe the *group* that shipped: one size,
-    with the group id alongside it, so a page that misses it is visible as an
-    exception rather than as another legitimate per-page value.
-    """
     src = _source_pdf(tmp_path / "book.pdf", 1)
     manifest = BookManifest(doc_id="d", title="t", source_path=str(src), target_lang="zh")
     strategy = DoclingRenderStrategy(delivery_mode="facsimile", enable_pdf_optimization=False)
@@ -127,7 +104,6 @@ def test_the_delivered_size_is_the_group_decision_not_a_per_page_search(
 def test_every_L1_page_of_a_document_ships_the_same_body_size(
     tmp_path: Path, stub_compile: None
 ) -> None:
-    """The invariant the drift check reads: one size across the group."""
     src = _source_pdf(tmp_path / "book.pdf", 3)
     manifest = BookManifest(doc_id="d", title="t", source_path=str(src), target_lang="zh")
     blocks = [_body(f"b{i}", i) for i in (1, 2, 3)]
@@ -142,8 +118,6 @@ def test_every_L1_page_of_a_document_ships_the_same_body_size(
 
 
 def test_geometry_does_not_leak_across_renders(tmp_path: Path, stub_compile: None) -> None:
-    """A second render must describe its own pages; a stale count is reported as
-    this page's geometry, which is worse than no record."""
     src_short = _source_pdf(tmp_path / "short.pdf", 1)
     src_long = _source_pdf(tmp_path / "long.pdf", 4)
     strategy = DoclingRenderStrategy(delivery_mode="facsimile", enable_pdf_optimization=False)
@@ -160,8 +134,6 @@ def test_geometry_does_not_leak_across_renders(tmp_path: Path, stub_compile: Non
 def test_the_rows_load_into_the_ledger(
     tmp_path: Path, stub_compile: None, ledger: SQLiteJobLedger
 ) -> None:
-    """The end-to-end claim: what the renderer measured is what the ledger reads
-    back, for the job that rendered it."""
     src = _source_pdf(tmp_path / "book.pdf", 2)
     manifest = BookManifest(doc_id="d", title="t", source_path=str(src), target_lang="zh")
     strategy = DoclingRenderStrategy(delivery_mode="facsimile", enable_pdf_optimization=False)
@@ -181,7 +153,5 @@ def test_the_rows_load_into_the_ledger(
 
 
 def test_a_non_facsimile_render_records_no_geometry(tmp_path: Path) -> None:
-    """The reflow channel measures no page, so it must record nothing rather
-    than zeroes that would read as "page 1 was 0pt"."""
     strategy = DoclingRenderStrategy(delivery_mode="reflow", enable_pdf_optimization=False)
     assert strategy.last_page_geometry == []

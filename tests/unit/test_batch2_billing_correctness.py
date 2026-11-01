@@ -1,5 +1,3 @@
-"""Regression tests for billing and prompt accounting fixes."""
-
 from __future__ import annotations
 
 import httpx
@@ -9,11 +7,6 @@ from ubt.core.exceptions import ModelProviderError
 from ubt.core.router.transports.gemini import GeminiTransport
 
 pytestmark = pytest.mark.fast
-
-
-# --------------------------------------------------------------------------- #
-# Gemini: usage is recorded before the response is judged an error.
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.asyncio
@@ -36,7 +29,5 @@ async def test_gemini_blocked_200_still_bills_its_prompt_tokens() -> None:
         await transport.generate_with_finish_reason("hello")
     await transport.aclose()
 
-    # The blocked call consumed 42 prompt tokens; skipping the write let the
-    # budget cap undercount real spend.
     assert transport.usage_log
     assert transport.usage_log[0]["prompt_tokens"] == 42

@@ -1,5 +1,3 @@
-"""Unit tests for canonical markup_cleanup module."""
-
 from __future__ import annotations
 
 import pytest

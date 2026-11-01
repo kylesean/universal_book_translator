@@ -1,5 +1,3 @@
-"""Unit tests for the 'ubt benchmark' CLI command."""
-
 from __future__ import annotations
 
 import json
@@ -25,7 +23,6 @@ runner = CliRunner()
 
 
 def _make_dummy_pdf(path: Path) -> None:
-    """Create minimal valid PDF binary."""
     pdf_content = (
         b"%PDF-1.4\n"
         b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
@@ -63,21 +60,18 @@ def _setup_mock_corpus(corpus_dir: Path) -> None:
 
 
 def test_benchmark_command_missing_corpus() -> None:
-    """Missing corpus directory exits with code 2."""
     result = runner.invoke(app, ["benchmark", "--corpus", "nonexistent_corpus_dir_123"])
     assert result.exit_code == 2
     assert "not found" in result.output.lower() or "error" in result.output.lower()
 
 
 def test_benchmark_command_invalid_mode() -> None:
-    """Invalid execution mode exits with code 2."""
     result = runner.invoke(app, ["benchmark", "--mode", "unsupported-mode"])
     assert result.exit_code == 2
     assert "invalid mode" in result.output.lower() or "error" in result.output.lower()
 
 
 def test_benchmark_command_json_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Valid run with --json prints valid structured report."""
     corpus_dir = tmp_path / "corpus"
     _setup_mock_corpus(corpus_dir)
 
@@ -118,11 +112,9 @@ def test_benchmark_command_json_output(tmp_path: Path, monkeypatch: pytest.Monke
 def test_benchmark_command_exports_and_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify HTML, Markdown, JSON file exports, baseline saving and drift comparison."""
     corpus_dir = tmp_path / "corpus"
     _setup_mock_corpus(corpus_dir)
 
-    # 1. First run: save baseline
     def mock_run_baseline(
         self: BenchmarkRunner, case_ids: list[str] | None = None
     ) -> CorpusBenchmarkReport:
@@ -162,7 +154,6 @@ def test_benchmark_command_exports_and_drift(
     assert res1.exit_code == 0
     assert base_json.exists()
 
-    # 2. Second run: compare against baseline and write markdown / html / json
     def mock_run_candidate(
         self: BenchmarkRunner, case_ids: list[str] | None = None
     ) -> CorpusBenchmarkReport:
@@ -225,7 +216,6 @@ def test_benchmark_command_exports_and_drift(
 def test_benchmark_command_regression_exits_1(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Drift regression causes exit code 1."""
     corpus_dir = tmp_path / "corpus"
     _setup_mock_corpus(corpus_dir)
 
@@ -248,7 +238,6 @@ def test_benchmark_command_regression_exits_1(
     )
     base_report.save(base_json)
 
-    # Candidate has regression (errors introduced)
     def mock_run_cand(
         self: BenchmarkRunner, case_ids: list[str] | None = None
     ) -> CorpusBenchmarkReport:

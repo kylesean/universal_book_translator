@@ -1,5 +1,3 @@
-"""CELS layout coordinator unit tests: Stage 1 to Stage 3B chaining."""
-
 from __future__ import annotations
 
 import pytest
@@ -44,7 +42,6 @@ def test_single_column_page_solves_cleanly() -> None:
 
 def test_two_column_page_partitions_tracks_and_solves_independently() -> None:
     printable = Box(x0=54.0, y0=54.0, x1=558.0, y1=738.0)
-    # Left column: x: 54..280, Right column: x: 332..558 (gutter 52pt)
     blocks: list[PageLayoutBlock] = []
     for i in range(4):
         y = 60.0 + i * 50.0
@@ -87,7 +84,6 @@ def test_two_column_page_partitions_tracks_and_solves_independently() -> None:
 
 
 def test_overfull_track_flags_condensation_and_reports_deficit() -> None:
-    # Printable height = 200pt (50..250)
     printable = Box(x0=50.0, y0=50.0, x1=500.0, y1=250.0)
     # 5 blocks requiring 50pt each = 250pt + gaps > 200pt -> deficit!
     blocks = [
@@ -113,13 +109,11 @@ def test_overfull_track_flags_condensation_and_reports_deficit() -> None:
 
     assert sol.total_deficit_pt > 1.5
     assert sol.requires_llm_condensation
-    # Deficit blocks are identified
     deficit_blocks = [
         spec for spec in sol.track_solutions[0].solved_blocks if spec.deficit_pt > 0.0
     ]
     assert len(deficit_blocks) > 0
 
-    # Stage 4 requests generated with valid budgets
     assert len(sol.stage4_requests) > 0
     for req in sol.stage4_requests:
         assert req.char_budget > 0
@@ -132,11 +126,9 @@ def test_overfull_track_flags_condensation_and_reports_deficit() -> None:
 
 
 def test_stage4_condensation_loop_resolves_deficit() -> None:
-    """Stage 4 closed-loop: deficit triggers character budget -> condensation -> re-solve clears deficit."""
     from ubt.render.typst.container_repair import repair_bottleneck_containers
 
-    printable = Box(x0=50.0, y0=50.0, x1=500.0, y1=200.0)  # 150pt printable height
-    # 3 blocks requiring 60pt each = 180pt > 150pt
+    printable = Box(x0=50.0, y0=50.0, x1=500.0, y1=200.0)
     verbose_texts = [
         "我们可以看到，在大多数情况下，由于这个原因，系统需要进行复杂的分析和处理，以确保最终质量达到预期标准。",
         "根据上述内容，在当前情况下，我们可以看到相关的内容已经通过测试，并且由此可见，进行优化的效果非常显著。",
@@ -153,7 +145,6 @@ def test_stage4_condensation_loop_resolves_deficit() -> None:
         for i in range(3)
     ]
 
-    # Initial solve fails with deficit
     sol1 = solve_page_cels(
         page_no=4,
         blocks=blocks,
@@ -166,19 +157,16 @@ def test_stage4_condensation_loop_resolves_deficit() -> None:
     assert sol1.requires_llm_condensation
     assert len(sol1.stage4_requests) > 0
 
-    # Stage 4: Run condensation via heuristic/LLM
     fit_specs = sol1.to_container_fit_specs()
     repaired = repair_bottleneck_containers(fit_specs)
     assert len(repaired) > 0
 
-    # Re-solve with condensed text and reduced required height (fits in available height)
     condensed_blocks = [
         PageLayoutBlock(
             block_id=b.block_id,
             box=b.box,
             text=repaired.get(b.block_id, b.text),
             source_font_size_pt=b.source_font_size_pt,
-            # Each condensed block now fits within 40pt
             required_height_pt=40.0,
         )
         for b in blocks
@@ -202,14 +190,6 @@ def test_stage4_condensation_loop_resolves_deficit() -> None:
 
 
 def test_elastic_segments_carry_y_up_orientation() -> None:
-    """Segments span the printable area in PDF y-up order (y_top > y_bottom).
-
-    Regression: the coordinator used to construct the segment with
-    ``y_top=printable_box.y0`` and ``y_bottom=printable_box.y1``, which the
-    ``max(0.0, y_top - y_bottom)`` height property clamped to 0.0 for every
-    page, so any Stage 3A consumer reading the segment would have measured a
-    zero-height flow.
-    """
     printable = Box(x0=54.0, y0=54.0, x1=558.0, y1=738.0)
     blocks = [
         PageLayoutBlock(
@@ -237,20 +217,11 @@ def test_elastic_segments_carry_y_up_orientation() -> None:
     for seg in segments:
         assert seg.y_top > seg.y_bottom
         assert seg.height > 0.0
-        # The segment must cover the source blocks it was built from.
         assert seg.y_top >= max(box.y1 for box in seg.source)
         assert seg.y_bottom <= min(box.y0 for box in seg.source)
 
 
 def test_wide_spanning_block_pins_only_on_multicolumn_pages() -> None:
-    """A >60%-wide block rides as a straddler pin only when columns exist.
-
-    On a two-column page a full-width section title would fill the gutter and
-    collapse the column detection, so it is pinned and the columns survive.
-    Where the narrower flow reveals no columns (a single-column page), the
-    wide block must keep flowing: pinning it would leave nothing flowable and
-    collapse the solve.
-    """
     printable = Box(x0=54.0, y0=54.0, x1=558.0, y1=738.0)
     title = PageLayoutBlock(
         block_id="title",
@@ -293,14 +264,10 @@ def test_wide_spanning_block_pins_only_on_multicolumn_pages() -> None:
     assert sol.detection.is_multicolumn
     assert len(sol.track_solutions) == 2
     flowed_ids = {bid for track_sol in sol.track_solutions for bid in track_sol.block_ids}
-    # The title is pinned as a straddler instead of flowing into one column,
-    # and every column block still flows inside its own track.
     assert "title" not in flowed_ids
     assert {f"left_{i}" for i in range(4)} <= flowed_ids
     assert {f"right_{i}" for i in range(4)} <= flowed_ids
 
-    # The same wide title above a single-column narrow flow: no columns are
-    # revealed, so the title keeps flowing instead of being pinned.
     prose = [
         PageLayoutBlock(
             block_id=f"p{i}",

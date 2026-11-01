@@ -1,16 +1,3 @@
-"""`/jobs` and `/status` must answer the same thing about the same ledger.
-
-They are two views of one durable store, read by different code paths — the
-catalog builds summaries from `db_dir/*.sqlite`, the status route has an
-in-memory branch and a disk fallback. When they disagree the console shows a
-crashed job as live in the list and as failed on its own page, and the operator
-has no way to tell which one is lying.
-
-The cases below are the ones that actually differ in behaviour: a crash, a live
-writer holding the lease through a long call, and a book whose blocks all
-reached a terminal state before the row was finalized.
-"""
-
 from __future__ import annotations
 
 import os
@@ -95,7 +82,6 @@ def test_a_crashed_job_reads_failed_in_both(tmp_path: Path) -> None:
 
 
 def test_a_live_writer_reads_running_in_both(tmp_path: Path) -> None:
-    """The case an mtime rule got wrong: quiet ledger, working process."""
     db_dir = tmp_path / "db"
     db = _seed(db_dir, block=BlockStatus.DRAFTED, age=_QUIET_FOR)
     with SQLiteJobLedger(db) as ledger:
@@ -117,7 +103,6 @@ def test_a_fully_processed_book_reads_completed_in_both(tmp_path: Path) -> None:
 
 
 def test_an_agent_job_waiting_for_input_reads_awaiting_agent_in_both(tmp_path: Path) -> None:
-    """An Agent job holds no writer lease between MCP calls by design."""
     db_dir = tmp_path / "db"
     db = _seed(db_dir, block=BlockStatus.PENDING, age=_QUIET_FOR)
     status, catalog = _both(tmp_path, db_dir, db)

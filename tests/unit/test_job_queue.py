@@ -1,14 +1,3 @@
-"""The durable job queue: submission idempotency, atomic claims, and leases.
-
-The queue is the service front door's durability guarantee: a submitted job must
-survive a restart, two workers must never claim the same row, and a dead worker's
-job must be reclaimed -- or, past its attempt budget, failed -- without losing a
-user's cancel. These tests pin those contracts against a real SQLite file.
-
-Time is always passed explicitly via ``now`` so every case is deterministic; no
-wall-clock sleeping, no threads.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -24,11 +13,6 @@ pytestmark = pytest.mark.fast
 
 def _queue(tmp_path: Path, **kwargs: Any) -> JobQueue:
     return JobQueue(tmp_path / "queue.db", **kwargs)
-
-
-# --------------------------------------------------------------------------- #
-# Submission: persist once, then be idempotent or re-run a dead id.
-# --------------------------------------------------------------------------- #
 
 
 def test_enqueue_persists_a_queued_row(tmp_path: Path) -> None:
@@ -93,7 +77,6 @@ def test_enqueue_does_not_requeue_a_dead_id_across_tenants(tmp_path: Path) -> No
     queue.claim("w", now=2.0)
     queue.complete("j1", "w", status=JobStatus.FAILED, error="boom", now=3.0)
 
-    # A different tenant resubmitting the same id must not hijack the dead row.
     again = queue.enqueue("j1", {"v": 2}, tenant_id="tenant-b", now=4.0)
     assert again.status is JobStatus.FAILED
     assert again.tenant_id == "tenant-a"
@@ -109,7 +92,6 @@ def test_enqueue_rejects_a_new_row_past_the_depth_cap(tmp_path: Path) -> None:
 
 
 def test_enqueue_resubmitting_a_live_id_when_full_does_not_raise(tmp_path: Path) -> None:
-    # The cap guards *new* rows; an idempotent resubmit adds none.
     queue = _queue(tmp_path, max_queued=1)
     queue.enqueue("j1", {}, now=1.0)
     again = queue.enqueue("j1", {}, now=2.0)
@@ -119,14 +101,9 @@ def test_enqueue_resubmitting_a_live_id_when_full_does_not_raise(tmp_path: Path)
 def test_depth_cap_counts_only_queued_rows(tmp_path: Path) -> None:
     queue = _queue(tmp_path, max_queued=1)
     queue.enqueue("j1", {}, now=1.0)
-    queue.claim("w", now=2.0)  # j1 is RUNNING now, so nothing is QUEUED
-    queue.enqueue("j2", {}, now=3.0)  # allowed
+    queue.claim("w", now=2.0)
+    queue.enqueue("j2", {}, now=3.0)
     assert queue.depth().get("queued") == 1
-
-
-# --------------------------------------------------------------------------- #
-# Claim: atomic selection, ordering, and running caps.
-# --------------------------------------------------------------------------- #
 
 
 def test_claim_returns_none_when_nothing_is_queued(tmp_path: Path) -> None:
@@ -186,7 +163,6 @@ def test_claim_skips_a_tenant_at_its_cap(tmp_path: Path) -> None:
     queue.enqueue("b1", {}, tenant_id="tenant-b", now=3.0)
 
     assert queue.claim("w", now=10.0).job_id == "a1"  # type: ignore[union-attr]
-    # tenant-a is at its cap, so the next claim takes tenant-b's job instead.
     assert queue.claim("w", now=11.0).job_id == "b1"  # type: ignore[union-attr]
     assert queue.claim("w", now=12.0) is None
 
@@ -194,17 +170,12 @@ def test_claim_skips_a_tenant_at_its_cap(tmp_path: Path) -> None:
 def test_claim_reclaims_an_expired_lease_before_choosing(tmp_path: Path) -> None:
     queue = _queue(tmp_path, default_max_attempts=3)
     queue.enqueue("j1", {}, now=1.0)
-    queue.claim("dead-worker", lease_seconds=5.0, now=10.0)  # lease expires at 15
+    queue.claim("dead-worker", lease_seconds=5.0, now=10.0)
     reclaimer = queue.claim("live-worker", lease_seconds=5.0, now=16.0)
     assert reclaimer is not None
     assert reclaimer.job_id == "j1"
     assert reclaimer.worker_id == "live-worker"
     assert reclaimer.attempts == 2
-
-
-# --------------------------------------------------------------------------- #
-# Lease ownership: only the current owner may act on a running job.
-# --------------------------------------------------------------------------- #
 
 
 def test_heartbeat_extends_only_for_the_owner(tmp_path: Path) -> None:
@@ -275,11 +246,6 @@ def test_complete_keeps_progress_when_none_is_passed(tmp_path: Path) -> None:
     assert queue.get("j1").progress == {"done": 7}  # type: ignore[union-attr]
 
 
-# --------------------------------------------------------------------------- #
-# Releasing a claim: transient contention must not burn the attempt budget.
-# --------------------------------------------------------------------------- #
-
-
 def test_release_claim_requeues_and_refunds_the_attempt(tmp_path: Path) -> None:
     queue = _queue(tmp_path)
     queue.enqueue("j1", {}, now=1.0)
@@ -318,15 +284,10 @@ def test_release_claim_refuses_a_foreign_worker(tmp_path: Path) -> None:
     assert queue.get("j1").status is JobStatus.RUNNING  # type: ignore[union-attr]
 
 
-# --------------------------------------------------------------------------- #
-# Stale-lease reclamation: requeue, fail, or honour a cancel.
-# --------------------------------------------------------------------------- #
-
-
 def test_reclaim_stale_requeues_below_max_attempts(tmp_path: Path) -> None:
     queue = _queue(tmp_path, default_max_attempts=3)
     queue.enqueue("j1", {}, now=1.0)
-    queue.claim("w1", lease_seconds=5.0, now=10.0)  # lease expires at 15
+    queue.claim("w1", lease_seconds=5.0, now=10.0)
     assert queue.reclaim_stale(now=16.0) == (1, 0)
     job = queue.get("j1")
     assert job is not None
@@ -339,7 +300,7 @@ def test_reclaim_stale_requeues_below_max_attempts(tmp_path: Path) -> None:
 def test_reclaim_stale_fails_at_max_attempts(tmp_path: Path) -> None:
     queue = _queue(tmp_path, default_max_attempts=1)
     queue.enqueue("j1", {}, now=1.0)
-    queue.claim("w1", lease_seconds=5.0, now=10.0)  # attempts reaches max
+    queue.claim("w1", lease_seconds=5.0, now=10.0)
     assert queue.reclaim_stale(now=16.0) == (0, 1)
     job = queue.get("j1")
     assert job is not None
@@ -359,15 +320,10 @@ def test_reclaim_stale_honours_a_pending_cancel(tmp_path: Path) -> None:
 def test_reclaim_stale_leaves_a_live_lease_alone(tmp_path: Path) -> None:
     queue = _queue(tmp_path)
     queue.enqueue("j1", {}, now=1.0)
-    queue.claim("w1", lease_seconds=10.0, now=100.0)  # lease expires at 110
-    assert queue.reclaim_stale(now=110.0) == (0, 0)  # boundary is strict '<'
+    queue.claim("w1", lease_seconds=10.0, now=100.0)
+    assert queue.reclaim_stale(now=110.0) == (0, 0)
     assert queue.get("j1").status is JobStatus.RUNNING  # type: ignore[union-attr]
     assert queue.reclaim_stale(now=110.001) == (1, 0)
-
-
-# --------------------------------------------------------------------------- #
-# Cancellation.
-# --------------------------------------------------------------------------- #
 
 
 def test_request_cancel_cancels_a_queued_job(tmp_path: Path) -> None:
@@ -403,11 +359,6 @@ def test_request_cancel_leaves_a_terminal_job_alone(tmp_path: Path) -> None:
     assert still.status is JobStatus.COMPLETED
 
 
-# --------------------------------------------------------------------------- #
-# Queries and lifecycle.
-# --------------------------------------------------------------------------- #
-
-
 def test_queue_position_is_one_based_by_priority(tmp_path: Path) -> None:
     queue = _queue(tmp_path, global_max_running=10)
     queue.enqueue("a", {}, priority=0, now=1.0)
@@ -416,7 +367,7 @@ def test_queue_position_is_one_based_by_priority(tmp_path: Path) -> None:
     assert queue.queue_position("b") == 1
     assert queue.queue_position("a") == 2
     assert queue.queue_position("c") == 3
-    queue.claim("w", now=10.0)  # b leaves the queue
+    queue.claim("w", now=10.0)
     assert queue.queue_position("b") is None
     assert queue.queue_position("missing") is None
 
@@ -444,7 +395,7 @@ def test_close_is_idempotent_and_reopens_lazily(tmp_path: Path) -> None:
     queue = _queue(tmp_path)
     queue.enqueue("j1", {}, now=1.0)
     queue.close()
-    queue.close()  # must never raise
+    queue.close()
     assert queue.get("j1").job_id == "j1"  # type: ignore[union-attr]
 
 
@@ -457,11 +408,6 @@ def test_rows_persist_across_reopen(tmp_path: Path) -> None:
         assert job is not None
         assert job.payload == {"v": 1}
         assert job.status is JobStatus.QUEUED
-
-
-# --------------------------------------------------------------------------- #
-# Terminal-row retention: the queue file must not grow with every run.
-# --------------------------------------------------------------------------- #
 
 
 def _finish(queue: JobQueue, job_id: str, *, now: float) -> None:
@@ -488,8 +434,6 @@ def test_prune_terminal_keeps_only_the_newest(tmp_path: Path) -> None:
 
 
 def test_terminal_retention_bounds_growth(tmp_path: Path) -> None:
-    # retention=2 -> prune every 2 terminal writes, so at most retention + the
-    # in-flight batch survives instead of all six.
     queue = _queue(tmp_path, terminal_retention=2)
     for i in range(6):
         _finish(queue, f"j{i}", now=float(i))

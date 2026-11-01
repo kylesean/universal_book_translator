@@ -1,10 +1,3 @@
-"""``finalize_draft`` parses the model's bold markers into target-side runs.
-
-The draft prompt asks the model to bracket emphasized target text with
-``⟦B⟧ … ⟦/B⟧``; the finalized target text must be clean (no marker ever leaks)
-and the parsed runs must be checkpointed so the render can re-apply the weight.
-"""
-
 from __future__ import annotations
 
 from types import SimpleNamespace

@@ -1,5 +1,3 @@
-"""Contract tests for deriving the KPI set from a finished job's report artifacts."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -111,11 +109,6 @@ def _report(
     )
 
 
-# --------------------------------------------------------------------------- #
-# Pure helpers
-# --------------------------------------------------------------------------- #
-
-
 def test_div_is_guarded_against_a_zero_denominator() -> None:
     assert _div(1, 0) == 0.0
     assert _div(3, 2) == 1.5
@@ -159,25 +152,19 @@ def test_visual_page_count_uses_the_largest_named_page() -> None:
 
 
 def test_visual_page_count_falls_back_to_severity_findings() -> None:
-    assert _visual_page_count({}, 0) == 1  # historic denominator
+    assert _visual_page_count({}, 0) == 1
     assert _visual_page_count({"findings": [{"severity": "critical"}]}, 0) == 1
     assert (
         _visual_page_count({"findings": [{"severity": "critical"}, {"severity": "major"}]}, 0) == 2
     )
-    # Unrecognised severity is excluded and cannot dilute the rate.
     assert _visual_page_count({"findings": [{"severity": "bogus"}]}, 0) == 1
-
-
-# --------------------------------------------------------------------------- #
-# collect_kpis
-# --------------------------------------------------------------------------- #
 
 
 def test_collect_kpis_derives_the_core_ratios() -> None:
     kpis = collect_kpis(_report())
     assert kpis.schema_version == SCHEMA_VERSION
-    assert kpis.kpis["term_consistency"] == pytest.approx(0.75)  # 1 - 1/4
-    assert kpis.kpis["repair_rate"] == pytest.approx(0.2)  # 2/10
+    assert kpis.kpis["term_consistency"] == pytest.approx(0.75)
+    assert kpis.kpis["repair_rate"] == pytest.approx(0.2)
     assert kpis.kpis["needs_human_rate"] == pytest.approx(0.1)
     assert kpis.kpis["blocked_human_rate"] == 0.0
     assert kpis.kpis["pass_rate"] == 0.8
@@ -189,14 +176,14 @@ def test_collect_kpis_derives_the_core_ratios() -> None:
 
 def test_collect_kpis_guards_the_empty_denominator() -> None:
     kpis = collect_kpis(_report(total_blocks=0, terms_audited=0, terms_with_drift=0))
-    assert kpis.kpis["term_consistency"] == 1.0  # vacuously consistent
+    assert kpis.kpis["term_consistency"] == 1.0
     assert kpis.kpis["repair_rate"] == 0.0
     assert kpis.kpis["render_skip_rate"] == 0.0
 
 
 def test_collect_kpis_scales_cost_by_chars() -> None:
     kpis = collect_kpis(_report(chars=2500, estimated_cost_usd=0.5))
-    assert kpis.kpis["cost_per_1k_chars"] == pytest.approx(0.2)  # 0.5 / 2.5
+    assert kpis.kpis["cost_per_1k_chars"] == pytest.approx(0.2)
     assert collect_kpis(_report(chars=0, estimated_cost_usd=0.5)).kpis["cost_per_1k_chars"] == 0.0
 
 
@@ -207,7 +194,6 @@ def test_collect_kpis_counts_untranslated_flags() -> None:
             defect_flags={"untranslated:x": 2, "unknown:y": 5, "other": 9},
         )
     )
-    # Only the 'untranslated' family counts; 'unknown' must not leak in.
     assert kpis.kpis["untranslated_leak_rate"] == pytest.approx(0.2)
 
 
@@ -261,23 +247,14 @@ def test_collect_kpis_records_the_job_block() -> None:
     assert kpis.job["doc_id"] == "doc-1"
     assert kpis.job["target_lang"] == "zh"
     assert kpis.job["output_path"] == "out.epub"
-    assert kpis.job["typst_version"] == ""  # None folds to empty string
+    assert kpis.job["typst_version"] == ""
 
 
 def test_collect_kpis_render_preserved_rate_is_bounded_in_zero_one() -> None:
-    """When preserved_blocks > total_blocks (translatable blocks),
-    render_preserved_rate must divide by total_blocks + preserved_blocks so the
-    rate never exceeds 1.0 (regression for 146 / 105 = 1.3904).
-    """
     kpis = collect_kpis(_report(total_blocks=105, preserved_blocks=146))
     rate = kpis.kpis["render_preserved_rate"]
     assert 0.0 <= rate <= 1.0
     assert rate == pytest.approx(146 / (105 + 146))
-
-
-# --------------------------------------------------------------------------- #
-# Persistence
-# --------------------------------------------------------------------------- #
 
 
 def test_metrics_report_round_trips_through_disk(tmp_path: Path) -> None:

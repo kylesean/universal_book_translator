@@ -1,26 +1,3 @@
-"""Synthetic-PDF end-to-end: the real adapter extracts, bridges, and lowers.
-
-The PDF adapter family is the largest subsystem in the tree and, until this
-module, had no ``fast``-tier coverage: the harnesses that exercise it
-(``scripts/shadow_*.py`` via ``tests/integration/test_corpus_acceptance.py``)
-live in the ``slow`` tier and need the gitignored corpus, so CI -- which runs
-``pytest -m fast`` only -- never reached them. A PDF *render* cannot be a
-``fast`` test either: every render path shells out to the external ``typst``
-binary, which CI's ``uv sync --extra dev`` does not install.
-
-So this pins what can be proven with the pure-runtime dependency set and no
-toolchain, over a synthetic PDF built by an independent writer
-(:mod:`tests.pdf_builders`):
-
-- the adapter extracts the source text without loss and keeps the page number;
-- the IR <-> AST bridge round-trips the extraction unchanged;
-- every element carries a lossless source slice
-  losslessly, the Axiom-A/Axiom-B construction-time guarantee.
-
-It is deliberately *not* a translation-quality or renderer test -- those stay
-with the corpus gate. It is the regression net under the PDF *ingest* half.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -40,7 +17,6 @@ from ubt.model.ast import source_slice
 
 pytestmark = pytest.mark.fast
 
-#: A single-column page exercising prose, a citation, and an inline math token.
 _PAGE_ONE = (
     "The Attention Machine",
     "The machine relies on attention. Each layer runs a forward pass over the batch.",
@@ -56,7 +32,6 @@ _SOURCE_TEXT = "\n".join((*_PAGE_ONE, *_PAGE_TWO))
 
 
 def _chars(text: str) -> Counter[str]:
-    """Whitespace-insensitive character histogram (segmentation may differ)."""
     return Counter(ch for ch in text if not ch.isspace())
 
 
@@ -73,16 +48,6 @@ def _blocks(path: Path, *, pdf_engine: str) -> list[IRBlock]:
 
 
 def test_auto_routes_to_docling_even_for_single_column_prose(tmp_path: Path) -> None:
-    """`auto` is the lossless mode: it cannot risk dropping structure.
-
-    pdfium's reader represents only headings, paragraphs, list items and code.
-    The probe cannot prove a document has nothing else — a vector-drawn figure
-    reads as zero on every cheap signal — and the reflow renderer has no source
-    canvas to fall back on, so an unextracted table would be a hole in the book.
-
-    ``pdfium`` remains available explicitly (``pdf_engine="pdfium"``) and is what
-    the ``preview``/``fast`` presets select.
-    """
     if importlib.util.find_spec("docling") is None:
         pytest.skip("docling is not installed; the refusal path is pinned separately")
     pdf = write_text_pdf(tmp_path / "single.pdf", [_PAGE_ONE])
@@ -91,7 +56,6 @@ def test_auto_routes_to_docling_even_for_single_column_prose(tmp_path: Path) -> 
 
 
 def test_extraction_keeps_every_source_character_and_the_page_number(tmp_path: Path) -> None:
-    """No lossy extraction: every non-space source char survives, page numbers carry."""
     pdf = write_text_pdf(tmp_path / "book.pdf", [_PAGE_ONE, _PAGE_TWO])
     blocks = _blocks(pdf, pdf_engine="pdfium")
 
@@ -109,7 +73,6 @@ def test_extraction_keeps_every_source_character_and_the_page_number(tmp_path: P
 
 
 def test_extraction_round_trips_through_the_bridge(tmp_path: Path) -> None:
-    """IR -> AST -> IR preserves reading order, identity, and element kind."""
     pdf = write_text_pdf(tmp_path / "book.pdf", [_PAGE_ONE, _PAGE_TWO])
     blocks = _blocks(pdf, pdf_engine="pdfium")
 
@@ -122,8 +85,6 @@ def test_extraction_round_trips_through_the_bridge(tmp_path: Path) -> None:
 
 
 def test_a_cross_page_sentence_becomes_one_continuation_run(tmp_path: Path) -> None:
-    # A sentence split by a page break is fused by the adapter into a single
-    # block carrying a CompositeSpan, so translation receives the full sentence.
     from ubt.model.span import CompositeSpan
 
     pdf = write_text_pdf(
@@ -141,8 +102,6 @@ def test_a_cross_page_sentence_becomes_one_continuation_run(tmp_path: Path) -> N
 
 
 def test_a_cross_column_sentence_becomes_one_continuation_run(tmp_path: Path) -> None:
-    # A two-column page: the paragraph finishes at the bottom of the left column
-    # and resumes at the top of the right; the adapter fuses them into one CompositeSpan.
     from ubt.model.span import CompositeSpan
 
     left = [f"left column filler line number {i} continues here" for i in range(1, 9)]
@@ -165,7 +124,6 @@ def test_a_cross_column_sentence_becomes_one_continuation_run(tmp_path: Path) ->
 
 
 def test_every_element_carries_its_source_slice(tmp_path: Path) -> None:
-    """The source-preservation floor is lossless: every element carries source text."""
     pdf = write_text_pdf(tmp_path / "book.pdf", [_PAGE_ONE, _PAGE_TWO])
     document = document_from_blocks(_blocks(pdf, pdf_engine="pdfium"), doc_id="synth")
 
@@ -175,16 +133,13 @@ def test_every_element_carries_its_source_slice(tmp_path: Path) -> None:
 
 
 def test_pdfium_populates_font_size_and_page_kind(tmp_path: Path) -> None:
-    """PDFium blocks carry font_size and page_kind on provenance."""
     pdf = write_text_pdf(tmp_path / "book.pdf", [_PAGE_ONE, _PAGE_TWO])
     blocks = _blocks(pdf, pdf_engine="pdfium")
 
     assert blocks
-    # At least some blocks must carry positive font_size
     font_sizes = [b.provenance.font_size for b in blocks if b.provenance.font_size is not None]
     assert len(font_sizes) > 0
     assert all(fs >= 4.5 for fs in font_sizes)
 
-    # Page kinds annotated on provenance
     page_kinds = [b.provenance.page_kind for b in blocks if b.provenance.page_kind is not None]
     assert len(page_kinds) > 0

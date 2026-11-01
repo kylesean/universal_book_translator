@@ -1,22 +1,3 @@
-"""The font stack must be resolved against the machine, not just the profile.
-
-``language_profile`` names a per-language stack, but the names are static and
-the machine is not: a family that is not installed produces ``unknown font
-family`` per compile, and a stack with no face for the target script produces
-tofu without failing the build.
-
-``resolve_font_stack`` is the guard for both, and it sits on the delivery path
-(one wrong answer ships blank squares), so each branch is pinned here:
-
-* probe reports a family -> it is kept, in the profile's order,
-* probe reports it missing -> dropped and reported,
-* non-Latin target with nothing usable -> a same-script substitute is chosen,
-  and a *foreign*-script face never wins that race,
-* no probe answered -> the stack passes through untouched (an unavailable
-  probe is not evidence a font is missing),
-* a user's explicit ``font_family`` survives even when unresolvable.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
@@ -46,11 +27,6 @@ _KO = frozenset({"Noto Serif CJK KR", "Noto Sans CJK KR", "Liberation Serif"})
 _AR = frozenset({"Noto Naskh Arabic", "Amiri", "DejaVu Sans"})
 
 
-# --------------------------------------------------------------------------- #
-# Script classification
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     "lang",
     ["zh", "zh-CN", "zh-Hans", "zh_TW", "ja", "ja-JP", "ko", "ko-KR"],
@@ -74,7 +50,6 @@ def test_script_need_reports_one_answer_per_target() -> None:
     assert script_need("ar-SA") == "rtl"
     assert script_need("en") == ""
     assert script_need(None) == ""
-    # A CJK tag with an RTL region subtag is still CJK: the base subtag decides.
     assert script_need("zh-Arab") == "cjk"
 
 
@@ -94,12 +69,6 @@ def test_script_need_reports_one_answer_per_target() -> None:
     ],
 )
 def test_cjk_capable_families_are_recognised_on_every_platform(family: str) -> None:
-    """The stacks ship per-OS names, so the classifier must cover each vendor.
-
-    macOS and Windows names are the ones a name-stem check tends to miss:
-    ``PingFang``/``Songti``/``Hiragino`` carry no literal "cjk", and a false
-    negative here reports "no CJK font installed" on a Mac that has three.
-    """
     assert is_cjk_capable(family)
 
 
@@ -108,11 +77,6 @@ def test_cjk_capable_families_are_recognised_on_every_platform(family: str) -> N
     ["Liberation Serif", "DejaVu Sans", "Arial", "Helvetica", "Franklin Gothic", "Century Gothic"],
 )
 def test_latin_families_are_not_mistaken_for_cjk(family: str) -> None:
-    """ "Gothic" is a style word Latin faces carry; matching it would ship tofu.
-
-    A false "available" suppresses the tofu warning, which is strictly worse
-    than an extra warning about a font that is only missing.
-    """
     assert not is_cjk_capable(family)
 
 
@@ -121,11 +85,6 @@ def test_latin_families_are_not_mistaken_for_cjk(family: str) -> None:
 )
 def test_rtl_capable_families_are_recognised(family: str) -> None:
     assert is_rtl_capable(family)
-
-
-# --------------------------------------------------------------------------- #
-# resolve_font_stack
-# --------------------------------------------------------------------------- #
 
 
 def test_installed_families_are_kept_in_profile_order() -> None:
@@ -141,12 +100,6 @@ def test_installed_families_are_kept_in_profile_order() -> None:
 
 
 def test_the_absent_spare_never_reaches_the_emitted_preamble() -> None:
-    """This is the exact shape of the warning observed on arXiv 2608.25512.
-
-    The profile lists Source Han Serif SC as the second face; the machine has
-    only the Noto release. Emitting both makes Typst warn on every compile —
-    pruning turns that into one debug-level fact instead.
-    """
     stack = resolve_font_stack(
         ["Noto Serif CJK SC", "Source Han Serif SC", "Noto Sans CJK SC"],
         target_lang="zh",
@@ -157,7 +110,6 @@ def test_the_absent_spare_never_reaches_the_emitted_preamble() -> None:
 
 
 def test_a_non_latin_target_gets_a_same_script_substitute() -> None:
-    """The profile's faces are all missing, but the machine has a usable one."""
     stack = resolve_font_stack(
         ["Source Han Serif SC"],
         target_lang="zh",
@@ -165,24 +117,16 @@ def test_a_non_latin_target_gets_a_same_script_substitute() -> None:
     )
     assert stack.substituted, "a same-script family must be added"
     assert stack.script_available is True
-    # The substitute has to carry the script, not merely exist.
     assert is_cjk_capable(stack.substituted[0])
 
 
 def test_a_foreign_script_face_never_wins_the_substitution_race() -> None:
-    """A Korean face in a Chinese book is the same blank squares by another name.
-
-    Pan-CJK families serve every CJK target; a region-tagged or
-    language-specific face serves only its own.
-    """
     available = frozenset({"Malgun Gothic", "Noto Serif CJK KR", "Noto Sans CJK JP"})
     stack = resolve_font_stack(["Source Han Serif SC"], target_lang="zh", available=available)
     assert stack.substituted
     chosen = stack.substituted[0]
     assert "Malgun" not in chosen
     assert "KR" not in chosen
-    # The pan-CJK JP release is the only face left that covers simplified
-    # Chinese, so it wins over the Korean-only family.
     assert "CJK" in chosen
 
 
@@ -200,7 +144,6 @@ def test_an_arabic_target_gets_a_shaping_capable_face() -> None:
 
 
 def test_a_rtl_target_with_no_arabic_face_reports_no_script_coverage() -> None:
-    """No silent tofu: the caller must be able to say the page will not shape."""
     stack = resolve_font_stack(
         ["Noto Naskh Arabic"], target_lang="ar", available=frozenset({"Liberation Serif"})
     )
@@ -210,21 +153,17 @@ def test_a_rtl_target_with_no_arabic_face_reports_no_script_coverage() -> None:
 def test_no_probe_answer_passes_the_stack_through_untouched(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An unavailable probe is not evidence that a font is missing."""
     requested = ["Noto Serif CJK SC", "Source Han Serif SC"]
-    # Both probes silent: no typst binary and no fontconfig.
     monkeypatch.setattr("ubt.adapters.pdf.font_probe._typst_families", lambda _b, _lang=None: None)
     monkeypatch.setattr("ubt.adapters.pdf.font_probe._fontconfig_families", lambda: None)
 
     stack = resolve_font_stack(requested, target_lang="zh")
     assert stack.probed is False
     assert stack.families == tuple(requested)
-    # No verdict is offered about script coverage without a probe.
     assert stack.script_available is True
 
 
 def test_a_user_override_survives_even_when_it_is_not_installed() -> None:
-    """Silently replacing an explicit choice is worse than Typst's fallback."""
     stack = resolve_font_stack(
         ["My Private Face", "Noto Serif CJK SC"],
         target_lang="zh",
@@ -256,19 +195,7 @@ def test_fontstack_primary_is_the_first_emitted_face() -> None:
     assert FontStack(families=()).primary == ""
 
 
-# --------------------------------------------------------------------------- #
-# Marker-table consistency and the shared resolver
-# --------------------------------------------------------------------------- #
-
-
 def test_every_script_exclusive_marker_is_also_script_capable() -> None:
-    """Two tables describe the same fonts; a drift between them ships tofu.
-
-    ``_SCRIPT_EXCLUSIVE`` decides the substitution ranking and
-    ``_CJK_NAME_MARKERS`` decides "can this face carry the script". A name in
-    one but not the other means a face that ranks as usable is then judged
-    incapable (or the reverse), so the substitute race picks wrongly.
-    """
     import ubt.adapters.pdf.font_probe as probe
 
     for target, markers in probe._SCRIPT_EXCLUSIVE.items():
@@ -282,7 +209,6 @@ def test_every_script_exclusive_marker_is_also_script_capable() -> None:
 def test_resolve_for_render_prunes_through_the_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The shared entry point: profile stack + probe + protected override."""
     from ubt.adapters.pdf.font_probe import resolve_for_render
 
     monkeypatch.setattr(
@@ -308,21 +234,9 @@ def test_resolve_for_render_keeps_a_user_override_first(
     assert "My Private Face" in resolved.unavailable
 
 
-# --------------------------------------------------------------------------- #
-# The verdict reaches the delivery report
-# --------------------------------------------------------------------------- #
-
-
 def test_the_font_verdict_lands_in_the_quality_report() -> None:
-    """A tofu deliverable must be visible in the report, not only in stderr.
-
-    ``script_available=False`` is a delivery-level fact: the PDF carries blank
-    squares. Logging it means only whoever watched the console learns it; the
-    report is what the console page and the KPI artifact read.
-    """
     from ubt.core.engine.reporter import QualityReport
 
-    # The field exists on the model and survives serialization untouched.
     assert "font_delivery" in QualityReport.model_fields
     field = QualityReport.model_fields["font_delivery"]
     assert field.default is None, "unmeasured must be None, never a guessed verdict"
@@ -331,7 +245,6 @@ def test_the_font_verdict_lands_in_the_quality_report() -> None:
 def test_font_delivery_helper_reports_no_verdict_when_unprobed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An unavailable probe must not become ``script_available: True`` in a report."""
     from ubt.adapters.pdf.font_probe import FontStack
 
     monkeypatch.setattr(
@@ -351,20 +264,7 @@ def test_font_delivery_helper_reports_no_verdict_when_unprobed(
     assert _font_delivery_for(cast("StageContext", _Ctx())) is None
 
 
-# --------------------------------------------------------------------------- #
-# The probe must ask the same question the compile asks
-# --------------------------------------------------------------------------- #
-
-
 def test_the_probe_passes_the_bundled_font_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A compile gets ``--font-path``; a probe without it sees a smaller set.
-
-    The failure this pins: a machine that has the bundled set installed but
-    none of those families as *system* fonts. ``typst fonts`` alone reports
-    "not installed", the stack is pruned against that report, and the very
-    faces this project ships are dropped from the emitted preamble — while the
-    compile would have resolved them fine.
-    """
     import ubt.adapters.pdf.font_probe as probe
 
     probe._typst_families.cache_clear()
@@ -392,7 +292,6 @@ def test_the_probe_passes_the_bundled_font_path(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_no_bundled_set_means_no_extra_flag(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without a bundled set the probe stays a plain ``typst fonts``."""
     import ubt.adapters.pdf.font_probe as probe
 
     probe._typst_families.cache_clear()
@@ -418,11 +317,6 @@ def test_no_bundled_set_means_no_extra_flag(monkeypatch: pytest.MonkeyPatch) -> 
 def test_a_changed_font_path_is_not_served_from_the_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Installing the font set mid-run must change the answer, not the cache.
-
-    The family set is cached on the resolved binary's mtime; adding a font path
-    is a second input the answer depends on, so it belongs in the key too.
-    """
     import ubt.adapters.pdf.font_probe as probe
 
     probe._typst_families.cache_clear()

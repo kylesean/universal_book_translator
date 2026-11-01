@@ -1,20 +1,3 @@
-"""Canonical text normalization: the stream ``Span.chars`` indexes.
-
-The normalized stream is what every reader, verifier and translator compares
-against, and offsets are assigned *after* normalization -- so the contract has
-two halves that matter equally:
-
-- **normalize** the characters that carry no translation meaning: presentation
-  ligatures expand to their letters, invisible formatting characters vanish, a
-  non-breaking space becomes an ordinary space;
-- **do not touch** anything a reader can see -- no case folding, no width/CJK
-  compatibility folding, no general NFKC. Rewriting visible text would change
-  what "source kept" means.
-
-Idempotence is the load-bearing property: normalizing twice must not shift an
-offset, or a span taken against the stream would drift.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -23,7 +6,6 @@ from ubt.analyze.normalize import normalize_text
 
 pytestmark = pytest.mark.fast
 
-#: Every presentation ligature and the letters it stands for.
 _LIGATURES: tuple[tuple[str, str], ...] = (
     ("\ufb00", "ff"),
     ("\ufb01", "fi"),
@@ -34,14 +16,13 @@ _LIGATURES: tuple[tuple[str, str], ...] = (
     ("\ufb06", "st"),
 )
 
-#: Every invisible formatting character that must be dropped.
 _INVISIBLE: tuple[str, ...] = (
-    "\u00ad",  # soft hyphen
-    "\u200b",  # zero-width space
-    "\u200c",  # zero-width non-joiner
-    "\u200d",  # zero-width joiner
-    "\u2060",  # word joiner
-    "\ufeff",  # byte-order mark
+    "\u00ad",
+    "\u200b",
+    "\u200c",
+    "\u200d",
+    "\u2060",
+    "\ufeff",
 )
 
 
@@ -68,11 +49,6 @@ def test_empty_input_is_returned_unchanged() -> None:
     assert normalize_text("") == ""
 
 
-# --------------------------------------------------------------------------- #
-# Idempotence: normalizing twice must not shift an offset.
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     "text",
     [
@@ -97,19 +73,14 @@ def test_a_string_of_every_normalized_form_collapses_in_one_pass() -> None:
     assert normalize_text(normalize_text(raw)) == "affbficfldefghij k"
 
 
-# --------------------------------------------------------------------------- #
-# Deliberate non-transformations: visible text stays byte-faithful.
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     "text",
     [
-        "ABC",  # no case folding
-        "\uff21\uff22",  # fullwidth A B: no width folding
-        "café",  # accents preserved
-        "\u4e2d\u6587",  # CJK preserved
-        "\U0001f600",  # emoji preserved
+        "ABC",
+        "\uff21\uff22",
+        "café",
+        "\u4e2d\u6587",
+        "\U0001f600",
     ],
 )
 def test_visible_text_is_left_byte_faithful(text: str) -> None:

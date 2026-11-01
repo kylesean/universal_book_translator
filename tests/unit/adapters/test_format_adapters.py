@@ -1,13 +1,3 @@
-"""The HTML/EPUB/DOCX adapters parse their format and render it back.
-
-Parse: the adapter's ``parse_stream`` yields the expected block count for a
-fixture whose every construct is known. Render: with every translatable block
-given a ``tr:``-prefixed target, the monolingual render ships the target text
-and the bilingual render pairs it with the source -- for DOCX including the
-table, whose structured target is Markdown the adapter must lay back into real
-table cells.
-"""
-
 from __future__ import annotations
 
 import zipfile
@@ -24,7 +14,6 @@ from ubt.model.ast import Heading, ListItem, Span
 
 pytestmark = pytest.mark.fast
 
-#: A 1x1 transparent PNG, for the picture fixtures.
 _PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
     "0000000d49444154789c6360606060000000050001a5f645400000000049454e44ae426082"
@@ -137,17 +126,13 @@ async def test_html_adapter_parses_and_renders(tmp_path: Path, html_book: Path) 
     assert bilingual.exists()
     bilingual_text = bilingual.read_text(encoding="utf-8")
     assert "ubt-bilingual-target" in bilingual_text
-    assert "Hello" in bilingual_text  # the source stays beside the target
+    assert "Hello" in bilingual_text
 
 
 async def test_epub_adapter_parses_and_renders(tmp_path: Path, epub_book: Path) -> None:
     adapter = EPUBAdapter()
     manifest = await adapter.extract_manifest(epub_book)
     blocks = await _collect(adapter, epub_book)
-    # 7, not 6: the fixture's figure is a direct child of <body>, which the EPUB
-    # wrapper folds into a synthetic <p>. Reading only that paragraph's *text*
-    # dropped the picture entirely (an <img> contributes none), so the block
-    # count was one short and the figure never reached the delivered book.
     assert len(blocks) == 7, "the epub fixture has exactly 7 blocks"
     figure_ids = [b.source_text for b in blocks if b.block_type is BlockType.IMAGE]
     assert [Path(a).name for a in figure_ids] == ["fig.png"], figure_ids
@@ -166,13 +151,6 @@ async def test_epub_adapter_parses_and_renders(tmp_path: Path, epub_book: Path) 
 async def test_docx_manifest_reads_the_title_without_loading_the_body(
     docx_book: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``extract_manifest`` must not load the whole document for one metadata field.
-
-    ``parse_stream`` loads the document again for the body, so the old manifest
-    path parsed every paragraph twice (a second full DOM). The title lives in
-    the small ``docProps/core.xml`` member; reading it directly is enough. This
-    fails loudly if the manifest ever re-introduces the full-package load.
-    """
     import docx
 
     def _boom(*_args: object, **_kwargs: object) -> object:
@@ -180,7 +158,7 @@ async def test_docx_manifest_reads_the_title_without_loading_the_body(
 
     monkeypatch.setattr(docx, "Document", _boom)
     manifest = await DOCXAdapter().extract_manifest(docx_book)
-    assert manifest.title  # falls back to the filename stem, still non-empty
+    assert manifest.title
     assert manifest.chapters[0].source_file == docx_book.name
 
 
@@ -214,7 +192,7 @@ async def test_docx_adapter_parses_and_renders(tmp_path: Path, docx_book: Path) 
     assert bilingual.exists()
     bi_doc = OpenDocx(str(bilingual))
     bi_text = " ".join(p.text for p in bi_doc.paragraphs)
-    assert "Chapter One" in bi_text  # the source stays beside the target
+    assert "Chapter One" in bi_text
     assert "tr:Chapter One" in bi_text
 
 
@@ -223,12 +201,10 @@ def test_epub_natural_sort_orders_embedded_numbers_numerically() -> None:
 
     names = ["ch10.xhtml", "ch2.xhtml", "ch1.xhtml"]
     assert sorted(names, key=_natural_sort_key) == ["ch1.xhtml", "ch2.xhtml", "ch10.xhtml"]
-    # A plain lexicographic sort would put ch10 before ch2.
     assert sorted(names) != sorted(names, key=_natural_sort_key)
 
 
 def test_markdown_adapter_heading_level_preservation() -> None:
-    """Verify MarkdownAdapter preserves heading levels from AST element even if raw_content has no '#'."""
     h = Heading(id="h1", spine_index=0, span=Span(), text="Chapter Three", level=3)
     block = IRBlock.from_element(h)
     block.target_text = "第三章"
@@ -237,8 +213,6 @@ def test_markdown_adapter_heading_level_preservation() -> None:
 
 
 def test_markdown_adapter_list_item_preservation() -> None:
-    """Verify MarkdownAdapter preserves list markers and ordinals."""
-    # Unordered list item
     li_unordered = ListItem(
         id="li1",
         spine_index=0,
@@ -249,7 +223,6 @@ def test_markdown_adapter_list_item_preservation() -> None:
     block_u = IRBlock.from_element(li_unordered)
     assert _format_markdown_block(block_u, "第一点") == "- 第一点"
 
-    # Ordered list item
     li_ordered = ListItem(
         id="li2",
         spine_index=0,

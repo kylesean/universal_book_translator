@@ -1,17 +1,3 @@
-"""The contract's group-aware style check (G4 Stage 3A).
-
-Two questions have to stay separate, and these tests are what keep them apart:
-
-* **drift** — a member page whose *measured* size misses the declared group size;
-* **exception** — a page the group declared up front it could not hold.
-
-Merging them would let either one hide the other: a book that shrinks every
-page uniformly would have zero drift, and a book that declares every page an
-exception would have zero exceptions-worth of drift. The 26-page replay is why
-the second one matters — its 2.29pt spread was real, page-level shrinking, and
-"it was all legitimate" is exactly the excuse the group record exists to refuse.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -119,7 +105,6 @@ def test_a_group_that_holds_its_declared_size_is_clean() -> None:
 
 
 def test_a_member_page_that_misses_the_declared_size_is_drift() -> None:
-    """Deviation is measured against the group's declaration, not against peers."""
     sizes = dict.fromkeys(range(1, 11), 8.4)
     sizes[7] = 9.6
     report = evaluate_delivery_contract(
@@ -147,16 +132,12 @@ def test_a_declared_exception_is_reported_and_blocks_no_major_delivery() -> None
     )
     codes = {finding.code for finding in report.findings}
     assert "style_group_exception" in codes
-    # The exception page is not also counted as drift: it was declared, and
-    # double-reporting the same page as two faults teaches reviewers to ignore
-    # the second one.
     assert "style_drift" not in codes
     assert not report.deliverable
-    assert report.passed  # major, not critical: explicit accept is possible
+    assert report.passed
 
 
 def test_too_many_exceptions_escalate_to_critical() -> None:
-    """Past the budget the group is not a group, and that must not ship."""
     pages = 10
     sizes = dict.fromkeys(range(1, pages + 1), 8.4)
     for page in (8, 9, 10):
@@ -181,7 +162,6 @@ def test_too_many_exceptions_escalate_to_critical() -> None:
 
 
 def test_a_page_cannot_excuse_itself_by_being_drawn_at_another_size() -> None:
-    """Membership comes from the plan; the artifact only supplies the number."""
     sizes = dict.fromkeys(range(1, 11), 8.4)
     sizes[6] = 9.2
     report = evaluate_delivery_contract(
@@ -191,7 +171,6 @@ def test_a_page_cannot_excuse_itself_by_being_drawn_at_another_size() -> None:
 
 
 def test_without_a_group_record_the_document_wide_check_still_runs() -> None:
-    """Artifacts that predate the group must not lose their style audit."""
     sizes = dict.fromkeys(range(1, 11), 8.4)
     sizes[5] = 9.6
     report = evaluate_delivery_contract(_evidence(sizes=sizes, plan=None, pages=10))

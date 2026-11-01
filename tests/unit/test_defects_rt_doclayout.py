@@ -1,15 +1,3 @@
-"""Regressions for the defects a real paper exposed (PaddleOCR RT-DocLayout).
-
-Each test pins a shape that shipped *wrong* on arXiv 2606.23344 and names the
-consequence, so a future tightening of the same rule cannot reopen it:
-
-* two full English paragraphs leaked untranslated because ``looks_like_listing``
-  read prose as program syntax;
-* a one-off footnote paragraph shipped untranslated because every page footer
-  was treated as chrome;
-* a Korean word rode inside a Chinese block past every language-identity gate.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -17,12 +5,6 @@ import pytest
 pytestmark = pytest.mark.fast
 
 
-# --------------------------------------------------------------------------- #
-# looks_like_listing: prose and equations are not program syntax
-# --------------------------------------------------------------------------- #
-
-#: (source, why it is prose) — each was classified as a code listing and so
-#: skipped translation entirely, leaving the English paragraph on the page.
 _PROSE_NOT_LISTINGS = [
     (
         "Classification and Detection Losses. For category prediction, we adopt "
@@ -45,7 +27,6 @@ def test_prose_and_equations_are_not_listings(text: str, why: str) -> None:
     assert not looks_like_listing(text), why
 
 
-#: Real program/algorithm syntax must still be recognized.
 _REAL_LISTINGS = [
     "class Foo:",
     "class Foo(Base):",
@@ -62,11 +43,6 @@ def test_real_listings_are_still_recognized(text: str) -> None:
     from ubt.analyze.structure import looks_like_listing
 
     assert looks_like_listing(text)
-
-
-# --------------------------------------------------------------------------- #
-# Page footer: a one-off footnote paragraph is prose, not chrome
-# --------------------------------------------------------------------------- #
 
 
 def test_a_footnote_paragraph_is_translatable() -> None:
@@ -99,17 +75,7 @@ def test_page_chrome_is_not_a_footnote(chrome: str) -> None:
     assert not _is_prose_footer(chrome)
 
 
-# --------------------------------------------------------------------------- #
-# Foreign-script cross-talk: a wrong-script word in the target
-# --------------------------------------------------------------------------- #
-
-
 def test_a_korean_word_inside_chinese_is_foreign_script() -> None:
-    """The measured leak: "查询기반" (query-based) rode in a Chinese block.
-
-    Every density gate passed — the block's CJK share measured 0.82 — so the
-    word shipped. Chinese uses no Hangul, so even a single syllable is an error.
-    """
     from ubt.core.language_profile import foreign_script_chars
 
     leaked = "遵循查询기반范式，解码器迭代地优化 𝑁 个对象查询"
@@ -138,7 +104,6 @@ def test_korean_target_admits_hangul_but_not_kana() -> None:
 
 
 def test_the_foreign_script_gate_rejects_the_leak() -> None:
-    """End to end through FastPass: the leaked block must fail, not pass."""
     from ubt.core.qe.fast_pass import FastPassFilter
 
     filt = FastPassFilter()
@@ -149,14 +114,7 @@ def test_the_foreign_script_gate_rejects_the_leak() -> None:
     assert "Foreign-script" in decision.reason
 
 
-# --------------------------------------------------------------------------- #
-# Table cell line breaks: a stacked column must not fuse into one cell blob
-# --------------------------------------------------------------------------- #
-
-
 class _Cell:
-    """Stand-in for a Docling table cell (the attributes ``table_to_markdown`` reads)."""
-
     def __init__(self, text: str, row: int, col: int) -> None:
         self.text = text
         self.start_row_offset_idx = row
@@ -175,14 +133,6 @@ class _Table:
 
 
 def test_a_stacked_table_cell_keeps_its_line_breaks() -> None:
-    """A wrapped cell's lines are a stack, not one sentence.
-
-    Docling emits one text line per wrapped visual row inside a cell. The old
-    extraction joined them with a space, so the benchmark table's "Recognition
-    Method" column — four model names stacked — read as a single
-    "MonkeyOCR [27] MinerU2.5 [5] Dolphin-v2 [28] …" blob and the whole table
-    rendered unreadable. ``<br>`` preserves the stack (the renderer splits on it).
-    """
     from ubt.adapters.pdf.docling_blocks import table_to_markdown
 
     table = _Table(
@@ -193,22 +143,10 @@ def test_a_stacked_table_cell_keeps_its_line_breaks() -> None:
     )
     md = table_to_markdown(table)
     assert "MonkeyOCR [27]<br>MinerU2.5 [5]<br>Dolphin-v2 [28]" in md
-    # The stack is not fused into one space-joined run.
     assert "MonkeyOCR [27] MinerU2.5 [5]" not in md
 
 
-# --------------------------------------------------------------------------- #
-# Figure caption binding and native figure width
-# --------------------------------------------------------------------------- #
-
-
 def test_a_translated_figure_caption_binds_to_its_image() -> None:
-    """``图 1 | …`` is a caption, not a standalone paragraph.
-
-    The delimiter regex accepted only ``:``/``.``, so the translator's ``|``
-    form missed it; the caption (301 chars) then also cleared the length cap,
-    and the image and its caption rendered on separate pages.
-    """
     from ubt.render.typst.document_renderer import _CAPTION_RE
 
     caption = (
@@ -236,12 +174,10 @@ def test_a_translated_figure_caption_binds_to_its_image() -> None:
     (tmp / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     renderer = TypstDocumentRenderer(assets_root=tmp)
     source, _ = renderer.build_source([img("i1"), para("p1", caption)], tmp / "b", target_lang="zh")
-    # The caption is inside the figure, not a stray paragraph after it.
     assert "caption: [" in source
 
 
 def test_a_small_logo_keeps_its_own_width() -> None:
-    """A 121pt logo must not be blown up to 88% of the page (this shipped)."""
     from pathlib import Path
 
     from ubt.render.typst.document_renderer import TypstDocumentRenderer, _Figure
@@ -252,19 +188,9 @@ def test_a_small_logo_keeps_its_own_width() -> None:
     renderer = TypstDocumentRenderer(assets_root=tmp)
 
     small = renderer._figure_markup(_Figure(asset=str(tmp / "logo.png"), width_pt=121.0), tmp)
-    # Container-relative, not absolute points: 121/470.55 = 25.7% of the column,
-    # so the logo stays small on BOTH a single-column and a two-column page.
-    # An absolute ``121pt`` was laid out at 121pt in a 228.98pt column too, which
-    # is how a 290pt figure ran past the gutter on the academic template.
     assert "width: 25.7%" in small
-    # A figure wider than the native cap falls through to the page-wide default.
     wide = renderer._figure_markup(_Figure(asset=str(tmp / "logo.png"), width_pt=524.0), tmp)
     assert "width: 88%" in wide
-
-
-# --------------------------------------------------------------------------- #
-# Cross-page span split: a paragraph continuation is not a caption
-# --------------------------------------------------------------------------- #
 
 
 class _Prov:
@@ -281,13 +207,6 @@ class _Item:
 
 
 def test_a_page_break_that_mid_sentence_is_not_split() -> None:
-    """``…we evaluate RT-`` + ``DocLayout using…`` is one paragraph.
-
-    The tail test (capital + terminal punctuation) passed, so the split fired —
-    and the detached fragment then absorbed the neighbouring table's content in
-    translation, shipping a table where a sentence belonged (arXiv 2606.23344).
-    A head that does not end a sentence keeps the item whole.
-    """
     from ubt.adapters.pdf.docling_blocks import split_prov_spans
 
     text = (
@@ -300,7 +219,6 @@ def test_a_page_break_that_mid_sentence_is_not_split() -> None:
 
 
 def test_a_cross_page_caption_is_still_split() -> None:
-    """A head that ends a sentence followed by a caption body still splits."""
     from ubt.adapters.pdf.docling_blocks import split_prov_spans
 
     head = "The dataset is described below."
@@ -314,13 +232,7 @@ def test_a_cross_page_caption_is_still_split() -> None:
     assert got_tail == tail
 
 
-# --------------------------------------------------------------------------- #
-# Stacked table cell: Docling fuses several visual rows into one cell
-# --------------------------------------------------------------------------- #
-
-
 def test_a_stacked_citation_cell_splits_into_rows() -> None:
-    """``MonkeyOCR [27] MinerU2.5 [5]`` is two rows, not one cell."""
     from ubt.adapters.pdf.docling_blocks import _split_stacked_cell
 
     assert _split_stacked_cell("MonkeyOCR [27] MinerU2.5 [5]") == [
@@ -332,7 +244,6 @@ def test_a_stacked_citation_cell_splits_into_rows() -> None:
 
 
 def test_prose_with_two_citations_is_not_split() -> None:
-    """A sentence citing two works is prose, not a name stack."""
     from ubt.adapters.pdf.docling_blocks import _split_stacked_cell
 
     assert _split_stacked_cell("SigLIP [12] and CLIP [13]") is None
@@ -347,19 +258,7 @@ def test_a_single_value_cell_is_left_alone() -> None:
     assert _split_stacked_cell("85.10") is None
 
 
-# --------------------------------------------------------------------------- #
-# Reference numbering: Docling strips the [n] off a reference entry
-# --------------------------------------------------------------------------- #
-
-
 def test_a_dropped_reference_number_is_recovered_from_the_page_text() -> None:
-    """``[1] Mark Chen, …`` — the number Docling leaves out of ``text``.
-
-    Measured on arXiv 2609.20519: the source page carries 108 markers, every
-    ``[n]`` prefix sits immediately before the entry in the page's own text
-    layer, and Docling's ``list_item`` arrives with an empty ``marker`` and the
-    number already stripped. The delivered bibliography lost its numbering.
-    """
     from ubt.adapters.pdf.docling_parser import _recover_reference_marker
 
     page = "[1] Mark Chen, Jerry Tworek, Heewoo Jun.\n[2] John Yang, Carlos Jimenez."
@@ -368,13 +267,6 @@ def test_a_dropped_reference_number_is_recovered_from_the_page_text() -> None:
 
 
 def test_recovery_tolerates_a_re_wrapped_line() -> None:
-    """The page text may break a line between words; Docling's text has a space.
-
-    Measured shape: the page layer wraps at the margin, so an entry reads
-    "…Michalewski,\nDavid Dohan." while Docling carries the same words separated
-    by spaces. Collapsing whitespace on both sides is what made the difference
-    between 1/57 and 52/54 recovered on the reference list.
-    """
     from ubt.adapters.pdf.docling_parser import _recover_reference_marker
 
     page = "[7] Maarten Bosma, Henryk Michalewski,\nDavid Dohan."
@@ -384,7 +276,6 @@ def test_recovery_tolerates_a_re_wrapped_line() -> None:
 
 
 def test_recovery_returns_none_when_the_entry_is_not_numbered() -> None:
-    """A body bullet has no [n]; recovery must not invent one."""
     from ubt.adapters.pdf.docling_parser import _recover_reference_marker
 
     page = "• Breadth expands hypothesis coverage.\n[1] Mark Chen, Jerry Tworek."
@@ -393,7 +284,6 @@ def test_recovery_returns_none_when_the_entry_is_not_numbered() -> None:
 
 
 def test_recovery_handles_an_organisation_name_without_its_space() -> None:
-    """Docling drops the space inside an org name: "Axiom Math" -> "AxiomMath"."""
     from ubt.adapters.pdf.docling_parser import _recover_reference_marker
 
     page = "[38] Axiom Math. AxiomProver at IMO 2026. https://example.org"
@@ -401,7 +291,6 @@ def test_recovery_handles_an_organisation_name_without_its_space() -> None:
 
 
 def test_recovery_handles_typographic_apostrophes() -> None:
-    """The page layer uses ’ where Docling's text has '."""
     from ubt.adapters.pdf.docling_parser import _recover_reference_marker
 
     page = "[28] Anthropic. Anthropic\u2019s original performance take-home."

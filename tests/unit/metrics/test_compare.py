@@ -1,5 +1,3 @@
-"""Contract tests for the direction-aware KPI regression gate."""
-
 from __future__ import annotations
 
 import pytest
@@ -13,11 +11,6 @@ from ubt.core.metrics.compare import (
 from ubt.core.metrics.schema import KpiSet
 
 pytestmark = pytest.mark.fast
-
-
-# --------------------------------------------------------------------------- #
-# compare_kpis
-# --------------------------------------------------------------------------- #
 
 
 def test_a_higher_is_better_drop_beyond_tolerance_regresses() -> None:
@@ -105,11 +98,6 @@ def test_deltas_are_sorted_by_name() -> None:
     assert [d.name for d in report.deltas] == ["a", "z"]
 
 
-# --------------------------------------------------------------------------- #
-# compare_kpi_sets
-# --------------------------------------------------------------------------- #
-
-
 def test_identical_kpi_sets_pass() -> None:
     baseline = KpiSet(schema_version=2, kpis={"term_precision": 0.9})
     assert compare_kpi_sets(baseline, baseline.model_copy()).passed is True
@@ -141,11 +129,6 @@ def test_non_structural_details_are_ignored() -> None:
     baseline = KpiSet(schema_version=2, details={"skip_families": {"a": 1}})
     candidate = KpiSet(schema_version=2, details={"skip_families": {"a": 2}})
     assert compare_kpi_sets(baseline, candidate).passed is True
-
-
-# --------------------------------------------------------------------------- #
-# check_thresholds
-# --------------------------------------------------------------------------- #
 
 
 def test_a_value_below_a_floor_violates() -> None:

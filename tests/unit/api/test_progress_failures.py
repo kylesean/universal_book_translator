@@ -1,5 +1,3 @@
-"""The queue projection must not turn failed blocks into progress."""
-
 from __future__ import annotations
 
 from pathlib import Path

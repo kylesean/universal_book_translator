@@ -95,7 +95,6 @@ async def test_run_consistency_stage_passes_abbreviations_to_table(tmp_path: Pat
 
     scoring = Scoring(repair_loop=cast("Any", mock_repair_loop))
 
-    # Patch evaluate_terms and plan_consistency_tasks to simulate drift on b1
     from ubt.core.qe.consistency_enforce import ConsistencyTask
 
     with (
@@ -120,7 +119,6 @@ async def test_run_consistency_stage_passes_abbreviations_to_table(tmp_path: Pat
 def _drift_stage(
     tmp_path: Path, *, repair_rounds: int, max_repair_rounds: int
 ) -> tuple[Any, Terminology, list[list[dict[str, Any]]]]:
-    """A stage over one drifted block, with a ledger that records batch writes."""
     block = IRBlock(
         element=make_element(
             id="b1",
@@ -172,7 +170,6 @@ def _drift_stage(
 
 @pytest.mark.asyncio
 async def test_host_driven_consistency_returns_drift_for_repair(tmp_path: Path) -> None:
-    """repair=False hands the drift back as claimable work, without a model call."""
     from ubt.core.qe.consistency_enforce import ConsistencyTask
 
     ctx, terminology, batches = _drift_stage(tmp_path, repair_rounds=0, max_repair_rounds=2)
@@ -208,7 +205,6 @@ async def test_host_driven_consistency_returns_drift_for_repair(tmp_path: Path) 
     update = batches[0][0]
     assert update["block_id"] == "b1"
     assert update["status"] is BlockStatus.REPAIR_PENDING
-    # The draft is preserved: the host repairs it, it does not re-translate.
     assert "target_text" not in update
     assert task.flag in update["error_flags"]
 
@@ -217,7 +213,6 @@ async def test_host_driven_consistency_returns_drift_for_repair(tmp_path: Path) 
 async def test_host_driven_consistency_leaves_a_block_at_the_repair_ceiling(
     tmp_path: Path,
 ) -> None:
-    """A block the claim query refuses must not be requeued forever."""
     from ubt.core.qe.consistency_enforce import ConsistencyTask
 
     ctx, terminology, batches = _drift_stage(tmp_path, repair_rounds=2, max_repair_rounds=2)

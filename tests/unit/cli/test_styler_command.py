@@ -1,5 +1,3 @@
-"""Unit tests for the 'ubt styler' CLI commands."""
-
 from __future__ import annotations
 
 import json
@@ -26,13 +24,11 @@ def test_styler_inspect_command(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    # Terminal output
     result = runner.invoke(app, ["styler", "inspect", str(doc_path)])
     assert result.exit_code == 0
     assert "Responsive EPUB / HTML Layout Inspector" in result.output
     assert "table-responsive" in result.output
 
-    # JSON output
     json_res = runner.invoke(app, ["styler", "inspect", str(doc_path), "--json"])
     assert json_res.exit_code == 0
     data = json.loads(json_res.output)

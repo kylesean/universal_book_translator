@@ -1,5 +1,3 @@
-"""Contract tests for the read-only neighbor sliding-window context builder."""
-
 from __future__ import annotations
 
 import pytest
@@ -33,11 +31,6 @@ def test_default_window_is_three_hundred_chars() -> None:
     assert DEFAULT_NEIGHBOR_CHARS == 300
 
 
-# --------------------------------------------------------------------------- #
-# extract_excerpts
-# --------------------------------------------------------------------------- #
-
-
 def test_extracts_tail_of_prev_and_head_of_next() -> None:
     excerpts = NeighborContextBuilder(5).extract_excerpts("abcdefghij", "klmnopqrst")
     assert excerpts == {"prev_excerpt": "fghij", "next_excerpt": "klmno"}
@@ -54,11 +47,6 @@ def test_absent_and_blank_sides_are_empty() -> None:
     builder = NeighborContextBuilder(5)
     assert builder.extract_excerpts(None, None) == {"prev_excerpt": "", "next_excerpt": ""}
     assert builder.extract_excerpts("   ", "  ") == {"prev_excerpt": "", "next_excerpt": ""}
-
-
-# --------------------------------------------------------------------------- #
-# format_prompt_block
-# --------------------------------------------------------------------------- #
 
 
 def test_no_context_renders_nothing() -> None:
@@ -79,11 +67,6 @@ def test_both_sides_render_both_labels_in_order() -> None:
     assert rendered.endswith("next")
 
 
-# --------------------------------------------------------------------------- #
-# extract_from_blocks
-# --------------------------------------------------------------------------- #
-
-
 def test_neighbors_are_filtered_to_the_same_flow_and_sorted_by_spine() -> None:
     target = _block("c", 2, "T")
     surrounding = [
@@ -94,15 +77,14 @@ def test_neighbors_are_filtered_to_the_same_flow_and_sorted_by_spine() -> None:
         _block("x", 1, "FootnoteSrc", flow=FlowID.FOOTNOTE),
     ]
     rendered = NeighborContextBuilder().extract_from_blocks(target, surrounding)
-    assert "Atgt" in rendered  # previous finished translation, spine-ordered
+    assert "Atgt" in rendered
     assert "Btgt" not in rendered
-    assert "NextSrcText" in rendered  # next uses the source while untranslated
-    assert "FootnoteSrc" not in rendered  # footnote flow is isolated
+    assert "NextSrcText" in rendered
+    assert "FootnoteSrc" not in rendered
 
 
 def test_previous_prefers_translation_then_falls_back_to_source() -> None:
     target = _block("c", 2, "T")
-    # The preceding block has no target yet -> its source is used.
     rendered = NeighborContextBuilder().extract_from_blocks(
         target, [_block("b", 1, "Bsrc"), target]
     )

@@ -1,5 +1,3 @@
-"""Unit tests for injecting bold markers into the draft's masked source."""
-
 from __future__ import annotations
 
 from typing import Any

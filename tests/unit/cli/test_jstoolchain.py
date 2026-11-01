@@ -1,15 +1,3 @@
-"""The console must not require a package manager it does not need.
-
-`ubt console --dev` and `scripts/build_console_assets.py` both ran a bare
-`pnpm ...`. On a machine with npm but no pnpm that is a raw `FileNotFoundError`
-traceback, and the build path is worse: `ubt console` calls the script
-automatically when the bundle is missing, so a first-time run failed too and
-reported only "Failed to build static assets".
-
-These tests pin the resolution order (local `node_modules/.bin` first, then
-pnpm → npm → yarn) and the readable failure when nothing is available.
-"""
-
 from __future__ import annotations
 
 import os
@@ -25,7 +13,6 @@ pytestmark = pytest.mark.fast
 
 
 def _fake_web(tmp_path: Path, tools: tuple[str, ...] = ()) -> Path:
-    """A ``web/`` directory with the given executables in ``node_modules/.bin``."""
     web = tmp_path / "web"
     bin_dir = web / "node_modules" / ".bin"
     bin_dir.mkdir(parents=True)
@@ -37,19 +24,12 @@ def _fake_web(tmp_path: Path, tools: tuple[str, ...] = ()) -> Path:
 
 
 def test_local_binaries_are_preferred_over_any_package_manager(tmp_path: Path) -> None:
-    """Dependencies installed means no package manager is needed at all.
-
-    This is the repository's own state: ``web/node_modules`` is populated, so
-    requiring pnpm to *use* it was requiring a tool the task does not need.
-    """
     web = _fake_web(tmp_path, ("vite", "tsc"))
     with patch.object(shutil, "which", return_value="/usr/bin/npm"):
         toolchain = detect_js_toolchain(web)
 
     assert toolchain.local("vite") == web / "node_modules" / ".bin" / "vite"
     assert toolchain.dev_argv() == [str(web / "node_modules" / ".bin" / "vite")]
-    # Two steps, not one `&&`-joined string: `&&` is a shell operator, so a
-    # non-shell subprocess would pass it to tsc as an argument.
     assert toolchain.build_steps() == [
         [str(web / "node_modules" / ".bin" / "tsc"), "-b"],
         [str(web / "node_modules" / ".bin" / "vite"), "build"],
@@ -57,7 +37,6 @@ def test_local_binaries_are_preferred_over_any_package_manager(tmp_path: Path) -
 
 
 def test_a_package_manager_is_the_fallback_when_node_modules_is_absent(tmp_path: Path) -> None:
-    """A fresh clone has no dependencies yet; the manager runs the npm script."""
     web = tmp_path / "web"
     web.mkdir()
     with patch.object(
@@ -71,7 +50,6 @@ def test_a_package_manager_is_the_fallback_when_node_modules_is_absent(tmp_path:
 
 
 def test_pnpm_is_preferred_over_npm_when_both_exist(tmp_path: Path) -> None:
-    """The committed lockfile is pnpm's, so pnpm wins when it is available."""
     web = tmp_path / "web"
     web.mkdir()
     with patch.object(shutil, "which", return_value="/usr/bin/whatever"):
@@ -80,11 +58,6 @@ def test_pnpm_is_preferred_over_npm_when_both_exist(tmp_path: Path) -> None:
 
 
 def test_no_toolchain_fails_with_an_actionable_message(tmp_path: Path) -> None:
-    """The old failure was `FileNotFoundError: 'pnpm'` — not actionable.
-
-    A user reading it cannot tell whether to install pnpm, install dependencies,
-    or drop the flag. The message must name all three.
-    """
     web = tmp_path / "web"
     web.mkdir()
     with patch.object(shutil, "which", return_value=None):
@@ -96,7 +69,6 @@ def test_no_toolchain_fails_with_an_actionable_message(tmp_path: Path) -> None:
         toolchain.dev_argv()
     message = str(excinfo.value)
     assert "no JavaScript toolchain found" in message
-    # All three remedies, because any one of them unblocks the user.
     assert "npm install" in message
     assert "node_modules" in message
     assert "without --dev" in message
@@ -106,11 +78,6 @@ def test_no_toolchain_fails_with_an_actionable_message(tmp_path: Path) -> None:
 
 
 def test_vite_alone_is_enough_for_dev_but_not_for_build(tmp_path: Path) -> None:
-    """`dev` needs only vite; `build` also needs tsc.
-
-    Distinguishing them means a partially installed tree still gets the dev server
-    instead of a blanket refusal.
-    """
     web = _fake_web(tmp_path, ("vite",))
     with patch.object(shutil, "which", return_value=None):
         toolchain = detect_js_toolchain(web)
@@ -123,18 +90,12 @@ def test_vite_alone_is_enough_for_dev_but_not_for_build(tmp_path: Path) -> None:
 
 
 def test_the_repository_itself_resolves_without_pnpm() -> None:
-    """The real checkout must build here, where pnpm is not installed.
-
-    This is the regression that started it: the machine has npm and a populated
-    ``node_modules`` but no pnpm, so a pnpm-only path cannot work.
-    """
     repo = Path(__file__).resolve().parents[3]
     web = repo / "web"
     if not (web / "node_modules").is_dir():
         pytest.skip("web dependencies are not installed in this checkout")
 
     toolchain = detect_js_toolchain(web)
-    # build_steps() raises JsToolchainError when the console cannot be built.
     argv = toolchain.build_steps()
     assert argv
     assert all("pnpm" not in part for step in argv for part in step) or (
@@ -143,16 +104,9 @@ def test_the_repository_itself_resolves_without_pnpm() -> None:
 
 
 def test_windows_prefers_the_cmd_stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """On Windows the executable stub is ``<tool>.cmd``; the bare file is a sh script.
-
-    ``node_modules/.bin`` carries both spellings on Windows, and CreateProcess
-    can run only the batch one — resolving the POSIX script there made --dev
-    and the auto-build crash with an exec error no error message explained.
-    """
     monkeypatch.setattr(os, "name", "nt")
     web = _fake_web(tmp_path, ("vite", "tsc"))
     bin_dir = web / "node_modules" / ".bin"
-    # The Windows layout: batch stubs beside the POSIX scripts.
     (bin_dir / "vite.cmd").write_text("@echo off\r\n", encoding="utf-8")
     (bin_dir / "tsc.cmd").write_text("@echo off\r\n", encoding="utf-8")
 
@@ -167,7 +121,6 @@ def test_windows_prefers_the_cmd_stub(monkeypatch: pytest.MonkeyPatch, tmp_path:
 def test_windows_falls_back_to_the_plain_stub_without_a_batch_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """No .cmd stub must not mean no tool: some setups expose .exe instead."""
     monkeypatch.setattr(os, "name", "nt")
     web = _fake_web(tmp_path, ("vite", "tsc"))
     bin_dir = web / "node_modules" / ".bin"

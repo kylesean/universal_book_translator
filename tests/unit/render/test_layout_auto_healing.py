@@ -1,5 +1,3 @@
-"""Unit tests for the Typst adaptive layout auto-healing pass."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -27,7 +25,6 @@ pytestmark = pytest.mark.fast
 
 
 def _make_dummy_pdf(path: Path) -> None:
-    """Create minimal valid PDF binary."""
     pdf_content = (
         b"%PDF-1.4\n"
         b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
@@ -45,7 +42,6 @@ def _make_dummy_pdf(path: Path) -> None:
 
 
 def test_auto_healing_models_serialization() -> None:
-    """Verify AutoHealingAction and AutoHealingReport serialization."""
     action = AutoHealingAction(
         action_type="adaptive_layout_scaling",
         description="Pass 1: scale tables",
@@ -74,7 +70,6 @@ def test_auto_healing_models_serialization() -> None:
 
 
 def test_layout_auto_healer_no_spills_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """When initial PDF passes layout diagnostics, auto-healer returns immediately."""
     pdf_path = tmp_path / "doc.pdf"
     _make_dummy_pdf(pdf_path)
 
@@ -111,13 +106,11 @@ def test_layout_auto_healer_no_spills_noop(tmp_path: Path, monkeypatch: pytest.M
 def test_layout_auto_healer_heals_spill_successfully(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When initial PDF has spills, healer adjusts options, recompiles, and clears spills."""
     pdf_path = tmp_path / "output.pdf"
     _make_dummy_pdf(pdf_path)
     build_dir = tmp_path / "build"
     build_dir.mkdir()
 
-    # Diagnosis 1 (spill): 1 error
     anomaly = LayoutAnomaly(
         anomaly_type=AnomalyType.MARGIN_SPILL_RIGHT,
         severity=Severity.FAIL,
@@ -142,7 +135,6 @@ def test_layout_auto_healer_heals_spill_successfully(
         page_reports={1: spill_page_rep},
     )
 
-    # Diagnosis 2 (healed): 0 errors
     clean_report = DocumentLayoutReport(
         pdf_path=str(pdf_path),
         total_pages=1,
@@ -199,7 +191,6 @@ def test_layout_auto_healer_heals_spill_successfully(
 
 
 def test_document_renderer_with_auto_healing_options(tmp_path: Path) -> None:
-    """Verify TypstDocumentRenderer applies auto-healing table/formula scaling and paragraph spacing."""
     table_elem = make_element(
         id="b_table",
         spine_index=1,
@@ -231,16 +222,12 @@ def test_document_renderer_with_auto_healing_options(tmp_path: Path) -> None:
         [table_block, formula_block], build_dir=build_dir, target_lang="zh"
     )
 
-    # Check paragraph spacing in preamble
     assert "spacing: 0.82em" in source
-    # Check formula scaled in #text block
     assert "#text(size: 9.45pt)" in source
-    # Check long formula folded across lines
     assert "\\\n" in source
 
 
 def test_render_table_scale_factor() -> None:
-    """Verify render_table accepts table_scale_factor and scales text accordingly."""
     markdown_table = (
         "| Identifier | Description | Status |\n"
         "| :--- | :--- | :--- |\n"

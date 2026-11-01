@@ -1,16 +1,3 @@
-"""Human edits must reach the delivered file (P1-C6).
-
-A reviewer edits a segment in the L3 workbench; the edit lands in the ledger
-(``apply_human_edit``). Before this, nothing re-rendered the deliverable, so the
-reviewer saw the correction in the single-page preview while the customer kept
-downloading the stale machine draft. ``re_export_job`` closes that gap: it
-rebuilds the run's inputs from the ledger and re-runs the export stage over the
-current text.
-
-Needs the external ``typst`` compiler (the render path shells out to it), so it
-lives in the slow tier and skips when typst is absent.
-"""
-
 from __future__ import annotations
 
 import shutil
@@ -41,8 +28,6 @@ _PAGE = (
     "The machine relies on attention. Each layer runs a forward pass.",
 )
 
-#: A marker no rehearsal echo would ever produce, so finding it in the delivered
-#: PDF proves the human edit reached the file rather than the machine draft.
 _EDITED = "HUMAN-EDITED-SENTINEL-7f3a"
 
 
@@ -66,23 +51,15 @@ async def _run_then_edit(tmp_path: Path) -> tuple[Path, str, str, Any]:
     terminal = None
     async for event in orchestrator.run(book, output, target_lang="es", job_id=job_id):
         terminal = event
-    # The API manager and the queue worker persist the artifact triple from the
-    # terminal event (``persist_progress_metadata``); a bare orchestrator has no
-    # completion hook, so do it here exactly as they do — otherwise a re-export
-    # has no recorded output path to overwrite.
     assert terminal is not None
     db_path = rehearsal_db_dir(config.db_dir) / f"{job_id}.sqlite"
     with SQLiteJobLedger(db_path) as ledger:
         persist_progress_metadata(terminal, ledger, job_id)
 
-    # Pick a translatable block and revise it.
     with SQLiteJobLedger(db_path, read_only=True) as ledger:
         blocks = ledger.get_all_blocks(job_id)
     target = next(b for b in blocks if b.source_text.strip() and not b.skip_translate)
     apply_human_edit(db_path, job_id, target.id, _EDITED)
-    # Re-export spends nothing (every block is terminal), so the dry-run
-    # orchestrator's echo router is the right collaborator to hand in: no live
-    # provider is contacted.
     return output, job_id, target.id, orchestrator
 
 
@@ -108,7 +85,6 @@ async def test_a_human_edit_reaches_the_delivered_file(tmp_path: Path) -> None:
 
 
 async def test_a_re_export_writes_the_original_output_path_by_default(tmp_path: Path) -> None:
-    """With no explicit path, the re-export overwrites the deliverable in place."""
     output, job_id, _, orchestrator = await _run_then_edit(tmp_path)
     config = _config(tmp_path)
     db_path = rehearsal_db_dir(config.db_dir) / f"{job_id}.sqlite"
@@ -130,16 +106,6 @@ def _flat(text: str) -> str:
 
 
 async def test_a_re_export_never_rewrites_a_block(tmp_path: Path) -> None:
-    """Re-export re-typesets; it does not own any block's delivered text or status.
-
-    The docstring said so all along, but the stage ran the deterministic glossary
-    substitution, the HTML structure checker (which can wrap a target in
-    ``<mark>`` and set FAILED), the math guard (which resets a drifted formula to
-    its source) and the length policy (which can move a block to NEEDS_HUMAN).
-    A formatting-only re-render therefore silently rewrote the ledger — undoing a
-    human edit was the worst case, but any of these could quarantine a block that
-    a later resume would no longer pick up.
-    """
     output, job_id, block_id, orchestrator = await _run_then_edit(tmp_path)
     config = _config(tmp_path)
     db_path = rehearsal_db_dir(config.db_dir) / f"{job_id}.sqlite"
@@ -166,5 +132,4 @@ async def test_a_re_export_never_rewrites_a_block(tmp_path: Path) -> None:
 
     changed = {bid for bid in before if before[bid] != after.get(bid)}
     assert not changed, f"re-export rewrote block(s) {sorted(changed)}"
-    # And the artifact still reflects the human edit.
     assert _EDITED in _flat("\n".join(oxide_render.extract_page_texts(output)))

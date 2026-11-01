@@ -1,5 +1,3 @@
-"""Contract vocabulary and compatibility-map tests (Phase 0 scaffold)."""
-
 from __future__ import annotations
 
 from typing import get_args
@@ -41,13 +39,6 @@ def test_unknown_legacy_mode_is_refused() -> None:
 
 
 def test_delivery_contract_values_match_the_artifact_contract() -> None:
-    """Routing vocabulary and artifact verdict vocabulary must not drift.
-
-    ``ubt.core.engine.delivery_contract`` already owns the artifact-side
-    ``ContractName`` literal. The router's enum is the same two contracts;
-    this guard makes a rename fail here instead of producing a report with a
-    contract the router cannot parse.
-    """
     assert set(get_args(ContractName)) == {contract.value for contract in DeliveryContract}
 
 

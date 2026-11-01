@@ -1,11 +1,3 @@
-"""An encrypted PDF fails with an actionable parse error, not engine noise.
-
-Docling surfaced a password-protected file as ``ConversionError: ... could not
-load document`` plus a burst of pdf_oxide decryption noise; the operator could
-not tell it from a corrupt file. The guard runs at manifest extraction, before
-engine dispatch, so both PDF engines and the translate CLI share one message.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -28,7 +20,6 @@ runner = CliRunner()
 
 
 def _output(result: object) -> str:
-    """stdout+stderr: typer.echo(err=True) lands on stderr under click >= 8.2."""
     text = getattr(result, "output", "") or ""
     return text + (getattr(result, "stderr", "") or "")
 

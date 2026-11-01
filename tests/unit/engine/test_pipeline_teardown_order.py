@@ -1,18 +1,3 @@
-"""P2-1: the stage generator is drained before the ledger closes.
-
-The run's teardown (``finally`` in ``PipelineOrchestrator.run``) closes the
-ledger and releases the writer lock. The *stage* generator has its own
-``finally`` (stage teardown, checkpoint flush); before this fix it finalized
-only when the outer generator was garbage-collected — after the lock release —
-and its writes silently reopened the closed ledger.
-
-Pinned here:
-
-* a stage generator is closed *inside* ``run``'s writer-lock/ledger window, not
-  after it;
-* a closed ``SQLiteJobLedger`` refuses to reopen (``LedgerBase._get_conn``).
-"""
-
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
@@ -39,15 +24,6 @@ def _config(tmp_path: Path) -> UBTConfig:
 async def test_the_stage_generator_is_drained_when_run_is_closed_early(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Closing run() early must drain the stage generator, not leak it.
-
-    ``run`` owns the stage generator with ``aclosing``, so an early close (a
-    lost lease, a user cancel) finalizes the stages inside ``run`` rather than
-    leaving them to GC. GC is disabled here so the assertion can only pass if
-    ``run`` itself drains the generator: without ``aclosing`` the inner
-    generator survives the ``aclose`` (its ``finally`` would not have run) and
-    the count stays empty until collection.
-    """
     import gc
 
     book = tmp_path / "book.md"
@@ -55,8 +31,6 @@ async def test_the_stage_generator_is_drained_when_run_is_closed_early(
     output = tmp_path / "out.md"
 
     drained: list[str] = []
-    # Read the real function from its home module; ``pipeline`` re-exports it as
-    # a bare name, which mypy does not treat as an explicit attribute.
     from ubt.core.engine import plan as plan_module
 
     real_run_stages = plan_module.run_stages
@@ -89,7 +63,6 @@ async def test_the_stage_generator_is_drained_when_run_is_closed_early(
 
 @pytest.mark.asyncio
 async def test_run_reaches_export_and_the_ledger_is_closed_after(tmp_path: Path) -> None:
-    """A full run finishes, and the ledger it wrote refuses a reopen afterwards."""
     book = tmp_path / "book.md"
     book.write_text(_BOOK, encoding="utf-8")
     output = tmp_path / "out.md"
@@ -102,7 +75,6 @@ async def test_run_reaches_export_and_the_ledger_is_closed_after(tmp_path: Path)
 
 
 def test_a_closed_ledger_refuses_to_reopen(tmp_path: Path) -> None:
-    """The ledger's own guard: after close(), a read raises instead of reopening."""
     from ubt.core.engine.ledger import SQLiteJobLedger
     from ubt.core.exceptions import LedgerError
 

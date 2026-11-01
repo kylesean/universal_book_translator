@@ -1,12 +1,3 @@
-"""Prompt hygiene (module B, item 3): positive academic guidance, no negative rules.
-
-The spec removed the "pink elephant" negative hardcode (anti-passive-voice and
-OCR-denoising) from the rich/macro prompts — naming a forbidden construction
-tends to *elicit* it — and replaced it with positive register guidance. It also
-removed the "placeholders keep their original relative order" constraint, which
-contradicted the reorder-tolerant unmask fix. HYBRID is the default strategy.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -23,7 +14,6 @@ from ubt.core.router.registry import get_default_registry
 
 pytestmark = pytest.mark.fast
 
-#: Fragments the spec removed from the prompts.
 _REMOVED = (
     "relative order",
     "Restorative Denoising",
@@ -41,7 +31,6 @@ def _system(prompt: tuple[str, str]) -> str:
     [build_rich_draft_prompt, build_macro_chunk_draft_prompt, build_hybrid_draft_prompt],
 )
 def test_prompts_carry_no_negative_rules(builder: Any) -> None:
-    # The macro builder takes a list of (id, text) blocks; the others a string.
     if builder is build_macro_chunk_draft_prompt:
         system, _user = builder([("b1", "Hello world.")], target_lang="zh")
     else:

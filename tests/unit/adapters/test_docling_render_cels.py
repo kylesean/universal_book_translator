@@ -1,5 +1,3 @@
-"""Unit tests for CELS coordinator & distortion engine assembly into DoclingRenderStrategy."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,7 +16,6 @@ pytestmark = pytest.mark.fast
 async def test_cels_clean_page_routes_l1_and_records_metrics(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A clean single-column page without overlaps or deficits routes to L1 with CELS metrics."""
     src_pdf = tmp_path / "clean_cels_src.pdf"
     with pikepdf.Pdf.new() as pdf:
         pdf.add_blank_page(page_size=(500, 700))
@@ -86,7 +83,6 @@ async def test_cels_clean_page_routes_l1_and_records_metrics(
     assert len(rendered_pages) == 1
     assert rendered_pages[0].tier == "L1"
 
-    # Verify CELS metrics recorded in page_geometry
     geom = strategy.last_page_geometry
     assert len(geom) == 1
     row = geom[0]
@@ -103,13 +99,11 @@ async def test_cels_clean_page_routes_l1_and_records_metrics(
 async def test_cels_high_distortion_auto_degrades_to_l2(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When CELS distortion is critical (e.g. source blocks heavily overlap), the page routes to L2."""
     src_pdf = tmp_path / "corrupt_cels_src.pdf"
     with pikepdf.Pdf.new() as pdf:
         pdf.add_blank_page(page_size=(500, 700))
         pdf.save(src_pdf)
 
-    # 3 paragraphs occupying the EXACT same bounding box (100% collision)
     blocks = [
         IRBlock(
             element=make_element(
@@ -151,7 +145,6 @@ async def test_cels_high_distortion_auto_degrades_to_l2(
     await strategy.render_blocks(manifest, blocks, "zh", out_pdf)
 
     assert len(rendered_pages) == 1
-    # Degraded to L2 page-locked reflow
     assert rendered_pages[0].tier == "L2"
 
     geom = strategy.last_page_geometry
@@ -168,13 +161,11 @@ async def test_cels_high_distortion_auto_degrades_to_l2(
 async def test_cels_two_column_page_partitions_tracks_in_render(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A two-column document is recognized by CELS column detection during render."""
     src_pdf = tmp_path / "twocol_cels_src.pdf"
     with pikepdf.Pdf.new() as pdf:
         pdf.add_blank_page(page_size=(612, 792))
         pdf.save(src_pdf)
 
-    # Left column: 54..280, Right column: 332..558
     blocks = [
         IRBlock(
             element=make_element(
@@ -244,7 +235,6 @@ async def test_cels_two_column_page_partitions_tracks_in_render(
 async def test_cels_rollback_switch_falls_back_to_legacy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When enable_cels=False, strategy bypasses CELS coordinator and falls back to legacy packing."""
     src_pdf = tmp_path / "rollback_src.pdf"
     with pikepdf.Pdf.new() as pdf:
         pdf.add_blank_page(page_size=(500, 700))
@@ -279,7 +269,6 @@ async def test_cels_rollback_switch_falls_back_to_legacy(
 
     monkeypatch.setattr(FacsimileRenderer, "render_document", fake_render_doc)
 
-    # Instantiate strategy with rollback switch enable_cels=False
     strategy = DoclingRenderStrategy(
         delivery_mode="facsimile",
         enable_pdf_optimization=False,
@@ -299,7 +288,6 @@ async def test_cels_rollback_switch_falls_back_to_legacy(
     assert len(rendered_pages) == 1
     assert rendered_pages[0].tier == "L1"
 
-    # Verify that CELS metrics are disabled in page_geometry
     row = strategy.last_page_geometry[0]
     assert row["cels_enabled"] is False
     assert "cels_distortion_score" not in row

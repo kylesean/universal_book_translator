@@ -56,7 +56,6 @@ def test_workbench_controller_pause_resume() -> None:
 @pytest.mark.asyncio
 async def test_workbench_controller_wait_if_paused() -> None:
     ctrl = WorkbenchController()
-    # Unpaused: wait_if_paused returns immediately
     await ctrl.wait_if_paused()
 
     ctrl.pause()
@@ -73,12 +72,10 @@ def test_workbench_controller_concurrency_bounds() -> None:
     ctrl = WorkbenchController(concurrency=2)
     assert ctrl.state.concurrency == 2
 
-    # Increase
     for _ in range(20):
         ctrl.increase_concurrency(max_limit=16)
     assert ctrl.state.concurrency == 16
 
-    # Decrease
     for _ in range(25):
         ctrl.decrease_concurrency(min_limit=1)
     assert ctrl.state.concurrency == 1
@@ -177,7 +174,6 @@ def test_workbench_dashboard_rendering_all_tabs() -> None:
         layout = render_dashboard(ctrl.state)
         assert layout is not None
 
-    # Help overlay
     ctrl.state.show_help = True
     layout = render_dashboard(ctrl.state)
     assert layout is not None
@@ -185,7 +181,6 @@ def test_workbench_dashboard_rendering_all_tabs() -> None:
 
 def test_interactive_key_reader_non_tty() -> None:
     reader = InteractiveKeyReader(on_key=lambda k: None)
-    # On non-interactive test runs, fd is either None or not a tty
     loop = asyncio.new_event_loop()
     try:
         reader.start(loop)

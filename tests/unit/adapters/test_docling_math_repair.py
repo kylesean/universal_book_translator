@@ -1,5 +1,3 @@
-"""Unit tests for Docling math symbol corruption repair via PDFium line witness."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -96,7 +94,6 @@ def test_math_symbol_repair_unlocks_space_repair() -> None:
     # Direct space repair fails because '∅' != '='
     assert reinsert_missing_spaces(doc_text, wit_text) is None
 
-    # Step 1: Repair math symbols
     symbol_repaired = repair_math_symbol_corruptions(doc_text, wit_text)
     assert symbol_repaired == "ASandboxwith 17 mod 5 = 2"
 

@@ -1,5 +1,3 @@
-"""Contract tests for the zero-LLM bilingual-mode advisor (Phase 1 / Phase 2)."""
-
 from __future__ import annotations
 
 import pytest
@@ -33,7 +31,7 @@ from ubt.core.policy.bilingual_advisor import (
 pytestmark = pytest.mark.fast
 
 
-_LONG = "word " * 10  # 50 chars, safely above the 25-char fragment cutoff
+_LONG = "word " * 10
 
 
 def _block(
@@ -58,11 +56,6 @@ def _block(
 
 def _rule(name: str) -> AdvisorRule:
     return next(r for r in RULES if r.name == name)
-
-
-# --------------------------------------------------------------------------- #
-# Constants / small helpers
-# --------------------------------------------------------------------------- #
 
 
 def test_mode_vocabulary_and_cutoffs_are_pinned() -> None:
@@ -107,11 +100,6 @@ def test_rule_registry_order_and_names() -> None:
         "untranslatable_heavy",
         "fragment_heavy",
     ]
-
-
-# --------------------------------------------------------------------------- #
-# Rule predicates (fires)
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -164,16 +152,9 @@ def test_fragment_heavy_boundary(value: float, fires: bool) -> None:
 
 
 def test_every_rule_penalizes_dual_and_never_mono() -> None:
-    # Mono is the safe fallback: no rule may push a document toward it except
-    # by penalizing the pairing.
     for rule in RULES:
         assert rule.penalties["dual"] >= 0.0
         assert rule.penalties["mono"] == 0.0
-
-
-# --------------------------------------------------------------------------- #
-# collect_signals
-# --------------------------------------------------------------------------- #
 
 
 def test_empty_blocks_keep_only_page_count() -> None:
@@ -201,14 +182,14 @@ def test_signals_aggregate_shares() -> None:
     assert signals.struct_block_share == 0.75
     assert signals.interruption_per_page == 1.5
     assert signals.fragment_share == 0.0
-    assert signals.prose_char_share == 0.25  # one narrative of four equal-length blocks
+    assert signals.prose_char_share == 0.25
 
 
 def test_skip_and_fragment_counts() -> None:
     blocks = [
         _block("a", skip=True),
         _block("b", source="tiny"),
-        _block("c", source="   "),  # whitespace-only -> fragment
+        _block("c", source="   "),
         _block("d"),
     ]
     signals = collect_signals(blocks)
@@ -217,7 +198,7 @@ def test_skip_and_fragment_counts() -> None:
 
 
 def test_fragment_uses_stripped_length_at_boundary() -> None:
-    exact = _block("a", source="x" * 25)  # 25 chars is not a fragment
+    exact = _block("a", source="x" * 25)
     under = _block("b", source="x" * 24)
     signals = collect_signals([exact, under])
     assert signals.fragment_share == 0.5
@@ -246,23 +227,17 @@ def test_heading_and_dialogue_count_as_prose() -> None:
     assert signals.prose_char_share == pytest.approx(2 / 3)
 
 
-# --------------------------------------------------------------------------- #
-# advise_layout
-# --------------------------------------------------------------------------- #
-
-
 def test_clean_prose_recommends_dual_with_ok_tier() -> None:
     advisory = advise_layout([_block("a"), _block("b")], "dual", page_count=1)
     assert advisory.tier == "ok"
     assert advisory.recommended == "dual"
     assert [m.mode for m in advisory.ranking] == ["dual", "mono"]
     assert advisory.ranking[0].score == 1.0
-    assert advisory.ranking[1].score == 0.8  # mono baseline penalty
+    assert advisory.ranking[1].score == 0.8
     assert advisory.reasons == ()
 
 
 def test_off_vocabulary_request_is_normalized_to_dual() -> None:
-    # ``auto`` and any stale value never reach tiering; they tier as the default.
     advisory = advise_layout([_block("a")], "auto", page_count=1)
     assert advisory.requested == "dual"
     advisory_auto = advise_layout([_block("a")], "auto", page_count=1)
@@ -270,8 +245,6 @@ def test_off_vocabulary_request_is_normalized_to_dual() -> None:
 
 
 def _high_interruption_only_blocks() -> list[IRBlock]:
-    # 5 structural blocks over 101 total -> 2.5/page but struct share ~0.0495,
-    # so only the high-density rule fires.
     structs = [_block(f"s{i}", block_type=BlockType.FORMULA) for i in range(5)]
     prose = [_block(f"p{i}") for i in range(96)]
     return structs + prose
@@ -282,7 +255,7 @@ def test_single_high_density_rule_lands_in_suggest() -> None:
         _high_interruption_only_blocks(), "dual", profile="paper", page_count=2
     )
     assert advisory.tier == "suggest"
-    assert advisory.ranking[0].mode == "mono"  # 0.8 beats dual's 0.5
+    assert advisory.ranking[0].mode == "mono"
     dual = next(m for m in advisory.ranking if m.mode == "dual")
     assert dual.score == 0.5
     assert dual.penalties == ("high_interruption_density",)
@@ -300,9 +273,9 @@ def _chaotic_blocks() -> list[IRBlock]:
         _block("p2"),
         _block("p3"),
         _block("p4", skip=True),
-        _block("p5", source=""),  # fragment
-        _block("p6", source=""),  # fragment
-        _block("p7", source=""),  # fragment
+        _block("p5", source=""),
+        _block("p6", source=""),
+        _block("p7", source=""),
     ]
 
 
@@ -313,7 +286,7 @@ def test_chaotic_document_discourages_dual_and_recommends_mono() -> None:
     assert advisory.tier == "discourage"
     assert advisory.recommended == "mono"
     dual = next(m for m in advisory.ranking if m.mode == "dual")
-    assert dual.score == 0.0  # clamped after >1.0 of penalties
+    assert dual.score == 0.0
     assert set(dual.penalties) == {
         "high_interruption_density",
         "figure_heavy",
@@ -321,7 +294,6 @@ def test_chaotic_document_discourages_dual_and_recommends_mono() -> None:
         "untranslatable_heavy",
         "fragment_heavy",
     }
-    # Reasons follow RULES order, not penalty magnitude.
     assert [r.split(":")[0] for r in advisory.reasons] == [
         "high_interruption_density",
         "figure_heavy",
@@ -338,7 +310,7 @@ def test_general_profile_is_lenient_relative_to_paper() -> None:
     paper_dual = next(m for m in paper.ranking if m.mode == "dual")
     general_dual = next(m for m in general.ranking if m.mode == "dual")
     assert paper_dual.score == 0.5
-    assert general_dual.score == 0.6  # 0.5 * 0.8 sensitivity
+    assert general_dual.score == 0.6
     assert paper.tier == "suggest"
     assert general.tier == "suggest"
 
@@ -354,16 +326,13 @@ def test_tier_tracks_the_requested_mode_not_the_ranking_head() -> None:
     blocks = _high_interruption_only_blocks()
     dual = advise_layout(blocks, "dual", profile="paper", page_count=2)
     mono = advise_layout(blocks, "mono", profile="paper", page_count=2)
-    # Same signals and ranking; only the tiered mode differs.
     assert dual.ranking == mono.ranking
     assert dual.ranking[0].mode == "mono"
-    assert dual.tier == "suggest"  # dual scores 0.5
-    assert mono.tier == "ok"  # mono scores 0.8
+    assert dual.tier == "suggest"
+    assert mono.tier == "ok"
 
 
 def test_ok_tier_boundary_at_exactly_point_seven() -> None:
-    # One figure among 100 blocks over 4 pages: only figure_heavy fires for
-    # dual (0.30 penalty), landing the score on exactly 0.70.
     blocks = [_block("fig", block_type=BlockType.IMAGE)] + [_block(f"p{i}") for i in range(99)]
     advisory = advise_layout(blocks, "dual", profile="paper", page_count=4, figure_pages={1})
     dual = next(m for m in advisory.ranking if m.mode == "dual")
@@ -372,7 +341,6 @@ def test_ok_tier_boundary_at_exactly_point_seven() -> None:
 
 
 def test_suggest_tier_boundary_at_exactly_point_four() -> None:
-    # High interruption (0.50) + fragment-heavy (0.10) -> dual exactly 0.40.
     structs = [_block(f"s{i}", block_type=BlockType.FORMULA) for i in range(5)]
     fragments = [_block(f"f{i}", source="") for i in range(21)]
     prose = [_block(f"p{i}") for i in range(75)]
@@ -409,11 +377,6 @@ def test_advisory_to_dict_shape_and_rounding() -> None:
     }
 
 
-# --------------------------------------------------------------------------- #
-# assess_difficulty
-# --------------------------------------------------------------------------- #
-
-
 def test_assess_zero_total_is_not_hard() -> None:
     assessment = assess_difficulty(total=0, repaired=0, failed=0)
     assert assessment == DifficultyAssessment(hard=False, repair_share=0.0, reasons=())
@@ -431,11 +394,6 @@ def test_assess_at_threshold_is_hard_with_reason() -> None:
     assert assessment.hard is True
     assert assessment.repair_share == 0.15
     assert assessment.reasons == ("repair burden 15% >= 15%",)
-
-
-# --------------------------------------------------------------------------- #
-# downgrade_mode / resolve_effective_mode
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -497,21 +455,14 @@ def test_auto_downgrades_after_switching_to_recommended() -> None:
     result = resolve_effective_mode(
         "dual", _advisory("discourage", "mono"), _hard(), enforcement="auto"
     )
-    assert result == "mono"  # mono is the ladder floor
+    assert result == "mono"
 
 
 def test_auto_hard_requested_off_ladder_passes_through() -> None:
-    # ``auto`` is never tiered, so a hard document leaves it alone.
     assert resolve_effective_mode("auto", _advisory("ok"), _hard(), enforcement="auto") == "auto"
 
 
-# --------------------------------------------------------------------------- #
-# The converged two-value space: ``auto`` and the pairing layout
-# --------------------------------------------------------------------------- #
-
-
 def test_auto_is_never_a_tiered_mode() -> None:
-    """``auto`` is resolved before tiering; it is not itself a layout."""
     from ubt.core.policy.bilingual_advisor import MODES, RENDER_MODE_VALUE
 
     assert "auto" not in MODES
@@ -519,11 +470,6 @@ def test_auto_is_never_a_tiered_mode() -> None:
 
 
 def test_dual_is_the_only_pairing_layout() -> None:
-    """There is exactly one bilingual layout: the per-block source/translation pair.
-
-    A page-zip against the source cannot exist under reflow (it changes the page
-    count), so ``inline``/``alternating``/``facing`` collapsed into one value.
-    """
     from ubt.core.policy.bilingual_advisor import RENDER_MODE_VALUE, SECONDARY_SUFFIX
 
     assert RENDER_MODE_VALUE["dual"] == "bilingual"
@@ -531,7 +477,6 @@ def test_dual_is_the_only_pairing_layout() -> None:
 
 
 def test_a_structure_heavy_document_is_advised_toward_mono() -> None:
-    """The advisor's whole point: pairing degrades on a chaotic document."""
     advisory = advise_layout(
         _chaotic_blocks(), "dual", profile="paper", page_count=2, figure_pages={1, 2}
     )
@@ -541,7 +486,6 @@ def test_a_structure_heavy_document_is_advised_toward_mono() -> None:
 
 
 def test_every_advisor_mode_has_an_adapter_mapping() -> None:
-    """A mode the advisor can recommend must be renderable."""
     from ubt.core.policy.bilingual_advisor import MODES, RENDER_MODE_VALUE
 
     for mode in MODES:

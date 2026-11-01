@@ -1,20 +1,3 @@
-"""The 0-token added-content gate — the complement of the omission gate.
-
-Two deterministic signals catch content a translation *gained*:
-
-* a reference (citation / equation / figure / table number) the target cites but
-  the source never mentions — an anchored callout the source lacked is direct
-  evidence of fabrication, while a plain parenthesised quantity the source also
-  carries is a legitimate rendering choice;
-* a markdown heading in the target while the source carries none — the model
-  reproducing prompt scaffolding.
-
-Pinned here: the reference tokenizer (citations, ranges, keyword callouts, bare
-parenthesised refs, Chinese section refs, docling spacing), the anchored-vs-all
-distinction, heading extraction (CommonMark 0-3 space indent, setext excluded),
-and the gate's fabrication/exemption/heading-leak verdicts.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -28,11 +11,6 @@ from ubt.core.qe.added_content import (
 )
 
 pytestmark = pytest.mark.fast
-
-
-# --------------------------------------------------------------------------- #
-# reference_tokens
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -54,7 +32,6 @@ def test_reference_tokens(text: str, expected: set[str]) -> None:
 
 
 def test_a_long_citation_range_is_not_expanded() -> None:
-    # 100 - 25 = 75 > 50, so only the endpoints survive.
     assert reference_tokens("[25-100]") == frozenset({"25", "100"})
 
 
@@ -72,11 +49,6 @@ def test_anchored_tokens_exclude_bare_parenthesised_numbers() -> None:
 def test_keyword_and_citation_tokens_are_anchored(text: str) -> None:
     all_tokens, anchored = _reference_token_sets(text)
     assert all_tokens == anchored
-
-
-# --------------------------------------------------------------------------- #
-# markdown_headings
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -99,11 +71,6 @@ def test_headings_preserve_order() -> None:
     assert markdown_headings("# A\nbody\n## B") == ("# A", "## B")
 
 
-# --------------------------------------------------------------------------- #
-# AddedContentGate
-# --------------------------------------------------------------------------- #
-
-
 def test_a_clean_translation_passes() -> None:
     decision = AddedContentGate().evaluate("The value is 3.5", "\u503c\u662f 3.5")
     assert decision.passed is True
@@ -117,8 +84,6 @@ def test_empty_texts_pass() -> None:
 
 
 def test_an_anchored_callout_the_source_lacks_is_fabricated() -> None:
-    # The source carries "3.5" only as a bare quantity; turning it into a
-    # figure callout is fabrication.
     decision = AddedContentGate().evaluate("The value is 3.5", "\u89c1\u56fe 3.5")
     assert decision.passed is False
     assert decision.fabricated_refs == ("3.5",)
@@ -171,7 +136,6 @@ def test_the_decision_defaults_are_empty() -> None:
 
 
 def test_section_symbol_reference_is_not_fabricated() -> None:
-    # A source text with "in §8.4" translated as "在第 8.4 节" must not be flagged
     src = "In our evaluation in §8.4, DAMON with balloon free-page reporting reduces memory consumption by 21.2%."
     tgt = "在第 8.4 节的评估中，DAMON 结合 balloon 空闲页报告在未引入显著 CPU 开销的情况下，将内存消耗降低了 21.2%。"
     decision = AddedContentGate().evaluate(src, tgt)
@@ -181,9 +145,6 @@ def test_section_symbol_reference_is_not_fabricated() -> None:
 
 
 def test_a_translated_listing_callout_is_not_fabricated() -> None:
-    # Source "List. 1" -> target "列表 1": the list keyword must be recognized
-    # on both sides. Without it the single 表 (table) matched inside 列表 (list),
-    # fabricating a reference the source's "List. 1" never produced.
     decision = AddedContentGate().evaluate(
         "List. 1 shows a minimal container session through libdsec.",
         "列表 1 展示了通过 libdsec 实现的最小容器会话。",
@@ -194,15 +155,9 @@ def test_a_translated_listing_callout_is_not_fabricated() -> None:
 
 
 def test_a_listing_keyword_without_a_number_is_not_a_reference() -> None:
-    # "list of items" has no callout number and must not become one.
     decision = AddedContentGate().evaluate("A list of items follows.", "接下来是项目列表。")
     assert decision.passed is True
     assert decision.source_refs == frozenset()
-
-
-# --------------------------------------------------------------------------- #
-# CJK keyword word boundaries (P2-4)
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -224,11 +179,6 @@ def test_a_listing_keyword_without_a_number_is_not_a_reference() -> None:
     ],
 )
 def test_a_cjk_compound_tail_is_not_a_bare_keyword(text: str) -> None:
-    # ``式``/``表``/``图`` are ordinary tails of technical compounds
-    # (模式/格式/方式/公式/表达式, 代表/图表/手表, 地图). A digit after one of
-    # those compounds is a plain quantity, not a callout: "将模式3设置好" ("set
-    # mode 3") must not be read as the equation callout "式 3" and routed to
-    # delete a reference the translation never invented.
     assert reference_tokens(text) == frozenset()
 
 
@@ -245,9 +195,6 @@ def test_a_cjk_compound_tail_is_not_a_bare_keyword(text: str) -> None:
     ],
 )
 def test_a_genuine_cjk_callout_still_matches(text: str, expected: set[str]) -> None:
-    # The word-boundary guard must not silence a real callout: a preceding
-    # prepositional character (见/如/下/和) is not a compound prefix, so the
-    # keyword stays at a boundary and the number is still a reference.
     assert reference_tokens(text) == frozenset(expected)
 
 

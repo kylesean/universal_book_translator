@@ -1,25 +1,3 @@
-"""Unicode-soup math detection and masking for delimiter-free display equations.
-
-Docling merges display equations into narrative blocks as delimiter-free unicode
-soup (``βSI=e−ψpert``, ``whereQ0``). ``MathMasker`` cannot see them (no ``$``,
-no backslash), so this module detects the spans precision-first — a span must
-carry real math signal, never a bare identifier — and masks them behind
-``⟦SOUP_MASK_…⟧`` tokens reusing the checksum-verified restore machinery.
-
-The contracts pinned here:
-
-* runs are maximal stretches of math-adjacent characters; CJK and whitespace
-  break them, so a Latin equation embedded in Chinese prose is still one run;
-* a run qualifies only with genuine signal: ≥2 math hits always qualify, a
-  lone hit needs a subscript/superscript/paren context or a leading Greek letter
-  or a digit, and bare identifiers (``whereQ0``, ``5CfinVtm``, ``x2``) never do;
-* physical parameter assignments are matched as their own span, with a
-  trailing guard so ``area = 5 square meters`` is not split into ``area = 5 s``;
-* already-masked ``⟦…⟧`` token interiors are subtracted out (no nested tokens);
-* ``SoupMathMasker.mask`` emits index-ordered, checksum-bound tokens whose
-  ``unmask`` is the identity and whose faithful echo restores ``clean``.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -32,11 +10,6 @@ from ubt.core.cleaners.soup_math import (
 )
 
 pytestmark = pytest.mark.fast
-
-
-# --------------------------------------------------------------------------- #
-# _run_spans
-# --------------------------------------------------------------------------- #
 
 
 def test_run_spans_empty_text() -> None:
@@ -63,47 +36,35 @@ def test_run_spans_include_a_trailing_run() -> None:
     assert _run_spans("a+b") == [(0, 3)]
 
 
-# --------------------------------------------------------------------------- #
-# _qualifies (precision-first)
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("run", "expected"),
     [
-        # Real math signal.
-        ("\u03b2SI=e\u2212\u03c8pert", True),  # two greek + one op
-        ("e\u2212\u03c8", True),  # greek + op
-        ("\u03b1\u03b2", True),  # two greek
-        ("\u03b2x", True),  # leading greek, single hit
-        ("x_12", True),  # underscore + digit + length 4
-        ("x^22", True),  # caret + digit + length 4
-        ("m\u2080", True),  # subscript counts as a digit-bearing hit
-        ("x\u00b2", True),  # superscript two
-        ("\u2264x2", True),  # single op + digit
-        ("(\u03b2", True),  # single greek hit + paren
-        ("\u2264_x", True),  # single op hit + underscore
-        # Bare identifiers / prose: never masked.
+        ("\u03b2SI=e\u2212\u03c8pert", True),
+        ("e\u2212\u03c8", True),
+        ("\u03b1\u03b2", True),
+        ("\u03b2x", True),
+        ("x_12", True),
+        ("x^22", True),
+        ("m\u2080", True),
+        ("x\u00b2", True),
+        ("\u2264x2", True),
+        ("(\u03b2", True),
+        ("\u2264_x", True),
         ("whereQ0", False),
         ("5CfinVtm", False),
         ("x2", False),
         ("abc", False),
-        ("x\u03b2", False),  # greek not at the start, no digit
-        ("x_1", False),  # underscore but shorter than 4
-        ("F\u226aF", False),  # spaced single operator
-        ("\u2264x", False),  # single op, no digit
+        ("x\u03b2", False),
+        ("x_1", False),
+        ("F\u226aF", False),
+        ("\u2264x", False),
         ("\u00b0C", False),
-        ("(x", False),  # a paren alone is not math signal
-        ("\u03b2", False),  # lone character
+        ("(x", False),
+        ("\u03b2", False),
     ],
 )
 def test_qualifies(run: str, expected: bool) -> None:
     assert _qualifies(run) is expected
-
-
-# --------------------------------------------------------------------------- #
-# find_soup_spans
-# --------------------------------------------------------------------------- #
 
 
 def test_find_soup_spans_empty_text() -> None:
@@ -127,7 +88,6 @@ def test_find_soup_spans_matches_a_physical_assignment() -> None:
 
 
 def test_find_soup_spans_does_not_split_a_unit_word() -> None:
-    # Without the trailing guard this matched "area = 5 s" and split "square".
     assert find_soup_spans("area = 5 square meters") == [(0, 8)]
     assert find_soup_spans("area = 5 s") == [(0, 10)]
 
@@ -147,11 +107,6 @@ def test_find_soup_spans_subtracts_existing_tokens() -> None:
 def test_find_soup_spans_keeps_text_around_a_token() -> None:
     text = "\u03b2SI=e\u2212\u03c8 \u27e6SOUP_MASK_0001-abc\u27e7 x_12"
     assert find_soup_spans(text) == [(0, 7), (29, 33)]
-
-
-# --------------------------------------------------------------------------- #
-# SoupMathMasker
-# --------------------------------------------------------------------------- #
 
 
 def test_soup_masker_empty_text() -> None:

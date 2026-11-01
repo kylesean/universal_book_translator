@@ -1,14 +1,3 @@
-"""L3 review-workbench contract: segments, fault ribbon, and human edits.
-
-These pin the workbench's backend contract:
-
-- ``/segments`` projects blocks with their grouped issue kinds and filters by
-  status/issues;
-- ``/issues`` counts by the engine's own defect taxonomy;
-- ``POST /segments/{id}`` writes a human revision through the same path the
-  file-based PE import uses (ledger + shared TM, ``human_pe`` provenance).
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -89,13 +78,6 @@ def _seed(tmp_path: Path) -> UBTConfig:
 
 
 def test_issue_classifier_flags_every_render_skip() -> None:
-    """Every ``render_skip:`` is a fault now, not a preserve.
-
-    The intentional-preserve whitelist (``inplace_skip:chrome`` and its
-    siblings) is gone: nothing ever emitted those reasons, and the one flag that
-    looked like one was mislabelled. A block that was skipped because its
-    translation could not be placed belongs in the ribbon.
-    """
     clean = _block(9, "s", "t", [], BlockStatus.MTQE_PASSED)
     assert segment_issue_kinds(clean) == []
     skipped = _block(9, "s", "t", ["render_skip:overflow(base=1)"], BlockStatus.REPAIRED)
@@ -118,8 +100,6 @@ def test_segments_filter_issues_excludes_clean_and_intentional(tmp_path: Path) -
     client = TestClient(create_app(_seed(tmp_path)))
     body = client.get(f"/jobs/{_JOB}/segments", params={"status": "issues"}, headers=_AUTH).json()
     ids = {segment["block_id"] for segment in body["segments"]}
-    # b002 (term violation + needs_human) and b003 (overflow) are issues;
-    # b001 is clean and b004 is an intentional chrome skip.
     assert ids == {"b002", "b003"}
     assert body["total"] == 2
 
@@ -159,7 +139,7 @@ def test_edit_segment_writes_ledger_and_tm(tmp_path: Path) -> None:
     assert body["tm_written"] == 1
     assert body["segment"]["status"] == "repaired"
     assert body["segment"]["human_verified"] is True
-    assert body["segment"]["mtqe_score"] is None  # stale machine verdict cleared
+    assert body["segment"]["mtqe_score"] is None
 
     tm = TranslationMemory(config.db_dir / "tm.sqlite")
     try:
@@ -234,10 +214,6 @@ def test_segments_unknown_job_is_404(tmp_path: Path) -> None:
     assert client.get("/jobs/nosuchjob00/segments", headers=_AUTH).status_code == 404
 
 
-# --------------------------------------------------------------------------- #
-# Global term propagation (PRD §5.2.2)
-# --------------------------------------------------------------------------- #
-
 _TERM_JOB = "termjob00001"
 _TERM_GLOSSARY = [{"source": "Backpropagation", "translation": "反向传播", "aliases": ["反向传递"]}]
 
@@ -288,7 +264,6 @@ def test_block_terms_reports_cascade_counts(tmp_path: Path) -> None:
     assert violation["expected"] == "反向传播"
     assert violation["kind"] == "alias"
     assert violation["occurrences"] == 1
-    # b002 and b003 carry the same error; b001 itself is excluded.
     assert violation["cascade_all"] == 2
     assert violation["cascade_subsequent"] == 2
 
@@ -325,7 +300,7 @@ def test_term_propagation_scope_block_touches_only_the_pivot(tmp_path: Path) -> 
     }
     assert segments["b001"]["target_text"] == "反向传播很关键"
     assert segments["b001"]["human_verified"] is True
-    assert segments["b002"]["target_text"] == "反向传递再次出现"  # untouched
+    assert segments["b002"]["target_text"] == "反向传递再次出现"
     assert segments["b003"]["target_text"] == "这里也用了反向传递"
 
 
@@ -368,7 +343,6 @@ def test_term_propagation_scope_subsequent_skips_earlier_blocks(tmp_path: Path) 
         headers=_AUTH,
     )
     assert res.status_code == 200
-    # b001 is before the pivot and untouched; b002 (pivot) and b003 are rewritten.
     assert res.json()["block_ids"] == ["b002", "b003"]
 
 
@@ -393,7 +367,6 @@ def test_term_propagation_unknown_block_is_404(tmp_path: Path) -> None:
 
 
 def test_term_propagation_without_a_glossary_is_422(tmp_path: Path) -> None:
-    # The plain seed has no bible_cache, so there is nothing to propagate from.
     client = TestClient(create_app(_seed(tmp_path)))
     res = client.post(
         f"/jobs/{_JOB}/term-propagation",
@@ -403,9 +376,6 @@ def test_term_propagation_without_a_glossary_is_422(tmp_path: Path) -> None:
     assert res.status_code == 422
 
 
-# --- re-export: a human edit must reach the delivered file (P1-C6) ----------
-
-
 def test_re_export_unknown_job_is_404(tmp_path: Path) -> None:
     client = TestClient(create_app(_seed(tmp_path)))
     res = client.post("/jobs/nosuchjob0001/re-export", headers=_AUTH)
@@ -413,13 +383,7 @@ def test_re_export_unknown_job_is_404(tmp_path: Path) -> None:
 
 
 def test_re_export_without_a_recorded_output_path_is_409(tmp_path: Path) -> None:
-    """The seed records no ``output_file``, so there is nothing to overwrite.
-
-    A re-export with no explicit path and no recorded deliverable must refuse
-    (409) rather than invent a destination — the caller can still pass one.
-    """
     config = _seed(tmp_path)
-    # The source must exist so the check that fails is the missing-output one.
     (tmp_path / "in.md").write_text("# book\n", encoding="utf-8")
     client = TestClient(create_app(config))
     res = client.post(f"/jobs/{_JOB}/re-export", headers=_AUTH)

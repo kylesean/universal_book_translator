@@ -1,16 +1,3 @@
-"""A degraded PDF ingest gets its own ledger namespace.
-
-``auto`` selects docling; when the package is missing the adapter falls back to
-the geometric pdfium reader, which cannot represent tables, figures or formulas.
-The blocks that fallback produced were filed under the *same* job id as a full
-docling ingest would use, so installing the extra later resumed the degraded
-ledger and skipped parsing — the loss was permanent and silent.
-
-The degraded engine now contributes an ``fb<engine>`` token to the job id. A
-normal run (including an explicit ``--pdf-engine pdfium``) adds nothing, so
-existing ledgers stay resumable.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -33,17 +20,14 @@ def test_the_default_config_adds_no_suffix() -> None:
 
 
 def test_a_degraded_ingest_names_the_engine_that_ran() -> None:
-    """The token is normalized like every other signature part: alnum only."""
     assert engine_signature(_config(), pdf_engine_fallback="oxide_fallback") == ("fboxidefallback")
 
 
 def test_a_healthy_run_adds_no_fallback_token() -> None:
-    """Only an actual degradation namespaces; a full docling run must not."""
     assert "fb" not in engine_signature(_config(), pdf_engine_fallback=None)
 
 
 def test_a_normal_pdfium_run_is_unchanged() -> None:
-    """An explicit fast-path choice is not a degradation."""
     assert engine_signature(_config(pdf_engine="pdfium"), pdf_engine_fallback=None) == ""
 
 
@@ -74,12 +58,6 @@ def test_derive_job_id_namespaces_the_fallback() -> None:
 
 
 def test_the_ingest_identity_uses_the_same_fallback_rule() -> None:
-    """The resume guard compares the same signature the job id was built from.
-
-    Reading only the config made the guard disagree with the derived id and
-    refuse a legitimate resume of a degraded job. Both call sites now share
-    ``degraded_pdf_engine``, so this pins the rule rather than a copy of it.
-    """
     from ubt.core.engine.pipeline import degraded_pdf_engine
 
     metadata = {"pdf_parser_engine": "oxide_fallback"}
@@ -89,7 +67,6 @@ def test_the_ingest_identity_uses_the_same_fallback_rule() -> None:
 
 
 def test_a_deliberate_pdfium_choice_is_not_a_degradation() -> None:
-    """``--pdf-engine pdfium`` is a choice; the manifest still says pdfium."""
     from ubt.core.engine.pipeline import degraded_pdf_engine
 
     metadata = {"pdf_parser_engine": "pdfium"}
@@ -104,7 +81,6 @@ def test_a_full_docling_run_is_not_a_degradation() -> None:
 
 
 def test_an_empty_manifest_names_no_engine() -> None:
-    """A non-PDF run records nothing; the rule must not invent a fallback."""
     from ubt.core.engine.pipeline import degraded_pdf_engine
 
     assert degraded_pdf_engine(_config(pdf_engine="auto"), {}) is None

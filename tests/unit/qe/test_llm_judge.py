@@ -1,5 +1,3 @@
-"""Unit tests for L3 LLM-as-Judge QE and TieredQERunner."""
-
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
@@ -25,20 +23,16 @@ def test_parse_judge_score_formats() -> None:
     assert parse_judge_score("") is None
     assert parse_judge_score("unparsable output here") is None
 
-    # score: N / 100
     assert parse_judge_score("score: 85") == 0.85
     assert parse_judge_score("Score: 92/100") == 0.92
     assert parse_judge_score("**score**: 75") == 0.75
 
-    # JSON response
     assert parse_judge_score('{"score": 90}') == 0.90
     assert parse_judge_score('{"score": 0.88}') == 0.88
 
-    # Bare number
     assert parse_judge_score("95") == 0.95
     assert parse_judge_score("80/100") == 0.80
 
-    # Boundary edge: score of 1 means 1% (0.01), not 100%
     assert parse_judge_score("score: 1") == 0.01
     assert parse_judge_score("score: 100") == 1.0
     assert parse_judge_score("score: 0") == 0.0
@@ -62,7 +56,6 @@ async def test_llm_judge_qe_runner_scoring() -> None:
     assert scores == [0.88]
     assert runner.is_calibrated() is False
 
-    # Language rebinding
     rebound = runner.with_languages("fr", "de")
     assert rebound is not runner
     assert rebound._source_lang == "fr"
@@ -75,7 +68,6 @@ async def test_llm_judge_qe_runner_handles_failure() -> None:
     runner = LLMJudgeQERunner(judge_fn=mock_judge_fn)
 
     scores = await runner.score_pairs([{"src": "Hello", "mt": "你好"}])
-    # Returns sentinel -1.0 on failure
     assert scores == [-1.0]
 
 
@@ -87,14 +79,12 @@ async def test_tiered_qe_runner_gray_zone_routing() -> None:
 
     tiered = TieredQERunner(heuristic=heuristic, judge=judge)
 
-    # Clean translation that passes heuristic cleanly does not trigger judge (pass_sample=0)
     scores = await tiered.score_pairs(
         [{"src": "This is a normal sentence.", "mt": "这是一句正常的话。"}]
     )
     assert scores == [QE_SCORE_PASS]
     assert tiered.judge_calls == 0
 
-    # Pair with structural issue (which lands in QE_SCORE_STRUCTURAL_OTHER ~ 0.78)
     class FakeHeuristic(HeuristicQERunner):
         async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
             return [QE_SCORE_STRUCTURAL_OTHER]
@@ -102,6 +92,4 @@ async def test_tiered_qe_runner_gray_zone_routing() -> None:
     tiered_mocked = TieredQERunner(heuristic=FakeHeuristic(), judge=judge)
     judged_scores = await tiered_mocked.score_pairs([{"src": "text", "mt": "text"}])
     assert tiered_mocked.judge_calls == 1
-    # The judge may only LOWER. A favourable verdict (0.85) cannot raise a real
-    # structural failure over the pass line, so the heuristic value stands.
     assert judged_scores == [QE_SCORE_STRUCTURAL_OTHER]

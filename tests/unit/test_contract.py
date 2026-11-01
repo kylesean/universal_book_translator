@@ -1,21 +1,3 @@
-"""Reconciliation: does a delivery account for every content node?
-
-This is the gate the architecture exists to provide, and it reads the content
-graph and its ledgers -- not the render path. The rules are the two axioms made
-checkable:
-
-- **Axiom B (text):** a text node is accounted for when it is TRANSLATED or
-  deliberately VERBATIM. PENDING was never decided and SKIPPED was dropped --
-  both are errors. SOURCE_KEPT is an explicit keep: a warning, *unless* the
-  reason is a space failure (the translation existed but could not be placed),
-  which is an error.
-- **Axiom A (assets):** an asset is accounted for when PRESERVED_OPAQUE, a
-  *verified* RECONSTRUCTED, or an intentional DROPPED. MISSING is an error; an
-  unverified reconstruction is a warning and a corrupt one an error.
-
-``passed`` is the single machine-checkable verdict: no ERROR-severity violation.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -72,11 +54,6 @@ def _graph(*nodes: TextNode | AssetNode) -> ContentGraph:
     return ContentGraph(doc_id="d", title="t", nodes=nodes)
 
 
-# --------------------------------------------------------------------------- #
-# _is_space_failure: the source-kept severity switch.
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     "reason", ["spill", "SPILL", "overflow", "no_fit", "text does not fit the box"]
 )
@@ -89,11 +66,6 @@ def test_other_source_kept_reasons_are_not_space_failures(reason: str) -> None:
     assert _is_space_failure(reason) is False
 
 
-# --------------------------------------------------------------------------- #
-# Text dispositions.
-# --------------------------------------------------------------------------- #
-
-
 def test_translated_text_is_delivered_without_a_violation() -> None:
     report = reconcile(_graph(_text("t1", TextDisposition.TRANSLATED)))
     assert report.delivered_text == 1
@@ -101,12 +73,6 @@ def test_translated_text_is_delivered_without_a_violation() -> None:
 
 
 def test_a_quarantined_block_surfaces_as_a_source_kept_warning() -> None:
-    """End-to-end: a quarantined block's graph row reconciles to a warning.
-
-    Ties the classification fix (``adapt._text_node``) to the contract: the
-    block must be counted as source-kept, not delivered, and the run must stay
-    ``passed`` (a quarantine is honest, not a space failure).
-    """
     report = reconcile(
         _graph(_text("q1", TextDisposition.SOURCE_KEPT, reason="quarantined:blocked_human"))
     )
@@ -158,11 +124,6 @@ def test_pending_text_is_an_unaccounted_error() -> None:
     assert violation.severity is Severity.ERROR
 
 
-# --------------------------------------------------------------------------- #
-# Asset integrity.
-# --------------------------------------------------------------------------- #
-
-
 def test_preserved_asset_is_accounted_without_a_violation() -> None:
     report = reconcile(_graph(_asset("a1", AssetIntegrity.PRESERVED_OPAQUE)))
     assert report.preserved_assets == 1
@@ -207,11 +168,6 @@ def test_a_corrupt_reconstruction_is_an_error() -> None:
     assert violation.severity is Severity.ERROR
 
 
-# --------------------------------------------------------------------------- #
-# The report: totals, verdict, summary.
-# --------------------------------------------------------------------------- #
-
-
 def test_an_empty_graph_passes_with_zero_counts() -> None:
     report = reconcile(ContentGraph())
     assert report.total_text == 0
@@ -242,8 +198,8 @@ def test_totals_count_every_disposition_and_integrity() -> None:
 def test_errors_and_warnings_split_by_severity() -> None:
     report = reconcile(
         _graph(
-            _text("t1", TextDisposition.SOURCE_KEPT, "unrenderable math"),  # warning
-            _text("t2", TextDisposition.SKIPPED),  # error
+            _text("t1", TextDisposition.SOURCE_KEPT, "unrenderable math"),
+            _text("t2", TextDisposition.SKIPPED),
         )
     )
     assert [v.node_id for v in report.errors] == ["t2"]
@@ -266,13 +222,11 @@ def test_a_violation_carries_the_node_reason_or_a_default_detail() -> None:
 
 def test_graceful_spill_degradation_downgrades_space_failure() -> None:
     graph = _graph(_text("t1", TextDisposition.SOURCE_KEPT, "no_fit: source kept"))
-    # Default strict behavior: space failure is an error
     strict_report = reconcile(graph, allow_spill_warning=False)
     assert not strict_report.passed
     assert len(strict_report.errors) == 1
     assert strict_report.errors[0].severity == Severity.ERROR
 
-    # Graceful degradation policy: downgraded to warning
     graceful_report = reconcile(graph, allow_spill_warning=True)
     assert graceful_report.passed
     assert len(graceful_report.errors) == 0

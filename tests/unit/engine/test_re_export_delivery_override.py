@@ -1,13 +1,3 @@
-"""Re-export delivery override: one ledger, two contracts, zero tokens.
-
-G1 needs to compare the readable path against the faithful one on the *same*
-translations. Re-running the whole job in readable mode would pay for a second
-translation just to change the renderer, so the override re-targets the export
-stage only. These tests pin the metadata it writes, because the renderer and the
-artifact contract both read those keys and drifting one of them would silently
-render one contract while auditing the other.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -69,7 +59,6 @@ def test_an_infeasible_request_fails_instead_of_rendering_the_other_contract() -
     with pytest.raises(ReExportError, match="not feasible"):
         _apply_delivery_override(manifest, "faithful")
 
-    # A refusal must not leave a half-written plan behind.
     assert manifest.metadata["delivery_plan"] == {"contract": "faithful"}
 
 

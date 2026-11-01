@@ -1,18 +1,3 @@
-"""Turn document-level terminology drift into bounded constrained re-translations.
-
-The planner is deterministic: drift in, a stable task list out. Pinned contracts:
-
-* ``ConsistencyTask.flag`` is the greppable repair instruction carried verbatim
-  as an error flag;
-* one task per ``(block, drifted term)`` — exact renderings are skipped and
-  duplicate hits collapse;
-* ordering is ``(block_id, source)`` so the same drift always yields the same
-  plan;
-* the cap counts distinct **blocks**, not tasks, and a selected block keeps
-  every one of its drifted-term tasks (or its repair is under-constrained);
-* ``max_blocks <= 0`` disables planning.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -41,8 +26,6 @@ def _metrics(*hits: TermHit) -> TermMetrics:
 
 def test_flag_is_the_repair_instruction() -> None:
     flag = ConsistencyTask("b", "X", "Y").flag
-    # Structured form: the prefix the marker tables match, a declared severity
-    # triage can read without guessing, and the instruction the prompt shows.
     assert flag == "terminology_consistency:major:render 'X' as 'Y'"
     assert flag.startswith(CONSTRAINT_PREFIX)
     assert parse_defect_flag(flag) == ("terminology_consistency", "major")

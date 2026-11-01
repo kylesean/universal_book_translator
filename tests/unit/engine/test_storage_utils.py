@@ -1,5 +1,3 @@
-"""Unit tests for the SQLite storage-path filesystem detection helpers."""
-
 from __future__ import annotations
 
 import logging
@@ -21,7 +19,6 @@ def test_detect_filesystem_type_on_local_disk(tmp_path: Path) -> None:
     fs_type, is_net = detect_filesystem_type(tmp_path)
     assert isinstance(fs_type, str)
     assert isinstance(is_net, bool)
-    # The current local test directory should not be treated as a network filesystem
     assert is_net is False
 
 

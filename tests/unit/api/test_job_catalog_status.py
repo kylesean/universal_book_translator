@@ -1,23 +1,3 @@
-"""`/jobs` and `/status` must agree about one ledger.
-
-`job_meta.status` has no `running` value: the row is written `initialized` at
-ingest and stays that way for the whole run, so the column alone cannot tell a
-live job from one whose process died. `summarize_job` passed it through verbatim,
-so `/jobs` showed `initialized` (which the console renders as a live run) for a
-job that had crashed hours earlier, while `/status` for the same id — which does
-normalize — reported it failed.
-
-The rule is the one `/status` already applied: a terminal row passes through, a
-row whose blocks are all accounted for is completed, and anything else is
-`running` while a live writer holds the lease and `failed` once nothing does.
-
-**The lease, not the file's mtime.** A first attempt used "the ledger has not
-been written for N seconds" and was wrong in the one case that matters: a run
-spends minutes inside a single model call without writing a checkpoint, so a
-working job was reported dead. `test_a_live_writer_overrides_a_quiet_ledger`
-pins that, and is the reason the mtime rule must not come back.
-"""
-
 from __future__ import annotations
 
 import os
@@ -40,7 +20,6 @@ from ubt.model.span import Span
 
 pytestmark = pytest.mark.fast
 
-#: Longer than any lease, so a "quiet ledger" cannot be mistaken for a live one.
 _QUIET_FOR = 1000.0
 
 
@@ -77,18 +56,12 @@ def _age(db: Path, seconds: float) -> None:
 
 
 def test_a_crashed_row_is_reported_failed(tmp_path: Path) -> None:
-    """The regression: a crashed run read as live forever."""
     db = _ledger(tmp_path, "deadjob", status="initialized", block=_block(1, BlockStatus.DRAFTED))
     _age(db, _QUIET_FOR)
     assert _status(db) == "failed"
 
 
 def test_a_live_writer_overrides_a_quiet_ledger(tmp_path: Path) -> None:
-    """The bug the mtime rule caused: a long model call is not a crash.
-
-    A run can sit inside one provider call for longer than any staleness window
-    without touching the ledger. The lease is the only honest signal.
-    """
     db = _ledger(tmp_path, "longcall", status="initialized", block=_block(1, BlockStatus.DRAFTED))
     _age(db, _QUIET_FOR)
     lock = LedgerWriterLock(db, "longcall")
@@ -97,7 +70,6 @@ def test_a_live_writer_overrides_a_quiet_ledger(tmp_path: Path) -> None:
         assert _status(db) == "running"
     finally:
         lock.release()
-    # Once the lease is gone, nothing is working on it any more.
     assert _status(db) == "failed"
 
 
@@ -120,12 +92,6 @@ def test_a_terminal_row_is_passed_through(tmp_path: Path) -> None:
 
 
 def test_a_fully_processed_row_reads_completed_even_before_finalize(tmp_path: Path) -> None:
-    """Every block accounted for is a finished run whatever the row says.
-
-    That is exactly the condition ``finalize_job("completed")`` is guarded on,
-    and the export stage finalizes *before* it records the rendered digest, so a
-    process lost in that window leaves a fully translated book behind.
-    """
     db = _ledger(
         tmp_path, "allblocks", status="initialized", block=_block(1, BlockStatus.MTQE_PASSED)
     )

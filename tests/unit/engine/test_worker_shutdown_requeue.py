@@ -1,14 +1,3 @@
-"""Worker shutdown: a cancelled slot requeues the job instead of killing it.
-
-``asyncio.run`` cancels the slot tasks on Ctrl-C *before* the
-``KeyboardInterrupt`` reaches the caller (measured), so a cancelled slot cannot
-wait for ``stop()`` to have been called. That matters because the two outcomes
-are not equivalent: a terminal CANCELLED row is never reclaimed by the queue, so
-treating a shutdown as a user cancel permanently kills a multi-hour job, while
-``release_claim`` hands it back to QUEUED for the next worker to resume from its
-ledger checkpoints.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -41,13 +30,10 @@ def _worker(tmp_path: Path) -> JobWorker:
 
 
 async def _run_interrupted(worker: JobWorker, *, shutting_down: bool) -> list[str]:
-    """Start ``execute``, cancel it, and report the queue calls it made."""
     calls: list[str] = []
     worker._shutting_down = shutting_down
 
     async def fake_q(fn: Any, *args: Any, **kwargs: Any) -> Any:
-        # ``_q`` receives the *bound* method; compare by name so the fake does
-        # not depend on identity across two lookups of the same attribute.
         name = getattr(fn, "__name__", "")
         if name == "complete":
             calls.append(f"complete:{kwargs['status'].value}")
@@ -56,7 +42,7 @@ async def _run_interrupted(worker: JobWorker, *, shutting_down: bool) -> list[st
             calls.append("release_claim")
             return True
         if name == "update_progress":
-            return True  # still the owner: do not short-circuit into LeaseLostError
+            return True
         if name == "is_cancel_requested":
             return False
         return None
@@ -110,12 +96,6 @@ def test_stop_sets_the_shutdown_flag(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_a_signal_handler_runs_stop_before_the_slots_unwind(tmp_path: Path) -> None:
-    """The graceful path: the loop's own handler sets the flag in time.
-
-    ``_run_worker_until_signalled`` installs ``worker.stop`` as the SIGINT
-    handler, so by the time ``asyncio.run`` cancels the slots the flag is already
-    set. This pins the ordering without sending a real signal.
-    """
     from ubt.cli.commands.worker import _run_worker_until_signalled
 
     worker = _worker(tmp_path)
@@ -138,7 +118,6 @@ async def test_a_signal_handler_runs_stop_before_the_slots_unwind(tmp_path: Path
 
 
 def test_the_queue_reclaims_a_requeued_row(tmp_path: Path) -> None:
-    """A requeued row is claimable again; a CANCELLED one is not."""
     queue = JobQueue(tmp_path / "queue.sqlite")
     queue.enqueue("job-a", {"input_path": "/tmp/a.md"})
     claimed = queue.claim("w1")
@@ -149,13 +128,11 @@ def test_the_queue_reclaims_a_requeued_row(tmp_path: Path) -> None:
     again = queue.claim("w2")
     assert again is not None and again.job_id == "job-a"
 
-    # The contrast: a terminal cancel is not reclaimable.
     queue.request_cancel("job-a")
     assert queue.claim("w3") is None
 
 
 async def test_worker_writer_lock_conflict_backs_off_using_lease_expiry(tmp_path: Path) -> None:
-    """When a writer lock conflict occurs, worker backs off until lease expiry instead of spinning."""
     import time
     import unittest.mock
 
@@ -184,5 +161,4 @@ async def test_worker_writer_lock_conflict_backs_off_using_lease_expiry(tmp_path
         result = await worker.execute(job)  # type: ignore[arg-type]
 
     assert result is False
-    # Heartbeat task also sleeps, so check that our conflict backoff (~45.5s) was called
     assert any(40.0 <= s <= 46.0 for s in slept)

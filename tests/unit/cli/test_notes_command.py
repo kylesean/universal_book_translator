@@ -1,5 +1,3 @@
-"""Unit tests for the 'ubt notes' CLI command suite."""
-
 from __future__ import annotations
 
 import json
@@ -30,14 +28,12 @@ def sample_notes_doc(tmp_path: Path) -> Path:
 
 
 def test_notes_inspect_command(sample_notes_doc: Path) -> None:
-    # Terminal text table
     result = runner.invoke(app, ["notes", "inspect", str(sample_notes_doc)])
     assert result.exit_code == 0
     assert "Total Notes Found: 2" in result.output
     assert "100.0%" in result.output
     assert "Castro & Liskov" in result.output
 
-    # JSON output
     json_res = runner.invoke(app, ["notes", "inspect", str(sample_notes_doc), "--json"])
     assert json_res.exit_code == 0
     data = json.loads(json_res.output)
@@ -47,7 +43,6 @@ def test_notes_inspect_command(sample_notes_doc: Path) -> None:
 
 
 def test_notes_generate_command(sample_notes_doc: Path, tmp_path: Path) -> None:
-    # Typst format
     res_typst = runner.invoke(
         app,
         ["notes", "generate", str(sample_notes_doc), "--format", "typst"],
@@ -56,7 +51,6 @@ def test_notes_generate_command(sample_notes_doc: Path, tmp_path: Path) -> None:
     assert "#heading(level: 2)[注释]" in res_typst.output
     assert "Castro & Liskov" in res_typst.output
 
-    # HTML format
     res_html = runner.invoke(
         app,
         ["notes", "generate", str(sample_notes_doc), "--format", "html"],
@@ -65,7 +59,6 @@ def test_notes_generate_command(sample_notes_doc: Path, tmp_path: Path) -> None:
     assert '<section class="ubt-endnotes"' in res_html.output
     assert '<ol class="ubt-endnotes-list">' in res_html.output
 
-    # Write to file
     out_file = tmp_path / "notes_out.md"
     res_file = runner.invoke(
         app,
@@ -86,18 +79,15 @@ def test_notes_generate_command(sample_notes_doc: Path, tmp_path: Path) -> None:
 
 
 def test_notes_audit_command(sample_notes_doc: Path, tmp_path: Path) -> None:
-    # Audit pass
     res_pass = runner.invoke(
         app, ["notes", "audit", str(sample_notes_doc), "--min-resolution", "0.9"]
     )
     assert res_pass.exit_code == 0
     assert "PASS" in res_pass.output
 
-    # Create document with missing definition
     bad_doc = tmp_path / "orphan.md"
     bad_doc.write_text("正文内容出现孤立注释引用[^missing]。", encoding="utf-8")
 
-    # Audit fail
     res_fail = runner.invoke(app, ["notes", "audit", str(bad_doc), "--min-resolution", "0.8"])
     assert res_fail.exit_code == 1
     assert "FAIL" in res_fail.output

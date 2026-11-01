@@ -1,24 +1,3 @@
-"""Single source of truth for defect-flag classification.
-
-The same ``error_flags`` strings are read by the quality gate, the repair loop,
-triage and the resume path. The load-bearing facts pinned here:
-
-* the three "not translated" phrasings (exact echo, near-verbatim, same-script
-  residue) are all structural *and* critical — matching only one lets a
-  never-translated paragraph fall through to "other structural rejection" and be
-  auto-passed;
-* all five masked-token corrupt markers are structural and critical, and the
-  set is derived from ``PlaceholderEngine``'s own report list so a new masker
-  namespace cannot be added without also classifying it;
-* terminology violation and the provenance-only "Visual witness discrepancy" are
-  structural but deliberately **not** critical (Major, not quarantine);
-* format-only classes (HTML delta, length) are structural but not critical and
-  can bypass expensive reasoning only when *every* flag is format-only;
-* lifecycle failures re-queue on resume, but a non-retryable drafting failure
-  never does, and a repair-only transient failure must go back to
-  REPAIR_PENDING rather than PENDING.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -43,11 +22,6 @@ from ubt.core.qe.defect_taxonomy import (
 from ubt.segment.placeholders import RestoreOutcome
 
 pytestmark = pytest.mark.fast
-
-
-# --------------------------------------------------------------------------- #
-# has_structural_defect
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize("marker", ECHO_MARKERS)
@@ -87,14 +61,6 @@ def test_unrelated_flags_are_not_structural() -> None:
 
 
 def test_every_masker_namespace_is_classified() -> None:
-    """A new masker namespace must not silently escape the defect tables.
-
-    ``RestoreOutcome.reports`` is the producer of the ``*_token_corrupt``
-    labels. Deriving the expected set from it means adding a sixth masker
-    cannot leave the gate with a namespace that classifies as PASS — the
-    ``email`` namespace was exactly that gap: it was emitted, counted by the
-    reporter's retention metric, and auto-passed by ``classify_defect``.
-    """
     clean = UnmaskReport(text="")
     outcome = RestoreOutcome(
         text="",
@@ -110,11 +76,6 @@ def test_every_masker_namespace_is_classified() -> None:
     for label in labels:
         assert label in STRUCTURAL_DEFECT_MARKERS, f"{label} is not structural"
         assert label in CRITICAL_DEFECT_MARKERS, f"{label} is not critical"
-
-
-# --------------------------------------------------------------------------- #
-# has_critical_defect
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -146,9 +107,9 @@ def test_echoes_are_critical(marker: str) -> None:
 @pytest.mark.parametrize(
     "marker",
     [
-        "Glossary term violation",  # Major, not quarantine
-        "Visual witness discrepancy",  # provenance-only
-        "HTML delta failure",  # format-only
+        "Glossary term violation",
+        "Visual witness discrepancy",
+        "HTML delta failure",
         "html_structure_mismatch",
         "Target text suspiciously truncated",
         "Target text suspiciously inflated",
@@ -162,11 +123,6 @@ def test_major_and_format_markers_are_not_critical(marker: str) -> None:
 def test_unrelated_flags_are_not_critical() -> None:
     assert has_critical_defect([]) is False
     assert has_critical_defect(["some unrelated note"]) is False
-
-
-# --------------------------------------------------------------------------- #
-# is_format_only
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -189,11 +145,6 @@ def test_empty_flags_are_not_format_only() -> None:
 
 def test_a_mixed_bag_is_not_format_only() -> None:
     assert is_format_only(["HTML delta failure", "Numeric fidelity"]) is False
-
-
-# --------------------------------------------------------------------------- #
-# lifecycle failures
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -234,11 +185,6 @@ def test_lifecycle_only_ignores_blank_flags() -> None:
     assert is_transient_lifecycle_only(["", "Drafting error: x"]) is True
 
 
-# --------------------------------------------------------------------------- #
-# has_triage_verdict
-# --------------------------------------------------------------------------- #
-
-
 def test_triage_verdicts_are_matched_exactly() -> None:
     assert has_triage_verdict(["needs_human_review"]) is True
     assert has_triage_verdict(["mqm_critical_blocked"]) is True
@@ -246,25 +192,9 @@ def test_triage_verdicts_are_matched_exactly() -> None:
     assert has_triage_verdict([]) is False
 
 
-# --------------------------------------------------------------------------- #
-# Table coherence
-# --------------------------------------------------------------------------- #
-
-
 def test_the_critical_table_is_a_subset_of_the_structural_table() -> None:
     structural = set(STRUCTURAL_DEFECT_MARKERS)
     assert set(CRITICAL_DEFECT_MARKERS) <= structural
-
-
-# --------------------------------------------------------------------------- #
-# The single routing decision
-#
-# Before this, "repair automatically?" was answered twice: the quality gate
-# routed every FastPass failure to REPAIR_PENDING, and the repair loop re-decided
-# with ``error_flags or score < threshold * 0.8``. Every block reaching the
-# second check already carried a flag, so the score clause was dead and the
-# ``* 0.8`` constant was a second pass line no documented knob controlled.
-# --------------------------------------------------------------------------- #
 
 
 def test_a_clean_block_passes() -> None:
@@ -275,7 +205,6 @@ def test_a_clean_block_passes() -> None:
 
 
 def test_a_named_invariant_failure_is_repairable() -> None:
-    """Repair is verifiable: the same check that rejected it will judge the fix."""
     from ubt.core.qe.defect_taxonomy import classify_defect
 
     assert (
@@ -291,7 +220,6 @@ def test_a_named_invariant_failure_is_repairable() -> None:
 
 
 def test_a_judge_opinion_alone_is_not_repairable() -> None:
-    """A rewrite cannot be verified against the judgement that asked for it."""
     from ubt.core.qe.defect_taxonomy import classify_defect
 
     assert classify_defect(["judge: semantic loss"], score=0.55, threshold=0.75) == "SEMANTIC_DOUBT"
@@ -299,7 +227,6 @@ def test_a_judge_opinion_alone_is_not_repairable() -> None:
 
 
 def test_a_deterministic_marker_outranks_a_semantic_one() -> None:
-    """A dropped number is a deterministic defect even if the judge also objected."""
     from ubt.core.qe.defect_taxonomy import classify_defect
 
     outcome = classify_defect(
@@ -311,7 +238,6 @@ def test_a_deterministic_marker_outranks_a_semantic_one() -> None:
 
 
 def test_a_flagged_block_is_never_released_by_a_high_score() -> None:
-    """The score cannot whitewash a named defect."""
     from ubt.core.qe.defect_taxonomy import classify_defect
 
     assert (
@@ -321,7 +247,6 @@ def test_a_flagged_block_is_never_released_by_a_high_score() -> None:
 
 
 def test_the_repair_selector_uses_the_shared_decision() -> None:
-    """The repair loop must not carry its own second pass line."""
     from unittest.mock import MagicMock
 
     from ubt.core.engine.repair_loop import RepairLoop
@@ -350,29 +275,16 @@ def test_the_repair_selector_uses_the_shared_decision() -> None:
     assert [b.id for b in selected] == ["det"]
 
 
-# --------------------------------------------------------------------------- #
-# One "shippable" rule
-#
-# ``max(0.5, qe_threshold)`` appeared four times — triage's auto-pass, the
-# repair stage's standalone finalizer, and two circuit-breaker exits. Four
-# copies of the most consequential threshold in the pipeline.
-# --------------------------------------------------------------------------- #
-
-
 def test_the_shippable_bar_tracks_the_threshold_but_never_drops_below_the_floor() -> None:
     from ubt.core.qe.score_policy import SHIPPABLE_FLOOR, shippable_threshold
 
-    # Above the floor: the operator's setting is honoured.
     assert shippable_threshold(0.9) == 0.9
     assert shippable_threshold(0.75) == 0.75
-    # At or below it: the floor holds, so a low setting cannot promote a draft
-    # the deterministic gates rejected (their classes sit at or below 0.70).
     assert shippable_threshold(0.2) == SHIPPABLE_FLOOR
     assert shippable_threshold(0.5) == SHIPPABLE_FLOOR
 
 
 def test_a_block_with_a_defect_flag_is_never_shippable() -> None:
-    """A favourable score is not evidence the defect was fixed."""
     from ubt.core.qe.score_policy import is_shippable
 
     assert is_shippable(0.99, 0.75, ["Numeric fidelity failure"]) is False
@@ -382,12 +294,6 @@ def test_a_block_with_a_defect_flag_is_never_shippable() -> None:
 
 
 def test_the_judge_cannot_raise_a_score_over_the_pass_line() -> None:
-    """There is no upgrade switch: a judge opinion may only lower.
-
-    ``qe_judge_allow_upgrade`` used to let a favourable verdict lift a real
-    STRUCTURAL_OTHER failure (0.70) over the line, releasing a draft on an
-    opinion alone. The knob is gone.
-    """
     import asyncio
 
     from ubt.core.qe.heuristic import QE_SCORE_STRUCTURAL_OTHER, HeuristicQERunner
@@ -408,19 +314,8 @@ def test_the_judge_cannot_raise_a_score_over_the_pass_line() -> None:
     assert scores == [QE_SCORE_STRUCTURAL_OTHER]
 
 
-# --------------------------------------------------------------------------- #
-# The table must name strings the pipeline actually emits
-# --------------------------------------------------------------------------- #
-
-#: Markers that are deliberately not emitted anywhere yet, or whose emit site is
-#: a different layer. Empty today; a marker belongs here only with a reason.
 _KNOWN_UNEMITTED: frozenset[str] = frozenset()
 
-#: Markers the pipeline emits through a shared constant rather than a literal.
-#: The constant *is* the emit site, so searching for the literal string would
-#: wrongly call these dead. ``CONSTRAINT_PREFIX`` is emitted by
-#: ``ConsistencyTask.flag`` (``ubt.core.qe.consistency_enforce``), which builds
-#: the string from the constant both modules share.
 _EMITTED_VIA_CONSTANT: frozenset[str] = frozenset((*ECHO_MARKERS, CONSTRAINT_PREFIX))
 
 
@@ -442,14 +337,6 @@ def _is_emitted(marker: str, sources: dict[Any, str]) -> bool:
 
 
 def test_every_structural_marker_is_a_string_some_module_emits() -> None:
-    """A marker nobody emits is a hole in the table, not a classification.
-
-    ``STRUCTURAL_DEFECT_MARKERS`` listed ``html_tag_mismatch`` while the export
-    stage emits ``html_structure_mismatch``. The dead entry matched nothing, so a
-    target that lost its markup structure classified as "other structural
-    rejection" (0.70) and could be released by any threshold at or below it —
-    the exact failure the table exists to prevent, hidden by a spelling.
-    """
     sources = _sources()
     dead = [
         marker
@@ -460,7 +347,6 @@ def test_every_structural_marker_is_a_string_some_module_emits() -> None:
 
 
 def test_every_format_only_marker_is_a_string_some_module_emits() -> None:
-    """``is_format_only`` only ever fires on a real emitted substring."""
     sources = _sources()
     dead = [
         marker
@@ -471,16 +357,10 @@ def test_every_format_only_marker_is_a_string_some_module_emits() -> None:
 
 
 def test_a_structure_mismatch_is_a_deterministic_defect() -> None:
-    """The export stage's own flag must outrank a passing score."""
     from ubt.core.qe.defect_taxonomy import classify_defect
 
     flag = "html_structure_mismatch: expected <p> got <div>"
     assert classify_defect([flag], score=0.95, threshold=0.70) == "DETERMINISTIC_DEFECT"
-
-
-# --------------------------------------------------------------------------- #
-# Structured flags: the format that removes the substring coupling
-# --------------------------------------------------------------------------- #
 
 
 def test_a_structured_flag_round_trips() -> None:
@@ -492,7 +372,6 @@ def test_a_structured_flag_round_trips() -> None:
 
 
 def test_an_unknown_severity_is_rejected_at_the_writer() -> None:
-    """A typo must fail where it is written, not silently classify as prose."""
     from ubt.core.qe.defect_taxonomy import format_defect_flag
 
     with pytest.raises(ValueError, match="unknown defect severity"):
@@ -500,15 +379,14 @@ def test_an_unknown_severity_is_rejected_at_the_writer() -> None:
 
 
 def test_legacy_flags_parse_as_none() -> None:
-    """The narrow regex is the point: prose with a colon is not structured."""
     from ubt.core.qe.defect_taxonomy import parse_defect_flag
 
     for legacy in (
         "Drafting error: 500 from upstream",
         "Glossary term violation: ALU",
         "Numeric fidelity failure: dropped 42",
-        "terminology_consistency:render 'ALU' as 'X'",  # no severity tier
-        "Terminology_Consistency:major:x",  # category must be lowercase
+        "terminology_consistency:render 'ALU' as 'X'",
+        "Terminology_Consistency:major:x",
         "",
     ):
         assert parse_defect_flag(legacy) is None, legacy
@@ -524,7 +402,7 @@ def test_the_highest_declared_severity_wins() -> None:
         format_defect_flag("style", "minor", "a"),
         format_defect_flag("terminology_consistency", "critical", "b"),
         format_defect_flag("format", "major", "c"),
-        "Drafting error: 500",  # legacy, contributes nothing
+        "Drafting error: 500",
     ]
     assert structured_severity(flags) == "critical"
 
@@ -537,11 +415,6 @@ def test_no_structured_flag_reports_no_severity() -> None:
 
 
 def test_triage_honours_a_declared_severity_over_the_substring_tables() -> None:
-    """The consumer: a structured flag's own verdict beats phrase matching.
-
-    The flag text contains no marker from any table, so the tables alone would
-    call it minor; the declaration says critical.
-    """
     from ubt.core.engine.stages.triage import _flags_severity
     from ubt.core.qe.defect_taxonomy import format_defect_flag
 
@@ -553,7 +426,5 @@ def test_triage_still_reads_legacy_flags_from_the_tables() -> None:
     from ubt.core.engine.stages.triage import _flags_severity
 
     assert _flags_severity(["Numeric fidelity failure: dropped 42"]) == "critical"
-    # "Drafting error" is a structural marker, so it floors at major.
     assert _flags_severity(["Drafting error: 500"]) == "major"
-    # A flag matching no table at all stays minor.
     assert _flags_severity(["Low legibility font"]) == "minor"

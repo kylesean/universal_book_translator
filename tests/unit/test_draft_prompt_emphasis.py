@@ -1,11 +1,3 @@
-"""The draft builders must carry the bold-emphasis markers into the target.
-
-The draft stage brackets a partial bold source span with ``⟦B⟧ … ⟦/B⟧`` (see
-``ubt.core.ir.emphasis``); the builders state the preservation rule, the
-short-source heuristic must measure the source without the markers, and a
-few-shot reference (which has no markers) must not be shown for such a block.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -40,16 +32,12 @@ def test_every_builder_states_the_emphasis_rule(build: _Builder) -> None:
 
 @pytest.mark.parametrize("build", _BUILDERS)
 def test_the_short_source_hint_ignores_the_markers(build: _Builder) -> None:
-    # Clean form ends with "." so no "do not expand" clause fires; the marked
-    # form ends with "⟧", so a builder that measured it raw would fire wrongly.
     system, user = build(source_text=_MARKED)
     assert "equally short" not in system + user
 
 
 @pytest.mark.parametrize("build", _BUILDERS)
 def test_the_short_source_hint_still_fires_on_a_marked_short_label(build: _Builder) -> None:
-    # 58 chars (<= 60) with no terminal punctuation fires; the markers would push
-    # it over the limit if they were counted.
     marked = "⟦B⟧" + ("A" * 58) + "⟦/B⟧"
     system, user = build(source_text=marked)
     assert "equally short" in system + user

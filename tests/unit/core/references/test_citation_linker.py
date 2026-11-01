@@ -1,5 +1,3 @@
-"""Unit tests for cross-chapter citation topology, anchor extraction, and Typst hyperlink injection."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,9 +26,6 @@ def _make_block(
     element: Any,
     page: int = 1,
 ) -> IRBlock:
-    # ``IRBlock`` has no ``bbox`` field: the bounding box is the element's
-    # ``span`` and is exposed as a read-only property. Building the element with
-    # that span is the supported route, and it keeps ``block.bbox`` populated.
     return IRBlock(element=element, style=None, status=BlockStatus.PENDING)
 
 
@@ -226,7 +221,6 @@ def test_inject_hyperlinks_typst() -> None:
     ]
     topology = build_citation_topology(blocks)
 
-    # 1. English text
     en_text = "As shown in [1], Section 2.1 details the framework. Refer to Figure 2 and Table 4."
     en_linked = inject_hyperlinks(en_text, topology, target_format="typst")
     assert "#link(<bib-1>)[[1]]" in en_linked
@@ -234,7 +228,6 @@ def test_inject_hyperlinks_typst() -> None:
     assert "#link(<fig-2>)[Figure 2]" in en_linked
     assert "#link(<tbl-4>)[Table 4]" in en_linked
 
-    # 2. Chinese text
     zh_text = "根据文献 [1] 的定义，详见第 2.1 节，结构如图 2 所示，性能见表 4。"
     zh_linked = inject_hyperlinks(zh_text, topology, target_format="typst")
     assert "#link(<bib-1>)[[1]]" in zh_linked
@@ -263,16 +256,6 @@ def test_inject_hyperlinks_protects_code_and_math() -> None:
 
 
 def test_inject_hyperlinks_does_not_steal_a_style_wrapper_body() -> None:
-    """A citation inside a styled run must not lose the run's content block.
-
-    The renderer wraps a coloured citation run as
-    ``#text(fill: rgb("#00699d"))[1]`` before links are injected. The citation
-    regex used to see the body's ``[1]`` as prose, replace it with
-    ``#link(<bib-1>)[[1]]`` and consume the body's brackets, leaving
-    ``#text(fill: …)#link(…)`` — a Typst call with no body
-    (``missing argument: body``) that aborted the whole page-locked render on
-    26-page replay block ``pdf_main#b0004``.
-    """
     blocks = [
         _make_block(
             "h_bib",
@@ -334,17 +317,14 @@ def test_typst_document_renderer_emits_anchors_and_links(tmp_path: Path) -> None
             ),
         ),
     ]
-    blocks[3].policy_translate = False  # keeps source for bibliography
+    blocks[3].policy_translate = False
 
     renderer = TypstDocumentRenderer()
     source, stats = renderer.build_source(blocks, tmp_path)
 
-    # Heading should carry anchor label <sec-1>
     assert "#heading(level: 1)[1\\. Introduction] <sec-1>" in source
-    # Prose should carry clickable #link
     assert "#link(<sec-1>)[Section 1]" in source
     assert "#link(<bib-1>)[\\[1\\]]" in source
-    # Bibliography entry should carry anchor point
     assert "<bib-1>" in source
 
 
@@ -389,7 +369,6 @@ def test_format_mention_text_schemes() -> None:
     from ubt.core.references.linker import format_mention_text
     from ubt.core.references.models import CrossRefPrefixScheme
 
-    # Chinese standard
     assert (
         format_mention_text(
             "Figure 2",
@@ -441,7 +420,6 @@ def test_format_mention_text_schemes() -> None:
         == "第 15 页"
     )
 
-    # Academic formal
     assert (
         format_mention_text(
             "图 2",
@@ -463,7 +441,6 @@ def test_format_mention_text_schemes() -> None:
         == "Table 3"
     )
 
-    # Compact
     assert (
         format_mention_text(
             "Figure 2",
@@ -503,9 +480,6 @@ def test_inject_hyperlinks_with_page_and_native_ref() -> None:
 
     text = "Refer to Figure 2, see page 5 for details."
 
-    # 1. With page number dynamic lookup. Page references are opt-in since the
-    # dangling-label hardening (enable_page_references defaults to False): this
-    # topology does contain a page-5 block, so the link is safe to emit here.
     cfg_page = CrossRefConfig(
         style=CrossRefStyle.WITH_PAGE, target_lang="zh", enable_page_references=True
     )
@@ -514,21 +488,12 @@ def test_inject_hyperlinks_with_page_and_native_ref() -> None:
     assert "loc.first().location().page() != here().page()" in linked_page
     assert "#link(<page-5>)[see page 5]" in linked_page
 
-    # 2. Native ref
     cfg_native = CrossRefConfig(style=CrossRefStyle.NATIVE_REF)
     linked_native = inject_hyperlinks(text, topology, target_format="typst", config=cfg_native)
     assert "#ref(<fig-2>)" in linked_native
 
 
 def test_page_references_default_off() -> None:
-    """``enable_page_references`` defaults to False: no <page-N> links.
-
-    Prose like "see page 5" used to emit ``#link(<page-5>)``, but that label
-    only exists when page 5 still has surviving blocks at render time, so a
-    reference into a pruned page aborted the whole Typst compile
-    (AD-034). The opt-in flag keeps the feature available where the caller
-    knows every referenced page survives; the default must stay link-free.
-    """
     from ubt.core.references.models import CrossRefConfig, CrossRefStyle
 
     blocks = [
@@ -563,7 +528,6 @@ def test_inject_hyperlinks_html_and_markdown() -> None:
 
     text = "Detailed metrics are shown in Table 3."
 
-    # HTML
     cfg_html = CrossRefConfig(link_css_class="doc-link", open_in_new_tab=True)
     linked_html = inject_hyperlinks(text, topology, target_format="html", config=cfg_html)
     assert (
@@ -571,7 +535,6 @@ def test_inject_hyperlinks_html_and_markdown() -> None:
         in linked_html
     )
 
-    # Markdown
     linked_md = inject_hyperlinks(text, topology, target_format="markdown")
     assert "[Table 3](#tbl-3)" in linked_md
 
@@ -602,20 +565,15 @@ def test_typst_document_renderer_with_xref_enabled(tmp_path: Path) -> None:
         ),
     ]
 
-    # Page references are opt-in (dangling <page-N> hardening); this topology
-    # contains the page-1 block, so the reference is safe to link.
     cfg = CrossRefConfig(
         style=CrossRefStyle.WITH_PAGE, target_lang="zh", enable_page_references=True
     )
     renderer = TypstDocumentRenderer(enable_xref=True, xref_config=cfg)
     source, stats = renderer.build_source(blocks, tmp_path)
 
-    # Page start metadata emitted
     assert '[#metadata("page-start") <page-1>]' in source
     assert '[#metadata("page-start") <page-2>]' in source
 
-    # Equation label emitted
     assert "<eq-1>" in source
 
-    # Page reference linked
     assert "#link(<page-1>)[See page 1]" in source

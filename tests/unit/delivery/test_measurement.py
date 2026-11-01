@@ -1,5 +1,3 @@
-"""MeasurementService cache scaffold tests: real delegate, stable keys."""
-
 from __future__ import annotations
 
 import pytest

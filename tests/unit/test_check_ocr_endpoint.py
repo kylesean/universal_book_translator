@@ -1,12 +1,3 @@
-"""The OCR-endpoint probe: a wrong endpoint must fail in seconds.
-
-A misconfigured vision endpoint used to surface only after a full translation —
-the run finished, every scanned page stayed source, and nothing said why. The
-probe posts one page and checks the failure modes that matter: unreachable,
-empty, and an echoed prompt (a model refusing vision commonly echoes its
-instruction, which would otherwise be scored as a successful OCR).
-"""
-
 from __future__ import annotations
 
 import sys
@@ -24,8 +15,6 @@ pytestmark = pytest.mark.fast
 
 
 class _FakeState(TypedDict):
-    """What the stubbed transport recorded for one probe run."""
-
     reply: str
     calls: int
     image_bytes: int
@@ -36,12 +25,6 @@ _STATE: dict[str, str] = {"reply": ""}
 
 @pytest.fixture()
 def fake_post(monkeypatch: pytest.MonkeyPatch) -> _FakeState:
-    """Replace the HTTP post so no socket is opened.
-
-    The suite blocks outbound connects by default (tests/conftest.py). Patching
-    ``_post`` keeps this test offline while still exercising the real verdict
-    logic -- empty, echoing, and usable replies.
-    """
     state: _FakeState = {"reply": _STATE["reply"], "calls": 0, "image_bytes": 0}
 
     def _fake_post(endpoint: str, model: str, api_key: str, png: bytes, timeout: float) -> str:
@@ -89,7 +72,6 @@ def test_probe_verdicts(
 
 
 def test_the_request_carries_the_page_image(fake_post: _FakeState, pdf: Path) -> None:
-    """A probe that never sent the image would pass against any chat endpoint."""
     fake_post["reply"] = "这是识别出的整页正文内容"
     code = main(["--pdf", str(pdf), "--page", "1", "--endpoint", "http://fake/v1/chat/completions"])
     assert code == 0
@@ -103,7 +85,7 @@ def test_an_unreachable_endpoint_fails_fast(pdf: Path) -> None:
             "--pdf",
             str(pdf),
             "--endpoint",
-            "http://127.0.0.1:9/v1/chat/completions",  # discard port, refuses instantly
+            "http://127.0.0.1:9/v1/chat/completions",
             "--timeout",
             "5",
         ]

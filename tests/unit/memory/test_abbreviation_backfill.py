@@ -1,5 +1,3 @@
-"""Contract tests for the bulk abbreviation translation backfill channel."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -24,11 +22,6 @@ def _entry(
     return {"source": source, "aliases": list(aliases), "translation": translation, "kind": kind}
 
 
-# --------------------------------------------------------------------------- #
-# _clean_translation
-# --------------------------------------------------------------------------- #
-
-
 def test_clean_translation_strips_and_unquotes() -> None:
     assert _clean_translation("  《工作记忆》  ", "WM") == "工作记忆"
 
@@ -51,11 +44,6 @@ def test_clean_translation_rejects_acronym_echo(echo: str) -> None:
 def test_clean_translation_rejects_newline_or_equals() -> None:
     assert _clean_translation("a\nb", "WM") is None
     assert _clean_translation("a=b", "WM") is None
-
-
-# --------------------------------------------------------------------------- #
-# _apply_response
-# --------------------------------------------------------------------------- #
 
 
 def test_apply_response_equals_and_colon_forms() -> None:
@@ -115,11 +103,6 @@ def test_apply_response_empty_response() -> None:
     assert _apply_response("", [_entry("A", ["A"])]) == 0
 
 
-# --------------------------------------------------------------------------- #
-# build_backfill_prompt
-# --------------------------------------------------------------------------- #
-
-
 def test_build_prompt_mentions_target_language() -> None:
     system_prompt, _ = build_backfill_prompt([_entry("A", ["A"])], "zh")
     assert "zh" in system_prompt
@@ -150,11 +133,6 @@ def test_build_prompt_missing_alias_uses_empty_key() -> None:
     assert "1.  — Source" in user_prompt
 
 
-# --------------------------------------------------------------------------- #
-# backfill_abbreviation_translations
-# --------------------------------------------------------------------------- #
-
-
 async def test_backfill_fills_empty_translations() -> None:
     entries = [_entry("Working Memory", ["WM"]), _entry("Central Unit", ["CU"])]
 
@@ -179,7 +157,6 @@ async def test_backfill_skips_already_translated_entries() -> None:
 
 
 async def test_backfill_groups_variants_sharing_a_key() -> None:
-    # Mr. Bingley / Miss Bingley share the "bingley" core through their aliases.
     entries = [
         _entry("Mr. Bingley", ["bingley"], kind="person"),
         _entry("Miss Bingley", ["bingley"], kind="person"),
@@ -194,7 +171,7 @@ async def test_backfill_groups_variants_sharing_a_key() -> None:
     assert filled == 2
     assert entries[0]["translation"] == "彬格莱"
     assert entries[1]["translation"] == "彬格莱"
-    assert len(calls) == 1  # one representative per shared key
+    assert len(calls) == 1
 
 
 async def test_backfill_batches_and_applies_only_within_batch(
@@ -207,8 +184,6 @@ async def test_backfill_batches_and_applies_only_within_batch(
     async def complete(system: str, user: str) -> str:
         nonlocal calls
         calls += 1
-        # The first batch's response also names the *other* batch's acronym;
-        # it must not fill Beta (that entry belongs to the second batch).
         return "AA = 甲\nBB = 乙" if calls == 1 else ""
 
     _, filled = await backfill_abbreviation_translations(entries, complete)
@@ -250,32 +225,18 @@ def test_max_translation_chars_constant() -> None:
     assert _MAX_TRANSLATION_CHARS == 80
 
 
-# --------------------------------------------------------------------------- #
-# A technical acronym must survive into its rendering
-#
-# The prompt states this as rule 2 ("keep the acronym itself unchanged"), but the
-# model broke it on the ATC'25 paper: IOMMU came back as 输入/输出内存管理单元. The
-# code accepted it, so 19 prose occurrences were expanded and a table column that
-# used to read "Aster. no IOMMU(s)" became "Aster.（禁用输入/输出内存管理单元，秒）" --
-# too wide for its column. A stated acceptance criterion the parser ignores is
-# not a criterion.
-# --------------------------------------------------------------------------- #
-
-
 def test_a_rendering_that_drops_a_technical_acronym_is_rejected() -> None:
     assert _clean_translation("输入/输出内存管理单元", "IOMMU") is None
 
 
 def test_a_rendering_that_keeps_the_acronym_is_accepted() -> None:
     assert _clean_translation("输入/输出内存管理单元（IOMMU）", "IOMMU") is not None
-    assert _clean_translation("IOMMU", "IOMMU") is None  # a bare echo is still not a translation
+    assert _clean_translation("IOMMU", "IOMMU") is None
 
 
 def test_a_two_letter_initialism_may_still_be_expanded() -> None:
-    """The convention differs by length: WM -> 工作记忆 is correct Chinese."""
     assert _clean_translation("工作记忆", "WM") == "工作记忆"
 
 
 def test_a_mixed_case_token_is_not_held_to_the_rule() -> None:
-    """Only the all-caps technical shape is enforced (Rust, Theseus keep their form)."""
     assert _clean_translation("铁锈", "RUST") is None

@@ -1,13 +1,3 @@
-"""``ubt doctor`` tells the truth about a missing docling.
-
-The check used to say PDF jobs "will fail" for both engine settings. Neither
-was right: ``auto`` degrades to the geometric pdfium reader (tables, figures
-and formulas silently dropped from the rebuilt PDF), while an explicit
-``--pdf-engine docling`` now fails with an actionable error instead of
-degrading. An operator reading the old text went looking for a crash that
-never came.
-"""
-
 from __future__ import annotations
 
 import importlib.util
@@ -51,7 +41,6 @@ def test_explicit_docling_without_the_package_is_not_described_as_a_fallback() -
 
 
 def test_the_two_engine_checks_do_not_share_copy() -> None:
-    """The old text was one sentence used for both paths, and true for neither."""
     from ubt.cli.commands.doctor import collect_checks
     from ubt.core.config import UBTConfig
 

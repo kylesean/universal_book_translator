@@ -1,15 +1,3 @@
-"""A macro-chunk failure marks only the block that failed, never its group.
-
-The draft stage finalizes each block in a macro-chunk group one at a time, and
-``finalize_draft`` checkpoints a block the moment it succeeds. If a later
-block's finalize raised and the exception escaped to ``run_draft_batch``'s
-``asyncio.gather``, the handler there marked EVERY block in the group FAILED —
-including blocks already drafted, paid for and checkpointed. On resume the
-``Drafting error:`` flag routed those paid blocks to ``reset_blocks_to_pending``,
-which cleared their target text and re-billed them. This pins the fault
-isolation: the failure stays on the block that produced it.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -25,8 +13,6 @@ pytestmark = pytest.mark.fast
 
 
 class _FakeEngine:
-    """Stands in for the translation engine: no cache, identity resolve."""
-
     cache = None
 
     async def draft(self, masked_source: str, generate: Any, *, context: str = "") -> object:
@@ -37,8 +23,6 @@ class _FakeEngine:
 
 
 class _FakeRouter:
-    """Returns one extracted draft per requested block, keyed by block id."""
-
     def __init__(self, drafts: dict[str, str]) -> None:
         self.drafts = drafts
         self.calls: list[list[IRBlock]] = []
@@ -98,8 +82,6 @@ def _inputs(block_id: str) -> _DraftInputs:
 
 
 class _Policy:
-    """The handful of policy knobs ``draft_macro_chunk_group`` reads."""
-
     glossary_dicts: list[Any] = []
     draft_max_retries = 0
     draft_retry_base_delay = 0.0
@@ -128,12 +110,10 @@ async def test_a_finalize_failure_does_not_fail_already_drafted_siblings() -> No
     b1, b2 = _block("b1"), _block("b2")
     await processor.draft_macro_chunk_group([(b1, _inputs("b1")), (b2, _inputs("b2"))], [b1, b2])
 
-    # b1 was drafted and checkpointed; only b2 carries a FAILED update.
     assert drafted == ["b1"]
     updates = runtime.flusher.updates
     failed_ids = {u["block_id"] for u in updates if str(u.get("status")) == "failed"}
     assert failed_ids == {"b2"}, updates
-    # b1's successful checkpoint is present and intact — it was never re-marked.
     b1_updates = [u for u in updates if u["block_id"] == "b1"]
     assert b1_updates and all(str(u.get("status")) != "failed" for u in b1_updates)
     assert any(u.get("target_text") == "译文一" for u in b1_updates)
@@ -141,13 +121,6 @@ async def test_a_finalize_failure_does_not_fail_already_drafted_siblings() -> No
 
 @pytest.mark.asyncio
 async def test_a_failed_macro_chunk_redrafts_blocks_individually() -> None:
-    """A group-level budget failure must not mark every block from one call.
-
-    The original job failed macro-chunks with ``finish_reason=length`` and then
-    marked all eight blocks FAILED without retrying them individually. Resume
-    re-queued the same group and repeated the failure. The group call is allowed
-    to fail, but each member must then get its own smaller request.
-    """
     runtime = _runtime({})
 
     class _ChunkFailsRouter(_FakeRouter):
@@ -174,13 +147,6 @@ async def test_a_failed_macro_chunk_redrafts_blocks_individually() -> None:
 
 
 def test_a_group_raise_leaves_already_paid_blocks_alone() -> None:
-    """The group-level failure path must not re-flag a checkpointed draft.
-
-    ``run_draft_batch`` marks every member of a group that raised. A block that
-    already landed (target text, or a verdict that consumed it) must be
-    excluded: re-flagging it as a transient *drafting* failure is what makes
-    resume clear the paid text and re-bill the provider.
-    """
     from ubt.core.engine.stages.draft import _paid_block_ids
     from ubt.core.ir.models import BlockStatus
 

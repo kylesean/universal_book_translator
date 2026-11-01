@@ -1,22 +1,3 @@
-"""Guard against ``except`` handlers that discard the error and say nothing.
-
-The audit counted ~350 ``except Exception`` handlers in the package. Most are
-correct: a fallback assignment (``except Exception: return []``) is visible to
-the next reader, and probing code legitimately reports "not available" through
-its return value. Replacing them wholesale would be noise, not a fix.
-
-The handler this test rejects is the one with nothing left to inspect: its whole
-body is ``pass``, ``continue`` or ``break``. When one of those fires, the
-process keeps running with no record anywhere that something failed — no log
-line, no re-raise, no fallback value — which is how a stale cache, an unreadable
-page or a corrupt report turns into an unexplained wrong result.
-
-The escape hatch is a same-line comment on the ``except`` clause: it is the
-cheapest possible statement of *why* silence is right, and it puts that reason
-where the next editor will see it. That is what this gate asks for, not a
-rewrite of the handler.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -29,9 +10,6 @@ pytestmark = pytest.mark.fast
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PACKAGE_ROOT = _REPO_ROOT / "ubt"
 
-#: Exception bases that also swallow programming errors (``AttributeError``,
-#: ``TypeError``, ...). A handler narrowing to ``ValueError`` is stating
-#: something, so it is out of scope.
 _BROAD_EXCEPTIONS = frozenset({"Exception", "BaseException"})
 
 
@@ -49,12 +27,6 @@ def _caught_names(handler: ast.ExceptHandler) -> list[str]:
 
 
 def _body_is_a_silent_exit(handler: ast.ExceptHandler) -> bool:
-    """True when the handler does nothing but pass/continue/break.
-
-    A bare string statement (a docstring) is not an action, so it is ignored —
-    but it is also not a justification: the author still has to say why the
-    error is being dropped, and the failure message asks for the comment.
-    """
     statements = [
         node
         for node in handler.body
@@ -68,7 +40,6 @@ def _body_is_a_silent_exit(handler: ast.ExceptHandler) -> bool:
 
 
 def _is_justified(source_lines: list[str], handler: ast.ExceptHandler) -> bool:
-    """Whether the ``except`` line carries a trailing comment."""
     line = source_lines[handler.lineno - 1]
     return "#" in line
 
@@ -89,7 +60,6 @@ def _violation_lines(source: str) -> list[int]:
 
 
 def test_the_gate_detects_a_silent_handler() -> None:
-    """The detector itself must not be asleep: a vacuous gate passes forever."""
     silent = "try:\n    x()\nexcept Exception:\n    pass\n"
     assert _violation_lines(silent) == [3]
 

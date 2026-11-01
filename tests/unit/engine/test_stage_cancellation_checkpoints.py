@@ -1,5 +1,3 @@
-"""Tests for cancellation and lease loss checkpoints in pipeline stages."""
-
 from __future__ import annotations
 
 import asyncio
@@ -83,7 +81,6 @@ def _make_dummy_ctx(
 
 @pytest.mark.asyncio
 async def test_bible_stage_cancellation_and_lease_lost(tmp_path: Path) -> None:
-    # 1. Cancel token raises JobInterruptedError
     cancel_token = asyncio.Event()
     cancel_token.set()
     ctx_cancel = _make_dummy_ctx(tmp_path, cancel_token=cancel_token)
@@ -91,7 +88,6 @@ async def test_bible_stage_cancellation_and_lease_lost(tmp_path: Path) -> None:
         async for _ in run_bible_stage(ctx_cancel, Terminology()):
             pass
 
-    # 2. Lease lost raises LedgerWriterLeaseLostError
     lease_lost = asyncio.Event()
     lease_lost.set()
     ctx_lease = _make_dummy_ctx(tmp_path, lease_lost=lease_lost)
@@ -105,7 +101,6 @@ async def test_quality_gate_stage_cancellation_and_lease_lost(tmp_path: Path) ->
     services = cast(
         "RunServices", SimpleNamespace(fast_pass=None, qe_runner=None, qe_runner_explicit=False)
     )
-    # 1. Cancel token raises JobInterruptedError
     cancel_token = asyncio.Event()
     cancel_token.set()
     ctx_cancel = _make_dummy_ctx(tmp_path, cancel_token=cancel_token)
@@ -113,7 +108,6 @@ async def test_quality_gate_stage_cancellation_and_lease_lost(tmp_path: Path) ->
         async for _ in run_quality_gate_stage(ctx_cancel, services, Terminology(), Scoring()):
             pass
 
-    # 2. Lease lost raises LedgerWriterLeaseLostError
     lease_lost = asyncio.Event()
     lease_lost.set()
     ctx_lease = _make_dummy_ctx(tmp_path, lease_lost=lease_lost)
@@ -128,7 +122,6 @@ async def test_consistency_stage_cancellation_and_lease_lost(tmp_path: Path) -> 
         "RunServices",
         SimpleNamespace(repair_loop=None, fast_pass=None, concurrency_sem=asyncio.Semaphore(1)),
     )
-    # 1. Cancel token raises JobInterruptedError
     cancel_token = asyncio.Event()
     cancel_token.set()
     ctx_cancel = _make_dummy_ctx(tmp_path, cancel_token=cancel_token)
@@ -136,7 +129,6 @@ async def test_consistency_stage_cancellation_and_lease_lost(tmp_path: Path) -> 
         async for _ in run_consistency_stage(ctx_cancel, services, Terminology(), Scoring()):
             pass
 
-    # 2. Lease lost raises LedgerWriterLeaseLostError
     lease_lost = asyncio.Event()
     lease_lost.set()
     ctx_lease = _make_dummy_ctx(tmp_path, lease_lost=lease_lost)
@@ -150,7 +142,6 @@ async def test_backfill_abbreviation_translations_cancels_cooperatively() -> Non
     entries = [{"source": "BERT", "aliases": ["BERT"], "translation": ""}]
     complete_mock = AsyncMock(return_value="BERT = 变换器双向编码器表征")
 
-    # Cancel check raises
     def cancel_check() -> None:
         raise JobInterruptedError("cancelled")
 
@@ -162,5 +153,4 @@ async def test_backfill_abbreviation_translations_cancels_cooperatively() -> Non
             cancel_check=cancel_check,
         )
 
-    # complete_mock must NOT have been called
     complete_mock.assert_not_called()

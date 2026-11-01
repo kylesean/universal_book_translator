@@ -1,5 +1,3 @@
-"""Unit tests for figure subcaption parsing, panel grouping, and grid generation."""
-
 from __future__ import annotations
 
 import pytest
@@ -32,8 +30,6 @@ def _make_block(
         block_type=btype,
         source_text=asset_id or text,
     )
-    # Only ``element`` and ``target_text`` are fields of ``IRBlock``; the rest
-    # were silently ignored by ``extra="ignore"``.
     return IRBlock(element=elem, target_text=text)
 
 
@@ -76,8 +72,8 @@ def test_calculate_grid_columns() -> None:
     assert calculate_grid_columns(1) == 1
     assert calculate_grid_columns(2) == 2
     assert calculate_grid_columns(3) == 3
-    assert calculate_grid_columns(4) == 2  # 2x2 grid preferred
-    assert calculate_grid_columns(6) == 3  # 2x3 grid
+    assert calculate_grid_columns(4) == 2
+    assert calculate_grid_columns(6) == 3
     assert calculate_grid_columns(8, max_cols=3) == 3
 
 

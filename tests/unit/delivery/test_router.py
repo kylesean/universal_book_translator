@@ -1,5 +1,3 @@
-"""Delivery router tests: routing matrix, eligibility, and fail-closed plans."""
-
 from __future__ import annotations
 
 import pytest
@@ -89,7 +87,6 @@ def test_technical_long_book_and_mobile_default_to_readable() -> None:
         plan = route_delivery(_signals(document_class=document_class))
         assert plan.contract is DeliveryContract.READABLE
 
-    # Technical document with LOW complexity also defaults to readable
     tech_plan = route_delivery(
         _signals(
             document_class=DocumentClass.TECHNICAL,

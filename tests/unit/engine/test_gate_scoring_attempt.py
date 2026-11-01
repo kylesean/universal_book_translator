@@ -1,18 +1,3 @@
-"""P2-5: a scoring runner must actually be *used* by the gate.
-
-A runner's ``is_calibrated()`` is False until its first batch answers (an honest
-"not yet proven"). The quality gate tested ``is_calibrated()`` *before* deciding
-whether to score, so the first call was never made and every block was stamped
-``mtqe_score=None`` for the life of the run. The neural subprocess runner this
-originally described was retired for license compliance, but the split it pins
-is engine-agnostic and still correct.
-
-The fix splits the two questions: ``may_be_calibrated()`` ("is a scoring call
-worth attempting") gates the call, and ``is_calibrated()`` (the settled verdict)
-decides whether the returned numbers are trusted. A runner that answers
-non-calibrated still yields ``None`` scores.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -33,8 +18,6 @@ pytestmark = pytest.mark.fast
 
 
 class _SubprocessLikeRunner(BaseQERunner):
-    """A calibration-protocol runner without the retired neural subprocess."""
-
     def __init__(self, *, neural: bool) -> None:
         self._requested_neural = neural
         self._last_engine: str | None = None
@@ -46,12 +29,9 @@ class _SubprocessLikeRunner(BaseQERunner):
         return [0.91] * len(pairs)
 
     def is_calibrated(self) -> bool:
-        # Unproven until the first batch answers, exactly like the real runner.
         return self._last_engine == "neural"
 
     def may_be_calibrated(self) -> bool:
-        # A call is worth attempting while the subprocess has not yet answered
-        # non-neural.
         return self._last_engine is None or self._last_engine == "neural"
 
 
@@ -82,8 +62,6 @@ def _block(block_id: str) -> IRBlock:
         block_type=BlockType.NARRATIVE,
         source_text="The value is 3.5 percent.",
     )
-    # An empty target fails FastPass, so the block is "suspicious" and reaches
-    # the scoring branch.
     return IRBlock(element=element, status=BlockStatus.DRAFTED, target_text="")
 
 
@@ -155,7 +133,6 @@ async def _run(runner: BaseQERunner) -> list[dict[str, Any]]:
 
 
 def test_a_neural_subprocess_runner_is_scored_on_the_first_batch() -> None:
-    """The gate must attempt the first call, then trust the neural verdict."""
     runner = _SubprocessLikeRunner(neural=True)
     updates = asyncio.run(_run(runner))
 
@@ -165,7 +142,6 @@ def test_a_neural_subprocess_runner_is_scored_on_the_first_batch() -> None:
 
 
 def test_a_heuristic_fallback_subprocess_runner_yields_no_pseudo_scores() -> None:
-    """A non-neural answer still produces None — the honesty rule is intact."""
     runner = _SubprocessLikeRunner(neural=False)
     updates = asyncio.run(_run(runner))
 
@@ -174,14 +150,6 @@ def test_a_heuristic_fallback_subprocess_runner_yields_no_pseudo_scores() -> Non
 
 
 def test_the_gate_records_which_engine_produced_the_scores() -> None:
-    """The audit artifact must name the scoring engine.
-
-    The probe used to read ``last_engine``, an attribute only the retired
-    CometKiwi subprocess set, so ``qe_score_source`` was never written and the
-    report field was permanently ``None`` while the console fell back to a
-    hard-coded label. Reading ``score_source()`` — part of the runner
-    interface — makes the write unconditional.
-    """
     runner = _SubprocessLikeRunner(neural=True)
     _, ledger = asyncio.run(_run_with_ledger(runner))
 
@@ -196,12 +164,10 @@ def test_the_gate_records_which_engine_produced_the_scores() -> None:
     ],
 )
 def test_each_runner_names_its_own_engine(runner: BaseQERunner, expected: str) -> None:
-    """The label is per-runner, not a single hard-coded string."""
     assert runner.score_source() == expected
 
 
 def test_a_tiered_runner_reports_the_leg_that_answered() -> None:
-    """A tier that never reached its judge must not claim a judge opinion."""
     tier = TieredQERunner(heuristic=HeuristicQERunner(), judge=None, pass_sample=0.0)
 
     assert tier.score_source() == "heuristic"

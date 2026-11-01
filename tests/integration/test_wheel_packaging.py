@@ -1,17 +1,3 @@
-"""Wheel packaging smoke: build, install into a clean venv, check the archive.
-
-Every other test runs against the SOURCE tree, where ``ubt/api/static`` and
-every module exist by definition. The wheel is what an operator actually
-installs, and nothing checked it: ``packages = ["ubt"]`` could drop a
-subpackage, the SPA bundle could fall out of the archive, or a module could
-import something only present in the dev extra — and every gate would stay
-green while ``pip install universal-book-translator`` produced a broken
-package.
-
-Slow tier: it shells out to ``uv build`` and ``uv pip install`` into a fresh
-virtual environment. Skipped when ``uv`` is not on PATH.
-"""
-
 from __future__ import annotations
 
 import json
@@ -37,7 +23,6 @@ def _uv() -> str:
 
 @pytest.fixture(scope="module")
 def built_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """One wheel build for the whole module (it is the slow part)."""
     uv = _uv()
     out_dir = tmp_path_factory.mktemp("wheel")
     proc = subprocess.run(
@@ -54,18 +39,14 @@ def built_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def test_the_wheel_carries_the_package_and_the_spa_bundle(built_wheel: Path) -> None:
-    """The archive itself: package modules and the prebuilt console."""
     with zipfile.ZipFile(built_wheel) as archive:
         names = archive.namelist()
 
     assert any(name.startswith("ubt/") for name in names), "ubt package missing from the wheel"
-    # The console ships inside the package so a pip-installed wheel serves it
-    # with no Node.js on the end-user machine (pyproject's own comment says so).
     assert "ubt/api/static/index.html" in names, (
         "the SPA bundle is missing: run scripts/build_console_assets.py before packaging"
     )
     assert any(name.startswith("ubt/api/static/assets/") for name in names)
-    # A few load-bearing subpackages; a `packages` regression drops these.
     for required in (
         "ubt/core/engine/pipeline.py",
         "ubt/adapters/pdf/docling_adapter.py",
@@ -94,13 +75,6 @@ print(json.dumps({
 def test_the_installed_wheel_ships_a_usable_console_bundle(
     built_wheel: Path, tmp_path: Path
 ) -> None:
-    """Install into a clean venv and read the bundle from the INSTALLED package.
-
-    ``--no-deps`` on purpose: this smoke is about the archive's own contents,
-    not about resolving the dependency tree (the dev env already proves that,
-    and a network-free CI must not fetch). The probe therefore imports only
-    ``ubt.api``'s package location, not FastAPI.
-    """
     uv = _uv()
     venv = tmp_path / "venv"
     subprocess.run(
@@ -134,14 +108,6 @@ def test_the_installed_wheel_ships_a_usable_console_bundle(
 
 
 def test_the_wheel_declares_its_entry_points(built_wheel: Path) -> None:
-    """The console scripts are declared in the wheel's own metadata.
-
-    Installing with ``--no-deps`` keeps this smoke network-free, so the CLI
-    cannot actually run here (typer is a runtime dependency). What CAN be
-    checked from the archive alone is that the entry points an operator calls
-    are declared and point at modules the wheel actually carries — a
-    ``[project.scripts]`` typo ships a command that does not exist.
-    """
     with zipfile.ZipFile(built_wheel) as archive:
         names = archive.namelist()
         metadata_name = next(name for name in names if name.endswith(".dist-info/entry_points.txt"))
@@ -153,9 +119,7 @@ def test_the_wheel_declares_its_entry_points(built_wheel: Path) -> None:
     assert "[console_scripts]" in entry_points
     for script in ("ubt", "ubt-api", "ubt-mcp"):
         assert f"{script} =" in entry_points, f"{script} entry point missing"
-    # The modules those entry points name must be inside the wheel.
     for module in ("ubt/cli/main.py", "ubt/api/app.py", "ubt/mcp/_entrypoint.py"):
         assert module in names, f"{module} (an entry point target) missing from the wheel"
-    # The package metadata is real, not a stub.
     assert "Name: universal-book-translator" in metadata
     assert "Requires-Python:" in metadata

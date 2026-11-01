@@ -1,5 +1,3 @@
-"""Unit tests for the semantic AST diffing and incremental patch engine."""
-
 from __future__ import annotations
 
 import json
@@ -49,23 +47,19 @@ def _make_block(
 
 
 def test_normalize_and_token_estimation() -> None:
-    """Verify text normalization and token count heuristics."""
     assert normalize_source_text("  hello \n\t world  ") == "hello world"
     assert normalize_source_text(None) == ""
 
-    # English token estimation
     en_tokens = estimate_block_tokens(
         "This is a simple sentence describing distributed algorithms."
     )
     assert en_tokens > 5
 
-    # CJK token estimation
     zh_tokens = estimate_block_tokens("这是一个关于分布式系统一致性协议的简短描述。")
     assert zh_tokens >= 20
 
 
 def test_semantic_differ_identical_documents() -> None:
-    """Identical block sequences must result in 100% reuse and UNCHANGED status."""
     differ = DocumentSemanticDiffer()
     blocks = [
         _make_block(
@@ -99,27 +93,23 @@ def test_semantic_differ_identical_documents() -> None:
 
 
 def test_semantic_differ_empty_and_extremes() -> None:
-    """Empty or one-sided block diffs should be handled without exceptions."""
     differ = DocumentSemanticDiffer()
     empty_summary = differ.diff_blocks([], [])
     assert empty_summary.total_base_blocks == 0
     assert empty_summary.total_revised_blocks == 0
     assert empty_summary.reuse_ratio == 0.0
 
-    # Base only -> pure deletion
     blocks = [_make_block("b1", 1, "Deleted block", BlockType.NARRATIVE)]
     del_summary = differ.diff_blocks(blocks, [])
     assert del_summary.deleted_count == 1
     assert del_summary.unchanged_count == 0
 
-    # Revised only -> pure addition
     add_summary = differ.diff_blocks([], blocks)
     assert add_summary.added_count == 1
     assert add_summary.unchanged_count == 0
 
 
 def test_semantic_differ_mixed_revisions() -> None:
-    """Diffing modified, added, deleted, and unchanged blocks."""
     differ = DocumentSemanticDiffer(min_similarity=0.40)
 
     base = [
@@ -146,26 +136,23 @@ def test_semantic_differ_mixed_revisions() -> None:
     ]
 
     revised = [
-        _make_block("r1", 1, "# Chapter 1", BlockType.HEADING),  # UNCHANGED
+        _make_block("r1", 1, "# Chapter 1", BlockType.HEADING),
         _make_block(
             "r2", 2, "Paxos is a classic distributed consensus protocol.", BlockType.NARRATIVE
-        ),  # MODIFIED
-        _make_block(
-            "r3", 3, "Raft was designed for understandability.", BlockType.NARRATIVE
-        ),  # ADDED
-        _make_block("r4", 4, "Conclusion notes.", BlockType.NARRATIVE),  # UNCHANGED
+        ),
+        _make_block("r3", 3, "Raft was designed for understandability.", BlockType.NARRATIVE),
+        _make_block("r4", 4, "Conclusion notes.", BlockType.NARRATIVE),
     ]
 
     summary = differ.diff_blocks(base, revised)
     assert summary.total_base_blocks == 4
     assert summary.total_revised_blocks == 4
-    assert summary.unchanged_count == 2  # r1 and r4
-    assert summary.modified_count == 1  # r2
-    assert summary.added_count == 1  # r3
-    assert summary.deleted_count == 1  # b3
+    assert summary.unchanged_count == 2
+    assert summary.modified_count == 1
+    assert summary.added_count == 1
+    assert summary.deleted_count == 1
     assert summary.reuse_ratio == 0.50
 
-    # Markdown and JSON rendering
     md = differ.render_diff_markdown(summary)
     assert "### Universal Book Translator: Semantic Revision Patch Summary" in md
     assert "Asset Reuse Rate" in md
@@ -178,11 +165,9 @@ def test_semantic_differ_mixed_revisions() -> None:
 
 @pytest.mark.asyncio
 async def test_patch_engine_apply_patch(tmp_path: Path) -> None:
-    """Verify BookPatchEngine applies patch to seed a new SQLite ledger job with preserved translations."""
     db_file = tmp_path / "test_ledger.sqlite"
     ledger = SQLiteJobLedger(db_file)
 
-    # 1. Create base document & revised document
     base_file = tmp_path / "base_book.md"
     base_file.write_text(
         "# Introduction\n\n"
@@ -203,15 +188,13 @@ async def test_patch_engine_apply_patch(tmp_path: Path) -> None:
     differ = DocumentSemanticDiffer(min_similarity=0.40)
     engine = BookPatchEngine(differ=differ, ledger=ledger)
 
-    # 2. Diff documents
     diff_summary = await engine.diff_documents(base_file, revised_file)
     assert diff_summary.total_base_blocks == 3
     assert diff_summary.total_revised_blocks == 4
-    assert diff_summary.unchanged_count == 2  # Heading + Conclusion
-    assert diff_summary.modified_count == 1  # Modern distributed...
-    assert diff_summary.added_count == 1  # Brand new section
+    assert diff_summary.unchanged_count == 2
+    assert diff_summary.modified_count == 1
+    assert diff_summary.added_count == 1
 
-    # 3. Simulate existing base job with translations
     base_job_id = "job_base_v1"
     from ubt.core.ports import resolve_adapter
 
@@ -219,14 +202,12 @@ async def test_patch_engine_apply_patch(tmp_path: Path) -> None:
     m = await ad.extract_manifest(base_file)
     ledger.init_job_from_manifest(base_job_id, m)
     async for ch in ad.parse_stream(base_file):
-        # Give translation to base blocks
         for b in ch.blocks:
             b.target_text = f"已译: {b.source_text}"
             b.status = BlockStatus.MTQE_PASSED
             b.mtqe_score = 0.95
         ledger.append_chapter(base_job_id, ch)
 
-    # 4. Apply patch onto revised book
     new_job_id = "job_revised_v2"
     actual_id, patch_res = await engine.apply_patch(
         base_source=base_job_id,
@@ -240,7 +221,6 @@ async def test_patch_engine_apply_patch(tmp_path: Path) -> None:
     assert patch_res.modified_count == 1
     assert patch_res.added_count == 1
 
-    # 5. Inspect seeded blocks in new ledger
     all_blocks = ledger.get_all_blocks(actual_id)
     assert len(all_blocks) == 4
 
@@ -258,7 +238,6 @@ async def test_patch_engine_apply_patch(tmp_path: Path) -> None:
     for pb in pending_blocks:
         assert pb.target_text is None
 
-    # Check patch provenance metadata in ledger
     meta_prov = ledger.get_job_metadata_value(actual_id, "patch_provenance")
     assert meta_prov is not None
     assert meta_prov["unchanged_count"] == 2

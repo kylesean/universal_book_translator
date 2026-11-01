@@ -1,5 +1,3 @@
-"""Contract tests for the summary primitives the hierarchical manager uses."""
-
 from __future__ import annotations
 
 import pytest
@@ -26,28 +24,18 @@ class _Block:
         self.draft_text = draft_text
 
 
-# --------------------------------------------------------------------------- #
-# extract_chapter_id
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("block_id", "expected"),
     [
         ("ch_001#b0002", "ch_001"),
         ("ch_001:b0002", "ch_001"),
-        ("ch#a:b", "ch"),  # first delimiter wins
-        ("b0002", ""),  # no delimiter = single-chapter document
+        ("ch#a:b", "ch"),
+        ("b0002", ""),
         ("", ""),
     ],
 )
 def test_extract_chapter_id(block_id: str, expected: str) -> None:
     assert extract_chapter_id(block_id) == expected
-
-
-# --------------------------------------------------------------------------- #
-# collect_chapter_text
-# --------------------------------------------------------------------------- #
 
 
 def test_collect_prefers_target_then_draft_then_source() -> None:
@@ -64,13 +52,7 @@ def test_collect_skips_blank_blocks() -> None:
 
 
 def test_collect_caps_at_max_chars_from_the_recent_end() -> None:
-    # The summary this feeds is *continuation* context, so the cap must keep
-    # the newest blocks whole. A buffer that just crossed the step trigger used
-    # to collect only its head (a 3,500-char step yielded 3,000 chars ending 5
-    # blocks early), so the recap described everything except what the next
-    # block continues from.
     blocks = [_Block("a" * 10), _Block("b" * 10), _Block("c" * 10)]
-    # Oldest block trimmed to its tail; the newest two stay whole.
     assert collect_chapter_text(blocks, max_chars=25) == "aaa" + "\n" + "b" * 10 + "\n" + "c" * 10
 
 
@@ -81,19 +63,12 @@ def test_collect_keeps_the_newest_block_whole() -> None:
 
 
 def test_collect_stays_in_chronological_order() -> None:
-    # Recency selects which blocks survive; the surviving text still reads in
-    # narrative order (the prompt presents it as a story-so-far recap).
     blocks = [_Block("first"), _Block("second"), _Block("third")]
     assert collect_chapter_text(blocks) == "first\nsecond\nthird"
 
 
 def test_collect_of_no_blocks_is_empty() -> None:
     assert collect_chapter_text([]) == ""
-
-
-# --------------------------------------------------------------------------- #
-# deterministic_summary
-# --------------------------------------------------------------------------- #
 
 
 def test_deterministic_summary_returns_short_text_unchanged() -> None:
@@ -105,8 +80,6 @@ def test_deterministic_summary_cuts_at_a_sentence_boundary() -> None:
 
 
 def test_deterministic_summary_ignores_an_abbreviation_boundary() -> None:
-    # The only period in the window is "Fig." — a 4-char boundary is too short
-    # to trust, so the hard cut wins.
     assert deterministic_summary("Fig. 3 shows", max_chars=6) == "Fig. 3"
 
 
@@ -116,11 +89,6 @@ def test_deterministic_summary_honours_a_five_char_boundary() -> None:
 
 def test_deterministic_summary_honours_a_cjk_boundary() -> None:
     assert deterministic_summary("第一句。第二句。第三句。", max_chars=8) == "第一句。第二句。"
-
-
-# --------------------------------------------------------------------------- #
-# _build_summary_prompt
-# --------------------------------------------------------------------------- #
 
 
 def test_build_summary_prompt_embeds_language_and_content() -> None:

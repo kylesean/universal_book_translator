@@ -1,5 +1,3 @@
-"""Unit tests for strongly typed BlockProvenance model and IRBlock integration."""
-
 from __future__ import annotations
 
 import json
@@ -45,7 +43,6 @@ def test_block_provenance_model_copy() -> None:
     assert updated.is_bold is True
     assert updated.is_italic is True
     assert updated.font_size == 16.0
-    # Original is untouched
     assert prov.is_italic is None
     assert prov.font_size == 14.0
 
@@ -61,19 +58,16 @@ def test_block_provenance_extra_fields() -> None:
 def test_ir_block_provenance_coercion() -> None:
     el = make_element(id="b1", spine_index=0, block_type=BlockType.NARRATIVE, source_text="test")
 
-    # Initialized with dict (coerced at runtime via field_validator)
     block1 = IRBlock(element=el, provenance={"is_bold": True, "source_page": 2})  # type: ignore[arg-type]
     assert isinstance(block1.provenance, BlockProvenance)
     assert block1.provenance.is_bold is True
     assert block1.provenance.source_page == 2
 
-    # Assignment with dict
     block1.provenance = {"toc_entry": True, "toc_page": "5"}  # type: ignore[assignment]
     assert isinstance(block1.provenance, BlockProvenance)
     assert block1.provenance.toc_entry is True
     assert block1.provenance.toc_page == "5"
 
-    # Assignment with None falls back to empty BlockProvenance
     block1.provenance = None  # type: ignore[assignment]
     assert isinstance(block1.provenance, BlockProvenance)
     assert block1.provenance.model_dump(exclude_none=True) == {

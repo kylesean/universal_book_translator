@@ -1,16 +1,3 @@
-"""``--fresh`` redoes a delivery; it must not leave half of the old one behind.
-
-``ubt translate -o X_mono.md --fresh`` regenerates X_mono.md, so the sibling
-deliverables of the same run (X_bilingual.md, X_dual.md) are stale by
-definition. Two things the sweep used to get wrong:
-
-* it deleted the document but not the document's reports, leaving
-  ``x_bilingual_md_quality_report.json`` beside nothing -- a report the next
-  reader picks up as the current deliverable's;
-* it also swept ``_rigid``/``_reflow`` names that nothing in the tree produces,
-  so a file that merely looked like that was deleted for no reason.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -56,8 +43,6 @@ def test_a_deleted_companion_takes_its_reports_with_it(tmp_path: Path) -> None:
 
 def test_a_deliverable_that_is_not_a_companion_is_left_alone(tmp_path: Path) -> None:
     output = _deliverable(tmp_path, "book_mono.md")
-    # Not one of the family names: another format's deliverable, a hand-made
-    # file, or the legacy render names that no longer have a producer.
     others = [
         _deliverable(tmp_path, "book_mono_rigid.pdf", reports=False),
         _deliverable(tmp_path, "book.epub"),
@@ -71,8 +56,6 @@ def test_a_deliverable_that_is_not_a_companion_is_left_alone(tmp_path: Path) -> 
 
 
 def test_the_input_document_is_never_deleted(tmp_path: Path) -> None:
-    # -o book_mono.md beside an input literally named book_bilingual.md: the
-    # name pattern matches the source, and the source must survive --fresh.
     source = _deliverable(tmp_path, "book_bilingual.md")
     output = _deliverable(tmp_path, "book_mono.md")
 
@@ -94,9 +77,6 @@ def test_a_dual_primary_drops_the_mono_render(tmp_path: Path) -> None:
 
 
 def test_an_output_with_no_family_suffix_sweeps_nothing(tmp_path: Path) -> None:
-    # -o delivered.md: the mono/dual/bilingual names are unrelated to it, and
-    # guessing which of them "belongs" to this run is how a sweep deletes
-    # somebody else's delivery.
     output = _deliverable(tmp_path, "delivered.md")
     bystander = _deliverable(tmp_path, "book_bilingual.md")
 

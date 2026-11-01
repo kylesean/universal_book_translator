@@ -1,5 +1,3 @@
-"""Unit tests for PDFium vs Docling layout IoU cross-check (Defense 1)."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -42,8 +40,6 @@ def _block(
 
 
 def test_high_iou_blocks_are_preserved() -> None:
-    # A block whose bounding box closely matches the physical PDFium text lines
-    # passes verification and retains its original confidence and skip_translate state.
     block = _block("b1", "Clean body paragraph text.", x0=50.0, y0=600.0, x1=300.0, y1=700.0)
     mock_lines = [
         LineBox(text="Clean body paragraph", rect=(52.0, 602.0, 298.0, 698.0)),
@@ -62,8 +58,6 @@ def test_high_iou_blocks_are_preserved() -> None:
 
 
 def test_phantom_block_with_no_physical_lines_is_sunk_to_opaque() -> None:
-    # A block claiming substantial text where PDFium finds 0 intersecting lines
-    # is recognized as a layout hallucination and sunk to PRESERVED_OPAQUE.
     block = _block(
         "b1",
         "A hallucinated paragraph over an empty white area.",
@@ -72,7 +66,6 @@ def test_phantom_block_with_no_physical_lines_is_sunk_to_opaque() -> None:
         x1=300.0,
         y1=700.0,
     )
-    # The page has text elsewhere, but none under this block.
     mock_lines = [
         LineBox(text="Header text at the very top", rect=(50.0, 750.0, 200.0, 780.0)),
     ]
@@ -91,9 +84,6 @@ def test_phantom_block_with_no_physical_lines_is_sunk_to_opaque() -> None:
 
 
 def test_low_iou_displaced_box_is_sunk_to_opaque() -> None:
-    # A block whose bounding box severely disagrees with the physical text lines (IoU < 0.60)
-    # is demoted to PRESERVED_OPAQUE.
-    # Block box area = 250 * 500 = 125000; mock line area = 50 * 50 = 2500; IoU << 0.60
     block = _block("b1", "Sprawling hallucinated box", x0=50.0, y0=100.0, x1=300.0, y1=600.0)
     mock_lines = [
         LineBox(text="Tiny line in corner", rect=(50.0, 100.0, 100.0, 150.0)),
@@ -113,17 +103,6 @@ def test_low_iou_displaced_box_is_sunk_to_opaque() -> None:
 
 
 def test_a_tight_box_under_an_overshooting_witness_is_preserved() -> None:
-    """A block fully covered by its witness lines passes even when IoU < 0.60.
-
-    IoU conflates a *displaced* box (its text is elsewhere -- sink it) with a
-    *tight* box the witness merely overshoots (a pdfium line spanning into the
-    neighbouring column inflates the union). On arXiv 2610.02185 all 75
-    IoU-demoted blocks were the second kind (containment >= 0.85), including 20
-    captions and the references list, which shipped untranslated for a 0.01
-    margin. Containment is the second acceptance path.
-    """
-    # Block box = 200x100; witness covers it entirely but is 3x as wide, so IoU
-    # is 0.33 (< 0.60) while containment is 1.0.
     block = _block(
         "b1", "A caption the witness line overshoots.", x0=50.0, y0=600.0, x1=250.0, y1=700.0
     )
@@ -143,8 +122,6 @@ def test_a_tight_box_under_an_overshooting_witness_is_preserved() -> None:
 
 
 def test_a_half_covered_box_is_still_sunk_to_opaque() -> None:
-    """Containment < 0.85 must not rescue a box the witness only half covers."""
-    # Witness covers the top half only: containment = 0.5 < 0.85, IoU < 0.60.
     block = _block("b1", "Half the box has no ink.", x0=50.0, y0=600.0, x1=250.0, y1=700.0)
     mock_lines = [
         LineBox(text="Half the box", rect=(50.0, 650.0, 250.0, 700.0)),
@@ -162,8 +139,6 @@ def test_a_half_covered_box_is_still_sunk_to_opaque() -> None:
 
 
 def test_scanned_textless_pages_skip_crosscheck() -> None:
-    # On a pure image/scanned page where PDFium returns 0 lines, cross-check skips
-    # without demoting blocks (leaving transcription to OCR / VLM).
     block = _block("b1", "Transcribed OCR text", x0=50.0, y0=600.0, x1=300.0, y1=700.0)
 
     with patch(
@@ -177,8 +152,6 @@ def test_scanned_textless_pages_skip_crosscheck() -> None:
 
 
 def test_non_prose_blocks_are_not_checked() -> None:
-    # Tables and images are assets the renderer places or rebuilds itself, so the
-    # prose-glyph cross-check does not apply to them.
     table = _block("t1", "a | b", block_type=BlockType.TABLE)
     image = _block("i1", "", block_type=BlockType.IMAGE)
 
@@ -193,10 +166,6 @@ def test_non_prose_blocks_are_not_checked() -> None:
 
 
 def test_page_caches_are_evicted_as_the_page_advances() -> None:
-    # Blocks arrive in reading order (page 1, page 2, then page 1 again). The
-    # per-page caches must be dropped when the page advances: without eviction
-    # they held every page's lines and char styles for the whole book. The third
-    # block therefore re-extracts page 1 instead of reusing a book-wide cache.
     pages_seen: list[int] = []
 
     def fake_extract_lines(_path: object, page: int) -> tuple[list[LineBox], tuple[float, float]]:

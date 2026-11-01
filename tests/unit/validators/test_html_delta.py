@@ -1,9 +1,3 @@
-"""Contract tests for the HTML/Markdown structural-delta validator.
-
-Structural image deltas are hard errors (RETRY); emphasis-tag drift and dropped
-anchor hrefs are advisory warnings that must never fail the gate.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -101,7 +95,6 @@ def test_an_added_anchor_href_is_not_a_warning(validator: HTMLDeltaValidator) ->
 
 
 def test_a_faithful_translation_of_a_dirty_source_cancels(validator: HTMLDeltaValidator) -> None:
-    # Both sides carry the same malformed <img>; the per-tag delta is zero.
     dirty = '<img src="a" alt="say "hi"">'
     result = validator.validate(dirty, dirty)
     assert result.is_valid

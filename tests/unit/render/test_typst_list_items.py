@@ -1,17 +1,3 @@
-"""A list item must reach the PDF as a list item.
-
-The Typst backend had no ``LIST_ITEM`` branch: the block fell through to the
-prose path, so every bullet and every list number was dropped and a delivered
-list flattened into unmarked paragraphs. The marker was already on the element
-(all three readers populate it) and the HTML companion already emitted
-``<ul><li>`` — only the Typst backend lost it.
-
-Consecutive items of the same kind are emitted as one ``#list(..)``/``#enum(..)``
-call. The call form (not the ``- `` markup form) because an item body is already
-escaped markup that may contain a soft wrap, and each body is bracketed so a
-stray ``#`` cannot be parsed as code.
-"""
-
 from __future__ import annotations
 
 import pathlib
@@ -41,7 +27,6 @@ def _paragraph(index: int, source: str, target: str) -> IRBlock:
 
 
 def _body(blocks: list[IRBlock], tmp_path: pathlib.Path, **kwargs: object) -> str:
-    """The emitted body, with the preamble (a single leading block) removed."""
     renderer = TypstDocumentRenderer()
     for key, value in kwargs.items():
         setattr(renderer, key, value)
@@ -84,7 +69,6 @@ def test_a_paragraph_splits_two_lists(tmp_path: pathlib.Path) -> None:
 
 
 def test_adjacent_lists_of_different_kinds_do_not_merge(tmp_path: pathlib.Path) -> None:
-    """A bullet run followed by a numbered run stays two lists."""
     blocks = [_item(1, "a", "甲", "•"), _item(2, "b", "乙", "1."), _item(3, "c", "丙", "•")]
     body = _body(blocks, tmp_path)
     assert "#enum(" in body
@@ -107,7 +91,6 @@ def test_a_source_kept_item_renders_its_source(tmp_path: pathlib.Path) -> None:
 
 
 def test_a_translated_prose_lt_is_escaped_inside_the_item(tmp_path: pathlib.Path) -> None:
-    """The bracket wrapper must not let a ``#`` reach Typst as code."""
     body = _body([_item(1, "tag", "使用 #tag 与 [x]")], tmp_path)
     assert "\\#" in body
     assert "\\[" in body
@@ -115,7 +98,6 @@ def test_a_translated_prose_lt_is_escaped_inside_the_item(tmp_path: pathlib.Path
 
 @pytest.mark.skipif(shutil.which("typst") is None, reason="typst not installed")
 def test_the_generated_list_compiles_and_keeps_its_markers(tmp_path: pathlib.Path) -> None:
-    """End to end: the PDF's text layer carries the bullets and the numbers."""
     blocks = [
         _item(1, "alpha", "甲", "•"),
         _item(2, "beta", "乙", "•"),

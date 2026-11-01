@@ -1,11 +1,3 @@
-"""Unit tests for the stdio MCP server (ubt.mcp.server).
-
-Covers:
-- ubt_list_issues tool for human-in-the-loop (HITL) review.
-- ubt_edit_segment tool for applying human post-edits.
-- Adapter render skip / flag contract properties.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -42,7 +34,6 @@ def test_document_adapter_render_properties() -> None:
     assert get_last_render_skips(adapter) == []
     assert get_last_render_flags(adapter) == []
 
-    # Verify property setter
     adapter.last_render_skips = [("blk_1", "render_skip:overflow")]
     adapter.last_render_flags = [("blk_1", "low_legibility_font")]
     assert adapter.last_render_skips == [("blk_1", "render_skip:overflow")]
@@ -97,7 +88,6 @@ async def test_mcp_hitl_tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
             ChapterIR(doc_id=job_id, chapter_id="c1", title="C1", spine_index=0, blocks=[b1, b2]),
         )
 
-    # Test ubt_list_issues
     issues_res = await ubt_list_issues(job_id=job_id, db_dir=str(tmp_path))
     assert issues_res["job_id"] == job_id
     assert issues_res["total_issues"] >= 1
@@ -105,7 +95,6 @@ async def test_mcp_hitl_tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert len(issues_res["segments"]) == 1
     assert issues_res["segments"][0]["block_id"] == "blk_1"
 
-    # Test filter by issue_kind
     filtered_res = await ubt_list_issues(job_id=job_id, issue_kind="numeric", db_dir=str(tmp_path))
     assert len(filtered_res["segments"]) == 1
     assert filtered_res["segments"][0]["block_id"] == "blk_1"
@@ -113,7 +102,6 @@ async def test_mcp_hitl_tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     unmatched_res = await ubt_list_issues(job_id=job_id, issue_kind="formula", db_dir=str(tmp_path))
     assert len(unmatched_res["segments"]) == 0
 
-    # Test ubt_edit_segment
     new_text = "患者服用了 50mg 的药物 A。"
     edit_res = await ubt_edit_segment(
         job_id=job_id,

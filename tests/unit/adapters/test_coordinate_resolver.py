@@ -1,12 +1,3 @@
-"""Page-level coordinate-system inference and bbox normalization.
-
-A per-box ``auto`` guess cannot tell a normalized-1000 box that fits inside an
-A4 page from a native PDF-point box, so ``infer_coord_system`` decides once per
-page from the boxes' extremes. These tests pin that decision and the resolved
-geometry it feeds, because a wrong choice scales only some boxes and silently
-misplaces the extracted block on the page.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -28,9 +19,6 @@ def test_normalized_1000_page_is_inferred_from_its_extremes() -> None:
 
 
 def test_a_top_left_box_is_placed_correctly_once_the_page_is_known() -> None:
-    # The top-left box (100, 50, 300, 150) fits inside A4 and, seen alone, looks
-    # like native points. Page-level inference sees the other box reach x=900 and
-    # decides normalized_1000, so the small box is scaled instead of misplaced.
     boxes = [(500.0, 200.0, 900.0, 300.0), (100.0, 50.0, 300.0, 150.0)]
     system = PageBBoxResolver.infer_coord_system(boxes, *_A4)
     resolved = _resolver().resolve_bbox(boxes[1], coord_system=system)
@@ -65,13 +53,10 @@ def test_infer_falls_back_to_auto_without_usable_boxes() -> None:
 
 
 def test_cropbox_origin_offset_normalized_1() -> None:
-    # Page with CropBox starting at (50, 60) with size 200x300
     resolver = PageBBoxResolver(page_width=200.0, page_height=300.0, origin_x=50.0, origin_y=60.0)
     box = (0.1, 0.2, 0.6, 0.7)
     resolved = resolver.resolve_bbox(box, coord_system="normalized_1")
     assert resolved is not None
-    # x: 50 + [0.1*200, 0.6*200] = [70, 170]
-    # y: 60 + [(1-0.7)*300, (1-0.2)*300] = [150, 300]
     assert resolved == pytest.approx((70.0, 150.0, 170.0, 300.0))
 
 
@@ -92,7 +77,6 @@ def test_cropbox_origin_offset_image_pixel() -> None:
         origin_x=50.0,
         origin_y=60.0,
     )
-    # At scale 2 (400x600 px), box (40, 120, 240, 420) is identical to the 100x200pt box above
     box = (40.0, 120.0, 240.0, 420.0)
     resolved = resolver.resolve_bbox(box, coord_system="image_pixel")
     assert resolved is not None
@@ -108,8 +92,6 @@ def test_cropbox_origin_offset_top_left_points() -> None:
 
 
 def test_cropbox_origin_offset_with_page_rotation() -> None:
-    # A rotated 90 page displayed as 500x300 with unrotated CropBox origin (50, 60)
-    # rotation=270 un-rotates the displayed box into unrotated user-space orientation
     resolver = PageBBoxResolver(
         page_width=500.0,
         page_height=300.0,
@@ -117,9 +99,6 @@ def test_cropbox_origin_offset_with_page_rotation() -> None:
         origin_x=50.0,
         origin_y=60.0,
     )
-    # Box at pixels (445, 54)-(456, 102) on 500x300 image
-    # Without origin offset, it lands at unrotated points (54, 445, 102, 456)
-    # With origin offset (50, 60), it lands at (104, 505, 152, 516)
     box = (445.0, 54.0, 456.0, 102.0)
     resolved = resolver.resolve_bbox(box, coord_system="image_pixel")
     assert resolved is not None

@@ -1,22 +1,3 @@
-"""The SQLite job ledger: schema, job lifecycle, block checkpoints, batch jobs.
-
-The ledger is where every block's translation state survives a restart, so its
-contracts are load-bearing:
-
-- the schema lands exactly on ``SCHEMA_VERSION`` and every column
-  ``_row_to_block`` reads is present (a drift here corrupts resume silently);
-- block ids are content-derived and repeat across jobs, so a block write must be
-  scoped by ``job_id`` (the composite-primary-key contract);
-- a checkpoint records state, but a *non-terminal* batch write must not
-  resurrect a terminal row, and ``reset_blocks_to_pending`` must clear the whole
-  verdict so a re-queued block is genuinely re-derivable;
-- the batch create-reservation is the only thing preventing a crash from
-  re-submitting (and re-billing) the same provider batch.
-
-All time-dependent behaviour is driven by explicit values or by back-dating a
-row, never by sleeping.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -94,11 +75,6 @@ def ledger(tmp_path: Path) -> Iterator[SQLiteJobLedger]:
         yield db
 
 
-# --------------------------------------------------------------------------- #
-# Foundation: schema, connection lifecycle.
-# --------------------------------------------------------------------------- #
-
-
 def test_fresh_ledger_lands_on_the_target_schema_version(ledger: SQLiteJobLedger) -> None:
     with ledger._get_conn() as conn:
         assert conn.execute("PRAGMA user_version;").fetchone()[0] == SCHEMA_VERSION
@@ -130,14 +106,9 @@ def test_read_only_ledger_reads_an_existing_file(tmp_path: Path) -> None:
 
 
 def test_close_is_idempotent_and_refuses_to_reopen(ledger: SQLiteJobLedger) -> None:
-    """P2-1: close() is idempotent, and a closed ledger never silently reopens.
-
-    Reopening on the next ``_get_conn`` (the old behaviour) let a stage that
-    finalized *after* the run's teardown write past the writer-lock release.
-    """
     _init(ledger)
     ledger.close()
-    ledger.close()  # must never raise
+    ledger.close()
     with pytest.raises(LedgerError):
         ledger.get_job_status("job")
 
@@ -148,13 +119,8 @@ def test_blocks_seq_advances_on_writes_only(ledger: SQLiteJobLedger) -> None:
     ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1")]))
     after_write = ledger.blocks_seq
     assert after_write > before
-    ledger.get_all_blocks("job")  # a pure read must not bump the revision
+    ledger.get_all_blocks("job")
     assert ledger.blocks_seq == after_write
-
-
-# --------------------------------------------------------------------------- #
-# Job lifecycle: metadata, resolution, usage, finalize.
-# --------------------------------------------------------------------------- #
 
 
 def test_init_job_from_manifest_persists_metadata(ledger: SQLiteJobLedger) -> None:
@@ -172,7 +138,7 @@ def test_init_job_from_manifest_persists_metadata(ledger: SQLiteJobLedger) -> No
 def test_init_job_from_manifest_is_idempotent(ledger: SQLiteJobLedger) -> None:
     _init(ledger)
     ledger.set_job_metadata_value("job", "marker", "kept")
-    _init(ledger)  # second init must not reset the row
+    _init(ledger)
     assert ledger.get_job_metadata_value("job", "marker") == "kept"
 
 
@@ -305,12 +271,6 @@ def test_finalize_completed_refuses_with_non_terminal_blocks(ledger: SQLiteJobLe
 
 
 def test_finalize_writes_artifact_pointers_with_the_status(ledger: SQLiteJobLedger) -> None:
-    """The download pointers must not be a second write.
-
-    The export hook persisted them after the terminal event, so a crash in that
-    window left a ``completed`` job with no ``output_file`` — undownloadable,
-    while every surface reported success. They commit with the status now.
-    """
     _init(ledger)
     ledger.finalize_job(
         "job",
@@ -324,7 +284,7 @@ def test_finalize_writes_artifact_pointers_with_the_status(ledger: SQLiteJobLedg
 def test_finalize_failed_is_permissive(ledger: SQLiteJobLedger) -> None:
     _init(ledger)
     ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1")]))
-    ledger.finalize_job("job", "failed")  # abort path must land mid-flight
+    ledger.finalize_job("job", "failed")
     assert ledger.get_job_status("job") == "failed"
 
 
@@ -340,16 +300,9 @@ def test_finalize_unknown_job_raises(ledger: SQLiteJobLedger) -> None:
         ledger.finalize_job("ghost", "failed")
 
 
-# --------------------------------------------------------------------------- #
-# Blocks: scoping, upsert, checkpoints, pagination, stats.
-# --------------------------------------------------------------------------- #
-
-
 def test_blocks_of_two_jobs_with_the_same_block_id_do_not_collide(
     ledger: SQLiteJobLedger,
 ) -> None:
-    # block ids are content-derived (``ch1#1``), so two jobs over the same
-    # document produce identical ids; the composite PK must keep them apart.
     _init(ledger, job_id="job-a", doc_id="doc-a")
     _init(ledger, job_id="job-b", doc_id="doc-b")
     ledger.append_chapter("job-a", _chapter("ch1", [_block("ch1#1", text="A")]))
@@ -387,9 +340,6 @@ def test_append_chapter_upserts_a_repeated_block_id(ledger: SQLiteJobLedger) -> 
 
 
 def test_append_chapter_roundtrips_structural_element_fields(ledger: SQLiteJobLedger) -> None:
-    # A resumed job re-materializes every block through ``_row_to_block``; the
-    # element's level/marker/confidence/decorative must survive, or a
-    # ``### Section`` comes back as ``# Section`` and lists lose their bullet.
     _init(ledger)
     heading = IRBlock(
         element=make_element(
@@ -430,11 +380,6 @@ def test_append_chapter_roundtrips_structural_element_fields(ledger: SQLiteJobLe
 
 
 def test_span_chars_survive_the_ledger_round_trip(ledger: SQLiteJobLedger) -> None:
-    # ``Span.chars`` is the canonical-stream back-reference the native readers
-    # stamp (``source_slice`` slices it). It had no column, so a resumed block
-    # re-materialized without it and a re-export sliced coarser text than the
-    # original export -- the block matched on the first run and not after a
-    # resume. It must survive ``append_chapter`` (write) + ``get_block`` (read).
     _init(ledger)
     block = IRBlock(
         element=make_element(
@@ -453,8 +398,6 @@ def test_span_chars_survive_the_ledger_round_trip(ledger: SQLiteJobLedger) -> No
 
 
 def test_a_block_without_span_chars_round_trips_as_none(ledger: SQLiteJobLedger) -> None:
-    # A format with no canonical stream (or a block written by an older build)
-    # has no char range; the round-trip must leave it None, not fabricate one.
     _init(ledger)
     ledger.append_chapter("job", _chapter("ch1", [_block("ch1#n")]))
     stored = ledger.get_block("ch1#n", job_id="job")
@@ -476,8 +419,6 @@ def test_save_checkpoints_batch_persists_style_and_preserves_when_omitted(
     assert block is not None and block.style is not None
     assert block.style.target_runs == style.target_runs
 
-    # A later repair/consistency/export checkpoint omits style: the parsed runs
-    # must survive so the render can still locate them (graceful degradation).
     ledger.save_checkpoints_batch(
         [{"block_id": "ch1#1", "status": BlockStatus.DRAFTED, "target_text": "x repaired"}],
         job_id="job",
@@ -507,7 +448,7 @@ def test_save_checkpoints_batch_counts_and_preserves_omitted_flags(
     first = ledger.get_block("ch1#1", job_id="job")
     assert first is not None
     assert first.target_text == "x1"
-    assert first.error_flags == ["keep"]  # omitted key -> COALESCE preserves
+    assert first.error_flags == ["keep"]
 
 
 def test_save_checkpoints_batch_explicit_empty_list_clears_flags(
@@ -602,7 +543,6 @@ def test_fail_non_terminal_blocks_marks_and_flags(ledger: SQLiteJobLedger) -> No
     assert block is not None
     assert block.status is BlockStatus.FAILED
     assert "stage crashed" in block.error_flags
-    # A terminal block is untouched.
     assert ledger.get_block("ch1#2", job_id="job").status is BlockStatus.MTQE_PASSED  # type: ignore[union-attr]
 
 
@@ -641,13 +581,6 @@ def test_reset_blocks_to_pending_clears_the_whole_verdict(ledger: SQLiteJobLedge
 def test_resume_requeues_transient_failures_but_keeps_triage_verdicts(
     ledger: SQLiteJobLedger,
 ) -> None:
-    """A provider outage is retryable; a human-review verdict is not.
-
-    Resume used to strand transient failures forever because FAILED was a
-    terminal state. Requeueing every FAILED row would be worse: it would erase
-    deliberate triage verdicts and silently ship blocks that a human still has
-    to inspect.
-    """
     _init(ledger)
     ledger.append_chapter(
         "job",
@@ -690,13 +623,6 @@ def test_resume_requeues_transient_failures_but_keeps_triage_verdicts(
 def test_resume_recovers_legacy_configuration_failures_only(
     ledger: SQLiteJobLedger,
 ) -> None:
-    """The 404 that broke a job is fixed once the model route exists.
-
-    Older ledgers used the permanent ``Drafting unrecoverable:`` marker for
-    both a missing model and malformed source content. Resume must requeue the
-    former after the operator fixes the provider, while leaving the latter
-    terminal instead of paying for the same failure again.
-    """
     _init(ledger)
     ledger.append_chapter(
         "job",
@@ -753,7 +679,7 @@ def test_get_job_stats_counts_by_status(ledger: SQLiteJobLedger) -> None:
     )
     stats = ledger.get_job_stats("job")
     assert stats["total"] == 6
-    assert stats["completed"] == 2  # mtqe_passed + repaired
+    assert stats["completed"] == 2
     assert stats["drafted"] == 1
     assert stats["failed"] == 1
     assert stats["blocked_human"] == 1
@@ -777,7 +703,7 @@ def test_preceding_text_tail_prefers_target_over_source(ledger: SQLiteJobLedger)
         job_id="job",
     )
     context = ledger.get_preceding_text_tail("job", FlowID.MAIN_STORY, 3, max_chars=50)
-    assert "T2" in context  # translated prose is what the model continues
+    assert "T2" in context
     assert "s2" not in context
 
 
@@ -790,11 +716,6 @@ def test_following_text_head_stays_source_side(ledger: SQLiteJobLedger) -> None:
     assert head == "s1 s2 s3"
 
 
-# --------------------------------------------------------------------------- #
-# Batch API: persistence, liveness, and the create-reservation.
-# --------------------------------------------------------------------------- #
-
-
 def test_batch_liveness_transitions(ledger: SQLiteJobLedger) -> None:
     ledger.reserve_batch_job("key-1", "job")
     ledger.finalize_batch_job("key-1", "batch-1", status="submitted")
@@ -804,9 +725,6 @@ def test_batch_liveness_transitions(ledger: SQLiteJobLedger) -> None:
 
 
 def test_completed_but_unconsumed_batch_is_still_resumable(ledger: SQLiteJobLedger) -> None:
-    # ``completed`` means the provider finished, not that results were reaped;
-    # re-creating here would re-bill the same payload, so the restart lookup
-    # must still surface it (and the same-job query skips it via exclude_key).
     ledger.reserve_batch_job("key-1", "job")
     ledger.finalize_batch_job("key-1", "batch-1", status="completed")
     assert ledger.find_live_batch_for_job("job", exclude_key="key-2") == "batch-1"
@@ -814,13 +732,11 @@ def test_completed_but_unconsumed_batch_is_still_resumable(ledger: SQLiteJobLedg
 
 
 def test_is_batch_live_is_true_for_a_missing_row(ledger: SQLiteJobLedger) -> None:
-    # With no recorded status the safe action is to cancel (it may be billing).
     assert ledger.is_batch_live("never-seen") is True
 
 
 def test_reserve_batch_job_create_then_pending_then_resume(ledger: SQLiteJobLedger) -> None:
     assert ledger.reserve_batch_job("key-1", "job") == ("create", None)
-    # A fresh sentinel means another worker is submitting right now.
     assert ledger.reserve_batch_job("key-1", "job") == ("pending", None)
     ledger.finalize_batch_job("key-1", "batch-real", status="submitted")
     assert ledger.reserve_batch_job("key-1", "job") == ("resume", "batch-real")
@@ -835,10 +751,6 @@ def test_reserve_batch_job_reclaims_a_stale_sentinel(
             "UPDATE batch_jobs SET updated_at = datetime('now', '-1 hour') WHERE batch_id = ?",
             ("creating:key-1",),
         )
-    # The worker that held the reservation died mid-create; a new caller owns it.
-    # The takeover may be a second charge for a batch whose id died with that
-    # worker, and only a successful ``finalize_batch_job`` -- which overwrites
-    # this row -- could record it, so the warning must fire here.
     with caplog.at_level(logging.WARNING):
         assert ledger.reserve_batch_job("key-1", "job") == ("create", None)
     assert "died mid-create" in caplog.text
@@ -848,10 +760,6 @@ def test_reserve_batch_job_reclaims_a_stale_sentinel(
 def test_finalize_batch_job_records_a_paid_batch_whose_sentinel_was_reclaimed(
     ledger: SQLiteJobLedger,
 ) -> None:
-    # A slow worker's reservation was reclaimed and promoted by a second worker;
-    # the first worker's DELETE of the sentinel then makes its ``batch_id`` the
-    # only evidence of a paid submission. Dropping it would leave the batch
-    # uncancellable and invisible to find_live_batch_for_job.
     ledger.reserve_batch_job("key-0", "job")
     ledger.finalize_batch_job("key-0", "batch-a", status="submitted")
     ledger.finalize_batch_job("key-1", "batch-b", status="submitted")
@@ -864,13 +772,6 @@ def test_finalize_batch_job_records_a_paid_batch_whose_sentinel_was_reclaimed(
 
 
 def test_a_legacy_ledger_is_refused_not_silently_migrated(tmp_path: Path) -> None:
-    """A pre-baseline ledger must be refused with guidance, never rewritten.
-
-    Incremental migration was removed in favour of a single flat baseline. A
-    database from an older build must fail loudly: migrating it in place would
-    risk the run's only copy of its translations, and silently stamping it as
-    the new baseline would let ``_row_to_block`` read a schema it does not have.
-    """
     db_file = tmp_path / "legacy.db"
     conn = sqlite3.connect(db_file)
     conn.executescript("""
@@ -887,7 +788,6 @@ def test_a_legacy_ledger_is_refused_not_silently_migrated(tmp_path: Path) -> Non
     assert "flattened baseline" in str(excinfo.value)
     assert excinfo.value.details["db_version"] == 10
     assert excinfo.value.details["baseline_version"] == SCHEMA_VERSION
-    # The file is untouched: still at its old version.
     conn = sqlite3.connect(db_file)
     assert conn.execute("PRAGMA user_version;").fetchone()[0] == 10
     conn.close()
@@ -899,7 +799,6 @@ def test_a_fresh_ledger_lands_on_the_flat_baseline_version(ledger: SQLiteJobLedg
 
 
 def test_a_file_missing_a_required_column_is_refused(tmp_path: Path) -> None:
-    """A file stamped at the baseline but missing a column fails at startup."""
     db_file = tmp_path / "broken.db"
     conn = sqlite3.connect(db_file)
     conn.executescript(f"""
@@ -916,7 +815,6 @@ def test_a_file_missing_a_required_column_is_refused(tmp_path: Path) -> None:
 
 
 def test_the_baseline_is_idempotent_on_reopen(tmp_path: Path) -> None:
-    """Re-opening a baseline ledger must not re-create tables or raise."""
     db_file = tmp_path / "baseline.db"
     ledger = SQLiteJobLedger(db_file)
     ledger.close()
@@ -930,26 +828,20 @@ def test_the_baseline_is_idempotent_on_reopen(tmp_path: Path) -> None:
 def test_a_fresh_baseline_has_the_composite_primary_key_and_no_dead_columns(
     ledger: SQLiteJobLedger,
 ) -> None:
-    """The flattened schema ships the final shape directly (no ALTER ladder)."""
     with ledger._get_conn() as conn:
         sql = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='blocks';"
         ).fetchone()[0]
         cols = {str(r["name"]) for r in conn.execute("PRAGMA table_info(blocks);").fetchall()}
     assert "PRIMARY KEY (job_id, block_id)" in sql
-    # Dead columns the ladder used to add then drop are absent from the baseline.
     assert "semantic_role" not in cols
     assert "structure_role" not in cols
     assert "owner_id" not in cols
     assert "lease_expires_at" not in cols
-    # Live columns are present.
     assert {"span_chars_json", "level", "marker", "provenance_json"} <= cols
 
 
 def test_get_job_stats_reports_whether_qe_measured_anything(ledger: SQLiteJobLedger) -> None:
-    # The 0.0 avg under the heuristic QE engine is a "nothing scored" sentinel,
-    # not a failing measurement. ``qe_measured`` separates the two so a status
-    # table cannot print a placeholder as quality data.
     _init(ledger)
     ledger.append_chapter(
         "job",
@@ -982,7 +874,6 @@ def test_get_job_stats_reports_whether_qe_measured_anything(ledger: SQLiteJobLed
 
 
 def test_ledger_staleness_helper(tmp_path: Path) -> None:
-    """The MCP disk fallback's staleness guard: fresh mtime is live, old is stale."""
     from ubt.mcp.server import _LEDGER_STALENESS_S, _ledger_is_stale
 
     ledger = tmp_path / "job_x.sqlite"
@@ -997,13 +888,6 @@ def test_ledger_staleness_helper(tmp_path: Path) -> None:
 
 
 def test_fresh_resets_a_legacy_ledger_instead_of_refusing(tmp_path: Path) -> None:
-    """``--fresh`` must be able to restart a job whose ledger is a legacy schema.
-
-    The run path opens the ledger *before* ``--fresh``'s row reset runs, so a
-    legacy file was refused with no way forward — testing the tool became
-    impossible without hand-deleting the file. ``fresh=True`` resets it to the
-    flat baseline (the operator explicitly asked to discard prior state).
-    """
     db_file = tmp_path / "legacy.db"
     conn = sqlite3.connect(db_file)
     conn.executescript("""
@@ -1015,11 +899,9 @@ def test_fresh_resets_a_legacy_ledger_instead_of_refusing(tmp_path: Path) -> Non
     conn.commit()
     conn.close()
 
-    # Without --fresh: refused.
     with pytest.raises(LedgerError):
         SQLiteJobLedger(db_file)
 
-    # With --fresh: reset to the baseline and usable.
     ledger = SQLiteJobLedger(db_file, fresh=True)
     try:
         with ledger._get_conn() as c:

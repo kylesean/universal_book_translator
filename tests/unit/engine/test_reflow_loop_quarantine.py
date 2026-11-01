@@ -1,23 +1,3 @@
-"""``VisualVerifyLoop``: the post-render visual gate's quarantine decisions.
-
-The loop is the only place a rendered artifact is judged against its own
-source, and its output decides whether a block ships or is held for a human.
-Its end-to-end path is exercised by the ``slow`` render e2e, which drives the
-happy path only -- a clean render produces no findings, so the quarantine
-branch never runs there. These tests pin the decisions themselves with a fake
-gate runner, so the branch that holds a defective page cannot silently rot:
-
-- a ``major``/``critical`` finding quarantines the blocks **on that page** and
-  leaves blocks on other pages alone;
-- a finding with no page is not a page-level defect and quarantines nothing;
-- blocks already ``FAILED``/``BLOCKED_HUMAN`` keep their terminal status (a
-  quarantine must not overwrite a worse verdict), and ``skip_translate``
-  blocks are never touched;
-- quarantine is idempotent: a second run does not duplicate the flag;
-- the report sidecar and ledger record are written on every run, and a gate
-  that *crashes* is recorded as a failed gate rather than as "no gate".
-"""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -60,8 +40,6 @@ def _bbox(page: int) -> Any:
 
 @dataclass
 class _RecordingLedger:
-    """Minimal ledger: records the checkpoint batches the loop persists."""
-
     batches: list[list[dict[str, Any]]] = field(default_factory=list)
     visual_reports: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
 
@@ -85,7 +63,6 @@ def _manifest(tmp_path: Path) -> BookManifest:
 
 
 def _manifest_with_source(tmp_path: Path) -> BookManifest:
-    """A manifest whose source file exists, so the T0.5/T0.6 probes run."""
     source = tmp_path / "source.pdf"
     source.write_bytes(b"%PDF-1.4\n%%EOF\n")
     return BookManifest(
@@ -127,11 +104,6 @@ def _run(loop: VisualVerifyLoop, tmp_path: Path, blocks: list[IRBlock]) -> Any:
     return asyncio.run(loop.run(tmp_path / "artifact.pdf", blocks))
 
 
-# --------------------------------------------------------------------------- #
-# Quarantine
-# --------------------------------------------------------------------------- #
-
-
 def test_a_major_finding_quarantines_only_its_page(tmp_path: Path) -> None:
     ledger = _RecordingLedger()
     on_bad = _block("bad", page=3)
@@ -170,12 +142,10 @@ def test_every_finding_code_on_a_page_lands_in_the_flag(tmp_path: Path) -> None:
     )
     _run(_loop(tmp_path, ledger, gate), tmp_path, [block])
 
-    # The info finding is not a quarantine trigger, so its code is not named.
     assert block.error_flags == ["visual_gate_failed:major:blank_page,text_overflow"]
 
 
 def test_a_finding_without_a_page_quarantines_nothing(tmp_path: Path) -> None:
-    """A document-level finding has no page to quarantine."""
     ledger = _RecordingLedger()
     block = _block("b", page=1)
     gate = VisualGateResult(
@@ -208,7 +178,6 @@ def test_a_clean_gate_quarantines_nothing(tmp_path: Path) -> None:
 
 
 def test_terminal_and_skipped_blocks_keep_their_status(tmp_path: Path) -> None:
-    """A quarantine must not overwrite a worse verdict, nor touch a kept block."""
     ledger = _RecordingLedger()
     failed = _block("failed", page=1, status=BlockStatus.FAILED)
     blocked = _block("blocked", page=1, status=BlockStatus.BLOCKED_HUMAN)
@@ -241,7 +210,6 @@ def test_a_block_without_geometry_is_never_quarantined(tmp_path: Path) -> None:
 
 
 def test_quarantine_is_idempotent_across_runs(tmp_path: Path) -> None:
-    """A re-run must not append the same flag twice."""
     ledger = _RecordingLedger()
     block = _block("b", page=1)
     gate = VisualGateResult(
@@ -255,11 +223,6 @@ def test_quarantine_is_idempotent_across_runs(tmp_path: Path) -> None:
     assert block.error_flags == ["visual_gate_failed:major:text_overflow"]
 
 
-# --------------------------------------------------------------------------- #
-# Reporting
-# --------------------------------------------------------------------------- #
-
-
 def test_the_report_sidecar_and_ledger_record_are_always_written(tmp_path: Path) -> None:
     ledger = _RecordingLedger()
     _run(_loop(tmp_path, ledger, VisualGateResult(passed=True)), tmp_path, [])
@@ -270,12 +233,10 @@ def test_the_report_sidecar_and_ledger_record_are_always_written(tmp_path: Path)
     assert report.exists()
     assert ledger.visual_reports[0][0] == "job-1"
     assert ledger.visual_reports[0][1]["passed"] is True
-    # The loop owns this key; the gate's own half does not carry it.
     assert "parse_noise" in ledger.visual_reports[0][1]
 
 
 def test_cancellation_before_the_gate_raises_and_touches_nothing(tmp_path: Path) -> None:
-    """A cancelled job must not be recorded as a gate outcome."""
     import asyncio
 
     from ubt.core.exceptions import JobInterruptedError
@@ -292,22 +253,10 @@ def test_cancellation_before_the_gate_raises_and_touches_nothing(tmp_path: Path)
 
 
 def test_a_crashing_gate_is_recorded_as_a_failure_not_an_absence(tmp_path: Path) -> None:
-    """The loop propagates the crash; the caller turns it into a failed gate.
-
-    ``run_export_stage`` catches the exception and builds a crash result, so
-    the loop's job is only to surface it rather than swallow it -- a swallowed
-    crash would read downstream as "gate absent", skipping blocking
-    enforcement and reporting a perfect pass.
-    """
     ledger = _RecordingLedger()
     with pytest.raises(RuntimeError, match="gate exploded"):
         _run(_loop(tmp_path, ledger, RuntimeError("gate exploded")), tmp_path, [])
     assert ledger.visual_reports == []
-
-
-# --------------------------------------------------------------------------- #
-# Probe degradation
-# --------------------------------------------------------------------------- #
 
 
 def _finding_codes(gate: Any) -> list[str]:
@@ -317,11 +266,6 @@ def _finding_codes(gate: Any) -> list[str]:
 def test_a_crashed_parity_probe_is_recorded_not_swallowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A crashed T0.5 probe must appear in the report as unmeasured.
-
-    The probe is allowed to fail without breaking delivery, but recording
-    nothing made the crash indistinguishable from a clean measurement.
-    """
     import ubt.core.ports as ports
 
     ledger = _RecordingLedger()
@@ -340,17 +284,6 @@ def test_a_crashed_parity_probe_is_recorded_not_swallowed(
 
     assert "parity_probe_crashed" in _finding_codes(gate)
     assert gate.passed is True, "an unmeasured probe is advisory, not a delivery block"
-
-
-# --------------------------------------------------------------------------- #
-# A block-scoped finding must not quarantine the whole page
-#
-# `blocks_out_of_bounds_findings` reported the offending block id inside its
-# MESSAGE while leaving `page` as the only structured field, so the consumer
-# could only quarantine an entire page for one misplaced rectangle. On the
-# ATC'25 paper two rectangles overran the mediabox by ~60pt and 13 blocks with
-# verified translations (score 0.92) were held for human review.
-# --------------------------------------------------------------------------- #
 
 
 def test_a_block_scoped_finding_quarantines_only_that_block(tmp_path: Path) -> None:
@@ -372,12 +305,6 @@ def test_a_block_scoped_finding_quarantines_only_that_block(tmp_path: Path) -> N
 
 
 def test_an_artifact_rect_id_falls_back_to_page_scope(tmp_path: Path) -> None:
-    """T1 reads pdfium rects (``p3:rect327``), which match no IR block.
-
-    Treating such an id as a block key would match nothing AND suppress the page
-    fallback, silently dropping a real clipped-text defect — worse than
-    over-quarantining. The page rule must still apply.
-    """
     blocks = [_block("b1", 3), _block("b2", 3)]
     gate = VisualGateResult(
         passed=False,
@@ -396,7 +323,6 @@ def test_an_artifact_rect_id_falls_back_to_page_scope(tmp_path: Path) -> None:
 
 
 def test_a_page_scoped_finding_still_quarantines_the_page(tmp_path: Path) -> None:
-    """A blank page or a VLM FAIL implicates every block on it."""
     blocks = [_block("b1", 5), _block("b2", 5), _block("b3", 6)]
     gate = VisualGateResult(
         passed=False,

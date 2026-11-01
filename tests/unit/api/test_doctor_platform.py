@@ -1,21 +1,8 @@
-"""The doctor must not measure what the platform cannot measure.
-
-The ledger-permissions probe reads POSIX mode bits (``st_mode & 0o077``). On
-Windows those bits are synthesized — a writable file always reports 0666 — so
-the scan would flag every file as group/other-readable and the printed remedy
-(``chmod -R go-rwx``) would be noise. The check therefore SKIPs there, the
-runtime warning stays silent, and the console's forbidden-path panel renders
-the deny list the server actually enforces instead of hardcoded Unix paths.
-"""
-
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-# collect_checks lazily imports pikepdf (and friends) inside the PDF checks;
-# those imports branch on sys.platform, so they must be primed while the test
-# process still claims the real platform, before any test fakes win32.
 import pikepdf  # noqa: F401
 import pytest
 from fastapi.testclient import TestClient
@@ -40,9 +27,6 @@ def _config(tmp_path: Path) -> UBTConfig:
 def test_ledger_permissions_skips_on_windows(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # Called through the extracted helper, not collect_checks: the other probes
-    # shell out (shutil.which), and CPython's own win32 branches crash under a
-    # faked platform — this test is about OUR platform gate, not theirs.
     monkeypatch.setattr(sys, "platform", "win32")
     from ubt.cli.commands.doctor import _record_ledger_permissions
 

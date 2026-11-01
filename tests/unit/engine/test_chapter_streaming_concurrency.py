@@ -1,5 +1,3 @@
-"""Tests for chapter_streaming concurrency, cancellation, and deadlock resilience."""
-
 from __future__ import annotations
 
 import asyncio
@@ -69,7 +67,6 @@ def _make_context(
 
 @pytest.mark.asyncio
 async def test_chapter_streaming_normal_completion(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify normal streaming completes and emits chapter completed milestones."""
     chapters = [
         ChapterMeta(chapter_id="c1", spine_index=1, title="Chapter 1"),
         ChapterMeta(chapter_id="c2", spine_index=2, title="Chapter 2"),
@@ -113,8 +110,6 @@ async def test_chapter_streaming_normal_completion(monkeypatch: pytest.MonkeyPat
 async def test_chapter_streaming_consumer_crash_does_not_deadlock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify that if consumer crashes when queue is full, draft_worker does not deadlock in finally."""
-    # 5 chapters, queue size = 1 -> queue will quickly become full
     chapters = [
         ChapterMeta(chapter_id=f"c{i}", spine_index=i, title=f"Chapter {i}") for i in range(1, 6)
     ]
@@ -128,7 +123,6 @@ async def test_chapter_streaming_consumer_crash_does_not_deadlock(
         ctx: Any, services: Any, term: Any, scoring: Any, chapter_id: str | None = None
     ) -> Any:
         if chapter_id == "c1":
-            # Simulate unexpected failure in consumer
             raise RuntimeError("Consumer exploded!")
         yield _make_event(EventType.MTQE_EVALUATED, f"qg {chapter_id}")
 
@@ -142,7 +136,6 @@ async def test_chapter_streaming_consumer_crash_does_not_deadlock(
     monkeypatch.setattr("ubt.core.engine.stages.chapter_streaming.run_repair_stage", mock_repair)
 
     with pytest.raises(RuntimeError, match="Consumer exploded!"):
-        # Wrap in wait_for to guarantee no deadlock occurs
         async with asyncio.timeout(2.0):
             async for _ in run_chapter_streaming_pipeline(
                 ctx,
@@ -157,14 +150,6 @@ async def test_chapter_streaming_consumer_crash_does_not_deadlock(
 async def test_a_cancelled_stream_drains_the_per_chapter_generators(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """P2-2: cancelling the stream must close each chapter's stage generator.
-
-    The draft stage's generator owns the checkpoint flusher; its ``finally``
-    persists the chapter's drafted blocks. A bare ``async for`` left that
-    generator open on cancellation, so the ``finally`` ran only at GC — after
-    the pipeline's ledger teardown — and up to ``ledger_flush_batch_size`` paid
-    checkpoints were lost. ``aclosing`` makes the drain happen on cancel.
-    """
     chapters = [
         ChapterMeta(chapter_id="c1", spine_index=1, title="Chapter 1"),
         ChapterMeta(chapter_id="c2", spine_index=2, title="Chapter 2"),
@@ -176,7 +161,7 @@ async def test_a_cancelled_stream_drains_the_per_chapter_generators(
     async def mock_draft(ctx: Any, services: Any, term: Any, chapter_id: str | None = None) -> Any:
         try:
             yield _make_event(EventType.DRAFT_BATCH_COMPLETED, f"drafted {chapter_id}")
-            await asyncio.sleep(10)  # park so the cancel lands mid-chapter
+            await asyncio.sleep(10)
         finally:
             closed.append(str(chapter_id))
 
@@ -196,23 +181,18 @@ async def test_a_cancelled_stream_drains_the_per_chapter_generators(
         Terminology(glossary_dicts=[], abbreviation_entries=[]),
         Scoring(),
     )
-    # Consume the first event, then cancel the stream mid-chapter.
     await anext(gen)
     await gen.aclose()
 
-    # Give the worker tasks a tick to unwind after the closure.
     await asyncio.sleep(0.05)
     assert "c1" in closed, "the in-flight chapter's stage generator was not drained"
 
 
 @pytest.mark.asyncio
 async def test_chapter_streaming_event_queue_backpressure() -> None:
-    """Verify supervisor waits for event_queue space when putting _DONE rather than dropping it."""
     event_queue: asyncio.Queue[object] = asyncio.Queue(maxsize=1)
-    # Fill event queue to simulate saturation
     await event_queue.put("pre-existing-event")
 
-    # In a background task, read one event after a small delay
     async def drain_event() -> None:
         await asyncio.sleep(0.05)
         await event_queue.get()
@@ -220,11 +200,9 @@ async def test_chapter_streaming_event_queue_backpressure() -> None:
 
     drain_task = asyncio.create_task(drain_event())
 
-    # Simulated supervisor putting _DONE with backpressure
     put_done_coro = event_queue.put(_DONE)
     await asyncio.wait_for(put_done_coro, timeout=1.0)
     await drain_task
 
-    # Queue should now have _DONE
     item = await event_queue.get()
     assert item is _DONE

@@ -1,5 +1,3 @@
-"""Unit tests for the target-side emphasis markup codec."""
-
 from __future__ import annotations
 
 import pytest
@@ -81,9 +79,6 @@ def test_mark_skips_missing_and_empty_spans() -> None:
 
 
 def test_mark_folds_a_dash_mismatch_between_extractor_and_reader() -> None:
-    # The pdfium probe can report an en dash where the reader's source text has
-    # a hyphen ("agent–environment" vs "agent-environment"); the span must still
-    # be found and the *source* spelling preserved inside the markers.
     marked = mark_bold_spans("agent-environment loop", ["agent\u2013environment"])
     assert marked == f"{BOLD_OPEN}agent-environment{BOLD_CLOSE} loop"
     clean, runs = parse_bold(marked)
@@ -113,11 +108,6 @@ def test_parse_never_leaves_a_marker_in_the_clean_text() -> None:
         assert "⟧" not in clean
 
 
-# --------------------------------------------------------------------------- #
-# A model transcribing the sentinels as LaTeX brackets
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     "marker_open",
     ["⟦B⟧", "⟦ B ⟧", "\\llbracket B \\rrbracket", "\\llbracket b \\rrbracket"],
@@ -129,14 +119,6 @@ def test_parse_never_leaves_a_marker_in_the_clean_text() -> None:
 def test_a_latex_transcribed_marker_is_still_recognised(
     marker_open: str, marker_close: str
 ) -> None:
-    """The model reads the sentinels as math brackets and writes them as LaTeX.
-
-    Measured on the gold corpus (mamba ``pdf_main#b0426``): the draft carried
-    ``$\\llbracket B \\rrbracket A \\llbracket /B \\rrbracket$``. The marker
-    survived the parse, so a stray ``\\llbracket`` and a bare ``/`` reached a math
-    span and Typst failed with ``unknown variable: lbracket`` — losing the whole
-    document.
-    """
     clean, runs = parse_bold(f"{marker_open}粗体{marker_close}")
 
     assert clean == "粗体", f"the marker must be stripped: {clean!r}"
@@ -158,7 +140,6 @@ def test_strip_emphasis_markers_handles_the_latex_form() -> None:
 
 
 def test_ordinary_brackets_are_not_markers() -> None:
-    # The tolerant pattern must not fire on a real interval or a citation.
     for text in (r"$[a, b]$", r"see [21] and [32]", r"$\{x\}$"):
         clean, runs = parse_bold(text)
         assert clean == text, f"false positive on {text!r}"
@@ -166,12 +147,10 @@ def test_ordinary_brackets_are_not_markers() -> None:
 
 
 def test_word_boundary_prevents_substring_matching_in_longer_words() -> None:
-    # "in" should NOT match inside "Looking" or "window", but should match stand-alone "in"
     text = "Looking in the window."
     marked = mark_bold_spans(text, ["in"])
     assert marked == f"Looking {BOLD_OPEN}in{BOLD_CLOSE} the window."
 
-    # "in" inside "Looking" without standalone "in" should produce no match
     text_no_standalone = "Looking out the window."
     marked_none = mark_bold_spans(text_no_standalone, ["in"])
     assert marked_none == text_no_standalone
@@ -193,7 +172,6 @@ def test_mark_and_parse_emphasis_italic() -> None:
 
 
 def test_unclosed_markers_are_parsed_and_stripped() -> None:
-    # Model frequently drops ⟧ on closing sentinels before CJK, space, or punctuation
     clean, runs = parse_emphasis("CPU ⟦/B 资源涉及控制")
     assert clean == "CPU 资源涉及控制"
     assert runs == ()

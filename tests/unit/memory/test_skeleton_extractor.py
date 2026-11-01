@@ -1,5 +1,3 @@
-"""Contract tests for the LLM document-skeleton terminology extractor (Tier-2 Bible)."""
-
 from __future__ import annotations
 
 import asyncio
@@ -40,11 +38,6 @@ def _block(
     return IRBlock(element=element)
 
 
-# --------------------------------------------------------------------------- #
-# _document_text
-# --------------------------------------------------------------------------- #
-
-
 def test_document_text_joins_strings() -> None:
     assert _document_text(["a", "b"]) == "a\nb"
 
@@ -53,28 +46,18 @@ def test_document_text_reads_block_sources() -> None:
     assert _document_text([_block("x", "S1"), _block("y", "S2")]) == "S1\nS2"
 
 
-# --------------------------------------------------------------------------- #
-# _count_term_occurrences
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("term", "text", "expected"),
     [
-        ("coeffect", "coeffect coeffects and coeffect", 3),  # inflections count
-        ("agent harness", "agent harnesses here", 1),  # multi-word, last inflected
-        ("cat", "category cat", 1),  # prefix of a longer word does not match
+        ("coeffect", "coeffect coeffects and coeffect", 3),
+        ("agent harness", "agent harnesses here", 1),
+        ("cat", "category cat", 1),
         ("", "anything", 0),
-        ("\u795e\u7ecf\u7f51\u7edc", "\u795e\u7ecf\u7f51\u7edc\u5c42", 1),  # CJK substring
+        ("\u795e\u7ecf\u7f51\u7edc", "\u795e\u7ecf\u7f51\u7edc\u5c42", 1),
     ],
 )
 def test_count_term_occurrences(term: str, text: str, expected: int) -> None:
     assert _count_term_occurrences(term, text) == expected
-
-
-# --------------------------------------------------------------------------- #
-# build_document_skeleton
-# --------------------------------------------------------------------------- #
 
 
 def test_skeleton_of_no_blocks_is_empty() -> None:
@@ -104,11 +87,6 @@ def test_skeleton_from_blocks_keeps_headings_and_intro_prose() -> None:
     assert build_document_skeleton(blocks) == "[H] Chapter One\nIntro prose here"
 
 
-# --------------------------------------------------------------------------- #
-# _parse_terms_json
-# --------------------------------------------------------------------------- #
-
-
 def test_parse_terms_from_a_json_fence() -> None:
     raw = '```json\n{"terms":[{"source":"a"}]}\n```'
     assert _parse_terms_json(raw) == [{"source": "a"}]
@@ -125,11 +103,6 @@ def test_parse_terms_from_surrounding_prose() -> None:
 @pytest.mark.parametrize("raw", ["not json", "", '{"domain":"x"}'])
 def test_parse_terms_returns_empty_on_unusable_input(raw: str) -> None:
     assert _parse_terms_json(raw) == []
-
-
-# --------------------------------------------------------------------------- #
-# extract_skeleton_terms_llm
-# --------------------------------------------------------------------------- #
 
 
 def _stub(response: str) -> _CompleteFn:
@@ -156,8 +129,6 @@ def test_extraction_without_a_completer_is_empty() -> None:
 
 
 def test_extraction_of_a_too_small_skeleton_is_empty() -> None:
-    # The skeleton is below the 30-char floor, so no LLM call is made — even
-    # though the stub would return a term that is present in the document.
     response = '{"terms":[{"source":"x","translation":"y"}]}'
     result = asyncio.run(
         extract_skeleton_terms_llm(
@@ -185,11 +156,10 @@ def test_extraction_anchors_terms_to_the_document_and_ranks_by_occurrence() -> N
         )
     )
     by_source = {e.source: e for e in entries}
-    assert "absent-term" not in by_source  # not present in the document
+    assert "absent-term" not in by_source
     assert by_source["coeffect"].translation == "\u4f59\u6548\u5e94"
-    assert by_source["coeffect"].frequency == 2  # matches 'coeffect' + 'coeffects'
+    assert by_source["coeffect"].frequency == 2
     assert by_source["coeffects"].frequency == 1
-    # An unknown kind collapses to the default "term".
     assert by_source["coeffects"].kind == "term"
 
 
@@ -265,7 +235,6 @@ async def test_run_bible_stage_feeds_ir_blocks_to_skeleton_extractor() -> None:
         pass
 
     assert received_input is not None
-    # Because IRBlocks were fed, the heading "[H] Quantum Computing" is present,
     # and skip_translate block "Ignored intro prose" was excluded!
     assert "[H] Quantum Computing" in received_input
     assert "Ignored intro prose" not in received_input

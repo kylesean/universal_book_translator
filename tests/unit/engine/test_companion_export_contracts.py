@@ -1,14 +1,3 @@
-"""Tests for companion artifact export contracts and degradation audit (P2-2).
-
-Verifies:
-1. CompanionArtifactResult and CompanionExportSummary data contracts (status, size, duration, reason, error).
-2. _write_xliff_companion, _write_html_view, _write_epub_view, and _write_artifact_check
-   typed return values, graceful degradation on exceptions, and skipped rationale.
-3. run_export_stage emits EventType.COMPANIONS_EXPORTED and persists companion audit records
-   to job metadata and the quality report.
-4. Deliverables endpoint exposes companion_artifacts breakdown.
-"""
-
 from __future__ import annotations
 
 import json
@@ -98,7 +87,6 @@ def _make_ctx(
 
 
 def test_companion_artifact_result_and_summary_contract(tmp_path: Path) -> None:
-    """Validate CompanionArtifactResult model, statuses, and CompanionExportSummary aggregation."""
     path_xliff = tmp_path / "book.xliff"
     path_xliff.write_text("<xliff/>", encoding="utf-8")
 
@@ -140,7 +128,6 @@ def test_companion_artifact_result_and_summary_contract(tmp_path: Path) -> None:
     assert summary.get("html") == r_fail
     assert summary.get("nonexistent") is None
 
-    # CompanionKind / ArtifactKind types and CompanionExportManifest alias
     assert CompanionExportManifest is CompanionExportSummary
     kind: CompanionKind = "xliff"
     art_kind: ArtifactKind = kind
@@ -148,25 +135,21 @@ def test_companion_artifact_result_and_summary_contract(tmp_path: Path) -> None:
 
 
 def test_write_xliff_companion_contract(tmp_path: Path) -> None:
-    """_write_xliff_companion returns typed result across disabled, empty, success, and error paths."""
     out_pdf = tmp_path / "book.pdf"
     out_pdf.write_bytes(b"%PDF")
     block = _make_block()
 
-    # 1. Skipped when config disabled
     ctx_disabled = _make_ctx(tmp_path, emit_xliff=False)
     res_disabled = _write_xliff_companion(ctx_disabled, out_pdf, [block])
     assert res_disabled.status == "skipped"
     assert "disabled" in str(res_disabled.reason)
 
-    # 2. Skipped when export_xliff returns None (no segments)
     ctx_enabled = _make_ctx(tmp_path, emit_xliff=True)
     with patch("ubt.core.ports.export_xliff", return_value=None):
         res_empty = _write_xliff_companion(ctx_enabled, out_pdf, [block])
         assert res_empty.status == "skipped"
         assert "no extractable text segments" in str(res_empty.reason)
 
-    # 3. Success (generated)
     with patch("ubt.core.ports.export_xliff", return_value=("<xliff>bilingual content</xliff>", 1)):
         res_success = _write_xliff_companion(ctx_enabled, out_pdf, [block])
         assert res_success.status == "generated"
@@ -175,7 +158,6 @@ def test_write_xliff_companion_contract(tmp_path: Path) -> None:
         assert res_success.size_bytes is not None and res_success.size_bytes > 0
         assert res_success.duration_ms is not None and res_success.duration_ms >= 0
 
-    # 4. Failed on exception
     with patch("ubt.core.ports.export_xliff", side_effect=RuntimeError("XLIFF builder crash")):
         res_fail = _write_xliff_companion(ctx_enabled, out_pdf, [block])
         assert res_fail.status == "failed"
@@ -184,22 +166,16 @@ def test_write_xliff_companion_contract(tmp_path: Path) -> None:
 
 
 def test_write_html_view_contract(tmp_path: Path) -> None:
-    """_write_html_view returns typed result across disabled, success, and failure paths."""
     out_pdf = tmp_path / "book.pdf"
     out_pdf.write_bytes(b"%PDF")
     block = _make_block()
-    # ``target_text`` is ``str | None`` on the block, while every companion
-    # writer takes an already-placed ``dict[str, str]``: an unresolved block
-    # is simply absent from the map rather than mapped to ``None``.
     translations = {block.id: block.target_text or ""}
 
-    # 1. Skipped when disabled
     ctx_disabled = _make_ctx(tmp_path, emit_html=False)
     res_disabled = _write_html_view(ctx_disabled, out_pdf, translations, [block])
     assert res_disabled.status == "skipped"
     assert "disabled" in str(res_disabled.reason)
 
-    # 2. Success (generated)
     ctx_enabled = _make_ctx(tmp_path, emit_html=True)
 
     def _fake_compose_html(blocks: Any, trans: Any, path: Path, **kw: Any) -> None:
@@ -212,7 +188,6 @@ def test_write_html_view_contract(tmp_path: Path) -> None:
         assert res_success.path.exists()
         assert res_success.size_bytes is not None and res_success.size_bytes > 0
 
-    # 3. Failed on exception
     with patch("ubt.render.html_view.compose_html", side_effect=ValueError("HTML syntax invalid")):
         res_fail = _write_html_view(ctx_enabled, out_pdf, translations, [block])
         assert res_fail.status == "failed"
@@ -220,22 +195,16 @@ def test_write_html_view_contract(tmp_path: Path) -> None:
 
 
 def test_write_epub_view_contract(tmp_path: Path) -> None:
-    """_write_epub_view returns typed result across disabled, success, and failure paths."""
     out_pdf = tmp_path / "book.pdf"
     out_pdf.write_bytes(b"%PDF")
     block = _make_block()
-    # ``target_text`` is ``str | None`` on the block, while every companion
-    # writer takes an already-placed ``dict[str, str]``: an unresolved block
-    # is simply absent from the map rather than mapped to ``None``.
     translations = {block.id: block.target_text or ""}
 
-    # 1. Skipped when disabled
     ctx_disabled = _make_ctx(tmp_path, emit_epub=False)
     res_disabled = _write_epub_view(ctx_disabled, out_pdf, translations, [block])
     assert res_disabled.status == "skipped"
     assert "disabled" in str(res_disabled.reason)
 
-    # 2. Success (generated)
     ctx_enabled = _make_ctx(tmp_path, emit_epub=True)
 
     def _fake_compose_epub(blocks: Any, trans: Any, path: Path, **kw: Any) -> None:
@@ -248,7 +217,6 @@ def test_write_epub_view_contract(tmp_path: Path) -> None:
         assert res_success.path.exists()
         assert res_success.size_bytes is not None and res_success.size_bytes > 0
 
-    # 3. Failed on exception
     with patch(
         "ubt.render.epub_view.compose_epub", side_effect=OSError("Disk write quota exceeded")
     ):
@@ -258,22 +226,16 @@ def test_write_epub_view_contract(tmp_path: Path) -> None:
 
 
 def test_write_artifact_check_contract(tmp_path: Path) -> None:
-    """_write_artifact_check returns typed result across disabled, success, and failure paths."""
     out_pdf = tmp_path / "book.pdf"
     out_pdf.write_bytes(b"%PDF")
     block = _make_block()
-    # ``target_text`` is ``str | None`` on the block, while every companion
-    # writer takes an already-placed ``dict[str, str]``: an unresolved block
-    # is simply absent from the map rather than mapped to ``None``.
     translations = {block.id: block.target_text or ""}
 
-    # 1. Skipped when disabled
     ctx_disabled = _make_ctx(tmp_path, emit_attestation=False)
     res_disabled = _write_artifact_check(ctx_disabled, out_pdf, translations, [block])
     assert res_disabled.status == "skipped"
     assert "disabled" in str(res_disabled.reason)
 
-    # 2. Success (generated)
     ctx_enabled = _make_ctx(tmp_path, emit_attestation=True)
     mock_report = SimpleNamespace(
         total=1,
@@ -291,7 +253,6 @@ def test_write_artifact_check_contract(tmp_path: Path) -> None:
         assert data["artifact"]["total"] == 1
         assert data["artifact"]["summary"] == "1/1 blocks attested"
 
-    # 3. Failed on exception
     with patch("ubt.core.ports.check_artifact", side_effect=RuntimeError("PyMuPDF parser error")):
         res_fail = _write_artifact_check(ctx_enabled, out_pdf, translations, [block])
         assert res_fail.status == "failed"
@@ -299,7 +260,6 @@ def test_write_artifact_check_contract(tmp_path: Path) -> None:
 
 
 def test_deliverables_endpoint_surfaces_companion_artifacts(tmp_path: Path) -> None:
-    """Verify that GET /jobs/{job_id}/deliverables surfaces the structured companion audit breakdown."""
     from starlette.testclient import TestClient
 
     from ubt.api.app import create_app
@@ -315,7 +275,6 @@ def test_deliverables_endpoint_surfaces_companion_artifacts(tmp_path: Path) -> N
     out_file = out_dir / "out.pdf"
     out_file.write_bytes(b"%PDF-1.4\nmock")
 
-    # Write mock quality report sidecar so deliverables endpoint passes verdict probe
     report_data = json.dumps(
         {
             "summary": {

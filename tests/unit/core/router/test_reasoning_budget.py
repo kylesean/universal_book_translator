@@ -1,5 +1,3 @@
-"""A reasoning model must not fail every block at the same output budget."""
-
 from __future__ import annotations
 
 import pytest
@@ -73,7 +71,6 @@ async def test_reasoning_budget_widening_is_not_repeated() -> None:
 
 @pytest.mark.asyncio
 async def test_reasoning_budget_is_widened_when_the_request_left_it_unset() -> None:
-    """A reasoning profile may omit max_tokens and inherit a gateway default."""
     provider = _ReasoningBudgetProvider()
     router = ModelRouter(provider=provider, draft_model="reasoning-model")
 
@@ -87,7 +84,6 @@ async def test_reasoning_budget_is_widened_when_the_request_left_it_unset() -> N
 
 @pytest.mark.asyncio
 async def test_reasoning_draft_sets_a_scaled_budget_before_the_first_call() -> None:
-    """A gateway default must not be the first budget a reasoning draft sees."""
     from ubt.core.ir.models import BlockStatus, IRBlock
     from ubt.model.ast import Paragraph
     from ubt.model.span import Span
@@ -108,14 +104,11 @@ async def test_reasoning_draft_sets_a_scaled_budget_before_the_first_call() -> N
 
     assert provider.budgets[0] is not None
     assert provider.budgets[0] > _REASONING_MIN_OUTPUT_TOKENS
-    # The prompt template itself is part of the source-token estimate, so the
-    # exact value is above the bare 10k-token payload.
     assert provider.budgets[0] >= 10_000 // 4 * _REASONING_OUTPUT_HEADROOM
 
 
 @pytest.mark.asyncio
 async def test_reasoning_macro_chunk_budget_covers_all_blocks() -> None:
-    """One eight-block macro call must budget for the whole chunk, not one block."""
     from ubt.core.ir.models import BlockStatus, IRBlock
     from ubt.model.ast import Paragraph
     from ubt.model.span import Span
@@ -139,13 +132,11 @@ async def test_reasoning_macro_chunk_budget_covers_all_blocks() -> None:
 
     assert provider.budgets[0] is not None
     assert provider.budgets[0] > _REASONING_MIN_OUTPUT_TOKENS
-    # Eight ~1000-token blocks must scale beyond the one-block floor.
     assert provider.budgets[0] > 20_000
 
 
 @pytest.mark.asyncio
 async def test_reasoning_repair_uses_a_scaled_budget_too() -> None:
-    """Repair is the same reasoning model and must not fall back to 1024."""
     from ubt.core.ir.models import BlockStatus, IRBlock
     from ubt.model.ast import Paragraph
     from ubt.model.span import Span
@@ -175,7 +166,6 @@ async def test_reasoning_repair_uses_a_scaled_budget_too() -> None:
 
 
 def test_anthropic_owns_its_thinking_budget_instead_of_double_counting() -> None:
-    """Messages API raises max_tokens over budget_tokens; do not pre-inflate it."""
     router = ModelRouter(provider=MockModelProvider(), draft_model="reasoning-model")
 
     class _AnthropicProvider(MockModelProvider):

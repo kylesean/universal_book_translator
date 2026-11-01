@@ -1,23 +1,3 @@
-"""L2 (page-locked) pages must draw their assets, never typeset their paths.
-
-The delivery defect this pins is measured, not hypothetical: on a real 26-page
-BSIM-CMG chapter (``chapter-3.pdf``) 25 of 26 pages routed to L2, and the L2
-channel carried no background layer and had no ``IMAGE`` branch at all. Each
-asset block's ``source_text`` *is* the extracted file's absolute path (that is
-how the parser stores it), so the renderer set those paths as body prose. The
-delivered page 4 read, verbatim:
-
-    /home/kyle/.cache/ubt/docling_cache/assets/fc1d7…/pic_p4_22.dpi300-tight2.png
-
-while the contract reported 94 ``MISSING`` assets for figures the reader could
-not see. Two independent things had to be true afterwards: the ink has to be on
-the page, and the contract has to say so.
-
-An L1 facsimile page does *not* need this: its stripped background layer carries
-the asset's source ink at its exact box, which is why the copier is only wired
-into the L2 branch of the hybrid document.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -49,7 +29,6 @@ def _asset_block(
     page: int = 4,
     bbox: tuple[float, float, float, float] = (36.0, 500.0, 300.0, 700.0),
 ) -> IRBlock:
-    """An image block in the exact shape the PDF parser writes: path as text."""
     bb = BoundingBox(page=page, x0=bbox[0], y0=bbox[1], x1=bbox[2], y1=bbox[3])
     el = make_element(
         id=block_id, spine_index=1, block_type=BlockType.IMAGE, source_text=path, bbox=bb
@@ -89,8 +68,6 @@ def _spec(blocks: list[IRBlock], *, columns: int = 1) -> PageLockedPageSpec:
 
 
 class TestAssetPathNeverBecomesProse:
-    """The path is machinery. Under no configuration may it be typeset."""
-
     def test_no_copier_drops_the_asset_instead_of_printing_the_path(self) -> None:
         markup = PageLockedReflowRenderer().build_page_markup(_spec([_asset_block("a1")]))
         assert "docling_cache" not in markup
@@ -109,8 +86,6 @@ class TestAssetPathNeverBecomesProse:
             _spec([_asset_block("a1", str(asset))]), asset_copier=copier
         )
         assert "image(" in markup
-        # The reference is the content-addressed copy that actually exists in
-        # the build dir next to the .typ, not the absolute source path.
         name = markup.split('image("')[1].split('"')[0]
         assert (build / name).exists()
         assert name.startswith("pic_p4_22.dpi300-tight2-")
@@ -119,18 +94,15 @@ class TestAssetPathNeverBecomesProse:
         assert "docling_cache" not in markup
 
     def test_the_image_is_clamped_to_the_column_width(self, tmp_path: Path) -> None:
-        """A wider-than-column figure must not overflow the text block."""
         asset = tmp_path / "wide.png"
         asset.write_bytes(b"\x89PNG\r\n\x1a\n")
         copier = make_asset_copier(tmp_path / "build", tmp_path)
-        # bbox width 600pt on a 540pt page: content width is 460pt.
         block = _asset_block("a1", str(asset), bbox=(20.0, 500.0, 620.0, 700.0))
         markup = PageLockedReflowRenderer().build_page_markup(_spec([block]), asset_copier=copier)
         width = float(markup.split("width: ")[-1].split("pt")[0])
         assert width <= 540.0 - 40.0 - 40.0 + 0.01
 
     def test_a_missing_asset_file_is_dropped_not_broken(self, tmp_path: Path) -> None:
-        """``copier`` returns ``None`` for an unreadable path -> block dropped."""
         copier = make_asset_copier(tmp_path / "build", tmp_path / "nope")
         markup = PageLockedReflowRenderer().build_page_markup(
             _spec([_asset_block("a1", str(tmp_path / "gone.png"))]), asset_copier=copier
@@ -156,7 +128,6 @@ class TestAssetCopier:
     def test_name_is_content_addressed_against_same_basename_collisions(
         self, tmp_path: Path
     ) -> None:
-        """Flat build dirs plus shared basenames silently overwrite each other."""
         root = tmp_path / "assets"
         root.mkdir()
         one = root / "pic_p4_22.png"
@@ -186,13 +157,6 @@ class TestAssetCopier:
     def test_a_missing_build_dir_is_created_rather_than_dropping_every_asset(
         self, tmp_path: Path
     ) -> None:
-        """The copier must not need the render stage to have run first.
-
-        A caller that builds markup before ``build_dir`` exists (a preflight, a
-        preview, a test) would otherwise get ``None`` for every asset and an
-        artifact with no figures at all — silent loss through a missing
-        ``mkdir``, which is the exact failure this copier exists to prevent.
-        """
         asset = tmp_path / "assets" / "pic.png"
         asset.parent.mkdir()
         asset.write_bytes(b"\x89PNG\r\n\x1a\n")
@@ -209,23 +173,17 @@ class TestAssetCopier:
 
 
 class TestHeightBudgetCountsAssets:
-    """An asset occupies vertical space, or the page silently overflows."""
-
     def test_an_image_reserves_its_scaled_height(self) -> None:
         block = _asset_block("a1", bbox=(36.0, 500.0, 300.0, 700.0))
         h = _block_height(block, col_w=460.0, size=9.0, leading=0.35, spacing=0.65, tracking=0.0)
         assert h > 0.0, "a 200pt figure must not budget as zero height"
 
     def test_a_full_width_image_budgets_its_whole_box(self) -> None:
-        """At or below the column width the height is the source region's height."""
-        # 264pt wide (<= col_w) and 200pt tall: no scaling, so ~200pt reserved.
         block = _asset_block("a1", bbox=(36.0, 500.0, 300.0, 700.0))
         h = _block_height(block, col_w=460.0, size=9.0, leading=0.35, spacing=0.65, tracking=0.0)
         assert 195.0 < h < 210.0, h
 
     def test_an_image_wider_than_the_column_budgets_the_scaled_height(self) -> None:
-        """Scaled down to the column, its height shrinks by the same factor."""
-        # 920pt wide, 200pt tall, into a 460pt column -> half scale -> ~100pt.
         block = _asset_block("a1", bbox=(20.0, 500.0, 940.0, 700.0))
         h = _block_height(block, col_w=460.0, size=9.0, leading=0.35, spacing=0.65, tracking=0.0)
         assert 95.0 < h < 110.0, h
@@ -242,8 +200,6 @@ class TestHeightBudgetCountsAssets:
 
 
 class TestHybridFacsimileOnlyL2GetsCopier:
-    """L1 pages keep their figures in the background layer; L2 pages must draw."""
-
     def test_build_markup_passes_the_copier_and_l1_still_uses_the_background(
         self, tmp_path: Path
     ) -> None:
@@ -284,9 +240,7 @@ class TestHybridFacsimileOnlyL2GetsCopier:
         ]
         markup = FacsimileRenderer().build_markup(pages, "bg_stripped.pdf", asset_copier=copier)
 
-        # L1 still pages over the stripped background, and names no asset file.
         assert 'background: image("bg_stripped.pdf", page: 1' in markup
-        # L2 draws the figure instead of printing its path.
         assert "pic_p4_22" in markup
         assert "docling_cache" not in markup
         assert str(asset) not in markup

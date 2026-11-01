@@ -1,12 +1,3 @@
-"""How a provider block's credential resolves — and the three ways it lies.
-
-``read_provider`` used to answer ``bool(raw)`` on the merged block, which counts
-the literal text ``"${OPENCODE_API_KEY}"`` as a credential. The console then
-reported "credential set" for a block whose loader output was ``""``, and every
-call failed at the first request. These tests pin the corrected contract, which
-the router depends on: a configured key is not a usable key.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -54,15 +45,12 @@ def test_a_literal_credential_is_usable(config_dir: Path) -> None:
 
 
 def test_an_unset_variable_is_present_but_not_usable(config_dir: Path) -> None:
-    """The bug the console shipped: ``${VAR}`` counted as a credential."""
     from ubt.core.providers import credential_resolution
 
     state = credential_resolution("variable")
     assert state["kind"] == "variable"
     assert state["usable"] is False
     assert state["unresolved_vars"] == ["TEST_CRED_VAR"]
-    # The variable's *value* is never in the payload, and neither is the name of
-    # a variable that did resolve.
     assert "TEST_CRED_VAR" in state["unresolved_vars"]
 
 
@@ -79,17 +67,11 @@ def test_a_set_variable_is_usable_and_no_longer_unresolved(
 
 
 def test_a_default_makes_an_absent_variable_resolve(config_dir: Path) -> None:
-    """``${VAR:-default}`` resolves without the variable, so it is not an error.
-
-    Reporting it as unresolved would send the operator to export a variable the
-    block deliberately does not require.
-    """
     from ubt.core.providers import credential_resolution
 
     state = credential_resolution("with_default")
     assert state["usable"] is True
     assert state["unresolved_vars"] == []
-    # The default is a secret and must not be echoed.
     assert "sk-default-value" not in str(state)
 
 
@@ -102,18 +84,12 @@ def test_a_keyless_block_uses_the_generic_variable(
     monkeypatch.setenv("UBT_LLM_API_KEY", "sk-generic")
     state = credential_resolution("keyless")
     assert state["authenticates"] is True
-    # The block holds nothing to shadow: the variable is supplying, not hiding.
     assert state["shadowed_by_env"] is False
 
 
 def test_a_block_credential_is_reported_as_shadowed_when_the_env_is_set(
     config_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The save that could not take effect.
-
-    ``UBT_LLM_API_KEY`` outranks the block, so a credential written into the file
-    is inert while it is exported. The console promised the next job would use it.
-    """
     from ubt.core.providers import credential_resolution
 
     assert credential_resolution("literal")["shadowed_by_env"] is False
@@ -124,11 +100,6 @@ def test_a_block_credential_is_reported_as_shadowed_when_the_env_is_set(
 
 
 def test_the_loader_and_the_report_agree(config_dir: Path) -> None:
-    """``usable`` must match what the engine would actually send.
-
-    This is the invariant that makes the report worth showing: if it says usable,
-    ``load_provider_block`` must hand the router a non-empty credential.
-    """
     from ubt.core.providers import credential_resolution, load_provider_block
 
     for name in ("literal", "variable", "with_default", "keyless"):

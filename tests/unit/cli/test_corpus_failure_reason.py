@@ -1,18 +1,3 @@
-"""A failed corpus case must report the pipeline's own error, not a warning.
-
-``ubt verify --corpus --run`` shells out to ``ubt translate`` and, on a nonzero
-exit, reported the *last six lines* of its output. A refused book therefore read
-as::
-
-    translation failed (exit 1):  / Using a slow image processor as `use_fast`
-    is unset and a slow processor was saved with this model.
-
-which is the HuggingFace startup notice. The actual refusal -- "1 of 92 page(s)
-have no extractable text layer" -- was above it. The reporter now prefers the
-``Pipeline Execution Failed:`` line the CLI prints, and keeps the tail as the
-fallback for a run that died before reaching that handler.
-"""
-
 from __future__ import annotations
 
 import subprocess

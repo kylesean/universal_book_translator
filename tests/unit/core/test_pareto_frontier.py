@@ -1,5 +1,3 @@
-"""Unit tests for multi-model quality vs. cost Pareto frontier evaluation engine."""
-
 from __future__ import annotations
 
 import json
@@ -32,7 +30,6 @@ pytestmark = pytest.mark.fast
 
 
 def test_dominates_logic() -> None:
-    # A dominates B if A is cheaper and higher quality
     a = ModelPoint(
         model_name="model_a", quality_score=0.95, cost_per_10k_words=0.05, total_cost_usd=0.05
     )
@@ -42,14 +39,12 @@ def test_dominates_logic() -> None:
     assert dominates(a, b) is True
     assert dominates(b, a) is False
 
-    # Trade-off: C is cheaper but lower quality -> neither dominates
     c = ModelPoint(
         model_name="model_c", quality_score=0.88, cost_per_10k_words=0.02, total_cost_usd=0.02
     )
     assert dominates(a, c) is False
     assert dominates(c, a) is False
 
-    # Equal points: identical points do not dominate each other
     d = ModelPoint(
         model_name="model_d", quality_score=0.95, cost_per_10k_words=0.05, total_cost_usd=0.05
     )
@@ -71,7 +66,7 @@ def test_compute_pareto_frontier_basic() -> None:
             cost_per_10k_words=0.01,
             total_cost_usd=0.01,
             throughput_cps=40,
-        ),  # dominated by free_good
+        ),
         ModelPoint(
             model_name="mid_sweet",
             quality_score=0.92,
@@ -92,7 +87,7 @@ def test_compute_pareto_frontier_basic() -> None:
             cost_per_10k_words=0.18,
             total_cost_usd=0.18,
             throughput_cps=80,
-        ),  # dominated
+        ),
     ]
 
     frontier = compute_pareto_frontier(points, min_qe_threshold=0.75)
@@ -104,7 +99,6 @@ def test_compute_pareto_frontier_basic() -> None:
     assert "cheap_bad" not in pareto_names
     assert "expensive_worse" not in pareto_names
 
-    # Check recommendations
     assert frontier.budget_pick is not None
     assert frontier.budget_pick.model_name == "free_good"
     assert frontier.flagship_pick is not None
@@ -130,7 +124,6 @@ def test_simulate_model_pareto() -> None:
     assert len(report.frontier.all_points) > 0
     assert len(report.frontier.frontier_points) > 0
 
-    # Ensure sweet spot exists and has marginal return calculated
     assert report.frontier.sweet_spot is not None
     assert report.frontier.flagship_pick is not None
     assert report.frontier.budget_pick is not None
@@ -200,24 +193,20 @@ def test_build_pareto_from_benchmark_reports() -> None:
 def test_pareto_reporters(tmp_path: Path) -> None:
     report = simulate_model_pareto(sample_words=10000)
 
-    # 1. Terminal (should not crash)
     render_pareto_terminal(report)
 
-    # 2. Markdown
     md_content = render_pareto_markdown(report)
     assert "# Multi-Model Quality vs. Cost Pareto Frontier Analysis" in md_content
     assert "Sweet Spot" in md_content
     assert "Evaluated Model Options Matrix" in md_content
 
-    # 3. HTML Dashboard
     html_content = render_pareto_html_dashboard(report)
     assert "<!DOCTYPE html>" in html_content
-    assert "<svg" in html_content  # embedded SVG chart
-    assert "cdn." not in html_content.lower()  # zero external CDN
-    assert "<script" not in html_content.lower()  # zero external scripts
-    assert '<link rel="stylesheet"' not in html_content.lower()  # zero external CSS
+    assert "<svg" in html_content
+    assert "cdn." not in html_content.lower()
+    assert "<script" not in html_content.lower()
+    assert '<link rel="stylesheet"' not in html_content.lower()
 
-    # 4. JSON export
     json_content = render_pareto_json(report)
     parsed = json.loads(json_content)
     assert "frontier" in parsed

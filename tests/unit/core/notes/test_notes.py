@@ -1,5 +1,3 @@
-"""Unit tests for Footnote & Endnote Flow Manager."""
-
 from __future__ import annotations
 
 import pytest
@@ -36,10 +34,6 @@ def _mk_block(
         level=level,
         flow_id=flow_id,
     )
-    # ``IRBlock`` carries its structure in ``element``; ``id``, ``block_type``,
-    # ``source_text`` and ``flow_id`` all live on the element (``flow_id`` is
-    # passed to ``make_element`` above) and were silently dropped here by
-    # ``extra="ignore"``. ``target_text`` is a real block field and stays.
     return IRBlock(element=el, target_text=target or source)
 
 
@@ -120,7 +114,6 @@ def test_extract_notes_topology_per_chapter_and_continuous() -> None:
         _mk_block("fn2", BlockType.NARRATIVE, target="[^1]: 解释二", flow_id=FlowID.FOOTNOTE),
     ]
 
-    # Per chapter
     top_ch = extract_notes_topology(
         blocks, NotesConfig(numbering_scope=NoteNumberingScope.PER_CHAPTER)
     )
@@ -130,7 +123,6 @@ def test_extract_notes_topology_per_chapter_and_continuous() -> None:
     assert top_ch.notes[1].note_id == "fn-ch2-1"
     assert top_ch.notes[1].index_num == 1
 
-    # Continuous
     top_cont = extract_notes_topology(
         blocks, NotesConfig(numbering_scope=NoteNumberingScope.CONTINUOUS)
     )

@@ -1,5 +1,3 @@
-"""Contract tests for the hierarchical (L1/L2/L3) memory manager."""
-
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -53,11 +51,6 @@ async def _snapshot(
     return await manager.generate_step_snapshot(complete)
 
 
-# --------------------------------------------------------------------------- #
-# Construction / defaults
-# --------------------------------------------------------------------------- #
-
-
 def test_defaults() -> None:
     manager = HierarchicalMemoryManager()
     assert manager.step_chars == DEFAULT_STEP_CHARS == 3500
@@ -70,10 +63,6 @@ def test_defaults() -> None:
 
 
 def test_disabled_manager_buffers_nothing_and_triggers_no_snapshot() -> None:
-    # resolve_draft_policy turns hierarchical L2/L3 off for a single-chapter
-    # document. Before the flag, that route still paid the L2 llm_summary calls
-    # while refusing to inject the L2 macro slot -- L3 alone rode the prompt,
-    # at L2's price.
     manager = HierarchicalMemoryManager(enabled=False, step_chars=1)
     manager.record_drafted_block(_block("c1#b1", 0, target="x" * 50))
     assert manager.should_trigger_snapshot() is False
@@ -99,13 +88,8 @@ def test_snapshot_properties_return_copies() -> None:
     manager = HierarchicalMemoryManager()
     manager.snapshots.append(StepSnapshot(0, 0, 0, "", "x", 0))
     manager.epochs.append(EpochSnapshot(0, 0, 0, "y"))
-    assert manager.snapshots == []  # internal list untouched
+    assert manager.snapshots == []
     assert manager.epochs == []
-
-
-# --------------------------------------------------------------------------- #
-# record_drafted_block
-# --------------------------------------------------------------------------- #
 
 
 def test_record_prefers_target_then_draft_then_source() -> None:
@@ -114,11 +98,6 @@ def test_record_prefers_target_then_draft_then_source() -> None:
     manager.record_drafted_block(_block("b", 1, draft="DDDD", source="SSSS"))
     manager.record_drafted_block(_block("c", 2, source="SSSSSS"))
     assert manager._current_buffer_chars == len("TT") + len("DDDD") + len("SSSSSS")
-
-
-# --------------------------------------------------------------------------- #
-# should_trigger_snapshot
-# --------------------------------------------------------------------------- #
 
 
 def test_no_buffer_never_triggers() -> None:
@@ -141,7 +120,6 @@ def test_chapter_transition_triggers_with_enough_content() -> None:
 def test_chapter_transition_needs_two_blocks_when_short() -> None:
     manager = HierarchicalMemoryManager(step_chars=10_000)
     manager.record_drafted_block(_block("ch1#b1", 0, target="short"))
-    # One short block, chapter differs: not enough evidence yet.
     assert manager.should_trigger_snapshot(_block("ch2#b1", 1)) is False
     manager.record_drafted_block(_block("ch1#b2", 1, target="short"))
     assert manager.should_trigger_snapshot(_block("ch2#b1", 2)) is True
@@ -157,7 +135,6 @@ def test_missing_chapter_namespace_does_not_trigger() -> None:
     manager = HierarchicalMemoryManager(step_chars=10_000)
     manager.record_drafted_block(_block("plain1", 0, target="x" * 300))
     assert manager.should_trigger_snapshot(_block("plain2", 1)) is False
-    # And a delimited next block against an undelimited buffer is also silent.
     assert manager.should_trigger_snapshot(_block("ch2#b1", 1)) is False
 
 
@@ -165,11 +142,6 @@ def test_no_next_block_uses_char_threshold_only() -> None:
     manager = HierarchicalMemoryManager(step_chars=10_000)
     manager.record_drafted_block(_block("ch1#b1", 0, target="x" * 300))
     assert manager.should_trigger_snapshot() is False
-
-
-# --------------------------------------------------------------------------- #
-# generate_step_snapshot
-# --------------------------------------------------------------------------- #
 
 
 async def test_empty_buffer_returns_latest_summary() -> None:
@@ -187,9 +159,9 @@ async def test_snapshot_records_fields_and_increments_step() -> None:
     )
     snap = manager.snapshots[0]
     assert snap.step_index == 0
-    assert snap.start_spine == 1  # sorted by spine
+    assert snap.start_spine == 1
     assert snap.end_spine == 5
-    assert snap.chapter_id == "ch1"  # from the first (spine-ordered) block
+    assert snap.chapter_id == "ch1"
     assert snap.summary_text == "Summary Alpha"
     assert snap.char_count == len("hello world") + len("more text")
 
@@ -230,7 +202,6 @@ async def test_overlong_llm_summary_is_truncated_to_800() -> None:
 
 async def test_deterministic_fallback_uses_uncapped_content() -> None:
     manager = HierarchicalMemoryManager()
-    # A short LLM reply forces the deterministic fallback over the block text.
     summary = await _snapshot(manager, [_block("ch1#b1", 0, target="A" * 100)], "tiny")
     assert summary == "A" * 100
 
@@ -253,11 +224,6 @@ async def test_blank_blocks_produce_empty_summary() -> None:
     )
     assert summary == ""
     assert manager.snapshots[0].summary_text == ""
-
-
-# --------------------------------------------------------------------------- #
-# L3 epochs
-# --------------------------------------------------------------------------- #
 
 
 async def test_epoch_generated_every_l3_epoch_steps() -> None:
@@ -318,7 +284,7 @@ def test_get_l3_summary_keeps_earliest_whole_epochs() -> None:
     summary = manager.get_l3_summary()
     assert summary.startswith("A" * 590)
     assert "B" * 590 in summary
-    assert "C" not in summary  # would exceed the 1200-char clamp
+    assert "C" not in summary
     assert len(summary) <= 1200
 
 
@@ -341,7 +307,6 @@ def test_get_l3_summary_sliding_window() -> None:
         EpochSnapshot(1, 2, 3, "Middle" * 50),
         EpochSnapshot(2, 4, 5, "Recent" * 50),
     ]
-    # Sliding window keeps the most recent epochs within budget
     summary = manager.get_l3_summary()
     assert "Recent" in summary
     assert "Middle" in summary
@@ -373,14 +338,8 @@ def test_restore_state_caps_max_epochs() -> None:
     assert len(manager.epochs) == 3
     assert [e.epoch_index for e in manager.epochs] == [7, 8, 9]
 
-    # Default manager has bounded max_epochs
     default_mgr = HierarchicalMemoryManager()
     assert default_mgr.max_epochs == DEFAULT_MAX_EPOCHS == 50
-
-
-# --------------------------------------------------------------------------- #
-# Latest summary / export / restore
-# --------------------------------------------------------------------------- #
 
 
 async def test_get_latest_macro_summary() -> None:
@@ -426,7 +385,7 @@ def test_restore_filters_non_dicts_and_falls_back_on_bad_counter() -> None:
     )
     assert len(manager.snapshots) == 1
     assert len(manager.epochs) == 1
-    assert manager._step_counter == 1  # falls back to len(snapshots)
+    assert manager._step_counter == 1
 
 
 def test_restore_defaults_counter_to_snapshot_count() -> None:
@@ -448,11 +407,6 @@ def test_restore_defaults_counter_to_snapshot_count() -> None:
     assert manager._step_counter == 1
 
 
-# --------------------------------------------------------------------------- #
-# get_macro_context_for_block
-# --------------------------------------------------------------------------- #
-
-
 async def _chaptered_manager() -> HierarchicalMemoryManager:
     manager = HierarchicalMemoryManager(l3_epoch_steps=100)
     await _snapshot(manager, [_block("ch1#b1", 1, target="a" * 40)], "Summary Alpha")
@@ -467,7 +421,6 @@ async def test_macro_context_prefers_exact_chapter_match() -> None:
 
 async def test_macro_context_chapter_match_beats_a_more_recent_snapshot() -> None:
     manager = await _chaptered_manager()
-    # Spine 6 is past both snapshots, but the ch1 snapshot is the chapter match.
     assert manager.get_macro_context_for_block(_block("ch1#b9", 6)) == "Summary Alpha"
 
 
@@ -492,13 +445,7 @@ def test_macro_context_skips_blank_summaries() -> None:
         StepSnapshot(0, 0, 1, "ch1", "real", 5),
         StepSnapshot(1, 0, 2, "ch1", "", 5),
     ]
-    # No chapter id -> spine fallback walks back past the newest (blank) snapshot.
     assert manager.get_macro_context_for_block(_block("plain", 3)) == "real"
-
-
-# --------------------------------------------------------------------------- #
-# L1 delegation
-# --------------------------------------------------------------------------- #
 
 
 def test_l1_context_delegates_to_neighbor_builder() -> None:
@@ -525,11 +472,6 @@ def test_export_state_is_json_serializable_shape() -> None:
     assert state["snapshots"][0]["chapter_id"] == "c"
 
 
-# --------------------------------------------------------------------------- #
-# Chapter-end flush: a short chapter must not lose its summary
-# --------------------------------------------------------------------------- #
-
-
 def test_pending_block_count_reports_the_buffer() -> None:
     manager = HierarchicalMemoryManager(step_chars=10_000)
     assert manager.pending_block_count == 0
@@ -541,20 +483,11 @@ def test_pending_block_count_reports_the_buffer() -> None:
 
 @pytest.mark.asyncio
 async def test_a_short_chapter_can_be_summarized_before_the_buffer_is_dropped() -> None:
-    """The draft stage's chapter-end path.
-
-    Under ``chapter_streaming`` each chapter gets a fresh manager, so a chapter
-    shorter than ``step_chars`` never tripped ``should_trigger_snapshot`` and its
-    whole buffer was discarded at teardown. Summarizing first (what the stage
-    now does when ``pending_block_count`` is non-zero) produces the L2 entry the
-    next chapter restores.
-    """
     manager = HierarchicalMemoryManager(step_chars=10_000)
     blocks = [_block("ch1#b1", 1, target="第一章的正文内容。" * 100)]
     for block in blocks:
         manager.record_drafted_block(block)
 
-    # The threshold alone does not fire for a short chapter.
     assert manager.should_trigger_snapshot() is False
     assert manager.pending_block_count == 1
 
@@ -565,7 +498,6 @@ async def test_a_short_chapter_can_be_summarized_before_the_buffer_is_dropped() 
     assert manager.pending_block_count == 0
     assert len(manager.snapshots) == 1
 
-    # And it survives a resume round-trip, which is how the next chapter sees it.
     state = manager.export_state()
     restored = HierarchicalMemoryManager(step_chars=10_000)
     restored.restore_state(state)
@@ -574,13 +506,9 @@ async def test_a_short_chapter_can_be_summarized_before_the_buffer_is_dropped() 
 
 
 def test_a_chapter_transition_triggers_once_the_buffer_has_content() -> None:
-    """The trigger production never used: it needs the *incoming* block."""
     manager = HierarchicalMemoryManager(step_chars=10_000)
     manager.record_drafted_block(_block("ch1#b1", 1, target="第一章的正文内容。" * 100))
 
-    # No next block: the transition cannot be seen.
     assert manager.should_trigger_snapshot() is False
-    # With the incoming block the boundary is visible.
     assert manager.should_trigger_snapshot(_block("ch2#b1", 2, target="第二章。")) is True
-    # A block from the same chapter is not a transition.
     assert manager.should_trigger_snapshot(_block("ch1#b2", 2, target="同章。")) is False

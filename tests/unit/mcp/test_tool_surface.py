@@ -1,19 +1,3 @@
-"""The MCP tool surface: the two discovery/repair tools and resubmit parity.
-
-Three gaps closed (2026-10-14 review, W4-6):
-
-1. ``ubt_re_export`` — a human edit (``ubt_edit_segment``) lands in the
-   ledger but the delivered file was rendered before it; the REST surface
-   had a re-export endpoint and the MCP surface had none, so an agent could
-   edit and then had no way to make the fix reach the download.
-2. ``ubt_list_jobs`` — an agent could only ask about a job id it already
-   knew. The console's queue table reads the per-job ledgers on disk; the
-   MCP surface now does too.
-3. Resubmit parity — REST treats a live job id as an idempotent resubmit
-   (returns the existing job); MCP raised, so a retry after a timeout gave
-   the agent an error it could not act on.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -37,7 +21,6 @@ def test_the_discovery_and_repair_tools_are_registered() -> None:
     names = _tool_names()
     assert "ubt_re_export" in names
     assert "ubt_list_jobs" in names
-    # The original eight stay registered.
     for original in (
         "ubt_translate_book",
         "ubt_job_status",
@@ -59,7 +42,6 @@ def test_the_discovery_and_repair_tools_are_registered() -> None:
 
 
 def test_every_tool_carries_a_description() -> None:
-    """A tool the model cannot read is a tool it cannot use correctly."""
     for tool in asyncio.run(mcp.list_tools()):
         assert tool.description and tool.description.strip(), tool.name
 
@@ -101,8 +83,6 @@ def test_the_new_tools_document_their_arguments() -> None:
 
 
 class _Record:
-    """Just enough of a JobRecord for the resubmit guard to read."""
-
     def __init__(self, job_id: str, request: JobSubmitRequest, status: str) -> None:
         self.job_id = job_id
         self.request = request
@@ -126,7 +106,6 @@ async def _call(**kwargs: Any) -> dict[str, Any]:
 async def test_a_repeated_submit_with_the_same_arguments_is_reused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The resubmit contract now compares the full normalized request."""
     source = tmp_path / "book.md"
     source.write_text("# t\n\nhello\n", encoding="utf-8")
     monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))

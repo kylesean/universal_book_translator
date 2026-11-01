@@ -1,9 +1,3 @@
-"""Contract tests for the execution-policy resolver.
-
-The Granularity axis is gone: the pipeline is always the frozen-math
-micro-block architecture. The render engine is a single constant, not a choice.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -40,11 +34,6 @@ def _manifest(run: RunMetadata | None = None) -> BookManifest:
     return BookManifest(doc_id="doc", title="t", source_path="s.pdf", run=run or RunMetadata())
 
 
-# --------------------------------------------------------------------------- #
-# The engine is not a choice
-# --------------------------------------------------------------------------- #
-
-
 def test_config_has_no_render_engine_knob() -> None:
     assert not hasattr(UBTConfig(), "render_engine")
     assert not hasattr(AdaptivePolicy, "render_engine")
@@ -76,11 +65,6 @@ def test_to_dict_round_trips_every_field() -> None:
     }
 
 
-# --------------------------------------------------------------------------- #
-# resolve_adaptive_policy
-# --------------------------------------------------------------------------- #
-
-
 def test_short_document_keeps_fast_lane_and_glossary() -> None:
     policy = resolve_adaptive_policy(_manifest(), _route("short", 5), UBTConfig())
     assert policy.fast_lane_bible is True
@@ -106,29 +90,15 @@ def test_long_document_honours_visual_blocking_gate_flag() -> None:
 
 
 def test_long_route_glossary_is_config_opt_in() -> None:
-    """The long route's deterministic glossary is an explicit config switch.
-
-    Default off (the historical premise stays the default until an on/off
-    comparison proves otherwise); on, the export stage enforces terms for
-    books too, and the reason string says so. Re-export reads the same flag,
-    so a re-render cannot silently drop the layer.
-    """
     config = UBTConfig(deterministic_glossary_long_route=True)
     policy = resolve_adaptive_policy(_manifest(), _route("long", 300), config)
     assert policy.deterministic_glossary is True
     assert "config opt-in" in policy.reason
-    # Short route unaffected: it keeps enforcement with or without the flag.
     short = resolve_adaptive_policy(_manifest(), _route("short", 5), UBTConfig())
     assert short.deterministic_glossary is True
 
 
 def test_re_export_enforcement_follows_the_config(tmp_path: Path) -> None:
-    """re_export's AdaptivePolicy reads deterministic_glossary_long_route.
-
-    The old hard ``False`` meant a re-render shipped a *different* delivery
-    than the original run whenever the long-route flag was on (enforced
-    spans N -> 0) with nothing flagging the difference.
-    """
     from ubt.core.engine.re_export import _build_services
 
     config = UBTConfig(
@@ -136,14 +106,12 @@ def test_re_export_enforcement_follows_the_config(tmp_path: Path) -> None:
         deterministic_glossary_long_route=True,
     )
     manifest = _manifest()
-    # No collaborator is invoked: the assertion reads adaptive_policy only.
     placeholder_router = cast(ModelRouter, object())
     placeholder_qe = cast(BaseQERunner, object())
     services = _build_services(
         config, router=placeholder_router, qe_runner=placeholder_qe, manifest=manifest
     )
     assert services.adaptive_policy.deterministic_glossary is True
-    # And off stays off.
     config_off = UBTConfig(db_dir=tmp_path / "db2")
     services_off = _build_services(
         config_off, router=placeholder_router, qe_runner=placeholder_qe, manifest=manifest

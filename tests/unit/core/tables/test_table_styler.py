@@ -1,5 +1,3 @@
-"""Unit tests for table continuation configuration and Typst/HTML styling primitives."""
-
 from __future__ import annotations
 
 import pytest
@@ -17,12 +15,10 @@ pytestmark = pytest.mark.fast
 
 def test_table_continuation_config_language_resolution() -> None:
     cfg = TableContinuationConfig()
-    # Chinese resolution
     assert cfg.get_continued_header_text("zh") == "（续表）"
     assert cfg.get_continued_header_text("zh-CN") == "（续表）"
     assert cfg.get_next_page_footer_text("zh") == "（续下页）"
 
-    # English resolution
     assert cfg.get_continued_header_text("en") == "(Continued from previous page)"
     assert cfg.get_next_page_footer_text("en") == "(Continued on next page)"
     assert cfg.get_continued_header_text("fr") == "(Continued from previous page)"
@@ -52,14 +48,12 @@ def test_generate_typst_table_continuation_elements() -> None:
     assert "<ubt-tbl-start-tab1>" in start_anc
     assert "<ubt-tbl-end-tab1>" in end_anc
 
-    # Header cell checks
     assert "table.cell(colspan: 3)" in header_cell
     assert "#context" in header_cell
     assert "query(selector(<ubt-tbl-start-tab1>).before(here()))" in header_cell
     assert "here().page() > el.location().page()" in header_cell
     assert "[续表]" in header_cell
 
-    # Footer block checks
     assert "table.footer(" in footer_blk
     assert "repeat: true" in footer_blk
     assert "query(selector(<ubt-tbl-end-tab1>).after(here()))" in footer_blk

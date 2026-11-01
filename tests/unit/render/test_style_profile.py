@@ -1,5 +1,3 @@
-"""Unit tests for DocumentStyleProfile and visual style cloning (P3 / G3)."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -102,13 +100,6 @@ def test_extract_document_style_profile_monochrome() -> None:
 
 
 def test_the_no_color_fallback_is_neutral_black() -> None:
-    """A document whose headings measure no color ships black headings.
-
-    The fallback used to be a brand accent: the ATC'25 replay measured zero
-    colored headings on a paper whose headings are black, and every section
-    title came out painted blue. An unmeasured color must resolve to the
-    source's own neutral, never to a decoration.
-    """
     assert DEFAULT_PRIMARY_HEADING_HEX == "#000000"
 
 
@@ -171,7 +162,6 @@ def test_document_renderer_academic_applies_style_profile(tmp_path: Path) -> Non
 async def test_docling_render_manifest_metadata_style_profile(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """DoclingRenderStrategy records the document_style_profile in manifest.metadata."""
     import ubt.adapters.pdf.typst_compile as tc
 
     monkeypatch.setattr(tc, "typst_compile", lambda *_a, **_kw: (True, ""))

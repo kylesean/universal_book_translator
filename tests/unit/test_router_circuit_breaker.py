@@ -14,7 +14,6 @@ pytestmark = pytest.mark.fast
 
 @pytest.mark.asyncio
 async def test_router_circuit_breaker_tripping_and_skip() -> None:
-    """Verify that after 3 consecutive failures, a model trips the circuit breaker and is skipped in favor of fallback."""
     provider = MockModelProvider()
     router = ModelRouter(
         provider=provider,
@@ -39,19 +38,16 @@ async def test_router_circuit_breaker_tripping_and_skip() -> None:
         return f"translated by {model}"
 
     with patch.object(router, "_execute_single_model", side_effect=fake_execute_single):
-        # 1st call: failing-model fails, falls back to healthy-model
         res1 = await router._execute_with_retry("sys", "user", "failing-model", 0.3)
         assert res1 == "translated by healthy-model"
         assert call_counts["failing-model"] == 1
         assert router._model_circuit["failing-model"][0] == 1
 
-        # 2nd call: failing-model fails again, falls back
         res2 = await router._execute_with_retry("sys", "user", "failing-model", 0.3)
         assert res2 == "translated by healthy-model"
         assert call_counts["failing-model"] == 2
         assert router._model_circuit["failing-model"][0] == 2
 
-        # 3rd call: failing-model fails a 3rd time -> trips circuit breaker
         res3 = await router._execute_with_retry("sys", "user", "failing-model", 0.3)
         assert res3 == "translated by healthy-model"
         assert call_counts["failing-model"] == 3
@@ -69,12 +65,6 @@ async def test_router_circuit_breaker_tripping_and_skip() -> None:
 
 @pytest.mark.asyncio
 async def test_circuit_cooldown_uses_failure_time_not_entry_time() -> None:
-    """A chain that burns wall-clock time must not write an already-expired cooldown.
-
-    The entry timestamp predates the retries and fallback walk; a cooldown
-    computed from it can be expired the moment it is written, so the breaker
-    never actually opens under a slow-failing chain.
-    """
     provider = MockModelProvider()
     router = ModelRouter(provider=provider, draft_model="failing-model", fallback_models=[])
     clock = {"t": 1000.0}
@@ -83,7 +73,7 @@ async def test_circuit_cooldown_uses_failure_time_not_entry_time() -> None:
         return clock["t"]
 
     async def slow_failure(*args: object, **kwargs: object) -> str:
-        clock["t"] += 30.0  # emulate wall-clock burn during the failed call
+        clock["t"] += 30.0
         raise ModelProviderError("429 Too Many Requests")
 
     with (
@@ -96,20 +86,11 @@ async def test_circuit_cooldown_uses_failure_time_not_entry_time() -> None:
 
     fails, cooldown = router._model_circuit["failing-model"]
     assert fails == 3
-    # Third failure lands at t=1090, so the failure-based cooldown is 1150. An
-    # entry-based one (t=1060 + 60 = 1120) would already lag the burned time.
     assert cooldown == pytest.approx(1150.0)
 
 
 @pytest.mark.asyncio
 async def test_router_unstructured_auth_error_fails_fast() -> None:
-    """An unstructured 401 must fail fast *without* trying a fallback model.
-
-    The "without fallbacks" half is the point: an auth failure applies to the
-    provider, so walking the chain would bill two more doomed calls. The earlier
-    version of this test only asserted that an error surfaced, which is also
-    true when every candidate is attempted.
-    """
     provider = MockModelProvider()
     router = ModelRouter(
         provider=provider,
@@ -141,7 +122,6 @@ async def test_router_unstructured_auth_error_fails_fast() -> None:
 
 @pytest.mark.asyncio
 async def test_router_repair_fallback_uses_repair_provider() -> None:
-    """Verify that fallbacks in repair routing use the repair provider."""
     primary_provider = MockModelProvider()
     repair_provider = MockModelProvider()
     router = ModelRouter(
@@ -151,6 +131,5 @@ async def test_router_repair_fallback_uses_repair_provider() -> None:
         fallback_models=["fallback-repair"],
     )
 
-    # When is_repair=True, fallback-repair should route to repair_provider
     assert router._provider_for("fallback-repair", is_repair=True) is repair_provider
     assert router._provider_for("fallback-repair", is_repair=False) is primary_provider

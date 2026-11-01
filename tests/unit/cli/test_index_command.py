@@ -1,5 +1,3 @@
-"""Unit tests for the 'ubt index' CLI command suite."""
-
 from __future__ import annotations
 
 import json
@@ -28,13 +26,11 @@ def sample_doc_with_terms(tmp_path: Path) -> Path:
 
 
 def test_index_inspect_command(sample_doc_with_terms: Path) -> None:
-    # Terminal text output
     result = runner.invoke(app, ["index", "inspect", str(sample_doc_with_terms)])
     assert result.exit_code == 0
     assert "Consensus Algorithm" in result.output
     assert "共识算法" in result.output
 
-    # JSON output
     json_res = runner.invoke(app, ["index", "inspect", str(sample_doc_with_terms), "--json"])
     assert json_res.exit_code == 0
     data = json.loads(json_res.output)
@@ -65,7 +61,6 @@ def test_index_generate_command(sample_doc_with_terms: Path, tmp_path: Path) -> 
     assert "#columns(3" in content
     assert "Consensus Algorithm" in content
 
-    # HTML format to stdout
     html_res = runner.invoke(
         app,
         ["index", "generate", str(sample_doc_with_terms), "--format", "html"],
@@ -73,7 +68,6 @@ def test_index_generate_command(sample_doc_with_terms: Path, tmp_path: Path) -> 
     assert html_res.exit_code == 0
     assert '<section class="ubt-concordance-index">' in html_res.output
 
-    # Markdown format to stdout
     md_res = runner.invoke(
         app,
         ["index", "generate", str(sample_doc_with_terms), "--format", "markdown"],
@@ -83,12 +77,10 @@ def test_index_generate_command(sample_doc_with_terms: Path, tmp_path: Path) -> 
 
 
 def test_index_stats_command(sample_doc_with_terms: Path) -> None:
-    # Text output
     res = runner.invoke(app, ["index", "stats", str(sample_doc_with_terms)])
     assert res.exit_code == 0
     assert "Total Indexed Terms:" in res.output
 
-    # JSON output
     json_res = runner.invoke(app, ["index", "stats", str(sample_doc_with_terms), "--json"])
     assert json_res.exit_code == 0
     data = json.loads(json_res.output)

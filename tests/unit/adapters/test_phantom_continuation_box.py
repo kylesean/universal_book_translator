@@ -1,13 +1,3 @@
-"""Drop a cross-page box Docling attached to the wrong element.
-
-Docling sometimes gives one text item two ``prov`` boxes on different pages, the
-second of which is *another* block's box (a caption). The parser fused them into
-a ``CompositeSpan``, and the compositor flowed the paragraph's text across the
-page boundary into the caption's box -- overlapping, unreadable text on
-arXiv 2610.02185 p6. The tell is exact duplication: a real cross-page
-continuation's second box is a distinct region, never one another block owns.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -44,9 +34,8 @@ def _block(block_id: str, page: int, y0: float, y1: float, *, chain: bool = Fals
 
 
 def test_a_chain_box_owned_by_another_block_is_dropped() -> None:
-    """The paragraph loses the box the caption already owns."""
     para = _block("p1", 5, 94.0, 124.0, chain=True)
-    caption = _block("c1", 6, 398.9, 414.4)  # owns the page-6 box
+    caption = _block("c1", 6, 398.9, 414.4)
 
     out = drop_phantom_continuation_boxes([para, caption])
     by_id = {b.id: b for b in out}
@@ -54,16 +43,13 @@ def test_a_chain_box_owned_by_another_block_is_dropped() -> None:
     assert by_id["p1"].provenance.physical_boxes == []
     assert not isinstance(by_id["p1"].element.span, CompositeSpan)
     assert by_id["p1"].bbox is not None
-    assert by_id["p1"].bbox.page == 5  # stays on its own page
-    # The caption is untouched.
+    assert by_id["p1"].bbox.page == 5
     assert by_id["c1"].bbox is not None
     assert by_id["c1"].bbox.page == 6
 
 
 def test_a_genuine_cross_page_continuation_is_kept() -> None:
-    """A second box no other block owns is a real continuation: keep it."""
     para = _block("p1", 5, 94.0, 124.0, chain=True)
-    # No block owns the page-6 box.
 
     out = drop_phantom_continuation_boxes([para])
     (only,) = out

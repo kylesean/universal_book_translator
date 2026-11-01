@@ -1,5 +1,3 @@
-"""Unit tests for the 'scripts/run_corpus_benchmark.py' standalone script."""
-
 from __future__ import annotations
 
 import json
@@ -38,7 +36,6 @@ def _setup_mock_corpus(corpus_dir: Path) -> None:
 
 
 def test_script_missing_corpus(capsys: pytest.CaptureFixture[str]) -> None:
-    """Missing corpus path exits with code 2."""
     ret = main(["--corpus", "nonexistent_dir_xyz"])
     assert ret == 2
     captured = capsys.readouterr()
@@ -48,7 +45,6 @@ def test_script_missing_corpus(capsys: pytest.CaptureFixture[str]) -> None:
 def test_script_json_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """--json prints machine-readable structured report."""
     corpus_dir = tmp_path / "corpus"
     _setup_mock_corpus(corpus_dir)
 
@@ -87,7 +83,6 @@ def test_script_json_mode(
 def test_script_exports_and_drift_detection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Verify script file exports (--html-out, --markdown-out, --json-out, --save-baseline, --baseline)."""
     corpus_dir = tmp_path / "corpus"
     _setup_mock_corpus(corpus_dir)
 

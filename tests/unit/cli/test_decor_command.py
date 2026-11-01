@@ -1,5 +1,3 @@
-"""Unit tests for the 'ubt decor' CLI command suite."""
-
 from __future__ import annotations
 
 import json
@@ -109,7 +107,6 @@ def test_decor_inspect_command(tmp_path: Path) -> None:
     )
     doc.write_text(content, encoding="utf-8")
 
-    # Text mode
     result = runner.invoke(app, ["decor", "inspect", str(doc)])
     assert result.exit_code == 0
     assert "第 1 章" in result.output
@@ -117,7 +114,6 @@ def test_decor_inspect_command(tmp_path: Path) -> None:
     assert "第 2 章" in result.output
     assert "架构模式" in result.output
 
-    # JSON mode
     json_res = runner.invoke(app, ["decor", "inspect", str(doc), "--json"])
     assert json_res.exit_code == 0
     data = json.loads(json_res.output)

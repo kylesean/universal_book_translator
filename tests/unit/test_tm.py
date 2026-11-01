@@ -1,24 +1,3 @@
-"""Translation memory: the pure functions, centred on the polarity guard.
-
-A fuzzy TM hit is injected into the draft prompt as a *terminology* reference.
-Whole-string similarity cannot see meaning, so a one-morpheme inversion
-("exothermic" vs "endothermic", "is" vs "isn't") still clears the fuzzy
-threshold -- and a wrong reference is the most direct route for a wrong sentence
-into a book. :func:`_polarity_diverges` is the guard that drops such a reference
-before it is shown. It is conservative by design: a dropped reference costs one
-LLM draft, never a wrong sentence.
-
-The rest of the module's pure surface is pinned here too -- the context
-fingerprint an exact hit is valid under, the exact-key normalization, the FTS5
-trigram shingling, and the few-shot rendering that consumes the guard.
-
-The SQLite-backed :class:`TranslationMemory` is exercised against a real
-``tmp_path`` database: the writeback upsert policy (human review is never
-downgraded, the reuse counter is *not* a write counter), the context/domain
-read gate, identity-row refusal, the per-pair generation that lets one writer
-process invalidate another's cached pool, and the FTS5 prefilter path.
-"""
-
 from __future__ import annotations
 
 import random
@@ -48,7 +27,6 @@ from ubt.core.memory.tm import (
 
 pytestmark = pytest.mark.fast
 
-#: Negation words that must set the negation slot (word-level, not substring).
 _NEGATION_CUES = (
     "not",
     "no",
@@ -62,7 +40,6 @@ _NEGATION_CUES = (
     "cannot",
 )
 
-#: CJK negators that travel as characters, not ``[a-z]+`` tokens.
 _CJK_NEGATION_CUES = (
     "\u4e0d",
     "\u6ca1",
@@ -75,7 +52,6 @@ _CJK_NEGATION_CUES = (
     "\u306c",
 )
 
-#: Mutually exclusive antonym groups; each contributes one slot.
 _ANTONYM_GROUPS = (
     ("increase", "decrease"),
     ("left", "right"),
@@ -85,11 +61,6 @@ _ANTONYM_GROUPS = (
 )
 
 _NEG = "neg"
-
-
-# --------------------------------------------------------------------------- #
-# _polarity_signature: one slot per cue group.
-# --------------------------------------------------------------------------- #
 
 
 def test_signature_has_a_negation_slot_plus_one_per_antonym_group() -> None:
@@ -110,7 +81,6 @@ def test_the_n_t_contraction_sets_the_negation_slot() -> None:
 
 
 def test_a_curly_apostrophe_contraction_also_sets_the_negation_slot() -> None:
-    # Real books use U+2019; "n't" in "isn’t" is false unless it is folded first.
     assert _polarity_signature("this isn\u2019t the case")[0] == _NEG
 
 
@@ -120,7 +90,6 @@ def test_negation_membership_is_word_level_not_substring() -> None:
 
 @pytest.mark.parametrize("cue", _CJK_NEGATION_CUES)
 def test_cjk_negators_set_the_negation_slot(cue: str) -> None:
-    # CJK negation travels as characters; the [a-z]+ cue set never fired for it.
     assert _polarity_signature(f"{cue}\u662f\u771f\u7684")[0] == _NEG
 
 
@@ -134,19 +103,12 @@ def test_each_antonym_group_puts_its_cue_in_its_own_slot(word: str, slot_index: 
 
 
 def test_antonym_inflections_canonicalize_to_the_same_slot() -> None:
-    # A tense change is not an antonym divergence -- and the slot must hold the
-    # canonical cue, not merely be equal to the other inflection's slot.
     assert _polarity_signature("it increases") == _polarity_signature("it increased")
     assert _polarity_signature("it increased")[1] == "increase"
 
 
 def test_opposite_antonyms_land_in_different_slots() -> None:
     assert _polarity_signature("rates increase") != _polarity_signature("rates decrease")
-
-
-# --------------------------------------------------------------------------- #
-# _polarity_diverges: the guard itself.
-# --------------------------------------------------------------------------- #
 
 
 def test_identical_polarity_does_not_diverge() -> None:
@@ -171,11 +133,6 @@ def test_a_cjk_negation_difference_diverges() -> None:
 
 def test_an_inflection_only_change_does_not_diverge() -> None:
     assert _polarity_diverges("it increases", "it increased") is False
-
-
-# --------------------------------------------------------------------------- #
-# compute_tm_context: the identity an exact hit is valid under.
-# --------------------------------------------------------------------------- #
 
 
 def _context(**overrides: str) -> str:
@@ -212,20 +169,11 @@ def test_context_is_deterministic_and_32_hex_chars() -> None:
     ],
 )
 def test_every_prompt_visible_part_changes_the_context(field: str) -> None:
-    # A prompt-visible change that did not move the fingerprint would let a
-    # stale exact hit survive it.
     assert _context(**{field: "changed"}) != _context()
 
 
 def test_a_different_draft_model_does_not_share_identity() -> None:
-    # The content-addressed draft cache keys on model; TM must too, or a rerun
-    # under a new draft model short-circuits on the old model's exact hit.
     assert _context(model="draft-model-b") != _context(model="draft-model-a")
-
-
-# --------------------------------------------------------------------------- #
-# normalize_for_tm / _source_hash: the exact key.
-# --------------------------------------------------------------------------- #
 
 
 def test_normalize_collapses_whitespace_and_strips() -> None:
@@ -240,11 +188,6 @@ def test_source_hash_is_sha256_hex_and_input_sensitive() -> None:
     assert len(_source_hash("x")) == 64
     assert _source_hash("x") == _source_hash("x")
     assert _source_hash("x") != _source_hash("y")
-
-
-# --------------------------------------------------------------------------- #
-# FTS5 trigram shingling.
-# --------------------------------------------------------------------------- #
 
 
 def test_terms_are_three_codepoint_shingles_of_each_word_run() -> None:
@@ -271,11 +214,6 @@ def test_a_phrase_quotes_and_doubles_embedded_quotes() -> None:
     assert _fts_phrase('a"b') == '"a""b"'
 
 
-# --------------------------------------------------------------------------- #
-# format_few_shot_reference: the guard at the prompt boundary.
-# --------------------------------------------------------------------------- #
-
-
 def _hit(source: str = "The cat sat.", target: str = "Le chat.", similarity: float = 0.9) -> TMHit:
     return TMHit(source, target, similarity, "machine")
 
@@ -294,11 +232,6 @@ def test_a_surviving_hit_is_presented_as_terminology_only() -> None:
     assert "do NOT copy" in reference
     assert "Reference source: The cat sat." in reference
     assert "Reference translation: Le chat." in reference
-
-
-# --------------------------------------------------------------------------- #
-# TranslationMemory: the SQLite-backed store.
-# --------------------------------------------------------------------------- #
 
 
 @pytest.fixture()
@@ -388,8 +321,6 @@ def test_machine_writeback_never_downgrades_human_pe(tm: TranslationMemory) -> N
     _store(tm, "Reviewed.", "\u673a\u3002", provenance=PROVENANCE_MACHINE)
     hit = tm.lookup_exact("en", "zh", "Reviewed.")
     assert hit is not None
-    # The latest translation wins, but the reviewed *label* survives: a machine
-    # rewrite must not demote a human-reviewed row back to machine provenance.
     assert hit.target_text == "\u673a\u3002"
     assert hit.provenance == PROVENANCE_HUMAN_PE
 
@@ -419,9 +350,6 @@ def test_exact_lookup_increments_the_reuse_counter(tm: TranslationMemory) -> Non
     assert row.use_count == 2
 
 
-# --- identity rows --------------------------------------------------------- #
-
-
 def test_a_machine_row_echoing_its_source_is_refused(tm: TranslationMemory) -> None:
     _store(tm, "Introduction", "introduction", provenance=PROVENANCE_MACHINE)
     assert tm.lookup_exact("en", "zh", "Introduction") is None
@@ -447,9 +375,6 @@ def test_row_rejected_is_verbatim_only_for_human_rows() -> None:
     assert not TranslationMemory._row_rejected(PROVENANCE_HUMAN_PE, "Recase.", "RECASE.")
 
 
-# --- context / domain gate ------------------------------------------------- #
-
-
 def test_exact_hit_requires_a_matching_context(tm: TranslationMemory) -> None:
     _store(tm, "Ctx.", "\u4e0a\u4e0b\u6587\u3002", context_hash="A")
     assert tm.lookup_exact("en", "zh", "Ctx.", context_hash="A") is not None
@@ -469,28 +394,20 @@ def test_a_human_pe_row_is_exempt_from_the_context_gate(tm: TranslationMemory) -
 
 
 def test_hit_allowed_gate_matrix() -> None:
-    # human_pe bypasses everything.
     assert TranslationMemory._hit_allowed(PROVENANCE_HUMAN_PE, "A", None, "B", None)
-    # a machine row needs context equality ...
     assert TranslationMemory._hit_allowed(PROVENANCE_MACHINE, "A", None, "A", None)
     assert not TranslationMemory._hit_allowed(PROVENANCE_MACHINE, "A", None, "B", None)
-    # ... or a shared domain.
     assert TranslationMemory._hit_allowed(PROVENANCE_MACHINE, "A", "math", "B", "math")
     assert not TranslationMemory._hit_allowed(PROVENANCE_MACHINE, "A", "math", "B", "bio")
 
 
 def test_human_pe_outranks_an_exact_context_machine_row(tm: TranslationMemory) -> None:
-    # Same normalized source under different context hashes -> two rows; the
-    # reviewed rendering must win even though the machine row matches exactly.
     _store(tm, "Rank.", "\u673a\u3002", context_hash="A", provenance=PROVENANCE_MACHINE)
     _store(tm, "Rank.", "\u4eba\u3002", context_hash="", provenance=PROVENANCE_HUMAN_PE)
     hit = tm.lookup_exact("en", "zh", "Rank.", context_hash="A")
     assert hit is not None
     assert hit.target_text == "\u4eba\u3002"
     assert hit.provenance == PROVENANCE_HUMAN_PE
-
-
-# --- fuzzy lookup (scan path) ---------------------------------------------- #
 
 
 def test_fuzzy_scan_finds_a_near_identical_source(tm: TranslationMemory) -> None:
@@ -528,7 +445,6 @@ def test_fuzzy_refuses_an_identity_candidate(tm: TranslationMemory) -> None:
 
 
 def test_writeback_refreshes_the_cached_pool(tm: TranslationMemory) -> None:
-    # Prime the pool, then write; the new row must be findable without a reopen.
     tm.lookup_fuzzy("en", "zh", "nothing close at all here", 0.99)
     _store(tm, "Brand new sentence for the pool.", "\u65b0\u3002")
     hit = tm.lookup_fuzzy("en", "zh", "Brand new sentence for the pool.", 0.95)
@@ -542,9 +458,6 @@ def test_evict_refreshes_the_cached_pool(tm: TranslationMemory) -> None:
     row = next(entry for entry in tm.scan() if entry.source_text.startswith("Evictable"))
     assert tm.evict_ids([row.id]) == 1
     assert tm.lookup_fuzzy("en", "zh", "Evictable sentence for the pool.", 0.95) is None
-
-
-# --- FTS prefilter path ---------------------------------------------------- #
 
 
 def test_the_fts_path_owns_a_large_enough_pool(tmp_path: Path) -> None:
@@ -561,8 +474,6 @@ def test_the_fts_path_owns_a_large_enough_pool(tmp_path: Path) -> None:
 
 
 def test_the_fts_path_is_a_miss_without_token_overlap(tmp_path: Path) -> None:
-    # A >=threshold hit without trigram overlap is near-impossible; the prefilter
-    # deliberately does not fall back to a full scan in that case.
     memory = TranslationMemory(tmp_path / "tm.sqlite", prefilter_min_pool=2)
     try:
         _store(memory, "The riverbank erosion study is important.", "\u6cb3\u5cb8\u3002")
@@ -579,9 +490,6 @@ def test_a_punctuation_only_query_has_no_fts_terms(tmp_path: Path) -> None:
         assert memory.lookup_fuzzy("en", "zh", "!!! ...", 0.5) is None
     finally:
         memory.close()
-
-
-# --- counts, scan, evict --------------------------------------------------- #
 
 
 def test_entry_count_filters_by_pair(tm: TranslationMemory) -> None:
@@ -656,13 +564,6 @@ def test_list_page_rejects_unknown_filters(tm: TranslationMemory) -> None:
 def test_list_page_search_keeps_the_derived_count_clauses_valid(
     tm: TranslationMemory,
 ) -> None:
-    """A filtered count must remain one valid WHERE clause.
-
-    Search adds an OR-group to the shared filter. Appending an unqualified
-    ``provenance = ?`` after that group copied the field name into the count
-    query in a form SQLite reads as an alias, so the real 38k-row store answered
-    every TM page with HTTP 500 while the empty-store tests stayed green.
-    """
     _store(tm, "markdown search sentence", "\u4e2d\u6587\u53e5\u5b50\u3002")
 
     page = tm.list_page(query="markdown")
@@ -714,16 +615,12 @@ def test_evict_matching_refuses_a_scope_that_changed_after_preview(
     assert tm.entry_count() == 1
 
 
-# --- per-pair generation across processes ---------------------------------- #
-
-
 def test_one_process_sees_another_process_write(tmp_path: Path) -> None:
     db = tmp_path / "tm.sqlite"
     writer = TranslationMemory(db)
     reader = TranslationMemory(db)
     try:
         _store(writer, "First sentence for sharing.", "\u4e00\u3002")
-        # Prime the reader's pool before the second write.
         assert reader.lookup_fuzzy("en", "zh", "First sentence for sharing.", 0.99) is not None
         _store(writer, "Second sentence added by the writer.", "\u4e8c\u3002")
         hit = reader.lookup_fuzzy("en", "zh", "Second sentence added by the writer.", 0.95)
@@ -768,22 +665,10 @@ def test_generation_starts_at_zero_and_increments(tm: TranslationMemory) -> None
         tm._bump_generations(conn, {("en", "zh")})
         tm._bump_generations(conn, {("en", "zh")})
         assert tm._generation(conn, ("en", "zh")) == 2
-        # A different pair is untouched by the first pair's bumps.
         assert tm._generation(conn, ("en", "fr")) == 0
 
 
 def test_concurrent_lookups_overlap_a_writeback(tmp_path: Path) -> None:
-    """Per-thread read connections keep lookups off the writer's lock.
-
-    Eight threads issue exact + fuzzy lookups while the main thread writebacks
-    more entries; every lookup must answer from a consistent store and the
-    writeback must land completely. A regression that put reads back on the
-    single shared connection serializes here at best; one that shared the
-    writer's handle across threads races the pool cache at worst. The
-    lookups deliberately mix known hits (exact), gate-passing fuzzy hits that
-    exercise the use-count bump on the writer connection, and misses whose
-    pool fill races the writeback's generation bump.
-    """
     db = tmp_path / "tm.sqlite"
     memory = TranslationMemory(db)
     try:
@@ -800,9 +685,6 @@ def test_concurrent_lookups_overlap_a_writeback(tmp_path: Path) -> None:
                     hit = memory.lookup_exact("en", "zh", source)
                     assert hit is not None
                     assert hit.target_text.startswith("第")
-                    # Over the fuzzy threshold but not an identity candidate:
-                    # this reaches _fetch_hit_if_allowed and its writer-side
-                    # use-count bump.
                     fuzzy = memory.lookup_fuzzy("en", "zh", source + " tail", 0.5)
                     if fuzzy is not None:
                         assert fuzzy.provenance == PROVENANCE_MACHINE

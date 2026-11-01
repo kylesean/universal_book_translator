@@ -1,5 +1,3 @@
-"""Math fallback: balanced frac/sqrt must compile, degrades must stay readable."""
-
 from __future__ import annotations
 
 import pytest
@@ -47,14 +45,8 @@ def test_clean_math_fallback_text_display_math() -> None:
 
 
 def test_uncompilable_math_does_not_leak_latex_into_the_page() -> None:
-    # A math span the transpiler cannot convert must degrade to readable Unicode
-    # rather than leak raw LaTeX command names (\frac, \phi) into the rendered
-    # text. ``render_prose`` is the single place that decides this now.
     line = r"公式为：$\frac{1}{2} \phi s_2 \gamma s_1 \phi d$。"
     rendered = render_prose(line)
-    # This body *is* convertible, so it becomes real Typst math (better than a
-    # Unicode approximation). What matters is that no LaTeX command name
-    # survives into the page.
     assert r"\frac" not in rendered
     assert r"\phi" not in rendered
     assert r"\gamma" not in rendered
@@ -62,9 +54,6 @@ def test_uncompilable_math_does_not_leak_latex_into_the_page() -> None:
 
 
 def test_an_unconvertible_formula_degrades_to_unicode_not_latex() -> None:
-    # The case the fallback exists for: a command the transpiler does not know
-    # cannot become math, and must not become LaTeX source or a command name
-    # either — it degrades to the neutral ``⟨math⟩`` placeholder.
     rendered = render_prose(r"公式：$\unknowncmd{x} + \phi$。")
     assert "\\unknowncmd" not in rendered
     assert "unknowncmd" not in rendered, "the command name itself must not ship"
@@ -73,13 +62,6 @@ def test_an_unconvertible_formula_degrades_to_unicode_not_latex() -> None:
 
 
 def test_fallback_never_leaks_a_command_name_for_structure_commands() -> None:
-    r"""The 2026-10-14 review measured 169 of 241 table commands leaking their
-    names on the fallback path (``begin{cases}``, ``underline{x}``,
-    ``tfrac{1}{2}``, ``otimes``...). The fallback must degrade every one of
-    them to readable text: structure shells unwrap to their content, known
-    symbols map to Unicode, and anything unmapped becomes the neutral
-    ``⟨math⟩`` placeholder — never the command name.
-    """
     cases = clean_math_fallback_text(r"\begin{cases} x & y \\ z & w \end{cases}")
     assert "begin" not in cases and "end" not in cases
     assert cases == "x, y ; z, w"

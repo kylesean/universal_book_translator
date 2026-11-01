@@ -1,12 +1,3 @@
-"""The shared ledger readers: manifest, glossary, events and output-suffix rule.
-
-Two surfaces read a finished (or finishing) job back out of its ledger — the
-Agent workflow's ``finish`` and the human-edit re-export. They used to carry
-private copies of these readers; the copies drifted, and the drift was load
-bearing: the Agent manifest whitelisted fewer metadata keys, so an Agent job's
-render never saw the ``delivery_plan`` its own ingest had persisted.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -64,11 +55,8 @@ def test_manifest_carries_delivery_metadata_and_agent_config(tmp_path: Path) -> 
     assert manifest.doc_id == "job1"
     assert manifest.source_path == "/tmp/book.md"
     assert manifest.target_lang == "zh"
-    # The delivery contract is what the ingest persisted for THIS job. The
-    # Agent reader used to drop these keys, so its render ignored the plan.
     assert manifest.metadata["delivery_plan"] == {"contract": "faithful"}
     assert manifest.metadata["delivery_mode"] == "reflow"
-    # Operational rows stay out of the manifest snapshot.
     assert "agent_config" not in manifest.metadata
     assert manifest.metadata["_agent_config"] == {"profile": "general"}
 
@@ -116,8 +104,6 @@ async def test_event_factory_reports_the_ledger_counters() -> None:
     factory = ledger_event_factory(cast("Any", _Ledger()), "job1")
     event = await factory(EventType.EXPORT_COMPLETED, "job1", cast("Any", _Ledger()))
 
-    # The re-export's old factory reported only total/completed; one reader now
-    # fills every counter for both surfaces.
     assert event.total_blocks == 10
     assert event.completed_blocks == 7
     assert event.failed_blocks == 1
@@ -125,8 +111,6 @@ async def test_event_factory_reports_the_ledger_counters() -> None:
 
 
 class _PdfAdapter:
-    """Adapters declare their suffixes on the class, which is what the check reads."""
-
     output_suffixes = frozenset({".pdf"})
 
 
@@ -136,8 +120,6 @@ def test_output_suffix_must_be_one_the_adapter_writes() -> None:
     with pytest.raises(UnsupportedDocumentFormatError, match="would not be a readable md"):
         require_output_suffix(adapter, Path("book.md"), subject="writing")
 
-    # A suffix-less name is allowed (the caller did not contradict the format),
-    # and the comparison is case-insensitive.
     require_output_suffix(adapter, Path("book"), subject="writing")
     require_output_suffix(adapter, Path("BOOK.PDF"), subject="writing")
 

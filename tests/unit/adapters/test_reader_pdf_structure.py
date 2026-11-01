@@ -1,19 +1,3 @@
-"""Native PDF reader structure: list boundaries and table-of-contents rows.
-
-Two parsing-layer regressions the Docling path handled but the pdfium reader
-did not:
-
-- consecutive list items were grouped into one paragraph (the reader's own
-  docstring rule 4 -- "a line beginning with a bullet/number starts a list
-  item" -- was unimplemented), so a numbered list collapsed into one block;
-- a table of contents was read as translated titles plus a run of bare
-  page-number blocks, because ``textgeom`` returns the title and its
-  right-margin page number as two lines.
-
-Both are pinned here over synthetic PDFs written by the independent
-``pdf_builders`` writer.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -40,11 +24,9 @@ pytestmark = pytest.mark.fast
         ("一、 中文", ("一、", "中文")),
         ("- item", ("-", "item")),
         ("• bullet", ("•", "bullet")),
-        # Full-width forms a CJK source or a model may use.
         ("（1） 全角项", ("（1）", "全角项")),
         ("１. 全角数字", ("１.", "全角数字")),
         ("（a） 全角字母", ("（a）", "全角字母")),
-        # Ambiguous forms stay prose: a decimal, a signed number, a year, a deref.
         ("1.5 ratio", None),
         ("-3 is negative", None),
         ("*ptr", None),
@@ -111,22 +93,15 @@ def test_a_toc_row_is_one_translatable_entry_with_its_page_number(tmp_path: Path
     )
     blocks = _blocks(source)
     rows = {block.source_text: block for block in blocks}
-    # The title is the translatable text; the page number rides on the element
-    # so the compositor can redraw the whole row (title + leaders + number).
     assert set(rows) == {"1. Introduction", "1.1. Background", "1.2. Method", "2. Results"}
     assert [getattr(rows[t].element, "toc_page", "") for t in rows] == ["1", "2", "3", "7"]
     assert not any(block.skip_translate for block in blocks)
-    # The row's box spans title through page number, so masking clears the
-    # source title/leaders/number in one region.
     for block in blocks:
         assert block.bbox is not None and block.bbox.x1 > 0.7 * PAGE_WIDTH
-    # The page numbers are not separate blocks that would scatter.
     assert not any(block.source_text.strip().isdigit() for block in blocks)
 
 
 def test_unnumbered_rows_join_a_confirmed_toc(tmp_path: Path) -> None:
-    # A confirmed TOC page (>= 3 numbered rows) also pairs unnumbered rows such
-    # as Abstract / References, so those entries keep their leaders and number.
     source = write_toc_pdf(
         tmp_path / "toc.pdf",
         [
@@ -146,9 +121,6 @@ def test_unnumbered_rows_join_a_confirmed_toc(tmp_path: Path) -> None:
 def test_a_page_of_right_margin_numbers_without_section_titles_is_not_a_toc(
     tmp_path: Path,
 ) -> None:
-    # An equation/table page also carries right-margin numerals; without several
-    # numbered section titles the page must not be mistaken for a TOC (which
-    # would strip the numbers and re-type the body lines as entries).
     source = write_toc_pdf(
         tmp_path / "equations.pdf",
         [

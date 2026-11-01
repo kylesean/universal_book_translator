@@ -1,15 +1,3 @@
-"""The console must not leave English chrome inside a Chinese screen.
-
-The dictionaries are typed (``TranslationDictionary``), so `tsc -b` already
-fails when a key exists in only one locale. That check cannot see the other
-half of the problem: a view that renders a *literal*, or a raw engine
-identifier, never consults the dictionary at all — so both locales show the
-same English word and the type system is satisfied.
-
-These guards cover the literal class, which is invisible to the compiler. They
-run in the Python suite because the frontend has no test runner of its own.
-"""
-
 from __future__ import annotations
 
 import re
@@ -30,53 +18,29 @@ def _source(path: Path) -> str:
 
 
 def test_no_view_upper_cases_a_status_into_the_ui() -> None:
-    """``status.toUpperCase()`` bypasses the dictionary entirely.
-
-    That is how the Chinese console ended up with "COMPLETED" in the header
-    badge, the queue rows and the execution-state panel — and "NEEDS_HUMAN" on
-    every review card — while the surrounding chrome was Chinese.
-    """
     offenders = []
     for view in sorted(_VIEWS.rglob("*.tsx")):
         for number, line in enumerate(_source(view).splitlines(), 1):
             if line.lstrip().startswith(("//", "*", "/*")):
                 continue
-            # A fallback inside a label helper is fine — it only fires for a
-            # status the dictionary does not know. What must not happen is a
-            # status rendered directly, i.e. `{status.toUpperCase()}` in JSX.
             if re.search(r"\{\s*\w*[Ss]tatus\s*\.toUpperCase\(\)\s*\}", line):
                 offenders.append(f"{view.name}:{number}: {line.strip()}")
     assert not offenders, "a status is upper-cased instead of localized: " + "; ".join(offenders)
 
 
 def test_the_dictionaries_name_every_engine_state_a_view_shows() -> None:
-    """A status the dictionary does not name falls back to a raw identifier.
-
-    The fallback exists so a new engine state is still visible, but the states
-    the console already renders must be translated in both locales.
-    """
     zh = _source(_REPO_ROOT / "web" / "src" / "i18n" / "translations" / "zh.ts")
     en = _source(_REPO_ROOT / "web" / "src" / "i18n" / "translations" / "en.ts")
 
-    # Job statuses (ubt.core.engine.job_queue.JobStatus).
     for status in ("submitted", "queued", "running", "completed", "failed", "cancelled"):
         assert status in en and status in zh, f"job status {status!r} is not localized"
-    # Block statuses (ubt.core.ir.models.BlockStatus) shown on review cards.
     for status in ("mtqe_passed", "needs_human", "blocked_human", "repaired"):
         assert status in en and status in zh, f"block status {status!r} is not localized"
-    # Doctor verdicts.
     for status in ("OK", "WARN", "FAIL", "SKIP"):
         assert status in en and status in zh, f"doctor status {status!r} is not localized"
 
 
 def test_every_deliverable_key_has_a_label() -> None:
-    """The label switch fell through to the backend's English ``label``.
-
-    ``DELIVERABLE_LABELS`` names the files the API will serve; the console
-    translates them by key. ``html`` and ``xliff`` were missing from the switch,
-    so those two buttons were the only deliverables still in English on a
-    Chinese screen — and adding a key to the backend would silently repeat it.
-    """
     from ubt.api.routes.shared import DELIVERABLE_LABELS
 
     meta = _source(_VIEWS / "quality-gate" / "artifactMeta.ts")
@@ -90,19 +54,10 @@ def test_every_deliverable_key_has_a_label() -> None:
 
 
 def test_the_reparse_confirm_names_the_job_it_will_destroy() -> None:
-    """A destructive action must show what it targets.
-
-    Re-parsing discards a paid ledger and re-translates the whole book. The
-    dialog used to be a bare "are you sure"; it now renders the job id itself in
-    a selectable monospace block. The phrase gate still exists in
-    ``ConfirmDialog`` for callers that want it — the console no longer does,
-    because retyping a 40-character id made cancel and re-parse look the same.
-    """
     repo = _REPO_ROOT
     dialog = _source(repo / "web" / "src" / "components" / "ui" / "ConfirmDialog.tsx")
     view = _source(_VIEWS / "mission-control" / "MissionControl.tsx")
 
-    # The capability is still there and still disables the button.
     assert "typeToConfirm" in dialog, "ConfirmDialog lost its optional phrase gate"
     assert "disabled={!phraseOk}" in dialog, "the confirm button is never disabled"
     assert "typed.trim() === typeToConfirm" in dialog, "the typed text is not compared"
@@ -114,11 +69,9 @@ def test_the_reparse_confirm_names_the_job_it_will_destroy() -> None:
 
 
 def test_the_console_says_re_parsing_is_expensive_and_destructive() -> None:
-    """The cost must be stated where the operator decides, not in a changelog."""
     zh = _source(_REPO_ROOT / "web" / "src" / "i18n" / "translations" / "zh.ts")
     en = _source(_REPO_ROOT / "web" / "src" / "i18n" / "translations" / "en.ts")
 
-    # Both locales must name the two things the operator is about to lose.
     for text, words in (
         (zh, ("花费", "人工修改")),
         (en, ("cost", "human revision")),
@@ -129,28 +82,15 @@ def test_the_console_says_re_parsing_is_expensive_and_destructive() -> None:
 
 
 def test_the_client_error_type_carries_the_http_status() -> None:
-    """A bare `Error` forced every call site to guess at prose.
-
-    The review surface distinguishes a 409 (another writer holds the job — retry
-    once it clears) from a 422 (the request is wrong — retrying is pointless),
-    and could not, because `apiError` flattened both into `new Error(detail)`.
-    """
     client = _source(_REPO_ROOT / "web" / "src" / "api" / "client.ts")
 
     assert "export class ApiError extends Error" in client
     assert "readonly status: number" in client
     assert "new ApiError(message, res.status)" in client
-    # The malformed label a template-literal refactor left behind.
     assert 'apiError(res, "string")' not in client
 
 
 def test_the_review_pane_reads_freshness_from_the_ledger() -> None:
-    """`reExportPending` in `useState` forgot across sessions what the ledger knows.
-
-    A reviewer who edited, closed the tab, and came back saw a clean toolbar
-    button while the delivered files were still stale — the marker lived only in
-    the tab that made the edit.
-    """
     view = _source(_VIEWS / "review" / "ReviewWorkbench.tsx")
 
     assert "listDeliverables(jobId)" in view
@@ -158,82 +98,44 @@ def test_the_review_pane_reads_freshness_from_the_ledger() -> None:
 
 
 def test_uncommitted_review_drafts_survive_leaving_the_page() -> None:
-    """`drafts` was component state: any navigation discarded unsaved edits.
-
-    On a long book that is real work lost with no warning and no trace.
-    """
     view = _source(_VIEWS / "review" / "ReviewWorkbench.tsx")
 
     assert "_DRAFT_PREFIX" in view
     assert "sessionStorage.setItem(_DRAFT_PREFIX" in view
     assert "useState<Record<string, string>>(() => readDrafts(jobId))" in view
-    # And the reviewer can see which block is carrying a restored draft.
     assert "t.review.unsavedDraft" in view
 
 
 def test_every_destructive_console_action_shows_the_job_it_will_destroy() -> None:
-    """The most irreversible actions must name their target, not just warn.
-
-    Both dialogs used to be a one-click confirm whose body was a generic
-    sentence: the operator could not tell which job was about to lose its
-    ledger and every delivered file. The guard is now *showing* the id (in a
-    selectable monospace block) rather than demanding it be retyped — retyping
-    a 40-character job id protects nothing a visible id does not, and it made
-    the safe action (cancel) feel identical to the dangerous one.
-    """
     view = _source(_VIEWS / "mission-control" / "MissionControl.tsx")
 
     for action in ("pendingReparse", "pendingDelete"):
         assert action in view, f"{action} is no longer wired"
-    # Both dialogs render the id itself, selectable and unbroken.
     assert view.count("font-mono text-xs text-muted-foreground") >= 1
     assert view.count("font-mono text-xs text-foreground select-all") >= 1
 
 
 def test_the_gate_never_attests_a_report_it_did_not_load() -> None:
-    """A missing report rendered as PRODUCTION READY / PASS / five green pillars.
-
-    `summary` defaults to `{}`, so `failed_blocks ?? 0` is 0 when the fetch
-    failed, and the old `verdict ? … : failedBlocks === 0` fallback made the
-    absent report read as a clean pass. The report legitimately 409s while a job
-    is running and 404s before it is written, so this was reachable by opening
-    the gate too early — an attestation of nothing, on the screen whose only job
-    is attestation.
-    """
     view = _source(_VIEWS / "quality-gate" / "QualityGateView.tsx")
 
     assert "const hasReport = report !== null" in view
     assert "const isPassed = hasReport &&" in view
-    # The whole attested section is gated on a loaded report.
     assert view.count("{hasReport && (") >= 1
     assert "t.quality.noVerdictTitle" in view
 
 
 def test_pillar_three_reads_the_live_visual_verdict_not_a_deleted_field() -> None:
-    """`report.fidelity` was removed with the overlay engine, but stayed read.
-
-    The result was a permanent "0 pages · residual —" scoring 100 and PASS: full
-    marks for a measurement nobody took. The real verdict (`passed`,
-    `skipped_reason`) lives on the visual report payload.
-    """
     view = _source(_VIEWS / "quality-gate" / "QualityGateView.tsx")
     reporter = _source(_REPO_ROOT / "ubt" / "core" / "engine" / "reporter.py")
 
     assert "fidelity" not in reporter, "the report schema grew fidelity back — recheck the view"
     assert "report?.fidelity" not in view
     assert "visual?.passed" in view and "visual?.skipped_reason" in view
-    # A skipped gate must not read as a pass — and neither may an absent
-    # report (gate disabled / non-PDF deliverable): no attestation either way.
     assert "visualMissing || visualSkipped" in view
     assert "visualMissing || visualSkipped ? 0" in view
 
 
 def test_an_unconfigured_glossary_is_not_reported_as_clean() -> None:
-    """A 409 ("no glossary file configured") was swallowed into `[]`.
-
-    The panel then showed "0 active terms" beside a green "No glossary conflicts
-    detected" — two positive claims about a file that does not exist.
-    """
     client = _source(_REPO_ROOT / "web" / "src" / "api" / "client.ts")
     view = _source(_VIEWS / "language-assets" / "LanguageAssetsView.tsx")
 
@@ -243,33 +145,20 @@ def test_an_unconfigured_glossary_is_not_reported_as_clean() -> None:
 
 
 def test_every_irreversible_console_action_confirms_first() -> None:
-    """The cheapest clicks were on the most expensive mistakes."""
     assets = _source(_VIEWS / "language-assets" / "LanguageAssetsView.tsx")
     mission = _source(_VIEWS / "mission-control" / "MissionControl.tsx")
 
-    # Glossary term and TM row: an icon click used to rewrite the glossary file
-    # and delete TM rows (including human post-editing) with no prompt.
     assert "setPendingDeleteTerm(" in assets and "open={pendingDeleteTerm !== null}" in assets
     assert "setPendingEvict(" in assets and "open={pendingEvict !== null}" in assets
-    # Cancel: aborts a billable in-flight run. It demanded a single click while
-    # delete and re-parse demanded a typed phrase.
     assert "setPendingCancel(true)" in mission and "open={pendingCancel}" in mission
 
 
 def test_the_mission_control_view_recovers_from_a_missing_job() -> None:
-    """`statusStr` defaulted to 'running' and the poll swallowed every error.
-
-    An unknown or deleted id therefore rendered a RUNNING badge, a live Cancel
-    button and "waiting for the first frame" indefinitely.
-    """
     view = _source(_VIEWS / "mission-control" / "MissionControl.tsx")
 
     assert "statusMissing" in view
     assert "err.status === 404" in view
     assert "t.mission.jobMissingTitle" in view
-    # A 404 is terminal. The status poll and the SSE client's own reconnect
-    # timer must both stop, or the page keeps requesting a job that cannot
-    # reappear until the operator navigates away.
     assert "let missing = false" in view
     assert "if (missing) return" in view
     assert "clearInterval(timer)" in view
@@ -278,12 +167,6 @@ def test_the_mission_control_view_recovers_from_a_missing_job() -> None:
 
 
 def test_a_restarted_run_resubscribes_its_stream() -> None:
-    """The SSE client closes permanently on a terminal frame.
-
-    Resume and re-parse restart the SAME job id, so without a new subscription
-    the panel kept the previous run's "completed · 250/250" lines above a run
-    that was actively re-translating.
-    """
     view = _source(_VIEWS / "mission-control" / "MissionControl.tsx")
 
     assert "streamGeneration" in view
@@ -293,15 +176,6 @@ def test_a_restarted_run_resubscribes_its_stream() -> None:
 
 
 def test_the_visual_gate_tiers_are_named_in_both_locales() -> None:
-    """Every tier/code the visual gate can report must have a translation.
-
-    The quality-gate view used to print the backend's English
-    ``skipped_reason`` sentence verbatim — "vlm judge disabled; tiers run:
-    geometry, type, pixel (not run: vlm)" — inside an otherwise Chinese panel.
-    It now renders the structured ``tiers_ran``/``tiers_skipped``/``skip_codes``
-    through these maps, so a tier or code with no entry falls back to the raw
-    English token, which is the same leak with extra steps.
-    """
     tiers = {"geometry", "type", "pixel", "canvas", "vlm"}
     codes = {
         "vlm_judge_disabled",
@@ -329,12 +203,6 @@ def test_the_visual_gate_tiers_are_named_in_both_locales() -> None:
 
 
 def test_the_quality_gate_does_not_render_the_raw_skipped_reason() -> None:
-    """The English sentence must not reach the row header.
-
-    ``skipped_reason`` stays on the payload for logs and the CLI. Rendering it
-    in the console both leaked English and overflowed the row, pushing the
-    status badge into a two-character column.
-    """
     source = _source(_VIEWS / "quality-gate" / "QualityGateView.tsx")
     assert "${t.quality.visualGateSkipped}: ${visualSkipped}" not in source, (
         "the quality gate is rendering the raw English skipped_reason again"
@@ -345,16 +213,6 @@ def test_the_quality_gate_does_not_render_the_raw_skipped_reason() -> None:
 
 
 def test_the_provider_editor_does_not_offer_output_extraction_as_a_choice() -> None:
-    """Four unexplained enum values, one of which is the only safe answer.
-
-    ``auto`` is not a peer of the other three — it *is* "tag first, then clean
-    the wrapper", so it contains ``xml_tag`` and ``cp``. ``raw`` skips cleaning
-    (a chatty endpoint's lead-in and ``` ship into the book) and ``xml_tag``
-    returns empty for every reply without a tag, which is every reply from the
-    minimal and hybrid prompt strategies. Offered as equal options, an operator
-    had no basis to choose; the field stays settable in ubt.toml for the rare
-    endpoint that needs it, and the panel states the default instead.
-    """
     source = _source(_VIEWS / "doctor" / "ProviderEditor.tsx")
     assert "EXTRACTION_STRATEGIES" not in source, (
         "the extraction dropdown is back; it offers values that are worse than "
@@ -366,13 +224,6 @@ def test_the_provider_editor_does_not_offer_output_extraction_as_a_choice() -> N
 
 
 def test_the_system_prompt_switch_is_a_collapsed_remedy_not_a_peer_choice() -> None:
-    """It is a fix for a specific 400, not a capability decision to weigh.
-
-    The engine already assumes a separate system turn is accepted, which is
-    right for essentially every endpoint. Rendering the switch beside "accepts
-    images" implied the user had to judge it. It now lives behind a disclosure
-    that names the symptom.
-    """
     source = _source(_VIEWS / "doctor" / "ProviderEditor.tsx")
     assert "capabilityTroubleshootToggle" in source, (
         "the system-prompt switch must sit behind a describing disclosure"

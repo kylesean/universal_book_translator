@@ -18,7 +18,6 @@ pytestmark = pytest.mark.fast
 
 
 def test_ledger_dotted_metadata_keys(tmp_path: Path) -> None:
-    """Verify that model names with dots like claude-3.5-sonnet or gemini-1.5-pro are stored and retrieved without splitting."""
     db_path = tmp_path / "test_ledger.db"
     ledger = SQLiteJobLedger(db_path)
     job_id = "test-job-dotted"
@@ -30,11 +29,9 @@ def test_ledger_dotted_metadata_keys(tmp_path: Path) -> None:
     val = {"cost": 0.42, "calls": 5}
     ledger.set_job_metadata_value(job_id, key, val)
 
-    # Read back through ledger API
     retrieved = ledger.get_job_metadata_value(job_id, key)
     assert retrieved == val, f"Expected {val}, got {retrieved}"
 
-    # Check raw JSON structure: key should NOT be nested like 'claude-3': {'5-sonnet': ...}
     with ledger._get_conn() as conn:
         row = conn.execute(
             "SELECT metadata_json FROM job_meta WHERE job_id = ?", (job_id,)
@@ -48,7 +45,6 @@ def test_ledger_dotted_metadata_keys(tmp_path: Path) -> None:
 
 
 def test_atomic_increment_job_usage_corrupt_metadata(tmp_path: Path) -> None:
-    """Verify that atomic_increment_job_usage rejects corrupt or non-dict metadata cleanly."""
     db_path = tmp_path / "test_ledger.db"
     ledger = SQLiteJobLedger(db_path)
     job_id = "test-job-corrupt"
@@ -56,7 +52,6 @@ def test_atomic_increment_job_usage_corrupt_metadata(tmp_path: Path) -> None:
         job_id, BookManifest(doc_id="doc1", title="Title", source_path="input.epub")
     )
 
-    # Corrupt metadata with non-dict JSON array
     with ledger._get_conn() as conn:
         conn.execute("UPDATE job_meta SET metadata_json = '[1, 2, 3]' WHERE job_id = ?", (job_id,))
         conn.commit()
@@ -66,7 +61,6 @@ def test_atomic_increment_job_usage_corrupt_metadata(tmp_path: Path) -> None:
 
 
 def test_apply_config_overrides_preserves_base_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify that apply_config_overrides keeps base.provider even when UBT_PROVIDER env var is set."""
     base = UBTConfig.from_env(bootstrap=False, provider="claude")
     monkeypatch.setenv("UBT_PROVIDER", "openai")
 
@@ -77,7 +71,6 @@ def test_apply_config_overrides_preserves_base_provider(monkeypatch: pytest.Monk
 
 @pytest.mark.asyncio
 async def test_sqlite_token_bucket_close_safety(tmp_path: Path) -> None:
-    """Verify that closing SqliteTokenBucket while tasks may be waiting does not raise ProgrammingError."""
     db_path = tmp_path / "bucket.db"
     bucket = SqliteTokenBucket(
         path=db_path,
@@ -89,21 +82,13 @@ async def test_sqlite_token_bucket_close_safety(tmp_path: Path) -> None:
     bucket.close()
     assert bucket._closed is True
 
-    # acquire should exit cleanly without calling into closed SQLite
     await bucket.acquire(estimated_tokens=500)
 
 
 def test_writer_lock_fails_loudly_on_an_unusable_ledger_path(tmp_path: Path) -> None:
-    """The SQLite-backed lock must surface an I/O failure, not silently succeed.
-
-    The old file-offset lock raised when the platform could not lock a file at
-    all; with the lock now living inside the ledger DB, the equivalent failure is
-    an unusable database path. Either way, a job must never run without the
-    single-writer guarantee.
-    """
     blocker = tmp_path / "blocker"
     blocker.write_text("not a directory", encoding="utf-8")
-    db_path = blocker / "job.db"  # parent is a file, so the dir cannot be made
+    db_path = blocker / "job.db"
     lock = LedgerWriterLock(db_path, "job-fail-closed")
 
     with pytest.raises((sqlite3.OperationalError, NotADirectoryError, OSError)):

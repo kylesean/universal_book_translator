@@ -1,13 +1,3 @@
-"""Document body group planning (G4 Stage 3A) — policy, not wrapping.
-
-The planner is exercised with an explicit probe table, never with a renderer:
-what these tests pin is the *decision policy* the product owner confirmed
-(整本一个 BODY 组 / 源字号优先 / 例外阻断), because that policy is what the
-2.29pt drift on the 26-page replay depends on. Whether a page really holds a
-size is the measurement backend's question, and it is probed for real by
-``scripts/style_group_probe.py`` and the artifact contract.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -40,12 +30,6 @@ def _probe_from_table(
     rescue_tracking: dict[int, float] | None = None,
     rescue_pitch: dict[int, float] | None = None,
 ) -> FeasibilityProbe:
-    """A probe where a page holds any size up to ``max_size``.
-
-    ``rescue_*`` say what micro-typography buys back per page: a page whose
-    ``max_size`` is below the candidate fits once tracking is at or under the
-    listed value, or once the pitch is at or under the listed ratio.
-    """
 
     def probe(page: int, size_pt: float, rung: MicroTypography, pitch: float) -> PageFit:
         limit = max_size.get(page, 99.0)
@@ -66,7 +50,6 @@ def _probe_from_table(
 
 
 def test_the_document_size_is_a_text_weighted_mode_not_a_page_median() -> None:
-    """A two-line title page must not outvote forty lines of body prose."""
     metrics = _metrics({1: (9.0, 1), 2: (8.9, 120), 3: (8.9, 90), 4: (7.9, 30), 5: (8.0, 2)})
     size, pitch = derive_document_body_metrics(metrics)
     assert size == 8.9
@@ -75,11 +58,11 @@ def test_the_document_size_is_a_text_weighted_mode_not_a_page_median() -> None:
 
 def test_the_band_is_relative_and_absolute_whichever_is_higher() -> None:
     floor, ceiling = body_band(9.8)
-    assert floor == pytest.approx(7.84)  # 0.80 x source beats the absolute 7.5
-    assert ceiling == pytest.approx(10.78)  # 1.10 x source
+    assert floor == pytest.approx(7.84)
+    assert ceiling == pytest.approx(10.78)
 
     floor, ceiling = body_band(6.0)
-    assert floor == BODY_FLOOR_PT  # an absolute floor the band cannot fall through
+    assert floor == BODY_FLOOR_PT
     assert ceiling == pytest.approx(BODY_FLOOR_PT)
 
 
@@ -93,15 +76,12 @@ def test_the_group_starts_at_the_source_size_and_spends_nothing() -> None:
 
 
 def test_the_mildest_rung_that_rescues_a_page_wins() -> None:
-    """Tracking before leading before size: never more compression than needed."""
     plan = plan_body_group(
         _metrics({1: (8.9, 100), 2: (8.9, 100)}),
         _probe_from_table({1: 8.0}, rescue_tracking={1: -0.015}),
     )
     assert plan.group.size_pt == 8.9
     assert plan.group.rung == "tracking_-0.015"
-    # A milder rung would not have rescued page 1, a stronger one wastes
-    # legibility on pages that already fit.
     assert plan.group.tracking_em == pytest.approx(-0.015)
 
 
@@ -111,7 +91,7 @@ def test_one_page_inside_the_budget_keeps_the_source_size_and_is_declared() -> N
         _metrics(pages),
         _probe_from_table({19: 8.0, 20: 8.0}),
     )
-    assert plan.group.size_pt == 8.9  # 2/20 = 10% is the budget, not a breach
+    assert plan.group.size_pt == 8.9
     assert plan.exception_pages == (19, 20)
     assert {exception.reason for exception in plan.exceptions} == {"does_not_fit"}
     assert all(exception.deficit_pt > 0 for exception in plan.exceptions)
@@ -121,8 +101,6 @@ def test_the_group_steps_down_only_until_the_budget_is_met() -> None:
     pages = dict.fromkeys(range(1, 21), (8.9, 100))
     intro = _probe_from_table(dict.fromkeys((18, 19, 20), 8.4))
     plan = plan_body_group(_metrics(pages), intro)
-    # 3/20 = 15% is over budget at 8.9 and at 8.65; the first size inside the
-    # budget wins, and it does not step one millimetre further than that.
     assert plan.group.size_pt == 8.4
     assert plan.exceptions == ()
 
@@ -135,12 +113,10 @@ def test_a_page_that_never_holds_the_group_is_declared_not_shrunk() -> None:
     assert plan.group.size_pt == BODY_FLOOR_PT
     assert plan.exception_pages == (1,)
     assert plan.exceptions[0].deficit_pt > 0
-    # The size did not invent a per-page value: it stopped at the floor.
     assert plan.group.size_pt >= plan.group.floor_pt
 
 
 def test_deferred_pages_join_the_group_but_do_not_vote_on_its_size() -> None:
-    """A page reflowed by L2 cannot be judged by a fixed-box probe."""
     plan = plan_body_group(
         _metrics({1: (8.9, 100), 2: (8.9, 100), 3: (8.9, 100)}),
         _probe_from_table({2: 7.0}),
@@ -173,7 +149,6 @@ def test_a_plan_round_trips_through_manifest_metadata() -> None:
 def test_the_ladder_never_compresses_past_the_prd_bounds() -> None:
     assert LADDER[0].label == "plain"
     assert min(rung.tracking_em for rung in LADDER) >= -0.030
-    # Every rung is a prefix of the previous one: the planner only advances.
     tracking = [rung.tracking_em for rung in LADDER]
     assert tracking == sorted(tracking, reverse=True)
     pitch_drop = [rung.pitch_drop for rung in LADDER]

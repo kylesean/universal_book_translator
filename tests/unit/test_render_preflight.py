@@ -1,11 +1,3 @@
-"""The pre-draft render preflight must really compile a sample.
-
-It exists to fail before any token is billed when the PDF renderer (Typst) is
-dead. LayerCompositor descends a fragment it cannot typeset to the source page
-instead of raising, so the gate has to detect that *nothing* was drawn; a
-source-only sample would otherwise pass without ever touching the typesetter.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -34,8 +26,6 @@ pytestmark = pytest.mark.fast
 
 
 class _FakeTypst:
-    """Stand-in for ``typst_compile``; writes a page of the requested size."""
-
     def __init__(self, *, ok: bool) -> None:
         self.ok = ok
         self.calls = 0
@@ -82,8 +72,6 @@ def _setup(tmp_path: Path) -> tuple[Any, BookManifest, list[IRBlock]]:
 
 
 def _patch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake: _FakeTypst) -> None:
-    # The reflow renderer compiles through ``ubt.adapters.pdf.typst_compile``;
-    # the overlay path it replaced went through ``ubt.render.outputs``.
     monkeypatch.setattr("ubt.adapters.pdf.typst_compile.typst_compile", fake)
 
 
@@ -104,17 +92,6 @@ def test_preflight_really_invokes_the_typesetter(
 def test_preflight_fails_when_no_fragment_can_be_typeset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A dead compiler must fail the preflight, whichever channel runs.
-
-    The match list names three messages because the preflight rehearses whichever
-    delivery mode the run will actually use, and each renderer words its own
-    compile failure: ``Facsimile compile failed`` (now the default mode, and the
-    one that also proves the background strip worked), ``Page-locked reflow
-    compile failed``, and the publish renderer's ``failed to compile``. Pinning
-    only the publish wording is what broke this test when ``delivery_mode``
-    moved to ``facsimile``; the behaviour under test — fail before billing —
-    never changed.
-    """
     fake = _FakeTypst(ok=False)
     _patch(monkeypatch, tmp_path, fake)
     adapter, manifest, blocks = _setup(tmp_path)
@@ -130,11 +107,6 @@ def test_preflight_fails_when_no_fragment_can_be_typeset(
 def test_preflight_sample_reaches_the_typesetter_for_a_formula_heavy_book(
     tmp_path: Path,
 ) -> None:
-    # A formula/table-heavy book's sample is all static-skip blocks. The reflow
-    # renderer has no "nothing was drawn" skip channel to check, so what has to
-    # hold is that the placeholder sample still emits real markup for the
-    # compiler — an empty sample would compile trivially and the gate would be
-    # inert (a dead Typst would pass).
     from ubt.core.engine.render_preflight import (
         _placeholder_blocks,
         select_preflight_sample,
@@ -157,7 +129,7 @@ def test_preflight_sample_reaches_the_typesetter_for_a_formula_heavy_book(
     ]
 
     sample = select_preflight_sample(blocks)
-    assert sample  # the sample is not empty
+    assert sample
     renderer = TypstDocumentRenderer()
     source, stats = renderer.build_source(_placeholder_blocks(sample), tmp_path / "build")
     assert stats.blocks_rendered >= 1, "the sample emitted nothing to compile"
@@ -165,9 +137,6 @@ def test_preflight_sample_reaches_the_typesetter_for_a_formula_heavy_book(
 
 
 def test_placeholder_text_replaces_an_empty_formula_body() -> None:
-    # ``docling_parser`` writes a bare ``$$`` for a formula it could not read.
-    # ``typeset_math`` rejects that empty body, so the rehearsal must substitute
-    # a synthetic one or the gate mistakes the placeholder for a dead toolchain.
     from ubt.core.engine.render_preflight import _placeholder_text
 
     def formula(text: str) -> IRBlock:
@@ -191,16 +160,10 @@ def test_placeholder_text_replaces_an_empty_formula_body() -> None:
 def test_preflight_survives_a_book_of_empty_formula_placeholders(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Regression: a formula-dense book whose formulas all extracted as bare
-    # ``$$`` placeholders used to abort before translation, because the sample
-    # is deliberately formula-first and every placeholder failed to typeset.
     fake = _FakeTypst(ok=True)
     _patch(monkeypatch, tmp_path, fake)
     source = write_text_pdf(tmp_path / "src.pdf", [("Title", "The body of the page.")])
     if importlib.util.find_spec("docling") is None:
-        # The probe reads this fixture as scanned (its text layer is not
-        # extractable), so the factory's capability-boundary escape routes it
-        # to docling — and a missing docling now refuses instead of degrading.
         pytest.skip("docling is not installed; the refusal path is pinned separately")
     adapter = get_adapter_for_path(source, pdf_engine="pdfium")
     manifest = BookManifest(doc_id="d", title="t", source_path=str(source))

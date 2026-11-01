@@ -1,14 +1,3 @@
-"""A resume with changed gate knobs must say so out loud (W2-3).
-
-Gate knobs decide what the export stage is willing to ship, but terminal
-blocks are never re-evaluated on resume: every stage reads only the statuses
-it owns (the quality gate claims ``drafted`` blocks, triage reads
-``repair_pending``/``failed``). So a resume that raised ``--qe-threshold``
-re-graded 0 blocks while the report's config snapshot recorded the new value
-as if it had applied — the operator believed a paid re-run was re-grading the
-book. The ingest stage now records the knobs per run and warns on a mismatch.
-"""
-
 from __future__ import annotations
 
 import logging

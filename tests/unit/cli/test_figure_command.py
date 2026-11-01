@@ -1,5 +1,3 @@
-"""Unit tests for the 'ubt figure' CLI command suite."""
-
 from __future__ import annotations
 
 import json
@@ -29,14 +27,12 @@ def sample_figures_doc(tmp_path: Path) -> Path:
 
 
 def test_figure_inspect_command(sample_figures_doc: Path) -> None:
-    # Text mode
     result = runner.invoke(app, ["figure", "inspect", str(sample_figures_doc)])
     assert result.exit_code == 0
     assert "Total Figure Panels: 1" in result.output
     assert "Composite/Grid Panels: 1" in result.output
     assert "GRID" in result.output
 
-    # JSON mode
     json_res = runner.invoke(app, ["figure", "inspect", str(sample_figures_doc), "--json"])
     assert json_res.exit_code == 0
     data = json.loads(json_res.output)

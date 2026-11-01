@@ -1,23 +1,3 @@
-"""The storage migration must not change a single verdict.
-
-``flag_upgrade`` rewrites legacy free-text flags into
-``<category>:<severity>:<detail>``. The ledger is live input — the quality
-report, the review workbench and every later reader classify blocks from it —
-so the only acceptable migration is one that is **verdict-preserving**. That is
-not a property a reviewer can check by reading a diff of the mapping table; it
-is checked here, exhaustively, against every flag the pipeline emits.
-
-Three properties, in order of importance:
-
-1. **Same routing.** For every legacy flag the package emits, the legacy and
-   upgraded forms must agree on ``classify_defect``, ``has_structural_defect``,
-   ``has_critical_defect`` and ``is_format_only``. Where they cannot agree the
-   migration must decline the rewrite, and this suite asserts that it does.
-2. **Idempotence.** Upgrading an already-upgraded flag is a no-op.
-3. **Containment.** Lifecycle notes are never rewritten — their readers match
-   by prefix and a rewrite would break resume.
-"""
-
 from __future__ import annotations
 
 import json
@@ -39,9 +19,6 @@ from ubt.core.qe.defect_taxonomy import (
 
 pytestmark = pytest.mark.fast
 
-#: Legacy flags the pipeline really emits, one per family. Kept here rather
-#: than imported from the producer modules so a producer's own rename cannot
-#: silently shrink the corpus this migration is checked against.
 _LEGACY_CORPUS: tuple[str, ...] = (
     "Empty target text",
     "Numeric fidelity failure: dropped 42",
@@ -83,14 +60,8 @@ def _verdict(flag: str) -> tuple[bool, bool, bool, str]:
     )
 
 
-# --------------------------------------------------------------------------- #
-# 1. Verdict preservation
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize("legacy", _LEGACY_CORPUS)
 def test_an_upgraded_flag_keeps_its_verdict(legacy: str) -> None:
-    """The core safety property, one flag at a time."""
     upgraded = upgrade_flag(legacy)
     if upgraded is None:
         pytest.skip("the migration declines this flag (covered by the next test)")
@@ -100,12 +71,6 @@ def test_an_upgraded_flag_keeps_its_verdict(legacy: str) -> None:
 
 
 def test_every_declined_flag_is_declined_for_a_reason() -> None:
-    """A skip is only acceptable for a flag the tables cannot place.
-
-    The failure mode this prevents: a mapping entry whose severity guess
-    flips a verdict, silently dropped from the migration so the corpus test
-    above passes by skipping everything.
-    """
     from ubt.core.qe.defect_taxonomy import ECHO_MARKERS
 
     declined = [flag for flag in _LEGACY_CORPUS if upgrade_flag(flag) is None]
@@ -138,22 +103,11 @@ def _is_lifecycle(flag: str) -> bool:
 
 
 def test_the_corpus_is_not_mostly_declined() -> None:
-    """Guard against the migration becoming a no-op by refusing everything.
-
-    Two of the 28 are echoes, which are deliberately never rewritten: their
-    reason text doubles as the repair instruction, so changing its encoding
-    would change the prompt the model is sent.
-    """
     upgraded = [flag for flag in _LEGACY_CORPUS if upgrade_flag(flag) is not None]
     assert len(upgraded) >= len(_LEGACY_CORPUS) - 2, (
         f"only {len(upgraded)}/{len(_LEGACY_CORPUS)} legacy flags were upgraded; "
         "the mapping table has lost coverage"
     )
-
-
-# --------------------------------------------------------------------------- #
-# 2. Idempotence
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize("legacy", _LEGACY_CORPUS)
@@ -162,11 +116,6 @@ def test_upgrading_twice_changes_nothing(legacy: str) -> None:
     if once is None:
         pytest.skip("declined")
     assert upgrade_flag(once) is None, f"{once!r} was rewritten a second time"
-
-
-# --------------------------------------------------------------------------- #
-# 3. Containment
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -180,7 +129,6 @@ def test_upgrading_twice_changes_nothing(legacy: str) -> None:
     ],
 )
 def test_a_lifecycle_note_is_never_rewritten(lifecycle: str) -> None:
-    """``reset_transient_failures`` matches these by prefix."""
     assert upgrade_flag(lifecycle) is None
 
 
@@ -188,23 +136,12 @@ def test_an_unclassifiable_flag_is_left_alone() -> None:
     assert upgrade_flag("some_vendor_note: 42") is None
 
 
-# --------------------------------------------------------------------------- #
-# The category tables must stay coherent
-# --------------------------------------------------------------------------- #
-
-
 def test_every_format_only_category_is_also_structural() -> None:
-    """The legacy tables say a format defect is both; the categories must too.
-
-    This invariant is what makes a format-only upgrade verdict-preserving: the
-    flag stays structural (never auto-passed) *and* stays cheap to fix.
-    """
     missing = [c for c in FORMAT_ONLY_CATEGORIES if c not in STRUCTURAL_CATEGORIES]
     assert missing == [], f"format-only categories that are not structural: {missing}"
 
 
 def test_the_upgrade_only_emits_categories_the_taxonomy_knows() -> None:
-    """Every category a rewrite produces must be classifiable."""
     from ubt.core.engine import flag_upgrade as module
 
     known = set(module._CATEGORY_BY_MARKER.values())
@@ -213,18 +150,6 @@ def test_the_upgrade_only_emits_categories_the_taxonomy_knows() -> None:
 
 
 def test_the_upgrade_covers_every_structural_marker_it_claims_to() -> None:
-    """A marker with no category is a legacy flag that can never be migrated.
-
-    Three exclusions, each deliberate:
-
-    * echo phrasings — the reason doubles as the repair instruction;
-    * lifecycle prefixes — not quality defects;
-    * ``repetition`` / ``loop hallucination`` — substrings of
-      ``Repetitive loop hallucination``, which *is* mapped, so a flag matching
-      them is migrated through the longer marker;
-    * ``terminology_consistency:`` — already structured; rewriting it is a
-      no-op by definition.
-    """
     from ubt.core.engine import flag_upgrade as module
     from ubt.core.qe.defect_taxonomy import STRUCTURAL_DEFECT_MARKERS
 
@@ -253,11 +178,6 @@ def _echo_markers() -> tuple[str, ...]:
 
 
 _ECHO_MARKERS = _echo_markers()
-
-
-# --------------------------------------------------------------------------- #
-# The database half
-# --------------------------------------------------------------------------- #
 
 
 def _ledger(tmp_path: Path, rows: dict[str, list[str]]) -> Path:
@@ -292,7 +212,6 @@ def test_plan_and_apply_rewrite_a_real_ledger(tmp_path: Path) -> None:
     rows = dict(conn.execute("SELECT block_id, error_flags_json FROM blocks"))
     conn.close()
     assert json.loads(rows["b1"]) == ["numeric_fidelity:critical:failure: dropped 42"]
-    # Untouched rows are byte-identical.
     assert json.loads(rows["b2"]) == ["Drafting error: 500"]
     assert json.loads(rows["b3"]) == []
 
@@ -304,7 +223,6 @@ def test_applying_twice_is_a_no_op(tmp_path: Path) -> None:
 
 
 def test_a_non_ledger_database_is_skipped(tmp_path: Path) -> None:
-    """``tm.sqlite`` has no blocks table; that is not an error."""
     conn = sqlite3.connect(tmp_path / "tm.sqlite")
     conn.execute("CREATE TABLE other (x INTEGER)")
     conn.commit()
@@ -313,35 +231,13 @@ def test_a_non_ledger_database_is_skipped(tmp_path: Path) -> None:
 
 
 def test_the_upgrade_and_the_wording_rewrite_are_separate(tmp_path: Path) -> None:
-    """``flag_rewrite`` fixes wording; ``flag_upgrade`` fixes encoding.
-
-    Sharing one pass would make it impossible to run either alone, and their
-    preconditions differ (one preserves the encoding, the other changes it).
-    """
     from ubt.core.engine import flag_rewrite, flag_upgrade
 
     assert flag_rewrite is not flag_upgrade
     assert UpgradeHit is flag_upgrade.UpgradeHit
 
 
-# --------------------------------------------------------------------------- #
-# Phase 4 gate: what must be true before the substring tables can be deleted
-# --------------------------------------------------------------------------- #
-
-
 def test_the_tables_cannot_be_deleted_while_lifecycle_flags_need_them() -> None:
-    """A precondition for deleting the marker tables, asserted rather than noted.
-
-    Deleting ``STRUCTURAL_DEFECT_MARKERS`` is only safe once every flag family
-    it classifies has a structured equivalent that preserves the routing
-    verdict. Lifecycle notes do not: they carry no severity, because the defect
-    is about the provider *call*, not the text. Removing the table today would
-    flip ``Drafting error: 500`` from ``DETERMINISTIC_DEFECT`` to ``PASS`` — a
-    block whose draft never arrived would be recorded as passing.
-
-    This test exists so the blocker is executable. When the last family gains a
-    structured equivalent, it fails and says the deletion is now unblocked.
-    """
     from ubt.core.qe.defect_taxonomy import classify_defect, parse_defect_flag
 
     lifecycle_flags = [
@@ -352,9 +248,7 @@ def test_the_tables_cannot_be_deleted_while_lifecycle_flags_need_them() -> None:
     unrepresentable = [
         flag
         for flag in lifecycle_flags
-        # No structured equivalent exists for any of these...
         if parse_defect_flag(flag) is None
-        # ...yet the tables keep them out of the auto-pass path.
         and classify_defect([flag], score=0.95, threshold=0.75) != "PASS"
     ]
     assert unrepresentable, (
@@ -365,7 +259,6 @@ def test_the_tables_cannot_be_deleted_while_lifecycle_flags_need_them() -> None:
 
 
 def test_an_echo_flag_is_deliberately_never_upgraded() -> None:
-    """The reason text doubles as the repair instruction."""
     from ubt.core.qe.defect_taxonomy import ECHO_MARKERS
 
     for marker in ECHO_MARKERS:

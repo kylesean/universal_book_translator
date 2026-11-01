@@ -1,12 +1,3 @@
-"""LaTeX math accents must reach Typst as compilable function calls.
-
-Translators re-encode a flattened accent (``x̂``) as the conventional LaTeX
-form (``\\hat{x}``); ``typstify_math`` is the rigid route's converter, and an
-accent it cannot map fails the whole math block closed to literal text. The
-expected strings below use the spellings Typst accepts where the LaTeX name is
-not one: ``\\bar`` becomes ``overline`` and ``\\ddot`` becomes ``diaer``.
-"""
-
 from __future__ import annotations
 
 import shutil
@@ -17,15 +8,8 @@ from ubt.adapters.pdf.typst_math_probe import TypstMathProbe
 from ubt.core.math_symbols import INLINE_SYMBOLS, SPECIAL_LATEX_COMMANDS
 from ubt.render.typst.math_transpiler import typstify_math
 
-#: Per-test ``fast`` marks, not a module-level ``pytestmark``: a module-level
-#: mark is ANDed onto every test in the file, so the three ``slow`` typst-probe
-#: tests below would also carry ``fast`` and be pulled into the pre-push
-#: ``-m fast`` tier (a 130s typst-compile loop inside a 50s tier).
-
-#: Symbol-table commands that take an argument and cannot be probed bare.
 _ARG_TAKING = {"frac": r"\frac{a}{b}", "sqrt": r"\sqrt{a}"}
 
-#: A compiling body for every command handled by a dedicated pre-pass.
 _SPECIAL_BODIES = {
     "mathbb": r"\mathbb{R}",
     "mathfrak": r"\mathfrak{g}",
@@ -59,12 +43,12 @@ _SPECIAL_BODIES = {
     ("body", "expected"),
     [
         (r"\hat{x}", "hat(x)"),
-        (r"\hat x", "hat(x)"),  # bare-command form
+        (r"\hat x", "hat(x)"),
         (r"\tilde{y}", "tilde(y)"),
         (r"\vec{v}", "vec(v)"),
-        (r"\bar{y}", "overline(y)"),  # Typst has no "bar" accent
+        (r"\bar{y}", "overline(y)"),
         (r"\overline{AB}", 'overline(#"AB")'),
-        (r"\dot{x} + \ddot{y}", "dot(x) + diaer(y)"),  # Typst has no "ddot"
+        (r"\dot{x} + \ddot{y}", "dot(x) + diaer(y)"),
         (r"\vec{v} \cdot \hat{n}", "vec(v) dot hat(n)"),
     ],
 )
@@ -76,8 +60,6 @@ def test_latex_accents_become_typst_calls(body: str, expected: str) -> None:
 @pytest.mark.fast
 @pytest.mark.parametrize("body", [r"\acute{x}", r"\breve{x}"])
 def test_accents_with_no_typst_spelling_fail_closed(body: str) -> None:
-    # None sends the block back to escaped literal text; a guessed spelling
-    # would emit a Typst document that does not compile.
     assert typstify_math(body) is None
 
 
@@ -87,18 +69,11 @@ def test_accents_with_no_typst_spelling_fail_closed(body: str) -> None:
     reason="the typst compiler is not installed; the probe cannot run",
 )
 def test_every_inline_symbol_table_command_compiles() -> None:
-    # The QE whitelist now derives from INLINE_SYMBOLS, so a symbol-table typo
-    # would silently widen the gate to a command the renderer cannot compile.
-    # Pin the table itself to reality: every mapped command converts and the
-    # probe accepts the spelling.
     probe = TypstMathProbe()
     converted = {
         command: typstify_math(_ARG_TAKING.get(command, "\\" + command))
         for command in sorted(INLINE_SYMBOLS)
     }
-    # One Typst invocation resolves the whole table (check_many bisects only on
-    # failure); a per-body check() loop spawned 196 compilers, ~115s of a
-    # ~0.7s job. The per-body check() below then reads the populated cache.
     probe.check_many(body for body in converted.values() if body is not None)
     failures = [
         (command, body)
@@ -114,10 +89,6 @@ def test_every_inline_symbol_table_command_compiles() -> None:
     reason="the typst compiler is not installed; the probe cannot run",
 )
 def test_every_special_latex_command_renders() -> None:
-    # SPECIAL_LATEX_COMMANDS feeds the QE whitelist too, but its members are
-    # handled by regex pre-passes rather than the symbol table. Pin each to a
-    # compiling body so a drift cannot widen the gate to a command the
-    # converter no longer strips.
     probe = TypstMathProbe()
     assert set(_SPECIAL_BODIES) == set(SPECIAL_LATEX_COMMANDS)
     converted = {
@@ -139,8 +110,6 @@ def test_every_special_latex_command_renders() -> None:
     reason="the typst compiler is not installed; the probe cannot run",
 )
 def test_check_many_matches_per_body_check() -> None:
-    # The batched probe lays every body out as a page of one document and
-    # bisects on failure; a good body must never be poisoned by a bad one.
     bodies = ["x", "cal(L)", "frak(g)", "bogus_undefined_symbol", "x +", "⟦ x ⟧"]
     batched = TypstMathProbe()
     batched.check_many(bodies)

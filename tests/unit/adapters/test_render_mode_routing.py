@@ -1,19 +1,3 @@
-"""The PDF render path is publish-only, and stays that way.
-
-`overlay` was removed because it cannot produce a uniform body size, translated
-table headers or native math — the three things the semantic reflow renderer
-exists to deliver. What remains worth pinning is not the switch (there is no
-switch) but the invariants around the single renderer:
-
-- the semantic reflow path is what a PDF target reaches, unconditionally;
-- a non-PDF target still gets the Markdown writer, not the renderer;
-- a compile failure raises rather than emitting a partial file;
-- a missing asset is reported instead of silently dropped.
-
-The last two are the failure modes a reader cannot see: an empty PDF reads as
-success downstream, and a dropped figure looks like a shorter paper.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -53,16 +37,7 @@ def _block(block_id: str, block_type: BlockType, source: str, target: str) -> IR
     )
 
 
-# --- the single render path ------------------------------------------------
-
-
 def test_the_strategy_no_longer_carries_a_render_mode() -> None:
-    """`overlay` is gone, not merely defaulted away.
-
-    A leftover `render_mode` attribute would let a stale config or an old test
-    keep selecting a renderer that no longer exists — the failure would be a
-    silently different artifact, which is the worst kind.
-    """
     strategy = DoclingRenderStrategy()
     assert not hasattr(strategy, "render_mode")
     assert not hasattr(strategy, "_publish_requested")
@@ -71,12 +46,6 @@ def test_the_strategy_no_longer_carries_a_render_mode() -> None:
 def test_a_pdf_target_always_reaches_the_reflow_renderer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A PDF target must route to `_render_publish` with no flag to set.
-
-    This replaces the old "the switch actually switches" test: with one
-    renderer there is no switch, so the invariant is that the PDF branch is
-    unconditional.
-    """
     strategy = DoclingRenderStrategy()
     seen: dict[str, object] = {}
 
@@ -106,7 +75,6 @@ def test_a_pdf_target_always_reaches_the_reflow_renderer(
 
 
 def test_the_adapter_exposes_no_render_mode_knob() -> None:
-    """The adapter must not offer a knob the engine cannot honour."""
     adapter = DoclingPDFAdapter()
     assert not hasattr(adapter, "render_mode")
     adapter.apply_config(_runtime_config())
@@ -116,12 +84,6 @@ def test_the_adapter_exposes_no_render_mode_knob() -> None:
 def test_bilingual_is_decided_by_the_dual_mode_not_a_render_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`dual` still works: pairing is driven by the bilingual mode alone.
-
-    Removing `render_mode` must not remove bilingual support — that is the
-    behaviour the overlay path used to own and the reflow renderer now has to
-    provide.
-    """
     from ubt.core.ir.render_plan import RenderPlan
 
     strategy = DoclingRenderStrategy()
@@ -157,11 +119,7 @@ def test_bilingual_is_decided_by_the_dual_mode_not_a_render_mode(
     assert seen["bilingual"] is True
 
 
-# --- the non-PDF path ------------------------------------------------------
-
-
 def test_a_non_pdf_target_uses_the_markdown_writer(tmp_path: Path) -> None:
-    """Markdown has its own writer; the PDF renderer must not intercept it."""
     strategy = DoclingRenderStrategy()
     blocks = [_block("b1", BlockType.NARRATIVE, "Source.", "译文。")]
     manifest = BookManifest(doc_id="d", title="T", source_path=str(tmp_path / "x.pdf"), chapters=[])
@@ -174,16 +132,7 @@ def test_a_non_pdf_target_uses_the_markdown_writer(tmp_path: Path) -> None:
     assert "译文" in out.read_text(encoding="utf-8")
 
 
-# --- failure modes a reader cannot see -------------------------------------
-
-
 def test_a_compile_failure_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A missing PDF is a clearer outcome than an empty one.
-
-    The failure path must not leave a zero-byte artifact behind: the caller
-    asked for a rebuilt document, and an empty file would read as success to
-    everything downstream.
-    """
     strategy = DoclingRenderStrategy()
 
     import ubt.adapters.pdf.typst_compile as tc
@@ -199,14 +148,12 @@ def test_a_compile_failure_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
             tmp_path / "out.pdf",
         )
     assert not (tmp_path / "out.pdf").exists()
-    # The generated source is kept so the failure is inspectable.
     assert (tmp_path / ".out_typst" / "main.typ").exists()
 
 
 def test_the_missing_asset_channel_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A dropped figure must be visible in the quality report, not just absent."""
     strategy = DoclingRenderStrategy()
 
     import ubt.adapters.pdf.typst_compile as tc
@@ -224,18 +171,6 @@ def test_the_missing_asset_channel_is_reported(
 
 
 def test_the_publish_path_applies_the_math_compile_gate(tmp_path: Path) -> None:
-    """P1-C5: a math body the transpiler accepts but Typst rejects must not
-    reach the compiler.
-
-    ``\\frac{a}{}`` converts to ``frac(a, )``, which the transpiler emits
-    happily and Typst then refuses — failing the *whole* document at the single
-    compile. The publish render supplies ``TypstMathProbe().check`` as the
-    renderer's ``math_gate`` so such a span degrades to readable Unicode
-    instead. Without the gate the bad body stays in ``main.typ``, so this pins
-    the wiring by inspecting the generated source. The real Typst binary is used
-    (the probe compiles its witness), so the assertion is the compiler's own
-    verdict, not a stub's.
-    """
     pytest.importorskip("ubt.adapters.pdf.typst_compile")
     from ubt.adapters.pdf.typst_compile import typst_version
 
@@ -252,4 +187,4 @@ def test_the_publish_path_applies_the_math_compile_gate(tmp_path: Path) -> None:
     )
     generated = (tmp_path / ".out_typst" / "main.typ").read_text(encoding="utf-8")
     assert "frac(a, )" not in generated
-    assert "Bad" in generated  # the prose is still there, just the body degraded
+    assert "Bad" in generated

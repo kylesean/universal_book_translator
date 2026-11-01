@@ -1,5 +1,3 @@
-"""Cloud vision-LLM OCR must surface an output-limit truncation, not ship it."""
-
 from __future__ import annotations
 
 import logging
@@ -76,7 +74,6 @@ def test_a_complete_ocr_response_is_not_flagged(caplog: pytest.LogCaptureFixture
 
 
 def test_cloud_driver_no_ambient_openai_scraping(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify VisionEndpointDriver never scrapes foreign OPENAI_API_KEY or OPENAI_BASE_URL."""
     monkeypatch.setenv("OPENAI_API_KEY", "ambient-stolen-key")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://ambient-stolen.endpoint.com")
     monkeypatch.delenv("UBT_OCR_API_KEY", raising=False)

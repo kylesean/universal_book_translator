@@ -1,5 +1,3 @@
-"""Pipeline preflight delivery-plan wiring tests (non-PDF path, no model)."""
-
 from __future__ import annotations
 
 from pathlib import Path

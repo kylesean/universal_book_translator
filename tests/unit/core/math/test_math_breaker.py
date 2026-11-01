@@ -1,5 +1,3 @@
-"""Unit tests for adaptive mathematical formula breaking and audits."""
-
 from __future__ import annotations
 
 import pytest
@@ -19,7 +17,6 @@ def test_break_equation_typst_nested_protection() -> None:
     breaker = AdaptiveMathBreaker(
         default_target_width=20, default_syntax=MathSyntax.TYPST, align_operators=False
     )
-    # The inside of frac(a + b, c + d) should NOT be split
     eq = "f(x) = frac(a + b + c, d + e + f) + g + h"
     broken = breaker.break_equation(eq)
     assert "frac(a + b + c, d + e + f)" in broken
@@ -34,7 +31,6 @@ def test_break_equation_typst_relation_and_alignment() -> None:
     eq = "L(theta) = E[log p(x | z)] - D_KL(q(z | x) || p(z)) + lambda * R(theta)"
     broken = breaker.break_equation(eq)
     assert "\\\n" in broken
-    # Alignment '&' injected
     assert "& =" in broken or "& -" in broken
 
 
@@ -51,18 +47,15 @@ def test_audit_math_blocks_scoring() -> None:
     el_h1 = make_element(
         id="h1", spine_index=0, block_type=BlockType.HEADING, source_text="Physics", level=1
     )
-    # Safe short formula
     el_f1 = make_element(
         id="f1", spine_index=1, block_type=BlockType.FORMULA, source_text="E = mc^2"
     )
-    # Oversized formula
     el_f2 = make_element(
         id="f2",
         spine_index=2,
         block_type=BlockType.FORMULA,
         source_text="H(psi) = - frac(hbar^2, 2m) nabla^2 psi + V(x, y, z) psi + sum_(i=1)^N lambda_i phi_i(x)",
     )
-    # Narrative with long inline math
     el_p1 = make_element(
         id="p1",
         spine_index=3,
@@ -85,6 +78,6 @@ def test_audit_math_blocks_scoring() -> None:
 
     report = audit_math_blocks(blocks, target_width=35)
     assert report.total_equations == 3
-    assert report.oversized_equations == 2  # f2 and inline equation
+    assert report.oversized_equations == 2
     assert 0.0 < report.compliance_score < 100.0
     assert len(report.audits) == 3

@@ -1,18 +1,3 @@
-"""Progress must count translation work, not blocks the skip rule finished.
-
-On a real 26-page PDF (259 blocks) the skip rule marked 154 of them
-``mtqe_passed`` without translating anything — images, list entries and short
-headings. The old query counted every row on both sides of the fraction, so
-skipped blocks were "done" by construction:
-
-    total     = COUNT(*)                                   -> 259
-    completed = SUM(status IN ('mtqe_passed','repaired'))  -> 244
-    percent   -> 100.0%   for 90 translated blocks out of 105
-
-Two books with identical translation load therefore reported different progress
-depending on how many images they happened to contain.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -32,7 +17,6 @@ def ledger(tmp_path: Path) -> SQLiteJobLedger:
 
 
 def _seed(ledger: SQLiteJobLedger, job_id: str, rows: list[tuple[str, int]]) -> None:
-    """Write one job with ``rows`` of ``(status, skip_translate)``."""
     with ledger._get_conn() as conn:
         conn.execute("BEGIN IMMEDIATE;")
         conn.execute(
@@ -41,8 +25,6 @@ def _seed(ledger: SQLiteJobLedger, job_id: str, rows: list[tuple[str, int]]) -> 
             "VALUES (?, 'doc', 'book.pdf', 'zh-CN', ?, 'running', '2026-01-01')",
             (job_id, len(rows)),
         )
-        # Only the NOT NULL columns the query touches: this fixture is about the
-        # aggregate, not about block fidelity (which the ledger's own tests cover).
         conn.executemany(
             "INSERT INTO blocks (block_id, job_id, flow_id, spine_index, "
             "block_type, source_text, status, skip_translate) "
@@ -60,12 +42,10 @@ def test_skipped_blocks_are_excluded_from_total_and_completed(
         ledger,
         job_id,
         [
-            # Translated / terminal work.
             ("mtqe_passed", 0),
             ("mtqe_passed", 0),
             ("failed", 0),
             ("needs_human", 0),
-            # Skipped: never translated, must not count as work.
             ("mtqe_passed", 1),
             ("mtqe_passed", 1),
             ("mtqe_passed", 1),
@@ -82,7 +62,6 @@ def test_skipped_blocks_are_excluded_from_total_and_completed(
 
 
 def test_a_job_of_only_skipped_blocks_reports_no_work(ledger: SQLiteJobLedger) -> None:
-    """No division by zero, and no "100% of nothing" claim either."""
     job_id = "job_all_skipped"
     _seed(ledger, job_id, [("mtqe_passed", 1), ("mtqe_passed", 1)])
 
@@ -96,11 +75,6 @@ def test_a_job_of_only_skipped_blocks_reports_no_work(ledger: SQLiteJobLedger) -
 def test_the_real_job_shape_matches_the_reported_workload(
     ledger: SQLiteJobLedger,
 ) -> None:
-    """The measured distribution: 105 translatable, 154 skipped, 15 to a human.
-
-    The panel used to say 244/259 = 100% for this. The honest reading is that all
-    105 translatable blocks reached a disposition, 15 of them needing a person.
-    """
     rows: list[tuple[str, int]] = []
     rows += [("mtqe_passed", 0)] * 90
     rows += [("needs_human", 0)] * 15
@@ -126,7 +100,6 @@ def test_live_progress_uses_drafts_but_reserves_100_for_finalization() -> None:
 
 
 def test_failed_blocks_never_advance_the_progress_bar() -> None:
-    """A dead endpoint must not turn 163 failures into 81.5% translated."""
     assert live_progress_percent(0, 0, 200) == 0.0
     assert live_progress_percent(10, 0, 200) == 5.0
     assert live_progress_percent(10, 50, 200) == 25.0
@@ -157,13 +130,6 @@ def test_needs_human_is_successful_progress_but_failed_is_not(
 
 
 def test_repair_pending_is_live_progress_not_a_regression(ledger: SQLiteJobLedger) -> None:
-    """Starting repair must not erase already-credited live work.
-
-    A real run reached 86.6% while 504 blocks were drafted; repair then moved
-    all of them to repair_pending. The old snapshot only credited drafted, so
-    the next repair heartbeat fell to 31.4% even though the same blocks were
-    still queued for work.
-    """
     job_id = "job_repair_pending_live"
     _seed(
         ledger,
@@ -184,13 +150,6 @@ def test_repair_pending_is_live_progress_not_a_regression(ledger: SQLiteJobLedge
 
 
 def test_progress_snapshot_exposes_a_machine_readable_event_type() -> None:
-    """The console localizes an event kind, never the engine's English prose.
-
-    ``message`` remains available for diagnostics, but the status card and the
-    activity timeline need a stable identifier. Sending only the English
-    sentence made a Chinese console show
-    "Translation Bible established with 30 entries ..." under "编译中".
-    """
     event = TranslationProgressEvent(
         event_type=EventType.BIBLE_EXTRACTED,
         job_id="job-activity",

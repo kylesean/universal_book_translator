@@ -1,5 +1,3 @@
-"""Unit tests for the AST-based LaTeX math transpiler (Phase 2)."""
-
 from __future__ import annotations
 
 import os
@@ -20,7 +18,6 @@ pytestmark = pytest.mark.fast
 
 
 def _compile_typst(math_snippet: str) -> tuple[bool, str]:
-    """Helper to verify that Typst actually compiles the transpiled math."""
     try:
         binary = resolve_typst_binary(os.environ.get("UBT_TYPST_BINARY", "typst"))
         if not binary:
@@ -167,12 +164,6 @@ def test_span_with_environment() -> None:
 
 
 def test_a_blank_leading_cell_is_preserved() -> None:
-    """A blank-corner matrix keeps its empty first cell (not collapsed).
-
-    The lead-empty prune that was added for the ``array`` column spec actually
-    ate a *real* empty cell: pylatexenc already consumes the spec, so the only
-    thing that prune could drop was a legitimate blank corner.
-    """
     result = typstify_math(r"\begin{pmatrix} & b \\ c & d \end{pmatrix}")
     assert result == "mat(, b; c, d)"
     ok, _ = _compile_typst(result)
@@ -180,12 +171,10 @@ def test_a_blank_leading_cell_is_preserved() -> None:
 
 
 def test_an_unstarred_matrix_position_arg_is_stripped() -> None:
-    """``\\begin{matrix}[r] ...`` must not leak ``[r]`` into a cell."""
     result = typstify_math(r"\begin{matrix}[r] a & b \\ c & d \end{matrix}")
     assert result == "mat(delim: #none, a, b; c, d)"
 
 
 def test_the_spaced_docling_dialect_reaches_the_ast() -> None:
-    """The gate runs after normalization, so ``\\begin { pmatrix }`` still works."""
     result = typstify_math(r"\begin { pmatrix } 1 & 2 \\ 3 & 4 \end { pmatrix }")
     assert result == "mat(1, 2; 3, 4)"

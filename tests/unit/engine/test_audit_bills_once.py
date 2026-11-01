@@ -1,17 +1,3 @@
-"""The pass-sample audit must bill the judge once per block.
-
-``_audit_pass_sample`` scores a sample of FastPass passes. A block the judge
-lowered below the line was then re-added to ``suspicious_blocks``, which the
-gate scores again — and because the sampling is a stable ``crc32`` of the
-source, ``_needs_judge`` selected the *same* pair a second time. The judge
-answered twice, the bill recorded two calls, and the second opinion could only
-agree with the first.
-
-The fix persists the audit's own measurement (status REPAIR_PENDING + the score
-it computed) instead of re-deriving it, so the block still reaches repair and
-still carries the demotion evidence.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -30,8 +16,6 @@ from ubt.core.qe.llm_judge import LLMJudgeQERunner, TieredQERunner
 
 pytestmark = pytest.mark.fast
 
-#: A clean pass the heuristic scores at its flat 0.92 band, so ``pass_sample``
-#: samples it and the judge gets asked.
 _CLEAN_SRC = "The model follows a query-based paradigm."
 _CLEAN_MT = "该模型遵循基于查询的范式。"
 
@@ -122,7 +106,6 @@ class _Terminology:
 
 
 def _counting_tiered() -> tuple[TieredQERunner, list[str]]:
-    """A tiered runner whose judge answers every call and records each one."""
     calls: list[str] = []
 
     async def judge_fn(*, user_prompt: str = "", **_kwargs: Any) -> str:
@@ -160,7 +143,6 @@ def _run(runner: BaseQERunner) -> tuple[list[list[dict[str, Any]]], _Ledger]:
 
 
 def test_a_demoted_block_is_judged_once() -> None:
-    """The regression: the audit's demotion was re-scored by the gate."""
     runner, calls = _counting_tiered()
     _batches, _ledger = _run(runner)
 
@@ -169,7 +151,6 @@ def test_a_demoted_block_is_judged_once() -> None:
 
 
 def test_a_demoted_block_still_reaches_repair_with_its_score() -> None:
-    """Billing once must not mean losing the verdict."""
     runner, _calls = _counting_tiered()
     batches, _ledger = _run(runner)
 
@@ -182,7 +163,6 @@ def test_a_demoted_block_still_reaches_repair_with_its_score() -> None:
 
 
 def test_a_passing_audit_still_records_the_measured_score() -> None:
-    """The other half of the audit: a good sample keeps its measurement."""
 
     async def high(**_kwargs: Any) -> str:
         return '{"score": 0.95, "reason": "faithful"}'

@@ -1,5 +1,3 @@
-"""Unit tests for the 'ubt table' CLI commands."""
-
 from __future__ import annotations
 
 import json
@@ -16,7 +14,6 @@ runner = CliRunner()
 
 
 def test_table_inspect_command(tmp_path: Path) -> None:
-    """Verify ubt table inspect detects tables and outputs terminal panel and JSON."""
     doc_file = tmp_path / "tables.md"
     doc_file.write_text(
         "# Benchmark Results\n\n"
@@ -32,13 +29,11 @@ def test_table_inspect_command(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    # 1. Terminal inspect output
     res_term = runner.invoke(app, ["table", "inspect", str(doc_file)])
     assert res_term.exit_code == 0
     assert "Multi-Page Table Continuity Inspection" in res_term.stdout
     assert "Total Tables Found:" in res_term.stdout
 
-    # 2. JSON inspect output
     res_json = runner.invoke(app, ["table", "inspect", str(doc_file), "--json"])
     assert res_json.exit_code == 0
     data = json.loads(res_json.stdout)
@@ -47,7 +42,6 @@ def test_table_inspect_command(tmp_path: Path) -> None:
 
 
 def test_table_stitch_command(tmp_path: Path) -> None:
-    """Verify ubt table stitch fuses split tables and can export output."""
     doc_file = tmp_path / "split_doc.md"
     doc_file.write_text(
         "| Architecture | Top-1 | Latency |\n"
@@ -64,7 +58,6 @@ def test_table_stitch_command(tmp_path: Path) -> None:
     assert res.exit_code == 0
     assert out_file.exists()
 
-    # Verify JSON mode
     res_json = runner.invoke(app, ["table", "stitch", str(doc_file), "--json"])
     assert res_json.exit_code == 0
     data = json.loads(res_json.stdout)
@@ -72,14 +65,12 @@ def test_table_stitch_command(tmp_path: Path) -> None:
 
 
 def test_table_command_file_not_found() -> None:
-    """Verify graceful error reporting when input does not exist."""
     res = runner.invoke(app, ["table", "inspect", "nonexistent_file_123.pdf"])
     assert res.exit_code != 0
     assert "Error loading blocks" in res.stdout
 
 
 def test_table_style_command(tmp_path: Path) -> None:
-    """Verify ubt table style renders repeated headers and continuation notices."""
     doc_file = tmp_path / "long_table.md"
     doc_file.write_text(
         "# Benchmark\n\n"
@@ -93,14 +84,12 @@ def test_table_style_command(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    # Typst format
     res_typ = runner.invoke(app, ["table", "style", str(doc_file), "--format", "typst"])
     assert res_typ.exit_code == 0
     assert "table.header(" in res_typ.output
     assert "（续表）" in res_typ.output
     assert "（续下页）" in res_typ.output
 
-    # HTML format to file
     html_out = tmp_path / "styled.html"
     res_html = runner.invoke(
         app,
@@ -114,7 +103,6 @@ def test_table_style_command(tmp_path: Path) -> None:
 
 
 def test_table_audit_command(tmp_path: Path) -> None:
-    """Verify ubt table audit reports continuation eligibility in terminal and JSON."""
     doc_file = tmp_path / "audit_table.md"
     doc_file.write_text(
         "# Data Summary\n\n"
@@ -130,14 +118,12 @@ def test_table_audit_command(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    # Terminal output
     res = runner.invoke(app, ["table", "audit", str(doc_file)])
     assert res.exit_code == 0
     assert "Publication Table Continuity Audit" in res.output
     assert "Total Tables Found: 2" in res.output
     assert "Continuation Styling Eligible: 1" in res.output
 
-    # JSON output
     res_json = runner.invoke(app, ["table", "audit", str(doc_file), "--json"])
     assert res_json.exit_code == 0
     data = json.loads(res_json.output)

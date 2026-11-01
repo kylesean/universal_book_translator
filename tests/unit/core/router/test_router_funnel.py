@@ -1,25 +1,3 @@
-"""Router funnel coverage: the retry/continuation/vision paths behind the wire.
-
-The transports' wire contract is pinned in ``test_transports_wire.py``; this
-module covers the *router* logic that wraps every provider call — the parts a
-wrong answer bills real money or stalls a whole book:
-
-- **Truncation continuation**: a ``finish_reason == "length"`` generation is
-  continued tail-anchored, the echoed overlap is merged away, and a failed
-  continuation keeps the partial (half a block beats no block) — but a
-  budget/cancel hard stop propagates instead of continuing a still-billing
-  generation.
-- **Retry classification**: a 429 reports to the AIMD limiter and retries;
-  an unparseable 200 fails the model fast (retrying the same request only
-  burns quota); a hard stop (budget/cancel) is never retried.
-- **Vision egress**: page images ship only when the run allows it, and the
-  request is charged at the vision tile count.
-- **Repair tier**: repair calls reach the repair provider, not the draft one.
-
-Every test drives :class:`ModelRouter` over a scripted fake provider — no
-network, no limiter wall-clock waits (the limiter is a pass-through stub).
-"""
-
 from __future__ import annotations
 
 import sqlite3
@@ -36,8 +14,6 @@ pytestmark = pytest.mark.fast
 
 
 class _ScriptedProvider:
-    """A provider whose generate_with_finish_reason plays a script of outcomes."""
-
     def __init__(self, outcomes: list[Any]) -> None:
         self.outcomes = list(outcomes)
         self.calls: list[dict[str, Any]] = []
@@ -58,8 +34,6 @@ class _ScriptedProvider:
 
 
 class _NullLimiter:
-    """A limiter that admits everything and records the reservations."""
-
     def __init__(self) -> None:
         self.reserved: list[int] = []
         self.reported_429 = 0
@@ -86,11 +60,6 @@ def _router(provider: Any, **kwargs: Any) -> ModelRouter:
     return ModelRouter(provider=provider, **kwargs)
 
 
-# --------------------------------------------------------------------------- #
-# Truncation continuation
-# --------------------------------------------------------------------------- #
-
-
 async def test_a_truncated_generation_is_continued_and_merged() -> None:
     provider = _ScriptedProvider(
         [
@@ -102,7 +71,6 @@ async def test_a_truncated_generation_is_continued_and_merged() -> None:
     text = await router.complete_raw("sys", "user prompt")
     assert "partial half of a sente" in text
     assert "nce that completes it" in text
-    # The continuation call re-sends the user prompt with the tail anchor.
     assert len(provider.calls) == 2
     continuation_prompt = provider.calls[1]["prompt"]
     assert "user prompt" in continuation_prompt
@@ -122,7 +90,6 @@ async def test_a_failed_continuation_keeps_the_partial_output() -> None:
 
 
 async def test_a_budget_stop_during_continuation_propagates() -> None:
-    """A spend cap must not be swallowed: the generation is still billing."""
     provider = _ScriptedProvider(
         [
             ("partial output", "length"),
@@ -134,11 +101,6 @@ async def test_a_budget_stop_during_continuation_propagates() -> None:
         await router.complete_raw("sys", "user prompt")
 
 
-# --------------------------------------------------------------------------- #
-# Retry classification
-# --------------------------------------------------------------------------- #
-
-
 async def test_a_429_reports_to_the_limiter_and_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = _ScriptedProvider(
         [
@@ -148,7 +110,6 @@ async def test_a_429_reports_to_the_limiter_and_retries(monkeypatch: pytest.Monk
     )
     limiter = _NullLimiter()
     router = _router(provider, rate_limiter=limiter)
-    # Collapse the backoff waits: the classification, not the wait, is the test.
     monkeypatch.setattr(router, "_interruptible_sleep", _async_noop)
     text = await router.complete_raw("sys", "user")
     assert text == "recovered"
@@ -168,7 +129,6 @@ async def test_a_hard_stop_is_never_retried() -> None:
 
 
 async def test_an_unparseable_200_fails_the_model_fast() -> None:
-    """A 200 whose body is not the declared JSON is deterministic: no retry."""
     provider = _ScriptedProvider([ValueError("not the declared JSON"), ("never reached", "stop")])
     router = _router(provider)
     with pytest.raises(ModelProviderError, match="could not be parsed"):
@@ -181,11 +141,6 @@ async def test_an_unexpected_error_is_wrapped_not_silently_dropped() -> None:
     router = _router(provider)
     with pytest.raises(ModelProviderError, match="Unexpected provider error"):
         await router.complete_raw("sys", "user")
-
-
-# --------------------------------------------------------------------------- #
-# Vision egress
-# --------------------------------------------------------------------------- #
 
 
 async def test_vision_is_refused_while_page_upload_is_disabled() -> None:
@@ -211,19 +166,11 @@ async def test_vision_charges_the_tile_count_to_the_limiter() -> None:
     router = _router(provider, rate_limiter=limiter, allow_page_upload=True)
     text = await router.complete_with_images("describe this page", ["QUJD"] * 3)
     assert text == "seen"
-    # The reservation must exceed the text-only estimate by the per-image
-    # tile charge (one page image's vision tokens are far more than text).
     assert limiter.reserved, "the vision call bypassed the limiter"
     assert limiter.reserved[0] > 3000, limiter.reserved
 
 
-# --------------------------------------------------------------------------- #
-# Repair tier routing
-# --------------------------------------------------------------------------- #
-
-
 def _block(text: str) -> Any:
-    """A minimal IRBlock for the repair call (only source_text/block_type read)."""
     from ubt.core.ir.models import BlockType, IRBlock, make_element
 
     return IRBlock(
@@ -245,19 +192,7 @@ async def test_repair_calls_reach_the_repair_provider() -> None:
     assert len(repair_provider.calls) == 1
 
 
-# --------------------------------------------------------------------------- #
-# The AIMD-built limiter still exists when none is injected
-# --------------------------------------------------------------------------- #
-
-
 def test_a_router_without_an_injected_limiter_builds_one_for_a_real_provider() -> None:
-    """Mock traffic gets the never-gating limiter; a real provider gets AIMD.
-
-    The duck-typed ``is_mock`` flag decides: a mock provider cannot exhaust a
-    credential, so the bucket would only add latency to tests; anything else
-    (the scripted stand-in has no ``is_mock``) must get a real limiter, with
-    the oscillation guard at the config default rather than the bucket's 0.0.
-    """
 
     class _RealProvider(_ScriptedProvider):
         is_mock = False
@@ -269,23 +204,19 @@ def test_a_router_without_an_injected_limiter_builds_one_for_a_real_provider() -
     from ubt.core.router.provider import MockModelProvider
 
     mock_router = ModelRouter(provider=MockModelProvider(), draft_model="m")
-    # NullRateLimiter subclasses AdaptiveTokenBucket, so the exact type decides.
     assert type(mock_router.rate_limiter) is not AdaptiveTokenBucket
 
 
 def test_adaptive_token_bucket_smoothed_aimd() -> None:
-    """Verify AdaptiveTokenBucket increases capacity smoothly without massive step jumps."""
     bucket = AdaptiveTokenBucket(initial_rpm=60, max_rpm=120)
     assert bucket.capacity == 60.0
 
-    # 1 success should add a fraction (1 / 60), not +1.0
     bucket.report_success()
     assert 60.0 < bucket.capacity < 60.1
     assert bucket._waiters == 0
 
 
 def test_router_quota_exhausted_fail_fast() -> None:
-    """Verify router treats 429 quota exhaustion as chain fail-fast instead of retrying all tiers."""
     err = ModelProviderError(
         "Rate limited",
         details={
@@ -307,11 +238,6 @@ def test_programming_defects_fail_fast_and_do_not_retry() -> None:
 
 
 def test_sqlite_shared_bucket_climbs_like_the_in_process_one(tmp_path: Path) -> None:
-    """The shared bucket must use the same additive-increase law (1/capacity).
-
-    A flat +1.0 let N workers reporting concurrently multiply the climb and
-    defeat the shared rate ceiling the bucket exists to enforce.
-    """
     from ubt.core.router.rate_limiter import SqliteTokenBucket
 
     path = tmp_path / "limiter.sqlite"
@@ -324,12 +250,10 @@ def test_sqlite_shared_bucket_climbs_like_the_in_process_one(tmp_path: Path) -> 
         .fetchone()
     )
     assert row is not None
-    # One success adds 1/60, not 1.0 — same law as AdaptiveTokenBucket.
     assert 60.0 < row[0] < 60.1
 
 
 async def test_content_refusal_fails_fast_and_does_not_trip_circuit_breaker() -> None:
-    """Content refusal fails the chain fast without retrying or tripping circuit breaker."""
     refusal_err = ModelProviderError(
         "Anthropic refused the request (stop_reason=refusal)",
         details={"fail_fast": True, "reason": "content_refusal"},
@@ -347,5 +271,4 @@ async def test_content_refusal_fails_fast_and_does_not_trip_circuit_breaker() ->
 
     # Only 1 call was made to primary_model; fallback_model was never called!
     assert len(provider.calls) == 1
-    # Circuit breaker for primary_model was NOT incremented or tripped
     assert router._model_circuit.get("primary_model", (0, 0.0))[0] == 0

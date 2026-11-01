@@ -1,33 +1,3 @@
-"""Guard against dead module-level definitions.
-
-`test_no_orphaned_modules.py` catches a whole *module* nobody imports. It cannot
-see the other half of the same problem: a function or constant that survives
-inside a live module after its last caller is deleted. The 2026-10 audit found
-2,500 lines of that shape, and a second sweep found 25 more (16 functions, 8
-constants, 1 class) left behind by refactors — including a `contains_point` with
-a `bisect` body, an `as_typst_tuple` renderer, and a `validate_contract` that
-documented invariants nothing enforced.
-
-This test is the same shape as the module guard: pure AST, no imports executed,
-milliseconds to run. It reports a definition that appears exactly once in the
-whole tree — its own `def`/`class`/assignment line.
-
-Deliberately conservative, because a false positive deletes live code:
-
-- any decorated definition is skipped (Typer commands, pytest fixtures,
-  ``@property``, ``@field_validator`` are reached through the framework);
-- any ``__dunder__`` name is skipped (protocol hooks are called by the runtime);
-- names starting with ``test_`` are skipped (collected by pytest, not imported);
-- the search covers ``tests/``, ``scripts/`` and the documentation/config files,
-  not just the package, so a symbol named only in a docstring or a ``.toml``
-  still counts as referenced.
-
-A hit means "nothing in this repository mentions this name", which is the
-actionable signal. It is not "safe to delete" — a public API consumed by a
-downstream package would also hit — so the failure message says to delete it
-*or* document why it stays.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -43,17 +13,11 @@ pytestmark = pytest.mark.fast
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PACKAGE_ROOT = _REPO_ROOT / "ubt"
 
-#: Roots whose text keeps a name live. ``tests/`` and ``scripts/`` matter: a
-#: slow-tier harness runs as a subprocess and is not collected by pytest, so a
-#: symbol reached only through one of them is live but invisible to the suite.
 _TEXT_ROOTS = ("ubt", "tests", "scripts")
 _TEXT_SUFFIXES = (".py", ".md", ".toml", ".json", ".yaml", ".yml", ".typ")
 
-#: Definitions that are reached without ever being named. Each entry must say
-#: how it is reached, so the allowlist cannot become a dumping ground.
 _UNNAMEABLE_BY_DESIGN: frozenset[str] = frozenset(
     {
-        # HTMLParser protocol hooks: the stdlib calls these by attribute name.
         "handle_comment",
         "handle_decl",
         "handle_pi",
@@ -73,35 +37,23 @@ def _iter_text_files() -> list[Path]:
     return files
 
 
-#: Decorators a framework calls without naming the function, so a definition
-#: carrying one is reached even though nothing in the tree mentions it. This is
-#: an allowlist of *reasons*, not a blanket skip: the old ``if
-#: node.decorator_list: continue`` exempted 183 module-level definitions —
-#: including every ``@dataclass`` — so a dead dataclass was invisible.
 _FRAMEWORK_DECORATORS = frozenset(
     {
-        # Typer/Click command registration.
         "command",
         "callback",
-        # pytest fixtures and markers.
         "fixture",
         "pytest.fixture",
-        # Protocol hooks the runtime calls by attribute name.
         "property",
         "cached_property",
         "setter",
         "getter",
         "deleter",
-        # pydantic field/model validators and serializers.
         "field_validator",
         "model_validator",
         "field_serializer",
         "model_serializer",
         "validator",
         "root_validator",
-        # A wrapper applied to the definition is not a *caller*: ``@dataclass``
-        # and ``@total_ordering`` generate code but nothing reaches the class,
-        # which is exactly the case the blanket skip used to hide.
         "lru_cache",
         "cache",
         "functools.lru_cache",
@@ -111,7 +63,6 @@ _FRAMEWORK_DECORATORS = frozenset(
 
 
 def _decorator_name(node: ast.AST) -> str:
-    """Dotted name of one decorator expression (``x`` / ``x.y`` / ``x(...)``)."""
     target = node.func if isinstance(node, ast.Call) else node
     parts: list[str] = []
     while isinstance(target, ast.Attribute):
@@ -123,25 +74,19 @@ def _decorator_name(node: ast.AST) -> str:
 
 
 def _is_framework_reached(decorator_list: Sequence[ast.AST]) -> bool:
-    """Whether any decorator makes the framework, not a caller, invoke this."""
     for decorator in decorator_list:
         name = _decorator_name(decorator)
         if name in _FRAMEWORK_DECORATORS:
             return True
-        # ``@x.setter`` / ``@app.command`` / ``@pytest.mark.parametrize``: the
-        # last segment is the framework hook.
         if name.rsplit(".", 1)[-1] in _FRAMEWORK_DECORATORS:
             return True
     return False
 
 
 def _definition_names(tree: ast.Module) -> list[tuple[str, int]]:
-    """(name, lineno) for every module-level definition that could be dead."""
     found: list[tuple[str, int]] = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            # Only a *framework* decorator makes the definition reachable
-            # without a caller; ``@dataclass`` does not.
             if _is_framework_reached(node.decorator_list):
                 continue
             name = node.name
@@ -163,16 +108,6 @@ def _definition_names(tree: ast.Module) -> list[tuple[str, int]]:
 
 
 def _exported_names(tree: ast.Module) -> list[str]:
-    """The string entries of every ``__all__`` in a module.
-
-    An ``__all__`` entry is *not* a use: the module's own re-export list is the
-    one place a dead definition can hide, because the naive counter counts the
-    string as a mention. ``page_sizes``, ``VlmEvidence`` and
-    ``resolve_cli_adaptive_dual_mode`` each survived this way -- defined once,
-    named only in their own ``__all__`` beside them, imported by nobody. Their
-    entries are subtracted from the reference count below so the guard sees
-    through the re-export.
-    """
     names: list[str] = []
     for node in ast.walk(tree):
         value = None
@@ -196,19 +131,6 @@ def _exported_names(tree: ast.Module) -> list[str]:
 
 
 def test_no_dead_definitions() -> None:
-    """Every module-level definition is used somewhere besides its own ``def`` line.
-
-    Counts identifiers once across the whole tree (a ``Counter``), rather than
-    regex-searching the corpus per name: the naive sweep is
-    O(definitions x corpus) and measured at 110s, which is not a fast test.
-    Counting is required, not mere membership — the definition's own line always
-    contains its name, so presence alone would make the check vacuous. A count of
-    one is exactly that self-reference.
-
-    An ``__all__`` entry is subtracted from every count: a module naming a
-    definition only in its own re-export list has no consumer, and counting the
-    string hid exactly that (see :func:`_exported_names`).
-    """
     mentions: Counter[str] = Counter()
     for path in _iter_text_files():
         text = path.read_text(encoding="utf-8", errors="replace")

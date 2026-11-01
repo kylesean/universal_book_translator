@@ -1,20 +1,3 @@
-"""Deterministic terminology metrics (TP/TF) for the quality report.
-
-Computed at export time with zero LLM cost, over the *rendering fidelity* of the
-blocks that actually carry a term (source or alias). Pinned contracts:
-
-* ``TermDrift.drift_rate`` is ``1 - exact/occurrences`` rounded to 4 places, and
-  ``0.0`` for a zero-occurrence term;
-* ``summarize_drift`` aggregates per-hit results per source, keeps only terms
-  that actually drifted, bounds the retained block ids without touching the
-  counts, and sorts worst-first (drift rate, then occurrences, then source);
-* ``_fuzzy_match`` is exact-only below 3 characters and otherwise uses a
-  partial-ratio bar (WMT's 80%);
-* ``evaluate_terms`` skips blocks without a translation, counts expected
-  occurrences, distinct rendered terms, and returns an all-zero result for an
-  empty glossary or no matching block.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -43,11 +26,6 @@ class _Block:
     policy_translate: bool | None = None
 
 
-# --------------------------------------------------------------------------- #
-# TermDrift.drift_rate
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("occurrences", "exact", "expected"),
     [
@@ -63,11 +41,6 @@ def test_drift_rate(occurrences: int, exact: int, expected: float) -> None:
     assert drift.drift_rate == expected
 
 
-# --------------------------------------------------------------------------- #
-# _fuzzy_match
-# --------------------------------------------------------------------------- #
-
-
 def test_fuzzy_match_is_disabled_below_three_characters() -> None:
     assert _fuzzy_match("xxabxx", "ab", 0.8) is False
 
@@ -81,14 +54,8 @@ def test_fuzzy_match_rejects_unrelated_text() -> None:
 
 
 def test_fuzzy_match_honours_the_threshold() -> None:
-    # partial_ratio("color", "colour") ~= 88.9.
     assert _fuzzy_match("color", "colour", 0.8) is True
     assert _fuzzy_match("color", "colour", 0.9) is False
-
-
-# --------------------------------------------------------------------------- #
-# summarize_drift
-# --------------------------------------------------------------------------- #
 
 
 def _metrics(*hits: TermHit) -> TermMetrics:
@@ -136,16 +103,11 @@ def test_summarize_drift_bounds_retained_block_ids() -> None:
 def test_summarize_drift_sorts_worst_first_then_by_occurrences() -> None:
     metrics = _metrics(
         TermHit("Mild", "E", "b1", exact=True, fuzzy=True),
-        TermHit("Mild", "E", "b2", exact=False, fuzzy=False),  # rate 0.5
+        TermHit("Mild", "E", "b2", exact=False, fuzzy=False),
         TermHit("Bad", "E", "b1", exact=False, fuzzy=False),
-        TermHit("Bad", "E", "b2", exact=False, fuzzy=False),  # rate 1.0
+        TermHit("Bad", "E", "b2", exact=False, fuzzy=False),
     )
     assert [d.source for d in summarize_drift(metrics)] == ["Bad", "Mild"]
-
-
-# --------------------------------------------------------------------------- #
-# evaluate_terms
-# --------------------------------------------------------------------------- #
 
 
 _GLOSSARY = [{"source": "FinFET", "translation": "鳍式场效应晶体管"}]
@@ -218,22 +180,9 @@ def test_recall_counts_distinct_terms() -> None:
     assert metrics.term_recall == 1.0
 
 
-# --------------------------------------------------------------------------- #
-# A deliberately source-kept block cannot render a glossary term
-# --------------------------------------------------------------------------- #
-
-
 def test_a_source_kept_block_is_excluded_from_the_precision_denominator() -> None:
-    """A bibliography entry is *supposed* to hold its English text.
-
-    Counting it measures the deliberate keep, not consistency. Measured across
-    the gold corpus 2-23% of every document's term occurrences sit in such
-    blocks — enough to move term precision from 0.969 to 0.862, below the
-    tier-B floor, with no real inconsistency involved.
-    """
     blocks: list[Any] = [
         _Block("b1", "The FinFET device", "鳍式场效应晶体管器件"),
-        # A reference entry: the policy keeps it in the source language.
         _Block("b2", "FinFET transistor", "FinFET transistor", skip_translate=True),
     ]
     metrics = evaluate_terms(blocks, _GLOSSARY)
@@ -250,9 +199,8 @@ def test_a_policy_verdict_of_false_also_excludes_the_block() -> None:
 
 
 def test_a_translatable_block_still_counts() -> None:
-    """The exclusion must be narrow: a real block keeps its defect."""
     blocks: list[Any] = [
-        _Block("b1", "The FinFET device", "FinFET 器件"),  # drifted
+        _Block("b1", "The FinFET device", "FinFET 器件"),
     ]
     metrics = evaluate_terms(blocks, _GLOSSARY)
 

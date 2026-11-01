@@ -1,5 +1,3 @@
-"""Unit tests for UBT logging configuration and telemetry standards."""
-
 from __future__ import annotations
 
 import io
@@ -19,7 +17,6 @@ pytestmark = pytest.mark.fast
 
 
 def test_default_log_format_structure() -> None:
-    """Standard UBT log format must include levelprefix, name_prefix, and message."""
     assert "%(levelprefix)s" in DEFAULT_LOG_FORMAT
     assert "%(name_prefix)s" in DEFAULT_LOG_FORMAT
     assert "%(message)s" in DEFAULT_LOG_FORMAT
@@ -27,7 +24,6 @@ def test_default_log_format_structure() -> None:
 
 
 def test_setup_logging_formats_records() -> None:
-    """A log record handled by setup_logging must render with the unified modern format."""
     stream = io.StringIO()
     setup_logging(level=logging.INFO, stream=stream)
 
@@ -39,7 +35,6 @@ def test_setup_logging_formats_records() -> None:
 
 
 def test_setup_logging_with_colors() -> None:
-    """When colors are enabled, level prefix includes ANSI escape sequences."""
     stream = io.StringIO()
     setup_logging(level=logging.INFO, stream=stream, use_colors=True)
 
@@ -51,7 +46,6 @@ def test_setup_logging_with_colors() -> None:
 
 
 def test_httpx_and_httpcore_are_floored_at_warning() -> None:
-    """httpx logs 'HTTP Request: POST ...' at INFO. Flooring at WARNING prevents request wire leakage."""
     assert _NOISY_LOGGERS["httpx"] == (logging.WARNING, False)
     assert _NOISY_LOGGERS["httpcore"] == (logging.WARNING, False)
     assert _NOISY_LOGGERS["urllib3"] == (logging.WARNING, False)
@@ -63,26 +57,22 @@ def test_httpx_and_httpcore_are_floored_at_warning() -> None:
     assert httpx_logger.level == logging.WARNING
     assert not httpx_logger.isEnabledFor(logging.INFO)
 
-    # An INFO-level wire log from httpx must NOT appear in output
     httpx_logger.info(
         "HTTP Request: POST http://127.0.0.1:9090/v1/chat/completions 'HTTP/1.1 200 OK'"
     )
     assert stream.getvalue() == ""
 
-    # WARNING must still pass
     httpx_logger.warning("HTTP connection timeout to provider")
     assert "WARNING:  httpx: HTTP connection timeout to provider" in stream.getvalue()
 
 
 def test_debug_lifts_floor_on_noisy_loggers(monkeypatch: pytest.MonkeyPatch) -> None:
-    """UBT_LOG_LEVEL=DEBUG or explicit debug level lifts the floor to NOTSET (inherits root DEBUG)."""
     monkeypatch.setenv("UBT_LOG_LEVEL", "DEBUG")
     root = logging.getLogger()
     old_level = root.level
     try:
         setup_logging()
         httpx_logger = logging.getLogger("httpx")
-        # In lift_all mode, floor is removed (set to NOTSET so it inherits root DEBUG)
         assert httpx_logger.level == logging.NOTSET
         assert httpx_logger.isEnabledFor(logging.DEBUG)
     finally:
@@ -90,12 +80,10 @@ def test_debug_lifts_floor_on_noisy_loggers(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_setup_logging_preserves_debug_when_already_debug() -> None:
-    """If an outer CLI callback (e.g. -v) already put root into DEBUG, re-calling setup_logging keeps it."""
     root = logging.getLogger()
     old_level = root.level
     try:
         root.setLevel(logging.DEBUG)
-        # A bare setup_logging() without args should detect already_debug and stay in DEBUG
         setup_logging()
         assert root.level == logging.DEBUG
         assert logging.getLogger("httpx").isEnabledFor(logging.DEBUG)
@@ -104,7 +92,6 @@ def test_setup_logging_preserves_debug_when_already_debug() -> None:
 
 
 def test_access_noise_filter_filters_polling_requests() -> None:
-    """AccessNoiseFilter must suppress 200/304 polling requests but preserve non-200 and business actions."""
     filt = AccessNoiseFilter(allow_all=False)
 
     def _make_record(msg: str) -> logging.LogRecord:
@@ -118,7 +105,6 @@ def test_access_noise_filter_filters_polling_requests() -> None:
             exc_info=None,
         )
 
-    # High-frequency 200/304 polling should be filtered
     assert (
         filt.filter(
             _make_record(
@@ -148,7 +134,6 @@ def test_access_noise_filter_filters_polling_requests() -> None:
         is False
     )
 
-    # State-changing operations and important non-polling endpoints must pass
     assert (
         filt.filter(_make_record('127.0.0.1:57164 - "POST /jobs/submit HTTP/1.1" 202 Accepted'))
         is True
@@ -178,13 +163,11 @@ def test_access_noise_filter_filters_polling_requests() -> None:
         is True
     )
 
-    # External probes for /v1/models (e.g. from OpenCode/VSCode) are noise and must be dropped
     assert (
         filt.filter(_make_record('127.0.0.1:48286 - "GET /v1/models HTTP/1.1" 404 Not Found'))
         is False
     )
 
-    # When allow_all=True (debug/verbose mode), everything passes
     filt_verbose = AccessNoiseFilter(allow_all=True)
     assert (
         filt_verbose.filter(
@@ -197,7 +180,6 @@ def test_access_noise_filter_filters_polling_requests() -> None:
 def test_run_server_boots_uvicorn_with_noisy_loggers_floored(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """run_server boots uvicorn with colorized terminal logging while keeping httpx wire traces floored."""
     from ubt.api.app import run_server
 
     captured_kwargs: dict[str, object] = {}
@@ -216,7 +198,6 @@ def test_run_server_boots_uvicorn_with_noisy_loggers_floored(
 
 
 def test_pkg_resources_userwarning_is_filtered() -> None:
-    """The deprecated pkg_resources warning from third parties like jieba is filtered."""
     import warnings
 
     setup_logging()

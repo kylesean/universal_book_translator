@@ -1,22 +1,3 @@
-"""Dynamic boilerplate cleaning: strip chrome, never strip content.
-
-This cleaner runs per *block* and writes its result back into the delivered
-file, so a false positive deletes a reader's text. The pattern comments record
-the regressions that shaped the current rules:
-
-- an unanchored page-marker rule ate the ``3`` from ``3. Preheat the oven…``,
-  the year from ``1812 was…``, and the numeral from ``IV. On the Origin of
-  Species``;
-- an ``IGNORECASE`` roman-numeral class matched ``Mild``/``Civil``/``Dim``/``Mix``
-  and deleted the first word of prose;
-- a bare *prefix* match on a harvested disclaimer deleted every body sentence
-  that merely opened with the same words.
-
-These tests pin both directions: the chrome that must go, and the content that
-must survive. The consensus harvester is pure (no IO), so it is exercised here
-too.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -32,11 +13,6 @@ _DISCLAIMER = (
     "This book is a work of fiction. Names, characters, places and incidents "
     "are products of the author's imagination."
 )
-
-
-# --------------------------------------------------------------------------- #
-# clean_head: page markers and running headers.
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -56,9 +32,9 @@ def test_leading_page_markers_are_stripped(
 @pytest.mark.parametrize(
     "text",
     [
-        "1812 was a year of change",  # a 4-digit year is content
-        "2024\nChapter body",  # a dated heading is content
-        "IV. On the Origin of Species",  # roman followed by '.' is a heading
+        "1812 was a year of change",
+        "2024\nChapter body",
+        "IV. On the Origin of Species",
     ],
 )
 def test_content_that_looks_like_a_marker_is_not_stripped(text: str) -> None:
@@ -69,14 +45,12 @@ def test_content_that_looks_like_a_marker_is_not_stripped(text: str) -> None:
 
 @pytest.mark.parametrize("word", ["Mild weather today", "Civil war began", "Dim light"])
 def test_words_spelled_from_roman_letters_are_not_markers(word: str) -> None:
-    # The old IGNORECASE [ivxlcdm]+ class matched these and deleted the word.
     cleaned, stripped = BoilerplateFingerprint().clean_head(word)
     assert stripped == ""
     assert cleaned == word
 
 
 def test_a_whole_text_that_is_only_a_number_is_not_stripped() -> None:
-    # Stripping it would leave nothing; the guard keeps the block.
     assert BoilerplateFingerprint().clean_head("42") == ("42", "")
 
 
@@ -92,11 +66,6 @@ def test_running_chapter_headers_are_stripped(text: str) -> None:
 
 def test_empty_head_is_a_no_op() -> None:
     assert BoilerplateFingerprint().clean_head("") == ("", "")
-
-
-# --------------------------------------------------------------------------- #
-# clean_tail: photo credits and harvested disclaimers.
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -117,8 +86,6 @@ def test_a_harvested_disclaimer_at_the_tail_is_stripped() -> None:
 
 
 def test_a_body_sentence_that_only_opens_like_the_disclaimer_is_kept() -> None:
-    # The prefix anchor alone is not evidence; the tail must resemble the
-    # disclaimer (>= 0.85). Otherwise the body sentence was truncated.
     fingerprint = BoilerplateFingerprint(footer_disclaimers=(_DISCLAIMER,))
     body = "Body paragraph here. This book is a work of fiction and I love it very much indeed."
     cleaned, stripped = fingerprint.clean_tail(body)
@@ -132,7 +99,6 @@ def test_a_disclaimer_shorter_than_the_minimum_is_ignored() -> None:
 
 
 def test_a_disclaimer_whose_tail_varies_is_still_stripped() -> None:
-    # A trailing page number / changed URL is why the anchor is a prefix.
     fingerprint = BoilerplateFingerprint(footer_disclaimers=(_DISCLAIMER,))
     cleaned, stripped = fingerprint.clean_tail(f"Body para. {_DISCLAIMER} Page 7")
     assert cleaned == "Body para"
@@ -143,18 +109,8 @@ def test_empty_tail_is_a_no_op() -> None:
     assert BoilerplateFingerprint().clean_tail("") == ("", "")
 
 
-# --------------------------------------------------------------------------- #
-# clean: tail first, then head.
-# --------------------------------------------------------------------------- #
-
-
 def test_clean_strips_both_ends() -> None:
     assert BoilerplateFingerprint().clean("Page 42\nBody text here.") == "Body text here."
-
-
-# --------------------------------------------------------------------------- #
-# The consensus harvester (pure).
-# --------------------------------------------------------------------------- #
 
 
 def test_fingerprint_defaults_have_no_patterns() -> None:

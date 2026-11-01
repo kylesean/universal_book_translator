@@ -1,11 +1,3 @@
-"""Macro-chunk extraction must not let a duplicate block id replace the real one.
-
-The model emits one ``<block id="...">...</block>`` per micro-block, in document
-order. A later duplicate can appear from chunk overlap, a leaked reasoning
-draft, or an echo of format documentation in the source; keeping the *first*
-emission stops it from silently overwriting the genuine translation.
-"""
-
 from __future__ import annotations
 
 import logging

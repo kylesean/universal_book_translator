@@ -1,19 +1,3 @@
-"""Inline style runs: the pdfium char probe and the reflow renderer's run markup.
-
-Two halves, tested separately because they live in different modules:
-
-* `styled_runs_in_box` (``ubt/adapters/pdf/textgeom.py``) reads the pdfium char
-  probe and decides which source spans carry a style;
-* `render_prose` (``ubt/render/typst/document_renderer.py``) locates a run's
-  literal text in the *target* and wraps it in Typst markup.
-
-The locating half is the fragile one: a run's text is its literal characters, so
-it is found by substring search, and the target's publishing pass (CJK spacing,
-full-width punctuation, dash folding) routinely rewrites the characters a run
-was recorded with. The folded fallback is what keeps bold from being silently
-dropped on a Chinese page.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -39,16 +23,11 @@ def _runs(*specs: tuple[str, bool, bool, bool, str | None]) -> tuple[InlineRun, 
     )
 
 
-# --- the pdfium char probe -------------------------------------------------
-
-
 def test_styled_runs_group_bold_superscript_and_colour_only() -> None:
     chars = [
         _char(0, "A"),
         _char(5, "B"),
         _char(10, "C", bold=True),
-        # A superscript is smaller AND lifted: the marker rides 2.5pt above the
-        # body baseline, the way a real footnote reference is set.
         CharStyle((15.0, 2.5, 20.0, 10.0), "1", 7.0, False, None),
         _char(20, "D", color="#0000ff"),
     ]
@@ -61,10 +40,6 @@ def test_styled_runs_group_bold_superscript_and_colour_only() -> None:
 
 
 def test_small_print_on_the_baseline_is_not_a_superscript() -> None:
-    # Measured on the ATC'25 caption "A Another Example for OSTD APIs": the
-    # acronym's tail is genuinely set at 9.56pt inside an 11.96pt line -- but ON
-    # the baseline. A size drop without a baseline lift is a font variant, and
-    # flagging it wrapped an ordinary caption in #super mid-word.
     chars = [
         _body(0, "O", height=8.5),
         _body(5, "S", height=6.8),
@@ -77,8 +52,6 @@ def test_small_print_on_the_baseline_is_not_a_superscript() -> None:
 
 
 def test_a_space_rides_the_surrounding_run() -> None:
-    # pdfium reports synthetic spaces with a degenerate 1pt box; they must not
-    # start a spurious superscript run of their own.
     chars = [
         _char(0, "G", color="#0000ff"),
         CharStyle((5.0, 0.0, 5.0, 0.0), " ", 1.0, False, None),
@@ -89,41 +62,23 @@ def test_a_space_rides_the_surrounding_run() -> None:
 
 
 def _body(x0: float, text: str, *, bottom: float = 0.0, height: float = 10.0) -> CharStyle:
-    """A body glyph whose box bottom and height are stated explicitly.
-
-    The default ``_char`` helper gives every glyph the same box, which is why it
-    cannot exercise the geometry path: a matrix-scaled PDF reports one
-    ``font_size`` for everything and distinguishes a raised marker only through
-    the glyph box.
-    """
     return CharStyle((x0, bottom, x0 + 5.0, bottom + height), text, 1.0, False, None)
 
 
 def test_a_matrix_scaled_marker_is_raised_by_geometry() -> None:
-    """A raised digit is found through its glyph box when ``font_size`` is blind.
-
-    Measured on the ATC'25 source: pdfium reports 1.0 for every character --
-    author-affiliation markers included -- because the PDF scales through the
-    text matrix. The marker's box (bottom lifted ~40% of a line, height ~0.77x
-    the body's) is the only signal, and the size-ratio rule cannot see it.
-    """
     chars = [
         _body(0, "Y"),
         _body(5, "u"),
         _body(10, "k"),
         _body(15, "e"),
-        _body(20, " "),  # space between name and marker
-        _body(25, "1", bottom=4.0, height=7.7),  # the affiliation marker
+        _body(20, " "),
+        _body(25, "1", bottom=4.0, height=7.7),
     ]
     runs = styled_runs_in_box(chars, (0.0, -2.0, 30.0, 12.0))
     assert runs == [("1", False, False, True, None)]
 
 
 def test_a_hanging_hyphen_is_not_a_marker() -> None:
-    # A hyphen hangs at half cap height: its box bottom is well above the
-    # line's baseline and its glyph is small. It is still not a superscript --
-    # compounds like "ABI-Compatible" must not ship wrapped in #super. A
-    # cluster of pure punctuation never qualifies as a raised marker.
     chars = [
         _body(0, "R"),
         _body(5, "u"),
@@ -138,10 +93,6 @@ def test_a_hanging_hyphen_is_not_a_marker() -> None:
 
 
 def test_a_marker_comma_rides_the_raised_run() -> None:
-    # A citation ``3,4`` draws its comma below the raised digits; splitting the
-    # cluster there would render super/plain/super in the target. The comma
-    # hangs far enough below the digit bottoms to be its own cluster only in
-    # hostile geometry -- within one tolerance it rides the digits' cluster.
     chars = [
         _body(0, "Z"),
         _body(5, "h"),
@@ -157,10 +108,6 @@ def test_a_marker_comma_rides_the_raised_run() -> None:
 
 
 def test_a_trailing_space_is_not_part_of_the_run() -> None:
-    # A run that ends at a synthetic space must not carry it: a CJK translation
-    # drops the space (or turns it into full-width punctuation), so a run text
-    # like "50.0% " would never be located in the target and the bold would be
-    # silently dropped. Internal spaces still ride the run (previous test).
     chars = [
         _char(0, "5", bold=True),
         _char(5, "0", bold=True),
@@ -174,11 +121,7 @@ def test_a_trailing_space_is_not_part_of_the_run() -> None:
     assert runs == [("50.0%", True, False, False, None)]
 
 
-# --- locating a run in the target ------------------------------------------
-
-
 def test_a_run_is_located_in_order_and_a_missing_one_is_skipped() -> None:
-    """Repeated tokens align to their own occurrence, not the first one."""
     text = "a Guo et al. b Guo et al. c missing"
     out = render_prose(
         text, _runs(("Guo et al.", True, False, False, None), ("nope", True, False, False, None))
@@ -188,11 +131,6 @@ def test_a_run_is_located_in_order_and_a_missing_one_is_skipped() -> None:
 
 
 def test_fullwidth_punctuation_in_a_cjk_target_still_matches() -> None:
-    """The target's publishing pass replaces the space with full-width punctuation.
-
-    ``"50.0% "`` becomes ``"50.0%；"``, so an exact find fails and the run would
-    be dropped; the folded fallback still locates it.
-    """
     text = "成本降低了 50.0%；随后"
     out = render_prose(text, _runs(("50.0%", True, False, False, None)))
     assert "#strong[50.0%]" in out
@@ -205,28 +143,22 @@ def test_fullwidth_digits_and_whitespace_still_match() -> None:
 
 
 def test_a_run_with_a_trailing_space_still_matches() -> None:
-    """A run that still carries a trailing space must not lose its span."""
     text = "降低了50.0%；随后"
     out = render_prose(text, _runs(("50.0% ", True, False, False, None)))
     assert "#strong[50.0%]" in out
 
 
 def test_dash_variants_still_match() -> None:
-    """The source probe can carry an en dash the target renders as a hyphen."""
     text = "成本降低了 44.7-49.0%；随后"
     out = render_prose(text, _runs(("44.7\u201349.0%", True, False, False, None)))
     assert "#strong[44.7-49.0%]" in out
 
 
 def test_a_pangu_space_inserted_in_the_target_still_matches() -> None:
-    """The CJK pass inserts a space between Latin and CJK after the run was recorded."""
     text = "图 1 | SoL-Pi 通过自动化研究发现了更高效的架构。"
     run = "SoL-Pi通过自动化研究发现了更高效的架构。"
     out = render_prose(text, _runs((run, True, False, False, None)))
     assert "#strong[SoL-Pi 通过自动化研究发现了更高效的架构。]" in out
-
-
-# --- emitting the markup ---------------------------------------------------
 
 
 def test_a_colour_run_is_wrapped_in_a_fill() -> None:
@@ -242,10 +174,6 @@ def test_a_superscript_run_is_wrapped() -> None:
 
 
 def test_a_run_inside_math_defers_to_the_math_render() -> None:
-    """A run inside a formula would split it and escape its halves into text.
-
-    ``$x_i$`` with a run on ``x_i`` must stay a formula; the run is dropped.
-    """
     out = render_prose("$x_i$", _runs(("x_i", True, False, False, None)))
     assert out == "$x_i$"
     assert "#strong" not in out
@@ -259,7 +187,6 @@ def test_a_bold_run_around_a_formula_keeps_the_formula_math() -> None:
 
 
 def test_a_run_the_translation_rewrote_is_drawn_plain() -> None:
-    """The documented contract: a span that did not survive verbatim is skipped."""
     out = render_prose("完全不同的译文。", _runs(("missing", True, False, False, None)))
     assert out == "完全不同的译文。"
 
@@ -268,15 +195,7 @@ def test_no_runs_leaves_prose_unchanged() -> None:
     assert render_prose("Plain $x_i$ text.") == "Plain $x_i$ text."
 
 
-# --- combining the two run sources -----------------------------------------
-
-
 def test_source_and_target_runs_are_merged_source_first() -> None:
-    """Source spans come first: they are usually the more specific one.
-
-    The renderer's ``next(...)`` lookup lets the first enclosing span win, so a
-    blue citation inside a bold sentence stays blue rather than becoming bold.
-    """
     style = StyleMeta(
         inline_runs=(InlineRun(text="2020", color_hex="#0000ff"),),
         target_runs=(InlineRun(text="重点", bold=True),),
@@ -292,27 +211,18 @@ def test_source_and_target_runs_are_merged_source_first() -> None:
 
 
 def test_a_bold_target_run_renders_as_strong() -> None:
-    """Plain bold rendering, with no full-width punctuation near the run.
-
-    The sibling test above exercises the *folded* fallback (``50.0%`` next to
-    ``；``); this one must take the exact-match branch, or neither test covers
-    the ordinary path.
-    """
     text = "成本降低了 50.0% 随后"
     out = render_prose(text, _runs(("50.0%", True, False, False, None)))
     assert "#strong[50.0%]" in out
 
 
 def test_superscript_run_does_not_split_decimal_or_year() -> None:
-    """Superscript citation runs must not split decimals (e.g. 7 in 7.39) or years (20 in 2021)."""
-    # Case 1: "7" inside "7.39" should not be matched; the standalone "7" at the end should match.
     text = "模型参数达到 7.39 亿，引用自 7。"
     out = render_prose(text, _runs(("7", False, False, True, None)))
     assert "7.39" in out
     assert "[7].39" not in out
     assert "[7]" in out
 
-    # Case 2: "20" inside "2021" must not be matched as superscript.
     text_year = "如 Fedus 等（2021）所述"
     out_year = render_prose(text_year, _runs(("20", False, False, True, None)))
     assert "（2021）" in out_year

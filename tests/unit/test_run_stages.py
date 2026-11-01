@@ -1,25 +1,3 @@
-"""``run_stages()``: the stage plan — order, gates, and explicit threading.
-
-The plan owns *what runs in what order*; the orchestrator owns the resources.
-The contracts pinned here, with every stage replaced by a recording fake:
-
-- the full non-streaming sequence runs in the declared order, and the
-  zero-token preflights (render, cost) land **before the billable bible** —
-  that ordering is the reason the plan exists, so it gets its own test;
-- each ``RunGates`` flag switches exactly its branch:
-  ``chapter_streaming`` replaces the draft ladder (draft → c-text → quality
-  gate → repair) with the chapter-streaming pipeline; ``c_text`` and
-  ``consistency`` skip only their own stage;
-- the plan threads each fact and service to the stage that reads it — the
-  inter-stage flow is an explicit, typed parameter, so the identities the
-  caller passed are the ones the stages receive;
-- progress events surface in stage order;
-- ``on_export_completed`` runs on the terminal export event **before** it is
-  yielded, so a consumer that stops iterating at the terminal event still
-  gets the hook's side effect (terminal persistence is not lost to
-  ``GeneratorExit``).
-"""
-
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -46,7 +24,6 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.fast
 
-#: Stage-name order of the full non-streaming plan.
 _FULL_ORDER = (
     "ingest",
     "extraction_witness",
@@ -63,7 +40,6 @@ _FULL_ORDER = (
     "difficulty_advisory",
     "export",
 )
-#: Stage-name order with the chapter-streaming gate on.
 _STREAMING_ORDER = (
     "ingest",
     "extraction_witness",
@@ -77,7 +53,6 @@ _STREAMING_ORDER = (
     "difficulty_advisory",
     "export",
 )
-#: Stages the plan awaits directly (they yield no events).
 _AWAITED = frozenset(
     {"extraction_witness", "render_preflight", "cost_preflight", "difficulty_advisory"}
 )
@@ -107,8 +82,6 @@ def _event(event_type: EventType, message: str) -> TranslationProgressEvent:
 
 @dataclass(frozen=True, slots=True)
 class _Recorder:
-    """Every stage replaced by a fake that records its call and arguments."""
-
     calls: list[str]
     args: dict[str, tuple[object, ...]]
 
@@ -142,7 +115,6 @@ class _Recorder:
 
 
 def _install(monkeypatch: pytest.MonkeyPatch, rec: _Recorder) -> None:
-    """Replace all fifteen stages on the plan module with recording fakes."""
     for name in _FULL_ORDER:
         attr = f"run_{name}_stage"
         event_type = (
@@ -181,11 +153,6 @@ async def _collect(
     return events
 
 
-# --------------------------------------------------------------------------- #
-# Order.
-# --------------------------------------------------------------------------- #
-
-
 async def test_the_plan_runs_every_stage_in_declared_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -197,8 +164,6 @@ async def test_the_plan_runs_every_stage_in_declared_order(
 async def test_zero_token_preflights_run_before_the_billable_bible(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The bible's skeleton extraction and abbreviation backfill cost tokens;
-    # the render/cost preflights exist to fail *before* any spend.
     rec = _Recorder.start()
     await _collect(rec, monkeypatch, _gates())
     assert rec.calls.index("render_preflight") < rec.calls.index("bible")
@@ -211,11 +176,6 @@ async def test_events_are_yielded_in_stage_order(monkeypatch: pytest.MonkeyPatch
     assert [event.message for event in events] == [
         name for name in _FULL_ORDER if name not in _AWAITED
     ]
-
-
-# --------------------------------------------------------------------------- #
-# Gates: each flag switches exactly its branch.
-# --------------------------------------------------------------------------- #
 
 
 async def test_the_chapter_streaming_gate_replaces_the_draft_ladder(
@@ -244,11 +204,6 @@ async def test_the_consistency_gate_skips_only_the_consistency_stage(
     await _collect(rec, monkeypatch, _gates(consistency=False))
     assert "consistency" not in rec.calls
     assert rec.calls == [name for name in _FULL_ORDER if name != "consistency"]
-
-
-# --------------------------------------------------------------------------- #
-# Threading: each fact and service reaches the stage that reads it.
-# --------------------------------------------------------------------------- #
 
 
 async def test_inter_stage_facts_go_to_the_stages_that_read_them(
@@ -281,19 +236,12 @@ async def test_run_resources_are_the_same_objects_for_every_stage(
         assert args[name][0] is _CTX
     for name in ("draft", "c_text", "quality_gate", "repair", "consistency", "triage", "export"):
         assert args[name][1] is _SERVICES
-    # extraction_witness/cost_preflight end with blocks; the two advisories
-    # carry blocks fourth, services last.
     for name in ("extraction_witness", "cost_preflight"):
         assert args[name][-1] is _BLOCKS
     for name in ("mode_advisory", "difficulty_advisory"):
         assert args[name][3] is _BLOCKS
         assert args[name][4] is _SERVICES
     assert args["render_preflight"][2] is _BLOCKS
-
-
-# --------------------------------------------------------------------------- #
-# The terminal export hook.
-# --------------------------------------------------------------------------- #
 
 
 _ORDINARY = "ordinary export event"
@@ -323,7 +271,6 @@ async def test_the_export_hook_runs_on_the_terminal_event_before_it_is_yielded(
         ("hook", _TERMINAL),
         ("yield", _TERMINAL),
     ]
-    # The hook saw the very event object the consumer then received.
     assert record[-2][1] is terminal
 
 
@@ -346,8 +293,6 @@ async def test_a_consumer_that_stops_at_the_terminal_event_keeps_the_hook_effect
             break
     await plan.aclose()
 
-    # The hook ran before the yield, so breaking at the terminal event did not
-    # lose it to GeneratorExit -- and it ran exactly once.
     assert [(kind, event.message) for kind, event in record][-2:] == [
         ("hook", _TERMINAL),
         ("yield", _TERMINAL),

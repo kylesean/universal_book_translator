@@ -1,13 +1,3 @@
-"""A DOCX whose body part declares a bomb-scale size is refused before parsing.
-
-``python-docx`` opens the package with a plain ``zipfile`` and decompresses
-whatever the central directory declares, so a crafted ``word/document.xml``
-takes the process down inside ``Document(...)`` — the kernel OOM-kills it and
-there is no traceback to diagnose from. ``ZipReadBudget`` already guards every
-member UBT reads itself; this is the one path where the read happens inside a
-third-party loader.
-"""
-
 from __future__ import annotations
 
 import zipfile
@@ -32,7 +22,6 @@ def _docx(tmp_path: Path, name: str = "base.docx") -> Path:
 
 
 def _with_body_of(tmp_path: Path, declared_bytes: int) -> Path:
-    """A real DOCX whose ``word/document.xml`` declares ``declared_bytes``."""
     base = _docx(tmp_path)
     bomb = tmp_path / "bomb.docx"
     payload = (
@@ -54,7 +43,6 @@ def test_a_normal_docx_passes_the_guard(tmp_path: Path) -> None:
 
 def test_a_bomb_shaped_body_is_refused(tmp_path: Path) -> None:
     bomb = _with_body_of(tmp_path, MAX_MEMBER_BYTES + 1024)
-    # The bomb is tiny on disk: the danger is entirely in the declared size.
     assert bomb.stat().st_size < 2 * 1024 * 1024
 
     with pytest.raises(DocumentParseError, match="decompression cap"):
@@ -75,8 +63,7 @@ def test_the_refusal_names_the_member_and_the_size(tmp_path: Path) -> None:
 
 
 def test_a_non_zip_file_is_left_to_python_docx(tmp_path: Path) -> None:
-    """A corrupt file must keep python-docx's own message, not a zip error."""
     junk = tmp_path / "junk.docx"
     junk.write_bytes(b"not a zip archive")
 
-    _guard_package_size(junk)  # no raise: the loader reports it
+    _guard_package_size(junk)

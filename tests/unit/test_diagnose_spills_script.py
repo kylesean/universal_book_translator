@@ -1,5 +1,3 @@
-"""Unit tests for scripts/diagnose_spills.py diagnostic script."""
-
 from __future__ import annotations
 
 import json
@@ -17,7 +15,6 @@ _DOC_PATH = _REPO_ROOT / "corpus" / "documents" / "chapter-3.pdf"
 
 
 def test_diagnose_spills_parse_pages() -> None:
-    """Verify page range parsing."""
     assert _parse_pages(None) is None
     assert _parse_pages("") is None
     assert _parse_pages("1,3,5") == [1, 3, 5]
@@ -28,7 +25,6 @@ def test_diagnose_spills_parse_pages() -> None:
 def test_diagnose_spills_script_help(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Invoking scripts/diagnose_spills.py with --help exits cleanly."""
     monkeypatch.setattr(sys, "argv", ["diagnose_spills.py", "--help"])
     with pytest.raises(SystemExit) as exc_info:
         main()
@@ -40,7 +36,6 @@ def test_diagnose_spills_script_help(
 def test_diagnose_spills_script_summary_mode(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Summary mode reports concise one-line pass status."""
     if not _DOC_PATH.is_file():
         pytest.skip("chapter-3.pdf not available")
 
@@ -65,7 +60,6 @@ def test_diagnose_spills_script_summary_mode(
 def test_diagnose_spills_script_json_mode(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """JSON mode outputs machine-readable layout diagnosis payload."""
     if not _DOC_PATH.is_file():
         pytest.skip("chapter-3.pdf not available")
 

@@ -1,5 +1,3 @@
-"""Tests for PromptContextAssembler, ContextBudget, and cross-stage prompt assembly."""
-
 from __future__ import annotations
 
 import pytest
@@ -40,7 +38,6 @@ def test_estimate_prompt_tokens_accuracy() -> None:
     cjk_text = "这是一段用于测试中文词汇估算的文本段落。"
     assert estimate_prompt_tokens(cjk_text) > 10
 
-    # Multi-argument sum
     combined = estimate_prompt_tokens(ascii_text, cjk_text)
     assert combined == estimate_prompt_tokens(ascii_text) + estimate_prompt_tokens(cjk_text)
 
@@ -50,17 +47,13 @@ def test_truncate_markdown_table_preserves_structure() -> None:
     rows = [f"| Term{i} | 术语{i} | Domain note for term {i} |" for i in range(100)]
     full_table = header + "\n" + "\n".join(rows)
 
-    # Tight budget: e.g. 100 tokens
     truncated = truncate_markdown_table_to_budget(full_table, max_tokens=100)
 
-    # Header and delimiter are strictly preserved
     assert "| Source Term | Target Term | Notes |" in truncated
     assert "| :--- | :--- | :--- |" in truncated
-    # Rows are truncated cleanly without broken lines
     assert truncated.count("\n| Term") < 100
     assert "omitted to fit context budget" in truncated
 
-    # Short table is returned untouched
     short_table = header + "\n| Alpha | 阿尔法 | Note |"
     assert truncate_markdown_table_to_budget(short_table, max_tokens=500) == short_table
 
@@ -74,7 +67,6 @@ def test_truncate_text_to_budget_preserves_boundaries() -> None:
     truncated = truncate_text_to_budget(full_text, max_tokens=80)
     assert "[... truncated to fit budget ...]" in truncated
     assert len(truncated) < len(full_text)
-    # Check it still has leading paragraphs
     assert "Paragraph 0:" in truncated
 
 
@@ -110,7 +102,7 @@ def test_assemble_critique_issues_deduplication_and_limit() -> None:
     flags = [
         "Glossary violation: 'Alpha' -> '阿尔法'",
         "Repetition detected in sentence 2",
-        "Glossary violation: 'Alpha' -> '阿尔法'",  # duplicate
+        "Glossary violation: 'Alpha' -> '阿尔法'",
         "Omission of equation clause",
     ]
     formatted = assemble_critique_issues(flags)
@@ -128,7 +120,6 @@ def test_prompt_context_assembler_repair_with_global_glossary() -> None:
     draft = "哈密顿算子代表系统的能量。"
     error_flags = ["Terminology drift: Hamiltonian should be 哈密顿量"]
 
-    # Assemble Rich Repair
     system_repair, user_repair = assembler.assemble_repair(
         source_text=source,
         draft_text=draft,
@@ -143,7 +134,6 @@ def test_prompt_context_assembler_repair_with_global_glossary() -> None:
     assert "Translation Bible (Global Terminology)" in user_repair
     assert "Translation Bible\n| Operator | 算子 |" in user_repair
     assert "Terminology drift: Hamiltonian should be 哈密顿量" in user_repair
-    # Source recovery must not leak scaffold
     assert draft_source_from_prompt(user_repair) == source
 
 
@@ -153,7 +143,6 @@ def test_repair_builders_directly_accept_global_glossary() -> None:
     global_glossary = "| Coordinate descent | 坐标下降算法 |\n|---|---|"
     chunk_glossary = "| Iteratively | 迭代地 |\n|---|---|"
 
-    # Minimal Repair
     _sys_min, user_min = build_minimal_repair_prompt(
         source_text=source,
         draft_text=draft,
@@ -165,7 +154,6 @@ def test_repair_builders_directly_accept_global_glossary() -> None:
     assert "迭代地" in user_min
     assert draft_source_from_prompt(user_min) == source
 
-    # Hybrid Repair
     _sys_hyb, user_hyb = build_hybrid_repair_prompt(
         source_text=source,
         draft_text=draft,
@@ -177,7 +165,6 @@ def test_repair_builders_directly_accept_global_glossary() -> None:
     assert "Terminology Glossary (this section)" in user_hyb
     assert draft_source_from_prompt(user_hyb) == source
 
-    # Rich Repair
     _sys_rich, user_rich = build_rich_repair_prompt(
         source_text=source,
         draft_text=draft,

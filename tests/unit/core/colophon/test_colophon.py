@@ -1,5 +1,3 @@
-"""Unit tests for publication colophon, CIP cataloging, and ISBN validation."""
-
 from __future__ import annotations
 
 import pytest
@@ -31,24 +29,17 @@ def test_clean_isbn() -> None:
 
 
 def test_isbn13_validation_and_calculation() -> None:
-    # 978-7-121-39655-7 is a real valid ISBN
     assert calculate_isbn13_check_digit("978712139655") == "7"
     assert validate_isbn13("978-7-121-39655-7") is True
-    # Corrupt check digit
     assert validate_isbn13("978-7-121-39655-8") is False
-    # Not 13 digits
     assert validate_isbn13("978-7-121") is False
 
 
 def test_isbn10_validation_and_calculation() -> None:
-    # 0-13-468599-7 is a real valid ISBN-10
     assert calculate_isbn10_check_digit("013468599") == "7"
     assert validate_isbn10("0-13-468599-7") is True
-    # Check digit with 'X'
-    # 0-8044-2957-X
     assert calculate_isbn10_check_digit("080442957") == "X"
     assert validate_isbn10("0-8044-2957-X") is True
-    # Corrupt check digit
     assert validate_isbn10("0-13-468599-6") is False
 
 

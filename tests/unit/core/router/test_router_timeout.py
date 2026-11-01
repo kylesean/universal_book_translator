@@ -1,5 +1,3 @@
-"""Tests for ModelRouter request_timeout enforcement."""
-
 from __future__ import annotations
 
 import asyncio
@@ -15,8 +13,6 @@ pytestmark = pytest.mark.fast
 
 
 class _SlowProvider(MockModelProvider):
-    """Provider that delays its answer by a configurable time."""
-
     def __init__(self, delay_sec: float, fail_times: int = 1) -> None:
         super().__init__()
         self.delay_sec = delay_sec
@@ -40,7 +36,6 @@ class _SlowProvider(MockModelProvider):
 
 @pytest.mark.asyncio
 async def test_router_enforces_request_timeout_and_retries() -> None:
-    # First call hangs (0.3s > 0.05s timeout); second call returns immediately.
     provider = _SlowProvider(delay_sec=0.3, fail_times=1)
     router = ModelRouter(
         provider=provider,
@@ -62,7 +57,6 @@ async def test_router_enforces_request_timeout_and_retries() -> None:
 
 @pytest.mark.asyncio
 async def test_router_raises_after_exhausting_timeout_retries() -> None:
-    # All calls hang for 0.3s; with timeout 0.05s and max_retries=1, it raises 408 error.
     provider = _SlowProvider(delay_sec=0.3, fail_times=5)
     router = ModelRouter(
         provider=provider,

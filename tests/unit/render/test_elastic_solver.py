@@ -1,5 +1,3 @@
-"""Unit tests for the three-tier elasticity solver."""
-
 from __future__ import annotations
 
 import pytest
@@ -18,7 +16,6 @@ def test_zero_deficit_keeps_defaults() -> None:
 
 
 def test_negative_deficit_keeps_defaults() -> None:
-    # Small underflow (spacious box < 20% slack) keeps defaults
     style = TypeElasticitySolver.resolve_params(base_font_size=10.0, deficit_ratio=-0.15)
     assert style.font_size_pt == 10.0
     assert style.leading_em == 0.62
@@ -26,7 +23,6 @@ def test_negative_deficit_keeps_defaults() -> None:
 
 
 def test_significant_slack_absorbs_via_relaxed_leading() -> None:
-    # Significant underflow (>= 20% slack) absorbs by relaxing leading up to 0.72em
     style = TypeElasticitySolver.resolve_params(base_font_size=10.0, deficit_ratio=-0.40)
     assert style.font_size_pt == 10.0
     assert style.leading_em == 0.70
@@ -34,7 +30,6 @@ def test_significant_slack_absorbs_via_relaxed_leading() -> None:
 
 
 def test_tier_1_reduces_leading_only() -> None:
-    # Small deficit 8% -> only reduces leading, leaves stretch at 100% and scale at 1.0
     style = TypeElasticitySolver.resolve_params(base_font_size=10.0, deficit_ratio=0.08)
     assert style.font_size_pt == 10.0
     assert style.leading_em == 0.55
@@ -52,9 +47,8 @@ def test_tier_2_compresses_variable_font_stretch_preserves_font_size() -> None:
 
 
 def test_tier_3_clamps_at_minimum_scale_envelope() -> None:
-    # Large deficit 40% -> compresses stretch to 90%, scales font gently, clamps at 0.92
     style = TypeElasticitySolver.resolve_params(base_font_size=10.0, deficit_ratio=0.40)
-    assert style.font_size_pt == 9.2  # 10.0 * 0.92
+    assert style.font_size_pt == 9.2
     assert style.leading_em == 0.48
     assert style.stretch_pct == 90.0
     assert style.scale == 0.92

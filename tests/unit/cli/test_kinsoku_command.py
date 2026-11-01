@@ -1,5 +1,3 @@
-"""Unit tests for the 'ubt kinsoku' CLI commands."""
-
 from __future__ import annotations
 
 import json
@@ -22,13 +20,11 @@ def test_kinsoku_inspect_command_terminal_and_json(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    # Terminal output
     result = runner.invoke(app, ["kinsoku", "inspect", str(doc_path)])
     assert result.exit_code == 0
     assert "CJK Typography & Kinsoku Audit" in result.output
     assert "line_start_prohibited" in result.output
 
-    # JSON output
     json_res = runner.invoke(app, ["kinsoku", "inspect", str(doc_path), "--json"])
     assert json_res.exit_code == 0
     data = json.loads(json_res.output)
@@ -46,7 +42,6 @@ def test_kinsoku_audit_command(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    # Clean doc should pass
     res_pass = runner.invoke(app, ["kinsoku", "audit", str(good_doc), "--strict"])
     assert res_pass.exit_code == 0
     assert "Typography Gate Passed" in res_pass.output
@@ -56,7 +51,6 @@ def test_kinsoku_audit_command(tmp_path: Path) -> None:
         "，行首错误\n（行尾错误\n孤\n",
         encoding="utf-8",
     )
-    # Bad doc should fail under strict mode
     res_fail = runner.invoke(app, ["kinsoku", "audit", str(bad_doc), "--strict"])
     assert res_fail.exit_code == 1
 

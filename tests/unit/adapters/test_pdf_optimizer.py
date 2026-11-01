@@ -1,5 +1,3 @@
-"""Unit tests for PDF size miniaturization and lossless stream compression pipeline."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,7 +21,6 @@ pytestmark = pytest.mark.fast
 
 
 def _create_minimal_pdf(tmp_path: Path, num_pages: int = 2) -> Path:
-    """Helper to create a simple readable PDF for testing."""
     tmp_path.mkdir(parents=True, exist_ok=True)
     pdf = pikepdf.Pdf.new()
     for _ in range(num_pages):
@@ -34,7 +31,6 @@ def _create_minimal_pdf(tmp_path: Path, num_pages: int = 2) -> Path:
 
 
 def _create_pdf_with_duplicate_streams(tmp_path: Path) -> Path:
-    """Helper to create a PDF with duplicate image streams across pages."""
     tmp_path.mkdir(parents=True, exist_ok=True)
     pdf = pikepdf.Pdf.new()
     p1 = pdf.add_blank_page(page_size=(200, 200))
@@ -61,7 +57,6 @@ def test_deduplicate_pdf_streams_merges_identical_streams(tmp_path: Path) -> Non
     with pikepdf.open(pdf_path) as pdf:
         count = deduplicate_pdf_streams(pdf)
         assert count == 1
-        # Resources on page 2 should now point to canonical stream from page 1
         im1 = pdf.pages[0].Resources.XObject[pikepdf.Name("/Im1")]
         im2 = pdf.pages[1].Resources.XObject[pikepdf.Name("/Im2")]
         assert im1.objgen == im2.objgen
@@ -88,7 +83,6 @@ def test_optimize_images_in_pdf_downsamples_oversized() -> None:
     pdf = pikepdf.Pdf.new()
     p = pdf.add_blank_page(page_size=(400, 400))
 
-    # Create uncompressed 200x200 RGB image
     img = Image.new("RGB", (200, 200), color=(150, 75, 200))
     s = pdf.make_stream(img.tobytes())
     s["/Type"] = pikepdf.Name("/XObject")
@@ -99,7 +93,6 @@ def test_optimize_images_in_pdf_downsamples_oversized() -> None:
     s["/BitsPerComponent"] = 8
     p.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im1=s))
 
-    # Request downsampling to max 80px
     opt_count = optimize_images_in_pdf(pdf, max_dimension=80, jpeg_quality=75)
     assert opt_count == 1
     assert int(s["/Width"]) == 80
@@ -159,9 +152,7 @@ def test_optimize_pdf_preserves_file_when_already_optimal(
     pdf_path = _create_minimal_pdf(tmp_path, num_pages=1)
     orig_size = pdf_path.stat().st_size
 
-    # Force candidate size check to simulate larger candidate
     res = optimize_pdf(pdf_path, options=PdfOptimizeOptions(profile=OptimizationProfile.LOSSLESS))
-    # On a tiny 1-page blank PDF (~700 bytes), QPDF object streams might not shrink it
     assert res.status in ("optimized", "skipped_already_optimal")
     assert pdf_path.stat().st_size == orig_size or res.status == "optimized"
 
@@ -179,7 +170,6 @@ def test_optimize_pdf_handles_corrupt_file(tmp_path: Path) -> None:
     res = optimize_pdf_in_place(corrupt)
     assert res.status == "failed"
     assert res.error is not None
-    # Original corrupt file must still be intact
     assert corrupt.read_bytes() == b"NOT A REAL PDF FILE HEADER"
 
 
@@ -195,4 +185,4 @@ def test_optimize_pdf_custom_output_path(tmp_path: Path) -> None:
     res = optimize_pdf(src, output_path=dst)
     assert dst.exists()
     assert res.path == str(dst)
-    assert src.exists()  # Source remains intact when output is distinct
+    assert src.exists()

@@ -1,5 +1,3 @@
-"""Unit tests for the Appendix & Backmatter Layout Manager."""
-
 from __future__ import annotations
 
 import pytest
@@ -33,13 +31,10 @@ def _mk_block(b_id: str, b_type: BlockType, target: str, level: int = 1) -> IRBl
         source_text=target,
         level=level,
     )
-    # Only ``element`` and ``target_text`` are fields of ``IRBlock``; the rest
-    # were silently ignored by ``extra="ignore"``.
     return IRBlock(element=el, target_text=target)
 
 
 def test_classify_heading() -> None:
-    # Appendices
     res = classify_heading("附录 A：算法正确性证明")
     assert res is not None
     assert res[0] == BackmatterKind.APPENDIX
@@ -52,33 +47,26 @@ def test_classify_heading() -> None:
     assert res_en[1] == "B"
     assert "Benchmarks" in res_en[2]
 
-    # Chinese numeral appendix
     res_zh = classify_heading("附录 二：数学推导")
     assert res_zh is not None
     assert res_zh[0] == BackmatterKind.APPENDIX
     assert res_zh[1] == "B"
 
-    # Bare appendix
     res_bare = classify_heading("附录")
     assert res_bare is not None
     assert res_bare[0] == BackmatterKind.APPENDIX
 
-    # Bibliography
     assert classify_heading("References") == (BackmatterKind.BIBLIOGRAPHY, "", "References")
     assert classify_heading("参考文献") == (BackmatterKind.BIBLIOGRAPHY, "", "参考文献")
 
-    # Glossary
     assert classify_heading("Glossary") == (BackmatterKind.GLOSSARY, "", "Glossary")
     assert classify_heading("术语表") == (BackmatterKind.GLOSSARY, "", "术语表")
 
-    # Index
     assert classify_heading("Index") == (BackmatterKind.INDEX, "", "Index")
     assert classify_heading("索引") == (BackmatterKind.INDEX, "", "索引")
 
-    # Afterword
     assert classify_heading("后记与致谢") == (BackmatterKind.AFTERWORD, "", "后记与致谢")
 
-    # Normal chapter (not backmatter)
     assert classify_heading("第 1 章：系统概述") is None
     assert classify_heading("Chapter 3: Raft") is None
 
@@ -104,7 +92,6 @@ def test_detect_backmatter_manifest() -> None:
     assert manifest.first_appendix_block_id == "app1"
     assert manifest.first_backmatter_block_id == "app1"
 
-    # Consecutive appendices receive letters A, B
     s0 = manifest.sections[0]
     assert s0.kind == BackmatterKind.APPENDIX
     assert s0.letter_index == "A"
@@ -145,7 +132,6 @@ def test_generator_typst_and_html() -> None:
     heading_bib = render_backmatter_heading_typst(sec_bib, cfg)
     assert "#heading(level: 1, numbering: none)[参考文献]" in heading_bib
 
-    # HTML
     html_out = render_backmatter_section_html(sec_app, "<p>Proofs...</p>")
     assert (
         '<section class="ubt-backmatter ubt-appendix" id="bm-app-a" role="doc-appendix">'
@@ -153,7 +139,6 @@ def test_generator_typst_and_html() -> None:
     )
     assert "<p>Proofs...</p>" in html_out
 
-    # Markdown skeleton
     md_skel = render_backmatter_skeleton_markdown([sec_app, sec_bib])
     assert "# 附录 A：数学证明" in md_skel
     assert "# 参考文献" in md_skel

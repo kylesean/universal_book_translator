@@ -1,5 +1,3 @@
-"""Unit tests for Paper Mode vs Book Mode scenario decoupling (P1-6)."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -24,15 +22,12 @@ pytestmark = pytest.mark.fast
 
 
 def test_document_mode_validation() -> None:
-    # Valid values
     assert UBTConfig(document_mode="auto").document_mode == "auto"
     assert UBTConfig(document_mode="paper").document_mode == "paper"
     assert UBTConfig(document_mode="book").document_mode == "book"
-    # Case-insensitive
     assert UBTConfig(document_mode="PAPER").document_mode == "paper"
     assert UBTConfig(document_mode="Book").document_mode == "book"
 
-    # Invalid values raise ValidationError
     with pytest.raises(ValidationError):
         UBTConfig(document_mode="invalid_mode")
 
@@ -76,19 +71,15 @@ def test_resolve_document_mode_auto_inference(tmp_path: Path) -> None:
     with patch("ubt.core.archetype.analyze_archetype", return_value=book_arch):
         assert resolve_document_mode("auto", dummy_pdf) == "book"
 
-    # None or missing path defaults to book
     assert resolve_document_mode("auto", None) == "book"
     assert resolve_document_mode("auto", tmp_path / "non_existent.pdf") == "book"
 
 
 def test_academic_layout_respects_document_mode() -> None:
-    # Explicit paper mode forces academic template
     assert is_academic_document({"document_mode": "paper"}) is True
-    # Explicit book mode forces non-academic template even if profile or doc_type says paper
     assert is_academic_document({"document_mode": "book", "genre_profile": "paper"}) is False
     assert is_academic_document({"document_mode": "book", "doc_type": "academic"}) is False
 
-    # Without document_mode, falls back to legacy heuristics
     assert is_academic_document({"genre_profile": "paper"}) is True
     assert is_academic_document({"genre_profile": "fiction"}) is False
 
@@ -121,7 +112,6 @@ async def test_bible_stage_character_mining_gated_in_paper_mode(tmp_path: Path) 
     async def mock_complete(sys: str, user: str) -> str:
         return ""
 
-    # In paper mode: character mining is skipped
     paper_ctx = StageContext(
         config=UBTConfig(fresh=True, document_mode="paper"),
         router=cast("Any", SimpleNamespace(complete_raw=mock_complete)),
@@ -143,7 +133,6 @@ async def test_bible_stage_character_mining_gated_in_paper_mode(tmp_path: Path) 
             pass
         mock_mine.assert_not_called()
 
-    # In book mode: character mining runs
     book_ctx = StageContext(
         config=UBTConfig(fresh=True, document_mode="book"),
         router=cast("Any", SimpleNamespace(complete_raw=mock_complete)),

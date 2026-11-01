@@ -1,21 +1,3 @@
-"""The bookmarks actually reach the delivered PDF, through the real render path.
-
-``test_outline_writer.py`` pins the module in isolation: it proves the entry
-builder and the pikepdf write are correct. It does **not** prove the renderer
-calls them, and that distinction is the whole reason this file exists — the
-project has shipped a correct helper that nothing invoked more than once, and a
-unit-tested function with no caller reads as done while the deliverable is
-unchanged.
-
-So these tests drive ``DoclingRenderStrategy.render_blocks`` end to end with the
-Typst compile stubbed out. The stub is not laziness: a real preview compile costs
-a subprocess and this module is ``fast``-marked, and the platform's
-``test_marker_hygiene`` check forbids that combination outright. Nothing about
-the outline depends on Typst's output — it depends on the *artifact page count*
-and the blocks' measured pages, both of which the stub reproduces faithfully
-(one output page per source page, which is the facsimile channel's contract).
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -64,12 +46,6 @@ def _source_pdf(path: Path, pages: int) -> Path:
 
 @pytest.fixture(name="stub_compile")
 def _stub_compile(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replace the Typst compile with "emit one page per spec, nothing on them".
-
-    Patched on the class, not on a module constant: ``_render_facsimile``
-    imports the renderer inside the function body, so a module-attribute patch
-    would be shadowed by a fresh import on every call.
-    """
 
     def _render(self: FacsimileRenderer, pages, bg, out, build_dir, **kwargs):  # type: ignore[no-untyped-def]
         pdf = pikepdf.Pdf.new()
@@ -83,14 +59,6 @@ def _stub_compile(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _outline(path: Path) -> list[str]:
-    """``"title@page"`` for every bookmark, depth-first, prefixed by its depth.
-
-    Depth is part of the assertion on purpose: the sidebar's *hierarchy* is the
-    feature (a flat list of 200 chapter titles is barely better than none), and
-    reading only ``ol.root`` silently drops every nested entry — which is how a
-    "it wrote 3 bookmarks" check passes while the reader sees one chapter with
-    two orphans missing.
-    """
     out: list[str] = []
 
     def walk(pdf: pikepdf.Pdf, items: object, depth: int) -> None:
@@ -133,8 +101,6 @@ def test_facsimile_render_writes_translated_bookmarks(tmp_path: Path, stub_compi
 def test_facsimile_render_opens_the_reader_with_the_sidebar(
     tmp_path: Path, stub_compile: None
 ) -> None:
-    """Bookmarks exist only if the reader shows them; without ``/PageMode`` the
-    feature is invisible to the person who received the file."""
     import asyncio
 
     src = _source_pdf(tmp_path / "book.pdf", 2)
@@ -150,8 +116,6 @@ def test_facsimile_render_opens_the_reader_with_the_sidebar(
 def test_facsimile_render_records_no_outline_when_there_is_no_heading(
     tmp_path: Path, stub_compile: None
 ) -> None:
-    """A heading-less document (a single article, a plain export) must not claim
-    an outline it does not have, and must not fail either."""
     import asyncio
 
     src = _source_pdf(tmp_path / "book.pdf", 2)
@@ -167,17 +131,6 @@ def test_facsimile_render_records_no_outline_when_there_is_no_heading(
 def test_reflow_channel_never_reaches_the_outline_writer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The reflow channel changes the page count, so a block's ``bbox.page``
-    names a page that no longer exists.
-
-    Driven through the real ``render_blocks`` dispatch with ``_render_publish``
-    stubbed to emit an artifact with a *different* page count than the source —
-    which is exactly what the reflow channel does when Chinese runs shorter than
-    English. The writer must not be reached at all: relying on its internal
-    ``expected_pages`` refusal to save us would make the guard a runtime
-    accident, and a future refactor that drops the ``expected_pages`` argument
-    would silently start writing wrong bookmarks.
-    """
     import asyncio
 
     import ubt.adapters.pdf.outline_writer as ow
@@ -193,7 +146,7 @@ def test_reflow_channel_never_reaches_the_outline_writer(
 
     async def _fake_publish(self, manifest, blocks, target_lang, output_path, bilingual=False):  # type: ignore[no-untyped-def]
         pdf = pikepdf.Pdf.new()
-        for _ in range(2):  # 2 pages from a 5-page source: the reflow shape
+        for _ in range(2):
             pdf.add_blank_page(page_size=(400, 600))
         pdf.save(output_path)
         pdf.close()

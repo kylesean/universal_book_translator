@@ -1,14 +1,3 @@
-"""Shared shape predicates: identifier detection and sentence counting.
-
-``is_identifier_shaped`` decides whether the omission gate must *demand* a Latin
-term survive translation; ``is_verbatim_carryover`` is its wider superset used to
-strip legitimately-kept tokens from the target-language density residue. The
-difference is load-bearing: ``IT``/``US``/``MHA`` kept verbatim must not read as
-untranslated, yet the omission gate must not demand ``IT``/``OR`` survive.
-``count_sentences`` is the QE subsystem's only sentence counter, so
-abbreviation periods must not inflate the count.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -20,11 +9,6 @@ from ubt.core.qe.term_shape import (
 )
 
 pytestmark = pytest.mark.fast
-
-
-# --------------------------------------------------------------------------- #
-# is_identifier_shaped
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -86,11 +70,6 @@ def test_ordinary_prose_is_not_an_identifier(term: str) -> None:
     assert is_identifier_shaped(term) is False
 
 
-# --------------------------------------------------------------------------- #
-# is_verbatim_carryover
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize("term", ["PagedAttention", "GQA-8", "MHA", "CPU"])
 def test_carryover_accepts_identifiers(term: str) -> None:
     assert is_verbatim_carryover(term) is True
@@ -109,8 +88,6 @@ def test_carryover_rejects_common_all_caps_words(term: str) -> None:
 
 @pytest.mark.parametrize("term", ["foo_bar", "a.b", "e.g."])
 def test_carryover_rejects_underscore_and_dot_terms(term: str) -> None:
-    # Underscore/dot are identifier-shaped for the omission gate but are not a
-    # camelCase/acronym/digit run, so the density check does not strip them.
     assert is_identifier_shaped(term) is True
     assert is_verbatim_carryover(term) is False
 
@@ -122,11 +99,6 @@ def test_carryover_rejects_structural_labels(term: str) -> None:
 
 def test_carryover_rejects_plain_prose() -> None:
     assert is_verbatim_carryover("hello") is False
-
-
-# --------------------------------------------------------------------------- #
-# count_sentences
-# --------------------------------------------------------------------------- #
 
 
 def test_empty_text_has_no_sentences() -> None:
@@ -145,16 +117,12 @@ def test_abbreviation_periods_do_not_split() -> None:
 
 
 def test_reference_labels_are_masked_only_before_a_number_or_citation() -> None:
-    # 'No.'/'Ref.'/'Eq.' introduce a number/citation -> not a sentence break.
     assert count_sentences("See No. 5 for details.") == 1
     assert count_sentences("Ref. [3] proves it.") == 1
     assert count_sentences("Eq. (3.11) gives the bound.") == 1
 
 
 def test_ordinary_words_ending_a_sentence_are_still_counted() -> None:
-    # These spellings share a prefix with reference labels but are plain words
-    # here; masking their period would under-count the source and could drop it
-    # below min_source_sentences, silently disarming the omission gate.
     assert count_sentences("This is a lab. We test the model. It works.") == 3
     assert count_sentences("We report the max. The min is lower.") == 2
     assert count_sentences("The answer is no. We disagree.") == 2
@@ -182,13 +150,6 @@ def test_a_closing_quote_keeps_the_split() -> None:
     assert count_sentences('He said "Hi." Then left.') == 2
 
 
-# ---------------------------------------------------------------------------
-# Leading ordered-list markers are editorial structure, not sentences
-# (arXiv 2101.03961 b0089): the "3 sentences" were marker + 2 sentences, and a
-# complete translation of both was quarantined 1-vs-3.
-# ---------------------------------------------------------------------------
-
-
 def test_a_leading_list_marker_does_not_count_as_a_sentence() -> None:
     assert (
         count_sentences(
@@ -200,7 +161,6 @@ def test_a_leading_list_marker_does_not_count_as_a_sentence() -> None:
 
 
 def test_multi_line_list_markers_strip_per_line() -> None:
-    # Each line's marker goes; the real sentences stay.
     text = "1. One point. More detail.\n2. Two point.\n3. Three point."
     assert count_sentences(text) == 4
 
@@ -211,6 +171,4 @@ def test_a_marker_only_line_leaves_no_fragment() -> None:
 
 
 def test_mid_line_numbers_are_never_stripped() -> None:
-    # The strip is line-start only: 'Table 9. 7 Our baselines' keeps both
-    # fragments (the footnote-exemption handles the marker, not this counter).
     assert count_sentences("summarized in Table 9. 7 Our baselines differ") == 2

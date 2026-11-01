@@ -1,17 +1,3 @@
-"""The translation engine is lossless when honest and fail-closed when not.
-
-The engine runs twice over the same units, once per provider:
-
-- **echo** (a faithful provider returning the masked source unchanged): every
-  segment comes back ``TRANSLATED`` with an empty flag set and a target equal
-  to the original element text -- masking + restore is lossless;
-- **vandal** (drops every ``⟦...⟧`` protected span): every segment that *had* a
-  placeholder must come back ``BLOCKED`` with a flag; segments with nothing to
-  protect stay ``TRANSLATED``. No corrupted span may ever be marked translated.
-
-Parse-only, no LLM: the provider is a two-line function.
-"""
-
 from __future__ import annotations
 
 import re
@@ -84,7 +70,6 @@ async def test_an_honest_provider_is_lossless_end_to_end() -> None:
         assert segment.state is SegmentState.TRANSLATED, element_id
         assert not segment.qa or not segment.qa.flags, element_id
         assert segment.target == xml_safe(text), element_id
-        # The mask pass is recorded on the segment either way.
         assert bool(segment.placeholders) is has_protection, element_id
 
 
@@ -94,7 +79,6 @@ async def test_a_vandal_provider_is_fail_closed() -> None:
     for element_id, _, has_protection in _ORIGINALS:
         segment = segments[element_id]
         if has_protection:
-            # A dropped span may never ship as a translation.
             assert segment.state is SegmentState.BLOCKED, element_id
             assert segment.qa is not None and segment.qa.flags, element_id
         else:
@@ -107,7 +91,6 @@ async def test_reordered_placeholders_resolve_clean() -> None:
     masked = engine.mask(text)
     tokens = list(masked.placeholders)
     assert len(tokens) == 2
-    # Simulate legitimate grammatical reordering
     reordered_raw = (
         masked.text.replace(tokens[0].token, "@@@")
         .replace(tokens[1].token, tokens[0].token)

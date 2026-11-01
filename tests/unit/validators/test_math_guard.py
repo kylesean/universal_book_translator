@@ -1,5 +1,3 @@
-"""Contract tests for the shared math-debris / formula-invariant guards (Gate 1/3)."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -51,25 +49,20 @@ def _block(
     return IRBlock(element=element, status=status, target_text=target)
 
 
-# --------------------------------------------------------------------------- #
-# Subscript residue
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("token", "expected"),
     [
-        ("x_1", True),  # single-letter base
-        ("x_{i}", True),  # brace subscript
-        ("psi_pert", True),  # greek name base
+        ("x_1", True),
+        ("x_{i}", True),
+        ("psi_pert", True),
         ("alpha_2", True),
-        ("x_", True),  # empty subscript still splits into two parts
-        ("ab_1", True),  # short latin base + numeric sub
-        ("create_task", False),  # snake_case identifier
+        ("x_", True),
+        ("ab_1", True),
+        ("create_task", False),
         ("code_change", False),
-        ("ab_cd", False),  # multi-letter latin base, non-numeric sub
-        ("_x", False),  # no base
-        ("F1", False),  # no underscore at all
+        ("ab_cd", False),
+        ("_x", False),
+        ("F1", False),
     ],
 )
 def test_is_math_subscript_residue(token: str, expected: bool) -> None:
@@ -87,18 +80,13 @@ def test_strip_code_snake_case_keeps_math_but_drops_identifiers() -> None:
     assert _strip_code_snake_case("a x_1 b") == "a x_1 b"
 
 
-# --------------------------------------------------------------------------- #
-# Unicode math style
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("char", "expected"),
     [
-        ("\U0001d44e", "mathit"),  # MATHEMATICAL ITALIC SMALL A
-        ("\U0001d400", "mathbf"),  # MATHEMATICAL BOLD CAPITAL A
-        ("\U0001d538", "mathbb"),  # MATHEMATICAL DOUBLE-STRUCK CAPITAL A
-        ("\u211d", None),  # DOUBLE-STRUCK CAPITAL R (not "MATHEMATICAL ...")
+        ("\U0001d44e", "mathit"),
+        ("\U0001d400", "mathbf"),
+        ("\U0001d538", "mathbb"),
+        ("\u211d", None),
         ("A", None),
         ("1", None),
         ("\u03b1", None),
@@ -108,11 +96,6 @@ def test_unicode_math_style_command(char: str, expected: str | None) -> None:
     assert _unicode_math_style_command(char) == expected
 
 
-# --------------------------------------------------------------------------- #
-# LaTeX command sets
-# --------------------------------------------------------------------------- #
-
-
 def test_source_command_set_reads_control_sequences() -> None:
     assert _source_command_set(r"\frac{a}{b} x \in S") == {"frac", "in"}
 
@@ -120,7 +103,6 @@ def test_source_command_set_reads_control_sequences() -> None:
 def test_source_command_set_expands_unicode_symbols() -> None:
     assert _source_command_set("x \u2208 S") == {"in"}
     assert _source_command_set("\U0001d538 \u211d") == {"mathbb"}
-    # A styled letter that is not in the unicode map is read from its name.
     assert _source_command_set("\U0001d538") == {"mathbb"}
 
 
@@ -129,8 +111,6 @@ def test_source_command_set_is_empty_for_plain_text() -> None:
 
 
 def test_source_command_set_expands_unicode_accents() -> None:
-    # Docling flattens a hat to the combining/spacing circumflex or a bare
-    # caret; either spelling must excuse a target's \hat.
     assert _source_command_set("x\u0302") == {"hat"}
     assert _source_command_set("x\u02c6") == {"hat"}
     assert _source_command_set("x^") == {"hat"}
@@ -141,29 +121,23 @@ def test_source_command_set_expands_unicode_accents() -> None:
 @pytest.mark.parametrize(
     ("source", "target", "expected"),
     [
-        ("x", r"\mathrm{2D}", []),  # \mathrm is renderable
+        ("x", r"\mathrm{2D}", []),
         (r"\frac{a}{b}", r"\frac{a}{b}", []),
-        ("x \u2208 S", r"x \in S", []),  # unicode symbol excuses its LaTeX spelling
-        ("Z", r"\mathbb{R}", []),  # \mathbb is renderable; only a changed letter is novel
-        ("x\u0302", r"\hat{x}", []),  # combining circumflex reads as \hat
-        ("v", r"\vec{v}", []),  # accents are renderable reconstruction
+        ("x \u2208 S", r"x \in S", []),
+        ("Z", r"\mathbb{R}", []),
+        ("x\u0302", r"\hat{x}", []),
+        ("v", r"\vec{v}", []),
         ("x", r"\ddot{x}", []),
-        # Font styles the renderer converts (bb/frak/cal) must not be flagged as
-        # hallucinations just because the source carried the Unicode glyph.
         ("L", r"\mathcal{L}", []),
         ("g", r"\mathfrak{g}", []),
-        # Operator symbols the inline converter now renders; the source carries
-        # the Unicode glyph while the model re-encodes it as LaTeX.
         ("", r"\diamond", []),
         ("\u22c4", r"\diamond", []),
         ("", r"\leadsto", []),
         ("", r"\coloneqq", []),
-        # Auto-sizing delimiters and the bracket/floor glyphs they wrap.
         ("", r"\left( x \right)", []),
         ("", r"\left\llbracket x \right\rrbracket", []),
         ("", r"\left\lfloor x \right\rfloor", []),
         ("", r"\leftrightarrow", []),
-        # Bold/italic wrappers stay refused: upright would be a styling lie.
         ("v", r"\mathbf{v}", ["mathbf"]),
     ],
 )
@@ -178,27 +152,15 @@ def test_blackboard_letter_identity_is_compared() -> None:
 
 def test_renderable_command_set_contains_the_documented_members() -> None:
     assert {"text", "mathrm", "frac", "in", "alpha"} <= RENDERABLE_LATEX_COMMANDS
-    # Math accents: a translator re-encoding a flattened accent may use any of
-    # these, and they all have a Typst spelling downstream.
     assert {"hat", "tilde", "vec", "bar", "overline", "dot", "ddot"} <= (RENDERABLE_LATEX_COMMANDS)
-    # Font styles the inline converter handles with dedicated pre-passes.
     assert {"mathbb", "mathfrak", "mathcal"} <= RENDERABLE_LATEX_COMMANDS
 
 
 def test_renderable_commands_are_the_render_table_not_a_hand_mirror() -> None:
-    # The gate must allow exactly what the inline converter can compile. This is
-    # the regression that let \mathcal/\mathfrak/\mathbb be flagged as
-    # unrenderable while the renderer converted them: a hand-maintained mirror
-    # drifted from the render table.
     from ubt.core.math_symbols import INLINE_RENDERABLE_COMMANDS, INLINE_SYMBOLS
 
     assert RENDERABLE_LATEX_COMMANDS is INLINE_RENDERABLE_COMMANDS
     assert set(INLINE_SYMBOLS) <= RENDERABLE_LATEX_COMMANDS
-
-
-# --------------------------------------------------------------------------- #
-# normalize_math
-# --------------------------------------------------------------------------- #
 
 
 def test_normalize_math_collapses_all_whitespace() -> None:
@@ -207,25 +169,20 @@ def test_normalize_math_collapses_all_whitespace() -> None:
     assert normalize_math("  ") == ""
 
 
-# --------------------------------------------------------------------------- #
-# looks_like_math_debris
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("K , V , x", True),  # isolated letters + no running word
+        ("K , V , x", True),
         ("K V x", True),
-        ("K , V =", True),  # strong math symbol rung (only 2 isolated letters)
-        ("K V yz ab", False),  # 2 isolated letters fall below the 3-letter rung
-        (". . . .", True),  # punctuation-only run
-        ("(1) Layer 1: K, V", False),  # running word vetoes
+        ("K , V =", True),
+        ("K V yz ab", False),
+        (". . . .", True),
+        ("(1) Layer 1: K, V", False),
         ("hello world this is prose", False),
         ("C OVER T ITLE P AGE", False),
         ("", False),
-        ("a", False),  # fewer than min_tokens
-        ("\u4e2d\u6587 K V x", False),  # CJK is never debris
+        ("a", False),
+        ("\u4e2d\u6587 K V x", False),
     ],
 )
 def test_looks_like_math_debris(text: str, expected: bool) -> None:
@@ -240,22 +197,17 @@ def test_debris_respects_its_thresholds() -> None:
     assert looks_like_math_debris("K , V , x" + " " * 200, max_chars=5) is False
 
 
-# --------------------------------------------------------------------------- #
-# target_missing_math_delimiters
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("source", "target", "expected"),
     [
-        ("$x$", "x", True),  # delimited source, flat target
-        ("F 1 , K , V , x", "F 1 K V x", True),  # debris source with a candidate
+        ("$x$", "x", True),
+        ("F 1 , K , V , x", "F 1 K V x", True),
         ("Ag_0 x", "Ag 0 x", True),
-        ("F 1 , K , V , x", "\u6ca1\u6709", False),  # no ASCII run to delimit
+        ("F 1 , K , V , x", "\u6ca1\u6709", False),
         ("F 1 , K , V , x", "\u7eaf\u4e2d\u6587", False),
-        ("$x$", "$y$", False),  # target already delimited
-        ("hello world", "hello world", False),  # no math candidate
-        ("K , V , x", "K V x", False),  # debris but nothing concrete to redelimit
+        ("$x$", "$y$", False),
+        ("hello world", "hello world", False),
+        ("K , V , x", "K V x", False),
         ("F1 hello world", "F1 hello world", False),
         ("", "x", False),
         ("x", "", False),
@@ -263,11 +215,6 @@ def test_debris_respects_its_thresholds() -> None:
 )
 def test_target_missing_math_delimiters(source: str, target: str, expected: bool) -> None:
     assert target_missing_math_delimiters(source, target) is expected
-
-
-# --------------------------------------------------------------------------- #
-# Formula invariants
-# --------------------------------------------------------------------------- #
 
 
 def test_formula_target_intact_ignores_whitespace_only() -> None:
@@ -293,11 +240,6 @@ def test_formula_skeleton_rejects_changed_math() -> None:
     block = _block("b", r"$a \text{hello} b$", r"$a \text{你好} c$")
     assert formula_target_intact(block) is False
     assert formula_skeleton_intact(block) is False
-
-
-# --------------------------------------------------------------------------- #
-# apply_math_guards
-# --------------------------------------------------------------------------- #
 
 
 def _flags(block: IRBlock) -> list[str]:
@@ -327,7 +269,7 @@ def test_apply_math_guards_resets_a_drifted_formula() -> None:
 def test_apply_math_guards_accepts_a_text_span_translation() -> None:
     accepted = _block("d2", r"$a \text{hello} b$", r"$a \text{你好} b$")
     checkpoints, counts = apply_math_guards([accepted])
-    assert accepted.target_text == r"$a \text{你好} b$"  # untouched
+    assert accepted.target_text == r"$a \text{你好} b$"
     assert counts["c_text_accepted"] == 1
     assert counts["formula_invariant_repairs"] == 0
     assert len(checkpoints) == 1

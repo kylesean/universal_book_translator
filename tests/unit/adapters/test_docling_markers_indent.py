@@ -1,5 +1,3 @@
-"""Docling extraction fixes: ordered list markers and first-line indents."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -49,7 +47,6 @@ def test_a_run_of_numbered_paragraphs_becomes_list_items() -> None:
 
 
 def test_a_lone_marker_paragraph_is_left_as_prose() -> None:
-    # A bracketed year opens like a marker but a single one is not a list.
     blocks = [_para("b1", "(2024) A reference to prior work.")]
     out = restore_ordered_markers(blocks)
     assert out[0].block_type is BlockType.NARRATIVE
@@ -97,12 +94,6 @@ def test_a_flush_left_paragraph_gets_no_indent(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_a_list_marker_column_indent_is_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A hanging list: the marker line hangs right of the wrapped lines' margin.
-
-    The block box starts at the wrapped lines' margin (the union), so without
-    the recorded indent the compositor would draw "(1)" flush with the body
-    margin where the source hangs it ~22pt to the right.
-    """
 
     def fake_extract_lines(_path: Path, _page: int) -> tuple[list[LineBox], tuple[float, float]]:
         lines = [
@@ -128,7 +119,6 @@ def test_a_list_marker_column_indent_is_recorded(monkeypatch: pytest.MonkeyPatch
 
 
 def test_a_centered_heading_is_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A centered title's short line hangs symmetrically inside its box."""
 
     def fake_extract_lines(_path: Path, _page: int) -> tuple[list[LineBox], tuple[float, float]]:
         lines = [
@@ -172,12 +162,6 @@ def test_a_flush_left_heading_is_not_marked_centered(monkeypatch: pytest.MonkeyP
 
 
 def test_a_multi_line_heading_records_its_line_boxes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The title's own two line boxes are recorded on the block's span.
-
-    The extractor keeps the source's line structure, so a later stage can see
-    that the title breaks at the subtitle colon rather than at an arbitrary
-    width-fill point.
-    """
 
     def fake_extract_lines(_path: Path, _page: int) -> tuple[list[LineBox], tuple[float, float]]:
         lines = [
@@ -205,14 +189,10 @@ def test_a_multi_line_heading_records_its_line_boxes(monkeypatch: pytest.MonkeyP
     span = out[0].element.span
     assert isinstance(span, CompositeSpan)
     assert len(span.boxes) == 2
-    # Reading order is top-down: the first box is the higher line (larger y).
     assert span.boxes[0].bbox[1] > span.boxes[1].bbox[1]
-    # The narrow first line (172→425) is preserved, not normalized to the box.
     assert span.boxes[0].bbox[0] == pytest.approx(172.1)
     assert span.boxes[1].bbox[2] == pytest.approx(524.0)
     assert out[0].style is not None and out[0].style.alignment == "center"
-    # The chain is mirrored into the one provenance key the ledger rebuilds it
-    # from; without it the export stage sees a single first-line span.
     assert [box["bbox"][1] for box in out[0].provenance.physical_boxes] == [
         pytest.approx(710.0),
         pytest.approx(690.0),
@@ -222,12 +202,6 @@ def test_a_multi_line_heading_records_its_line_boxes(monkeypatch: pytest.MonkeyP
 def test_a_multi_line_heading_chain_survives_the_ledger_round_trip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The export stage reloads blocks from the ledger; the chain must come back.
-
-    A heading read back as a single first-line box renders its translation
-    squeezed into that one line and leaves the rest of the source title in the
-    source language, so the round trip is part of the contract.
-    """
     import tempfile
 
     from ubt.core.engine.ledger import SQLiteJobLedger
@@ -283,17 +257,7 @@ def test_a_single_line_heading_keeps_its_simple_span(monkeypatch: pytest.MonkeyP
     assert not isinstance(out[0].element.span, CompositeSpan)
 
 
-# --- appendix headings the layout model missed ------------------------------
-
-
 def test_an_appendix_heading_matching_typed_siblings_is_retitled() -> None:
-    """``A ...`` ships a heading where Docling typed a paragraph.
-
-    Measured on the ATC'25 paper: Docling read "B Complete results ..." and
-    "C Complete results ..." as headings but "A Another Example for OSTD APIs"
-    as a body paragraph, which then shipped set as body text. The document's
-    own letter-marked headings corroborate the shape.
-    """
     heading_b = _para(
         "b293",
         "B Complete results for Redis benchmark",
@@ -306,24 +270,18 @@ def test_an_appendix_heading_matching_typed_siblings_is_retitled() -> None:
 
     assert out[0].block_type is BlockType.HEADING
     assert out[0].source_text == "A Another Example for OSTD APIs"
-    # Prose keeps its type even though it opens with an article: the word after
-    # the marker is lowercase, so the shape does not match at all.
     assert out[1].block_type is BlockType.NARRATIVE
     assert out[2].block_type is BlockType.HEADING
 
 
 def test_a_letter_shape_without_typed_siblings_stays_prose() -> None:
-    # A paper with no letter-marked headings offers no corroboration: "A CPU
-    # pipeline ..." as a one-line paragraph stays prose.
     prose = _para("p1", "A CPU pipeline flush costs microseconds here")
     assert restore_appendix_headings([prose])[0].block_type is BlockType.NARRATIVE
 
 
 def test_a_wrapped_or_terminated_paragraph_is_never_a_heading() -> None:
     heading_b = _para("b293", "B Complete results", block_type=BlockType.HEADING)
-    # Terminal punctuation reads as a sentence even with the marker shape.
     terminated = _para("b294", "A Second observation follows.")
-    # A 60pt-tall block is two printed lines of prose, not a title.
     two_lines = _para("b295", "A Example with a very long appendix title", y1=60.0)
 
     out = restore_appendix_headings([heading_b, terminated, two_lines])

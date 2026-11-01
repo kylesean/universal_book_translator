@@ -1,13 +1,3 @@
-"""The vector-figure micro-glyph cleanup must be bounded and must not be silent.
-
-A matplotlib/tikz scatter cloud puts thousands of sub-5pt marker glyphs on one
-page, which turns ``merge_row_fragments`` into an O(K^2) multi-minute hang. The
-cleanup that bounds K is only allowed to fire when the page really is a cloud
-(hundreds of debris-sized rects), because the same size test on a merely dense
-page discards real content -- a superscript or a footnote mark. And when it
-does fire it must say so: the rects, and the text under them, are gone.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -40,11 +30,6 @@ def _dots(n: int) -> list[Rect]:
 
 
 def test_a_dense_page_keeps_its_small_rects() -> None:
-    """700 rects with 200 superscript-sized ones: the small ones stay.
-
-    This is the page the old unconditional ``>600 rects`` filter damaged -- it
-    is dense, not a cloud, so its 1pt marks are content, not marker debris.
-    """
     rects = [_line(60.0, 700.0 - i * 12.0) for i in range(500)] + _dots(200)
     assert len(rects) > 600
     kept, dropped = _drop_scatter_debris(list(rects))
@@ -53,7 +38,6 @@ def test_a_dense_page_keeps_its_small_rects() -> None:
 
 
 def test_a_marker_cloud_drops_only_the_debris() -> None:
-    """Past the debris floor the cleanup fires and removes exactly the debris."""
     debris = _dots(_DEBRIS_MIN_COUNT + 400)
     lines = [_line(60.0, 200.0 - i * 12.0) for i in range(50)]
     kept, dropped = _drop_scatter_debris(debris + lines)
@@ -62,18 +46,12 @@ def test_a_marker_cloud_drops_only_the_debris() -> None:
 
 
 def test_a_small_page_is_never_touched() -> None:
-    """Below the rect count the cleanup never fires, however small the rects."""
     rects = _dots(_DEBRIS_MIN_COUNT + 100)
     kept, dropped = _drop_scatter_debris(list(rects))
     assert (kept, dropped) == (rects, 0)
 
 
 def test_a_tall_rect_is_only_debris_once_the_page_is_a_cloud() -> None:
-    """The >60pt rule rides the same gate -- a sidebar on a dense page survives.
-
-    A 100pt-tall rect on an ordinary page is a watermark or a table rule the
-    reader may still want; on a cloud page it is part of the figure cruft.
-    """
     tall = (60.0, 40.0, 70.0, 140.0)
     dense = [tall] + [_line(60.0, 700.0 - i * 8.0) for i in range(650)]
     kept, dropped = _drop_scatter_debris(list(dense))
@@ -87,7 +65,6 @@ def test_a_tall_rect_is_only_debris_once_the_page_is_a_cloud() -> None:
 def test_extract_lines_reports_the_cloud_it_cleaned(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A real cloud page: the body lines survive and the loss is logged."""
     path = write_marker_cloud_pdf(
         tmp_path / "cloud.pdf", 700, body=["Real body line one.", "Real body line two."]
     )
@@ -99,10 +76,6 @@ def test_extract_lines_reports_the_cloud_it_cleaned(
     assert "Real body line two." in texts
     (record,) = [r for r in caplog.records if r.levelno == logging.WARNING]
     message = record.getMessage()
-    # The message no longer diagnoses "marker cloud": the over-read guard that
-    # also feeds this line now fires on nested-rect pages too, so it reports the
-    # counts it dropped instead of the page shape. What an operator must be able
-    # to read out of it is the debris count and the loss.
     assert "dropped 700 debris rects" in message
     assert "not extracted" in message
 
@@ -116,14 +89,6 @@ def test_a_clean_page_says_nothing(tmp_path: Path, caplog: pytest.LogCaptureFixt
 
 
 def test_dense_per_character_text_is_not_a_cloud() -> None:
-    """Thousands of ~5pt character rects are text, not marker debris.
-
-    A PDF that gives pdfium one rect per character clears both the rect count
-    and the debris count, but its rects are lowercase letters (~5pt), not
-    scatter dots (~1pt). Dropping them deleted 61% of a real page's characters
-    (arXiv 2610.02185). The median rect height is the tell.
-    """
-    # 700 character-sized rects, all below the 5pt/3pt debris thresholds.
     chars = [
         (
             60.0 + i % 50 * 4.0,
@@ -139,7 +104,6 @@ def test_dense_per_character_text_is_not_a_cloud() -> None:
 
 
 def test_a_marker_cloud_is_still_dropped() -> None:
-    """~1pt scatter dots are still debris: the gate must not go blind."""
     dots = [
         (60.0 + i % 300, 700.0 - i // 300, 60.0 + i % 300 + 1.0, 700.0 - i // 300 + 1.1)
         for i in range(_DEBRIS_MIN_COUNT + 400)

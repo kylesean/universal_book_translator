@@ -1,5 +1,3 @@
-"""Unit tests for lease-loss and cancellation propagation in ModelRouter."""
-
 from __future__ import annotations
 
 import asyncio
@@ -24,8 +22,6 @@ pytestmark = pytest.mark.fast
 
 
 class _FailingRetryProvider(MockModelProvider):
-    """Mock provider that always raises 429."""
-
     def __init__(self) -> None:
         super().__init__()
         self.calls = 0
@@ -49,29 +45,24 @@ class _FailingRetryProvider(MockModelProvider):
 @pytest.mark.asyncio
 async def test_raise_if_cancelled_distinguishes_events() -> None:
     set_run_cancel_token(None, None)
-    # Neither set: no error
     _raise_if_cancelled()
 
-    # Cancel token set: JobInterruptedError
     cancel_token = asyncio.Event()
     cancel_token.set()
     set_run_cancel_token(cancel_token, None)
     with pytest.raises(JobInterruptedError, match="Job cancelled"):
         _raise_if_cancelled()
 
-    # Lease lost set: LedgerWriterLeaseLostError
     lease_lost = asyncio.Event()
     lease_lost.set()
     set_run_cancel_token(None, lease_lost)
     with pytest.raises(LedgerWriterLeaseLostError, match="Writer lease was reclaimed"):
         _raise_if_cancelled()
 
-    # Both set: Lease lost takes priority
     set_run_cancel_token(cancel_token, lease_lost)
     with pytest.raises(LedgerWriterLeaseLostError, match="Writer lease was reclaimed"):
         _raise_if_cancelled()
 
-    # Reset
     set_run_cancel_token(None, None)
     _raise_if_cancelled()
 
@@ -156,7 +147,6 @@ async def test_execute_single_model_aborts_immediately_on_lease_lost() -> None:
                 router._execute_single_model("sys", "user", "m", 0.0),
                 timeout=2.0,
             )
-        # Should have failed on the first retry sleep without exhausting all 5 retries
         assert provider.calls == 1
     finally:
         set_run_cancel_token(None, None)
@@ -193,17 +183,14 @@ async def test_task_isolation_between_concurrent_jobs() -> None:
     task_b = asyncio.create_task(job_b())
 
     await asyncio.sleep(0.01)
-    # Trigger lease loss for job A
     lease_lost_a.set()
     await asyncio.wait_for(task_a, timeout=2.0)
     assert results.get("a") == "lease_lost"
     assert "b" not in results
 
-    # Now trigger cancellation for job B
     cancel_b.set()
     await asyncio.wait_for(task_b, timeout=2.0)
     assert results.get("b") == "cancelled"
 
-    # ContextVars in caller remain clean
     assert _cancel_token_ctx.get() is None
     assert _lease_lost_ctx.get() is None

@@ -1,5 +1,3 @@
-"""Typst MeasurementService tests: real compile, real line boxes, real cache."""
-
 from __future__ import annotations
 
 import pytest

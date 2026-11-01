@@ -1,9 +1,3 @@
-"""Contract tests for the PDF document probe (``pdf_profiler``).
-
-The probe samples a handful of pages for layout diagnostics (scan, multicolumn,
-formula debris, vector diagrams) for assess and warnings.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,47 +25,24 @@ def _prose_pages(n: int) -> list[list[str]]:
 
 
 def test_probe_sample_fractions_skip_the_last_page() -> None:
-    # 1.0 is the last page of a paper — its reference list. Sampling it made a
-    # bibliography out-score the body and route the book to docling.
     assert max(PROBE_SAMPLE_FRACTIONS) < 1.0
     assert PROBE_SAMPLE_FRACTIONS[0] == 0.0
 
 
 def test_signal_bar_needs_more_than_one_page() -> None:
-    # One page is noise; two is a signal. A strict majority is too high for a
-    # five-page sample: a 296-page maths textbook with 41% formula pages draws
-    # only 2 of 5 samples, and a >50% bar would send it to pdfium.
     assert PROBE_MIN_SIGNAL_PAGES == 2
 
 
 def test_probe_routes_every_document_to_docling(tmp_path: Path) -> None:
-    """`auto` must be lossless, so it is always docling.
-
-    pdfium's reader emits only headings, paragraphs, list items and code — it
-    cannot represent a table, a figure or a formula. That used to be survivable
-    because the overlay renderer kept the source page as a canvas, so an
-    unextracted table was still visible in the original language. The reflow
-    renderer rebuilds the page, so the same omission is a hole in the book.
-
-    The probe cannot rule structure out: measured on the reference corpus every
-    document carried structure, and one had 19 figures and 16 tables with every
-    cheap signal reading zero (vector-drawn figures are invisible to
-    ``resource_image_count``). So the probe reports the signals it saw, and
-    ``auto`` takes the lossless engine regardless.
-    """
     pdf = write_text_pdf(tmp_path / "prose.pdf", _prose_pages(10))
     plan = inspect_pdf_profile(pdf)
     assert not plan.has_formulas
     assert not plan.has_multicolumn
-    # The signals are reported honestly (assess shows them to the operator)…
     assert plan.has_scan is False
-    # …and the engine is the fixed lossless policy.
     assert plan.primary_engine == "docling"
 
 
 def test_probe_routes_two_column_to_docling(tmp_path: Path) -> None:
-    # A genuine two-column body: pdfium would interleave the columns, so the
-    # probe must keep routing these to docling.
     pages = [
         (
             ["left column line one", "left column line two", "left column three"],
@@ -86,8 +57,6 @@ def test_probe_routes_two_column_to_docling(tmp_path: Path) -> None:
 
 
 def test_single_reference_page_does_not_veto_the_document(tmp_path: Path) -> None:
-    # Nine clean prose pages plus one reference page: the reference page scores
-    # as formula debris on its own, but one page must not flip the whole book.
     pages = _prose_pages(9) + [[_REFERENCE, _REFERENCE, _REFERENCE, _REFERENCE]]
     pdf = write_text_pdf(tmp_path / "refs.pdf", pages)
     plan = inspect_pdf_profile(pdf)
@@ -95,8 +64,6 @@ def test_single_reference_page_does_not_veto_the_document(tmp_path: Path) -> Non
 
 
 def test_single_formula_page_does_not_veto_the_document(tmp_path: Path) -> None:
-    # One page of formula debris among clean prose must not flip the route: a
-    # single figure page reads as debris (2026-10-10).
     debris = "K = x plus V t h"
     pages = _prose_pages(9) + [[debris, debris, debris, debris]]
     pdf = write_text_pdf(tmp_path / "one_debris.pdf", pages)
@@ -105,9 +72,6 @@ def test_single_formula_page_does_not_veto_the_document(tmp_path: Path) -> None:
 
 
 def test_two_formula_pages_route_to_docling(tmp_path: Path) -> None:
-    # Two sampled pages is a signal, even though it is below a strict majority
-    # of a five-page sample (the maths-textbook case). With 10 pages the probe
-    # samples 1, 3, 6, 8, 10, so the debris goes on pages 3 and 8.
     debris = "K = x plus V t h"
     pages = _prose_pages(10)
     pages[2] = [debris, debris, debris, debris]
@@ -119,10 +83,6 @@ def test_two_formula_pages_route_to_docling(tmp_path: Path) -> None:
 
 
 def test_majority_formula_debris_routes_to_docling(tmp_path: Path) -> None:
-    # When most pages carry real shattered-equation debris, the signal is real
-    # and the majority rule must fire. (Reference entries are deliberately NOT
-    # used here: after the name-initial fix they no longer read as debris, which
-    # is the point of the previous test.)
     debris = "K = x plus V t h"
     pages = [[debris, debris, debris, debris] for _ in range(10)]
     pdf = write_text_pdf(tmp_path / "all_debris.pdf", pages)
@@ -132,8 +92,6 @@ def test_majority_formula_debris_routes_to_docling(tmp_path: Path) -> None:
 
 
 def test_all_reference_pages_do_not_report_a_formula_signal(tmp_path: Path) -> None:
-    # A book of nothing but references is still not a formula book. Pinned so a
-    # future tweak cannot quietly reintroduce the 2026-10-10 false positive.
     pages = [[_REFERENCE, _REFERENCE, _REFERENCE, _REFERENCE] for _ in range(10)]
     pdf = write_text_pdf(tmp_path / "all_refs.pdf", pages)
     plan = inspect_pdf_profile(pdf)
@@ -142,7 +100,6 @@ def test_all_reference_pages_do_not_report_a_formula_signal(tmp_path: Path) -> N
 
 
 def test_alias_and_cache_parity(tmp_path: Path) -> None:
-    """Verify the PDFRoutePlan alias still names the profile type."""
     assert PDFRoutePlan is PDFDocumentProfile
     assert PROFILE_CACHE_DIR.name == "profile_cache"
 

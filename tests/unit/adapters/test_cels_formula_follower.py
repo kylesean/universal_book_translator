@@ -1,9 +1,3 @@
-"""Unit tests for CELS Stage 5 Formula Follower (GAP-14).
-
-Tests Form XObject extraction, mixed CJK + rigid formula stream injection,
-and text extraction roundtrip via PDFium.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -38,7 +32,7 @@ def test_create_formula_form_xobject_builds_valid_clipping_matrix() -> None:
     page = pdf.add_blank_page(page_size=(300, 300))
     page.Contents = pdf.make_stream(b"0 0 1 rg 10 10 80 40 re f")
 
-    formula_box = Box(x0=20.0, y0=15.0, x1=70.0, y1=35.0)  # width 50, height 20
+    formula_box = Box(x0=20.0, y0=15.0, x1=70.0, y1=35.0)
     rigid = create_formula_form_xobject(
         pdf,
         page,
@@ -54,7 +48,6 @@ def test_create_formula_form_xobject_builds_valid_clipping_matrix() -> None:
     assert rigid.baseline_offset_pt == -2.0
     assert rigid.xobject_ref == "/FmTest"
 
-    # Verify Form XObject in page resources
     assert "/XObject" in page.Resources
     form = page.Resources["/XObject"]["/FmTest"]
     assert str(form.Subtype) == "/Form"
@@ -117,7 +110,6 @@ def test_emit_line_with_rigids_generates_isolated_graphics_state(cjk_font: Path)
     )
 
     op_names = [str(op) for args, op in ops]
-    # Assert ET precedes Do and BT follows Do to ensure graphics state validity
     assert "ET" in op_names
     assert "Do" in op_names
     assert "BT" in op_names
@@ -130,21 +122,18 @@ def test_emit_line_with_rigids_generates_isolated_graphics_state(cjk_font: Path)
 
 
 def test_formula_follower_roundtrip_on_chapter3_page(cjk_font: Path, tmp_path: Path) -> None:
-    """Full roundtrip: extract formula on chapter-3 p9, rewrite line with Chinese + formula XObject."""
     source_pdf = Path("corpus/documents/chapter-3.pdf")
     if not source_pdf.exists():
         pytest.skip("chapter-3.pdf not found in corpus")
 
     pdf = pikepdf.open(str(source_pdf))
-    page = pdf.pages[8]  # Page 9
+    page = pdf.pages[8]
 
     lines = scan_lines(page)
     assert len(lines) > 0
 
-    # Line 0 is 'Here,' (x0=83.7, x1=105.5, baseline=579.7)
     target_line = lines[0]
 
-    # Create a Form XObject for the Q_bulk symbol at x: 111.2..131.7, y: 575..588
     q_bulk_box = Box(x0=111.2, y0=575.0, x1=131.7, y1=588.0)
     rigid_formula = create_formula_form_xobject(
         pdf,
@@ -175,7 +164,6 @@ def test_formula_follower_roundtrip_on_chapter3_page(cjk_font: Path, tmp_path: P
     out_file = tmp_path / "cels_formula_follower.pdf"
     pdf.save(str(out_file))
 
-    # Verify with PDFium: text extracted properly, no crash
     pdoc = pdfium.PdfDocument(str(out_file))
     tpage = pdoc[8].get_textpage()
     extracted_text = tpage.get_text_range()
@@ -183,7 +171,6 @@ def test_formula_follower_roundtrip_on_chapter3_page(cjk_font: Path, tmp_path: P
     assert "此处固定电荷由" in extracted_text
     assert "给出" in extracted_text
 
-    # Render page to verify graphics stream does not fail
     render_image = pdoc[8].render(scale=1.0).to_pil()
     assert render_image.width > 0
     assert render_image.height > 0

@@ -1,14 +1,3 @@
-"""A code listing whose text layer lost its line structure is cropped, not typed.
-
-Docling collapses a listing's lines into one space-separated stream, and the
-source PDF frequently draws identifier underscores as vector rules no text
-layer contains (the arXiv 2101.03961 pseudocode extracts as
-``def load balance loss(...)`` — visually ``load_balance_loss``). Typesetting
-that blob as prose delivered an unreadable wrapped paragraph in the body face.
-The recovery is the one the unreadable-formula branch already used: crop the
-source region and ship it as an IMAGE block.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -54,12 +43,10 @@ def test_a_lossy_listing_is_recovered_as_a_source_crop(tmp_path: Path) -> None:
     assert block.skip_translate is True
     asset = Path(block.source_text)
     assert asset.exists()
-    # Print resolution, tagged in the name so a DPI change re-cuts the file.
     assert "dpi300" in asset.name
 
 
 def test_an_unusable_region_keeps_the_text_block(tmp_path: Path) -> None:
-    # No bbox, no source file, or a degenerate region all keep the text.
     assert crop_lossy_code_asset(_item(1, 0, 0, 0, 0), tmp_path, None, 1) is None
     pdf = write_text_pdf(tmp_path / "tiny.pdf", [["x"]])
     assert crop_lossy_code_asset(_item(1, 0.0, 0.0, 5.0, 5.0), tmp_path, pdf, 1) is None

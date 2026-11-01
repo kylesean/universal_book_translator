@@ -1,10 +1,3 @@
-"""Language-asset import + glossary conflict detection (PRD §4.4).
-
-The console's asset center imports TMX/JSON into the shared TM and surfaces
-glossary sources configured with two competing renderings. Both are pure
-helpers over explicit paths, pinned here plus a thin HTTP round-trip.
-"""
-
 from __future__ import annotations
 
 import json
@@ -45,11 +38,6 @@ def _config(tmp_path: Path, **overrides: Any) -> UBTConfig:
     )
 
 
-# --------------------------------------------------------------------------- #
-# Glossary conflicts
-# --------------------------------------------------------------------------- #
-
-
 def test_conflict_detection_flags_competing_targets() -> None:
     terms = [
         {"source": "Backpropagation", "target": "反向传播"},
@@ -68,10 +56,6 @@ def test_conflict_detection_ignores_repeated_identical_targets() -> None:
     ]
     assert detect_glossary_conflicts(terms) == []
 
-
-# --------------------------------------------------------------------------- #
-# TMX / JSON parsing
-# --------------------------------------------------------------------------- #
 
 _TMX = """<?xml version="1.0" encoding="UTF-8"?>
 <tmx version="1.4">
@@ -117,11 +101,6 @@ def test_parse_tm_payload_rejects_unknown_format() -> None:
         parse_tm_payload("[]", "yaml")
 
 
-# --------------------------------------------------------------------------- #
-# Import into the store
-# --------------------------------------------------------------------------- #
-
-
 def test_import_writes_rows_with_the_default_language_pair(tmp_path: Path) -> None:
     tm_path = tmp_path / "tm.sqlite"
     rows = [{"src_lang": "", "tgt_lang": "", "source_text": "Hello", "target_text": "你好"}]
@@ -152,8 +131,6 @@ def test_machine_import_skips_a_human_row(tmp_path: Path) -> None:
         default_tgt_lang="zh",
         provenance=PROVENANCE_HUMAN_PE,
     )
-    # The store's writeback keeps the human label but lets latest text win, so a
-    # bulk machine import must skip the pair entirely to preserve the human row.
     written = import_tm_entries(
         tm_path,
         [{"src_lang": "en", "tgt_lang": "zh", "source_text": "Hello", "target_text": "喂"}],
@@ -183,13 +160,6 @@ def test_import_rejects_an_unknown_provenance(tmp_path: Path) -> None:
 
 
 def test_an_imported_machine_row_is_actually_hittable(tmp_path: Path) -> None:
-    """P2-11: an imported machine pair must be reachable by the pipeline.
-
-    The import writes ``context_hash=''`` (no pipeline run produced it), while
-    the draft stage looks up with a computed ``compute_tm_context`` hash. Before
-    the fix the read gate required equality, so the row was written but never
-    hit — the import reported success and did nothing.
-    """
     from ubt.core.memory.tm import compute_tm_context
 
     tm_path = tmp_path / "tm.sqlite"
@@ -210,8 +180,6 @@ def test_an_imported_machine_row_is_actually_hittable(tmp_path: Path) -> None:
     assert written == 1
     tm = TranslationMemory(tm_path)
     try:
-        # A later run's context fingerprint — different prompt/model/glossary —
-        # must still hit the imported pair.
         ctx = compute_tm_context("v9", "technical", "glossary-v2", "en", "zh")
         hit = tm.lookup_exact("en", "zh", "Hello world", ctx)
         assert hit is not None
@@ -221,11 +189,6 @@ def test_an_imported_machine_row_is_actually_hittable(tmp_path: Path) -> None:
 
 
 def test_a_pipeline_machine_row_stays_context_gated(tmp_path: Path) -> None:
-    """The import exemption must not un-gate rows the pipeline wrote.
-
-    A pipeline machine row carries a real context hash, so a changed
-    prompt/glossary/model must still miss it.
-    """
     from ubt.core.memory.tm import TMPendingEntry, compute_tm_context
 
     tm_path = tmp_path / "tm.sqlite"
@@ -249,11 +212,6 @@ def test_a_pipeline_machine_row_stays_context_gated(tmp_path: Path) -> None:
         assert tm.lookup_exact("en", "zh", "Pipeline row", other) is None
     finally:
         tm.close()
-
-
-# --------------------------------------------------------------------------- #
-# HTTP surface
-# --------------------------------------------------------------------------- #
 
 
 def test_conflicts_endpoint_reports_a_conflicting_glossary(tmp_path: Path) -> None:
@@ -400,15 +358,9 @@ def test_tm_import_endpoint_rejects_a_malformed_payload(tmp_path: Path) -> None:
     assert res.status_code == 422
 
 
-# --------------------------------------------------------------------------- #
-# Glossary bulk import
-# --------------------------------------------------------------------------- #
-
-
 def test_parse_glossary_payload_reads_header_and_headerless_csv() -> None:
     with_header = parse_glossary_payload("source,translation\nMOSFET,MOSFET\n", "csv")
     assert with_header == [("MOSFET", "MOSFET")]
-    # Headerless two-column rows are what a hand-maintained file often is.
     assert parse_glossary_payload("threshold voltage,阈值电压\n", "csv") == [
         ("threshold voltage", "阈值电压")
     ]
@@ -452,8 +404,6 @@ def test_glossary_import_endpoint_roundtrips_and_preserves_format(tmp_path: Path
         "MOSFET": "MOSFET",
         "subthreshold swing": "亚阈值摆幅",
     }
-    # The file keeps its header + CSV shape: the engine's own loader must
-    # still read it, which is the whole point of editing it in place.
     assert glossary.read_text(encoding="utf-8").startswith("source,translation")
 
 
@@ -481,9 +431,6 @@ def test_glossary_upload_endpoint_stages_a_path_jobs_can_use(tmp_path: Path) -> 
     assert body["name"] == "terms.csv"
     staged = Path(body["path"])
     assert staged.exists()
-    # The staged path must sit inside the managed uploads dir the engine can
-    # read, and the engine's own loader must be able to parse it back — the
-    # job submit hands this path to the pipeline untouched.
     assert "uploads" in staged.parts
     assert read_glossary_terms(staged) == [{"source": "MOSFET", "target": "MOSFET"}]
 
@@ -501,13 +448,6 @@ def test_glossary_upload_endpoint_rejects_non_glossary_formats(tmp_path: Path) -
 def test_enable_glossary_creates_and_activates_the_managed_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An unconfigured glossary must be fixable from the asset screen itself.
-
-    Previously the screen showed an Enable-shaped dead end: every write returned
-    409 until the operator hand-edited ``ubt.toml``. Enabling now creates the
-    managed file, records ``[defaults] glossary_path``, and the next route read
-    sees the live configuration rather than the boot snapshot.
-    """
     monkeypatch.chdir(tmp_path)
     (tmp_path / "ubt.toml").write_text("[defaults]\n", encoding="utf-8")
     client = TestClient(create_app(_config(tmp_path)))

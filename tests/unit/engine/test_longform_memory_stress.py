@@ -1,16 +1,3 @@
-"""Unit-tier long-form stress tests: sliding epoch memory, process pool cleanup, and state invariants.
-
-This module validates that:
-1. A 45-chapter book (>40 chapter cliff) runs end-to-end with sliding epoch memory
-   (memory_sliding_window=True, memory_max_epochs=3), constraining memory growth
-   and keeping RSS memory strictly bounded.
-2. Companion artifacts (XLIFF, HTML, EPUB, Attestation) comply with typed contracts,
-   and non-PDF formats gracefully skip PDF-specific attestation checks.
-3. DoclingWorkerPool terminates isolated child worker processes upon close without
-   leaving orphan/zombie processes behind.
-4. Concurrent jobs execute without ledger locks or state transition violations.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -32,7 +19,6 @@ pytestmark = pytest.mark.fast
 
 
 def _build_45_chapter_markdown(dest: Path) -> Path:
-    """Build a synthetic 45-chapter markdown manuscript to cross the memory cliff."""
     lines: list[str] = []
     for i in range(1, 46):
         lines.append(f"# Chapter {i}: The Principles of Analysis {i}")
@@ -51,7 +37,6 @@ def _build_45_chapter_markdown(dest: Path) -> Path:
 
 
 async def test_45_chapter_sliding_epoch_stress_markdown(tmp_path: Path) -> None:
-    """Validate 45-chapter long-form run with sliding epoch memory and companion exports."""
     book_md = _build_45_chapter_markdown(tmp_path / "book_45.md")
     output_md = tmp_path / "book_45_zh.md"
     job_id = "longform-stress-45"
@@ -80,22 +65,18 @@ async def test_45_chapter_sliding_epoch_stress_markdown(tmp_path: Path) -> None:
     rss_end = proc.memory_info().rss
     rss_growth_mb = (rss_end - rss_start) / (1024 * 1024)
 
-    # 1. Pipeline reached clean export completion
     assert len(events) > 0
     assert events[0].event_type is EventType.JOB_STARTED
     assert events[-1].event_type is EventType.EXPORT_COMPLETED
     assert not any(e.event_type is EventType.PIPELINE_FAILED for e in events)
 
-    # 2. Delivered manuscript integrity
     assert output_md.exists()
     delivered_text = output_md.read_text(encoding="utf-8")
     for i in (1, 15, 30, 45):
         assert f"Chapter {i}: The Principles of Analysis {i}" in delivered_text
 
-    # 3. RSS memory growth is strictly bounded (< 150 MB delta for 45 chapters)
     assert rss_growth_mb < 150.0, f"Excessive RSS growth: {rss_growth_mb:.2f} MB"
 
-    # 4. Ledger state machine invariants and block counts
     mock_db = rehearsal_db_dir(tmp_path / "ledgers") / f"{job_id}.sqlite"
     ledger = SQLiteJobLedger(mock_db)
     try:
@@ -106,20 +87,17 @@ async def test_45_chapter_sliding_epoch_stress_markdown(tmp_path: Path) -> None:
         failed_blocks = [b.id for b in blocks if b.status.value in ("failed", "needs_human")]
         assert failed_blocks == []
 
-        # 5. Companion artifact contract validation in ledger metadata
         meta = ledger.get_job_metadata(job_id)
         companion_summary = meta.get("companion_artifacts")
         assert companion_summary is not None
         results = {r["kind"]: r for r in companion_summary["results"]}
 
-        # XLIFF, HTML, EPUB generated with non-zero bytes and durations
         for kind in ("xliff", "html", "epub"):
             assert kind in results
             assert results[kind]["status"] == "generated"
             assert results[kind]["size_bytes"] is not None and results[kind]["size_bytes"] > 0
             assert results[kind]["duration_ms"] is not None and results[kind]["duration_ms"] >= 0
 
-        # Attestation gracefully skipped for non-PDF output
         assert "attestation" in results
         assert results["attestation"]["status"] == "skipped"
         assert "only applies to PDF" in (results["attestation"]["reason"] or "")
@@ -128,24 +106,19 @@ async def test_45_chapter_sliding_epoch_stress_markdown(tmp_path: Path) -> None:
 
 
 def test_docling_worker_pool_process_isolation_and_cleanup() -> None:
-    """Verify that DoclingWorkerPool spawns worker in a separate process and terminates it on close."""
     pool = get_docling_worker_pool()
     executor = pool._ensure_executor()
 
-    # Submit a minimal lambda task to ensure the worker process is initialized
     future = executor.submit(os.getpid)
     worker_pid = future.result(timeout=5.0)
 
-    # Worker process must have a distinct PID from main process
     current_pid = os.getpid()
     assert worker_pid != current_pid, "Worker process must run in an isolated subprocess"
 
-    # Worker must be visible in child processes
     proc = psutil.Process()
     child_pids = {c.pid for c in proc.children(recursive=True)}
     assert worker_pid in child_pids, "Spawned worker PID not found among child processes"
 
-    # Close worker pool and verify clean termination
     close_docling_worker_pool()
     time.sleep(0.1)
 
@@ -154,7 +127,6 @@ def test_docling_worker_pool_process_isolation_and_cleanup() -> None:
 
 
 async def test_concurrent_multi_job_stress_and_state_machine_invariants(tmp_path: Path) -> None:
-    """Verify concurrent multi-job execution without ledger locking or state machine errors."""
     jobs = ["concurrent-stress-1", "concurrent-stress-2", "concurrent-stress-3"]
     tasks = []
 
@@ -181,7 +153,6 @@ async def test_concurrent_multi_job_stress_and_state_machine_invariants(tmp_path
 
         tasks.append(_run_job(orchestrator, manuscript, out, jid))
 
-    # Run all 3 multi-chapter jobs concurrently
     all_results = await asyncio.gather(*tasks)
 
     for jid, events in zip(jobs, all_results, strict=True):

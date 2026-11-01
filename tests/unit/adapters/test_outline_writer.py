@@ -1,14 +1,3 @@
-"""PDF bookmark write-back: entry construction and the page invariant.
-
-The gate these tests defend is not "an outline was written" but "the outline
-names the pages the reader will actually turn to". Those are different claims:
-a bookmark tree of translated titles pointing at the wrong pages is worse than
-no tree at all, because the reader trusts it and is taken somewhere else. So the
-tests split in two — the entry builder (pure, no PDF) and the writer (a real
-``pikepdf`` round trip on a generated PDF), with the page-count check exercised
-from both sides.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -37,7 +26,6 @@ def _heading(
     level: int = 1,
     source: str | None = None,
 ) -> IRBlock:
-    """A heading block with a measured bbox and a translated title."""
     return IRBlock(
         element=make_element(
             id=block_id,
@@ -76,13 +64,6 @@ def _blank_pdf(path: Path, pages: int) -> Path:
 
 
 def _read_outline(path: Path) -> list[tuple[str, int, int]]:
-    """``(title, page, level)`` for every bookmark, depth-first.
-
-    ``1 + pdf.pages.index(...)`` is the only reliable way back from a
-    destination to a page number: pikepdf exposes ``Object.index`` as a *bound
-    method* on the stub, so reading ``dest[0].index`` yields a callable rather
-    than an integer and a naive read silently reports page 0 for every entry.
-    """
     result: list[tuple[str, int, int]] = []
 
     def page_of(pdf: pikepdf.Pdf, item: object) -> int:
@@ -104,11 +85,7 @@ def _read_outline(path: Path) -> list[tuple[str, int, int]]:
     return result
 
 
-# --------------------------------------------------------------------------- #
-# Entry construction (pure)
-# --------------------------------------------------------------------------- #
 def test_entries_use_the_translated_title_not_the_source() -> None:
-    """The sidebar must speak the reader's language, like the rest of the book."""
     block = _heading("h1", "第1章 引言", 1, source="1 Introduction")
     entries = build_outline_entries([block], max_page=10)
     assert [e.title for e in entries] == ["第1章 引言"]
@@ -125,8 +102,6 @@ def test_entries_skip_non_headings_and_untitled_headings() -> None:
 
 
 def test_entries_drop_headings_past_the_artifact_end() -> None:
-    """A stale block from a resumed or page-limited run must not create a
-    bookmark to a page that does not exist — readers error on open."""
     blocks = [_heading("h1", "第1章", 3), _heading("h2", "第2章", 99)]
     entries = build_outline_entries(blocks, max_page=10)
     assert [e.title for e in entries] == ["第1章"]
@@ -158,7 +133,6 @@ def test_entries_skip_levels_deeper_than_the_cap() -> None:
 
 
 def test_entries_deduplicate_a_heading_split_across_a_page_break() -> None:
-    """The same title on the same page is one bookmark, not two."""
     blocks = [_heading("h1", "第3章 方法", 5), _heading("h2", "第3章 方法", 5)]
     entries = build_outline_entries(blocks, max_page=10)
     assert len(entries) == 1
@@ -170,8 +144,6 @@ def test_entries_are_capped() -> None:
 
 
 def test_entries_unwrap_quarantine_markers_from_the_title() -> None:
-    """A quarantined heading ships its SOURCE under a ``<mark>``; the literal
-    markup must not become a bookmark label."""
     block = IRBlock(
         element=make_element(
             id="h1",
@@ -188,9 +160,6 @@ def test_entries_unwrap_quarantine_markers_from_the_title() -> None:
     assert entries and "<mark" not in entries[0].title
 
 
-# --------------------------------------------------------------------------- #
-# Writing (real pikepdf round trip)
-# --------------------------------------------------------------------------- #
 def test_write_outline_nests_by_level_and_targets_the_right_pages(tmp_path: Path) -> None:
     pdf = _blank_pdf(tmp_path / "out.pdf", 6)
     written = write_outline(
@@ -212,8 +181,6 @@ def test_write_outline_nests_by_level_and_targets_the_right_pages(tmp_path: Path
 
 
 def test_write_outline_sets_page_mode_so_readers_show_the_sidebar(tmp_path: Path) -> None:
-    """Bookmarks nobody can see read as unimplemented to the person holding
-    the file."""
     pdf = _blank_pdf(tmp_path / "out.pdf", 2)
     write_outline(pdf, [OutlineEntry("第1章", 1, 1)])
     with pikepdf.open(pdf) as opened:
@@ -231,8 +198,6 @@ def test_write_outline_drops_entries_past_the_page_count(tmp_path: Path) -> None
 
 
 def test_write_outline_replaces_a_preexisting_tree(tmp_path: Path) -> None:
-    """The delivered PDF is a fresh compile; a surviving source tree would put
-    untranslated titles in the sidebar."""
     pdf = _blank_pdf(tmp_path / "out.pdf", 3)
     write_outline(pdf, [OutlineEntry("旧标题", 1, 1)])
     write_outline(pdf, [OutlineEntry("第1章", 2, 1)])
@@ -247,16 +212,11 @@ def test_write_outline_with_no_entries_changes_nothing(tmp_path: Path) -> None:
 
 
 def test_write_outline_never_raises_on_a_corrupt_file(tmp_path: Path) -> None:
-    """An outline is navigation, not content: it must not fail a render that
-    already produced a good artifact."""
     bad = tmp_path / "bad.pdf"
     bad.write_bytes(b"not a pdf")
     assert write_outline(bad, [OutlineEntry("第1章", 1, 1)]) == 0
 
 
-# --------------------------------------------------------------------------- #
-# The page invariant
-# --------------------------------------------------------------------------- #
 def test_from_blocks_writes_the_translated_tree(tmp_path: Path) -> None:
     pdf = _blank_pdf(tmp_path / "out.pdf", 5)
     blocks = [
@@ -269,9 +229,6 @@ def test_from_blocks_writes_the_translated_tree(tmp_path: Path) -> None:
 
 
 def test_from_blocks_refuses_when_the_artifact_page_count_moved(tmp_path: Path) -> None:
-    """The reflow channel changes the page count, so ``bbox.page`` stops naming
-    a delivered page. Writing the tree anyway would mislabel every bookmark;
-    refusing keeps the reader on real pages."""
     pdf = _blank_pdf(tmp_path / "out.pdf", 7)
     blocks = [_heading("h1", "第1章", 1, level=1)]
     assert write_outline_from_blocks(pdf, blocks, expected_pages=5) == 0
@@ -287,9 +244,6 @@ def test_from_blocks_without_an_expectation_trusts_the_artifact(tmp_path: Path) 
 
 @pytest.mark.parametrize("pages", [1, 3, 12])
 def test_roundtrip_page_numbers_are_one_based(tmp_path: Path, pages: int) -> None:
-    """``OutlineItem`` takes a 0-based page index; every other layer in this
-    project speaks 1-based pages. Off-by-one here sends the reader to the
-    previous chapter, which looks like working navigation in a spot check."""
     pdf = _blank_pdf(tmp_path / "out.pdf", pages)
     write_outline(pdf, [OutlineEntry("末章", pages, 1)])
     assert _read_outline(pdf) == [("末章", pages, 1)]

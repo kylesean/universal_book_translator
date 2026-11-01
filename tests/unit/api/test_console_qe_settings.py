@@ -1,17 +1,3 @@
-"""The console must be able to turn quality measurement on — and must say when it is off.
-
-Every finished job said only "QE not measured (heuristic engine)" — jargon the
-operator could not act on — and stopped there. The remedy lived in ``ubt.toml``
-with no control anywhere in the console, so the sentence named a fix the reader
-could not perform on the screen they were on. The card exists to close that
-loop, and these guards cover the three ways it could lie:
-
-* report "measured" for a configuration that scores nothing,
-* write only one of the two keys, leaving the documented-but-useless
-  ``qe_engine = "tiered"`` + judge-off state,
-* claim a save took effect while ``UBT_QE_*`` outranks the file.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,12 +20,6 @@ def _source(path: Path) -> str:
 
 
 def test_the_heuristic_engine_is_reported_as_unmeasured() -> None:
-    """The default configuration scores nothing, and 0.0 is a placeholder.
-
-    This is the exact state the reference job ran in. Reporting it as
-    "measurable" would put a score-shaped zero in front of an operator who never
-    asked for one.
-    """
     settings = describe_qe_settings(UBTConfig(qe_engine="heuristic", qe_judge_enabled=False))
     assert settings["measurable"] is False
     assert settings["engine"] == "heuristic"
@@ -47,13 +27,6 @@ def test_the_heuristic_engine_is_reported_as_unmeasured() -> None:
 
 
 def test_the_tiered_label_without_the_judge_is_unmeasured() -> None:
-    """``qe_engine = "tiered"`` alone is the documented no-op.
-
-    The pipeline wraps the runner on ``qe_judge_enabled`` and only logs a warning
-    about the mismatch, so a surface that trusted the label would promise a
-    measurement the run never takes. This is the state the card's single selector
-    exists to make unreachable.
-    """
     settings = describe_qe_settings(
         UBTConfig(qe_engine="tiered", qe_judge_enabled=False, repair_model="m")
     )
@@ -69,12 +42,6 @@ def test_a_judge_with_a_model_is_measured() -> None:
 
 
 def test_a_judge_without_a_model_is_unmeasured() -> None:
-    """The wrapper needs something to call.
-
-    ``repair_model`` is the implicit fallback, so the only way to have no judge
-    model at all is a configuration that names neither — which is a real state on
-    a fresh install, and one where "judge on" would otherwise read as working.
-    """
     settings = describe_qe_settings(
         UBTConfig(qe_engine="tiered", qe_judge_enabled=True, repair_model="")
     )
@@ -85,12 +52,6 @@ def test_a_judge_without_a_model_is_unmeasured() -> None:
 def test_the_judge_model_comes_from_its_own_provider_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A judge on another endpoint answers with that block's model.
-
-    Checking only ``qe_judge_model or repair_model`` printed the translator's
-    model while the judge endpoint had never heard of it — measured at runtime as
-    twelve ``404 no such model`` answers in one run.
-    """
     monkeypatch.chdir(tmp_path)
     (tmp_path / "ubt.toml").write_text(
         '[providers.judge]\nbase_url = "https://judge.example/v1"\nrepair_model = "hosted-judge"\n',
@@ -112,11 +73,6 @@ def test_the_judge_model_comes_from_its_own_provider_block(
 def test_an_environment_variable_is_named_as_an_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A save cannot change what an exported variable decides.
-
-    ``UBT_QE_ENGINE`` outranks ``ubt.toml``. A form that reported "saved" here
-    would be describing a file the next job never reads.
-    """
     monkeypatch.setenv("UBT_QE_ENGINE", "heuristic")
     assert "qe_engine" in env_overrides()
     monkeypatch.delenv("UBT_QE_ENGINE")
@@ -124,13 +80,6 @@ def test_an_environment_variable_is_named_as_an_override(
 
 
 def test_the_edit_form_seeds_from_the_raw_judge_model() -> None:
-    """Seeding the form from the resolved id would pin an inherited model.
-
-    ``judge_model`` is the id the run will call — usually the translator's
-    ``repair_model``. An edit that only changed the threshold would then write
-    that inherited name back as an explicit ``qe_judge_model``, silently
-    detaching the judge from the block it was inheriting.
-    """
     inherited = describe_qe_settings(
         UBTConfig(qe_engine="tiered", qe_judge_enabled=True, repair_model="inherited")
     )
@@ -150,12 +99,6 @@ def test_the_edit_form_seeds_from_the_raw_judge_model() -> None:
 
 
 def test_the_console_writes_the_engine_and_the_judge_together() -> None:
-    """One selector, two keys.
-
-    Two independent controls would let an operator save ``tiered`` with the judge
-    off — a state that reads "semantic scoring" and scores nothing. The card
-    therefore submits both keys from the same ``tiered`` value.
-    """
     source = _source(_CARD)
     assert "qe_engine: tiered ? 'tiered' : 'heuristic'" in source
     assert "qe_judge_enabled: tiered" in source
@@ -164,12 +107,6 @@ def test_the_console_writes_the_engine_and_the_judge_together() -> None:
 def test_the_write_keeps_the_other_defaults(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A QE save must not drop ``[defaults] provider``.
-
-    The two settings share one table. Rewriting the table instead of updating
-    keys in it would leave a working install pointing at nothing — the failure
-    ``set_default_provider`` refuses to create.
-    """
     from ubt.api.provider_editor import update_qe_settings
 
     monkeypatch.chdir(tmp_path)
@@ -188,12 +125,6 @@ def test_the_write_keeps_the_other_defaults(
 def test_a_judge_provider_that_names_nothing_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Writing a name the loader cannot resolve fails every judge call.
-
-    The console's select only offers real blocks; this guards the direct API
-    caller, and matches the rule ``set_default_provider`` already enforces for
-    ``[defaults] provider``.
-    """
     from ubt.api.provider_editor import ProviderEditError, update_qe_settings
 
     monkeypatch.chdir(tmp_path)
@@ -204,12 +135,6 @@ def test_a_judge_provider_that_names_nothing_is_refused(
 
 
 def test_an_unknown_qe_key_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A judge credential belongs to the provider block that owns it.
-
-    Accepting ``qe_judge_api_key`` here would give the console a second place to
-    write a secret, bypassing the deployment-aware gate the provider editor
-    applies.
-    """
     from ubt.api.provider_editor import ProviderEditError, update_qe_settings
 
     monkeypatch.chdir(tmp_path)

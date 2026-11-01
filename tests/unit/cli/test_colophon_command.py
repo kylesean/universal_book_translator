@@ -1,5 +1,3 @@
-"""Unit tests for the 'ubt colophon' CLI commands."""
-
 from __future__ import annotations
 
 import json
@@ -24,7 +22,6 @@ def test_colophon_inspect_command(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    # Terminal output
     result = runner.invoke(
         app, ["colophon", "inspect", str(doc_path), "--isbn", "978-7-121-39655-7"]
     )
@@ -33,7 +30,6 @@ def test_colophon_inspect_command(tmp_path: Path) -> None:
     assert "分布式系统设计与实践" in result.output
     assert "Valid Checksum" in result.output
 
-    # JSON output
     json_res = runner.invoke(
         app, ["colophon", "inspect", str(doc_path), "--isbn", "978-7-121-39655-7", "--json"]
     )
@@ -49,7 +45,6 @@ def test_colophon_generate_command(tmp_path: Path) -> None:
     doc_path.write_text("# 编译原理研习\n\n测试正文内容。\n", encoding="utf-8")
     out_typst = tmp_path / "colophon.typ"
 
-    # Generate Typst
     res_typ = runner.invoke(
         app,
         [
@@ -70,7 +65,6 @@ def test_colophon_generate_command(tmp_path: Path) -> None:
     assert "图书在版编目（CIP）数据" in typ_content
     assert "编译原理研习" in typ_content
 
-    # Generate HTML stdout
     res_html = runner.invoke(
         app,
         ["colophon", "generate", str(doc_path), "--format", "html"],
@@ -78,7 +72,6 @@ def test_colophon_generate_command(tmp_path: Path) -> None:
     assert res_html.exit_code == 0
     assert '<section class="ubt-colophon"' in res_html.output
 
-    # Generate JSON stdout
     res_json = runner.invoke(
         app,
         ["colophon", "generate", str(doc_path), "--format", "json"],
@@ -90,16 +83,13 @@ def test_colophon_generate_command(tmp_path: Path) -> None:
 
 
 def test_colophon_validate_command() -> None:
-    # Valid ISBN-13
     res_valid = runner.invoke(app, ["colophon", "validate", "978-7-121-39655-7"])
     assert res_valid.exit_code == 0
     assert "Valid ISBN" in res_valid.output
 
-    # Invalid ISBN-13
     res_invalid = runner.invoke(app, ["colophon", "validate", "978-7-121-39655-8"])
     assert res_invalid.exit_code == 1
 
-    # Valid ISBN-10 with JSON output
     res_json = runner.invoke(app, ["colophon", "validate", "0-8044-2957-X", "--json"])
     assert res_json.exit_code == 0
     data = json.loads(res_json.output)

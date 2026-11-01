@@ -1,13 +1,3 @@
-"""The typed AST round-trips blocks without loss.
-
-The ADR's Phase-1 gate, on synthetic fixtures: bridge a flat ``IRBlock`` list
-into the typed :class:`~ubt.model.ast.Document` and back, and the
-document-defining fields must be identical -- id, spine_index, block_type,
-flow_id, region, source_text, skip_translate, bbox. Pipeline state (status,
-``target_text``, scores) is deliberately *not* carried: execution belongs to
-the pipeline, not to understanding.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -34,7 +24,6 @@ def _element(element: ElementT) -> IRBlock:
 
 
 def _blocks() -> list[IRBlock]:
-    # Deliberately out of reading order: the document must restore spine order.
     return [
         _element(
             Paragraph(
@@ -129,8 +118,6 @@ def test_consecutive_same_region_blocks_group_and_boundaries_split_regions() -> 
 
 
 def test_execution_state_is_deliberately_not_carried() -> None:
-    # The bridge understands the document; the pipeline owns its state. A block
-    # rebuilt from a document is structure only: pending, unscored, untranslated.
     blocks = _blocks()
     for block in blocks:
         block.status = BlockStatus.MTQE_PASSED
@@ -147,11 +134,10 @@ def test_block_type_and_flow_projection_matches_the_ir_vocabulary() -> None:
     assert by_id["h1"].block_type is BlockType.HEADING
     assert by_id["c1"].block_type is BlockType.CODE
     assert by_id["c1"].skip_translate is True
-    assert by_id["cap1"].flow_id is FlowID.MAIN_STORY  # region, not flow, carries it
+    assert by_id["cap1"].flow_id is FlowID.MAIN_STORY
     assert by_id["fn1"].flow_id is FlowID.FOOTNOTE
 
 
 def test_caption_region_kind_default() -> None:
-    """Verify Caption AST element defaults to RegionKind.CAPTION."""
     c = Caption(id="c1", spine_index=0, span=Span(), text="Photo of the author")
     assert c.region == RegionKind.CAPTION

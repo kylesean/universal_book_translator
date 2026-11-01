@@ -1,9 +1,3 @@
-"""G2 Measurement Calibration suite: 80 cases across body/heading/caption/table.
-
-Specification: ``docs/design/adaptive_delivery_prd.md`` §8.1 &
-``docs/guides/ADAPTIVE_DELIVERY_TECH_DESIGN.md`` §5.2.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -22,7 +16,6 @@ def test_all_80_calibration_cases_measure_cleanly() -> None:
     cases = get_calibration_corpus()
     assert len(cases) == 80
 
-    # Ensure equal 20 cases per role
     role_counts = {
         role: sum(1 for c in cases if c.role == role)
         for role in ("body", "heading", "caption", "table")
@@ -50,7 +43,6 @@ def test_all_80_calibration_cases_measure_cleanly() -> None:
 
 def test_batch_vs_single_measurement_parity() -> None:
     cases = get_calibration_corpus()
-    # Sample 2 from each role
     sample_indices = [0, 10, 20, 30, 40, 50, 60, 70]
     sample_cases = [cases[i] for i in sample_indices]
 

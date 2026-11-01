@@ -38,7 +38,6 @@ def test_compute_sentence_bleu() -> None:
     hyp_mismatch = ["totally", "different", "words", "here"]
     assert compute_sentence_bleu(ref, hyp_mismatch, smooth=False) == 0.0
 
-    # Short sentence with smoothing
     hyp_partial = ["the", "model", "runs"]
     bleu_partial = compute_sentence_bleu(ref, hyp_partial, smooth=True)
     assert 0.0 < bleu_partial < 1.0
@@ -54,24 +53,20 @@ def test_extract_key_entities() -> None:
 
 
 def test_check_polarity_conservation() -> None:
-    # Affirmative to affirmative
     ok, _ = check_polarity_conservation("The model converges.", "The model converges.")
     assert ok
 
-    # Negative to negative
     ok, _ = check_polarity_conservation(
         "The model does not converge.", "The model fails to converge."
     )
     assert ok
 
-    # Polarity flip (negative -> affirmative)
     ok, reason = check_polarity_conservation(
         "The model does not converge.", "The model converges quickly."
     )
     assert not ok
     assert "Polarity flip" in reason
 
-    # Polarity flip (affirmative -> negative)
     ok, reason = check_polarity_conservation(
         "The loss decreases monotonically.", "The loss does not decrease."
     )
@@ -175,15 +170,12 @@ def test_matrix_reporters() -> None:
         mqm_minor_count=1,
     )
 
-    # Markdown export
     md = render_markdown_matrix([summary])
     assert "en <-> zh" in md
     assert "80.0%" in md
 
-    # JSON export
     data = render_json_matrix([summary])
     assert len(data["matrix_summaries"]) == 1
     assert data["matrix_summaries"][0]["pass_rate"] == 80.0
 
-    # Terminal rendering smoke
     render_terminal_matrix([summary])

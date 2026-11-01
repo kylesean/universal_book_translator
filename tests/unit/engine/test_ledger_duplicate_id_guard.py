@@ -1,14 +1,3 @@
-"""A duplicate block id inside ONE append must fail closed, not overwrite.
-
-The ledger upserts with ``ON CONFLICT(job_id, block_id) DO UPDATE`` — the
-supported resume path re-writes known ids across appends. But a duplicate id
-*within a single append* means the extractor assigned one id to two different
-content, and the conflict clause silently kept whichever row was written last.
-That is exactly how a TOC renumbering bug shipped a PDF with no title page:
-the renumbered contents rows overwrote the front matter block-for-block, and
-no stage ever raised.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -66,14 +55,11 @@ def test_a_duplicate_id_in_one_append_raises_instead_of_overwriting(
     try:
         chapter_blocks = [
             _block("pdf_main#b0001", "the title page", 1),
-            # The bug shape: two different contents carrying the same id.
             _block("pdf_main#b0002", "the abstract", 2),
             _block("pdf_main#b0002", "1 Introduction (toc row)", 2),
         ]
         with pytest.raises(LedgerError, match="duplicate block id"):
             ledger.append_chapter("job", _chapter(chapter_blocks))
-        # And nothing from the poisoned batch was written: the failure happens
-        # inside the transaction, before any row lands.
         stats = ledger.get_job_stats("job")
         assert int(stats.get("total", 0)) == 0
     finally:
@@ -99,7 +85,6 @@ def test_distinct_ids_in_one_append_still_write(tmp_path: Path) -> None:
 
 
 def test_rewriting_a_known_id_across_appends_is_still_supported(tmp_path: Path) -> None:
-    """The resume path re-upserts ids from a previous append; it must keep working."""
     ledger = _ledger(tmp_path)
     try:
         ledger.append_chapter("job", _chapter([_block("pdf_main#b0001", "first", 1)]))
