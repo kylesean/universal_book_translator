@@ -116,7 +116,10 @@ def main() -> int:
     failed = 0
     for case_id, document in _load_cases(corpus_dir):
         if not document.exists():
+            # A missing document validates nothing: count it as a failure rather
+            # than letting an empty corpus report a green run.
             per_case.append({"id": case_id, "status": "missing"})
+            failed += 1
             continue
         try:
             native = read_pdf(document)

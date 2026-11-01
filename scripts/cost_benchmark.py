@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Real-LLM end-to-end cost benchmark for the UBT pipeline.
 
-Runs the full staged pipeline (``ubt.core.engine.plan.run_stages``) on a real
-book against any OpenAI-compatible
-API (default: DeepSeek) and reports per-stage call counts, latency, token
-usage, and estimated cost — plus the 0-token defense net's actual savings.
+Runs the full staged pipeline (``ubt.core.engine.pipeline.PipelineOrchestrator``)
+on a real book against any OpenAI-compatible API (default: DeepSeek) and
+reports per-stage call counts, latency, token usage, and estimated cost.
 
 Usage:
-    export DEEPSEEK_API_KEY=sk-...
+    export UBT_LLM_API_KEY=sk-...
     .venv/bin/python scripts/cost_benchmark.py path/to/book.md [options]
 
 Options:

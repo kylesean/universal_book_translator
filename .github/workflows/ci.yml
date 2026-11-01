@@ -99,9 +99,10 @@ jobs:
           uv run pytest -m fast -q -n auto --dist=loadscope
           --cov=ubt --cov-report=term:skip-covered --cov-fail-under=70
 
-      # The wheel force-includes the *prebuilt* SPA bundle at ubt/api/static
-      # (pyproject.toml), so a `pip install`ed release serves whatever was
-      # committed. Nothing else rebuilds it: without this step a web/src change
+      # The wheel ships the *prebuilt* SPA bundle at ubt/api/static (it is
+      # inside the `ubt` package that pyproject.toml includes), so a `pip
+      # install`ed release serves whatever was committed. Nothing else rebuilds
+      # it: without this step a web/src change
       # ships a stale bundle (the console contract tests skip when assets are
       # absent, and no Python test compares the bundle to its source). Rebuild
       # and fail if the committed bundle is not what the current source produces.
@@ -160,7 +161,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Install uv
         uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4

@@ -1,7 +1,7 @@
 """Tests for core layering and the ports boundary invariant.
 
 Ensures that ubt.core does not have forbidden reverse edges into adapters or
-compiler packages (ubt.pipeline, ubt.segment, ubt.translate), and that only
+compiler packages (ubt.segment, ubt.translate), and that only
 ubt/core/ports.py is permitted to hold lazy bridge forwarders.
 """
 
@@ -41,7 +41,10 @@ def test_core_has_no_module_level_compiler_or_adapter_edges() -> None:
 def test_only_ports_may_hold_lazy_bridge_imports_in_core() -> None:
     """Non-ports.py modules in core must not lazy-import adapters or compiler packages."""
     leaks: list[tuple[str, int, str]] = []
-    forbidden_targets = ("ubt.adapters", "ubt.pipeline", "ubt.segment", "ubt.translate")
+    forbidden_targets = (
+        "ubt.adapters",
+        *(mod for mod in dce.COMPILER if mod != dce._EXEMPT_LEAF),
+    )
 
     for f in sorted(_CORE_DIR.rglob("*.py")):
         if f.name == "ports.py":

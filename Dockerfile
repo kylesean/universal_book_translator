@@ -75,7 +75,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:$PATH" \
     # Standard UBT container storage layout
-    UBT_DATA_DIR="/data" \
     UBT_DB_DIR="/data/dbs" \
     UBT_OUTPUT_DIR="/data/output" \
     UBT_ALLOWED_DIRS="/data" \
@@ -88,7 +87,7 @@ WORKDIR /app
 # Install runtime dependencies:
 # 1. fonts-noto-cjk: Essential for Chinese/Japanese/Korean typography without tofu squares
 # 2. fontconfig: System font indexing and discovery (fc-list, fc-cache)
-# 3. libgl1, libglib2.0-0: Required by OpenCV, PyMuPDF, and image processing libraries
+# 3. libgl1, libglib2.0-0: Required by OpenCV when docling/rapidocr is installed
 # 4. curl, ca-certificates: Required for healthchecks and secure provider API egress
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-noto-cjk \

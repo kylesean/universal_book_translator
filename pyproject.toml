@@ -88,9 +88,9 @@ dependencies = [
     # and the fast test tier fail on a clean ``uv sync --extra dev``.
     "psutil>=5.9",
     # Last-resort charset detection for source files with neither a BOM nor a
-    # declared encoding (GBK/Shift-JIS Markdown, .txt). See adapters/base.py
-    # decode_markup; without it those bytes decode to U+FFFD before any sniffer
-    # can look at them.
+    # declared encoding (GBK/Shift-JIS Markdown, .txt). See
+    # ubt/core/text_decode.py decode_markup; without it those bytes decode to
+    # U+FFFD before any sniffer can look at them.
     "charset-normalizer>=3.3.0",
     "jieba>=0.42.1",
     # Hardened XML parsing for every untrusted document we read (TMX imports,

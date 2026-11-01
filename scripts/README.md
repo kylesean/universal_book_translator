@@ -71,8 +71,8 @@ It takes `--corpus corpus` (default) and exits 0 on pass.
 ## Utilities
 
 - `dump_compiler_edges.py` — read-only static check of the core↔compiler import
-  discipline: exit 1 on any module-level core→{segment, translate} edge or a
-  `core.engine ↔ pipeline` cycle.
+  discipline: exit 1 on any module-level core→{segment, translate} edge, an
+  engine→`ubt.render` edge, or a `core.engine ↔ render` cycle.
 - `build_console_assets.py` — builds the operator console (`web/`) and syncs the
   bundle into `ubt/api/static`, the copy the wheel ships and FastAPI serves.
 - `check_console_bundle.py` — the local mirror of CI's bundle check: rebuilds the
@@ -83,6 +83,16 @@ It takes `--corpus corpus` (default) and exits 0 on pass.
   line number is past its file's end. Run it after a refactor that moves code
   the docs cite. Comparison-repo and draft references are skipped by design.
 - `export_pdf_to_markdown.py` — one-off PDF → Markdown extraction helper.
+- `check_ocr_endpoint.py` — posts one rendered page to an OpenAI-compatible
+  vision OCR endpoint and reports whether it answers and returns usable text.
+- `compare_vlm_elements.py` — points a VLM reader and Docling at the same crop
+  and diffs their element reading (adoption evidence, not a gate).
+- `fetch_fonts.py` — fetches the digest-pinned redistributable font set;
+  `--update-digests` prints the sha256 to paste into `BUNDLED_FONTS`.
+- `generate_api_types.py` — exports the OpenAPI schema and regenerates
+  `web/src/api/generated-types.ts`.
+- `golden_baseline.py` — freezes/checks the delivery corpus' accepted metrics so
+  a change that regresses three documents is not mistaken for progress.
 
 ## Removed
 

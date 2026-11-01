@@ -19,8 +19,9 @@ Usage::
     uv run python scripts/knob_sweep.py --factor 1e6    # detectability probe
     uv run python scripts/knob_sweep.py --json band.json
 
-Exit status is always 0: this is a measurement, not a gate. Insensitivity is
-normal for most knobs today, and failing CI on it would only train people to
+Exit status is 0 for a completed measurement and 1 only when the harness itself
+could not run (no sweepable knob, or the control target failed). Insensitivity
+is normal for most knobs today, and failing CI on it would only train people to
 ignore the run.
 """
 
@@ -46,7 +47,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TARGETS = (
     "tests/unit/policy/test_adaptive_policy.py",
     "tests/unit/policy/test_layout_policy.py",
-    "tests/unit/render/test_layer_compositor.py",
+    "tests/unit/render/test_page_trim_wiring.py",
     "tests/unit/test_render_plan_fields.py",
     "tests/unit/test_router_circuit_breaker.py",
     "tests/unit/adapters/test_pdf_adapter_e2e.py",

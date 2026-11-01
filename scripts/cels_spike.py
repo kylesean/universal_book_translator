@@ -15,10 +15,10 @@ Usage::
         --pdf corpus/documents/chapter-3.pdf --pages 9 12 \
         --out-dir output/adaptive_delivery/g3
 
-Outputs, per page: ``p<N>_injected.pdf`` (tracking arm) and
-``p<N>_leading.pdf`` (``TL``/``T*`` twin), plus ``evidence.json`` and a summary
-on stdout. The raster diff compares the raw grayscale buffers row by row, so
-the spike runs with no optional dependency.
+Outputs, per page: ``p<N>_injected.pdf`` (tracking arm), ``p<N>_leading.pdf``
+(``TL``/``T*`` twin) and ``p<N>_scaled.pdf`` (Tz arm), plus ``evidence.json``
+and a summary on stdout. The raster diff compares the raw grayscale buffers row
+by row, so the spike runs with no optional dependency.
 """
 
 from __future__ import annotations

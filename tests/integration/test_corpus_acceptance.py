@@ -1,7 +1,7 @@
-"""The corpus acceptance harnesses, wired into the ``slow`` tier.
+"""The corpus acceptance harness, wired into the ``slow`` tier.
 
-``scripts/shadow_*.py`` are CLI acceptance harnesses the ``fast`` tier cannot
-carry: they read the real corpus PDFs (gitignored -- only the baselines under
+``scripts/shadow_reader.py`` is a CLI acceptance harness the ``fast`` tier cannot
+carry: it reads the real corpus PDFs (gitignored -- only the baselines under
 ``corpus/baseline/`` and the thresholds in ``corpus/cases.json`` are tracked)
 and run parser/render subprocesses. The tier rule parks them here: ``fast`` has
 to stay offline and cheap enough to run on every edit, so anything that spawns a
@@ -43,9 +43,8 @@ def _skip_without_corpus() -> None:
         # CI for as long as the corpus has been uncommitted.
         pytest.skip(
             "corpus/documents is not present (gitignored by design), so the "
-            "acceptance harness measured nothing. Fetch it with "
-            "`python scripts/fetch_semantic_gold.py` and run locally; CI cannot "
-            "cover this gate.",
+            "acceptance harness measured nothing. Place the benchmark PDFs named "
+            "by corpus/cases.json there and run locally; CI cannot cover this gate.",
             allow_module_level=False,
         )
 
@@ -72,7 +71,7 @@ def test_the_corpus_acceptance_harness_passes(script: str, extra: tuple[str, ...
 def test_the_ubt_verify_corpus_gate_passes() -> None:
     """``ubt verify --run``: the corpus README's full gate, in the suite.
 
-    The seven harnesses above check components; this one runs the *real
+    The harness above checks components; this one runs the *real
     pipeline* over every corpus document (dry-run provider, no API key) and
     reconciles each delivery contract against its ``cases.json`` thresholds —
     the ground truth the corpus was created for.
