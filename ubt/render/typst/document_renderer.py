@@ -847,17 +847,11 @@ TABLE_BASE_PT: float = 10.5
 #: characters measure 12.5 em = 131pt, not the 244pt the comment claimed), and
 #: it shrank healthy tables while missing a real overflow.
 #:
-#: A4 is 595.28pt wide. Academic single-column uses ``margin x: 2.5cm`` (453.55pt
-#: of text), the dual/两栏 layout uses ``x: 1.8cm`` and splits the 493.2pt text
-#: block into two columns (219.5pt each, less the 12pt column gutter), and the
-#: book template uses ``x: 2.2cm`` (470.55pt).
-_PAGE_TEXT_WIDTH_PT: dict[str, float] = {
-    "academic_1col": 453.55,
-    "academic_2col": 219.5,
-    "book": 470.55,
-}
-#: Fallback when the caller does not say which layout it is rendering into.
-_TABLE_DEFAULT_TEXT_WIDTH_PT = _PAGE_TEXT_WIDTH_PT["academic_1col"]
+#: A4 minus the academic single-column margins (``margin x: 2.5cm`` each side).
+#: Only a fallback for callers that do not pass ``content_width_pt``: the real
+#: width comes from ``TypstDocumentRenderer.text_width_pt``, which derives the
+#: block (and the per-column share) from the template actually in use.
+_TABLE_DEFAULT_TEXT_WIDTH_PT = 453.55
 #: Cell inset (5pt each side) plus a column gutter (0.7em) and rounding slack.
 _TABLE_CELL_CHROME_PT = 10.0
 _TABLE_GUTTER_EM = 0.7
@@ -866,10 +860,10 @@ _TABLE_GUTTER_EM = 0.7
 #: width is its content plus twice this.
 _TABLE_CELL_INSET_PT: float = 5.0
 
-#: Column count at which a table cannot fit a two-column page's text width at
-#: the document size, whatever its cell contents: 232pt / 10 columns leaves ~23pt
-#: per column, less than three Latin characters plus the gutter. Such a table is
-#: a whole-page exhibit and must be typeset smaller to survive.
+#: Column count at which a table stops fitting a two-column page's text width,
+#: whatever its cell contents: the per-column budget drops below three Latin
+#: characters plus the gutter. Such a table is a whole-page exhibit and must be
+#: typeset smaller to survive.
 _TABLE_MAX_COMFORTABLE_COLUMNS: int = 8
 
 
@@ -1261,9 +1255,7 @@ def render_table(
     # against the full text width rather than keeping the narrow column spec.
     if full_page:
         full_width_pt = (
-            full_page_width_pt
-            if full_page_width_pt is not None
-            else _PAGE_TEXT_WIDTH_PT.get("academic_1col", _TABLE_DEFAULT_TEXT_WIDTH_PT)
+            full_page_width_pt if full_page_width_pt is not None else _TABLE_DEFAULT_TEXT_WIDTH_PT
         )
         share_available_fp = max(
             full_width_pt - (columns - 1) * _TABLE_GUTTER_EM * TABLE_BASE_PT,
@@ -1877,14 +1869,15 @@ class TypstDocumentRenderer:
         """Width the tables will be typeset into, from the layout actually used.
 
         The verdict has to be taken against the real container: a table that
-        fits a two-column page's 219.5pt column and one that needs a 493pt
+        fits a two-column page's 236.75pt column and one that needs a 493.2pt
         page-wide block are different questions, and answering both with one
         constant is how the old heuristic mis-fired.
 
-        Derived from the page setup rather than from ``_PAGE_TEXT_WIDTH_PT``,
-        which describes A4 at the academic margins: a book set on 190.5mm has a
-        narrower text block, and sizing a table for the A4 block it is not on
-        puts the overflow into the artifact where only a reader sees it.
+        Derived from the page setup rather than from
+        ``_TABLE_DEFAULT_TEXT_WIDTH_PT``, which assumes A4 at the academic
+        margins: a book set on 190.5mm has a narrower text block, and sizing a
+        table for the A4 block it is not on puts the overflow into the artifact
+        where only a reader sees it.
         """
         return self.text_width_pt()
 

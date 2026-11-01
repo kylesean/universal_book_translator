@@ -194,7 +194,7 @@ def test_the_audit_spec_matches_the_page_that_is_emitted(
 def test_the_table_fit_verdict_uses_the_measured_text_block() -> None:
     """Tables are sized against the block they land in, not A4's.
 
-    ``_PAGE_TEXT_WIDTH_PT`` describes A4 at the academic margins; a 190.5mm book
+    ``_TABLE_DEFAULT_TEXT_WIDTH_PT`` assumes A4 at the academic margins; a 190.5mm book
     has a narrower block, so reading the constant there would size a table for a
     page it is not on and put the overflow in the artifact.
     """
