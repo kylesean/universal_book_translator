@@ -10,7 +10,9 @@ import pytest
 from ubt.adapters.pdf.docling_render import (
     _block_font_size,
     _facsimile_strip_plan,
+    _is_table_associated_text,
     _normalise_caption_label,
+    _preserve_table_exhibit_text,
 )
 from ubt.adapters.pdf.strip_pdf_text import (
     BoxRect,
@@ -18,7 +20,14 @@ from ubt.adapters.pdf.strip_pdf_text import (
     strip_stream_text,
     strip_text_streams,
 )
-from ubt.core.ir.models import BlockType, BookManifest, BoundingBox, IRBlock, make_element
+from ubt.core.ir.models import (
+    BlockProvenance,
+    BlockType,
+    BookManifest,
+    BoundingBox,
+    IRBlock,
+    make_element,
+)
 from ubt.model.span import BBox, PhysicalBox
 from ubt.render.flow import (
     approximate_measure,
@@ -552,6 +561,83 @@ def test_a_figure_caption_keeps_its_number() -> None:
         )
         == "图 7 | 生命周期分布。"
     )
+
+
+def _exhibit_block(
+    block_id: str,
+    text: str,
+    bbox: tuple[float, float, float, float],
+    *,
+    block_type: BlockType = BlockType.NARRATIVE,
+    parent_id: str | None = None,
+    target: str | None = None,
+) -> IRBlock:
+    provenance = (
+        BlockProvenance.model_validate({"caption_parent_id": parent_id})
+        if parent_id
+        else BlockProvenance()
+    )
+    block = IRBlock(
+        element=make_element(
+            id=block_id,
+            spine_index=1,
+            block_type=block_type,
+            source_text=text,
+            bbox=BoundingBox(page=1, x0=bbox[0], y0=bbox[1], x1=bbox[2], y1=bbox[3]),
+        ),
+        provenance=provenance,
+    )
+    block.target_text = target or text
+    return block
+
+
+def test_a_preserved_table_caption_and_legend_share_its_disposition() -> None:
+    table = _exhibit_block(
+        "tbl",
+        "| H | A | B |\n|---|---|---|\n| R | ? | ? |",
+        (70.0, 100.0, 520.0, 200.0),
+        block_type=BlockType.TABLE,
+    )
+    caption = _exhibit_block(
+        "caption",
+        "Table 1 | Typical workload fit.",
+        (70.0, 204.0, 360.0, 216.0),
+        parent_id=table.id,
+        target="表 1 | 典型工作负载适配。",
+    )
+    legend = _exhibit_block(
+        "legend",
+        "More ● = higher demand.",
+        (240.0, 85.0, 355.0, 96.0),
+        target="需求越高，需求就越大。",
+    )
+    prose = _exhibit_block(
+        "prose",
+        "This is a full body paragraph below the table that must remain translatable. " * 8,
+        (70.0, 55.0, 520.0, 80.0),
+        target="这是表格下方应继续翻译的正文段落。",
+    )
+    heading = _exhibit_block(
+        "heading",
+        "2.3. User-Visible Lifecycle",
+        (70.0, 80.0, 300.0, 95.0),
+        block_type=BlockType.HEADING,
+    )
+
+    assert _is_table_associated_text(caption, table)
+    assert _is_table_associated_text(legend, table)
+    assert not _is_table_associated_text(prose, table)
+    assert not _is_table_associated_text(heading, table)
+
+    changed = _preserve_table_exhibit_text(table, [caption, legend, prose, heading])
+
+    assert changed == ["caption", "legend"]
+    for block in (caption, legend):
+        assert block.skip_translate is True
+        assert block.target_text == block.source_text
+        assert block.policy_reason == "skip:table_exhibit_source_preserved"
+    assert prose.skip_translate is False
+    assert heading.skip_translate is False
 
 
 def test_a_caption_keeps_the_sources_left_alignment() -> None:

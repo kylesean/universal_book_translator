@@ -177,6 +177,84 @@ def _normalise_caption_label(source_text: str, target_text: str, *, target_lang:
     return f"{label} {number} |{rest}"
 
 
+#: A table note/legend is a short line, not a body paragraph. A prose block
+#: under a preserved table must stay translatable.
+_TABLE_NOTE_MAX_CHARS = 160
+_TABLE_NOTE_GAP_PT = 24.0
+
+
+def _is_table_associated_text(block: Any, table: Any) -> bool:
+    """Whether ``block`` is the caption or a short legend of ``table``.
+
+    A preserved table is an *exhibit*, not just a grid: its caption and its
+    ``More ● = higher demand``-style legend are the reader's key to the dots.
+    Preserving the grid and translating the legend produces the worst of both
+    (English table + wrong Chinese legend), so the whole exhibit shares one
+    disposition.
+
+    Captions are identified structurally (``caption_parent_id``) or by a
+    ``Table N`` label immediately above the grid. Legends are short blocks
+    directly below the grid, horizontally inside its measure. A full prose
+    paragraph below the table is not a legend and stays translatable.
+    """
+    if block.bbox is None or table.bbox is None or block.bbox.page != table.bbox.page:
+        return False
+    if block.block_type in (BlockType.TABLE, BlockType.IMAGE, BlockType.FORMULA, BlockType.HEADING):
+        return False
+
+    provenance = getattr(block, "provenance", None)
+    if getattr(provenance, "caption_parent_id", None) == table.id:
+        return True
+
+    text = (block.source_text or "").strip()
+    table_top = float(table.bbox.y1)
+    table_bottom = float(table.bbox.y0)
+    block_top = float(block.bbox.y1)
+    block_bottom = float(block.bbox.y0)
+
+    # Caption-like label immediately above the table.
+    gap_above = block_bottom - table_top
+    if -2.0 <= gap_above <= _TABLE_NOTE_GAP_PT and re.match(
+        r"^(?:table|表|표)\b", text, re.IGNORECASE
+    ):
+        return True
+
+    # Short legend/note immediately below the table, inside its measure.
+    gap_below = table_bottom - block_top
+    if gap_below < -2.0 or gap_below > _TABLE_NOTE_GAP_PT:
+        return False
+    if len(text) > _TABLE_NOTE_MAX_CHARS:
+        return False
+    block_width = float(block.bbox.x1) - float(block.bbox.x0)
+    if block_width <= 0.0:
+        return False
+    overlap = min(float(table.bbox.x1), float(block.bbox.x1)) - max(
+        float(table.bbox.x0), float(block.bbox.x0)
+    )
+    return overlap / block_width >= 0.5
+
+
+def _preserve_table_exhibit_text(table: Any, page_blocks: Sequence[Any]) -> list[str]:
+    """Keep a preserved table's caption and legend source-visible.
+
+    Returns the ids whose disposition changed. A caption/legend that is already
+    skipped is left as-is; a translated one is reset to its source text so the
+    artifact never mixes an English grid with a Chinese legend.
+    """
+    preserved: list[str] = []
+    for block in page_blocks:
+        if block.id == table.id or block.skip_translate:
+            continue
+        if not _is_table_associated_text(block, table):
+            continue
+        block.skip_translate = True
+        block.target_text = block.source_text
+        block.policy_translate = False
+        block.policy_reason = "skip:table_exhibit_source_preserved"
+        preserved.append(block.id)
+    return preserved
+
+
 @dataclass(frozen=True, slots=True)
 class _PageMetrics:
     """One page's measured body size and leading, in points."""
@@ -752,11 +830,14 @@ class DoclingRenderStrategy:
         # Preserving the source table whole is the content-graph axiom: an asset
         # is either losslessly reconstructed or left untouched.
         preserved_table_reasons: list[tuple[str, str]] = []
+        preserved_table_exhibit_text: dict[str, list[str]] = {}
         from ubt.render.table_compiler import table_is_reconstructable
 
         for table_block in blocks:
             if table_block.block_type is not BlockType.TABLE:
                 continue
+            table_page = table_block.bbox.page if table_block.bbox else 0
+            page_blocks = blocks_by_page.get(table_page, [])
             if table_block.skip_translate:
                 reason_prefix = "skip:table_unreconstructable("
                 policy_reason = table_block.policy_reason or ""
@@ -764,6 +845,9 @@ class DoclingRenderStrategy:
                     table_reason = policy_reason[len(reason_prefix) : -1]
                     render_flags.append((table_block.id, "table_source_preserved"))
                     preserved_table_reasons.append((table_block.id, table_reason))
+                    exhibit_ids = _preserve_table_exhibit_text(table_block, page_blocks)
+                    if exhibit_ids:
+                        preserved_table_exhibit_text[table_block.id] = exhibit_ids
                 continue
             table_ok, table_reason = table_is_reconstructable(
                 table_block.source_text or "", delivered_text(table_block) or ""
@@ -776,10 +860,18 @@ class DoclingRenderStrategy:
             table_block.policy_reason = f"skip:table_unreconstructable({table_reason})"
             render_flags.append((table_block.id, "table_source_preserved"))
             preserved_table_reasons.append((table_block.id, table_reason))
+            exhibit_ids = _preserve_table_exhibit_text(table_block, page_blocks)
+            if exhibit_ids:
+                preserved_table_exhibit_text[table_block.id] = exhibit_ids
         if preserved_table_reasons:
             manifest.metadata["table_source_preserved"] = [
                 {"block_id": block_id, "reason": reason}
                 for block_id, reason in preserved_table_reasons
+            ]
+        if preserved_table_exhibit_text:
+            manifest.metadata["table_exhibit_source_preserved"] = [
+                {"table_id": table_id, "block_ids": ids}
+                for table_id, ids in preserved_table_exhibit_text.items()
             ]
 
         # 2. Decide what the background layer keeps and what the translation

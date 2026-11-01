@@ -1959,7 +1959,6 @@ async def run_export_stage(
             "emit_secondary_mode": render.emit_secondary_mode,
         },
     )
-    translations = await asyncio.to_thread(_delivery_translations, final_blocks)
     event = await create_event_fn(
         EventType.RENDER_STARTED,
         actual_job_id,
@@ -1982,6 +1981,14 @@ async def run_export_stage(
     # memory only.
     await _apply_render_skip_ledger_pass(ctx, adapter, final_blocks, persist=owning_run)
     _check_completion_ratio(actual_job_id, final_blocks, min_completion_ratio)
+
+    # The renderer is allowed to change a block's disposition (a preserved
+    # table's caption/legend is kept source-visible, a caption label is
+    # normalized, a formula degrades). Build the placed-target map *after*
+    # that decision: building it before the render made the artifact check
+    # demand the pre-render translation of a block the renderer had just
+    # decided to keep in the source (measured: caption pdf_main#b0038).
+    translations: dict[str, str] = await asyncio.to_thread(_delivery_translations, final_blocks)
 
     # Clean up any stale quality/metrics reports from prior runs so that
     # the persisted report files always reflect the current render.
