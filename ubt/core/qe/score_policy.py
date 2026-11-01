@@ -68,7 +68,7 @@ __all__ = [
 
 #: Lowest bar a block may be released at, whatever the operator configures.
 #: A threshold below this would ship drafts the deterministic gates rejected:
-#: the twelve defect classes sit at or below 0.70, so 0.5 keeps a real failure
+#: the eleven defect classes sit at or below 0.70, so 0.5 keeps a real failure
 #: out of the delivery even when someone sets ``qe_threshold = 0.2``.
 SHIPPABLE_FLOOR = 0.5
 
