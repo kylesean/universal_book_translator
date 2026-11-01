@@ -184,7 +184,6 @@ class BookPatchEngine:
         }
         base_by_id: dict[str, IRBlock] = {b.id: b for b in base_blocks}
 
-        # Apply transformations per chapter
         patched_chapters: list[ChapterIR] = []
         for ch in revised_chapters:
             new_blocks: list[IRBlock] = []

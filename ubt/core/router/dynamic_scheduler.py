@@ -324,7 +324,6 @@ class DynamicParetoScheduler:
             elif effective_tier == ComplexityTier.COMPLEX:
                 effective_tier = ComplexityTier.EXTREME
 
-        # Apply routing policy
         if self.policy == DynamicRoutingPolicy.QUALITY_FIRST:
             if effective_tier in (ComplexityTier.COMPLEX, ComplexityTier.EXTREME):
                 assigned_model = self.flagship_model

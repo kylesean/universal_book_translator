@@ -109,8 +109,8 @@ def looks_like_debris(text: str) -> bool:
 # --------------------------------------------------------------------------- #
 # Markdown content rules
 # --------------------------------------------------------------------------- #
-# Shared by the native Markdown reader and the Markdown adapter, so a line
-# cannot be a heading to one and prose to the other (single source of truth: one owner).
+# Shared by the native Markdown reader and the Markdown adapter: a line must not
+# be a heading to one and prose to the other.
 _MD_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 _TABLE_DELIMITER = re.compile(r"^\|?(\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?$")
 _MD_LIST_ITEM = re.compile(r"^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$")

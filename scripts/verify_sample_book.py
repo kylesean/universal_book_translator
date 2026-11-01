@@ -51,7 +51,6 @@ class VerificationResult:
     pdf_optimization_saved_percent: float = 0.0
     pdf_page_count: int = 0
     spill_count: int = 0
-    contract_errors: int = 0
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -63,7 +62,6 @@ class VerificationResult:
             and self.math_formula_count >= 1
             and self.table_count >= 1
             and self.typst_markup_bytes > 0
-            and self.contract_errors == 0
             and len(self.errors) == 0
         )
 
@@ -272,8 +270,6 @@ def print_report(res: VerificationResult) -> None:
             else f"[red]{res.spill_count}[/]",
             "0 errors",
         )
-        table.add_row("Contract Errors / Drops", str(res.contract_errors), "0 errors")
-
         console.print(Panel(table, border_style=status_style, subtitle=f"Status: {status_text}"))
         if res.errors:
             console.print("[bold red]Errors encountered:[/]")

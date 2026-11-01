@@ -42,18 +42,9 @@ NS = "urn:oasis:names:tc:xliff:document:2.1"
 
 #: KERNEL state -> XLIFF state (distinct values, so the map is invertible).
 #:
-#: ``NEEDS_REVIEW`` and ``BLOCKED`` look similar and are opposites in practice,
-#: which is why they need separate states rather than sharing ``translated``:
-#:
-#: - ``NEEDS_REVIEW`` -- a real draft shipped, and a human should post-edit it.
-#: - ``BLOCKED`` -- no translation shipped; the target carries the source under
-#:   a quarantine marker, so the unit still needs translating.
-#:
-#: Both used to collapse: ``needs_human`` was emitted as ``translated`` (so a
-#: reviewer could not find it among a thousand clean blocks) while
-#: ``blocked_human`` was emitted as ``needs-review-translation`` (implying a
-#: translation existed to review when none had shipped). The routing was right
-#: and the interchange format threw the routing away.
+#: ``NEEDS_REVIEW`` shipped a draft and needs post-editing; ``BLOCKED`` shipped
+#: the source under a quarantine marker and still needs translating. Collapsing
+#: either into ``translated`` hides real work from a reviewer.
 _STATE_OUT: dict[SegmentState, str] = {
     SegmentState.NEW: "initial",
     SegmentState.TRANSLATED: "translated",

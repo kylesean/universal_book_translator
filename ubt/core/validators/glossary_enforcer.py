@@ -297,7 +297,6 @@ class DeterministicGlossaryEnforcer:
         self.source_lang = source_lang.lower()
         self.enforce_source_leak_replacement = enforce_source_leak_replacement
 
-        # Build replacement mapping: pattern -> (canonical_translation, rule_source, check_left, check_right)
         # Also collect approved target variants to prevent overwriting correct inflections.
         self._rules: dict[str, tuple[str, str, bool, bool]] = {}
         self._approved_target_forms: set[str] = set()

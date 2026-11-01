@@ -253,7 +253,6 @@ class CoreferenceResolver:
                 )
             )
 
-        # Sort mentions by start_char
         mentions.sort(key=lambda x: x.start_char)
         return mentions
 

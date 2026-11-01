@@ -136,7 +136,7 @@ def compute_pareto_frontier(
         else:
             dominated_list.append(pt)
 
-    # Sort frontier by cost ascending
+    # Cheapest first; ties go to the higher score so the frontier is stable.
     frontier_list.sort(key=lambda p: (p.cost_per_10k_words, -p.quality_score))
 
     # 2. Compute marginal return (dQuality / dCost) along the frontier

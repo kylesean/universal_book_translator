@@ -257,10 +257,8 @@ class MQMSpanAnnotator:
         if not spans:
             return draft_text, []
 
-        # Sort spans ascending by start_pos to build annotated string
         spans.sort(key=lambda s: s.start_pos)
 
-        # Build annotated draft
         pieces: list[str] = []
         curr_idx = 0
         for span in spans:
@@ -303,8 +301,8 @@ class SpanRepairSplicer:
     ) -> tuple[str, bool]:
         """Splice targeted repairs into original_draft.
 
-        Returns:
-            (repaired_text, is_in_place_spliced)
+        The boolean says whether at least one span was spliced in place, so the
+        caller can tell "no correction matched" from "repaired to the same text".
         """
         final_match = self._FINAL_TRANSLATION_PATTERN.search(model_output)
 
@@ -333,7 +331,7 @@ class SpanRepairSplicer:
 
         # If at least one span correction was found:
         if corrections:
-            # Sort spans by start_pos descending to perform safe in-place replacement by offset
+            # Right-to-left so a replacement cannot shift the offsets after it.
             sorted_spans = sorted(spans, key=lambda s: s.start_pos, reverse=True)
             result = original_draft
             spliced_any = False

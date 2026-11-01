@@ -271,34 +271,10 @@ def _sample_pages(total: int, wanted: int = VISUAL_SAMPLE_PAGES) -> list[int]:
 
 
 def _render_page_png(pdf: Path, page_no: int, resolution: int = 110) -> bytes | None:
-    """Rasterise one page via pdftoppm (the same tool the manual reviews use)."""
-    import subprocess
-    import tempfile
+    """Rasterise one page with the same pdf_oxide path the visual gate uses."""
+    from ubt.adapters.pdf import oxide_render
 
-    with tempfile.TemporaryDirectory(prefix="ubt-baseline-") as tmp:
-        stem = Path(tmp) / "page"
-        try:
-            subprocess.run(
-                [
-                    "pdftoppm",
-                    "-png",
-                    "-r",
-                    str(resolution),
-                    "-f",
-                    str(page_no),
-                    "-l",
-                    str(page_no),
-                    str(pdf),
-                    str(stem),
-                ],
-                check=True,
-                capture_output=True,
-                timeout=120,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return None
-        produced = sorted(Path(tmp).glob("page*.png"))
-        return produced[0].read_bytes() if produced else None
+    return oxide_render.render_page_png(pdf, page_no, dpi=resolution)
 
 
 def _ssim(a_png: bytes, b_png: bytes) -> float | None:

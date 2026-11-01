@@ -273,14 +273,11 @@ def _literal_pattern(surface: str, case_insensitive: bool) -> re.Pattern[str]:
 class _LiteralSourceIndex:
     """Literal candidate positions for many surfaces over one source text.
 
-    One Aho-Corasick pass over the raw text and one over its simple-folded
-    form replace the per-surface ``finditer`` scan that
-    :func:`detect_term_drift` used to pay once per glossary term per block —
-    O(G×L) collapses to O(L + candidates), measured 1.17 ms → 0.39 ms per
-    source-side scan at G=200 surfaces over a 1.3k-character block; the win
-    grows with the glossary and with the share of terms the block does not
-    carry (each carried term's flexible-pattern target scan stays on the old
-    path by design).
+    One Aho-Corasick pass over the raw text and one over its simple-folded form
+    replace the per-surface ``finditer`` scan, so O(G×L) collapses to
+    O(L + candidates). The win grows with the glossary and with the share of
+    terms the block does not carry (each carried term's flexible-pattern target
+    scan stays on the old path by design).
 
     The candidate set is a **superset** of what
     :func:`~ubt.core.validators.glossary_enforcer.find_term_occurrences`
