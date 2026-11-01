@@ -563,13 +563,14 @@ def classify_defect(flags: Iterable[str], *, score: float | None, threshold: flo
     ``PASS``
         Nothing deterministic failed and the score clears ``threshold``.
     ``DETERMINISTIC_DEFECT``
-        A named invariant failed (or the score is below ``threshold`` with no
-        semantic-only explanation). Automatic repair is legitimate here because
+        A named invariant failed. Automatic repair is legitimate here because
         the same check that rejected the draft will judge the repair.
     ``SEMANTIC_DOUBT``
-        The only reason to doubt this block is a probabilistic judge. Automatic
-        repair is *not* legitimate: the judge has its own noise, so a rewrite
-        cannot be shown to have helped. Route to a human queue.
+        The only reason to doubt this block is a probabilistic judgement — a
+        semantic-only flag, or a score below ``threshold`` with no deterministic
+        marker. Automatic repair is *not* legitimate: the judge has its own
+        noise, so a rewrite cannot be shown to have helped. Route to a human
+        queue.
 
     The distinction is the whole point of the simplification. Repairing a
     dropped number is verifiable; repairing "the judge thought this read

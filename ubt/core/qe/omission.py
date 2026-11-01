@@ -3,7 +3,7 @@
 Three deterministic (0 LLM tokens) omission signals computed per block:
 
 1. **Source/target sentence-count ratio** — deleting a whole sentence keeps the
-   character length ratio inside the profile band (zh: 0.2–3.0), so the
+   character length ratio inside the band ``get_pair_policy`` defines, so the
    historical length gate is blind to it. Sentences are counted identically on
    both sides (terminator-punctuation splits, decimals excluded), and the gate
    only arms when the source has enough sentences to be statistically

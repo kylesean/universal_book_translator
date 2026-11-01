@@ -174,9 +174,10 @@ def target_missing_math_delimiters(source: str, target: str) -> bool:
     signals (``Ag 0``, ``F th,SI``, ``psi_pert`` residue, debris) yet the
     target has no ``$...$`` span for the renderer to typeset in math mode.
     Fires only when the target actually contains ASCII runs worth
-    delimiting — pure-CJK targets take the omission path instead.
-    Conservative by design: score >= 2 required, so ordinary prose with
-    one or two stray single letters never trips it. The source must also
+    delimiting — pure-CJK targets take the omission path instead. A source
+    that already carries ``$...$`` spans returns True here (the renderer must
+    typeset them); an undelimited source must score >= 2, so ordinary prose
+    with one or two stray single letters never trips it. The source must also
     carry at least one concrete candidate (``_MATH_CANDIDATE_RE``), so
     isolated-letter debris with no math to redelimit stays quiet.
     Programming identifiers (snake_case like create_task, code_change)

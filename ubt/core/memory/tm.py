@@ -41,6 +41,11 @@ from typing import Any
 from rapidfuzz import fuzz, process
 
 from ubt.core.fs_perms import ensure_private_dir, restrict_sqlite_family
+
+# Prompt topology version baked into the TM exact-hit identity. Derived from the
+# prompt layout's own literals, so a layout change moves the identity without a
+# hand-bumped string. Re-exported because bible/draft/tm_writeback import it from
+# here.
 from ubt.core.router.prompts import PROMPT_VERSION as PROMPT_VERSION
 
 logger = logging.getLogger(__name__)
@@ -133,13 +138,6 @@ FTS_PREFILTER_MIN_POOL = 1_000_000
 FTS_PREFILTER_LIMIT = 200
 _FTS_QUERY_MAX_TERMS = 64
 _FTS_SCHEMA_VERSION = 1
-
-# Prompt topology version baked into the TM exact-hit identity. The value is
-# DERIVED from the prompt layout's own literals (see
-# ``ubt.core.router.prompts.PROMPT_VERSION``), so changing a layout constant
-# changes the identity automatically instead of relying on someone remembering
-# to bump a hand-written string. Re-exported here because this module's callers
-# (bible, draft, tm_writeback) have always imported it from here.
 
 
 def compute_tm_context(

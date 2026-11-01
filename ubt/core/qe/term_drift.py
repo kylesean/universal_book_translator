@@ -422,8 +422,8 @@ def detect_term_drift(
     "source carries it, target does not render it canonically".
 
     ``source_protected`` / ``target_protected`` let a caller match hundreds of
-    terms against one block without re-deriving that block's nine structural
-    spans per term; each is derived once here when omitted.
+    terms against one block without re-deriving that block's protected spans per
+    term; each is derived once here when omitted.
     """
     terms = _coerce_terms(glossary)
     if source_protected is None:

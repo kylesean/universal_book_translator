@@ -870,7 +870,7 @@ def markdown_grid_shape(text: str) -> list[int]:
     and a 3-column target is a mismatch.
 
     A single pipe row with no separator is still not a grid (see
-    :func:`_is_pipe_prose`): ``A | B | C`` in prose must not be read as a table.
+    :func:`grid_columns`): ``A | B | C`` in prose must not be read as a table.
     One row **plus** a GFM delimiter row (``|---|---|``) is.
     """
     lines = text.splitlines()
@@ -1429,10 +1429,10 @@ class FastPassFilter:
         num_advisories = tuple(num_res.details.get("numeric_advisories", ()))
 
         # 5. Length ratio check (thresholds are per-language-pair policy).
-        # Measured on *informative* content: CJK glyphs carry roughly one
-        # English word each, so a Latin->CJK translation compresses raw
-        # character counts two to three-fold and the raw ratio floors every
-        # short block — the arXiv 2101.03961 run quarantined the correct
+        # Measured on *informative* content: each Han glyph counts as ~2.2
+        # source characters (about half an English word), so a Latin->CJK
+        # translation compresses raw character counts two to three-fold and the
+        # raw ratio floors every short block — the arXiv 2101.03961 run quarantined the correct
         # heading "C Encouraging Exploration Across Experts" -> "鼓励跨专家
         # 探索" at ratio 0.17 while its real defect (the dropped letter C)
         # went unmentioned. Counting each CJK char as its typical English-word

@@ -47,7 +47,9 @@ def resolve_adaptive_policy(
     deterministic glossary, but run the same frozen-math block pipeline, so
     math masking and bounded context are never traded away for speed.
     """
-    del manifest  # kept in the signature: policy is a function of the document
+    # The manifest is not an input today; keep the parameter so the call surface
+    # stays stable while the policy grows.
+    del manifest
     is_short = route_decision.mode == "short"
     # ``deterministic_glossary`` is the export-time literal term enforcement
     # layer. Short-route by default; ``deterministic_glossary_long_route``
