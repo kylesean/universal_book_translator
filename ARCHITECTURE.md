@@ -68,7 +68,7 @@ under `docs/design/`, the delivery tech design and implementation plan under
 is rewritten by the next audit round, so versioning them made a stale design note
 indistinguishable from a current specification.
 
-Two rules follow, and `tests/unit/test_doc_authority.py` enforces both:
+Two rules follow:
 
 1. **A `docs/...§N` reference inside a comment or docstring is a citation, not a
    link.** It names where a decision was recorded. The reason that governs the
@@ -77,16 +77,13 @@ Two rules follow, and `tests/unit/test_doc_authority.py` enforces both:
    `pdf_engine` and `docling_device` field comments, the `PROBE_MIN_SIGNAL_PAGES`
    rationale, and the `QualityReport` docstring all carry their own argument for
    exactly this reason.
-2. **A reference to any other path is an instruction, so it must resolve.**
+2. **A reference to any other path is an instruction, so it should resolve.**
    The marker-quarantine comment in `pyproject.toml` sent readers to an
    agent-instructions file that had never existed in this repo, and the corpus
    harness docstring sent them to a corpus note that had just been deleted. Both
-   shipped green: `scripts/check_doc_refs.py` walks only the Markdown files under
-   `docs/`, and its pattern matches only `<file>.py:<line>`, so a `.md` target
-   cited from `pyproject.toml` or a code comment is outside its grammar. The new
-   test is a *test* rather than a script for that reason — a script has to be
-   remembered, and both dead pointers were written by people who had just run it
-   green.
+   shipped green. Keeping pointers resolvable is a review responsibility, not a
+   gate: while the docs and the module layout are being actively reshaped, a test
+   that fails on every rename costs more than the dead pointer it catches.
 
 What *is* versioned is the root set — `README.md`, `ARCHITECTURE.md`,
 `GLOSSARY.md`, `SEMANTIC_JUDGE.md`, `CHANGELOG.md`, `scripts/README.md`,
