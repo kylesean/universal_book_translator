@@ -963,8 +963,8 @@ _FONT_CONFIGS: dict[str, FontConfig] = {
 
 #: Script-level fallbacks for languages with no explicit entry above.
 #:
-#: ``_FONT_CONFIGS`` names 18 languages, but the engine accepts any target the
-#: provider can translate. Falling straight to the Latin default meant a Thai,
+#: ``_FONT_CONFIGS`` covers only a fixed set of languages, but the engine accepts
+#: any target the provider can translate. Falling straight to the Latin default meant a Thai,
 #: Hindi, Greek or Vietnamese book was typeset with a Latin-only stack and
 #: shipped tofu with no warning — the failure mode this table exists to bound.
 #: A script's fallback is still an approximation (it is why explicit entries
