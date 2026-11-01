@@ -269,10 +269,8 @@ def academic_preamble(
 
     is_dual = columns == 2
     col_str = "  columns: 2," if is_dual else "  columns: 1,"
-    # The venue's margins, not the book channel's measure. Kept as named
-    # constants so the layout audit (``PageLayoutSpec.academic_*``) and this
-    # template cannot drift apart: they used to spell the same 1.8/2.5cm twice,
-    # and a change in one would leave the other reporting spills that were not.
+    # The venue's margins, read from the constants above (shared with
+    # ``PageLayoutSpec.academic_*`` so audit and template cannot drift).
     margin_x_cm = ACADEMIC_DUAL_MARGIN_X_CM if is_dual else ACADEMIC_SINGLE_MARGIN_X_CM
     margin_y_cm = ACADEMIC_DUAL_MARGIN_Y_CM if is_dual else ACADEMIC_SINGLE_MARGIN_Y_CM
     margin_str = f"  margin: (x: {margin_x_cm:.1f}cm, y: {margin_y_cm:.1f}cm),"

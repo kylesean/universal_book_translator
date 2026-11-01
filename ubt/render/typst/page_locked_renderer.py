@@ -639,7 +639,7 @@ def make_formula_cropper(
 
 
 class PageLockedReflowRenderer:
-    """Renders single or multi-page documents under the strict 1:1 page-locked reflow invariant."""
+    """Renders under the 1:1 page-locked reflow invariant, expanding only where declared."""
 
     def __init__(
         self,
@@ -649,7 +649,7 @@ class PageLockedReflowRenderer:
     ) -> None:
         self.font_stack = tuple(font_stack) if font_stack else DEFAULT_FONT_STACK
         #: The Typst compile gate for a transpiled math body — see
-        #: ``TypstDocumentRenderer.math_gate``. A body the transpiler accepts but
+        #: ``TypstDocumentRenderer._math_gate``. A body the transpiler accepts but
         #: Typst rejects (``frac(a, )``) fails the *whole* document at one compile,
         #: so an L2 page cannot emit a converted formula without this verdict.
         #: ``None`` skips the gate, which is what a caller without a probe wants.

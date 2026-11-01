@@ -75,9 +75,9 @@ class BundledFont:
 #: a subset limited to the unified ideographs plus punctuation, so the total is
 #: tens of megabytes rather than the 25 MB-per-file upstream ``.ttc``.
 #:
-#: **Digests are placeholders until the first fetch records them**; the fetch
-#: script refuses to write a file whose digest does not match, and a mismatch
-#: is how a corrupted or substituted download is caught. Regenerate with
+#: **Each digest pins the exact bytes this build ships**; the fetch script
+#: refuses to write a file whose digest does not match, and a mismatch is how a
+#: corrupted or substituted download is caught. Regenerate with
 #: ``python scripts/fetch_fonts.py --update-digests``.
 BUNDLED_FONTS: tuple[BundledFont, ...] = (
     BundledFont(
@@ -87,10 +87,10 @@ BUNDLED_FONTS: tuple[BundledFont, ...] = (
         license="OFL-1.1",
         # `hant` too: the traditional ideographs live in the same unified block
         # the subset covers (measured against a traditional-only sample).
-        # Every CJK character is here (kana 96.9%, hangul 100%, ideographs
-        # 100%), but the *regional forms* belong to the JP/KR cuts below: an
-        # SC 直 does not look like a Japanese 直, so those scripts are not
-        # claimed here even though the glyphs exist.
+        # Ideographs are complete (100% of U+4E00-U+9FFF); kana and hangul are
+        # absent (0%), so Japanese/Korean need the regional cuts below. Those
+        # exist for a second reason too: shared ideographs are drawn
+        # differently per region, so an SC 直 does not look like a Japanese 直.
         scripts=("hans", "hant", "cjk"),
     ),
     BundledFont(

@@ -1,9 +1,10 @@
 """``ubt.render`` -- lowering delivered blocks to secondary views.
 
 :func:`compose_html` and :func:`compose_epub` lower the delivered blocks to
-semantic HTML and EPUB 3 views. The PDF path no longer lowers onto the source
-page: ``ubt/render/typst/document_renderer.py`` rebuilds the document and lets
-Typst lay it out.
+semantic HTML and EPUB 3 views. The PDF path has two shapes: the readable
+renderer (``ubt/render/typst/document_renderer.py``) rebuilds the document and
+lets Typst lay it out, while the facsimile renderer draws the translation onto
+a text-stripped copy of the source page.
 """
 
 from __future__ import annotations

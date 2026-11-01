@@ -75,9 +75,8 @@ from typing import Any
 #: purpose: including them would make every book fail its style check.
 BODY_ROLE = "body"
 
-#: Kept in lockstep with ``delivery_contract._STYLE_DRIFT_PT``. Duplicating the
-#: constant is intentional — the planner must not be able to widen the contract's
-#: tolerance by editing one number here.
+#: Single source of truth: ``delivery_contract._STYLE_DRIFT_PT`` binds directly
+#: to this constant, so widening it here widens the contract too.
 DRIFT_TOLERANCE_PT = 0.5
 
 #: Body limits: an absolute floor plus a relative one, whichever is higher. The

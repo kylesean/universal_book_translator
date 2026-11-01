@@ -6,9 +6,10 @@ eventual Typst probe, HarfBuzz path, and tests all agree about what a
 measurement *is*. It deliberately contains no estimator: a delegate must
 return a real measurement, or this scaffold is not wired in.
 
-The real Typst-backed service belongs to Phase 1 and is not part of this
-scaffold; ``CachedMeasurementService`` is usable now with a fake delegate in
-unit tests and with the Typst probe once it lands.
+The real Typst-backed service lives in
+``ubt.adapters.pdf.typst_measurement.TypstMeasurementService`` and has no
+production caller yet; ``CachedMeasurementService`` is usable now with a fake
+delegate in unit tests.
 """
 
 from __future__ import annotations

@@ -242,10 +242,10 @@ _CAPTION_RE = re.compile(
 #:
 #: The native width is emitted as a *percentage of the container*, not as an
 #: absolute ``pt`` length. Absolute points ignore the column: on the two-column
-#: academic template the body column measures 228.98pt (470.55pt text width,
-#: 1.2em gutter), so a 290pt figure ran ~61pt past its column and over the text
-#: beside it — Typst does not clip, it draws. Measuring against A4 text width
-#: instead (the old assumption of ~470pt) is what hid the overflow.
+#: academic template the body column measures 236.75pt (493.2pt text width,
+#: 4% gutter), so a 290pt figure ran past its column and over the text beside
+#: it — Typst does not clip, it draws. Measuring against A4 text width instead
+#: (the old assumption of ~470pt) is what hid the overflow.
 _FIGURE_NATIVE_MAX_PT = 300.0
 
 #: A *source-side* reference width, the denominator for turning a source figure's
