@@ -244,11 +244,10 @@ def to_xliff(
         file_note.text = xml_safe(job_id)
     for segment in segments:
         unit = ET.SubElement(file_el, "unit", {"id": xml_safe(segment.id)})
-        seg_job = getattr(segment, "job_id", "") or job_id
-        if seg_job:
+        if job_id:
             notes_el = ET.SubElement(unit, "notes")
             note_el = ET.SubElement(notes_el, "note", {"category": "ubt-job-id"})
-            note_el.text = xml_safe(seg_job)
+            note_el.text = xml_safe(job_id)
         # What the QA verdict was, next to the text it applies to. The state
         # says a block needs attention; these say why, which is the difference
         # between a queue a reviewer can work and a list of opaque ids.

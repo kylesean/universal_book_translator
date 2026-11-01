@@ -208,22 +208,6 @@ def _target_glyphs(paragraph: Sequence[Any], en_per_zh: float) -> float:
     return sum(len(line.text) for line in paragraph) / en_per_zh
 
 
-def _needed_lines(paragraph: Sequence[Any], size_pt: float, en_per_zh: float) -> int:
-    """Target lines this paragraph occupies at ``size_pt``.
-
-    A Han glyph is one em wide, so the line holds ``width / size`` glyphs. The
-    estimate is deliberately a plain division rather than a real typesetter
-    measurement: it only has to be monotone in ``size_pt`` for the binary search
-    to be correct, and it errs conservative because it ignores that justification
-    can squeeze an extra glyph into a line.
-    """
-    width = max(line.rect[2] - line.rect[0] for line in paragraph)
-    if width <= 0:
-        return len(paragraph)
-    per_line = max(1.0, float(width) / size_pt)
-    return max(1, math.ceil(_target_glyphs(paragraph, en_per_zh) / per_line))
-
-
 def _leading(lines: Sequence[Any], source_size: float) -> float:
     """The page's body leading, from its most common line-to-line pitch."""
     ordered = sorted(lines, key=lambda line: -line.rect[1])

@@ -15,28 +15,20 @@ from __future__ import annotations
 import logging
 import shutil
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.fs_perms import restrict_dir_to_owner
 from ubt.render.typst.page_locked_renderer import (
+    DEFAULT_FONT_STACK,
     PageLockedPageSpec,
     PageLockedReflowRenderer,
     leading_gap_em,
 )
 
 logger = logging.getLogger(__name__)
-
-#: ``par(leading:)`` conversion lives in ``page_locked_renderer`` so both
-#: renderers share one measurement; importing it keeps the two from drifting.
-DEFAULT_FONT_STACK: tuple[str, ...] = (
-    "Noto Serif CJK SC",
-    "Source Han Serif SC",
-    "Songti SC",
-    "SimSun",
-)
 
 #: Font weights the renderer will pass through to Typst verbatim. Anything else
 #: falls back to the block's own bold/regular classification rather than being
@@ -95,13 +87,9 @@ class FacsimilePageSpec:
     leading_em: float
     tracking_em: float = 0.0
     stretch_pct: float = 100.0
-    placements: list[FacsimileBlockPlacement] = None  # type: ignore[assignment]
+    placements: list[FacsimileBlockPlacement] = field(default_factory=list)
     tier: str = "L1"  # "L1" (canvas) or "L2" (page-locked reflow)
     l2_spec: PageLockedPageSpec | None = None
-
-    def __post_init__(self) -> None:
-        if self.placements is None:
-            self.placements = []
 
 
 def _normalise_weight(font_weight: str, *, is_heading: bool, bold: bool) -> str:

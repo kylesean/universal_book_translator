@@ -24,11 +24,11 @@ from ubt.core.qe.defect_taxonomy import ECHO_MARKER
 from ubt.core.qe.fast_pass import (
     REHEARSAL_MARKER,
     FastPassFilter,
-    _detect_line_repetition_loop,
     _math_spans_equivalent,
     _max_repeated_line_run,
     _missing_heading_label,
     _normalize_math_body,
+    _repeated_line_runs,
     _strip_verbatim_term,
     grid_columns,
     is_near_verbatim_echo,
@@ -290,21 +290,21 @@ def test_different_math_content_is_not_equivalent() -> None:
 
 def test_a_run_of_identical_lines_is_a_loop() -> None:
     loop = "This is a repeated hallucination line.\n" * 4
-    assert _detect_line_repetition_loop(loop) == "This is a repeated hallucination line."
+    assert _repeated_line_runs(loop)[0][0] == "This is a repeated hallucination line."
 
 
 def test_non_contiguous_repeats_are_not_a_loop() -> None:
-    assert _detect_line_repetition_loop("alpha\nbeta\ngamma") is None
+    assert _repeated_line_runs("alpha\nbeta\ngamma") == []
 
 
 def test_a_blank_line_resets_the_run() -> None:
     # Legitimate stanzas separated by whitespace stay exempt.
-    assert _detect_line_repetition_loop("same\nsame\n\nsame\nsame") is None
+    assert _repeated_line_runs("same\nsame\n\nsame\nsame") == []
 
 
 def test_a_run_without_word_content_is_not_a_loop() -> None:
     # Sparse numeric table rows like "| 0 | 0 |" must not trip the detector.
-    assert _detect_line_repetition_loop("| 0 | 0 |\n| 0 | 0 |\n| 0 | 0 |\n| 0 | 0 |") is None
+    assert _repeated_line_runs("| 0 | 0 |\n| 0 | 0 |\n| 0 | 0 |\n| 0 | 0 |") == []
 
 
 # --------------------------------------------------------------------------- #
@@ -398,13 +398,13 @@ def test_verbatim_term_strip_keeps_letter_boundaries() -> None:
 
 
 def test_repetition_detectors_agree() -> None:
-    # _max_repeated_line_run and loop detector agree on repetitive runs
+    # _max_repeated_line_run and the raw run list agree on repetitive runs
     loop = "This is a repeated hallucination line.\n" * 4
     assert _max_repeated_line_run(loop) >= 4
-    assert _detect_line_repetition_loop(loop) is not None
+    assert _repeated_line_runs(loop) != []
     plain = "alpha\nbeta\ngamma\n"
     assert _max_repeated_line_run(plain) < 2
-    assert _detect_line_repetition_loop(plain) is None
+    assert _repeated_line_runs(plain) == []
 
 
 def test_a_blank_separated_repetition_loop_is_rejected() -> None:

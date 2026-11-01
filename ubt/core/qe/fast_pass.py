@@ -301,12 +301,6 @@ def _repeated_line_runs(text: str) -> list[tuple[str, int]]:
     return runs
 
 
-def _detect_line_repetition_loop(text: str) -> str | None:
-    """Return the first newline-separated hallucination-loop line, or None."""
-    runs = _repeated_line_runs(text)
-    return runs[0][0] if runs else None
-
-
 def _max_repeated_line_run(text: str) -> int:
     """Length of the longest repeated-line run in ``text`` (0 when none).
 

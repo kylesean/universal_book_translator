@@ -379,11 +379,6 @@ class RoundTripVerifier:
         # Preserves numbers, protected symbols, and entities
         numbers = _NUMBER_RE.findall(mt)
 
-        # In offline rehearsal / deterministic mock tests:
-        # If target text was produced by mock (e.g. prefix '（译）'), strip prefix
-        if mt.startswith("（译）"):
-            return mt.replace("（译）", "").strip()
-
         # If numbers match source exactly, build aligned synthetic projection
         src_nums = _NUMBER_RE.findall(src)
         if numbers == src_nums and numbers:
