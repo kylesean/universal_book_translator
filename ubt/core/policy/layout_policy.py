@@ -89,18 +89,15 @@ NON_TEXT_BLOCK_TYPES = frozenset({BlockType.FORMULA, BlockType.CODE, BlockType.I
 NON_PROSE_FLOWS = frozenset({FlowID.FOOTNOTE, FlowID.CAPTION, FlowID.TABLE_GRID})
 CAPTION_RE = re.compile(r"^(FIG\.|Fig\.|Figure|Table|TAB\.|图|表)\s*[A-Za-z0-9]", re.IGNORECASE)
 FOOTER_PATTERNS = re.compile(r"copyright|©|doi\.org|rights reserved|Elsevier", re.IGNORECASE)
-# Chrome bands: short text hugging the page edges (points + chars).
+# Chrome bands: text hugging the page edges, in points.
 HEADER_BAND_PT = 45.0
 FOOTER_BAND_PT = 55.0
-BAND_TEXT_MAX_LEN = 30
 
 # ---------------------------------------------------------------------------
 # Pairing punctuation (docling_adapter prose tails)
 # ---------------------------------------------------------------------------
 PAIR_TERMINAL_PUNCT = frozenset({".", "。", "!", "！", "?", "？", ":", "：", ";", "；"})
 
-
-CJK_PUNCT_CHARS = frozenset("，。、；：？！「」『』（）【】《》〈〉…—·")
 # Measure words / units that license a preceding Chinese numeral run as a real
 # number rather than as part of a word. Consumed by
 # ubt/core/validators/consistency.py, which must normalise '为两百元' -> '为200元'
@@ -228,12 +225,8 @@ PDF_PATH_OPS = frozenset({"m", "l", "c", "v", "y", "h", "re"})
 PDF_TEXT_OPS = frozenset({"Tj", "TJ", "'", '"'})
 
 # ---------------------------------------------------------------------------
-# Background sampling (raster heuristics, rigid scan covers)
+# Width-metrics font
 # ---------------------------------------------------------------------------
-BG_SAMPLE_SCALE = 2.0
-# Only all-channels-dark pixels are glyph strokes; saturated backgrounds
-# (banner blue has R=0) must survive.
-STROKE_BLACK_CUTOFF = 64
 # Width-metrics font only: fontTools' TTCollection reads it, so every entry must
 # be a .ttc (a bare .ttf/.otf makes TTCollection raise, not degrade). The face is
 # never painted — the page renders in whatever the resolved stack says — so any
@@ -342,16 +335,8 @@ URL_DOI_RE = re.compile(r"^(https?://\S+|doi:\s*\S+)$", re.IGNORECASE)
 ISBN_DIGITS_RE = re.compile(r"^(97[89])?\d{9}[0-9xX]$", re.IGNORECASE)
 
 # ---------------------------------------------------------------------------
-# Continuation scoring (pair join/break weights)
+# Continuation vocabulary
 # ---------------------------------------------------------------------------
-JOIN_LOWER_START = 3
-JOIN_HYPHEN_TAIL = 4
-JOIN_CROSS_NO_TERMINAL = 2
-BREAK_TERMINAL = 4
-BREAK_CHAPTER_NUMBER = 6
-BREAK_UPPER_START = 1
-JOIN_THRESHOLD = 4
-BREAK_THRESHOLD = 4
 CONJUNCTIONS = frozenset(
     {
         "and",
@@ -460,9 +445,7 @@ CALIBRATION: dict[str, KnobMeta] = {
     "FOOTER_PATTERNS": KnobMeta(S, "Elsevier chrome observed in chapter-1"),
     "HEADER_BAND_PT": KnobMeta(S, "45pt band clears chapter-1 running heads"),
     "FOOTER_BAND_PT": KnobMeta(S, "55pt band clears chapter-1 footers"),
-    "BAND_TEXT_MAX_LEN": KnobMeta(S, "30-char cut separates chrome from body"),
     "PAIR_TERMINAL_PUNCT": KnobMeta(P, "terminal set, behaviour-tested"),
-    "CJK_PUNCT_CHARS": KnobMeta(P, "punctuation inventory, behaviour-tested"),
     "ROW_MERGE_GAP_PT": KnobMeta(
         H,
         "24pt row-glue cap, set between word gaps and gutters; sensitivity sweep: 16–36pt "
@@ -478,8 +461,6 @@ CALIBRATION: dict[str, KnobMeta] = {
     "PDF_PATH_OPS": KnobMeta(P, "PDF spec path-construction operators"),
     "PDF_TEXT_OPS": KnobMeta(P, "same set for profiler volume counting"),
     # Sampling: raster heuristics, rigid scan covers.
-    "BG_SAMPLE_SCALE": KnobMeta(S, "2x raster balances noise vs cost"),
-    "STROKE_BLACK_CUTOFF": KnobMeta(S, "64 fixed the banner-blue nuke (was 128)"),
     "CJK_FONT_CANDIDATES": KnobMeta(
         P,
         "environment config, UBT_CJK_FONT overrides; supports cross-platform fonts "
@@ -532,15 +513,6 @@ CALIBRATION: dict[str, KnobMeta] = {
     "SHORT_LABEL_RE": KnobMeta(P, "label pattern, behaviour-tested"),
     "URL_DOI_RE": KnobMeta(P, "identifier patterns, behaviour-tested"),
     "ISBN_DIGITS_RE": KnobMeta(P, "ISBN-10/13 digit rule, behaviour-tested"),
-    # Continuation: single-doc weights.
-    "JOIN_LOWER_START": KnobMeta(S, "weight 3 from KV断栏 cases"),
-    "JOIN_HYPHEN_TAIL": KnobMeta(S, "weight 4, hyphenation is near-certain"),
-    "JOIN_CROSS_NO_TERMINAL": KnobMeta(S, "weight 2, weak cross-page signal"),
-    "BREAK_TERMINAL": KnobMeta(S, "weight 4 balances hyphen 4"),
-    "BREAK_CHAPTER_NUMBER": KnobMeta(S, "weight 6, section numbers never continue"),
-    "BREAK_UPPER_START": KnobMeta(S, "weight 1, weak English signal"),
-    "JOIN_THRESHOLD": KnobMeta(S, "4 + margin-2 rule from KV cases"),
-    "BREAK_THRESHOLD": KnobMeta(S, "4, checked after join"),
     "CONJUNCTIONS": KnobMeta(P, "closed-class word list, behaviour-tested"),
     "CONT_SENTENCE_END_RE": KnobMeta(P, "terminal set, behaviour-tested"),
     "CONT_CHAPTER_NUMBER_RE": KnobMeta(P, "numbering pattern, behaviour-tested"),
@@ -618,19 +590,12 @@ def is_non_prose_degradable(
 
 __all__ = [
     "ASCII_WORD_RE",
-    "BAND_TEXT_MAX_LEN",
-    "BG_SAMPLE_SCALE",
     "BOOK_TEXT_DIR_MODE",
     "BOOK_TEXT_FILE_MODE",
-    "BREAK_CHAPTER_NUMBER",
-    "BREAK_TERMINAL",
-    "BREAK_THRESHOLD",
-    "BREAK_UPPER_START",
     "BYTE_WORD_RE",
     "CALIBRATION",
     "CAPTION_RE",
     "CJK_FONT_CANDIDATES",
-    "CJK_PUNCT_CHARS",
     "CN_MEASURE_WORDS",
     "CONJUNCTIONS",
     "CONTROL_RE",
@@ -654,10 +619,6 @@ __all__ = [
     "ISBN_DIGITS_RE",
     "is_non_prose_degradable",
     "is_fatal_leak",
-    "JOIN_CROSS_NO_TERMINAL",
-    "JOIN_HYPHEN_TAIL",
-    "JOIN_LOWER_START",
-    "JOIN_THRESHOLD",
     "MCP_MAX_RUNNING_JOBS",
     "NON_PROSE_FLOWS",
     "NON_TEXT_BLOCK_TYPES",
@@ -688,7 +649,6 @@ __all__ = [
     "SHORT_LABEL_MAX_LEN",
     "SHORT_LABEL_RE",
     "SINGLE_TOKEN_LINE_RE",
-    "STROKE_BLACK_CUTOFF",
     "UNICODE_WORD_RE",
     "URL_DOI_RE",
     "VLM_CIRCUIT_FAIL_PCT",
