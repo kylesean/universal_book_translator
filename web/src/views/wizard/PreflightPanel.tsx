@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { AlertTriangle, ArrowRight, Loader2 } from 'lucide-react'
+import { AlertTriangle, ArrowRight, FileText, Loader2 } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -316,8 +316,13 @@ export function PreflightPanel({
             ) : null}
           </div>
         ) : (
-          <div className="py-2">
-            <p className="text-sm font-medium text-foreground">{t.wizard.waitingFile}</p>
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/70 py-10 px-4 text-center">
+            <div className="flex size-10 items-center justify-center rounded-full bg-muted/60 text-muted-foreground">
+              <FileText className="size-5" />
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground max-w-[240px] leading-relaxed">
+              {t.wizard.waitingFile}
+            </p>
           </div>
         )}
       </div>

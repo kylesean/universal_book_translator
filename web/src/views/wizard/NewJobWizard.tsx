@@ -856,11 +856,11 @@ export function NewJobWizard() {
         filePath.trim() && 'pb-24',
       )}
     >
-      <header className="border-b border-border/80 pb-5">
-        <h1 className="text-2xl font-semibold tracking-[-0.025em] text-foreground">
+      <header className="border-b border-border/70 pb-4">
+        <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
           {t.wizard.title}
         </h1>
-        <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+        <p className="mt-1 max-w-2xl text-xs sm:text-sm text-muted-foreground">
           {t.wizard.subtitle}
         </p>
       </header>
@@ -1077,9 +1077,6 @@ export function NewJobWizard() {
             }
           >
             <div className="space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                {t.wizard.basicsTitle}
-              </p>
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 <div className="space-y-1.5">
                   <FieldLabel htmlFor="wizard-source-lang">{t.wizard.sourceLang}</FieldLabel>
@@ -1190,39 +1187,37 @@ export function NewJobWizard() {
             </RadioGroup>
 
             {deliveryMode === 'faithful' ? (
-              <div className="mt-3 rounded-xl bg-primary/[0.035] p-4">
-                <h3 className="text-sm font-semibold text-foreground">
-                  {t.wizard.faithfulShowcaseTitle}
-                </h3>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  {t.wizard.faithfulShowcaseDesc}
-                </p>
-                <p className="mt-2 text-xs leading-relaxed text-foreground/80">
-                  {[
-                    t.wizard.faithfulFeatureStretch,
-                    t.wizard.faithfulFeatureBooktabs,
-                    t.wizard.faithfulFeatureFlow,
-                    t.wizard.faithfulFeatureAnchor,
-                  ].join(t.wizard.listSeparator)}
-                </p>
+              <div className="mt-3 rounded-xl border border-primary/20 bg-primary/[0.02] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {t.wizard.faithfulShowcaseTitle}
+                  </h3>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      t.wizard.faithfulFeatureStretch,
+                      t.wizard.faithfulFeatureBooktabs,
+                      t.wizard.faithfulFeatureFlow,
+                      t.wizard.faithfulFeatureAnchor,
+                    ].map((feat) => (
+                      <Badge key={feat} variant="secondary" className="text-[11px] font-normal">
+                        {feat}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
 
-                <div className="mt-4 grid gap-4 border-t border-primary/10 pt-4 sm:grid-cols-2">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <Label
-                          htmlFor="inline-allow-degrade"
-                          className="cursor-pointer text-sm font-medium text-foreground"
-                        >
-                          {t.wizard.allowDegrade}
-                        </Label>
-                        <InfoTip label={t.wizard.allowDegrade}>
-                          {t.wizard.allowDegradeHelp}
-                        </InfoTip>
-                      </div>
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                <div className="mt-3 grid gap-3 border-t border-border/60 pt-3 sm:grid-cols-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Label
+                        htmlFor="inline-allow-degrade"
+                        className="cursor-pointer text-xs font-medium text-foreground truncate"
+                      >
+                        {t.wizard.allowDegrade}
+                      </Label>
+                      <InfoTip label={t.wizard.allowDegrade}>
                         {t.wizard.allowDegradeHelp}
-                      </p>
+                      </InfoTip>
                     </div>
                     <Switch
                       id="inline-allow-degrade"
@@ -1231,20 +1226,15 @@ export function NewJobWizard() {
                     />
                   </div>
 
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <Label
-                          htmlFor="inline-enable-cels"
-                          className="cursor-pointer text-sm font-medium text-foreground"
-                        >
-                          {t.wizard.enableCels}
-                        </Label>
-                        <InfoTip label={t.wizard.enableCels}>{t.wizard.enableCelsHelp}</InfoTip>
-                      </div>
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                        {t.wizard.enableCelsHelp}
-                      </p>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Label
+                        htmlFor="inline-enable-cels"
+                        className="cursor-pointer text-xs font-medium text-foreground truncate"
+                      >
+                        {t.wizard.enableCels}
+                      </Label>
+                      <InfoTip label={t.wizard.enableCels}>{t.wizard.enableCelsHelp}</InfoTip>
                     </div>
                     <Switch
                       id="inline-enable-cels"
@@ -1255,8 +1245,8 @@ export function NewJobWizard() {
                 </div>
 
                 {preset !== 'high_fidelity' ? (
-                  <div className="mt-4 flex flex-col gap-2 rounded-lg bg-amber-500/10 p-3 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between dark:text-amber-100">
-                    <span className="leading-relaxed">
+                  <div className="mt-3 flex items-center justify-between gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
+                    <span className="leading-tight">
                       {t.wizard.faithfulPresetRecommendation}
                     </span>
                     <Button
@@ -1267,7 +1257,7 @@ export function NewJobWizard() {
                         hasUserSelectedPresetRef.current = true
                         setPreset('high_fidelity')
                       }}
-                      className="h-auto shrink-0 p-0 text-xs font-semibold text-amber-900 dark:text-amber-100"
+                      className="h-auto shrink-0 p-0 text-xs font-semibold text-amber-900 underline underline-offset-2 dark:text-amber-100"
                     >
                       {t.wizard.faithfulPresetSwitchAction}
                     </Button>
@@ -1278,20 +1268,16 @@ export function NewJobWizard() {
           </WizardSection>
 
           {/* Step 3: Quality presets */}
-          <WizardSection
-            step={3}
-            title={t.wizard.stepQuality}
-            meta={<span>{t.wizard.presets}</span>}
-          >
+          <WizardSection step={3} title={t.wizard.stepQuality}>
             <RadioGroup
               value={preset ?? undefined}
               onValueChange={(value) => {
                 hasUserSelectedPresetRef.current = true
                 setPreset(value as typeof preset)
               }}
-              className="overflow-hidden rounded-xl border border-border bg-card"
+              className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3"
             >
-              {presetOptions.map((p, index) => {
+              {presetOptions.map((p) => {
                 const isSelected = preset === p.id
                 const isRecommended =
                   assessment?.route?.recommended_preset?.toLowerCase() === p.id
@@ -1300,38 +1286,41 @@ export function NewJobWizard() {
                     key={p.id}
                     htmlFor={`preset-${p.id}`}
                     className={cn(
-                      'relative flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors',
-                      index < presetOptions.length - 1 && 'border-b border-border/70',
+                      'relative flex cursor-pointer flex-col justify-between rounded-xl border p-3.5 transition-colors',
                       isSelected
-                        ? 'bg-primary/[0.045]'
-                        : 'hover:bg-muted/35',
+                        ? 'border-primary/45 bg-primary/[0.045] shadow-xs'
+                        : 'border-border bg-card hover:border-border-hover hover:bg-muted/20',
                     )}
                   >
-                    <RadioGroupItem
-                      id={`preset-${p.id}`}
-                      value={p.id}
-                      className="mt-0.5 shrink-0"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-semibold text-foreground">{p.name}</span>
-                        <Badge variant="secondary" className="font-normal">
-                          {p.badge}
-                        </Badge>
-                        {isRecommended && (
+                    <div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <RadioGroupItem
+                            id={`preset-${p.id}`}
+                            value={p.id}
+                            className="shrink-0"
+                          />
+                          <span className="text-sm font-semibold text-foreground truncate">
+                            {p.name}
+                          </span>
+                        </div>
+                        {isRecommended ? (
                           <Badge
                             variant="outline"
-                            className="border-emerald-600/25 bg-emerald-500/10 font-normal text-emerald-700 dark:text-emerald-400"
+                            className="shrink-0 border-emerald-600/25 bg-emerald-500/10 text-[11px] font-normal text-emerald-700 dark:text-emerald-400"
                           >
                             {t.wizard.engineRecommended}
                           </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="shrink-0 text-[11px] font-normal">
+                            {p.badge}
+                          </Badge>
                         )}
                       </div>
-                      <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground sm:line-clamp-1">
+                      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                         {p.desc}
                       </p>
                     </div>
-                    <InfoTip label={p.name}>{p.detail}</InfoTip>
                   </label>
                 )
               })}
@@ -1340,100 +1329,102 @@ export function NewJobWizard() {
 
           {/* Step 4: Budget */}
           <WizardSection step={4} title={t.wizard.stepBudget}>
-            <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="rounded-xl border border-border bg-card p-3.5 sm:p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground">{t.wizard.budgetCeiling}</p>
-                  <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
-                    {t.wizard.budgetHelp}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-foreground">{t.wizard.budgetCeiling}</p>
+                    <span className="text-xs text-muted-foreground">
+                      · {budgetUsd === null ? t.wizard.budgetUnlimited : t.wizard.budgetHelp}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-2.5">
-                  <Label
-                    htmlFor="unlimited-toggle"
-                    className="cursor-pointer select-none text-xs font-normal text-muted-foreground"
-                  >
-                    {t.wizard.budgetUnlimitedToggle}
-                  </Label>
-                  <Switch
-                    id="unlimited-toggle"
-                    checked={budgetUsd === null}
-                    onCheckedChange={(checked) => {
-                      if (checked) {
-                        setBudgetUsd(null)
-                        setBudgetInput('')
-                      } else {
-                        const seeded = 10
-                        setBudgetInput(String(seeded))
-                        setBudgetUsd(seeded)
-                      }
-                    }}
-                  />
-                </div>
-              </div>
 
-              <div className="mt-4 border-t border-border/70 pt-4">
-                {budgetUsd === null ? (
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
-                      {t.wizard.budgetUnlimited}
-                    </p>
-                    {quoteCost !== null && quoteCost > 0 ? (
+                <div className="flex shrink-0 items-center gap-3">
+                  {budgetUsd === null ? (
+                    <div className="flex items-center gap-2">
+                      {quoteCost !== null && quoteCost > 0 ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const value = Math.ceil(quoteCost * 1.5 * 100) / 100
+                            setBudgetInput(value.toFixed(2))
+                            setBudgetUsd(value)
+                          }}
+                          className="h-8 font-mono text-xs"
+                        >
+                          {t.wizard.budgetSuggest.replace(
+                            '{usd}',
+                            (Math.ceil(quoteCost * 1.5 * 100) / 100).toFixed(2),
+                          )}
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         onClick={() => {
-                          const value = Math.ceil(quoteCost * 1.5 * 100) / 100
-                          setBudgetInput(value.toFixed(2))
-                          setBudgetUsd(value)
+                          const seeded = 10
+                          setBudgetInput(String(seeded))
+                          setBudgetUsd(seeded)
                         }}
-                        className="h-8 shrink-0 font-mono text-xs"
+                        className="h-8 text-xs font-medium"
                       >
-                        {t.wizard.budgetSuggest.replace(
-                          '{usd}',
-                          (Math.ceil(quoteCost * 1.5 * 100) / 100).toFixed(2),
-                        )}
+                        设置限额
                       </Button>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="max-w-md space-y-2">
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono text-sm text-muted-foreground">
-                        $
-                      </span>
-                      <Input
-                        type="number"
-                        min="0.01"
-                        step="0.01"
-                        value={budgetInput}
-                        onChange={(event) => {
-                          const raw = event.target.value
-                          setBudgetInput(raw)
-                          const parsed = parseFloat(raw)
-                          setBudgetUsd(Number.isFinite(parsed) && parsed > 0 ? parsed : null)
-                        }}
-                        placeholder={t.wizard.budgetPlaceholder}
-                        className={cn(
-                          'pl-7',
-                          budgetInvalid &&
-                            'border-destructive focus-visible:ring-destructive',
-                        )}
-                      />
                     </div>
-                    {budgetInvalid ? (
-                      <p className="text-xs text-destructive">{t.wizard.budgetInvalid}</p>
-                    ) : assessment?.cost.total_cost_usd != null &&
-                      assessment.cost.total_cost_usd > budgetUsd ? (
-                      <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-400">
-                        {t.wizard.budgetExceedsQuote} ($
-                        {assessment.cost.total_cost_usd.toFixed(2)})
-                      </p>
-                    ) : null}
-                  </div>
-                )}
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className="relative w-28">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono text-xs text-muted-foreground">
+                          $
+                        </span>
+                        <Input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={budgetInput}
+                          onChange={(event) => {
+                            const raw = event.target.value
+                            setBudgetInput(raw)
+                            const parsed = parseFloat(raw)
+                            setBudgetUsd(Number.isFinite(parsed) && parsed > 0 ? parsed : null)
+                          }}
+                          placeholder={t.wizard.budgetPlaceholder}
+                          className={cn(
+                            'h-8 pl-6 pr-2 text-xs font-mono',
+                            budgetInvalid && 'border-destructive focus-visible:ring-destructive',
+                          )}
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setBudgetUsd(null)
+                          setBudgetInput('')
+                        }}
+                        className="h-8 text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        {t.wizard.budgetUnlimitedToggle}
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </div>
+
+              {budgetInvalid ? (
+                <p className="mt-2 text-xs text-destructive">{t.wizard.budgetInvalid}</p>
+              ) : budgetUsd !== null && assessment?.cost.total_cost_usd != null &&
+                assessment.cost.total_cost_usd > budgetUsd ? (
+                <p className="mt-2 text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+                  {t.wizard.budgetExceedsQuote} ($
+                  {assessment.cost.total_cost_usd.toFixed(2)})
+                </p>
+              ) : null}
             </div>
           </WizardSection>
 
@@ -1477,10 +1468,7 @@ export function NewJobWizard() {
                     <TabsTrigger value="run">{t.wizard.groupExec}</TabsTrigger>
                   </TabsList>
 
-                  <TabsContent value="delivery" className="space-y-4 pt-2">
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      {t.wizard.advancedDeliveryHelp}
-                    </p>
+                  <TabsContent value="delivery" className="space-y-4 pt-3">
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-1.5">
                         <div className="flex items-center gap-1.5">
@@ -1556,10 +1544,7 @@ export function NewJobWizard() {
                     </div>
                   </TabsContent>
 
-                  <TabsContent value="content" className="space-y-4 pt-2">
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      {t.wizard.advancedContentHelp}
-                    </p>
+                  <TabsContent value="content" className="space-y-4 pt-3">
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-1.5">
                         <div className="flex items-center gap-1.5">
@@ -1687,10 +1672,7 @@ export function NewJobWizard() {
                     </div>
                   </TabsContent>
 
-                  <TabsContent value="scope" className="space-y-4 pt-2">
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      {t.wizard.advancedScopeHelp}
-                    </p>
+                  <TabsContent value="scope" className="space-y-4 pt-3">
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between">
@@ -1760,10 +1742,7 @@ export function NewJobWizard() {
                     )}
                   </TabsContent>
 
-                  <TabsContent value="run" className="space-y-4 pt-2">
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      {t.wizard.advancedExecHelp}
-                    </p>
+                  <TabsContent value="run" className="space-y-4 pt-3">
                     <div className="grid gap-4 sm:grid-cols-2">
                       {declaredProviders.length > 0 ? (
                         <div className="space-y-1.5">
