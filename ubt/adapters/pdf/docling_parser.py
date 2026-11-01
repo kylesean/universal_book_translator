@@ -202,8 +202,10 @@ def configure_hf_environment(*, enrich: bool = False) -> None:
     1. If required models are already cached locally, set HF_HUB_OFFLINE=1 so
        snapshot_download does not hang for 135s * 3 attempting HEAD requests
        to huggingface.co without an international proxy.
-    2. If models need downloading and no proxy is configured, set
-       HF_ENDPOINT='https://hf-mirror.com' to avoid network dropouts/hangs.
+    2. If models need downloading, no proxy is configured and the operator set
+       ``UBT_ALLOW_HF_MIRROR=1``, set HF_ENDPOINT='https://hf-mirror.com' to
+       avoid network dropouts/hangs. Otherwise log the opt-in and leave the
+       endpoint alone (uploading to a third-party mirror is an egress decision).
     """
     hf_home = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub"
     required_repos = [
@@ -2238,7 +2240,7 @@ def _driver_can_transcribe_scans(driver: Any) -> bool:
     :func:`ubt.adapters.pdf.vlm.anchor.anchor_transcript` fails closed on such a
     transcript in recognition mode, so it can *proofread* a page that already
     has a text layer but cannot transcribe a true scan. A measured-box engine
-    a measured-box engine can.
+    can.
     """
     return bool(getattr(driver, "measured_boxes", True))
 
@@ -2389,7 +2391,8 @@ def vlm_fallback_missing_pages(
     ``UBT_OCR_FALLBACK`` env for direct callers):
     - ``off`` (default): untouched blocks, 0 behavior change.
     - ``missing``: only transcribe 0-block pages (scanned/textless).
-    - ``weak``: also upgrade pages with high formula debris (>= 0.15) or sparse text to VLM proofread.
+    - ``weak``: also upgrade pages with high formula debris (at or above
+      ``PROBE_FORMULA_SHARE``) or sparse text to VLM proofread.
     - ``all``: upgrade all non-editable_text pages to VLM proofread/recognition.
     """
     from ubt.adapters.pdf.vlm.transcribe import (

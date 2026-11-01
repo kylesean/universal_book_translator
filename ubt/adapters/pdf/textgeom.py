@@ -834,7 +834,7 @@ _OVERREAD_X_TOL_PT = 0.05
 #: 4 of 20 documents in a local corpus). A glyph row joins on the inter-glyph
 #: gap instead, so letters inside a word touch and only real spaces separate.
 #: The threshold is low because pdfium often mixes granularities in one row
-#: (``a``, ``L``, ``oopCD r``, ``eads``): a third of the fragments being single
+#: (``a``, ``L``, ``oopCD r``, ``eads``): a fifth of the fragments being single
 #: characters is already a glyph row.
 _GLYPH_ROW_SINGLE_SHARE = 0.2
 #: Inter-glyph gap as a fraction of the row's median glyph height. Below it the

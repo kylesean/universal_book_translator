@@ -188,8 +188,7 @@ class PDFiumAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
 
     Shares the Docling-mainline render stack (publication Typst, bilingual
     per-block pairing) via the render mixin — only extraction is replaced with
-    geometric text harvesting, which cannot represent tables, figures or
-    formulas.
+    the native reader, which cannot represent tables, figures or formulas.
     """
 
     def __init__(self, font_family: str | None = None) -> None:
@@ -245,10 +244,9 @@ class PDFiumAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
     def _extract_with_pdfium(
         self, path: Path, page_range: tuple[int, int] | None = None
     ) -> list[IRBlock]:
-        """Geometric line harvesting with column-aware reading order."""
-        # No analyze cache here on purpose: ``analysis_cache`` is assigned only
-        # by ``DoclingPDFAdapter.apply_config`` (the base is a no-op), so the
-        # old ``store=self.analysis_cache`` was always ``None`` — it promised a
-        # cache path that never existed. The function keeps its ``store``
-        # parameter for direct callers.
+        """Typed extraction through the native reader."""
+        # No analyze cache here: ``analysis_cache`` is assigned only by
+        # ``DoclingPDFAdapter.apply_config`` (the base is a no-op), so passing
+        # ``store=`` would always be ``None`` and promise a cache path that does
+        # not exist. Direct callers of the free function can still pass one.
         return extract_blocks_with_pdfium(path, page_range)

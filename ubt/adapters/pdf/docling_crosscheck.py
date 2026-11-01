@@ -20,7 +20,7 @@ provenance, and the renderer then prints the source text (see
 ``document_renderer._block_text``), so the reader sees the original rather than
 a mistranslation of a hallucinated box.
 
-The same physical lines are the witness for three text-content repairs, each a
+The same physical lines are the witness for four text-content repairs, each a
 pure function applied to a block only when the witness proves the change, so a
 repair that cannot prove itself leaves the block byte-identical:
 
@@ -30,7 +30,9 @@ repair that cannot prove itself leaves the block byte-identical:
   to the end back to the front ("Guidance Space 3.1" -> "3.1 Guidance Space");
 - :func:`repair_inline_math_with_lines` puts back the inline math Docling pulls
   out of a sentence and piles at the paragraph end ("let be the initial state
-  ... : h 0 h k k f R h R" -> "let h0 be the initial state ... :").
+  ... : h 0 h k k f R h R" -> "let h0 be the initial state ... :");
+- :func:`repair_math_symbols_with_lines` restores the TeX glyphs Docling maps to
+  look-alikes ("=" to "∅", "+" to "⊕") from pdfium's own character stream.
 """
 
 from __future__ import annotations

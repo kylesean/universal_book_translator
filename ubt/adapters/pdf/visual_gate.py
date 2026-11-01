@@ -35,12 +35,12 @@ Design (warn-only, ROI-first):
   case.
 
 The gate never blocks export: findings are warnings written to
-``{stem}_visual_report.json`` next to the quality report. Two exceptions:
-the opt-in blocking gate (``blocking_gate_tripped``) — short docs
-with CRITICAL findings refuse export when explicitly enabled, off by default,
-see ``UBTConfig.visual_blocking_gate_enabled`` — and an unreadable rendered
-PDF, which fails closed even when the blocking gate is off because the
-exported artifact itself cannot be read.
+``{stem}_visual_report.json`` next to the quality report. The exceptions are
+the opt-in blocking gate (``blocking_gate_tripped``) — short docs with CRITICAL
+findings refuse export when explicitly enabled, off by default, see
+``UBTConfig.visual_blocking_gate_enabled`` — an unreadable rendered PDF, which
+fails closed even when the blocking gate is off because the exported artifact
+itself cannot be read, and the fail-closed codes listed next.
 
 A handful of codes bypass the opt-in switch *and* the page window, because
 each one means the artifact is not a delivery at all rather than a style
@@ -915,7 +915,7 @@ def blocks_out_of_bounds_findings(
 def adaptive_sample_budget(total_pages: int, configured: int) -> int:
     """Size-aware zero-token sampling budget.
 
-    ``configured`` (from ``UBT_VISUAL_SAMPLE_PAGES``) is a floor, never a
+    ``configured`` (``UBTConfig.visual_sample_pages``) is a floor, never a
     ceiling: short books get full inspection, medium books ~20%, long books
     a fixed anchor set. ``configured <= 0`` still disables rendering.
     VLM spend is unaffected (capped by ``max_vlm_pages`` downstream).
