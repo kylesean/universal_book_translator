@@ -128,7 +128,9 @@ def _is_in_scope(ref_file: str) -> bool:
 def check(docs_dir: Path) -> list[str]:
     problems: list[str] = []
     if not docs_dir.is_dir():
-        return [f"docs directory not found: {docs_dir}"]
+        # ``docs/`` is unversioned by design (see ARCHITECTURE.md): a fresh
+        # clone has no notes to check, which is not a failure.
+        return problems
 
     for doc in sorted(docs_dir.rglob("*.md")):
         if doc.parent.name in _ARCHIVE_SUBDIRS:
@@ -160,6 +162,9 @@ def main() -> int:
     parser.add_argument("--docs", type=Path, default=Path("docs"))
     args = parser.parse_args()
 
+    if not args.docs.is_dir():
+        print(f"docs tree not present at {args.docs}; nothing to check")
+        return 0
     problems = check(args.docs)
     if problems:
         print(f"{len(problems)} doc reference problem(s):", file=sys.stderr)

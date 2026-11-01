@@ -178,7 +178,9 @@ The reader-facing choice is `dual_mode` (`mono` / `dual` / `auto`, default
 `auto`): `dual` pairs each block's source line above its translation, `mono`
 delivers the target only, and `auto` starts bilingual and lets the advisor step
 it down to target-only when the layout cannot pair cleanly. This is the only
-mode knob; effort and engine details are chosen by a **preset**
+knob for the pairing itself; what the document is (`--mode`) and which delivery
+contract it gets (`--delivery`) are separate switches. Effort and engine
+details are chosen by a **preset**
 (`high_fidelity` / `standard` / `vector_math` / `preview` / `fast`), which
 selects the prompt depth, formula handling and parser (a preset does pick
 `pdf_engine`, but never a model).
@@ -201,8 +203,10 @@ counted in the denominator.
 Every export runs a zero-token gate over the rendered PDF and writes
 `{stem}_{ext}_visual_report.json` beside the deliverable (for example
 `book_mono_pdf_visual_report.json`). Tiers: `geometry` (line overlap,
-out-of-bounds), `type` (glyph size), `pixel` (blank page, black blocks), and
-optionally `vlm`. The report's `skipped_reason`
+out-of-bounds), `source` (the Typst source scan), `type` (glyph size), `pixel`
+(blank page, black blocks), `canvas` (ink collision against the facsimile
+background, only when that background exists), and optionally `vlm`. The
+report's `skipped_reason`
 names the tiers that ran and the ones that did not, so a missing tier is never
 mistaken for a pass.
 

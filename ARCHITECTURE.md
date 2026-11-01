@@ -62,11 +62,12 @@ capability.
 
 ## Docs are not in the repo
 
-`docs/` — four notes today: the adaptive-delivery PRD and the refactor design
-under `docs/design/`, the delivery tech design and implementation plan under
-`docs/guides/` — is gitignored on purpose. Each file describes one HEAD and
-is rewritten by the next audit round, so versioning them made a stale design note
-indistinguishable from a current specification.
+`docs/` — an unversioned scratch area holding the adaptive-delivery PRD and the
+refactor design under `docs/design/`, and the delivery tech design and
+implementation plan under `docs/guides/` — is gitignored on purpose, so a fresh
+clone does not contain it. Each file describes one HEAD and is rewritten by the
+next audit round, so versioning them made a stale design note indistinguishable
+from a current specification.
 
 Two rules follow:
 
@@ -200,7 +201,7 @@ mixins (job lifecycle, block writes, batch-API partitions). The database is
 SQLite in WAL mode under `db_dir` (default `.ubt/ledgers`).
 
 - `ledger_base.py` owns the flattened baseline schema and `SCHEMA_VERSION`
-  (1000; `TARGET_SCHEMA_VERSION` is retained as an alias). Fresh databases are
+  (1000). Fresh databases are
   created directly from `_SCHEMA_SQL` and stamped with `1000`. The retired
   14-step incremental migration ladder was removed: an existing database from
   an older build without `--fresh` is refused with clear instructions rather than
