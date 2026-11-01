@@ -14,6 +14,7 @@ from ubt.core.ir.models import (
     StyleMeta,
     make_element,
 )
+from ubt.model.ast import RegionKind
 from ubt.render.layout_solver import FLOOR_PT
 from ubt.render.typst.facsimile_renderer import (
     FacsimileBlockPlacement,
@@ -41,6 +42,7 @@ def _make_block(
     bbox: tuple[float, float, float, float] | None = None,
     btype: BlockType = BlockType.NARRATIVE,
     color_hex: str = "#000000",
+    region: RegionKind | None = None,
 ) -> IRBlock:
     bb = BoundingBox(
         page=page,
@@ -55,6 +57,7 @@ def _make_block(
         block_type=btype,
         source_text=text,
         bbox=bb,
+        region=region,
     )
     return IRBlock(
         element=el,
@@ -110,6 +113,35 @@ def test_extract_page_geometry_empty_blocks() -> None:
     assert geom.margin_right == 36.0
     assert geom.columns == 1
     assert geom.theme_color_hex == "#000000"
+
+
+def test_an_l2_page_keeps_a_translated_footer_at_its_measured_size() -> None:
+    geom = PageGeometry(
+        page_w=595.0,
+        page_h=842.0,
+        margin_top=60.0,
+        margin_bottom=60.0,
+        margin_left=70.0,
+        margin_right=70.0,
+    )
+    footer = _make_block(
+        "footer",
+        "黄嘉亮 (Jialiang Huang) 是张明兴 (Mingxing Zhang) 的博士生。",
+        bbox=(70.0, 20.0, 520.0, 40.0),
+        region=RegionKind.FOOTER,
+    )
+    spec = PageLockedPageSpec(
+        page_no=1,
+        geometry=geom,
+        uniform_size_pt=10.65,
+        leading_em=0.35,
+        par_spacing_em=0.65,
+        blocks=[footer],
+        chrome_size_pt=8.97,
+    )
+    markup = PageLockedReflowRenderer().build_page_markup(spec, target_lang="zh")
+
+    assert "#text(size: 8.97pt)" in markup
 
 
 def test_solve_page_lock_roomy() -> None:

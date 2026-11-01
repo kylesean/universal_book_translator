@@ -40,7 +40,9 @@ def _make_table_block(
     return block
 
 
-def _make_ctx(tmp_path: Path, table_render_mode: str = "auto") -> StageContext:
+def _make_ctx(
+    tmp_path: Path, table_render_mode: str = "auto", target_lang: str = "zh"
+) -> StageContext:
     config = SimpleNamespace(table_render_mode=table_render_mode)
     return StageContext(
         config=cast("UBTConfig", config),
@@ -50,7 +52,7 @@ def _make_ctx(tmp_path: Path, table_render_mode: str = "auto") -> StageContext:
         job_id="test-table-job-456",
         input_path=tmp_path / "test.pdf",
         source_lang="en",
-        target_lang="zh",
+        target_lang=target_lang,
         profile_name="general",
         create_event=cast("Any", lambda *a, **k: None),
     )
@@ -101,6 +103,35 @@ def test_write_table_appendix_all_in_appendix_mode(tmp_path: Path) -> None:
     md_content = md_path.read_text(encoding="utf-8")
     assert "tbl_simple" in md_content
     assert "tbl_complex" in md_content
+
+
+def test_write_table_appendix_uses_the_target_language_labels(tmp_path: Path) -> None:
+    ctx = _make_ctx(tmp_path, table_render_mode="appendix", target_lang="ja")
+    rendered_path = tmp_path / "output.pdf"
+    rendered_path.write_bytes(b"%PDF-1.4 dummy")
+
+    block = _make_table_block("tbl_complex", page=5, is_complex=True)
+    md_path = _write_table_appendix(ctx, rendered_path, [block])
+    assert md_path is not None
+
+    md_content = md_path.read_text(encoding="utf-8")
+    assert "主要図表とデータマトリックス対照付録" in md_content
+    assert "収録図表数" in md_content
+    assert "核心图表与数据矩阵对照附录" not in md_content
+
+
+def test_write_table_appendix_falls_back_to_english_for_unknown_targets(tmp_path: Path) -> None:
+    ctx = _make_ctx(tmp_path, table_render_mode="appendix", target_lang="es")
+    rendered_path = tmp_path / "output.pdf"
+    rendered_path.write_bytes(b"%PDF-1.4 dummy")
+
+    block = _make_table_block("tbl_complex", page=5, is_complex=True)
+    md_path = _write_table_appendix(ctx, rendered_path, [block])
+    assert md_path is not None
+
+    md_content = md_path.read_text(encoding="utf-8")
+    assert "# Translated Tables Appendix" in md_content
+    assert "核心图表与数据矩阵对照附录" not in md_content
 
 
 def test_write_table_appendix_skip_mode_noop(tmp_path: Path) -> None:

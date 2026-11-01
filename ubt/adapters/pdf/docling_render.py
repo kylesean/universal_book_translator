@@ -23,6 +23,8 @@ from ubt.core.content.nodes import ReconstructionRecord
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, BookManifest, FlowID, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
+from ubt.core.language_profile import resolve_font_config
+from ubt.core.layout.style_group import DRIFT_TOLERANCE_PT
 from ubt.model.ast import RegionKind
 from ubt.render.inline_spans import block_runs
 
@@ -102,14 +104,19 @@ class _SizedBlock(Protocol):
     provenance: Any
 
 
-def _block_font_size(block: _SizedBlock, *, is_hdr: bool, body_size: float) -> float | None:
+def _block_font_size(
+    block: _SizedBlock, *, is_hdr: bool, body_size: float, is_chrome: bool = False
+) -> float | None:
     """A block's own size in points, or ``None`` to inherit the page's body size.
 
     Body prose inherits the page size, which the solver already picked. A
     *heading* must not: the page solves one size for its body, so a 16.2pt
     chapter title was being drawn at ~10pt and every page read as a flat wall of
-    uniform text. The size is taken from the block's own style/provenance
-    measurement, and only when that measurement is plausible.
+    uniform text. A *chrome* block (header/footer) must not either: its source
+    size is part of the page furniture, and a 9pt page footer drawn at the
+    10.65pt body size is visibly the wrong object. The size is taken from the
+    block's own style/provenance measurement, and only when that measurement is
+    plausible.
 
     Takes ``_SizedBlock`` rather than ``IRBlock`` because only two attributes
     are read. Requiring the full model forced callers with a measured size but
@@ -122,12 +129,52 @@ def _block_font_size(block: _SizedBlock, *, is_hdr: bool, body_size: float) -> f
         candidates.append(float(block.provenance.font_size))
     measured = next((size for size in candidates if size >= _MIN_BLOCK_SIZE_PT), None)
 
-    if not is_hdr:
+    if not is_hdr and not is_chrome:
         # Body prose: the page's uniform size is the whole point of the channel.
         return None
     if measured is not None:
         return round(measured, 2)
-    return round(body_size * _HEADING_SIZE_RATIO, 2)
+    if is_hdr:
+        return round(body_size * _HEADING_SIZE_RATIO, 2)
+    # Chrome with no measurement: keep it a footer-sized object rather than
+    # promoting it to body size. Nine points is the common running-head size
+    # and still below every body size the corpus measured.
+    return round(min(body_size, 9.0), 2)
+
+
+def _normalise_caption_label(source_text: str, target_text: str, *, target_lang: str) -> str:
+    """Keep a caption's label kind faithful to the source and target language.
+
+    A model translating ``Listing 1 | A minimal sandbox session`` as
+    ``图 1 | ...`` turns a code listing into a figure. Captions are structural
+    labels, not prose: the kind and number come from the source, and the label
+    itself is resolved from the target language profile rather than hardcoded
+    here. English/Japanese/Korean targets get their own prefixes; an unknown
+    target falls back to the Latin profile instead of inheriting Chinese.
+    """
+    source_match = re.match(
+        r"^(Listing|Table|Figure)\s+([0-9]+(?:\.[0-9]+)?)\s*\|",
+        source_text.strip(),
+        re.IGNORECASE,
+    )
+    if source_match is None:
+        return target_text
+    number = source_match.group(2)
+    target_match = re.match(
+        r"^[^0-9|]{1,24}\s*[0-9]+(?:\.[0-9]+)?\s*\|",
+        target_text.strip(),
+    )
+    if target_match is None:
+        return target_text
+    font_config = resolve_font_config(target_lang)
+    kind = source_match.group(1).lower()
+    label = {
+        "listing": font_config.listing_prefix,
+        "table": font_config.table_prefix,
+        "figure": font_config.figure_prefix,
+    }[kind]
+    rest = target_text.strip()[target_match.end() :]
+    return f"{label} {number} |{rest}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +259,17 @@ def _facsimile_strip_plan(
     keep: dict[int, list[BoxRect]] = {}
     seen_rects: set[tuple[bool, int, float, float, float, float]] = set()
 
+    def _is_caption_like(block: Any) -> bool:
+        """A caption's Docling box routinely stops above its last source line."""
+        return getattr(block, "flow_id", None) is FlowID.CAPTION or bool(
+            re.match(
+                r"^(?:figure|fig\.?|table|tab\.?|listing|图|圖|図|表|표|그림|代码清单|コードリスト|코드\s*목록)"
+                r"\s*[0-9A-Za-z]",
+                str(getattr(block, "source_text", "") or "").strip(),
+                re.IGNORECASE,
+            )
+        )
+
     def _add_rect(is_keep: bool, page_no: int, x0: float, y0: float, x1: float, y1: float) -> None:
         if page_no < 1 or page_no > total_pages:
             return
@@ -252,11 +310,21 @@ def _facsimile_strip_plan(
 
             if b.bbox.page != pno:
                 continue
+            erase_y0 = float(b.bbox.y0)
+            if not keeps_source and _is_caption_like(b):
+                # The cross-check exempts captions from opaque demotion (their
+                # text is author content), but their Docling box can stop above
+                # the last source line: measured on arXiv 2609.22978, page 6's
+                # box ended at 178.2 while the caption's last line reached 159.5
+                # (18.7pt below). Erasing only the box leaves that English tail
+                # under the Chinese caption. Pad by two caption lines so the
+                # strip covers it; a keep rect below still wins.
+                erase_y0 -= 24.0
             _add_rect(
                 keeps_source,
                 pno,
                 float(b.bbox.x0),
-                float(b.bbox.y0),
+                erase_y0,
                 float(b.bbox.x1),
                 float(b.bbox.y1),
             )
@@ -676,6 +744,44 @@ class DoclingRenderStrategy:
             for p in pages_for_block:
                 blocks_by_page.setdefault(p, []).append(b)
 
+        # A table whose source grid is already corrupt cannot be rebuilt from
+        # its Markdown: Docling maps dot glyphs to U+FFFD and drops the cells
+        # they occupied, so re-typesetting it would deliver a shattered table.
+        # Mark it preserved *before* the strip plan, because the strip plan is
+        # what decides whether the source table's ink survives in the background.
+        # Preserving the source table whole is the content-graph axiom: an asset
+        # is either losslessly reconstructed or left untouched.
+        preserved_table_reasons: list[tuple[str, str]] = []
+        from ubt.render.table_compiler import table_is_reconstructable
+
+        for table_block in blocks:
+            if table_block.block_type is not BlockType.TABLE:
+                continue
+            if table_block.skip_translate:
+                reason_prefix = "skip:table_unreconstructable("
+                policy_reason = table_block.policy_reason or ""
+                if policy_reason.startswith(reason_prefix) and policy_reason.endswith(")"):
+                    table_reason = policy_reason[len(reason_prefix) : -1]
+                    render_flags.append((table_block.id, "table_source_preserved"))
+                    preserved_table_reasons.append((table_block.id, table_reason))
+                continue
+            table_ok, table_reason = table_is_reconstructable(
+                table_block.source_text or "", delivered_text(table_block) or ""
+            )
+            if table_ok:
+                continue
+            table_block.skip_translate = True
+            table_block.target_text = table_block.source_text
+            table_block.policy_translate = False
+            table_block.policy_reason = f"skip:table_unreconstructable({table_reason})"
+            render_flags.append((table_block.id, "table_source_preserved"))
+            preserved_table_reasons.append((table_block.id, table_reason))
+        if preserved_table_reasons:
+            manifest.metadata["table_source_preserved"] = [
+                {"block_id": block_id, "reason": reason}
+                for block_id, reason in preserved_table_reasons
+            ]
+
         # 2. Decide what the background layer keeps and what the translation
         #    replaces. This is the whole correctness of the channel: the
         #    background must lose exactly the text a Typst block will re-draw,
@@ -709,7 +815,15 @@ class DoclingRenderStrategy:
 
         pages_spec: list[FacsimilePageSpec] = []
         skipped: list[tuple[str, str]] = []
-        reconstructions: list[ReconstructionRecord] = []
+        reconstructions: list[ReconstructionRecord] = [
+            ReconstructionRecord(
+                block_id=block_id,
+                verified=False,
+                corrupt=False,
+                reason=f"preserved_source:{reason}",
+            )
+            for block_id, reason in preserved_table_reasons
+        ]
         # Reset every render: geometry describes *this* artifact, and a stale
         # page count from a previous run would be reported as this page's.
         page_geometry: list[dict[str, Any]] = []
@@ -828,7 +942,13 @@ class DoclingRenderStrategy:
                 )
                 is_bold = getattr(b.style, "is_bold", False) if b.style else False
                 weight = "bold" if is_hdr or is_bold else "regular"
-                block_size = _block_font_size(b, is_hdr=is_hdr, body_size=source_size_pt)
+                is_chrome = getattr(b, "region", None) in {
+                    RegionKind.HEADER,
+                    RegionKind.FOOTER,
+                }
+                block_size = _block_font_size(
+                    b, is_hdr=is_hdr, body_size=source_size_pt, is_chrome=is_chrome
+                )
 
                 # A block that is not re-drawn keeps its own box protected in the
                 # background layer: a formula or figure must survive untouched.
@@ -872,7 +992,18 @@ class DoclingRenderStrategy:
                         by1 -= off_y
 
                 is_table_cap = bool(
-                    re.match(r"^(?:table|表)\.?\s*[\d\w]+", b.source_text.strip(), re.IGNORECASE)
+                    re.match(
+                        r"^(?:table|表|표)\.?\s*[\d\w]+",
+                        b.source_text.strip(),
+                        re.IGNORECASE,
+                    )
+                )
+                is_listing_cap = bool(
+                    re.match(
+                        r"^(?:listing|代码清单|コードリスト|코드\s*목록)\b",
+                        b.source_text.strip(),
+                        re.IGNORECASE,
+                    )
                 )
                 is_fig_cap = (
                     getattr(b, "flow_id", None) == FlowID.CAPTION
@@ -880,13 +1011,23 @@ class DoclingRenderStrategy:
                     or getattr(b.provenance, "is_anchored_caption", False)
                     or bool(
                         re.match(
-                            r"^(?:fig(?:ure)?|图)\.?\s*[\d\w]+",
+                            r"^(?:fig(?:ure)?|图|圖|図|그림)\.?\s*[\d\w]+",
                             b.source_text.strip(),
                             re.IGNORECASE,
                         )
                     )
                 ) and not is_table_cap
                 is_caption = is_fig_cap or is_table_cap
+                if is_caption or is_listing_cap:
+                    normalised_caption = _normalise_caption_label(
+                        b.source_text, target_content, target_lang=target_lang
+                    )
+                    if normalised_caption != target_content:
+                        # The contract checks the artifact against the block's
+                        # delivered text; a label corrected only in the markup
+                        # would be reported as missing text.
+                        b.target_text = normalised_caption
+                        target_content = normalised_caption
 
                 parent_fig_id = getattr(b.provenance, "caption_parent_id", None)
                 if is_fig_cap and images_on_page:
@@ -1127,6 +1268,9 @@ class DoclingRenderStrategy:
                         )
                     )
 
+                caption_align = (
+                    getattr(b.style, "alignment", None) or "left" if is_caption else "justify"
+                )
                 placements.append(
                     FacsimileBlockPlacement(
                         block_id=b.id,
@@ -1146,6 +1290,7 @@ class DoclingRenderStrategy:
                         runs=tuple(block_runs(b)),
                         src_y0=by0,
                         src_y1=by1,
+                        align=caption_align,
                         is_caption=is_caption,
                         parent_figure_id=parent_fig_id,
                     )
@@ -1428,6 +1573,13 @@ class DoclingRenderStrategy:
                 if cels_sol is not None
                 else (sol.source_overlap or not page_fit.fits)
             )
+            if not is_pure_page_locked and any(
+                b.block_type is BlockType.TABLE and b.skip_translate for b in page_blocks
+            ):
+                # A preserved table lives in the L1 background layer. L2 pages
+                # have no background, so routing this page there would drop the
+                # table the preservation decision just saved.
+                use_l2 = False
 
             if not use_l2 and cels_sol is not None and cels_sol.solved_blocks_by_id:
                 solved_map = cels_sol.solved_blocks_by_id
@@ -1481,6 +1633,20 @@ class DoclingRenderStrategy:
                     target_lang=target_lang,
                     preferred_pt=body_group.size_pt,
                 )
+                chrome_size_pt = next(
+                    (
+                        _block_font_size(
+                            pb,
+                            is_hdr=False,
+                            body_size=source_size_pt,
+                            is_chrome=True,
+                        )
+                        for pb in page_l2_blocks
+                        if not pb.skip_translate
+                        and getattr(pb, "region", None) in {RegionKind.HEADER, RegionKind.FOOTER}
+                    ),
+                    None,
+                )
                 l2_page = PageLockedPageSpec(
                     page_no=pno,
                     geometry=geom,
@@ -1490,6 +1656,7 @@ class DoclingRenderStrategy:
                     tracking_em=l2_tracking,
                     blocks=page_l2_blocks,
                     flow_expanded=l2_flows,
+                    chrome_size_pt=chrome_size_pt,
                 )
                 pages_spec.append(
                     FacsimilePageSpec(
@@ -1509,7 +1676,7 @@ class DoclingRenderStrategy:
                     # excess flow onto continuation pages: the body group is
                     # intact, the page count absorbed the squeeze.
                     page_fits[pno] = FitReport(fits=True, reason="l2_flow_holds_group")
-                elif l2_size < body_group.size_pt - 0.01:
+                elif l2_size < body_group.size_pt - DRIFT_TOLERANCE_PT:
                     # The page-locked reflow is the last placement strategy, and
                     # it had to go under the group to hold this page. That is a
                     # style exception with its own reason: the page is readable,
@@ -1557,6 +1724,10 @@ class DoclingRenderStrategy:
                 )
             else:
                 for pb in page_preserved:
+                    # ``facsimile_preserved_opaque`` is the content-graph
+                    # vocabulary for "the background layer carries this asset".
+                    # The specific table reason rides in ``render_flags`` below,
+                    # not here: the asset is present, not missing.
                     skipped.append((pb.id, "facsimile_preserved_opaque"))
 
                 elastic_stretch = 100.0
@@ -1780,14 +1951,15 @@ class DoclingRenderStrategy:
                                     "tracking_em": round(l2_tracking, 4),
                                     "tier": "L2",
                                     "style_exception": (
-                                        l2_size < body_group.size_pt - 0.01 and not l2_flows
+                                        l2_size < body_group.size_pt - DRIFT_TOLERANCE_PT
+                                        and not l2_flows
                                     ),
                                     "flow_expanded": l2_flows,
                                 }
                             )
                         if l2_flows:
                             page_fits[pno] = FitReport(fits=True, reason="l2_flow_holds_group")
-                        elif l2_size < body_group.size_pt - 0.01:
+                        elif l2_size < body_group.size_pt - DRIFT_TOLERANCE_PT:
                             page_fits[pno] = FitReport(
                                 fits=False,
                                 deficit_pt=round(body_group.size_pt - l2_size, 3),

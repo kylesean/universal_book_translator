@@ -805,12 +805,16 @@ def get_pair_policy(source_lang: str = "en", target_lang: str = "zh") -> Languag
 
 @dataclass(frozen=True, slots=True)
 class FontConfig:
-    """Per-language typography and figure caption configuration."""
+    """Per-language typography and caption-label configuration."""
 
     typst_fonts: tuple[str, ...]
     latex_main_font: str = "Liberation Serif"
     figure_prefix: str = "Fig."
     table_prefix: str = "Table"
+    #: Structural prefix for a code listing caption. A model translating
+    #: ``Listing 1`` as ``图 1`` turns a code sample into a figure; the prefix
+    #: is a language fact, so it lives here rather than in the renderer.
+    listing_prefix: str = "Listing"
 
 
 #: The Latin default. ``Noto Serif`` sits last so an ordinary run still
@@ -837,6 +841,7 @@ _FONT_CONFIGS: dict[str, FontConfig] = {
         ),
         figure_prefix="图",
         table_prefix="表",
+        listing_prefix="代码清单",
     ),
     "zh-cn": FontConfig(
         typst_fonts=(
@@ -847,6 +852,7 @@ _FONT_CONFIGS: dict[str, FontConfig] = {
         ),
         figure_prefix="图",
         table_prefix="表",
+        listing_prefix="代码清单",
     ),
     "zh-hans": FontConfig(
         typst_fonts=(
@@ -857,6 +863,7 @@ _FONT_CONFIGS: dict[str, FontConfig] = {
         ),
         figure_prefix="图",
         table_prefix="表",
+        listing_prefix="代码清单",
     ),
     "zh-tw": FontConfig(
         typst_fonts=(
@@ -867,6 +874,7 @@ _FONT_CONFIGS: dict[str, FontConfig] = {
         ),
         figure_prefix="圖",
         table_prefix="表",
+        listing_prefix="程式碼清單",
     ),
     "zh-hant": FontConfig(
         typst_fonts=(
@@ -877,6 +885,7 @@ _FONT_CONFIGS: dict[str, FontConfig] = {
         ),
         figure_prefix="圖",
         table_prefix="表",
+        listing_prefix="程式碼清單",
     ),
     "zh-hk": FontConfig(
         typst_fonts=(
@@ -887,6 +896,7 @@ _FONT_CONFIGS: dict[str, FontConfig] = {
         ),
         figure_prefix="圖",
         table_prefix="表",
+        listing_prefix="程式碼清單",
     ),
     "ja": FontConfig(
         typst_fonts=(
@@ -897,6 +907,7 @@ _FONT_CONFIGS: dict[str, FontConfig] = {
         ),
         figure_prefix="図",
         table_prefix="表",
+        listing_prefix="コードリスト",
     ),
     "ko": FontConfig(
         typst_fonts=(
@@ -907,6 +918,7 @@ _FONT_CONFIGS: dict[str, FontConfig] = {
         ),
         figure_prefix="그림",
         table_prefix="표",
+        listing_prefix="코드 목록",
     ),
     "en": FontConfig(
         typst_fonts=_DEFAULT_LATIN_FONTS,

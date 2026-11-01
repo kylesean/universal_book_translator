@@ -102,6 +102,30 @@ def test_low_iou_displaced_box_is_sunk_to_opaque() -> None:
     assert "iou=" in (demoted.provenance.iou_crosscheck or "")
 
 
+def test_a_caption_with_a_low_iou_box_stays_translatable() -> None:
+    block = _block(
+        "b1",
+        "Figure 2 | The distribution of the number of sandboxes created per task.",
+        x0=50.0,
+        y0=100.0,
+        x1=300.0,
+        y1=140.0,
+    )
+    mock_lines = [
+        LineBox(text="Tiny line in corner", rect=(50.0, 100.0, 100.0, 120.0)),
+    ]
+
+    with patch(
+        "ubt.adapters.pdf.docling_crosscheck.extract_lines",
+        return_value=(mock_lines, (600.0, 800.0)),
+    ):
+        result = cross_check_blocks_with_pdfium([block], Path("dummy.pdf"), min_iou=DEFAULT_MIN_IOU)
+
+    assert len(result) == 1
+    assert result[0].skip_translate is False
+    assert result[0].policy_translate is None
+
+
 def test_a_tight_box_under_an_overshooting_witness_is_preserved() -> None:
     block = _block(
         "b1", "A caption the witness line overshoots.", x0=50.0, y0=600.0, x1=250.0, y1=700.0

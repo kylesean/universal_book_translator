@@ -785,6 +785,37 @@ def compile_typst_booktabs(
     return "\n".join(lines)
 
 
+def table_is_reconstructable(source_markup: str, target_markup: str) -> tuple[bool, str]:
+    """Whether a translated grid can be rebuilt without corrupting the table.
+
+    ``verify_table_reconstruction`` compares the *shape* of the source and target
+    grids. That is necessary but not sufficient: the source grid itself may
+    already be corrupt. Docling maps the dot glyphs in a workload matrix to
+    U+FFFD and drops the cells those dots occupied, so a table like
+    ``Runtime Performance | | � | �� | ��`` has the same five-column shape as a
+    healthy grid and passes the shape check — while the delivered table has lost
+    its data. When the source is unreadable, the only safe disposition is to
+    preserve it whole (the content-graph axiom), never to re-typeset it.
+
+    Returns ``(ok, reason)``. ``reason`` names the first failed gate so the
+    renderer can record it instead of silently drawing a shattered grid.
+    """
+    if "\ufffd" in source_markup:
+        return False, "source_replacement_chars"
+    if "\ufffd" in target_markup:
+        return False, "target_replacement_chars"
+    counts = count_table_cells(source_markup)
+    if counts is None:
+        return False, "source_not_a_pipe_table"
+    header_cells, row_cells = counts
+    if any(cells != header_cells for cells in row_cells):
+        return False, "ragged_source_grid"
+    verdict = verify_table_reconstruction(source_markup, target_markup)
+    if not verdict.ok:
+        return False, verdict.reason or "unverified_table_reconstruction"
+    return True, "verified"
+
+
 __all__ = [
     "TableComplexity",
     "TableReconstruction",
@@ -792,5 +823,6 @@ __all__ = [
     "count_table_cells",
     "parse_markdown_table",
     "probe_table_complexity",
+    "table_is_reconstructable",
     "verify_table_reconstruction",
 ]

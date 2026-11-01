@@ -226,9 +226,10 @@ class FacsimileRenderer:
             cap_size = f"size: {pl.font_size_pt}pt, " if pl.font_size_pt else "size: 9pt, "
             fill = f'fill: rgb("{pl.text_color_hex}")' if pl.text_color_hex != "#000000" else ""
             fill_arg = f", {fill}" if fill else ""
+            cap_align = pl.align if pl.align in {"left", "center", "right"} else "left"
             return (
                 f"#set par(justify: false, leading: 0.50em)\n"
-                f'    #align(center)[#text({cap_size}{stretch}weight: "regular"{fill_arg})[{escaped}]]'
+                f'    #align({cap_align})[#text({cap_size}{stretch}weight: "regular"{fill_arg})[{escaped}]]'
             )
 
         if pl.is_heading:
@@ -405,16 +406,20 @@ class FacsimileRenderer:
                 # 1. Neither block is a table or code block
                 # 2. Both blocks sit in the same column track (or single-column track)
                 # 3. Reading order descends down the column
-                # 4. In the source document, they were adjacent paragraphs in the same text flow (src_gap <= 24pt)
+                # 4. In the source document, they were adjacent paragraphs in the same text flow
                 col = 0 if dx < 0.5 * p.page_w else 1
                 prev_col = 0 if prev_dx < 0.5 * p.page_w else 1
 
-                # Single-column documents (width > 60% of page_w) form a single track down the page
+                # Single-column documents (width > 60% of page_w) form a single track down the page.
+                # The width tolerance is deliberately wider than the paragraph measure: a
+                # lead-in sentence's bbox starts at its first-line indent, so it is ~50pt
+                # narrower than the prose around it. Treating that as a different track left
+                # a measured 120pt hole on page 2 of arXiv 2609.22978.
                 is_single_col_pair = (
                     width > 0.60 * p.page_w
                     and prev_w > 0.60 * p.page_w
                     and abs(dx - prev_dx) <= 24.0
-                    and abs(width - prev_w) <= 40.0
+                    and abs(width - prev_w) <= 80.0
                 )
                 # Multi-column documents require both blocks to sit within the same column
                 is_multi_col_pair = (
@@ -439,7 +444,7 @@ class FacsimileRenderer:
                     and not prev_pl.is_caption
                     and same_track
                     and dy >= prev_dy
-                    and -4.0 <= src_gap <= 24.0
+                    and -4.0 <= src_gap <= 36.0
                 )
 
                 if can_group:
@@ -505,8 +510,17 @@ class FacsimileRenderer:
                     flow_body = []
                     for idx, (it_pl, _, _, _, _, it_content) in enumerate(grp):
                         if idx > 0:
-                            v_gap = "#v(0.4em)" if it_pl.is_heading else "#v(0.65em)"
-                            flow_body.append(f"    {v_gap}")
+                            # Preserve the source paragraph/section gap instead of a
+                            # fixed 0.65em: a section heading sits ~24pt above its
+                            # body in the source, and collapsing that to 0.4em
+                            # made the heading look attached to the previous paragraph.
+                            prev_pl = grp[idx - 1][0]
+                            prev_y0 = prev_pl.src_y0 if prev_pl.src_y0 is not None else prev_pl.y0
+                            curr_y1 = it_pl.src_y1 if it_pl.src_y1 is not None else it_pl.y1
+                            gap_em = min(
+                                2.2, max(0.35, (prev_y0 - curr_y1) / max(1.0, p.uniform_size_pt))
+                            )
+                            flow_body.append(f"    #v({gap_em:.3f}em)")
                         flow_body.append(f"    #block[\n      {it_content}\n    ]")
                     flow_content_str = "\n".join(flow_body)
                     eff_stretch = min(min(it[0].stretch_pct for it in grp), p.stretch_pct)

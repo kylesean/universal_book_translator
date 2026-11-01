@@ -7,7 +7,11 @@ from typing import Any
 import pikepdf
 import pytest
 
-from ubt.adapters.pdf.docling_render import _block_font_size, _facsimile_strip_plan
+from ubt.adapters.pdf.docling_render import (
+    _block_font_size,
+    _facsimile_strip_plan,
+    _normalise_caption_label,
+)
 from ubt.adapters.pdf.strip_pdf_text import (
     BoxRect,
     strip_form_xobjects_recursive,
@@ -479,6 +483,101 @@ def test_block_font_size_lets_body_prose_inherit_the_page_size() -> None:
         provenance=SimpleNamespace(font_size=11.0),
     )
     assert _block_font_size(block, is_hdr=False, body_size=9.0) is None
+
+
+def test_block_font_size_keeps_a_measured_footer_out_of_body_size() -> None:
+    block = SimpleNamespace(
+        style=SimpleNamespace(font_size=8.97),
+        provenance=SimpleNamespace(font_size=8.97),
+    )
+    assert _block_font_size(block, is_hdr=False, body_size=10.65, is_chrome=True) == pytest.approx(
+        8.97
+    )
+
+
+def test_block_font_size_falls_back_to_a_footer_sized_chrome_face() -> None:
+    block = SimpleNamespace(style=None, provenance=None)
+    assert _block_font_size(block, is_hdr=False, body_size=10.65, is_chrome=True) == pytest.approx(
+        9.0
+    )
+
+
+def test_a_listing_caption_does_not_become_a_figure_caption() -> None:
+    assert (
+        _normalise_caption_label(
+            "Listing 1 | A minimal sandbox session.",
+            "图 1 | 最小沙箱会话。",
+            target_lang="zh",
+        )
+        == "代码清单 1 | 最小沙箱会话。"
+    )
+
+
+def test_a_listing_caption_uses_the_target_language_label() -> None:
+    assert (
+        _normalise_caption_label(
+            "Listing 1 | A minimal sandbox session.",
+            "図 1 | 最小限のサンドボックスセッション。",
+            target_lang="ja",
+        )
+        == "コードリスト 1 | 最小限のサンドボックスセッション。"
+    )
+    assert (
+        _normalise_caption_label(
+            "Listing 1 | A minimal sandbox session.",
+            "그림 1 | 최소 샌드박스 세션.",
+            target_lang="ko",
+        )
+        == "코드 목록 1 | 최소 샌드박스 세션."
+    )
+
+
+def test_an_unknown_target_does_not_inherit_a_chinese_label() -> None:
+    assert (
+        _normalise_caption_label(
+            "Figure 7 | Lifetime distributions.",
+            "图 7 | 生命周期分布。",
+            target_lang="es",
+        )
+        == "Figura 7 | 生命周期分布。"
+    )
+
+
+def test_a_figure_caption_keeps_its_number() -> None:
+    assert (
+        _normalise_caption_label(
+            "Figure 7 | Lifetime distributions.",
+            "图 7 | 生命周期分布。",
+            target_lang="zh",
+        )
+        == "图 7 | 生命周期分布。"
+    )
+
+
+def test_a_caption_keeps_the_sources_left_alignment() -> None:
+    placement = FacsimileBlockPlacement(
+        block_id="cap",
+        page=1,
+        x0=70.0,
+        y0=200.0,
+        x1=520.0,
+        y1=220.0,
+        text="Figure 1 | A measured caption.",
+        is_caption=True,
+        align="left",
+    )
+    page_spec = FacsimilePageSpec(
+        page_no=1,
+        page_w=595.0,
+        page_h=842.0,
+        uniform_size_pt=10.0,
+        leading_em=0.55,
+        placements=[placement],
+    )
+    markup = FacsimileRenderer().build_markup([page_spec], "bg.pdf", target_lang="zh")
+
+    assert "#align(left)" in markup
+    assert "#align(center)" not in markup
 
 
 def test_facsimile_renderer_heading_weight_is_not_inverted() -> None:
@@ -1444,3 +1543,82 @@ def test_facsimile_single_column_flow_grouping() -> None:
     )
     markup = renderer.build_markup(pages=[p], bg_pdf_filename="bg.pdf")
     assert "flow-group: 2 blocks" in markup
+
+
+def test_a_first_line_indent_does_not_split_a_paragraph_flow_group() -> None:
+    renderer = FacsimileRenderer(enable_column_flow=True)
+    p = FacsimilePageSpec(
+        page_no=1,
+        page_w=595.0,
+        page_h=842.0,
+        uniform_size_pt=10.0,
+        leading_em=0.55,
+        placements=[
+            FacsimileBlockPlacement(
+                block_id="b1",
+                page=1,
+                x0=70.0,
+                y0=600.0,
+                x1=520.0,
+                y1=700.0,
+                src_y0=600.0,
+                src_y1=700.0,
+                text="First paragraph at the page measure.",
+            ),
+            FacsimileBlockPlacement(
+                block_id="b2",
+                page=1,
+                x0=88.0,
+                y0=500.0,
+                x1=498.0,
+                y1=590.0,
+                src_y0=500.0,
+                src_y1=590.0,
+                text="An indented lead-in that introduces the items below.",
+            ),
+        ],
+        tier="L1",
+    )
+    markup = renderer.build_markup(pages=[p], bg_pdf_filename="bg.pdf")
+
+    assert "flow-group: 2 blocks" in markup
+
+
+def test_a_flow_group_preserves_the_source_paragraph_gap() -> None:
+    renderer = FacsimileRenderer(enable_column_flow=True)
+    p = FacsimilePageSpec(
+        page_no=1,
+        page_w=595.0,
+        page_h=842.0,
+        uniform_size_pt=10.0,
+        leading_em=0.55,
+        placements=[
+            FacsimileBlockPlacement(
+                block_id="b1",
+                page=1,
+                x0=70.0,
+                y0=600.0,
+                x1=520.0,
+                y1=700.0,
+                src_y0=600.0,
+                src_y1=700.0,
+                text="First paragraph.",
+            ),
+            FacsimileBlockPlacement(
+                block_id="b2",
+                page=1,
+                x0=70.0,
+                y0=500.0,
+                x1=520.0,
+                y1=590.0,
+                src_y0=500.0,
+                src_y1=590.0,
+                text="Second paragraph.",
+            ),
+        ],
+        tier="L1",
+    )
+    markup = renderer.build_markup(pages=[p], bg_pdf_filename="bg.pdf")
+
+    assert "flow-group: 2 blocks" in markup
+    assert "#v(1.000em)" in markup

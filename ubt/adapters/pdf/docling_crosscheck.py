@@ -53,12 +53,31 @@ from ubt.adapters.pdf.textgeom import (
     extract_lines,
     styled_runs_in_box,
 )
-from ubt.core.ir.models import BlockType, IRBlock
+from ubt.core.ir.models import BlockType, FlowID, IRBlock
 from ubt.core.policy.layout_policy import CONTROL_RE
-from ubt.model.ast import Confidence
+from ubt.model.ast import Confidence, RegionKind
 from ubt.model.span import CompositeSpan, PhysicalBox
 
 logger = logging.getLogger(__name__)
+
+#: Figure/table/listing caption labels. A caption's text is author content, and
+#: its box is often a tight fit the pdfium witness union overshoots; demoting it
+#: to opaque leaves an English caption under a translated figure.
+_CAPTION_RE = re.compile(
+    r"^(?:figure|fig\.?|table|tab\.?|listing|图|圖|図|表|표|그림|代码清单|コードリスト|코드\s*목록)"
+    r"\s*[0-9A-Za-z]",
+    re.IGNORECASE,
+)
+
+
+def _is_caption(block: IRBlock) -> bool:
+    """Whether a block is a figure/table/listing caption."""
+    return (
+        block.flow_id is FlowID.CAPTION
+        or block.region is RegionKind.CAPTION
+        or bool(_CAPTION_RE.match((block.source_text or "").strip()))
+    )
+
 
 #: Text block types subject to physical glyph grounding verification.
 _VERIFIABLE_TYPES = frozenset(
@@ -959,6 +978,21 @@ def cross_check_blocks_with_pdfium(
             ):
                 failed_reason = f"iou_mismatch(p{p_page}: iou={iou:.2f} < {effective_min_iou:.2f})"
                 break
+
+        if failed_reason is not None and _is_caption(block):
+            # A caption is not an opaque asset: its text is the only
+            # human-readable name of the exhibit. The witness union on a
+            # full-width caption routinely overshoots its tight source box,
+            # and demoting it leaves English under a translated figure (three
+            # captions on arXiv 2609.22978). Keep it translatable; the renderer
+            # anchors figure/table captions to their parent's box anyway.
+            logger.info(
+                "Caption %s on page %d failed cross-check (%s); keeping it translatable",
+                block.id,
+                bbox.page,
+                failed_reason,
+            )
+            failed_reason = None
 
         if failed_reason is not None:
             logger.info(

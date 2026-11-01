@@ -11,6 +11,7 @@ from ubt.render.table_compiler import (
     normalize_table_to_source,
     parse_markdown_table,
     probe_table_complexity,
+    table_is_reconstructable,
     verify_table_reconstruction,
 )
 
@@ -177,6 +178,36 @@ def test_normalize_table_to_source_never_pads_a_dropped_column() -> None:
     assert normalized == target
     ok = verify_table_reconstruction(source, normalized)
     assert not ok.ok and "row_1_cell_count_mismatch" in ok.reason
+
+
+def test_an_unreadable_source_grid_is_not_reconstructable() -> None:
+    source = (
+        "| Characteristic | FnCall | Container | MicroVM | Full VM |\n"
+        "|---|---|---|---|---|\n"
+        "| Runtime Performance | | \ufffd | \ufffd\ufffd | \ufffd\ufffd |"
+    )
+    target = source
+    ok, reason = table_is_reconstructable(source, target)
+
+    assert not ok
+    assert reason == "source_replacement_chars"
+
+
+def test_a_clean_grid_with_a_matching_target_is_reconstructable() -> None:
+    source = "| 方法 | 准确率 |\n|---|---|\n| 基线 | 82.5% |"
+    target = "| Method | Accuracy |\n|---|---|\n| Baseline | 82.5% |"
+    ok, reason = table_is_reconstructable(source, target)
+
+    assert ok
+    assert reason == "verified"
+
+
+def test_a_ragged_source_grid_is_not_reconstructable() -> None:
+    source = "| A | B | C |\n|---|---|---|\n| 一 | 二 |"
+    ok, reason = table_is_reconstructable(source, source)
+
+    assert not ok
+    assert reason == "ragged_source_grid"
 
 
 def test_compile_typst_booktabs_structure() -> None:

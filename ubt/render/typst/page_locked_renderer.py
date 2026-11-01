@@ -27,6 +27,7 @@ from typing import Any
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.fs_perms import restrict_dir_to_owner
 from ubt.core.ir.models import BlockType, FlowID, IRBlock
+from ubt.model.ast import RegionKind
 from ubt.render.delivered_text import delivered_text
 from ubt.render.inline_spans import block_runs
 from ubt.render.layout_solver import FLOOR_PT
@@ -114,6 +115,11 @@ class PageLockedPageSpec:
     #: ``False`` keeps the strict 1:1 promise; ``True`` downgrades it to
     #: "at least one output page per source page, in order".
     flow_expanded: bool = False
+    #: Measured source size for translated running heads/footers on this page.
+    #: ``None`` means "no chrome block shipped translated"; body text always
+    #: uses ``uniform_size_pt``. Chrome is furniture, and drawing it at body
+    #: size is the defect this field exists to prevent.
+    chrome_size_pt: float | None = None
 
 
 def _central_band_is_occupied(
@@ -533,10 +539,12 @@ def solve_page_lock(
     else:
         # Tight mode: compress spacing and tracking. The size does NOT go below
         # the floor; the page is reported as overflowing instead (see
-        # ``page_overflow_at_floor``).
+        # ``page_overflow_at_floor``). The earlier 0.22/0.35 values packed
+        # paragraphs into each other; 0.28/0.55 is still compressed (the roomy
+        # branch uses 0.35/0.65) but keeps a readable paragraph boundary.
         best_size = floor_pt
-        base_spacing = 0.35
-        base_leading = 0.22
+        base_spacing = 0.55
+        base_leading = 0.28
         base_tracking = -0.015
 
     return (
@@ -915,9 +923,28 @@ class PageLockedReflowRenderer:
                 ) / max(1, geom.columns)
                 code_mk = repair_code_block_markup(txt, container_width_pt=col_w)
                 lines.append(f"  {code_mk}")
+            elif (
+                b.region in {RegionKind.HEADER, RegionKind.FOOTER}
+                and spec.chrome_size_pt is not None
+            ):
+                # Chrome opt-in only: a translated running head/footer keeps its
+                # measured source size instead of inheriting the body group.
+                lines.append(
+                    f"  #text(size: {spec.chrome_size_pt}pt)"
+                    f"[{render_prose(txt, runs, is_math_ok=self._math_gate)}]"
+                )
+                lines.append("")
             else:
                 lines.append(f"  {render_prose(txt, runs, is_math_ok=self._math_gate)}")
                 lines.append("")
+                if b.flow_id is FlowID.CAPTION:
+                    # A caption names the exhibit; the next paragraph is body
+                    # text. The source leaves a visible gap after it, and the
+                    # solver's 0.55–0.65em paragraph gap alone reads cramped
+                    # under a figure. Add one caption-sized gap without raising
+                    # the spacing of every paragraph on the page (which would
+                    # shrink the body size to pay for it).
+                    lines.append("  #v(0.8em)")
 
         lines.append("]")
         lines.append("")

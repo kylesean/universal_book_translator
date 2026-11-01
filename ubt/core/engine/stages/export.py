@@ -187,6 +187,7 @@ RENDER_QUALITY_FLAGS: tuple[str, ...] = (
     "low_legibility_font",
     "formula_degraded",
     "sentinel_leaked",
+    "table_source_preserved",
 )
 
 
@@ -903,23 +904,25 @@ def _write_spill_appendix(
     """Write an overflow/spill appendix companion when blocks could not fit into layout boxes."""
     from ubt.core.content.contract import _is_space_failure
     from ubt.core.job_options import companion_path
+    from ubt.core.target_labels import appendix_labels
 
     spill_violations = [v for v in contract.violations if _is_space_failure(v.detail)]
     if not spill_violations:
         return None
     try:
         by_id = {b.id: b for b in blocks}
+        labels = appendix_labels(ctx.target_lang)
         items: list[dict[str, Any]] = []
         md_lines: list[str] = [
-            "# 排版溢出优雅降级对照附录 (Layout Spill Appendix)",
+            labels.spill_title,
             "",
             f"- **Job ID**: `{ctx.job_id}`",
             f"- **Document**: `{rendered_path.name}`",
-            f"- **溢出段落数**: {len(spill_violations)}",
+            f"- **{labels.spill_count}**: {len(spill_violations)}",
             "",
-            "以下段落在最小字号收缩策略下仍超出原始版面物理边界，已安全降级并在此提供完整双语对照：",
+            labels.spill_intro,
             "",
-            "| 段落 ID | 页码 | 原因 | 原文 | 译文 |",
+            "| " + " | ".join(labels.spill_headers) + " |",
             "| :--- | :---: | :--- | :--- | :--- |",
         ]
         for v in spill_violations:
@@ -970,6 +973,7 @@ def _write_table_appendix(
     ``--table-render-mode`` companion exports; no PDF page is appended.
     """
     from ubt.core.job_options import companion_path
+    from ubt.core.target_labels import appendix_labels
     from ubt.render.table_compiler import probe_table_complexity
 
     table_mode = getattr(ctx.config, "table_render_mode", "auto")
@@ -1017,19 +1021,19 @@ def _write_table_appendix(
             encoding="utf-8",
         )
 
+        labels = appendix_labels(ctx.target_lang)
         md_lines: list[str] = [
-            "# 核心图表与数据矩阵对照附录 (Translated Tables Appendix)",
+            labels.table_title,
             "",
             f"- **Job ID**: `{ctx.job_id}`",
             f"- **Document**: `{rendered_path.name}`",
-            f"- **收录图表数**: {len(appendix_tables)}",
+            f"- **{labels.table_count}**: {len(appendix_tables)}",
             "",
-            "以下为本次交付中判定为复杂版式的图表完整译文（正文已内联重排；"
-            "本附录供对照核校与复制取用）：",
+            labels.table_intro,
             "",
         ]
         for page, label, target in appendix_tables:
-            md_lines.append(f"## 原书第 {page} 页图表 (`{label}`)")
+            md_lines.append(labels.table_page.format(page=page, label=label))
             md_lines.append("")
             md_lines.append(target)
             md_lines.append("")
