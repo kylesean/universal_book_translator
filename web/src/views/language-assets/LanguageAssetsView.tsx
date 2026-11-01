@@ -620,12 +620,12 @@ export function LanguageAssetsView() {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 overflow-y-auto px-4 py-6 sm:px-7">
-      <header className="flex flex-col justify-between gap-4 border-b border-border/80 pb-5 sm:flex-row sm:items-end">
-        <div className="space-y-1.5">
-          <h1 className="text-2xl font-semibold tracking-[-0.025em] text-foreground">
+      <header className="flex flex-col justify-between gap-3 border-b border-border/70 pb-4 sm:flex-row sm:items-center">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
             {t.assets.title}
           </h1>
-          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
             {t.assets.subtitle}
           </p>
         </div>
@@ -649,15 +649,10 @@ export function LanguageAssetsView() {
 
       {activeTab === 'glossary' ? (
         <section className="min-w-0 space-y-4" aria-labelledby="glossary-heading">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h2 id="glossary-heading" className="text-base font-semibold text-foreground">
-                {t.assets.tabGlossary}
-              </h2>
-              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                {t.assets.glossaryDescription}
-              </p>
-            </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground">
+              {t.assets.glossaryDescription}
+            </p>
             {glossaryConfigured ? (
               <Button
                 variant="outline"
@@ -867,15 +862,10 @@ export function LanguageAssetsView() {
         </section>
       ) : (
         <section className="min-w-0 space-y-4" aria-labelledby="tm-heading">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h2 id="tm-heading" className="text-base font-semibold text-foreground">
-                {t.assets.tabTm}
-              </h2>
-              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                {t.assets.tmDescription}
-              </p>
-            </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground">
+              {t.assets.tmDescription}
+            </p>
             <Button variant="outline" size="sm" onClick={() => setTmImportOpen(true)}>
               <ArrowDownToLine />
               {t.assets.importAction}

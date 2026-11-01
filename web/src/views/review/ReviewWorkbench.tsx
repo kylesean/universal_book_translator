@@ -1222,13 +1222,14 @@ export function ReviewWorkbench() {
                                   }
                                 />
                               )}
-                              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/70 pt-3">
+                              <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2">
                                 <span className="text-xs text-muted-foreground">
-                                  {termNotice[seg.block_id] ?? t.review.editHint}
+                                  {termNotice[seg.block_id] ?? ''}
                                 </span>
                                 <Button
                                   variant="ghost"
                                   size="sm"
+                                  title={t.review.editHint}
                                   onClick={(event) => {
                                     event.stopPropagation()
                                     setEditing((prev) => ({ ...prev, [seg.block_id]: true }))

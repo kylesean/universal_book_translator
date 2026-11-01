@@ -582,22 +582,17 @@ export const en: TranslationDictionary = {
     },
   },
   quality: {
-    title: 'Delivery checks',
-    subtitle: 'Verdict, evidence and final book.',
+    title: 'Delivery Checks',
+    subtitle: 'Quality gate verification, deliverables and layout audit.',
     noJobTitle: 'No job selected',
     noJobDesc: 'Select a completed or running job from Jobs to view its delivery checks.',
-    rehearsalBadge: 'Rehearsal — echo text, not a translation',
+    rehearsalBadge: 'Rehearsal — echo verification',
     rehearsalBody:
-      'This run used the offline echo provider (--dry-run). The artifact repeats the source and every check below passes by construction, so treat the verdict as a pipeline check, not a quality verdict.',
-    decisionReady: 'Ready to deliver',
-    decisionBlocked: 'Not ready',
-    decisionWarning: 'Review before delivery',
-    // The verdict comes from block counters alone
-    // (job_options.delivery_verdict_from_blocks): no failed blocks, no
-    // quarantined blocks, no blocks awaiting human review, and at least one
-    // completed. Formula and terminology metrics are reported in the pillars
-    // below and do NOT feed this verdict, so this sentence must not claim them.
-    allPassedDesc: 'Every passage completed, with no failed or quarantined content.',
+      'This run used the offline echo provider (--dry-run). All checks pass by design to verify pipeline flow.',
+    decisionReady: 'Ready to Deliver',
+    decisionBlocked: 'Delivery Blocked',
+    decisionWarning: 'Review Before Delivery',
+    allPassedDesc: 'All passages completed with zero blocking issues.',
     // Unpriced means the model has no price-table entry; it never means $0.
     costNotPriced: 'Cost not priced',
     blockedDesc: 'Some passages did not pass. Resolve them in Review, then return here to deliver.',
@@ -772,11 +767,11 @@ export const en: TranslationDictionary = {
   },
   assets: {
     title: 'Language assets',
-    subtitle: 'Keep translations consistent with shared terminology and reusable translations.',
+    subtitle: 'Manage project terminology and translation memory.',
     tabGlossary: 'Glossary',
     tabTm: 'Translation memory',
-    glossaryDescription: 'One approved rendering per source term, applied to every translation.',
-    tmDescription: 'Confirmed source and target pairs let identical or similar passages reuse existing wording.',
+    glossaryDescription: 'Standardized terms applied during translation.',
+    tmDescription: 'Reuses verified high-quality translation segments.',
     sourceTerm: 'Source term',
     sourceTermPlaceholder: 'e.g. gradient descent',
     targetTerm: 'Approved translation',
@@ -893,7 +888,7 @@ export const en: TranslationDictionary = {
   },
   doctor: {
     title: 'System settings',
-    subtitle: 'Models, diagnostics and security boundaries.',
+    subtitle: 'Model services, runtime diagnostics and security boundaries.',
     tabDiagnostics: 'Diagnostics',
     tabModels: 'Models',
     tabSecurity: 'Security',

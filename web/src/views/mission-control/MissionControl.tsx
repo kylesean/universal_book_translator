@@ -1351,7 +1351,7 @@ export function MissionControl() {
                 <ArrowLeft />
               </Button>
             )}
-            <h1 className="truncate text-2xl font-semibold tracking-[-0.025em] text-foreground">
+            <h1 className="truncate text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
               {currentJobId ? displayFileName(currentJobFileName) : t.mission.queueTitle}
             </h1>
             {currentJobId && (
@@ -1607,11 +1607,8 @@ export function MissionControl() {
         /* Global Job Queue (When no jobId is selected) */
         <Card className="overflow-hidden border-border shadow-card">
           <div className="flex flex-col items-stretch justify-between gap-3 border-b border-border/70 bg-card px-4 py-3 sm:flex-row sm:items-center">
-            <div className="flex items-center gap-2.5">
-              <span className="text-sm font-semibold tracking-[-0.01em] text-foreground">
-                {t.mission.queueTitle}
-              </span>
-              <span className="text-xs font-mono font-medium text-muted-foreground px-2 py-0.5 rounded-full bg-border/60 tabular-nums">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono font-medium text-muted-foreground px-2.5 py-1 rounded-full bg-muted/60 tabular-nums">
                 {t.mission.runsCount.replace('{filtered}', String(filteredJobs.length)).replace('{total}', String(jobs.length))}
               </span>
             </div>

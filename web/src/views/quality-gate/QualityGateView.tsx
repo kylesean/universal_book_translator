@@ -325,6 +325,7 @@ export function QualityGateView() {
                 t.quality.contractDeliverableLabel,
                 deliveryContract ? (
                   <Badge
+                    key="deliverable-badge"
                     variant={deliveryContract.deliverable ? 'default' : 'destructive'}
                     className={cn(
                       'font-mono text-xs',
@@ -739,10 +740,10 @@ export function QualityGateView() {
               </button>
             </div>
           </div>
-          <h1 className="mt-1 text-2xl font-semibold tracking-[-0.025em] text-foreground">
+          <h1 className="mt-1 text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
             {t.quality.title}
           </h1>
-          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          <p className="mt-1 max-w-2xl text-xs text-muted-foreground sm:text-sm">
             {t.quality.subtitle}
           </p>
         </div>

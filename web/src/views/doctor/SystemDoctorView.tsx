@@ -219,12 +219,12 @@ export function SystemDoctorView() {
 
   return (
     <div className="mx-auto w-full max-w-6xl flex-1 space-y-5 px-4 py-6 sm:px-7">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="space-y-1.5">
-          <h1 className="text-2xl font-semibold tracking-[-0.03em] text-foreground">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border/70 pb-4">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
             {t.doctor.title}
           </h1>
-          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
             {t.doctor.subtitle}
           </p>
         </div>
