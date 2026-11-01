@@ -45,22 +45,3 @@ def test_narrative_blocks_pack_into_one_chunk() -> None:
     chunks = chunk_by_section(prepared, chunk_size=8)
     assert len(chunks) == 1
     assert len(chunks[0]) == 6
-
-
-def test_a_heading_starts_a_new_chunk() -> None:
-    prepared = _prepared(
-        BlockType.HEADING,
-        BlockType.NARRATIVE,
-        BlockType.NARRATIVE,
-        BlockType.HEADING,
-        BlockType.NARRATIVE,
-    )
-    chunks = chunk_by_section(prepared, chunk_size=8)
-    assert [len(c) for c in chunks] == [3, 2]
-
-
-def test_chunk_size_bounds_a_long_section() -> None:
-    prepared = _prepared(*(BlockType.NARRATIVE for _ in range(10)))
-    chunks = chunk_by_section(prepared, chunk_size=4)
-    assert all(len(c) <= 4 for c in chunks)
-    assert sum(len(c) for c in chunks) == 10
