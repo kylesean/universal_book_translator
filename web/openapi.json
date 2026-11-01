@@ -5999,7 +5999,7 @@
               }
             ],
             "title": "Ocr Mode",
-            "description": "OCR engine (auto, local, vlm, off)"
+            "description": "OCR engine (auto, local, cloud, off)"
           },
           "domain": {
             "anyOf": [
@@ -7497,6 +7497,32 @@
           "target_text": {
             "type": "string",
             "title": "Target Text"
+          },
+          "delivered_text": {
+            "type": "string",
+            "title": "Delivered Text",
+            "default": ""
+          },
+          "repair_failed": {
+            "type": "boolean",
+            "title": "Repair Failed",
+            "default": false
+          },
+          "repair_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Error"
+          },
+          "quarantined": {
+            "type": "boolean",
+            "title": "Quarantined",
+            "default": false
           },
           "mtqe_score": {
             "anyOf": [

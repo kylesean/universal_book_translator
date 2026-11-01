@@ -683,6 +683,10 @@ class SegmentItem(BaseModel):
     status: str
     source_text: str
     target_text: str
+    delivered_text: str = ""
+    repair_failed: bool = False
+    repair_error: str | None = None
+    quarantined: bool = False
     mtqe_score: float | None = None
     error_flags: list[str] = Field(default_factory=list)
     issues: list[str] = Field(default_factory=list)

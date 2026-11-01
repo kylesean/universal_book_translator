@@ -1773,7 +1773,7 @@ export interface components {
             companion_reflow?: boolean | null;
             /**
              * Ocr Mode
-             * @description OCR engine (auto, local, vlm, off)
+             * @description OCR engine (auto, local, cloud, off)
              */
             ocr_mode?: ("off" | "auto" | "local" | "cloud") | null;
             /**
@@ -2523,6 +2523,23 @@ export interface components {
             source_text: string;
             /** Target Text */
             target_text: string;
+            /**
+             * Delivered Text
+             * @default
+             */
+            delivered_text: string;
+            /**
+             * Repair Failed
+             * @default false
+             */
+            repair_failed: boolean;
+            /** Repair Error */
+            repair_error?: string | null;
+            /**
+             * Quarantined
+             * @default false
+             */
+            quarantined: boolean;
             /** Mtqe Score */
             mtqe_score?: number | null;
             /** Error Flags */
