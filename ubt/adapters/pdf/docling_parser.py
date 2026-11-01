@@ -165,12 +165,8 @@ def extract_manifest(path: Path, *, is_docling_installed: bool) -> BookManifest:
     )
 
 
-def resolve_formula_enrichment(
-    formula_enrichment: str,
-    has_accelerator: Callable[[], bool],
-    path: Path | None = None,
-) -> bool:
-    """Resolve effective formula enrichment policy (on-demand + hardware probe)."""
+def resolve_formula_enrichment(formula_enrichment: str) -> bool:
+    """Resolve the effective formula-enrichment policy."""
     mode = str(formula_enrichment).lower().strip()
     if mode in ("off", "false", "0"):
         return False

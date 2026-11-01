@@ -9,9 +9,9 @@ The adapter orchestrates three extracted modules:
 - :mod:`ubt.adapters.pdf.docling_render` — IRBlocks → delivered artifact
   (Typst typesetting, bilingual per-block pairing, diagrams).
 
-It keeps the module-level ``_docling_symbols`` / ``_has_accelerator`` import
-seams and the tested private-method surface as thin delegates so existing
-patch points and call sites keep working.
+It keeps the module-level ``_docling_symbols`` import seam and the tested
+private-method surface as thin delegates so existing patch points and call
+sites keep working.
 """
 
 from __future__ import annotations
@@ -45,7 +45,6 @@ from ubt.adapters.pdf.docling_worker import (
 )
 from ubt.adapters.pdf.font_metrics import sanitize_font_family
 from ubt.adapters.pdf.page_chunking import compute_pdf_page_chunks, get_pdf_page_chunk_size
-from ubt.core.env import has_accelerator as _has_accelerator
 from ubt.core.ir.models import BookManifest, ChapterIR, ChapterMeta, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
 
@@ -438,14 +437,14 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
     def _extract_blocks_sync(
         self, path: Path, page_range: tuple[int, int] | None = None
     ) -> list[IRBlock]:
-        """Extract blocks synchronously via Docling or geometric pypdfium2/pdf_oxide fallback."""
+        """Extract blocks synchronously via Docling, else the native reader / pdf_oxide."""
         if self.is_docling_installed():
             from ubt.adapters.pdf.analysis_cache import cached_blocks, docling_identity
 
             # The Docling pass is the run's heaviest step; cache it on the exact
             # inputs (file, page range, enrichment policy, parser code) via the
             # content-addressed cache layer.
-            enrich = self._resolve_formula_enrichment(path)
+            enrich = self._resolve_formula_enrichment()
             if enrich:
                 # A *requested* enrichment is deliberately not cached in this
                 # outer block layer. Docling's ladder degrades inside
@@ -521,13 +520,9 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             ocr_fallback=ocr_fallback,
         )
 
-    def _resolve_formula_enrichment(self, path: Path | None = None) -> bool:
+    def _resolve_formula_enrichment(self) -> bool:
         """Resolve effective formula enrichment policy (delegates to docling_parser)."""
-        return resolve_formula_enrichment(
-            self.formula_enrichment,
-            _has_accelerator,
-            path=path,
-        )
+        return resolve_formula_enrichment(self.formula_enrichment)
 
     def _extract_with_docling(
         self, path: Path, page_range: tuple[int, int] | None = None
@@ -546,7 +541,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             path,
             page_range,
             symbols=_docling_symbols,
-            enrich=self._resolve_formula_enrichment(path),
+            enrich=self._resolve_formula_enrichment(),
             device=self.docling_device,
             formula_crop_margin=self.formula_crop_margin,
             isolate_process=self.docling_isolate_process,

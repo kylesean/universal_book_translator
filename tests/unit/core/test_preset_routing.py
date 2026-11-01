@@ -93,9 +93,8 @@ def test_auto_formula_enrichment_resolves_to_the_crop_path() -> None:
     # meaning "ask the VLM", the high_fidelity/standard copy above goes stale.
     from ubt.adapters.pdf.docling_parser import resolve_formula_enrichment
 
-    assert resolve_formula_enrichment("auto", lambda: True) is False
-    assert resolve_formula_enrichment("auto", lambda: False) is False
-    assert resolve_formula_enrichment("on", lambda: False) is True
+    assert resolve_formula_enrichment("auto") is False
+    assert resolve_formula_enrichment("on") is True
 
 
 def test_vector_math_only_changes_the_formula_policy() -> None:
