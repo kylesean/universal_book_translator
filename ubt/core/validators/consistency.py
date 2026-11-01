@@ -227,8 +227,6 @@ def _expand_scientific_not(text: str) -> str:
     return _SCI_NOTATION_RE.sub(_repl, text)
 
 
-# PDF extraction commonly puts spaces around decimal points ('19 . 6', '0 . 007', '+ 24 . 7').
-# Collapse them so they tokenize as single decimals instead of separate integers.
 #: PDF extraction commonly puts spaces around decimal points ('19 . 6', '0 . 007', '+ 24 . 7').
 #: Collapse them so they tokenize as single decimals instead of separate integers.
 #: The negative lookaheads guard the one shape a collapse corrupts: a sentence that
@@ -502,7 +500,7 @@ _COUNT_SCALE_FACTORS: dict[str, Decimal] = {
 #: a mandatory magnitude made the gate report that translation as having LOST the
 #: number 12, and ``2nd ed.`` as losing 2 to "2 nano-d". The lost-number check
 #: therefore treats a unit-prefixed token as satisfied by either reading (see
-#: ``_unit_prefixed_numbers``), while a true magnitude word (``250万``,
+#: ``_unit_prefix_map``), while a true magnitude word (``250万``,
 #: ``2.5 million``) must still be restated at its magnitude.
 _SI_SYMBOL_FACTORS: dict[str, Decimal] = {
     "T": Decimal(1_000_000_000_000),
@@ -1413,10 +1411,11 @@ class NumericConsistencyValidator(ContentValidator):
         # str.isdigit() counts them as digits, but the target-side match view
         # normalizes them to ASCII, so an un-folded source token would never be
         # found and a correct translation would be quarantined as a dropped
-        # number. Superscript/subscript digits are deliberately NOT folded
-        # here: folding before tokenization would merge '10²' into the phantom
-        # token '102', and since those characters are not in \d's class they
-        # are simply not numeric tokens on the source side.
+        # number. Superscript/subscript digits stay unfolded here: they are
+        # outside \d's class, so they never form a source token. The target
+        # canonicalizer folds them with a '^'/'_' separator
+        # (``_SUB_SUP_DIGITS_MAP``), which is what keeps '10²' from merging
+        # into the phantom token '102'.
         src_view = _expand_scientific_not(original.translate(_FULLWIDTH_DIGITS))
         src_view = _collapse_spaced_decimals(src_view)
         src_nums = {canonicalize_numeric_token(m) for m in _NUM.findall(src_view)}
