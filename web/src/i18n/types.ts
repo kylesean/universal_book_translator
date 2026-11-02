@@ -437,6 +437,17 @@ export interface TranslationDictionary {
     pipelineContext: string
     qeHeuristicHint: string
     avgQe: string
+    pipelineCompleted: string
+    allStagesCompleted: string
+    togglePipelineDetails: string
+    collapsePipelineDetails: string
+    qeScoreLabel: string
+    qeScoreGood: string
+    repairedCount: string
+    reviewRequired: string
+    durationLabel: string
+    previewAction: string
+    featuredProductsTitle: string
     //: Download is blocked while a job has un-re-rendered edits; the console
     //: re-renders and retries rather than showing the 409.
     reRenderingBeforeDownload: string

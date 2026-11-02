@@ -12,6 +12,7 @@ import {
   Download,
   AlertTriangle,
   ChevronDown,
+  ChevronUp,
   ChevronRight,
   Check,
   Copy,
@@ -20,6 +21,7 @@ import {
   ArrowLeft,
   ArrowUpRight,
   FileCheck,
+  Eye,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -102,6 +104,49 @@ function compactJobId(jobId: string): string {
   const separator = jobId.indexOf('_')
   if (separator < 0) return jobId
   return `${jobId.slice(0, separator + 1)}…${jobId.slice(-6)}`
+}
+
+function formatDuration(startStr?: string | null, endStr?: string | null): string | null {
+  if (!startStr || !endStr) return null
+  const start = new Date(startStr.replace(' ', 'T')).getTime()
+  const end = new Date(endStr.replace(' ', 'T')).getTime()
+  if (isNaN(start) || isNaN(end) || end <= start) return null
+  const sec = Math.round((end - start) / 1000)
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  if (m === 0) return `${s}s`
+  if (m < 60) return `${m}m ${s}s`
+  const h = Math.floor(m / 60)
+  const rm = m % 60
+  return `${h}h ${rm}m`
+}
+
+function formatEngineName(raw: string): string {
+  if (!raw) return ''
+  let name = raw.replace(/^dm/, '')
+  if (name.includes('gemma')) name = name.replace(/4e4b/i, ' 4B').replace(/27b/i, ' 27B')
+  else if (name.includes('qwen')) name = name.replace(/25/i, ' 2.5')
+  else if (name.includes('deepseek')) name = name.replace(/v3/i, ' V3').replace(/r1/i, ' R1')
+  return name.charAt(0).toUpperCase() + name.slice(1)
+}
+
+function parseJobIdMeta(jobId: string) {
+  const parts = jobId.split('_')
+  let targetLang = ''
+  let preset = ''
+  let engine = ''
+  if (parts.length >= 3) {
+    targetLang = parts[2].toUpperCase()
+  }
+  for (const part of parts) {
+    if (part.startsWith('pr')) {
+      preset = part.slice(2)
+    } else if (part.startsWith('eng')) {
+      const engMatch = part.match(/^eng([a-z0-9]+?)(?:rm[a-z0-9]+)?(?:ps[a-z0-9]+)?$/i)
+      engine = engMatch ? engMatch[1] : part.slice(3)
+    }
+  }
+  return { targetLang, preset, engine: formatEngineName(engine) }
 }
 
 type LogLevel = 'ALL' | 'INFO' | 'WARN' | 'ERROR'
@@ -414,6 +459,105 @@ function JobQueueTable({
   )
 }
 
+function DeliverableCard({
+  item,
+  isPrimary,
+  downloadLabel,
+  previewLabel,
+  previewUrl,
+  onDownload,
+}: {
+  item: DeliverableItem
+  isPrimary: boolean
+  downloadLabel: string
+  previewLabel: string
+  previewUrl?: string
+  onDownload: () => void
+}) {
+  const { t } = useI18n()
+  const badge = getFormatBadge(item.filename)
+  const isHtml = badge === 'HTML'
+  const isPdf = badge === 'PDF'
+
+  return (
+    <Card
+      className={cn(
+        'group relative flex flex-col justify-between overflow-hidden border transition-all duration-200 hover:shadow-md',
+        isPrimary
+          ? 'border-primary/40 bg-card shadow-xs ring-1 ring-primary/20'
+          : 'border-border/80 bg-card/60'
+      )}
+    >
+      {isPrimary && (
+        <div className="absolute right-0 top-0 rounded-bl-md bg-emerald-500/15 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+          {t.mission.exportPrimaryBadge}
+        </div>
+      )}
+      <CardContent className="space-y-3 p-3.5">
+        <div className="flex items-start gap-3">
+          <span
+            className={cn(
+              'flex size-9 shrink-0 items-center justify-center rounded-lg font-mono text-xs font-bold shadow-2xs',
+              isPdf
+                ? 'border border-rose-500/25 bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                : badge === 'EPUB'
+                  ? 'border border-purple-500/25 bg-purple-500/10 text-purple-600 dark:text-purple-400'
+                  : isHtml
+                    ? 'border border-sky-500/25 bg-sky-500/10 text-sky-600 dark:text-sky-400'
+                    : badge === 'XLIFF'
+                      ? 'border border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                      : 'border border-border bg-muted text-foreground'
+            )}
+          >
+            {badge}
+          </span>
+          <div className="min-w-0 flex-1 pr-6">
+            <h4
+              className="truncate text-sm font-semibold text-foreground"
+              title={item.label || item.filename}
+            >
+              {deliverableName(item.key, item.label || item.filename, t)}
+            </h4>
+            <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+              {formatBytes(item.size_bytes)}
+            </p>
+          </div>
+        </div>
+        <p
+          className="line-clamp-1 font-mono text-[11px] text-muted-foreground/80 truncate"
+          title={item.filename}
+        >
+          {item.filename}
+        </p>
+      </CardContent>
+      <div className="flex items-center gap-1.5 border-t border-border/60 bg-muted/20 px-3 py-2">
+        <Button
+          onClick={onDownload}
+          variant={isPrimary ? 'default' : 'secondary'}
+          size="sm"
+          className="h-7 flex-1 text-xs font-medium"
+        >
+          <Download className="mr-1.5 size-3" />
+          <span>{downloadLabel}</span>
+        </Button>
+        {previewUrl && (isHtml || isPdf) && (
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+            title={previewLabel}
+          >
+            <a href={previewUrl} target="_blank" rel="noreferrer">
+              <Eye className="size-3.5" />
+            </a>
+          </Button>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 function DeliverableRow({
   item,
   isPrimary,
@@ -645,6 +789,10 @@ export function MissionControl() {
   const [failedBlocks, setFailedBlocks] = useState<number>(0)
   const [needsHumanBlocks, setNeedsHumanBlocks] = useState<number>(0)
   const [blockedHumanBlocks, setBlockedHumanBlocks] = useState<number>(0)
+  const [avgQe, setAvgQe] = useState<number | null>(null)
+  const [repairedBlocks, setRepairedBlocks] = useState<number>(0)
+  const [showPipelineDetails, setShowPipelineDetails] = useState<boolean>(false)
+  const [showCompanion, setShowCompanion] = useState<boolean>(false)
   const completedRef = useRef(0)
   const draftedRef = useRef(0)
   const repairPendingRef = useRef(0)
@@ -671,6 +819,11 @@ export function MissionControl() {
   const [queueSearch, setQueueSearch] = useState('')
 
   const activeJob = useMemo(() => jobs.find((j) => j.job_id === currentJobId), [jobs, currentJobId])
+  const jobDuration = useMemo(
+    () => formatDuration(activeJob?.created_at, activeJob?.updated_at),
+    [activeJob?.created_at, activeJob?.updated_at]
+  )
+  const metaParsed = useMemo(() => parseJobIdMeta(currentJobId || ''), [currentJobId])
 
   // The queue snapshot already carries the ledger counters. Seeding from it
   // prevents the first paint of a terminal job from showing 0/0 until the
@@ -875,6 +1028,12 @@ export function MissionControl() {
       if (typeof res.blocked_human_blocks === 'number') {
         setBlockedHumanBlocks(res.blocked_human_blocks)
       }
+      if (typeof res.current_avg_qe === 'number') {
+        setAvgQe(res.current_avg_qe)
+      }
+      if (typeof res.repaired_blocks === 'number') {
+        setRepairedBlocks(res.repaired_blocks)
+      }
       if (typeof res.error === 'string' && res.error.trim()) setJobError(res.error)
       else if (res.status && String(res.status) !== 'failed') setJobError(null)
 
@@ -927,6 +1086,8 @@ export function MissionControl() {
           if (typeof frame.needs_human_blocks === 'number') setNeedsHumanBlocks(frame.needs_human_blocks)
           if (typeof frame.blocked_human_blocks === 'number')
             setBlockedHumanBlocks(frame.blocked_human_blocks)
+          if (typeof frame.current_avg_qe === 'number') setAvgQe(frame.current_avg_qe)
+          if (typeof frame.repaired_blocks === 'number') setRepairedBlocks(frame.repaired_blocks)
 
           const level: 'INFO' | 'WARN' | 'ERROR' = frame.error ? 'ERROR' : frame.status === 'failed' ? 'ERROR' : 'INFO'
           const qePart =
@@ -1381,23 +1542,61 @@ export function MissionControl() {
             )}
           </div>
           {currentJobId && (
-            <div className="mt-1.5 flex min-w-0 items-center gap-1.5 font-mono text-xs text-muted-foreground">
-              <span className="shrink-0">{t.mission.jobIdLabel}</span>
-              <span
-                className="min-w-0 truncate font-medium text-foreground select-all"
-                title={currentJobId}
-              >
-                {compactJobId(currentJobId)}
+            <div className="mt-1.5 flex flex-wrap items-center gap-2 font-mono text-xs text-muted-foreground">
+              {/* Language Pair */}
+              <span className="rounded bg-muted px-1.5 py-0.5 font-sans font-medium text-foreground">
+                EN → {(activeJob?.target_lang || metaParsed.targetLang || 'ZH').toUpperCase()}
               </span>
-              <button
-                type="button"
-                onClick={() => handleCopyJobId(currentJobId)}
-                className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
-                title={t.mission.copyJobId}
-                aria-label={t.mission.copyJobId}
-              >
-                {copiedId ? <CheckCheck className="size-3 text-emerald-600" /> : <Copy className="size-3" />}
-              </button>
+
+              {/* Preset / Profile */}
+              {metaParsed.preset && (
+                <span className="rounded bg-muted/60 px-1.5 py-0.5 font-sans text-muted-foreground capitalize">
+                  {metaParsed.preset}
+                </span>
+              )}
+
+              {/* Engine / Model */}
+              {metaParsed.engine && (
+                <span className="rounded bg-muted/60 px-1.5 py-0.5 font-sans text-muted-foreground">
+                  {metaParsed.engine}
+                </span>
+              )}
+
+              {/* Rehearsal */}
+              {activeJob?.rehearsal && (
+                <span className="rounded bg-amber-500/15 px-1.5 py-0.5 font-sans font-medium text-amber-700 dark:text-amber-300">
+                  {t.mission.rowRehearsal}
+                </span>
+              )}
+
+              {/* Duration */}
+              {jobDuration && (
+                <span className="font-sans text-muted-foreground">
+                  ⏱️ {jobDuration}
+                </span>
+              )}
+
+              <span className="text-muted-foreground/40">·</span>
+
+              {/* Job ID */}
+              <div className="flex items-center gap-1">
+                <span className="shrink-0">{t.mission.jobIdLabel}</span>
+                <span
+                  className="min-w-0 truncate font-medium text-foreground select-all"
+                  title={currentJobId}
+                >
+                  {compactJobId(currentJobId)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleCopyJobId(currentJobId)}
+                  className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                  title={t.mission.copyJobId}
+                  aria-label={t.mission.copyJobId}
+                >
+                  {copiedId ? <CheckCheck className="size-3 text-emerald-600" /> : <Copy className="size-3" />}
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -1484,13 +1683,18 @@ export function MissionControl() {
           {currentJobId && (
             <Button
               asChild
-              variant="secondary"
+              variant={needsHumanBlocks > 0 ? 'default' : 'secondary'}
               size="sm"
               className="h-8 px-2.5 text-xs font-medium"
             >
               <Link to={`/jobs/${currentJobId}/review`}>
-                <SplitSquareVertical className="mr-1.5 size-3.5 text-muted-foreground" />
+                <SplitSquareVertical className="mr-1.5 size-3.5" />
                 {t.nav.reviewWorkbench}
+                {needsHumanBlocks > 0 && (
+                  <span className="ml-1.5 rounded-full bg-amber-500/25 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-200">
+                    {needsHumanBlocks}
+                  </span>
+                )}
               </Link>
             </Button>
           )}
@@ -1665,78 +1869,135 @@ export function MissionControl() {
         /* Selected Job Overview */
         <>
           {/* Execution Pipeline Stepper */}
-          <Card className="p-3.5 sm:p-4 shrink-0 shadow-sm space-y-3 border-border">
-            <div className="grid gap-5 md:grid-cols-3 md:gap-0 md:divide-x md:divide-border/70">
-              {pipelineGroups.map((group) => (
-                <section
-                  key={group.label}
-                  className="min-w-0 md:px-4 md:first:pl-0 md:last:pr-0"
-                >
-                  <h3 className="mb-3 text-xs font-medium text-muted-foreground">
-                    {group.label}
-                  </h3>
-                  <ol className="grid grid-cols-3">
-                    {group.stages.map((stg) => {
-                      const idx = pipelineStages.findIndex((item) => item.key === stg.key)
-                      const currentIndex = pipelineStages.findIndex(
-                        (item) => item.key === derivedStage
-                      )
-                      const isCurrent = derivedStage !== '' && derivedStage === stg.key
-                      const isDone = isCompleted || (currentIndex >= 0 && idx < currentIndex)
-                      const isCurrentFailed = statusStr === 'failed' && isCurrent
-                      const isCurrentCancelled = isCancelled && isCurrent
+          {isCompleted && !showPipelineDetails ? (
+            <Card className="flex flex-wrap items-center justify-between gap-3 border-border bg-card/60 px-4 py-2.5 shadow-xs transition-all">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                  <Check className="size-3.5 stroke-[2.5]" />
+                </span>
+                <div className="flex flex-wrap items-center gap-2 min-w-0">
+                  <span className="text-xs font-semibold text-foreground">
+                    {t.mission.pipelineCompleted}
+                  </span>
+                  <span className="text-muted-foreground/50 text-xs">·</span>
+                  <span className="text-xs text-muted-foreground">
+                    {t.mission.allStagesCompleted}
+                  </span>
+                </div>
+              </div>
 
-                      return (
-                        <li
-                          key={stg.key}
-                          ref={isCurrent ? activeStageRef : undefined}
-                          aria-current={isCurrent ? 'step' : undefined}
-                          className="relative flex min-w-0 flex-col items-center text-center"
-                        >
-                          <span
-                            className={cn(
-                              'relative z-10 flex size-8 items-center justify-center rounded-full border text-xs font-semibold tabular-nums transition-colors',
-                              isCurrentCancelled
-                                ? 'border-muted-foreground/30 bg-muted text-muted-foreground'
-                                : isCurrentFailed
-                                ? 'border-destructive/30 bg-destructive text-destructive-foreground'
-                                : isCurrent
-                                  ? 'border-primary bg-primary text-primary-foreground'
+              <div className="flex items-center gap-3">
+                <div className="hidden sm:flex items-center gap-1.5" title="9 stages passed">
+                  {pipelineStages.map((stg) => (
+                    <span
+                      key={stg.key}
+                      className="size-2 rounded-full bg-emerald-500/80"
+                      title={stg.label}
+                    />
+                  ))}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowPipelineDetails(true)}
+                  className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <span>{t.mission.togglePipelineDetails}</span>
+                  <ChevronDown className="ml-1 size-3.5" />
+                </Button>
+              </div>
+            </Card>
+          ) : (
+            <Card className="p-3.5 sm:p-4 shrink-0 shadow-sm space-y-3 border-border">
+              {isCompleted && (
+                <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
+                    <Check className="size-3.5 text-emerald-600" />
+                    <span>{t.mission.pipelineCompleted}</span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowPipelineDetails(false)}
+                    className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    <span>{t.mission.collapsePipelineDetails}</span>
+                    <ChevronUp className="ml-1 size-3.5" />
+                  </Button>
+                </div>
+              )}
+              <div className="grid gap-5 md:grid-cols-3 md:gap-0 md:divide-x md:divide-border/70">
+                {pipelineGroups.map((group) => (
+                  <section
+                    key={group.label}
+                    className="min-w-0 md:px-4 md:first:pl-0 md:last:pr-0"
+                  >
+                    <h3 className="mb-3 text-xs font-medium text-muted-foreground">
+                      {group.label}
+                    </h3>
+                    <ol className="grid grid-cols-3">
+                      {group.stages.map((stg) => {
+                        const idx = pipelineStages.findIndex((item) => item.key === stg.key)
+                        const currentIndex = pipelineStages.findIndex(
+                          (item) => item.key === derivedStage
+                        )
+                        const isCurrent = derivedStage !== '' && derivedStage === stg.key
+                        const isDone = isCompleted || (currentIndex >= 0 && idx < currentIndex)
+                        const isCurrentFailed = statusStr === 'failed' && isCurrent
+                        const isCurrentCancelled = isCancelled && isCurrent
+
+                        return (
+                          <li
+                            key={stg.key}
+                            ref={isCurrent ? activeStageRef : undefined}
+                            aria-current={isCurrent ? 'step' : undefined}
+                            className="relative flex min-w-0 flex-col items-center text-center"
+                          >
+                            <span
+                              className={cn(
+                                'relative z-10 flex size-8 items-center justify-center rounded-full border text-xs font-semibold tabular-nums transition-colors',
+                                isCurrentCancelled
+                                  ? 'border-muted-foreground/30 bg-muted text-muted-foreground'
+                                  : isCurrentFailed
+                                  ? 'border-destructive/30 bg-destructive text-destructive-foreground'
+                                  : isCurrent
+                                    ? 'border-primary bg-primary text-primary-foreground'
+                                    : isDone
+                                      ? 'border-emerald-600/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                                      : 'border-border bg-background text-muted-foreground'
+                              )}
+                            >
+                              {isCurrentCancelled ? (
+                                <X className="size-3.5" />
+                              ) : isCurrentFailed ? (
+                                <AlertTriangle className="size-3.5" />
+                              ) : isDone ? (
+                                <Check className="size-3.5 stroke-[2.5]" />
+                              ) : (
+                                String(idx + 1).padStart(2, '0')
+                              )}
+                            </span>
+                            <span
+                              className={cn(
+                                'mt-2 max-w-full truncate text-xs leading-tight',
+                                isCurrent
+                                  ? 'font-semibold text-foreground'
                                   : isDone
-                                    ? 'border-emerald-600/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                                    : 'border-border bg-background text-muted-foreground'
-                            )}
-                          >
-                            {isCurrentCancelled ? (
-                              <X className="size-3.5" />
-                            ) : isCurrentFailed ? (
-                              <AlertTriangle className="size-3.5" />
-                            ) : isDone ? (
-                              <Check className="size-3.5 stroke-[2.5]" />
-                            ) : (
-                              String(idx + 1).padStart(2, '0')
-                            )}
-                          </span>
-                          <span
-                            className={cn(
-                              'mt-2 max-w-full truncate text-xs leading-tight',
-                              isCurrent
-                                ? 'font-semibold text-foreground'
-                                : isDone
-                                  ? 'font-medium text-foreground'
-                                  : 'text-muted-foreground'
-                            )}
-                          >
-                            {stg.label}
-                          </span>
-                        </li>
-                      )
-                    })}
-                  </ol>
-                </section>
-              ))}
-            </div>
-          </Card>
+                                    ? 'font-medium text-foreground'
+                                    : 'text-muted-foreground'
+                              )}
+                            >
+                              {stg.label}
+                            </span>
+                          </li>
+                        )
+                      })}
+                    </ol>
+                  </section>
+                ))}
+              </div>
+            </Card>
+          )}
 
           {/* Four compact facts: one label, one value, one supporting line. */}
           <Card className="grid grid-cols-2 md:grid-cols-4 shrink-0 shadow-sm overflow-hidden p-0 border-border">
@@ -1797,6 +2058,9 @@ export function MissionControl() {
                   <>
                     {displayedProgressPct.toFixed(1)}
                     <span className="text-base font-normal text-muted-foreground">%</span>
+                    <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                      ({isCompleted ? totalBlocks : completedBlocks}/{totalBlocks || '—'})
+                    </span>
                   </>
                 )}
               </div>
@@ -1819,53 +2083,67 @@ export function MissionControl() {
               </div>
             </div>
 
-            <div className="flex min-w-0 flex-col justify-between p-3.5 sm:p-4">
-              <div className="flex items-center type-group">
-                <span>{t.mission.completedPages}</span>
+            <div className="flex min-w-0 flex-col justify-between border-b border-border p-3.5 sm:p-4 md:border-b-0 md:border-r">
+              <div className="flex items-center justify-between type-group">
+                <span>{t.mission.qeScoreLabel}</span>
+                {avgQe !== null && avgQe > 0 && (
+                  <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                    {t.mission.qeScoreGood}
+                  </span>
+                )}
               </div>
               <div className="mt-1 flex h-8 items-baseline gap-1 text-2xl font-semibold tabular-nums text-foreground">
-                {isCompleted ? totalBlocks : completedBlocks}
-                <span className="text-xs font-normal text-muted-foreground">
-                  / {totalBlocks || '—'}
-                </span>
+                {avgQe !== null && avgQe > 0 ? (
+                  <>
+                    {(avgQe * 100).toFixed(1)}
+                    <span className="text-base font-normal text-muted-foreground">%</span>
+                  </>
+                ) : (
+                  <span className="text-lg font-medium text-muted-foreground">
+                    {isCompleted ? '合格' : '—'}
+                  </span>
+                )}
               </div>
               <div className="mt-2 flex h-5 items-center truncate text-xs">
-                {failedBlocks > 0 || needsHumanBlocks > 0 || skippedBlocks > 0 ? (
-                  <div className="flex items-center gap-2 truncate text-xs">
-                    {failedBlocks > 0 && (
-                      <span className="text-destructive">
-                        {failedBlocks} {t.mission.failedBlocks}
-                      </span>
-                    )}
-                    {needsHumanBlocks > 0 && (
-                      <span className="text-amber-700 dark:text-amber-400">
-                        {needsHumanBlocks} {t.mission.needsHumanBlocks}
-                      </span>
-                    )}
-                    {skippedBlocks > 0 && (
-                      <span className="text-muted-foreground">
-                        {skippedBlocks} {t.mission.preservedBlocks}
-                      </span>
-                    )}
-                  </div>
+                {needsHumanBlocks > 0 ? (
+                  <Link
+                    to={`/jobs/${currentJobId}/review`}
+                    className="flex items-center gap-1 font-medium text-amber-700 hover:underline dark:text-amber-400 truncate"
+                  >
+                    <span>{t.mission.reviewRequired.replace('{count}', String(needsHumanBlocks))}</span>
+                    <ArrowUpRight className="size-3 shrink-0" />
+                  </Link>
+                ) : repairedBlocks > 0 ? (
+                  <span className="text-muted-foreground truncate">
+                    {t.mission.repairedCount.replace('{count}', String(repairedBlocks))}
+                  </span>
+                ) : skippedBlocks > 0 ? (
+                  <span className="text-muted-foreground truncate">
+                    {skippedBlocks} {t.mission.preservedBlocks}
+                  </span>
                 ) : (
-                  <span className="truncate text-xs text-muted-foreground">
-                    {totalBlocks > 0 ? t.mission.allBlocksVerified.replace('{total}', String(totalBlocks)) : t.mission.waitingForExtraction}
+                  <span className="text-muted-foreground truncate">
+                    {totalBlocks > 0 ? t.mission.allBlocksVerified.replace('{total}', String(totalBlocks)) : '—'}
                   </span>
                 )}
               </div>
             </div>
 
-            <div className="flex min-w-0 flex-col justify-between border-r border-border p-3.5 sm:p-4">
+            <div className="flex min-w-0 flex-col justify-between p-3.5 sm:p-4">
               <div className="flex items-center justify-between type-group">
                 <span>{t.mission.totalSpend}</span>
+                {jobDuration && (
+                  <span className="text-xs font-mono text-muted-foreground">
+                    ⏱️ {jobDuration}
+                  </span>
+                )}
               </div>
               <div className="mt-1 flex h-8 items-baseline gap-1 text-2xl font-semibold tabular-nums text-foreground">
                 ${costUsd.toFixed(3)}
               </div>
               <div className="mt-2 flex h-5 items-center truncate text-xs text-muted-foreground">
                 {isCompleted ? (
-                  <span>{t.mission.deliverablesReady}</span>
+                  <span>{jobDuration ? `${t.mission.durationLabel}: ${jobDuration}` : t.mission.deliverablesReady}</span>
                 ) : totalBlocks > completedBlocks ? (
                   <span>{totalBlocks - completedBlocks} {t.mission.blocksRemaining}</span>
                 ) : completedBlocks > 0 && costUsd > 0 ? (
@@ -2081,11 +2359,11 @@ export function MissionControl() {
                         </div>
                       )}
 
-                      <section className="overflow-hidden rounded-lg border border-border/70">
-                        <div className="border-b border-border/70 bg-emerald-500/5 px-3 py-2 flex items-center justify-between">
+                      <section className="space-y-3">
+                        <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <h3 className="text-xs font-semibold tracking-wide text-foreground">
-                              {missionT.readerProductsTitle}
+                              {t.mission.featuredProductsTitle || missionT.readerProductsTitle}
                             </h3>
                             {deliverableListing?.deliveryMode && (
                               <Badge variant="outline" className="text-[10px] font-mono font-normal">
@@ -2096,15 +2374,17 @@ export function MissionControl() {
                             )}
                           </div>
                         </div>
-                        <div className="divide-y divide-border/60">
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                           {deliverables
                             .filter((item) => readerKeys.has(item.key))
                             .map((item) => (
-                              <DeliverableRow
+                              <DeliverableCard
                                 key={item.key}
                                 item={item}
                                 isPrimary={item.key === primaryDeliverable?.key}
                                 downloadLabel={missionT.downloadPrimary}
+                                previewLabel={t.mission.previewAction}
+                                previewUrl={currentJobId ? deliverableDownloadUrl(currentJobId, item.key) : undefined}
                                 onDownload={() => void handleDownload(item.key)}
                               />
                             ))}
@@ -2112,7 +2392,7 @@ export function MissionControl() {
                       </section>
 
                       <section className="overflow-hidden rounded-lg border border-border/70">
-                        <div className="border-b border-border/70 bg-muted/30 px-3 py-2">
+                        <div className="flex items-center justify-between border-b border-border/70 bg-muted/30 px-3 py-2">
                           <h3 className="text-xs font-semibold tracking-wide text-foreground">
                             {missionT.reviewFilesTitle}
                           </h3>
@@ -2146,22 +2426,35 @@ export function MissionControl() {
                       {companionArtifacts.length > 0 && (
                         <section className="overflow-hidden rounded-lg border border-border/70">
                           <div className="flex items-center justify-between border-b border-border/70 bg-indigo-500/5 px-3 py-2">
-                            <h3 className="text-xs font-semibold tracking-wide text-foreground">
-                              {missionT.companionArtifactsTitle}
-                            </h3>
-                            <span className="font-mono text-xs text-muted-foreground">
-                              {companionArtifacts.filter((c) => c.status === 'generated').length} / {companionArtifacts.length}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-xs font-semibold tracking-wide text-foreground">
+                                {missionT.companionArtifactsTitle}
+                              </h3>
+                              <span className="font-mono text-xs text-muted-foreground">
+                                ({companionArtifacts.filter((c) => c.status === 'generated').length} / {companionArtifacts.length})
+                              </span>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setShowCompanion((open) => !open)}
+                              className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+                            >
+                              <span>{showCompanion ? t.quality.collapseDetail : t.quality.expandDetail}</span>
+                              <ChevronDown className={cn("ml-1 size-3.5 transition-transform", showCompanion && "rotate-180")} />
+                            </Button>
                           </div>
-                          <div className="divide-y divide-border/60">
-                            {companionArtifacts.map((comp) => (
-                              <CompanionArtifactRow
-                                key={comp.kind}
-                                comp={comp}
-                                onDownload={() => void handleDownload(comp.kind)}
-                              />
-                            ))}
-                          </div>
+                          {showCompanion && (
+                            <div className="divide-y divide-border/60">
+                              {companionArtifacts.map((comp) => (
+                                <CompanionArtifactRow
+                                  key={comp.kind}
+                                  comp={comp}
+                                  onDownload={() => void handleDownload(comp.kind)}
+                                />
+                              ))}
+                            </div>
+                          )}
                         </section>
                       )}
                     </div>
