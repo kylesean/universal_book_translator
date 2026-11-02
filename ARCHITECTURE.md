@@ -87,14 +87,15 @@ Two rules follow:
    that fails on every rename costs more than the dead pointer it catches.
 
 What *is* versioned is the root set — `README.md`, `ARCHITECTURE.md`,
-`GLOSSARY.md`, `SEMANTIC_JUDGE.md`, `CHANGELOG.md`, `scripts/README.md`,
+`GLOSSARY.md`, `SEMANTIC_JUDGE.md`, `scripts/README.md`,
 `web/README.md`, `deploy/docker/README.md` — plus each module's
 own docstring. That is the documentation a reviewer and CI can actually read.
-`CHANGELOG.md` is exempt from the link check: an entry cites the tree it
-describes, and rewriting history to satisfy a present-day check falsifies it (the
-same reasoning is why `check_doc_refs.py` skips dated audit records — it excludes
-the `archive/` and `reviews/` subdirectories of `docs/` by name, whether or not
-this HEAD's docs set has them).
+
+There is no changelog. The tree is still changing fast enough that a
+per-release narrative restates it and then lags it, and a changelog that is
+wrong is worse than none. Until the interfaces stabilize, `git log` is the
+record, and the review notes under `docs/` hold the argument behind a
+decision (see rule 1).
 
 ## Sanctioned duplication
 

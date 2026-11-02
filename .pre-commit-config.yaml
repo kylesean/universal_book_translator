@@ -33,8 +33,8 @@ repos:
         language: system
         # markdown: ruff formats Python code blocks inside .md files, and CI's
         # `ruff format --check` runs over the whole tracked tree — the versioned
-        # docs (README.md, ARCHITECTURE.md, GLOSSARY.md, CHANGELOG.md,
-        # scripts/README.md, web/*.md) included. Without markdown here, a
+        # docs (README.md, ARCHITECTURE.md, GLOSSARY.md, scripts/README.md,
+        # web/*.md) included. Without markdown here, a
         # docs-only commit passed this hook and failed CI on the same tree; that
         # gap kept every CI run since Oct 23 red while the local gates stayed
         # green. (`docs/` itself is un-versioned, so its notes are only checked
