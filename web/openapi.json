@@ -4901,6 +4901,17 @@
             ],
             "title": "Delivery Mode"
           },
+          "requested_delivery_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Delivery Mode"
+          },
           "planned_delivery_mode": {
             "anyOf": [
               {
@@ -4927,6 +4938,18 @@
               }
             ],
             "title": "Degrade Reason"
+          },
+          "degrade_reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Degrade Reason Codes"
+          },
+          "degrade_reason_params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Degrade Reason Params"
           }
         },
         "type": "object",

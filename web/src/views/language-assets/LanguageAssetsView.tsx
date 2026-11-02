@@ -3,17 +3,25 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowDownToLine,
+  BookA,
+  Check,
   ChevronLeft,
   ChevronRight,
+  Copy,
+  Download,
   FileText,
   FilterX,
+  Layers,
   Loader2,
   Maximize2,
   MoreHorizontal,
+  Pencil,
   Plus,
   Search,
+  Sparkles,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/badge'
@@ -103,9 +111,37 @@ function TmPassage({
   text: string
   source: boolean
 }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async (event: React.MouseEvent) => {
+    event.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // ignore clipboard permission errors
+    }
+  }
+
   return (
-    <div className="line-clamp-4 w-full text-left">
-      <RichText text={text} source={source} density="compact" />
+    <div className="group/passage relative w-full text-left">
+      <div className="line-clamp-4 pr-7">
+        <RichText text={text} source={source} density="compact" />
+      </div>
+      <button
+        type="button"
+        onClick={handleCopy}
+        className="absolute right-0 top-0 hidden size-6 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground group-hover/passage:flex"
+        title={copied ? 'Copied' : 'Copy'}
+        aria-label="Copy text"
+      >
+        {copied ? (
+          <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+        ) : (
+          <Copy className="size-3.5" />
+        )}
+      </button>
     </div>
   )
 }
@@ -224,12 +260,16 @@ function RowActions({
   onDelete,
   inspectLabel,
   onInspect,
+  editLabel,
+  onEdit,
 }: {
   label: string
   deleteLabel: string
   onDelete: () => void
   inspectLabel?: string
   onInspect?: () => void
+  editLabel?: string
+  onEdit?: () => void
 }) {
   return (
     <DropdownMenu>
@@ -244,6 +284,12 @@ function RowActions({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
+        {editLabel && onEdit ? (
+          <DropdownMenuItem onSelect={onEdit}>
+            <Pencil />
+            {editLabel}
+          </DropdownMenuItem>
+        ) : null}
         {inspectLabel && onInspect ? (
           <DropdownMenuItem onSelect={onInspect}>
             <Maximize2 />
@@ -280,6 +326,9 @@ export function LanguageAssetsView() {
   const [newSource, setNewSource] = useState('')
   const [newTarget, setNewTarget] = useState('')
   const [savingTerm, setSavingTerm] = useState(false)
+  const [editingSource, setEditingSource] = useState<string | null>(null)
+  const [editingTarget, setEditingTarget] = useState('')
+  const [updatingTerm, setUpdatingTerm] = useState(false)
   const [glossaryImportOpen, setGlossaryImportOpen] = useState(false)
   const [glossaryImporting, setGlossaryImporting] = useState(false)
   const [glossaryImportFile, setGlossaryImportFile] = useState<File | null>(null)
@@ -385,6 +434,14 @@ export function LanguageAssetsView() {
     void loadTm()
   }, [activeTab, loadTm])
 
+  const tmPreloadedRef = useRef(false)
+  useEffect(() => {
+    if (!tmPreloadedRef.current) {
+      tmPreloadedRef.current = true
+      void loadTm(1)
+    }
+  }, [loadTm])
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setTmQuery(tmSearch.trim())
@@ -442,6 +499,68 @@ export function LanguageAssetsView() {
     } finally {
       setDeletingTerm(false)
     }
+  }
+
+  const handleStartEdit = (term: GlossaryTerm) => {
+    setEditingSource(term.source)
+    setEditingTarget(term.target)
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editingSource || !editingTarget.trim() || updatingTerm) return
+    setUpdatingTerm(true)
+    setGlossaryError(null)
+    try {
+      setTerms(await upsertGlossaryTerm(editingSource, editingTarget.trim()))
+      setConflicts(await getGlossaryConflicts().catch(() => conflicts))
+      setEditingSource(null)
+      toast.push(t.assets.termSaved, 'success')
+    } catch (err) {
+      setGlossaryError(err instanceof Error ? err.message : t.assets.saveTermFailed)
+    } finally {
+      setUpdatingTerm(false)
+    }
+  }
+
+  const handleCancelEdit = () => {
+    setEditingSource(null)
+  }
+
+  const exportGlossaryCsv = () => {
+    if (terms.length === 0) {
+      toast.push(t.assets.exportEmpty, 'info')
+      return
+    }
+    const escapeCsv = (str: string) => {
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return `"${str.replace(/"/g, '""')}"`
+      }
+      return str
+    }
+    const rows = ['source,target', ...terms.map((term) => `${escapeCsv(term.source)},${escapeCsv(term.target)}`)]
+    const blob = new Blob([rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `glossary_${new Date().toISOString().slice(0, 10)}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const exportGlossaryJson = () => {
+    if (terms.length === 0) {
+      toast.push(t.assets.exportEmpty, 'info')
+      return
+    }
+    const blob = new Blob([JSON.stringify(terms, null, 2)], {
+      type: 'application/json;charset=utf-8;',
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `glossary_${new Date().toISOString().slice(0, 10)}.json`
+    link.click()
+    URL.revokeObjectURL(url)
   }
 
   const importGlossaryFile = async () => {
@@ -647,6 +766,96 @@ export function LanguageAssetsView() {
         </Tabs>
       </header>
 
+      {/* Asset Health Overview Strip */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="flex flex-col justify-between rounded-xl border border-border/80 bg-card p-3 shadow-card transition-colors">
+          <div className="flex items-center justify-between gap-1 text-muted-foreground">
+            <span className="text-xs font-medium">{t.assets.kpiGlossaryTerms}</span>
+            <BookA className="size-4 text-primary" />
+          </div>
+          <div className="mt-2 flex items-baseline justify-between gap-2">
+            <span className="font-mono text-xl font-bold tracking-tight text-foreground">
+              {glossaryConfigured ? terms.length : '—'}
+            </span>
+            <span className="truncate text-[11px] text-muted-foreground">
+              {t.assets.kpiGlossarySubtext}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-col justify-between rounded-xl border border-border/80 bg-card p-3 shadow-card transition-colors">
+          <div className="flex items-center justify-between gap-1 text-muted-foreground">
+            <span className="text-xs font-medium">{t.assets.kpiConflicts}</span>
+            <AlertTriangle
+              className={cn(
+                'size-4',
+                conflicts.length > 0
+                  ? 'text-amber-500'
+                  : 'text-emerald-600 dark:text-emerald-400',
+              )}
+            />
+          </div>
+          <div className="mt-2 flex items-baseline justify-between gap-2">
+            <span
+              className={cn(
+                'font-mono text-xl font-bold tracking-tight',
+                conflicts.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-foreground',
+              )}
+            >
+              {conflicts.length}
+            </span>
+            <Badge
+              variant="outline"
+              className={cn(
+                'h-5 px-1.5 text-[10px] font-medium',
+                conflicts.length === 0
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                  : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+              )}
+            >
+              {conflicts.length === 0
+                ? t.assets.kpiConflictsNone
+                : `${conflicts.length} ${t.assets.kpiConflictsExist}`}
+            </Badge>
+          </div>
+        </div>
+
+        <div className="flex flex-col justify-between rounded-xl border border-border/80 bg-card p-3 shadow-card transition-colors">
+          <div className="flex items-center justify-between gap-1 text-muted-foreground">
+            <span className="text-xs font-medium">{t.assets.kpiTmTotal}</span>
+            <Layers className="size-4 text-sky-500" />
+          </div>
+          <div className="mt-2 flex items-baseline justify-between gap-2">
+            <span className="font-mono text-xl font-bold tracking-tight text-foreground">
+              {tmLoadedOnce ? tmTotal.toLocaleString() : '—'}
+            </span>
+            <span className="truncate text-[11px] text-muted-foreground">
+              {tmLoadedOnce
+                ? `${tmNeverUsedCount} ${t.assets.tmUsageNever}`
+                : t.assets.kpiTmSubtext}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-col justify-between rounded-xl border border-border/80 bg-card p-3 shadow-card transition-colors">
+          <div className="flex items-center justify-between gap-1 text-muted-foreground">
+            <span className="text-xs font-medium">{t.assets.kpiTmHuman}</span>
+            <Sparkles className="size-4 text-emerald-500" />
+          </div>
+          <div className="mt-2 flex items-baseline justify-between gap-2">
+            <span className="font-mono text-xl font-bold tracking-tight text-emerald-700 dark:text-emerald-400">
+              {tmLoadedOnce ? tmHumanCount.toLocaleString() : '—'}
+            </span>
+            <Badge
+              variant="outline"
+              className="h-5 border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300"
+            >
+              {t.assets.kpiTmHumanSubtext}
+            </Badge>
+          </div>
+        </div>
+      </div>
+
       {activeTab === 'glossary' ? (
         <section className="min-w-0 space-y-4" aria-labelledby="glossary-heading">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -654,14 +863,34 @@ export function LanguageAssetsView() {
               {t.assets.glossaryDescription}
             </p>
             {glossaryConfigured ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setGlossaryImportOpen(true)}
-              >
-                <Upload />
-                {t.assets.importAction}
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" disabled={terms.length === 0}>
+                      <Download />
+                      {t.assets.exportAction}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onSelect={exportGlossaryCsv}>
+                      <FileText />
+                      {t.assets.exportCsv}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={exportGlossaryJson}>
+                      <FileText />
+                      {t.assets.exportJson}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setGlossaryImportOpen(true)}
+                >
+                  <Upload />
+                  {t.assets.importAction}
+                </Button>
+              </div>
             ) : null}
           </div>
 
@@ -674,19 +903,57 @@ export function LanguageAssetsView() {
           ) : null}
 
           {conflicts.length > 0 ? (
-            <Alert variant="warning">
-              <AlertTriangle />
-              <AlertTitle>{t.assets.conflictsTitle}</AlertTitle>
+            <Alert variant="warning" className="space-y-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <AlertTitle className="mb-0 text-sm font-semibold">{t.assets.conflictsTitle}</AlertTitle>
+              </div>
               <AlertDescription>
-                <ul className="space-y-1">
+                <div className="space-y-2 pt-1">
                   {conflicts.map((conflict) => (
-                    <li key={conflict.source} className="break-words">
-                      <span className="font-medium text-foreground">{conflict.source}</span>
-                      <span className="mx-1.5 text-muted-foreground">→</span>
-                      <span>{conflict.targets.join(' / ')}</span>
-                    </li>
+                    <div
+                      key={conflict.source}
+                      className="flex flex-col gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <span className="font-semibold text-foreground">{conflict.source}</span>
+                        <span className="mx-2 text-muted-foreground">→</span>
+                        <span className="text-xs text-muted-foreground">
+                          {conflict.targets.length} {language === 'zh' ? '种译法' : 'variants'}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {conflict.targets.map((tgt) => (
+                          <Button
+                            key={tgt}
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 border-amber-500/30 text-xs hover:border-amber-500/50 hover:bg-amber-500/10"
+                            onClick={async () => {
+                              try {
+                                setTerms(await upsertGlossaryTerm(conflict.source, tgt))
+                                setConflicts(await getGlossaryConflicts().catch(() => []))
+                                toast.push(
+                                  `${conflict.source} → ${tgt} ${t.assets.termSaved}`,
+                                  'success'
+                                )
+                              } catch (err) {
+                                toast.push(
+                                  err instanceof Error ? err.message : t.assets.saveTermFailed,
+                                  'error'
+                                )
+                              }
+                            }}
+                          >
+                            <Check className="mr-1 size-3 text-emerald-600 dark:text-emerald-400" />
+                            {t.assets.resolveConflict}: 「{tgt}」
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
                   ))}
-                </ul>
+                </div>
               </AlertDescription>
             </Alert>
           ) : null}
@@ -811,11 +1078,47 @@ export function LanguageAssetsView() {
                               <dt className="text-xs font-medium text-muted-foreground">
                                 {t.assets.colTarget}
                               </dt>
-                              <dd className="mt-1 break-words text-foreground">{term.target}</dd>
+                              <dd className="mt-1 break-words text-foreground">
+                                {editingSource === term.source ? (
+                                  <div className="mt-1.5 flex items-center gap-1.5">
+                                    <Input
+                                      value={editingTarget}
+                                      onChange={(event) => setEditingTarget(event.target.value)}
+                                      className="h-8 bg-background text-sm"
+                                      autoFocus
+                                    />
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      className="size-7 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-950/40"
+                                      onClick={() => void handleSaveEdit()}
+                                      disabled={updatingTerm || !editingTarget.trim()}
+                                    >
+                                      {updatingTerm ? (
+                                        <Loader2 className="size-3.5 animate-spin" />
+                                      ) : (
+                                        <Check className="size-3.5" />
+                                      )}
+                                    </Button>
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      className="size-7 text-muted-foreground"
+                                      onClick={handleCancelEdit}
+                                    >
+                                      <X className="size-3.5" />
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  term.target
+                                )}
+                              </dd>
                             </div>
                           </dl>
                           <RowActions
                             label={t.assets.termActions.replace('{term}', term.source)}
+                            editLabel={t.assets.editTermAction}
+                            onEdit={() => handleStartEdit(term)}
                             deleteLabel={t.assets.deleteTermAction}
                             onDelete={() => setPendingDeleteTerm(term.source)}
                           />
@@ -836,15 +1139,66 @@ export function LanguageAssetsView() {
                         <TableBody>
                           {filteredTerms.map((term) => (
                             <TableRow key={term.source}>
-                              <TableCell className="font-medium text-foreground">
+                              <TableCell className="align-middle font-medium text-foreground">
                                 <span className="block break-words">{term.source}</span>
                               </TableCell>
-                              <TableCell className="text-foreground">
-                                <span className="block break-words">{term.target}</span>
+                              <TableCell className="align-middle text-foreground">
+                                {editingSource === term.source ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <Input
+                                      value={editingTarget}
+                                      onChange={(event) => setEditingTarget(event.target.value)}
+                                      onKeyDown={(event) => {
+                                        if (event.key === 'Enter') void handleSaveEdit()
+                                        if (event.key === 'Escape') handleCancelEdit()
+                                      }}
+                                      className="h-8 max-w-md bg-background text-sm"
+                                      autoFocus
+                                    />
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      className="size-7 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-950/40"
+                                      onClick={() => void handleSaveEdit()}
+                                      disabled={updatingTerm || !editingTarget.trim()}
+                                      title={t.assets.editTermSave}
+                                    >
+                                      {updatingTerm ? (
+                                        <Loader2 className="size-3.5 animate-spin" />
+                                      ) : (
+                                        <Check className="size-3.5" />
+                                      )}
+                                    </Button>
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      className="size-7 text-muted-foreground hover:text-foreground"
+                                      onClick={handleCancelEdit}
+                                      title={t.assets.editTermCancel}
+                                    >
+                                      <X className="size-3.5" />
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <div className="group/cell flex items-center justify-between gap-2">
+                                    <span className="block break-words">{term.target}</span>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="size-6 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/cell:opacity-100"
+                                      onClick={() => handleStartEdit(term)}
+                                      title={t.assets.editTermAction}
+                                    >
+                                      <Pencil className="size-3" />
+                                    </Button>
+                                  </div>
+                                )}
                               </TableCell>
-                              <TableCell className="text-right">
+                              <TableCell className="align-middle text-right">
                                 <RowActions
                                   label={t.assets.termActions.replace('{term}', term.source)}
+                                  editLabel={t.assets.editTermAction}
+                                  onEdit={() => handleStartEdit(term)}
                                   deleteLabel={t.assets.deleteTermAction}
                                   onDelete={() => setPendingDeleteTerm(term.source)}
                                 />
@@ -931,7 +1285,10 @@ export function LanguageAssetsView() {
                   }}
                   label={t.assets.tmFilterProvenance}
                   options={[
-                    { value: 'all', label: `${t.assets.tmFilterProvenance}：${t.assets.tmFilterAll}` },
+                    {
+                      value: 'all',
+                      label: `${t.assets.tmFilterProvenance}${language === 'zh' ? '：' : ': '}${t.assets.tmFilterAll}`,
+                    },
                     { value: 'machine', label: t.assets.provenanceMachine },
                     { value: 'human_pe', label: t.assets.provenanceHuman },
                   ]}
@@ -944,7 +1301,10 @@ export function LanguageAssetsView() {
                   }}
                   label={t.assets.tmFilterUsage}
                   options={[
-                    { value: 'all', label: `${t.assets.tmFilterUsage}：${t.assets.tmFilterAll}` },
+                    {
+                      value: 'all',
+                      label: `${t.assets.tmFilterUsage}${language === 'zh' ? '：' : ': '}${t.assets.tmFilterAll}`,
+                    },
                     { value: 'never', label: t.assets.tmUsageNever },
                     { value: 'used', label: t.assets.tmUsageUsed },
                   ]}
@@ -1150,14 +1510,22 @@ export function LanguageAssetsView() {
                           <span className="text-xs font-medium text-muted-foreground">
                             {t.assets.colProvenance}
                           </span>
-                          <Badge
-                            variant="outline"
-                            className="font-normal text-muted-foreground"
-                          >
-                            {entry.provenance === 'human_pe'
-                              ? t.assets.provenanceHuman
-                              : t.assets.provenanceMachine}
-                          </Badge>
+                          {entry.provenance === 'human_pe' ? (
+                            <Badge
+                              variant="outline"
+                              className="gap-1 border-emerald-500/30 bg-emerald-500/10 font-medium text-emerald-700 dark:text-emerald-400"
+                            >
+                              <Sparkles className="size-3" />
+                              {t.assets.provenanceHuman}
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="border-border/60 bg-muted/40 font-normal text-muted-foreground"
+                            >
+                              {t.assets.provenanceMachine}
+                            </Badge>
+                          )}
                           <span className="text-xs text-muted-foreground">
                             {entry.updated_at
                               ? t.assets.tmUpdatedAt.replace(
@@ -1231,21 +1599,38 @@ export function LanguageAssetsView() {
                           </TableCell>
                           <TableCell className="align-top py-2.5">
                             <div className="space-y-1.5">
-                              <Badge
-                                variant="outline"
-                                className="font-normal text-muted-foreground"
-                              >
-                                {entry.provenance === 'human_pe'
-                                  ? t.assets.provenanceHuman
-                                  : t.assets.provenanceMachine}
-                              </Badge>
-                              <div className="text-xs tabular-nums text-muted-foreground">
-                                {entry.use_count > 0
-                                  ? t.assets.tmReuseCount.replace(
+                              {entry.provenance === 'human_pe' ? (
+                                <Badge
+                                  variant="outline"
+                                  className="gap-1 border-emerald-500/30 bg-emerald-500/10 font-medium text-emerald-700 dark:text-emerald-400"
+                                >
+                                  <Sparkles className="size-3" />
+                                  {t.assets.provenanceHuman}
+                                </Badge>
+                              ) : (
+                                <Badge
+                                  variant="outline"
+                                  className="border-border/60 bg-muted/40 font-normal text-muted-foreground"
+                                >
+                                  {t.assets.provenanceMachine}
+                                </Badge>
+                              )}
+                              <div>
+                                {entry.use_count > 0 ? (
+                                  <Badge
+                                    variant="secondary"
+                                    className="bg-sky-500/10 font-mono text-[11px] tabular-nums text-sky-700 hover:bg-sky-500/15 dark:text-sky-300"
+                                  >
+                                    {t.assets.tmReuseCount.replace(
                                       '{count}',
                                       String(entry.use_count)
-                                    )
-                                  : t.assets.tmNeverReused}
+                                    )}
+                                  </Badge>
+                                ) : (
+                                  <span className="text-xs tabular-nums text-muted-foreground/70">
+                                    {t.assets.tmNeverReused}
+                                  </span>
+                                )}
                               </div>
                               {entry.updated_at ? (
                                 <div className="text-xs text-muted-foreground">

@@ -282,7 +282,7 @@ def test_every_placeholder_occurrence_is_reported() -> None:
             page_texts=(
                 "正文一。⟦SOUP_MASK_0001-f2d⟧ 之后继续。",
                 "正文二。⟦MATH_MASK_0002-91a⟧ 之后继续。",
-                "正文三。⟨missing⟩ 结尾。",
+                "正文三。[SENTINEL_0003] 结尾。",
             ),
         )
     )
@@ -292,11 +292,49 @@ def test_every_placeholder_occurrence_is_reported() -> None:
     assert "3 placeholder/sentinel or stray markup site(s)" in finding.message
     assert len(finding.occurrences) == 3
     assert "SOUP_MASK_0001-f2d" in finding.occurrences[0]
-    assert "⟨missing⟩" in finding.occurrences[2]
+    assert "SENTINEL_0003" in finding.occurrences[2]
     payload = finding.to_payload()
     assert payload["occurrence_count"] == 3
     assert isinstance(payload["occurrences"], list)
     assert len(payload["occurrences"]) == 3
+
+
+def test_the_reader_facing_missing_marker_is_not_a_leak() -> None:
+    """``⟨missing⟩`` is the shipped stand-in for an unrestorable span.
+
+    The renderer writes it deliberately (``strip_pipeline_sentinels``) and keeps
+    ``sentinel_leaked`` on the block, so the artifact must not be refused for it:
+    job ``web_mvyp5gnb_a8278e24df34`` reached 100% and then failed export on
+    exactly one such marker, and every resume reproduced the same BLOCKED
+    verdict. The excerpt below is the measured one from that contract sidecar.
+    """
+    excerpt = "向的空间依赖性，Nch是沟道掺杂浓度，且⟨missing⟩=𝑉tmln(𝑁ch𝑁ni)。请注意，式("
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b1", excerpt),),
+            page_texts=(excerpt,),
+        )
+    )
+
+    assert "placeholder_leak" not in _codes(report)
+    assert report.passed
+    assert report.deliverable
+    assert next(c for c in report.checks if c["name"] == "placeholders")["status"] == "pass"
+
+
+def test_a_marker_does_not_mask_the_machinery_beside_it() -> None:
+    """A raw token still blocks even when a sanctioned marker shares the page."""
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b1", "完整译文。"),),
+            page_texts=("且⟨missing⟩=𝑉tmln，后文 ⟦SOUP_MASK_0001-f2d⟧。",),
+        )
+    )
+
+    finding = next(f for f in report.findings if f.code == "placeholder_leak")
+    assert len(finding.occurrences) == 1
+    assert "SOUP_MASK_0001-f2d" in finding.occurrences[0]
+    assert not report.passed
 
 
 def test_a_stray_markup_tag_in_the_artifact_is_critical() -> None:

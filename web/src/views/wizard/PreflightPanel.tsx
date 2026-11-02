@@ -107,6 +107,10 @@ export interface PreflightPanelProps {
   assessStale: boolean
   canSubmit: boolean
   deliveryMode: 'auto' | 'readable' | 'faithful'
+  /** Pre-flight verdict: the selected 1:1 contract cannot hold for this file. */
+  faithfulInfeasible?: boolean
+  /** What will happen instead, when ``faithfulInfeasible`` is true. */
+  deliveryOutcomeNote?: string | null
   isReassessing: boolean
   isSubmitting: boolean
   onAcknowledgeRehearsal: () => void
@@ -125,6 +129,8 @@ export function PreflightPanel({
   assessStale,
   canSubmit,
   deliveryMode,
+  deliveryOutcomeNote,
+  faithfulInfeasible = false,
   isReassessing,
   isSubmitting,
   onAcknowledgeRehearsal,
@@ -141,7 +147,9 @@ export function PreflightPanel({
   const cost = assessment?.cost.total_cost_usd
   const deliveryLabel =
     deliveryMode === 'faithful'
-      ? t.wizard.deliveryModeFaithful
+      ? faithfulInfeasible
+        ? `${t.wizard.deliveryModeFaithful} → ${t.wizard.deliveryModeReadable}`
+        : t.wizard.deliveryModeFaithful
       : deliveryMode === 'readable'
         ? t.wizard.deliveryModeReadable
         : t.wizard.deliveryModeAuto
@@ -295,8 +303,19 @@ export function PreflightPanel({
                   value={`${(assessment.route.confidence * 100).toFixed(0)}%`}
                   valueClassName="text-primary"
                 />
-                <DetailRow label={t.wizard.deliveryMode} value={deliveryLabel} />
+                <DetailRow
+                  label={t.wizard.deliveryMode}
+                  value={deliveryLabel}
+                  valueClassName={
+                    faithfulInfeasible ? 'text-amber-700 dark:text-amber-400' : undefined
+                  }
+                />
               </dl>
+              {faithfulInfeasible && deliveryOutcomeNote ? (
+                <p className="mt-2 text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+                  {deliveryOutcomeNote}
+                </p>
+              ) : null}
             </section>
 
             {assessment.warnings.length > 0 ? (

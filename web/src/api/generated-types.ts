@@ -1263,6 +1263,8 @@ export interface components {
             }[] | null;
             /** Delivery Mode */
             delivery_mode?: string | null;
+            /** Requested Delivery Mode */
+            requested_delivery_mode?: string | null;
             /** Planned Delivery Mode */
             planned_delivery_mode?: string | null;
             /**
@@ -1272,6 +1274,12 @@ export interface components {
             degraded: boolean;
             /** Degrade Reason */
             degrade_reason?: string | null;
+            /** Degrade Reason Codes */
+            degrade_reason_codes?: string[];
+            /** Degrade Reason Params */
+            degrade_reason_params?: {
+                [key: string]: unknown;
+            };
         };
         /**
          * EgressConfigRequest

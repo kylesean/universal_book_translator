@@ -755,10 +755,23 @@ class DeliverableListResponse(BaseModel):
     delivery_verdict: str | None = None
     #: Companion artifact export audit summaries (e.g. status, size, reason).
     companion_artifacts: list[dict[str, Any]] | None = None
+    #: The mode the renderer actually produced (``reflow``/``facsimile``/...).
+    #: For an explicit ``faithful`` request this is the *effective* mode, which
+    #: may differ from the plan's contract when the planner degraded it.
     delivery_mode: str | None = None
+    #: The mode the user asked for. ``faithful`` here is a request, not a
+    #: promise; compare it with :attr:`delivery_mode` before telling a caller
+    #: which contract the files satisfy.
+    requested_delivery_mode: str | None = None
     planned_delivery_mode: str | None = None
     degraded: bool = False
+    #: Human-readable fallback (Chinese, following ``AssessWarning.detail_zh``)
+    #: for a console that does not know the codes. The console localizes
+    #: :attr:`degrade_reason_codes` with :attr:`degrade_reason_params` first.
     degrade_reason: str | None = None
+    #: Stable machine codes for why a ``faithful`` request was not honored.
+    degrade_reason_codes: list[str] = Field(default_factory=list)
+    degrade_reason_params: dict[str, Any] = Field(default_factory=dict)
 
 
 class GlossaryResponse(BaseModel):

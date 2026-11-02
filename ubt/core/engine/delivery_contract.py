@@ -78,7 +78,18 @@ _STYLE_DRIFT_PT = DRIFT_TOLERANCE_PT
 #: otherwise count as three findings and overstate the work left. The paired
 #: alternative comes first so a bracketed token is consumed as a unit; the
 #: lone-bracket alternatives stay last so a single stray bracket still matches.
-_PLACEHOLDER_SITE_RE = re.compile(r"⟦[^⟦⟧\n]{0,80}⟧|⟨missing⟩|<v>|<m>|SOUP_MASK|\[SENTINEL_|⟦|⟧")
+#:
+#: ``⟨missing⟩`` is deliberately *not* here. It is the reader-facing stand-in
+#: ``ubt.render.delivered_text.strip_pipeline_sentinels`` writes when a masker
+#: token's checksum refuses to restore its span, and the block keeps
+#: ``sentinel_leaked`` / ``soup_token_corrupt`` so the loss is attributable --
+#: the glossary's "render flag" states the content ships and the flag records
+#: that it shipped imperfectly. Treating the marker as a leak made the two rules
+#: mutually exclusive: the renderer wrote it on purpose, this contract then
+#: refused the artifact, and a job with one unrestorable span could never finish
+#: (resume re-exported the same file into the same BLOCKED verdict). Only
+#: machinery the pipeline never means to print belongs in this pattern.
+_PLACEHOLDER_SITE_RE = re.compile(r"⟦[^⟦⟧\n]{0,80}⟧|<v>|<m>|SOUP_MASK|\[SENTINEL_|⟦|⟧")
 
 #: Inline math and sentinel spans are not prose: a correct render draws the
 #: formula as Unicode math, so the block's source characters for that span are

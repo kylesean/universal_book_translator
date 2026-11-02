@@ -212,6 +212,13 @@ export interface TranslationDictionary {
     faithfulFeatureAnchor: string
     faithfulPresetRecommendation: string
     faithfulPresetSwitchAction: string
+    /** Pre-submit warning when the selected 1:1 contract cannot hold. */
+    faithfulInfeasibleTitle: string
+    faithfulInfeasibleFontDamage: string
+    faithfulInfeasibleScanned: string
+    faithfulInfeasibleDegrade: string
+    faithfulInfeasibleRefuse: string
+    faithfulFixHint: string
     allowDegrade: string
     allowDegradeHelp: string
     enableCels: string
@@ -410,6 +417,10 @@ export interface TranslationDictionary {
     readerProductsTitle: string
     degradedAlertTitle: string
     degradedAlertDesc: string
+    /** `{requested}` / `{actual}` are localized delivery-mode labels. */
+    degradedModeFlow: string
+    /** Per-code explanation of why a 1:1 request was not honored. */
+    degradeReasonCodes: Record<string, string>
     deliveryModeBadgeFaithful: string
     deliveryModeBadgeReadable: string
     companionArtifactsTitle: string
@@ -694,6 +705,8 @@ export interface TranslationDictionary {
     postEditDirtyIndicator: string
     postEditNoSegmentsFound: string
     postEditTotalSegments: string
+    expandDetail: string
+    collapseDetail: string
   }
   assets: {
     title: string
@@ -812,6 +825,24 @@ export interface TranslationDictionary {
     deleteTermBody: string
     evictTmTitle: string
     evictTmBody: string
+    exportAction: string
+    exportCsv: string
+    exportJson: string
+    exportEmpty: string
+    editTermAction: string
+    editTermCancel: string
+    editTermSave: string
+    resolveConflict: string
+    kpiGlossaryTerms: string
+    kpiGlossarySubtext: string
+    kpiConflicts: string
+    kpiConflictsNone: string
+    kpiConflictsExist: string
+    kpiTmTotal: string
+    kpiTmSubtext: string
+    kpiTmHuman: string
+    kpiTmHumanSubtext: string
+    copySuccess: string
   }
   doctor: {
     title: string

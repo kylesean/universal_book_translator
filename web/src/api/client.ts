@@ -516,9 +516,14 @@ export interface DeliverableListing {
   deliveryVerdict: 'passed' | 'warning' | 'blocked' | null
   companionArtifacts?: CompanionArtifactInfo[]
   deliveryMode?: string | null
+  requestedDeliveryMode?: string | null
   plannedDeliveryMode?: string | null
   degraded?: boolean
   degradeReason?: string | null
+  /** Stable machine codes for why a `faithful` request was not honored. */
+  degradeReasonCodes?: string[]
+  /** Measured values interpolated into the localized reason templates. */
+  degradeReasonParams?: Record<string, unknown>
 }
 
 export async function listDeliverables(jobId: string): Promise<DeliverableListing> {
@@ -541,9 +546,17 @@ export async function listDeliverables(jobId: string): Promise<DeliverableListin
         }))
       : [],
     deliveryMode: data.delivery_mode ?? null,
+    requestedDeliveryMode: data.requested_delivery_mode ?? null,
     plannedDeliveryMode: data.planned_delivery_mode ?? null,
     degraded: Boolean(data.degraded),
     degradeReason: data.degrade_reason ?? null,
+    degradeReasonCodes: Array.isArray(data.degrade_reason_codes)
+      ? data.degrade_reason_codes
+      : [],
+    degradeReasonParams:
+      data.degrade_reason_params && typeof data.degrade_reason_params === 'object'
+        ? data.degrade_reason_params
+        : {},
   }
 }
 

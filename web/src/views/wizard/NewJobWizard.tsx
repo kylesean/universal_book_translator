@@ -594,6 +594,40 @@ export function NewJobWizard() {
           ? t.wizard.fieldMinOne
           : null)
   /**
+   * The engine's faithful gate is measured, not assumed: a source with
+   * confirmed font-encoding damage (or a scan) has an untrustworthy text
+   * layer, so `text_trust` falls below 0.80 and page-locked 1:1 is vetoed
+   * (`ubt/delivery/router.py`). The pre-flight already measures both signals
+   * (`FONT_RESIDUE_RISK.params.confirmed_pages`, `scan_page_share`), so the
+   * wizard can say the same thing the engine will say — before submission
+   * instead of after a silent downgrade.
+   */
+  const fontDamageWarning = assessment?.warnings.find((w) => w.code === 'FONT_RESIDUE_RISK')
+  const confirmedDamagePages =
+    Number(fontDamageWarning?.params?.confirmed_pages ?? 0) || 0
+  const sourcePages = Number(assessment?.document.pages ?? 0) || 0
+  const sourceScanned = Boolean(
+    assessment?.document.is_scanned ||
+      ((assessment?.document.scan_page_share ?? 0) > 0.5)
+  )
+  const faithfulInfeasible =
+    deliveryMode === 'faithful' &&
+    assessment !== null &&
+    (confirmedDamagePages > 0 || sourceScanned)
+  const faithfulInfeasibleReason =
+    confirmedDamagePages > 0
+      ? t.wizard.faithfulInfeasibleFontDamage
+          .replace('{pages}', String(confirmedDamagePages))
+          .replace('{total}', String(sourcePages))
+      : sourceScanned
+        ? t.wizard.faithfulInfeasibleScanned
+        : null
+  const faithfulOutcomeNote = faithfulInfeasible
+    ? allowDegrade
+      ? t.wizard.faithfulInfeasibleDegrade
+      : t.wizard.faithfulInfeasibleRefuse
+    : null
+  /**
    * 报价是否存在且与当前表单一致——「先验后花」承诺的守门条件。
    *
    * 禁用态不另设文字说明：没文件时拖拽区就是说明，预算/数值无效时错误
@@ -1248,6 +1282,18 @@ export function NewJobWizard() {
                   </div>
                 </div>
 
+                {faithfulInfeasible && faithfulInfeasibleReason ? (
+                  <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-900 dark:text-amber-100">
+                    <div className="flex items-center gap-1.5 font-semibold">
+                      <AlertTriangle className="size-3.5 shrink-0" />
+                      <span>{t.wizard.faithfulInfeasibleTitle}</span>
+                    </div>
+                    <p className="mt-1 pl-5">{faithfulInfeasibleReason}</p>
+                    <p className="mt-1 pl-5">{faithfulOutcomeNote}</p>
+                    <p className="mt-1 pl-5 opacity-80">{t.wizard.faithfulFixHint}</p>
+                  </div>
+                ) : null}
+
                 {preset !== 'high_fidelity' ? (
                   <div className="mt-3 flex items-center justify-between gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
                     <span className="leading-tight">
@@ -1839,6 +1885,8 @@ export function NewJobWizard() {
           assessStale={assessStale}
           canSubmit={canSubmit}
           deliveryMode={deliveryMode}
+          deliveryOutcomeNote={faithfulOutcomeNote}
+          faithfulInfeasible={faithfulInfeasible}
           isReassessing={isReassessing}
           isSubmitting={isSubmitting}
           onAcknowledgeRehearsal={() => setRehearsalAcknowledged(true)}

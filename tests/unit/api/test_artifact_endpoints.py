@@ -156,6 +156,11 @@ def test_deliverables_list_what_exists_on_disk(tmp_path: Path) -> None:
     assert res.status_code == 200
     body = res.json()
     assert body["job_id"] == _JOB
+    # A ledger that never recorded a delivery plan must not invent a
+    # degradation: absence is not evidence of a downgrade.
+    assert body["delivery_mode"] is None
+    assert body["degraded"] is False
+    assert body["degrade_reason_codes"] == []
     keys = {item["key"] for item in body["deliverables"]}
     assert "primary" in keys
     assert "epub" not in keys
@@ -318,6 +323,104 @@ def test_the_listing_reports_the_verdict_before_the_click(tmp_path: Path) -> Non
 
     body = client.get(f"/jobs/{_JOB}/deliverables", headers=_AUTH).json()
     assert body["delivery_verdict"] == "blocked"
+
+
+def _seed_delivery_metadata(
+    config: UBTConfig,
+    *,
+    requested: str,
+    effective: str,
+    plan: dict[str, object],
+    page_count: int = 26,
+    damaged_pages: int = 20,
+) -> None:
+    with SQLiteJobLedger(config.db_dir / f"{_JOB}.sqlite") as ledger:
+        ledger.set_job_metadata_value(_JOB, "delivery_mode_requested", requested)
+        ledger.set_job_metadata_value(_JOB, "delivery_mode_effective", effective)
+        ledger.set_job_metadata_value(_JOB, "delivery_plan", plan)
+        ledger.set_job_metadata_value(_JOB, "page_count", page_count)
+        ledger.set_job_metadata_value(
+            _JOB, "route_decision", {"confirmed_font_damage_pages": damaged_pages}
+        )
+
+
+def test_the_listing_reports_a_planned_faithful_downgrade(tmp_path: Path) -> None:
+    """The planner's own downgrade must reach the console, not just the log.
+
+    The old reader looked for a ``delivery_mode`` key that a planned downgrade
+    never writes, and gated ``degraded`` on the plan still being faithful --
+    which it is not after the router already re-routed it. Job
+    ``web_mvyp5gnb_a8278e24df34`` therefore showed neither a mode badge nor a
+    notice while its files were reflow, not 1:1.
+    """
+    config = _config(tmp_path)
+    _seed_job(config, tmp_path)
+    _seed_delivery_metadata(
+        config,
+        requested="faithful",
+        effective="reflow",
+        plan={
+            "schema_version": 1,
+            "requested_mode": "faithful",
+            "contract": "readable",
+            "feasible": True,
+            "eligibility": {
+                "eligible": False,
+                "reasons": ["text_trust=0.23 < 0.80", "page_lock_feasible=false"],
+            },
+            "signals": {
+                "text_trust": 0.23076923076923073,
+                "page_kind": "native",
+                "source_overlap": False,
+                "page_lock_feasible": False,
+                "layout_complexity": "high",
+                "document_class": "academic",
+            },
+        },
+    )
+    client = TestClient(create_app(config))
+
+    body = client.get(f"/jobs/{_JOB}/deliverables", headers=_AUTH).json()
+    assert body["delivery_mode"] == "reflow"
+    assert body["requested_delivery_mode"] == "faithful"
+    assert body["planned_delivery_mode"] == "readable"
+    assert body["degraded"] is True
+    assert body["degrade_reason_codes"] == ["text_trust_low", "page_lock_infeasible"]
+    assert body["degrade_reason_params"]["text_trust"] == pytest.approx(0.23076923076923073)
+    assert body["degrade_reason_params"]["damaged_pages"] == 20
+    assert body["degrade_reason_params"]["page_count"] == 26
+    assert "字体编码" in body["degrade_reason"]
+
+
+def test_a_faithful_run_that_kept_its_contract_is_not_degraded(tmp_path: Path) -> None:
+    """``facsimile`` is the renderer a faithful plan maps to; it is not a loss."""
+    config = _config(tmp_path)
+    _seed_job(config, tmp_path)
+    _seed_delivery_metadata(
+        config,
+        requested="faithful",
+        effective="facsimile",
+        damaged_pages=0,
+        plan={
+            "schema_version": 1,
+            "requested_mode": "faithful",
+            "contract": "faithful",
+            "eligibility": {"eligible": True, "reasons": []},
+            "signals": {
+                "text_trust": 0.95,
+                "page_kind": "native",
+                "source_overlap": False,
+                "page_lock_feasible": True,
+            },
+        },
+    )
+    client = TestClient(create_app(config))
+
+    body = client.get(f"/jobs/{_JOB}/deliverables", headers=_AUTH).json()
+    assert body["delivery_mode"] == "facsimile"
+    assert body["degraded"] is False
+    assert body["degrade_reason_codes"] == []
+    assert body["degrade_reason"] is None
 
 
 def test_a_job_with_no_report_is_not_treated_as_blocked(tmp_path: Path) -> None:

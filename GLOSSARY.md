@@ -92,6 +92,8 @@ gate, and never picks a render route. `ubt/core/presets.py`.
 
 **delivery verdict** — The three-state answer to "may this ship": `blocked` (a quarantined or failed block ships its source), `warning` (a `needs_human` block still ships its translation), `passed`. One rule, shared by the CLI banner, the REST report and the console, so they cannot disagree. `ubt/core/job_options.py`.
 
+**delivery contract (artifact)** — The pure, adapter-free verdict over what was actually drawn: readable pages, page count, text realization, leaked machinery, overlap/bounds, assets, fonts, style and geometry. `passed` means no critical finding; `deliverable` means passed *and* no major. A reader-facing `⟨missing⟩` is not a leak: the renderer writes it deliberately for a protected span whose checksum refused restore, the block keeps `sentinel_leaked`, and the delivery verdict reports a `warning`. Only machinery the pipeline never means to print (a raw `⟦SOUP_MASK_…⟧`, stray `<span>`, or `SOUP_MASK` text) is a `placeholder_leak`. `ubt/core/engine/delivery_contract.py`.
+
 **contract (content contract / reconciliation)** — The engine-, language- and layout-agnostic gate asking whether a delivery accounts for every content node. Unaccounted or dropped content is a hard error; an unverified reconstruction is a warning. `ubt/core/content/contract.py`.
 
 **companion artifact** — A second real document written beside the deliverable (the mono/dual sibling, an XLIFF view, a translated table appendix), as opposed to a report. `ubt/core/job_options.py` (`companion_path`).

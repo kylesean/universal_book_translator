@@ -32,6 +32,7 @@ from ubt.api.security import resolve_secure_path, validate_job_id
 from ubt.core.engine.delivery_freshness import is_delivery_stale
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.job_options import delivery_verdict_from_summary
+from ubt.delivery.router import MIN_FAITHFUL_TEXT_TRUST
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,134 @@ def _preview_media_type(path: Path, registered: str) -> str:
     if registered != "application/octet-stream":
         return registered
     return _INLINE_SUFFIX_TYPES.get(path.suffix.lower(), registered)
+
+
+#: Effective modes that still satisfy an explicit ``faithful`` request. The
+#: planner maps ``faithful`` onto the legacy ``facsimile`` renderer, so a
+#: non-degraded run reports either name depending on which layer wrote the key.
+_FAITHFUL_EFFECTIVE_MODES: frozenset[str] = frozenset({"faithful", "facsimile", "page_locked"})
+
+#: Fallback copy for a console that does not know a code. The console localizes
+#: ``degrade_reason_codes`` with the measured params first; this prose is the
+#: last resort, following the ``AssessWarning.detail_zh`` convention.
+_DEGRADE_COPY: dict[str, str] = {
+    "text_trust_low": (
+        "原文档文本层可信度 {text_trust} 低于 {threshold}，通常是字体编码损坏，"
+        "无法保证页级 1:1 锁定"
+    ),
+    "scanned_source": "源文档以扫描/图像页为主，文本层不可信，无法保证页级 1:1 锁定",
+    "source_overlap": "源文档存在重叠文本层，无法保证页级 1:1 锁定",
+    "page_lock_infeasible": "源文档无法解出页级 1:1 版面（page-lock 不可行）",
+    "faithful_ineligible": "该文档不满足 1:1 物理复本的交付条件",
+}
+
+
+def _as_mode(value: object) -> str | None:
+    """One delivery-mode string, normalized, or ``None`` when absent."""
+    return value.strip().lower() if isinstance(value, str) and value.strip() else None
+
+
+def _as_count(value: object) -> int | None:
+    """A page counter from ledger metadata (bools are not counts)."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _degrade_codes(plan: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
+    """Structured reasons a ``faithful`` request was not honored.
+
+    Codes (not sentences) so the bilingual console can render them from its own
+    catalogue; ``params`` carries the measured values. Derived from the plan's
+    signals rather than its prose ``reasons`` so a copy edit cannot silently
+    change what the console reports.
+    """
+    signals = plan.get("signals")
+    signals = signals if isinstance(signals, dict) else {}
+    codes: list[str] = []
+    params: dict[str, Any] = {"threshold": MIN_FAITHFUL_TEXT_TRUST}
+    trust = signals.get("text_trust")
+    if (
+        isinstance(trust, (int, float))
+        and not isinstance(trust, bool)
+        and float(trust) < MIN_FAITHFUL_TEXT_TRUST
+    ):
+        codes.append("text_trust_low")
+        params["text_trust"] = float(trust)
+    page_kind = signals.get("page_kind")
+    if isinstance(page_kind, str) and page_kind != "native":
+        codes.append("scanned_source")
+        params["page_kind"] = page_kind
+    if signals.get("source_overlap") is True:
+        codes.append("source_overlap")
+    if signals.get("page_lock_feasible") is False:
+        codes.append("page_lock_infeasible")
+    if not codes:
+        codes.append("faithful_ineligible")
+    return codes, params
+
+
+def _degrade_message(codes: list[str], params: dict[str, Any]) -> str:
+    """The Chinese fallback sentence for the codes above."""
+    known = [code for code in codes if code in _DEGRADE_COPY] or ["faithful_ineligible"]
+    fmt = dict(params)
+    for key in ("text_trust", "threshold"):
+        value = fmt.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            fmt[key] = f"{float(value):.2f}"
+    clauses = [_DEGRADE_COPY[code].format(**fmt) for code in known]
+    return "；".join(clauses) + "。已按「1:1 不可行时自动降级」改为流式重排交付。"
+
+
+def _delivery_report(meta: dict[str, Any]) -> dict[str, Any]:
+    """What contract the files on disk actually satisfy.
+
+    ``delivery_mode`` was read from a key no planned downgrade writes
+    (``delivery_mode``), and ``degraded`` required the plan's contract to still
+    be ``faithful`` -- which it is not once the planner has already re-routed a
+    faithful request to readable. A job that asked for 1:1 and received a
+    reflow copy therefore showed neither a mode badge nor a degradation notice.
+    Compare the requested/effective pair the pipeline actually persists.
+    """
+    plan = meta.get("delivery_plan")
+    plan = plan if isinstance(plan, dict) else {}
+    effective = (
+        _as_mode(meta.get("delivery_mode_effective"))
+        or _as_mode(meta.get("delivery_mode"))
+        or _as_mode(plan.get("effective_mode"))
+        or _as_mode(plan.get("contract"))
+    )
+    requested = _as_mode(meta.get("delivery_mode_requested")) or _as_mode(
+        plan.get("requested_mode")
+    )
+    degraded = bool(
+        requested == "faithful"
+        and effective is not None
+        and effective not in _FAITHFUL_EFFECTIVE_MODES
+    )
+    codes: list[str] = []
+    params: dict[str, Any] = {}
+    reason: str | None = None
+    if degraded:
+        codes, params = _degrade_codes(plan)
+        page_count = _as_count(meta.get("page_count"))
+        if page_count is not None:
+            params["page_count"] = page_count
+        damaged = _as_count(meta.get("confirmed_font_damage_pages"))
+        if damaged is None:
+            route = meta.get("route_decision")
+            if isinstance(route, dict):
+                damaged = _as_count(route.get("confirmed_font_damage_pages"))
+        if damaged is not None:
+            params["damaged_pages"] = damaged
+        reason = _degrade_message(codes, params)
+    return {
+        "delivery_mode": effective,
+        "requested_delivery_mode": requested,
+        "planned_delivery_mode": _as_mode(plan.get("contract")),
+        "degraded": degraded,
+        "degrade_reason": reason,
+        "degrade_reason_codes": codes,
+        "degrade_reason_params": params,
+    }
 
 
 #: Deliverables whose contents are *for the reader*: the translated book, its
@@ -429,35 +558,20 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
                     }
                 )
         companion_artifacts: list[dict[str, Any]] | None = None
-        delivery_mode: str | None = None
-        planned_delivery_mode: str | None = None
-        degraded: bool = False
-        degrade_reason: str | None = None
+        delivery = _delivery_report({})
         db_path = _job_db_path(valid_id)
         if db_path.exists() and _is_job_ledger_sync(valid_id):
             try:
                 with SQLiteJobLedger(db_path, read_only=True) as ledger:
-                    meta = ledger.get_job_metadata_value(valid_id, "companion_artifacts")
+                    meta = ledger.get_job_metadata(valid_id)
+                    companion = meta.get("companion_artifacts")
                     if (
-                        isinstance(meta, dict)
-                        and "results" in meta
-                        and isinstance(meta["results"], list)
+                        isinstance(companion, dict)
+                        and "results" in companion
+                        and isinstance(companion["results"], list)
                     ):
-                        companion_artifacts = meta["results"]
-                    raw_mode = ledger.get_job_metadata_value(valid_id, "delivery_mode")
-                    if isinstance(raw_mode, str):
-                        delivery_mode = raw_mode
-                    plan = ledger.get_job_metadata_value(valid_id, "delivery_plan")
-                    if isinstance(plan, dict):
-                        planned_delivery_mode = plan.get("contract")
-                    if planned_delivery_mode == "faithful" and delivery_mode in (
-                        "reflow",
-                        "readable",
-                    ):
-                        degraded = True
-                        degrade_reason = (
-                            "原文档物理版面存在字符溢出或排版冲突，已安全回退为自适应流式精排交付"
-                        )
+                        companion_artifacts = companion["results"]
+                    delivery = _delivery_report(meta)
             except Exception as exc:  # metadata is optional: the artifact list still answers
                 logger.debug("Could not read artifact metadata for %s: %s", valid_id, exc)
 
@@ -474,10 +588,7 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
                 # 409-ing after it. ``None`` = no report yet, which is not a
                 # refusal.
                 "delivery_verdict": await asyncio.to_thread(_delivery_verdict_sync, valid_id),
-                "delivery_mode": delivery_mode,
-                "planned_delivery_mode": planned_delivery_mode,
-                "degraded": degraded,
-                "degrade_reason": degrade_reason,
+                **delivery,
             }
         )
 

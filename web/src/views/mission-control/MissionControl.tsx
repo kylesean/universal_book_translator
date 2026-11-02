@@ -206,6 +206,37 @@ const statusBadgeClass = (status: string): string =>
 const stageLabel = (t: ReturnType<typeof useI18n>['t'], stage: string): string =>
   t.mission.stageNames[stage] ?? t.mission.jobStatuses[stage] ?? stage.toUpperCase()
 
+/** Modes that satisfy a 1:1 promise; the planner maps faithful to facsimile. */
+const FAITHFUL_DELIVERY_MODES = new Set(['faithful', 'facsimile', 'page_locked'])
+
+const deliveryModeLabel = (
+  t: ReturnType<typeof useI18n>['t'],
+  mode: string | null | undefined,
+): string =>
+  !mode
+    ? ''
+    : FAITHFUL_DELIVERY_MODES.has(mode)
+      ? t.mission.deliveryModeBadgeFaithful
+      : t.mission.deliveryModeBadgeReadable
+
+/**
+ * Render one localized degrade-reason template.
+ *
+ * Values other than the trust ratio are integers; the ratio is measured to
+ * many decimals in the ledger, so it is rounded here rather than in every
+ * translation.
+ */
+const degradeReasonText = (template: string, params: Record<string, unknown>): string =>
+  template.replace(/\{(\w+)\}/g, (whole, key: string) => {
+    const value = params[key]
+    if (value === undefined || value === null) return whole
+    if (key === 'text_trust' || key === 'threshold') {
+      const numeric = Number(value)
+      return Number.isFinite(numeric) ? numeric.toFixed(2) : String(value)
+    }
+    return String(value)
+  })
+
 /**
  * Turn the server's safe terminal error into one product-language sentence.
  *
@@ -2348,13 +2379,46 @@ export function MissionControl() {
                   ) : (
                     <div className="space-y-3 p-3.5">
                       {deliverableListing?.degraded && (
-                        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+                        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-900 dark:text-amber-200 space-y-1.5">
                           <div className="flex items-center gap-2 font-semibold text-amber-800 dark:text-amber-300">
                             <AlertTriangle className="size-4 shrink-0" />
                             <span>{t.mission.degradedAlertTitle}</span>
                           </div>
-                          <p className="leading-relaxed pl-6">
-                            {deliverableListing.degradeReason || t.mission.degradedAlertDesc}
+                          <p className="pl-6 font-mono text-[11px] font-medium">
+                            {t.mission.degradedModeFlow
+                              .replace(
+                                '{requested}',
+                                deliveryModeLabel(t, deliverableListing.requestedDeliveryMode) ||
+                                  t.mission.deliveryModeBadgeFaithful,
+                              )
+                              .replace(
+                                '{actual}',
+                                deliveryModeLabel(t, deliverableListing.deliveryMode) ||
+                                  t.mission.deliveryModeBadgeReadable,
+                              )}
+                          </p>
+                          {(deliverableListing.degradeReasonCodes ?? []).length > 0 ? (
+                            <ul className="list-disc space-y-0.5 pl-10 leading-relaxed">
+                              {(deliverableListing.degradeReasonCodes ?? []).map((code) => {
+                                const template = t.mission.degradeReasonCodes[code]
+                                if (!template) return null
+                                return (
+                                  <li key={code}>
+                                    {degradeReasonText(
+                                      template,
+                                      deliverableListing.degradeReasonParams ?? {},
+                                    )}
+                                  </li>
+                                )
+                              })}
+                            </ul>
+                          ) : deliverableListing.degradeReason ? (
+                            <p className="pl-6 leading-relaxed">
+                              {deliverableListing.degradeReason}
+                            </p>
+                          ) : null}
+                          <p className="pl-6 leading-relaxed text-amber-900/80 dark:text-amber-200/80">
+                            {t.mission.degradedAlertDesc}
                           </p>
                         </div>
                       )}
@@ -2367,9 +2431,7 @@ export function MissionControl() {
                             </h3>
                             {deliverableListing?.deliveryMode && (
                               <Badge variant="outline" className="text-[10px] font-mono font-normal">
-                                {deliverableListing.deliveryMode === 'faithful'
-                                  ? t.mission.deliveryModeBadgeFaithful
-                                  : t.mission.deliveryModeBadgeReadable}
+                                {deliveryModeLabel(t, deliverableListing.deliveryMode)}
                               </Badge>
                             )}
                           </div>
