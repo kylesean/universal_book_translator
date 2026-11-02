@@ -169,6 +169,7 @@ async def run_render_preflight(
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="ubt-preflight-"))
     preflight_path = tmp_dir / "preflight.pdf"
+    failed = False
     try:
         await adapter.render_blocks(
             manifest=scratch_manifest,
@@ -188,20 +189,33 @@ async def run_render_preflight(
             raise DocumentParseError(
                 f"the sample compiled but produced no usable PDF (exists={preflight_path.exists()})"
             )
-    except DocumentParseError as exc:
+    except Exception as exc:
+        failed = True
+        # A raw pdfium/pikepdf error used to escape unwrapped: the operator saw
+        # only "PdfiumError (see server logs)" and the scratch .typ/.pdf were
+        # deleted with the temp dir, leaving nothing to reproduce with.
+        detail = str(exc)
+        if not isinstance(exc, DocumentParseError):
+            detail = f"{type(exc).__name__}: {detail}"
+        logger.warning(
+            "Render pre-flight failed; scratch artifacts kept at %s",
+            tmp_dir,
+            exc_info=True,
+        )
         raise DocumentParseError(
             "Render pre-flight failed before any translation was billed "
-            f"({len(sample)} sample block(s) of {len(blocks)}): {exc}\n"
+            f"({len(sample)} sample block(s) of {len(blocks)}): {detail}\n"
             "The configured PDF renderer could not compile a source-text "
             "sample. Check `ubt doctor` (Typst row) and the Typst binary "
             "setting; nothing has been sent to the model yet. The rejected "
-            "scratch sample was removed."
+            f"scratch sample is kept at {tmp_dir} for inspection."
         ) from exc
     finally:
-        # A renderer may raise an unexpected exception (not only
-        # DocumentParseError); scratch artifacts must not accumulate in either
-        # path, especially on long-lived workers.
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        # Keep the scratch artifacts on failure so a renderer defect is
+        # inspectable; remove them on success so long-lived workers do not
+        # accumulate temp dirs.
+        if not failed:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
     logger.info(
         "Render pre-flight passed on %d sample block(s); renderer is live "
         "before translation is billed",

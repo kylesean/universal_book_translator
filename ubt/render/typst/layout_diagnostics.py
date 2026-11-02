@@ -24,6 +24,8 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
+from ubt.core.exceptions import DocumentParseError
+
 # The academic audit specs read the template's own margins; restating them here is
 # how the auditor and the page drifted apart.
 from ubt.render.typst.academic import (
@@ -489,11 +491,21 @@ def diagnose_pdf_layout(
     if not pdf_path.exists():
         raise FileNotFoundError(f"PDF document not found: {pdf_path}")
 
-    import pypdfium2 as pdfium
+    # Open through the pdfium gate, never directly: libpdfium mutates
+    # process-global state without internal locking, and this audit runs on a
+    # worker thread next to ingest/rasterization. A direct open here raced
+    # those callers and surfaced as "Failed to load document (PDFium: Data
+    # format error)" on a PDF that was perfectly readable.
+    from ubt.adapters.pdf.pdfium_gate import open_document
 
-    pdf = pdfium.PdfDocument(str(pdf_path))
-    total_pages = len(pdf)
-    pdf.close()
+    size_bytes = pdf_path.stat().st_size
+    try:
+        with open_document(pdf_path) as pdf:
+            total_pages = len(pdf)
+    except Exception as exc:
+        raise DocumentParseError(
+            f"the artifact is not a readable PDF ({size_bytes} bytes at {pdf_path}): {exc}"
+        ) from exc
 
     if total_pages <= 0:
         return DocumentLayoutReport(

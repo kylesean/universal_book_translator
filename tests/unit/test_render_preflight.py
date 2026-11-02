@@ -104,6 +104,81 @@ def test_preflight_fails_when_no_fragment_can_be_typeset(
         )
 
 
+def test_preflight_wraps_a_raw_renderer_error_and_keeps_scratch_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A renderer error must reach the operator with its type and scratch path.
+
+    The reported failure surfaced as ``PdfiumError (see server logs; job_id=...)``
+    because the raw pdfium exception escaped the pre-flight's
+    ``except DocumentParseError`` and the scratch .typ/.pdf were deleted in
+    ``finally``. Both together left nothing to reproduce with.
+    """
+    adapter, manifest, blocks = _setup(tmp_path)
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+    created: list[Path] = []
+
+    def _mkdtemp(*, prefix: str) -> str:
+        directory = scratch_root / f"{prefix}{len(created)}"
+        directory.mkdir()
+        created.append(directory)
+        return str(directory)
+
+    monkeypatch.setattr("ubt.core.engine.render_preflight.tempfile.mkdtemp", _mkdtemp)
+
+    class _BrokenRenderer:
+        engine_name = "pdf"
+
+        async def render_blocks(self, **kwargs: Any) -> None:
+            Path(kwargs["output_path"]).write_bytes(b"%PDF-1.4\n% truncated just now")
+            raise RuntimeError("Failed to load document (PDFium: Data format error).")
+
+    with pytest.raises(DocumentParseError) as exc_info:
+        asyncio.run(
+            run_render_preflight(
+                adapter=_BrokenRenderer(),  # type: ignore[arg-type]
+                manifest=manifest,
+                blocks=blocks,
+                target_lang="zh",
+            )
+        )
+
+    message = str(exc_info.value)
+    assert "RuntimeError" in message
+    assert "PDFium: Data format error" in message
+    assert created, "the pre-flight did not create a scratch directory"
+    assert created[0].is_dir(), "the failing scratch sample was deleted before inspection"
+    assert (created[0] / "preflight.pdf").is_file()
+    assert f"kept at {created[0]}" in message
+
+
+def test_preflight_removes_scratch_artifacts_on_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = _FakeTypst(ok=True)
+    _patch(monkeypatch, tmp_path, fake)
+    adapter, manifest, blocks = _setup(tmp_path)
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+    created: list[Path] = []
+
+    def _mkdtemp(*, prefix: str) -> str:
+        directory = scratch_root / f"{prefix}{len(created)}"
+        directory.mkdir()
+        created.append(directory)
+        return str(directory)
+
+    monkeypatch.setattr("ubt.core.engine.render_preflight.tempfile.mkdtemp", _mkdtemp)
+
+    asyncio.run(
+        run_render_preflight(adapter=adapter, manifest=manifest, blocks=blocks, target_lang="zh")
+    )
+
+    assert fake.calls >= 1
+    assert created and not created[0].exists(), "a successful scratch render leaked its temp dir"
+
+
 def test_preflight_sample_reaches_the_typesetter_for_a_formula_heavy_book(
     tmp_path: Path,
 ) -> None:

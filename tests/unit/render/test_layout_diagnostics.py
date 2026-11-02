@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from ubt.core.exceptions import DocumentParseError
 from ubt.render.typst.layout_diagnostics import (
     A4_HEIGHT_PT,
     A4_WIDTH_PT,
@@ -189,3 +190,32 @@ def test_diagnose_pdf_layout_real_document() -> None:
 def test_diagnose_pdf_layout_non_existent_file() -> None:
     with pytest.raises(FileNotFoundError):
         diagnose_pdf_layout(Path("non_existent_12345.pdf"))
+
+
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [
+        ("empty.pdf", b""),
+        ("header_only.pdf", b"%PDF-1.4\n"),
+        ("garbage.pdf", b"this is not a PDF at all, only prose\n"),
+    ],
+)
+def test_diagnose_pdf_layout_unreadable_file_raises_domain_error(
+    tmp_path: Path, name: str, content: bytes
+) -> None:
+    """An unreadable artifact must name itself, not leak a raw PdfiumError.
+
+    The healing loop and the render pre-flight both audit a freshly compiled
+    artifact. A raw ``PdfiumError`` escaping here skipped every caller's
+    error handling, so the operator saw only "(see server logs)" and had no
+    path or size to tell a truncated compile from a locking race.
+    """
+    broken = tmp_path / name
+    broken.write_bytes(content)
+
+    with pytest.raises(DocumentParseError, match="not a readable PDF") as exc_info:
+        diagnose_pdf_layout(broken, spec=PageLayoutSpec.book())
+
+    message = str(exc_info.value)
+    assert str(broken) in message
+    assert f"{len(content)} bytes" in message

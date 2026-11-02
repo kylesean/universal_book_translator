@@ -190,6 +190,86 @@ def test_layout_auto_healer_heals_spill_successfully(
     assert report.actions[0].delta_errors_resolved == 1
 
 
+def test_layout_auto_healer_discards_an_unreadable_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A candidate the auditor cannot open must not fail a readable delivery.
+
+    The heal pass compiles into a separate ``healed_pN.pdf``; a corrupt
+    candidate is worse than the spill it was meant to fix. The original PDF
+    (already audited as readable) must survive untouched.
+    """
+    pdf_path = tmp_path / "output.pdf"
+    _make_dummy_pdf(pdf_path)
+    original_bytes = pdf_path.read_bytes()
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+
+    spill_page_rep = PageLayoutReport(
+        page=1,
+        page_width=595.28,
+        page_height=841.89,
+        line_count=10,
+        anomalies=[
+            LayoutAnomaly(
+                anomaly_type=AnomalyType.MARGIN_SPILL_RIGHT,
+                severity=Severity.FAIL,
+                page=1,
+                bbox=(50.0, 100.0, 610.0, 115.0),
+                delta_pt=14.72,
+                text_snippet="Very wide text table line",
+            )
+        ],
+    )
+    spill_report = DocumentLayoutReport(
+        pdf_path=str(pdf_path),
+        total_pages=1,
+        checked_pages=[1],
+        layout_template="book",
+        tolerance_pt=5.0,
+        page_reports={1: spill_page_rep},
+    )
+
+    audit_calls = 0
+
+    def mock_diagnose(path: Path | str, *a: Any, **kw: Any) -> DocumentLayoutReport:
+        nonlocal audit_calls
+        audit_calls += 1
+        if audit_calls == 1:
+            return spill_report
+        raise ValueError("Failed to load document (PDFium: Data format error).")
+
+    import ubt.render.typst.auto_healing as ah_mod
+
+    monkeypatch.setattr(ah_mod, "diagnose_pdf_layout", mock_diagnose)
+
+    class MockRenderer:
+        def __init__(self, **opts: Any) -> None:
+            self.opts = opts
+
+        def build_source(self, blocks: Any, build_dir: Path, target_lang: str) -> tuple[str, Any]:
+            return "healed source", None
+
+    def mock_compile(typ_p: str, out_p: str) -> tuple[bool, str]:
+        Path(out_p).write_bytes(b"%PDF-1.4\n% truncated candidate\n")
+        return True, ""
+
+    healer = LayoutAutoHealer(spec=PageLayoutSpec.book(), max_passes=2)
+    passed, report = healer.run_healing_loop(
+        output_path=pdf_path,
+        build_dir=build_dir,
+        blocks=[],
+        target_lang="zh",
+        renderer_builder_fn=lambda **kw: MockRenderer(**kw),
+        compile_fn=mock_compile,
+    )
+
+    assert passed is False
+    assert report.healed is False
+    assert report.actions == []
+    assert pdf_path.read_bytes() == original_bytes
+
+
 def test_document_renderer_with_auto_healing_options(tmp_path: Path) -> None:
     table_elem = make_element(
         id="b_table",

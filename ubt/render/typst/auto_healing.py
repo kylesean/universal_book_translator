@@ -170,7 +170,19 @@ class LayoutAutoHealer:
                 )
                 continue
 
-            healed_rep = diagnose_pdf_layout(healed_pdf, spec=self.spec)
+            try:
+                healed_rep = diagnose_pdf_layout(healed_pdf, spec=self.spec)
+            except Exception as exc:
+                # A candidate the auditor cannot even open is worse than the
+                # spill it was meant to fix. Discard it and keep the original
+                # delivery: the healer must never turn a readable PDF into a
+                # failure.
+                logger.warning(
+                    "Auto-healing pass %d produced an unreadable PDF; discarding it: %s",
+                    pass_num,
+                    exc,
+                )
+                continue
             healed_max_ov = max((a.delta_pt for a in healed_rep.all_anomalies), default=0.0)
 
             improved = healed_rep.error_count < current_rep.error_count or (

@@ -388,6 +388,22 @@ Pre-1.0; tagged `v0.1.0`. Everything below is in the current tree.
 
 ### Fixed
 
+- **The layout auditor opens PDFs through the pdfium gate, so a pre-flight audit
+  cannot report "Data format error" on a readable PDF.** `diagnose_pdf_layout`
+  called `pypdfium2.PdfDocument` directly, while every other pdfium caller in the
+  process holds `PDFIUM_LOCK`; the audit runs on a worker thread
+  (`asyncio.to_thread`) next to ingest and rasterization, and libpdfium mutates
+  process-global state without internal locking. A live job
+  (`web_mvymorxk_c900c532f47b`) failed at the render pre-flight with
+  `PdfiumError: Failed to load document (PDFium: Data format error)` even though
+  replaying its 300 blocks produced a valid 32 KB PDF on every attempt. The open
+  now goes through `ubt.adapters.pdf.pdfium_gate.open_document`, and an
+  unreadable artifact raises `DocumentParseError` naming its path and byte size
+  instead of leaking a raw pdfium exception. A corrupt *healing candidate* is
+  logged and discarded rather than aborting a delivery whose original PDF was
+  fine, and the pre-flight keeps the rejected scratch `.typ`/`.pdf` on failure
+  (removing them only on success) so the next renderer defect has evidence.
+
 - **A rehearsal actually runs at "no rate limit" now.** `create_dry_run_orchestrator`'s
   docstring promised *no rate limit* but built the limiter itself:
   `AdaptiveTokenBucket(initial_rpm=100_000, max_rpm=100_000)` raised the RPM side
