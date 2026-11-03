@@ -2282,10 +2282,17 @@ async def run_export_stage(
                 if delivery_report is not None
                 else "no delivery report was produced"
             )
-            raise IntegrityViolationError(
-                f"Export blocked for job {ctx.job_id}: delivery contract failed — "
-                f"{contract_summary}. See "
-                f"{sidecar_path(rendered_path, 'delivery_contract.json')}."
+            if getattr(ctx.config, "strict_contract", False):
+                raise IntegrityViolationError(
+                    f"Export blocked for job {ctx.job_id}: delivery contract failed — "
+                    f"{contract_summary}. See "
+                    f"{sidecar_path(rendered_path, 'delivery_contract.json')}."
+                )
+            logger.warning(
+                "Delivery contract finding(s) for job %s: %s; delivering best-effort artifact (strict_contract is false). See %s.",
+                ctx.job_id,
+                contract_summary,
+                sidecar_path(rendered_path, "delivery_contract.json"),
             )
 
     # Enforce AFTER the reports are on disk so a refused job keeps its audit

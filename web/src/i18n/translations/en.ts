@@ -262,17 +262,17 @@ export const en: TranslationDictionary = {
     faithfulInfeasibleScanned:
       'Pre-flight classifies the source as scan/image-dominant; the text layer is untrustworthy, so page-locked 1:1 is infeasible.',
     faithfulInfeasibleDegrade:
-      '“Auto-fallback to Reflow on Conflict” is enabled, so this run will deliver an adaptive reflow copy.',
+      '“Fallback to Reflow if 1:1 Infeasible” is enabled, so this run will deliver an adaptive reflow copy.',
     faithfulInfeasibleRefuse:
-      'Auto-fallback is disabled (Strict 1:1 mode), so the run will be intercepted pre-flight. Choose Adaptive Reflow, or fix the source first.',
+      'Fallback is disabled (Strict 1:1 mode), so the run will be intercepted pre-flight. Choose Adaptive Reflow, or fix the source first.',
     faithfulFixHint:
       'How to fix: re-export the original PDF, or repair the font encoding with OCR/manual proofing, then run again.',
-    allowDegrade: 'Auto-fallback to Reflow on Conflict',
+    allowDegrade: 'Fallback to Reflow if 1:1 Infeasible',
     allowDegradeHelp:
-      'Enabled: Prioritizes 1:1 facsimile; if scanned pages or font damage prevent layout locking, automatically falls back to reflow to ensure smooth output.\nDisabled: Strictly preserves original page-locked 1:1 geometry; if the document cannot meet 1:1 standards, the job is intercepted pre-flight to prevent unwanted layout changes.',
-    enableCels: 'Smart Layout Balancing (CELS)',
+      'Enabled: Prioritizes 1:1 physical facsimile; if scanned pages or corrupt fonts prevent layout locking, automatically delivers a reflow edition to prevent job failure.\nDisabled: Strict 1:1 mode. Only runs when the source document fully supports 1:1 geometry locking; otherwise intercepts pre-flight.\n(Note: Per-page text collision avoidance and adaptive layout fitting are handled automatically by the engine.)',
+    enableCels: 'Elastic Layout Micro-Adjust (CELS)',
     enableCelsHelp:
-      'Automatically adjusts kerning, line pitch, and font stretch to prevent text from colliding with formulas and figures. Recommended to keep enabled.',
+      'Uses a constraint solver to automatically fine-tune kerning, pitch, and character width, preventing text from colliding with formulas and figures. Recommended to keep enabled.',
     dualMode: 'Delivery Mode',
     dualModeHelp:
       'Smart Auto starts bilingual and lets the layout advisor step it down to target-only when the layout cannot pair cleanly.',

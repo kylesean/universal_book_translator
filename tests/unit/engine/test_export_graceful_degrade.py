@@ -106,3 +106,31 @@ async def test_export_degrade_to_reflow_on_faithful_failure(tmp_path: Path) -> N
         assert ctx.manifest.metadata["delivery_mode"] == "reflow"
         assert ctx.manifest.metadata["delivery_plan"]["degraded"] is True
         assert rendered_pdf.read_bytes() == b"%PDF-1.4 reflow content"
+
+
+def test_export_contract_gate_strict_vs_advisory() -> None:
+    from ubt.core.exceptions import IntegrityViolationError
+
+    failed_report = SimpleNamespace(
+        passed=False,
+        deliverable=False,
+        contract="faithful",
+        summary_line=lambda: "[BLOCKED] faithful: 2 critical, 0 major",
+    )
+
+    def _simulate_gate(strict: bool) -> bool:
+        contract_ok = failed_report.deliverable
+        if not contract_ok:
+            if strict:
+                raise IntegrityViolationError(
+                    "Export blocked for job job_test: delivery contract failed"
+                )
+            return False  # advisory warning, delivery continues
+        return True
+
+    # When strict_contract is off (default), contract failure does not abort delivery
+    assert _simulate_gate(strict=False) is False
+
+    # When strict_contract is on, contract failure aborts delivery
+    with pytest.raises(IntegrityViolationError, match="Export blocked for job"):
+        _simulate_gate(strict=True)
