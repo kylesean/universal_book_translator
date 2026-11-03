@@ -457,6 +457,8 @@ export const zh: TranslationDictionary = {
     degradedAlertTitle: '版面自适应安全降级通知',
     degradedAlertDesc:
       '如需严格 1:1：请在向导中关闭「1:1 不可行时自动降级」，并先修复源文档（重新导出或用 OCR 修复字体编码）后重跑。',
+    degradedAlertDescRenderFallback:
+      '如需严格 1:1：请在向导中关闭「1:1 不可行时自动降级」。但请注意，当学术论文双栏或图表排版过于紧凑时，中文译文可能因原物理框空间受限而产生文字缩放或微小溢出。',
     degradedModeFlow: '请求：{requested} · 实际：{actual}',
     degradeReasonCodes: {
       text_trust_low:

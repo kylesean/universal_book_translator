@@ -73,6 +73,47 @@ def _split_row(line: str) -> list[str]:
     return cells
 
 
+def is_dense_numerical_table(markdown_text: str) -> bool:
+    """Detect whether a Markdown table is primarily numerical/benchmark metrics.
+
+    A table where >= 70% of non-empty data cells are numbers, metrics, math diffs,
+    or short alphanumeric benchmark IDs (e.g. Pass@1, GSM8K, +3.26) should be preserved
+    as source text in auto mode to prevent LLM translation hallucinations, syntax corruption,
+    and unnecessary translation latency.
+    """
+    lines = [ln.strip() for ln in markdown_text.strip().splitlines() if ln.strip()]
+    data_lines = [ln for ln in lines if not re.match(r"^\|?[\s\-:|]+\|?$", ln)]
+    if len(data_lines) < 3:
+        return False
+    header_cells = _split_row(data_lines[0])
+    if len(header_cells) < 3:
+        return False
+
+    total_cells = 0
+    numeric_cells = 0
+    for line in data_lines[1:]:
+        cells = _split_row(line)
+        for c in cells:
+            clean = re.sub(r"<br\s*/?>", " ", c).strip()
+            if not clean:
+                continue
+            total_cells += 1
+            if (
+                re.match(r"^[\d\.\+\-±% /<>\*\(\),▲▼—–\:\$]+$", clean)
+                or clean in ("-", "--", "N/A", "n/a")
+                or (
+                    len(clean) <= 18
+                    and not any("\u4e00" <= ch <= "\u9fff" for ch in clean)
+                    and len(clean.split()) <= 2
+                )
+            ):
+                numeric_cells += 1
+
+    if total_cells == 0:
+        return False
+    return (numeric_cells / total_cells) >= 0.70
+
+
 def parse_markdown_table(
     markup: str, *, escape: bool = True
 ) -> tuple[list[str], list[list[str]]] | None:

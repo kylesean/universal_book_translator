@@ -208,3 +208,28 @@ class TestDegradedListMarkersAreTypedAsBullets:
     def test_prose_middle_dot_survives(self) -> None:
         block = _block(kind=BlockType.NARRATIVE, target="条目一 · 条目二 · 条目三。")
         assert delivered_text(block) == "条目一 · 条目二 · 条目三。"
+
+
+class TestTableLineBreakPreservation:
+    def test_table_preserves_br_tags(self) -> None:
+        block = _block(
+            kind=BlockType.TABLE,
+            source="| A | B |\n|---|---|\n| 1<br>2 | 3 |",
+            target="| 甲<br>乙 | 丙 |",
+        )
+        delivered = delivered_text(block)
+        assert "<br>" in delivered
+        assert "甲<br>乙" in delivered
+
+    def test_prose_strips_br_tags(self) -> None:
+        block = _block(
+            kind=BlockType.NARRATIVE,
+            target="第一行<br>第二行",
+        )
+        assert delivered_text(block) == "第一行第二行"
+
+    def test_latex_wrapped_sentinel_and_unicode_math_blanks(self) -> None:
+        raw = r"规则 $\text{SOUP\_MASK\_0001-2e4}$ 与到SOUP_MASK_0002-00𝑑之间"
+        out = strip_pipeline_sentinels(raw)
+        assert "SOUP_MASK" not in out
+        assert out.count(SENTINEL_PLACEHOLDER) == 2

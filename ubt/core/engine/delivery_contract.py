@@ -209,6 +209,7 @@ class ContractEvidence:
     #: contract). A faithful artifact may then carry MORE pages than the
     #: source -- never fewer -- without failing the page-count promise.
     declared_page_expansion: bool = False
+    exhibit_texts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -640,6 +641,9 @@ def _text_findings(
         for index, text in enumerate(page_texts)
     ]
     body_joined = "".join(body_pages)
+    normalized_block_texts = [_normalize(b.text) for b in evidence.blocks if b.text] + [
+        _normalize(text) for text in evidence.exhibit_texts if text
+    ]
 
     for block in evidence.blocks:
         expected = _normalize(block.text)
@@ -699,15 +703,15 @@ def _text_findings(
                 # PDFium extracts the figure's axis/caption text before the
                 # continuation prose. Check if ``run`` is split into a suffix of
                 # ``left_stripped`` and a contiguous substring on ``page p+1``.
+                # We normalize both pages so that PDF font kerning or interstitial
+                # whitespace around punctuation does not cause false negatives.
                 if block.allow_cross_page and len(run) >= _PROSE_RUN_MIN:
-                    right_page = page_texts[index + 1]
+                    norm_left = _normalize(left_stripped) or _normalize(page_texts[index])
+                    norm_right = _normalize(page_texts[index + 1])
                     for split_at in range(1, len(run)):
                         left_part = run[:split_at]
                         right_part = run[split_at:]
-                        if (
-                            left_stripped.endswith(left_part)
-                            or page_texts[index].endswith(left_part)
-                        ) and right_part in right_page:
+                        if left_part in norm_left and right_part in norm_right:
                             cross_page_runs[run] = [index + 1, index + 2]
                             break
                     if run in cross_page_runs:
@@ -775,7 +779,20 @@ def _text_findings(
         # page may repeat the second half). Headings are exempt from run-level
         # recurrence because a chapter title legitimately recurs in running heads.
         dup_where: list[int] = []
-        if len(expected) >= _MIN_DUPLICATE_PROBE and occurrences > 1 and block.kind != "heading":
+        in_exhibit = (
+            any(expected in _normalize(et) for et in evidence.exhibit_texts if et)
+            if expected
+            else False
+        )
+        expected_blocks_count = (
+            sum(1 for nb in normalized_block_texts if expected in nb) if expected else 0
+        )
+        if (
+            len(expected) >= _MIN_DUPLICATE_PROBE
+            and not in_exhibit
+            and occurrences > max(1, expected_blocks_count)
+            and block.kind != "heading"
+        ):
             dup_where = pages or [
                 index + 1 for index, text in enumerate(page_texts) if expected in text
             ]
@@ -784,6 +801,13 @@ def _text_findings(
                 if len(run) < _MIN_DUPLICATE_PROBE:
                     continue
                 if expected.count(run) > 1:
+                    continue
+                # A run can only serve as a probe of this block's duplication
+                # if it is unique to this block among all blocks in the document.
+                # Runs shared across multiple distinct blocks (e.g. standard
+                # terminology or benchmark names) legitimately appear on multiple pages.
+                run_blocks_count = sum(1 for nb in normalized_block_texts if run in nb)
+                if run_blocks_count > 1:
                     continue
                 r_pages = run_pages.get(run, [])
                 r_count = joined.count(run)

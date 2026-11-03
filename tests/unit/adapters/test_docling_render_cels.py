@@ -291,3 +291,88 @@ async def test_cels_rollback_switch_falls_back_to_legacy(
     row = strategy.last_page_geometry[0]
     assert row["cels_enabled"] is False
     assert "cels_distortion_score" not in row
+
+
+@pytest.mark.asyncio
+async def test_cels_disabled_with_container_repair_does_not_unbound_local_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ubt.render.layout_solver import FitReport, PageLayoutSolution
+
+    src_pdf = tmp_path / "repair_nobound_src.pdf"
+    with pikepdf.Pdf.new() as pdf:
+        pdf.add_blank_page(page_size=(500, 700))
+        pdf.save(src_pdf)
+
+    blocks = [
+        IRBlock(
+            element=make_element(
+                id="b_p1",
+                spine_index=1,
+                block_type=BlockType.NARRATIVE,
+                source_text="This is narrative paragraph one.",
+                bbox=BoundingBox(page=1, x0=50.0, y0=540.0, x1=450.0, y1=600.0),
+            ),
+            target_text="这是第一段内容需要被修复。",
+        ),
+    ]
+
+    rendered_pages: list[FacsimilePageSpec] = []
+
+    def fake_render_doc(
+        self: FacsimileRenderer,
+        pages: list[FacsimilePageSpec],
+        bg_pdf_path: Path,
+        output_path: Path,
+        build_dir: Path,
+        **kwargs: object,
+    ) -> Path:
+        rendered_pages.extend(pages)
+        output_path.write_bytes(src_pdf.read_bytes())
+        return output_path
+
+    monkeypatch.setattr(FacsimileRenderer, "render_document", fake_render_doc)
+
+    fake_sol = PageLayoutSolution(
+        uniform_size_pt=10.0,
+        leading_em=0.33,
+        tracking_em=0.0,
+        fits=False,
+        source_overlap=False,
+        delivery_tier="L1",
+        bottleneck_seg_ids=["b_p1"],
+    )
+    fake_unfit = FitReport(fits=False, deficit_pt=5.0, block_ids=("b_p1",), reason="overflow")
+    fake_fit = FitReport(fits=True, deficit_pt=0.0, block_ids=(), reason="fit")
+
+    call_count = {"fit": 0}
+
+    def fake_fit_at_size(*args: object, **kwargs: object) -> FitReport:
+        call_count["fit"] += 1
+        return fake_fit if call_count["fit"] > 1 else fake_unfit
+
+    monkeypatch.setattr("ubt.render.layout_solver.solve_page_2d", lambda *a, **k: fake_sol)
+    monkeypatch.setattr("ubt.render.layout_solver.fit_at_size", fake_fit_at_size)
+    monkeypatch.setattr(
+        "ubt.render.typst.container_repair.repair_bottleneck_containers",
+        lambda specs, rewriter=None: {"b_p1": "短文本"},
+    )
+
+    strategy = DoclingRenderStrategy(
+        delivery_mode="facsimile",
+        enable_pdf_optimization=False,
+        enable_cels=False,
+    )
+
+    manifest = BookManifest(
+        doc_id="doc_cels_repair_nobound",
+        title="CELS Disabled Repair",
+        source_path=str(src_pdf),
+        metadata={"source_path": str(src_pdf)},
+    )
+    out_pdf = tmp_path / "out_repair_nobound.pdf"
+
+    # Must complete without UnboundLocalError
+    await strategy.render_blocks(manifest, blocks, "zh", out_pdf)
+    assert len(rendered_pages) == 1
+    assert "b_p1" in manifest.metadata.get("container_fit_repaired_segments", [])

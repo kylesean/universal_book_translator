@@ -460,6 +460,7 @@ class DoclingRenderStrategy:
         self.enable_pdf_optimization = enable_pdf_optimization
         self.pdf_optimize_profile = pdf_optimize_profile
         self.enable_cels = enable_cels
+        self.allow_landscape_tables: bool | None = None
         #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
         #: Set from the resolved config by the adapter (``apply_config``).
         self.toc_mode = "auto"
@@ -585,6 +586,7 @@ class DoclingRenderStrategy:
             paper_title=manifest.title if is_academic else "",
             abstract=manifest.metadata.get("abstract", "") if is_academic else "",
             toc_mode=getattr(self, "toc_mode", "auto"),
+            allow_landscape_tables=getattr(self, "allow_landscape_tables", None),
             page_setup=page_setup,
             source_pdf=source_pdf_path,
             style_profile=style_profile,
@@ -626,6 +628,7 @@ class DoclingRenderStrategy:
                     paper_title=manifest.title if is_academic else "",
                     abstract=manifest.metadata.get("abstract", "") if is_academic else "",
                     toc_mode=getattr(self, "toc_mode", "auto"),
+                    allow_landscape_tables=getattr(self, "allow_landscape_tables", None),
                     page_setup=page_setup,
                     source_pdf=source_pdf_path,
                     **overrides,
@@ -1430,8 +1433,9 @@ class DoclingRenderStrategy:
 
             # CELS layout coordinator & distortion check (optional via self.enable_cels)
             cels_sol = None
+            cels_blocks: list[PageLayoutBlock] = []
+            printable_box: Box | None = None
             if self.enable_cels:
-                cels_blocks: list[PageLayoutBlock] = []
                 for pb in page_preserved:
                     if not pb.bbox:
                         continue
@@ -1609,34 +1613,35 @@ class DoclingRenderStrategy:
                             width_borrow_pt=body_group.width_borrow_pt,
                         )
                         page_fits[pno] = page_fit
-                        cels_blocks_repaired = [
-                            PageLayoutBlock(
-                                block_id=b_cels.block_id,
-                                box=b_cels.box,
-                                text=repaired_texts.get(b_cels.block_id, b_cels.text),
-                                source_font_size_pt=b_cels.source_font_size_pt,
-                                required_height_pt=b_cels.required_height_pt,
-                                is_pinned=b_cels.is_pinned,
-                            )
-                            for b_cels in cels_blocks
-                        ]
-                        try:
-                            cels_sol = solve_page_cels(
-                                page_no=pno,
-                                blocks=cels_blocks_repaired,
-                                page_width=pw,
-                                page_height=ph,
-                                printable_box=printable_box,
-                                source_body_size_pt=source_size_pt,
-                                realized_body_size_pt=body_group.size_pt,
-                                target_lang=target_lang,
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "CELS page %d repair layout solve failed: %s; keeping previous solve",
-                                pno,
-                                exc,
-                            )
+                        if self.enable_cels and cels_blocks and printable_box is not None:
+                            cels_blocks_repaired = [
+                                PageLayoutBlock(
+                                    block_id=b_cels.block_id,
+                                    box=b_cels.box,
+                                    text=repaired_texts.get(b_cels.block_id, b_cels.text),
+                                    source_font_size_pt=b_cels.source_font_size_pt,
+                                    required_height_pt=b_cels.required_height_pt,
+                                    is_pinned=b_cels.is_pinned,
+                                )
+                                for b_cels in cels_blocks
+                            ]
+                            try:
+                                cels_sol = solve_page_cels(
+                                    page_no=pno,
+                                    blocks=cels_blocks_repaired,
+                                    page_width=pw,
+                                    page_height=ph,
+                                    printable_box=printable_box,
+                                    source_body_size_pt=source_size_pt,
+                                    realized_body_size_pt=body_group.size_pt,
+                                    target_lang=target_lang,
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    "CELS page %d repair layout solve failed: %s; keeping previous solve",
+                                    pno,
+                                    exc,
+                                )
                         for rep_id in repaired_texts:
                             render_flags.append((rep_id, "container_fit_repaired"))
                         repaired_meta = manifest.metadata.setdefault(

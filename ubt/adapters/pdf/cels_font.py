@@ -97,8 +97,8 @@ def embed_subset_font(
     """
     try:
         # fontTools ships no py.typed marker; the subset API used here is stable.
-        from fontTools import subset  # type: ignore[import-untyped]
-        from fontTools.ttLib import TTFont  # type: ignore[import-untyped]
+        from fontTools import subset
+        from fontTools.ttLib import TTFont
     except ImportError as exc:  # pragma: no cover - the [cels] extra
         raise FontPipelineError(
             "fontTools is not installed; the font pipeline lives in the [cels] extra"

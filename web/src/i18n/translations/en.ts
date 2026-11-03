@@ -477,6 +477,8 @@ export const en: TranslationDictionary = {
     degradedAlertTitle: 'Adaptive layout safety fallback',
     degradedAlertDesc:
       'For strict 1:1: turn off “Auto-degrade when 1:1 is infeasible” in the wizard, fix the source (re-export it or repair the font encoding with OCR), then run again.',
+    degradedAlertDescRenderFallback:
+      'For strict 1:1: turn off “Auto-degrade when 1:1 is infeasible” in the wizard. Note that in dense multi-column or figure-heavy layouts, text may undergo aggressive font scaling or risk clipping if the original bounding boxes lack sufficient vertical clearance.',
     degradedModeFlow: 'Requested: {requested} · Delivered: {actual}',
     degradeReasonCodes: {
       text_trust_low:

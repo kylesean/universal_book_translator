@@ -160,25 +160,28 @@ def token_patterns(mask_prefix: str, core: str) -> tuple[re.Pattern[str], re.Pat
     :class:`RestoreStyle`.
     """
     clean_prefix = re.sub(r"^[⟦\[【(\s]+|[⟧\]】)\s]+$", "", mask_prefix).rstrip(":_")
-    prefix_pattern = re.sub(r"[:_]+", r"[:_]?", re.escape(clean_prefix))
+    sep = r"(?:\\?[:_])?"
+    prefix_core = re.sub(r"[:_]+", lambda _: sep, re.escape(clean_prefix))
     upper = clean_prefix.upper()
     if core in upper and upper != f"{core}_MASK":
-        prefix_pattern = rf"(?:{prefix_pattern}|{core}[:_]?MASK|{core})"
-    # The checksum suffix is ``1..3`` alnum, not exactly 3: the masker always
-    # emits 3, but a model can truncate it (``⟦MATH_MASK_0001-46⟧`` for a 3-char
-    # ``d42``). An exactly-3 pattern matched only the *index* of a truncated
-    # token, restored the span, and left the ``-46⟧`` tail as literal debris in
-    # the delivered text — with every integrity bucket empty, so the block
-    # still counted ``clean`` and shipped (FastPass "Flawless"). Accepting a
-    # short suffix makes the whole token match, so a truncated checksum is seen
-    # as present-but-wrong (``mismatched``) and the token is left intact
-    # (``residue``) instead of silently half-restored. A full token is matched
-    # identically either way, so this only tightens the failure cases.
+        prefix_pattern = rf"(?:{prefix_core}|{core}{sep}MASK|{core})"
+    else:
+        prefix_pattern = prefix_core
+
+    token_body = prefix_pattern + rf"{sep}(\d{{1,6}})(?:-(?:\\_)?([0-9a-z]{{1,3}}))?"
+    scan = re.compile(token_body, re.IGNORECASE)
+
+    # Left wrapper: optional LaTeX text/math markers or standard opening brackets
+    # e.g. $\text{, \text{, $, \(, ⟦, [, 【, (
+    left_wrapper = r"(?:(?:\$(?:\\(?:text|mathrm|mathbf)\s*\{)?|\\(?:text|mathrm|mathbf)\s*\{|\\\()\s*[⟦\[【(]?|[⟦\[【(])?"
+    # Right wrapper: optional closing brackets and LaTeX closers
+    # e.g. ⟧, ], 】, ), }$, }, $, \)
+    right_wrapper = r"(?:[⟧\]】)]\s*(?:\}\s*\$|\$|\}|\\\))|(?:\}\s*\$|\$|\}|\\\))|[⟧\]】)])?"
+
     fuzzy = re.compile(
-        r"[⟦\[【(]?\s*" + prefix_pattern + r"[:_]?(\d{1,6})(?:-([0-9a-z]{1,3}))?\s*[⟧\]】)]?",
+        rf"{left_wrapper}{token_body}{right_wrapper}",
         re.IGNORECASE,
     )
-    scan = re.compile(prefix_pattern + r"[:_]?(\d{1,6})(?:-([0-9a-z]{1,3}))?", re.IGNORECASE)
     return fuzzy, scan
 
 

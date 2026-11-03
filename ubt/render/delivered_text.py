@@ -114,12 +114,23 @@ def is_failed_draft(text: str) -> bool:
 #: optional surrounding ``$`` is swallowed with the token because the
 #: replacement is prose, not math — leaving the dollars behind would make Typst
 #: parse the placeholder as a math variable.
+_SENTINEL_CORE = (
+    r"(?:[A-Za-z]+(?:\\?_)+)?MASK(?:\\?_)+\d{1,6}"
+    r"(?:-?(?:\\?_)?[0-9A-Za-z\U0001d400-\U0001d7ff]{1,6})?"
+)
+_BARE_SENTINEL_CORE = (
+    r"(?:SOUP|MATH|CODE|CITE|EMAIL)(?:\\?_)+MASK(?:\\?_)+\d{1,6}"
+    r"(?:-?(?:\\?_)?[0-9A-Za-z\U0001d400-\U0001d7ff]{1,6})?"
+)
+_SENTINEL_LEFT = (
+    r"(?:\$?\s*(?:[⟦\[【]|\\llbracket)"
+    r"|\$(?:\\(?:text|mathrm|mathbf)\s*\{)?"
+    r"|\\(?:text|mathrm|mathbf)\s*\{"
+    r"|\\\()"
+)
+_SENTINEL_RIGHT = r"(?:[⟧】\]]|\\rrbracket|(?:\}\s*\$|\$|\}|\\\)))\s*\$?"
 _PIPELINE_SENTINEL_RE = re.compile(
-    r"\$?\s*(?:[⟦\[【]|\\llbracket)"
-    r"\s*(?:[A-Za-z]+(?:\\?_)+)?MASK(?:\\?_)+\d{1,6}"
-    r"(?:-?(?:\\?_)?[0-9A-Za-z]{1,6})?"
-    r"[^\n⟧】\]]{0,40}?"
-    r"(?:[⟧】\]]|\\rrbracket)\s*\$?",
+    rf"(?:{_SENTINEL_LEFT}\s*{_SENTINEL_CORE}[^\n⟧】\]$]{{0,40}}?\s*{_SENTINEL_RIGHT}|(?<![A-Za-z0-9]){_BARE_SENTINEL_CORE}(?![A-Za-z0-9\U0001d400-\U0001d7ff]))",
     re.IGNORECASE,
 )
 
@@ -170,22 +181,30 @@ _STRAY_HTML_TAG_RE = re.compile(
     r"</?(?:span|div|br|em|strong|sub|sup|small|code|font|mark)\b[^<>]*>",
     re.IGNORECASE,
 )
+_STRAY_HTML_TAG_NO_BR_RE = re.compile(
+    r"</?(?:span|div|em|strong|sub|sup|small|code|font|mark)\b[^<>]*>",
+    re.IGNORECASE,
+)
 
 #: Public alias: the delivered-artifact contract detects the same family in the
 #: rendered PDF, so both sides must match on one definition rather than drift.
 STRAY_HTML_TAG_RE = _STRAY_HTML_TAG_RE
 
 
-def strip_stray_html_tags(text: str) -> str:
+def strip_stray_html_tags(text: str, *, preserve_breaks: bool = False) -> str:
     """Delete stray HTML formatting tags from delivered prose.
 
     See :data:`_STRAY_HTML_TAG_RE` for the failure mode. Applied after the
     sentinel strip: the sentinel rule replaces its token with a marker, and a
     deletion running first inside a sentinel could corrupt that replacement.
+    When ``preserve_breaks=True`` (e.g. inside table blocks), ``<br>`` tags are
+    preserved because markdown and Docling tables rely on ``<br>`` for in-cell
+    line breaks.
     """
     if not text or "<" not in text:
         return text
-    return _STRAY_HTML_TAG_RE.sub("", text)
+    pattern = _STRAY_HTML_TAG_NO_BR_RE if preserve_breaks else _STRAY_HTML_TAG_RE
+    return pattern.sub("", text)
 
 
 #: A list marker the extractor degraded. The source PDF's filled bullet arrives
@@ -236,10 +255,12 @@ def delivered_text(block: IRBlock, *, sanitize_sentinels: bool = True) -> str:
     raw = _delivered_surface(block)
     if not sanitize_sentinels:
         return raw
+    is_table = str(getattr(block.block_type, "value", block.block_type) or "") == "table"
     text = normalize_list_marker(
-        block.block_type, strip_stray_html_tags(strip_pipeline_sentinels(raw))
+        block.block_type,
+        strip_stray_html_tags(strip_pipeline_sentinels(raw), preserve_breaks=is_table),
     )
-    if block.block_type.value == "table":
+    if is_table:
         # A model re-chunking one source cell into several target cells ships a
         # ragged grid the renderer lays out broken; the source's own row widths
         # are the contract, so the delivered surface is re-shaped to them

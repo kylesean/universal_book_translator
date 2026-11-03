@@ -417,6 +417,7 @@ export interface TranslationDictionary {
     readerProductsTitle: string
     degradedAlertTitle: string
     degradedAlertDesc: string
+    degradedAlertDescRenderFallback: string
     /** `{requested}` / `{actual}` are localized delivery-mode labels. */
     degradedModeFlow: string
     /** Per-code explanation of why a 1:1 request was not honored. */

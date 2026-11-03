@@ -395,3 +395,35 @@ def test_re_export_requires_the_api_key(tmp_path: Path) -> None:
     client = TestClient(create_app(_seed(tmp_path)))
     res = client.post(f"/jobs/{_JOB}/re-export")
     assert res.status_code == 401
+
+
+def test_segments_pagination_and_status_filtering(tmp_path: Path) -> None:
+    client = TestClient(create_app(_seed(tmp_path)))
+    # Page 1 (limit=2, offset=0)
+    page1 = client.get(
+        f"/jobs/{_JOB}/segments", params={"limit": 2, "offset": 0}, headers=_AUTH
+    ).json()
+    assert page1["total"] == 4
+    assert len(page1["segments"]) == 2
+    assert [s["block_id"] for s in page1["segments"]] == ["b001", "b002"]
+
+    # Page 2 (limit=2, offset=2)
+    page2 = client.get(
+        f"/jobs/{_JOB}/segments", params={"limit": 2, "offset": 2}, headers=_AUTH
+    ).json()
+    assert page2["total"] == 4
+    assert len(page2["segments"]) == 2
+    assert [s["block_id"] for s in page2["segments"]] == ["b003", "b004"]
+
+    # Concrete status filter with pagination
+    res_status = client.get(
+        f"/jobs/{_JOB}/segments", params={"status": "mtqe_passed", "limit": 10}, headers=_AUTH
+    ).json()
+    assert res_status["total"] == 2
+    assert [s["block_id"] for s in res_status["segments"]] == ["b001", "b004"]
+
+    # Block type filter
+    res_type = client.get(
+        f"/jobs/{_JOB}/segments", params={"block_type": "narrative"}, headers=_AUTH
+    ).json()
+    assert res_type["total"] == 4

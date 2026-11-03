@@ -312,3 +312,20 @@ def test_full_and_bare_checksum_tokens_still_restore() -> None:
     assert bare_report.clean
     assert bare_report.text == "The formula $E=mc^2$ is famous."
     assert bare_report.unverified == [1]
+
+
+def test_latex_wrapped_and_escaped_tokens_restore_cleanly() -> None:
+    from ubt.core.cleaners.soup_math import SoupMathMasker
+
+    masker = SoupMathMasker()
+    source = "The value of ω = 0.5 is chosen and ω ≈ 0.6 is boundary."
+    masked, mapping = masker.mask(source)
+    assert len(mapping) == 2
+
+    # Model echoes with LaTeX math text wrapping and escaped underscores
+    draft = r"选定值 $\text{SOUP\_MASK\_0001-269}$ 且边界为 $\text{SOUP\_MASK\_0002-00d}$。"
+    report = masker.unmask_checked(draft, mapping)
+    assert report.clean
+    assert report.missing == []
+    assert report.mutated == []
+    assert report.text == "选定值 ω = 0.5 且边界为 ω ≈ 0.6。"

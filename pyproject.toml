@@ -267,7 +267,7 @@ module = "defusedxml.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# Optional heavy/OCR extras: absent from the default `uv sync --extra dev`
+# Optional heavy/OCR/cels extras: absent from the default `uv sync --extra dev`
 # Environment by design, so the main mypy gate must not require them.
 module = [
     "docling.*",
@@ -279,6 +279,8 @@ module = [
     "rapidocr.*",
     "rapidocr_onnxruntime.*",
     "onnxruntime.*",
+    "kiwisolver.*",
+    "fontTools.*",
 ]
 ignore_missing_imports = true
 

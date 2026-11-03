@@ -2418,7 +2418,9 @@ export function MissionControl() {
                             </p>
                           ) : null}
                           <p className="pl-6 leading-relaxed text-amber-900/80 dark:text-amber-200/80">
-                            {t.mission.degradedAlertDesc}
+                            {(deliverableListing.degradeReasonCodes ?? []).includes('post_render_fallback')
+                              ? t.mission.degradedAlertDescRenderFallback
+                              : t.mission.degradedAlertDesc}
                           </p>
                         </div>
                       )}

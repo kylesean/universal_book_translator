@@ -44,8 +44,9 @@ docker run -d \
   --name ubt-app \
   -p 8000:8000 \
   -v "$(pwd)/data:/data" \
-  -e UBT_PROVIDER=openai \
-  -e OPENAI_API_KEY=sk-... \
+  -e UBT_PROVIDER=openai-chat \
+  -e UBT_LLM_API_KEY=sk-... \
+  -e UBT_DRAFT_MODEL=gpt-4o-mini \
   universal-book-translator:latest
 ```
 
@@ -53,7 +54,9 @@ docker run -d \
 ```bash
 docker run --rm \
   -v "$(pwd)/data:/data" \
-  -e OPENAI_API_KEY=sk-... \
+  -e UBT_PROVIDER=openai-chat \
+  -e UBT_LLM_API_KEY=sk-... \
+  -e UBT_DRAFT_MODEL=gpt-4o-mini \
   universal-book-translator:latest \
   translate /data/input/sample.pdf -o /data/output/sample_zh.pdf -l zh
 ```

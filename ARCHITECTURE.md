@@ -60,36 +60,23 @@ capability.
 - Both run as gates: a pre-push hook and a CI step
   (`.pre-commit-config.yaml`, `.github/workflows/ci.yml`).
 
-## Docs are not in the repo
+## Documentation and architecture records
 
-`docs/` — an unversioned scratch area holding the adaptive-delivery PRD and the
-refactor design under `docs/design/`, and the delivery tech design and
-implementation plan under `docs/guides/` — is gitignored on purpose, so a fresh
-clone does not contain it. Each file describes one HEAD and is rewritten by the
-next audit round, so versioning them made a stale design note indistinguishable
-from a current specification.
+`docs/` holds the project's documentation, guides (e.g. `docs/guides/`), and
+Architecture Decision Records (ADRs). Working transient notes should be placed
+under `docs/scratch/` (gitignored).
 
-Two rules follow:
+Two rules govern documentation in UBT:
 
-1. **A `docs/...§N` reference inside a comment or docstring is a citation, not a
-   link.** It names where a decision was recorded. The reason that governs the
-   code must be in the comment itself, because the reader in a fresh clone cannot
-   open the note. A comment whose meaning lives only in `docs/` is a bug: the
-   `pdf_engine` and `docling_device` field comments, the `PROBE_MIN_SIGNAL_PAGES`
-   rationale, and the `QualityReport` docstring all carry their own argument for
-   exactly this reason.
-2. **A reference to any other path is an instruction, so it should resolve.**
-   The marker-quarantine comment in `pyproject.toml` sent readers to an
-   agent-instructions file that had never existed in this repo, and the corpus
-   harness docstring sent them to a corpus note that had just been deleted. Both
-   shipped green. Keeping pointers resolvable is a review responsibility, not a
-   gate: while the docs and the module layout are being actively reshaped, a test
-   that fails on every rename costs more than the dead pointer it catches.
+1. **A `docs/...§N` citation inside a comment or docstring names where a decision was
+   recorded.** The core rationale that governs the code should always be summarized
+   in the comment itself for quick readability.
+2. **References to documentation paths should resolve.** Pointers should remain
+   accurate across refactors.
 
-What *is* versioned is the root set — `README.md`, `ARCHITECTURE.md`,
-`GLOSSARY.md`, `SEMANTIC_JUDGE.md`, `scripts/README.md`,
-`web/README.md`, `deploy/docker/README.md` — plus each module's
-own docstring. That is the documentation a reviewer and CI can actually read.
+In addition to `docs/`, key root documentation includes `README.md`, `ARCHITECTURE.md`,
+`GLOSSARY.md`, `SEMANTIC_JUDGE.md`, `scripts/README.md`, `web/README.md`, and
+`deploy/docker/README.md`.
 
 There is no changelog. The tree is still changing fast enough that a
 per-release narrative restates it and then lags it, and a changelog that is

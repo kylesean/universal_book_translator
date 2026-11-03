@@ -17,7 +17,7 @@ import shutil
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.fs_perms import restrict_dir_to_owner
@@ -272,6 +272,12 @@ class FacsimileRenderer:
         applied as a font-scale; reflow makes the result slightly shorter than
         the box, which is the safe direction. Content that pins its own size
         (headings, captions) keeps it, and the flow is measured around it.
+
+        Applies an Elastic Typography Ladder when content overflows:
+        1. Leading compaction (0.55em -> 0.42em)
+        2. Micro-tracking compaction (-0.01em to -0.02em)
+        3. Horizontal glyph stretch / condensing (95% to 88%)
+        4. Proportional font-size scaling down to `_MIN_FIT_SCALE`
         """
         return (
             "  #context {\n"
@@ -279,13 +285,71 @@ class FacsimileRenderer:
             f"    let natural = measure(block(width: {width}pt)[\n{content}\n    ]).height\n"
             "    let ratio = if natural > 0pt { box-h / natural } else { 1.0 }\n"
             f"    let fit = calc.max({_MIN_FIT_SCALE}, calc.min(1.0, ratio))\n"
+            "    let eff-track = if ratio < 0.90 { -0.02em } else if ratio < 0.96 { -0.01em } else { 0.0em }\n"
+            "    let eff-stretch = if ratio < 0.88 { 90% } else if ratio < 0.95 { 95% } else { 100% }\n"
             f"    place(top + left, dx: {dx}pt, dy: {dy}pt, "
             f"block(width: {width}pt, height: {height}pt, clip: true, outset: {outset})[\n"
-            f"      #set text(size: {base_size_pt}pt * fit)\n"
+            f"      #set text(size: {base_size_pt}pt * fit, tracking: eff-track, stretch: eff-stretch)\n"
             f"{content}\n"
             "    ])\n"
             "  }"
         )
+
+    def _resolve_placement_collisions(
+        self,
+        items: list[list[Any]],
+        page_w: float,
+        page_h: float,
+    ) -> list[list[Any]]:
+        """Resolve bounding-box overlap between adjacent blocks on a canvas page.
+
+        Docling/OCR extraction occasionally extracts proximate or stacked elements
+        (e.g. table caption and sub-panel heading, or figure labels) with overlapping
+        bounding boxes (e.g. 2-4pt delta). In a 1:1 facsimile canvas where items are
+        placed via absolute `#place(dx, dy)`, rendering them at raw extracted coordinates
+        causes acute text collision (often >80% overlap), failing the delivery contract.
+
+        This pass performs a stable top-down cascade relaxation:
+        Whenever item B succeeds item A in reading order, shares horizontal span
+        (same column or full-width overlap), and vertically overlaps with A by >= 15%,
+        item B's vertical placement `dy` is nudged down to `A.bottom + gap`, provided
+        it stays within the safe page boundary.
+        """
+        min_gap = 2.5
+        max_y = page_h - 24.0
+        for i in range(len(items)):
+            a_pl, a_dx, a_dy, a_w, a_h, a_c = items[i]
+            a_x0, a_x1 = a_dx, a_dx + a_w
+            a_y0, a_y1 = a_dy, a_dy + a_h
+            for j in range(i + 1, len(items)):
+                b_pl, b_dx, b_dy, b_w, b_h, b_c = items[j]
+                b_x0, b_x1 = b_dx, b_dx + b_w
+                b_y0, b_y1 = b_dy, b_dy + b_h
+
+                # Check horizontal overlap
+                h_overlap = max(0.0, min(a_x1, b_x1) - max(a_x0, b_x0))
+                smaller_w = min(a_w, b_w)
+                if smaller_w <= 0 or (h_overlap / smaller_w < 0.25):
+                    continue
+
+                # Check vertical overlap
+                v_overlap = max(0.0, min(a_y1, b_y1) - max(a_y0, b_y0))
+                smaller_h = min(a_h, b_h)
+                if smaller_h <= 0:
+                    continue
+
+                # Severe overlap threshold (matching delivery contract _OVERLAP_RATIO 0.15)
+                overlap_ratio = v_overlap / smaller_h
+                overlap_area = h_overlap * v_overlap
+                if overlap_ratio >= 0.15 and overlap_area >= 30.0:
+                    new_b_dy = round(a_y1 + min_gap, 2)
+                    if new_b_dy > b_dy and new_b_dy + b_h <= max_y:
+                        items[j][2] = new_b_dy
+                        # Update local reference for subsequent iterations in loop
+                        b_dy = new_b_dy
+                        b_y0 = b_dy
+                        b_y1 = b_dy + b_h
+        return items
 
     def build_markup(
         self,
@@ -388,26 +452,34 @@ class FacsimileRenderer:
                     target_lang=target_lang,
                     base_font_size_pt=p.uniform_size_pt,
                 )
-                valid_items.append((pl, dx, dy, width, height, content))
+                valid_items.append([pl, dx, dy, width, height, content])
+
+            valid_items = self._resolve_placement_collisions(valid_items, p.page_w, p.page_h)
 
             # Group contiguous narrative/heading prose within the same column into a flow group
             groups: list[list[Any]] = []
             for item in valid_items:
-                pl, dx, dy, width, height, content = item
+                f_pl: FacsimileBlockPlacement = cast(FacsimileBlockPlacement, item[0])
+                f_dx: float = cast(float, item[1])
+                f_dy: float = cast(float, item[2])
+                f_w: float = cast(float, item[3])
                 if not groups:
                     groups.append([item])
                     continue
 
                 prev_group = groups[-1]
                 prev_item = prev_group[-1]
-                prev_pl, prev_dx, prev_dy, prev_w, prev_h, _ = prev_item
+                prev_pl: FacsimileBlockPlacement = cast(FacsimileBlockPlacement, prev_item[0])
+                prev_dx: float = cast(float, prev_item[1])
+                prev_dy: float = cast(float, prev_item[2])
+                prev_w: float = cast(float, prev_item[3])
 
                 # Criteria for intra-column natural flow:
                 # 1. Neither block is a table or code block
                 # 2. Both blocks sit in the same column track (or single-column track)
                 # 3. Reading order descends down the column
                 # 4. In the source document, they were adjacent paragraphs in the same text flow
-                col = 0 if dx < 0.5 * p.page_w else 1
+                col = 0 if f_dx < 0.5 * p.page_w else 1
                 prev_col = 0 if prev_dx < 0.5 * p.page_w else 1
 
                 # Single-column documents (width > 60% of page_w) form a single track down the page.
@@ -416,34 +488,34 @@ class FacsimileRenderer:
                 # narrower than the prose around it. Treating that as a different track left
                 # a measured 120pt hole on page 2 of arXiv 2609.22978.
                 is_single_col_pair = (
-                    width > 0.60 * p.page_w
+                    f_w > 0.60 * p.page_w
                     and prev_w > 0.60 * p.page_w
-                    and abs(dx - prev_dx) <= 24.0
-                    and abs(width - prev_w) <= 80.0
+                    and abs(f_dx - prev_dx) <= 24.0
+                    and abs(f_w - prev_w) <= 80.0
                 )
                 # Multi-column documents require both blocks to sit within the same column
                 is_multi_col_pair = (
-                    width <= 0.60 * p.page_w
+                    f_w <= 0.60 * p.page_w
                     and prev_w <= 0.60 * p.page_w
                     and col == prev_col
-                    and abs(dx - prev_dx) <= 24.0
+                    and abs(f_dx - prev_dx) <= 24.0
                 )
                 same_track = is_single_col_pair or is_multi_col_pair
 
                 orig_prev_y0 = prev_pl.src_y0 if prev_pl.src_y0 is not None else prev_pl.y0
-                orig_curr_y1 = pl.src_y1 if pl.src_y1 is not None else pl.y1
+                orig_curr_y1 = f_pl.src_y1 if f_pl.src_y1 is not None else f_pl.y1
                 src_gap = orig_prev_y0 - orig_curr_y1
 
                 can_group = (
                     self.enable_column_flow
-                    and not pl.is_table
+                    and not f_pl.is_table
                     and not prev_pl.is_table
-                    and not pl.is_code
+                    and not f_pl.is_code
                     and not prev_pl.is_code
-                    and not pl.is_caption
+                    and not f_pl.is_caption
                     and not prev_pl.is_caption
                     and same_track
-                    and dy >= prev_dy
+                    and f_dy >= prev_dy
                     and -4.0 <= src_gap <= 36.0
                 )
 
@@ -452,9 +524,24 @@ class FacsimileRenderer:
                 else:
                     groups.append([item])
 
-            for grp in groups:
+            for grp_idx, grp in enumerate(groups):
+                # Intra-page safe vertical slack calculation:
+                # If there is empty vertical space before the next item in the same track or page footer,
+                # allow the box height budget to absorb up to that gap (minus safety margin) rather than hard-clipping.
+                grp_bottom = (grp[-1][2] + grp[-1][4]) if len(grp) > 1 else (grp[0][2] + grp[0][4])
+                slack_pt = 0.0
+                if grp_idx + 1 < len(groups):
+                    next_item = groups[grp_idx + 1][0]
+                    if next_item[2] >= grp_bottom and abs(next_item[1] - grp[0][1]) <= 60.0:
+                        slack_pt = max(0.0, (next_item[2] - grp_bottom) - 8.0)
+                else:
+                    slack_pt = max(0.0, (p.page_h - 36.0) - grp_bottom)
+                base_h = (grp[-1][2] + grp[-1][4]) - grp[0][2] if len(grp) > 1 else grp[0][4]
+                safe_slack = round(min(slack_pt, max(12.0, base_h * 0.4), 45.0), 2)
+
                 if len(grp) == 1:
                     pl, dx, dy, width, height, content = grp[0]
+                    fit_h = round(height + safe_slack, 2)
                     lines.append(f"  // bbox: {dx} {dy} {width} {height}")
                     # Table mask: paint a white background to completely eliminate ghost vector rules
                     if pl.is_table:
@@ -478,7 +565,7 @@ class FacsimileRenderer:
                             inner_w = round(width / scale_factor, 2)
                             lines.append(
                                 f"  #place(top + left, dx: {dx}pt, dy: {dy}pt, "
-                                f"block(width: {width}pt, height: {height}pt, clip: true, outset: (top: 2.5pt, bottom: 2.5pt))[\n"
+                                f"block(width: {width}pt, height: {fit_h}pt, clip: true, outset: (top: 2.5pt, bottom: 2.5pt))[\n"
                                 f"    #scale(x: {eff_stretch:.0f}%, origin: left + top)[\n"
                                 f"      #block(width: {inner_w}pt)[\n"
                                 f"        {content}\n"
@@ -492,7 +579,7 @@ class FacsimileRenderer:
                                     dx=dx,
                                     dy=dy,
                                     width=width,
-                                    height=height,
+                                    height=fit_h,
                                     base_size_pt=p.uniform_size_pt,
                                     outset="(top: 2.5pt, bottom: 2.5pt)",
                                     content=f"        {content}",
@@ -504,6 +591,7 @@ class FacsimileRenderer:
                     grp_dy = round(grp[0][2], 2)
                     grp_width = round(max(it[3] for it in grp), 2)
                     grp_height = round((grp[-1][2] + grp[-1][4]) - grp[0][2], 2)
+                    fit_grp_h = round(grp_height + safe_slack, 2)
                     lines.append(
                         f"  // flow-group: {len(grp)} blocks dx={grp_dx} dy={grp_dy} w={grp_width} h={grp_height}"
                     )
@@ -529,7 +617,7 @@ class FacsimileRenderer:
                         inner_w = round(grp_width / scale_factor, 2)
                         lines.append(
                             f"  #place(top + left, dx: {grp_dx}pt, dy: {grp_dy}pt, "
-                            f"block(width: {grp_width}pt, height: {grp_height}pt, clip: true, outset: (top: 3.0pt, bottom: 3.0pt))[\n"
+                            f"block(width: {grp_width}pt, height: {fit_grp_h}pt, clip: true, outset: (top: 3.0pt, bottom: 3.0pt))[\n"
                             f"    #scale(x: {eff_stretch:.0f}%, origin: left + top)[\n"
                             f"      #block(width: {inner_w}pt)[\n"
                             f"{flow_content_str}\n"
@@ -543,7 +631,7 @@ class FacsimileRenderer:
                                 dx=grp_dx,
                                 dy=grp_dy,
                                 width=grp_width,
-                                height=grp_height,
+                                height=fit_grp_h,
                                 base_size_pt=p.uniform_size_pt,
                                 outset="(top: 3.0pt, bottom: 3.0pt)",
                                 content=flow_content_str,

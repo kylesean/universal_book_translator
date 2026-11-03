@@ -1346,8 +1346,8 @@ def render_table(
     # table footnote printed below it. The width fit above knows nothing about
     # height, so the emitted scale is re-fit here: iterate, because the wrap
     # count is a step function of the scale.
-    inset_x_pt = _TABLE_CELL_INSET_PT
-    inset_y_pt = _TABLE_CELL_INSET_PT
+    inset_x_pt = round(min(_TABLE_CELL_INSET_PT, max(1.5, _TABLE_CELL_INSET_PT * emitted_scale)), 1)
+    inset_y_pt = round(min(_TABLE_CELL_INSET_PT, max(1.5, _TABLE_CELL_INSET_PT * emitted_scale)), 1)
     min_legible_scale = max(_TABLE_MIN_TEXT_SCALE, 5.2 / base_pt)
     if content_height_pt is not None and content_height_pt > 0.0:
         hlines_pt = 2.7
@@ -2067,7 +2067,7 @@ class TypstDocumentRenderer:
         paper_title: str = "",
         abstract: str = "",
         toc_mode: str = "auto",
-        allow_landscape_tables: bool = True,
+        allow_landscape_tables: bool | None = None,
         table_scale_factor: float = 1.0,
         formula_scale: float = 1.0,
         break_long_formulas: bool = False,
@@ -2110,7 +2110,10 @@ class TypstDocumentRenderer:
         self.columns = columns
         self.paper_title = paper_title
         self.abstract = abstract
-        self.allow_landscape_tables = allow_landscape_tables
+        if allow_landscape_tables is None:
+            self.allow_landscape_tables = layout_template != "academic"
+        else:
+            self.allow_landscape_tables = bool(allow_landscape_tables)
         self.table_scale_factor = float(table_scale_factor)
         self.formula_scale = float(formula_scale)
         self.break_long_formulas = bool(break_long_formulas)

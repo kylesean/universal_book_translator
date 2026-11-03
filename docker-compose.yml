@@ -9,11 +9,14 @@ services:
     ports:
       - "${UBT_PORT:-8000}:8000"
     environment:
-      # --- LLM Provider Credentials (uncomment and provide your key) ---
-      # - UBT_PROVIDER=openai
-      # - OPENAI_API_KEY=sk-...
-      # - ANTHROPIC_API_KEY=sk-ant-...
-      # - GEMINI_API_KEY=AIza...
+      # --- Outbound LLM Provider Configuration (UBT Single-Key Design) ---
+      # UBT uses a unified UBT_LLM_API_KEY for all providers (third-party names like
+      # OPENAI_API_KEY are deliberately not read).
+      # - UBT_PROVIDER=openai-chat           # Built-in protocols: openai-chat, anthropic-messages, gemini-native
+      # - UBT_LLM_API_KEY=sk-...             # Your outbound model API key
+      # - UBT_DRAFT_MODEL=gpt-4o-mini        # Draft translation model
+      # - UBT_REPAIR_MODEL=gpt-4o            # Repair/Refinement model (optional)
+      # - UBT_BASE_URL=https://api.openai.com/v1 # Custom endpoint/relay (optional)
       # --- Network & Storage Binding ---
       - UBT_HOST=0.0.0.0
       - UBT_PORT=8000

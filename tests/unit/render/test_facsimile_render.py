@@ -1708,3 +1708,72 @@ def test_a_flow_group_preserves_the_source_paragraph_gap() -> None:
 
     assert "flow-group: 2 blocks" in markup
     assert "#v(1.000em)" in markup
+
+
+def test_facsimile_collision_resolution_nudges_overlapping_blocks() -> None:
+    # Simulates Page 5 conflict: Table caption and sub-panel heading with overlapping raw coordinates
+    renderer = FacsimileRenderer()
+    p = FacsimilePageSpec(
+        page_no=1,
+        page_w=612.0,
+        page_h=792.0,
+        uniform_size_pt=9.0,
+        leading_em=0.55,
+        placements=[
+            FacsimileBlockPlacement(
+                block_id="b_table_cap",
+                page=1,
+                x0=60.45,
+                y0=685.84,  # top = 792 - 697.84 = 94.16, bottom = 792 - 685.84 = 106.16
+                x1=491.99,
+                y1=697.84,
+                text="表 1 LoopCD 在完整的循环深度下提升了数学推理和代码生成能力。",
+                is_caption=True,
+            ),
+            FacsimileBlockPlacement(
+                block_id="b_sub_head",
+                page=1,
+                x0=59.94,
+                y0=692.88,  # top = 792 - 701.09 = 90.9, raw coordinates overlap table cap
+                x1=175.86,
+                y1=701.09,
+                text="数学推理",
+                is_heading=True,
+                font_size_pt=11.46,
+            ),
+        ],
+        tier="L1",
+    )
+    markup = renderer.build_markup(pages=[p], bg_pdf_filename="bg.pdf")
+    # Table caption starts at dy: 94.16pt, height: 12.0pt -> bottom is 106.16pt
+    assert "dx: 60.45pt, dy: 94.16pt" in markup
+    # Sub-head should be nudged down below the caption (dy >= 106.16 + 2.5 = 108.66pt) instead of colliding at dy: 90.9pt
+    assert "dy: 90.9pt" not in markup
+    assert "dx: 59.94pt, dy: 108.66pt" in markup
+
+
+def test_facsimile_elastic_typography_ladder_emitted() -> None:
+    renderer = FacsimileRenderer()
+    p = FacsimilePageSpec(
+        page_no=1,
+        page_w=500.0,
+        page_h=700.0,
+        uniform_size_pt=9.0,
+        leading_em=0.55,
+        placements=[
+            FacsimileBlockPlacement(
+                block_id="b_dense",
+                page=1,
+                x0=50.0,
+                y0=500.0,
+                x1=450.0,
+                y1=540.0,
+                text="这是一段较长的测试文本用于验证弹性排版阶梯在字数膨胀时是否能激活微字距与水平字形压缩。",
+            ),
+        ],
+        tier="L1",
+    )
+    markup = renderer.build_markup(pages=[p], bg_pdf_filename="bg.pdf", target_lang="zh")
+    assert "eff-track" in markup
+    assert "eff-stretch" in markup
+    assert "tracking: eff-track, stretch: eff-stretch" in markup

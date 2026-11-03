@@ -474,6 +474,7 @@ def read_artifact_evidence(
             overflow_records=tuple(overflow_records),
             style_samples=tuple(style_samples),
             declared_page_expansion=declared_page_expansion,
+            exhibit_texts=tuple(exhibit_texts),
         )
 
     return ContractEvidence(
@@ -500,6 +501,7 @@ def read_artifact_evidence(
         or measured
         or _exact_body_sizes(pdf_path, page_exhibits or None, body_pages or None),
         declared_page_expansion=declared_page_expansion,
+        exhibit_texts=tuple(exhibit_texts),
     )
 
 

@@ -1165,6 +1165,10 @@ def test_typst_document_renderer_dense_table_landscape(tmp_path: Path) -> None:
     source_bilingual, _ = renderer_bilingual.build_source([table_block], build_dir)
     assert "#page(flipped: true)[" not in source_bilingual
 
+    renderer_academic = TypstDocumentRenderer(columns=1, layout_template="academic")
+    source_academic, _ = renderer_academic.build_source([table_block], build_dir)
+    assert "#page(flipped: true)[" not in source_academic
+
 
 def test_prose_with_kinsoku_enabled(tmp_path: Path) -> None:
     from ubt.core.cleaners.kinsoku import WORD_JOINER

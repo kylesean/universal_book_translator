@@ -111,6 +111,8 @@ class AdapterRuntimeConfig:
     #: Enable CELS (Constraint-Enforced Layout Synthesis) in facsimile rendering.
     #: If False, rolls back to legacy 2D packing facsimile placement.
     enable_cels: bool = True
+    #: Whether wide tables in single-column pages may flip to dedicated landscape pages.
+    allow_landscape_tables: bool | None = None
 
 
 def adapter_runtime_config(config: Any, *, delivery_mode: str) -> AdapterRuntimeConfig:
@@ -142,6 +144,7 @@ def adapter_runtime_config(config: Any, *, delivery_mode: str) -> AdapterRuntime
         enable_pdf_optimization=config.enable_pdf_optimization,
         pdf_optimize_profile=config.pdf_optimize_profile,
         enable_cels=getattr(config, "enable_cels", True),
+        allow_landscape_tables=getattr(config, "allow_landscape_tables", None),
     )
 
 

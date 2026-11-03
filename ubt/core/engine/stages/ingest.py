@@ -549,9 +549,21 @@ async def run_ingest_stage(
                         (ctx.output_path and ctx.output_path.suffix.lower() == ".pdf")
                         or (ctx.input_path and ctx.input_path.suffix.lower() == ".pdf")
                     )
+                    should_skip_table = False
+                    table_skip_reason = ""
                     if is_pdf_target and table_mode == "skip":
+                        should_skip_table = True
+                        table_skip_reason = "skip:table_mode_skip"
+                    elif is_pdf_target and table_mode == "auto":
+                        from ubt.render.table_compiler import is_dense_numerical_table
+
+                        if is_dense_numerical_table(b.source_text):
+                            should_skip_table = True
+                            table_skip_reason = "skip:dense_numerical_table"
+
+                    if should_skip_table:
                         b.policy_translate = False
-                        b.policy_reason = "skip:table_mode_skip"
+                        b.policy_reason = table_skip_reason
                         b.skip_translate = True
                         b.status = BlockStatus.MTQE_PASSED
                         b.target_text = b.source_text

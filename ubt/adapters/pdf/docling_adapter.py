@@ -371,6 +371,7 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         self._renderer.layout_auto_heal_max_passes = runtime_config.layout_auto_heal_max_passes
         self.delivery_mode = getattr(runtime_config, "delivery_mode", "facsimile")
         self._renderer.delivery_mode = self.delivery_mode
+        self._renderer.allow_landscape_tables = runtime_config.allow_landscape_tables
         self._renderer.enable_pdf_optimization = getattr(
             runtime_config, "enable_pdf_optimization", True
         )

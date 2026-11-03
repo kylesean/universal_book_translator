@@ -1244,12 +1244,18 @@ export function NewJobWizard() {
                   </div>
                 </div>
 
-                <div className="mt-3 grid gap-3 border-t border-border/60 pt-3 sm:grid-cols-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-1.5 min-w-0">
+                <div className="mt-3 grid gap-2.5 border-t border-border/60 pt-3 sm:grid-cols-2">
+                  <div className="flex items-center gap-3 rounded-lg border border-border/70 bg-card/60 p-2.5 transition-colors hover:border-border hover:bg-card/90">
+                    <Switch
+                      id="inline-allow-degrade"
+                      checked={allowDegrade}
+                      onCheckedChange={setAllowDegrade}
+                      className="shrink-0"
+                    />
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
                       <Label
                         htmlFor="inline-allow-degrade"
-                        className="cursor-pointer text-xs font-medium text-foreground truncate"
+                        className="cursor-pointer text-xs font-medium text-foreground truncate select-none"
                       >
                         {t.wizard.allowDegrade}
                       </Label>
@@ -1257,28 +1263,24 @@ export function NewJobWizard() {
                         {t.wizard.allowDegradeHelp}
                       </InfoTip>
                     </div>
-                    <Switch
-                      id="inline-allow-degrade"
-                      checked={allowDegrade}
-                      onCheckedChange={setAllowDegrade}
-                    />
                   </div>
 
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="flex items-center gap-3 rounded-lg border border-border/70 bg-card/60 p-2.5 transition-colors hover:border-border hover:bg-card/90">
+                    <Switch
+                      id="inline-enable-cels"
+                      checked={enableCels}
+                      onCheckedChange={setEnableCels}
+                      className="shrink-0"
+                    />
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
                       <Label
                         htmlFor="inline-enable-cels"
-                        className="cursor-pointer text-xs font-medium text-foreground truncate"
+                        className="cursor-pointer text-xs font-medium text-foreground truncate select-none"
                       >
                         {t.wizard.enableCels}
                       </Label>
                       <InfoTip label={t.wizard.enableCels}>{t.wizard.enableCelsHelp}</InfoTip>
                     </div>
-                    <Switch
-                      id="inline-enable-cels"
-                      checked={enableCels}
-                      onCheckedChange={setEnableCels}
-                    />
                   </div>
                 </div>
 

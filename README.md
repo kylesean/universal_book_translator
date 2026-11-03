@@ -1,268 +1,232 @@
 # Universal Book Translator (UBT)
 
-Pre-1.0 self-hosted document/book translation compiler: ingest PDF/EPUB/DOCX/
-HTML/Markdown into one IR, translate it through a ledger-backed multi-stage LLM
-pipeline, and re-typeset the result as a new document laid out by Typst.
+[![CI](https://github.com/kylesean/universal_book_translator/actions/workflows/ci.yml/badge.svg)](https://github.com/kylesean/universal_book_translator/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Python: 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![Typst: 0.15.1](https://img.shields.io/badge/typst-0.15.1-239dad.svg)](https://typst.app/)
 
-Consistency defenses: a mined book bible (terms and names) and a structural +
-quality gate run on every job. Hierarchical chapter memory runs only on the
-multi-chapter long route — a single-chapter document and academic profiles get
-no rolling summary; multi-chapter books retain sliding epoch memory across chapters. A PDF up to 50 pages is
-ingested as one chapter; a longer one is split into internal page chunks that
-the draft stage sees as multiple chapters. Deterministic glossary enforcement is
-short-document by default; the long route opts in with
-`UBT_DETERMINISTIC_GLOSSARY_LONG_ROUTE=true`.
+> ⚠️ **开发状态提示**：本项目目前处于 **Pre-1.0 积极迭代开发阶段**。核心流水线与排版引擎已具备出版级质量，但在多格式分章灵活性、依赖轻量化与极端版面自适应上仍有已知缺陷与限制（详见后文[已知局限与问题](#已知局限与缺陷)）。欢迎试用、提出 Issue 或提交 PR 参与建设！
 
-## Install
+---
 
-No PyPI release yet — install from a checkout:
+## 📖 项目简介
+
+**Universal Book Translator (UBT)** 是一个自托管、编译器架构的工业级图书与学术文档翻译重排引擎。
+
+不同于市面上常见的“调用 LLM API + 简单正则替换”的机翻脚本，UBT 真正采用**编译器思想**构建：
+1. **统一文档解析 (Ingestion)**：将 PDF、EPUB、DOCX、Markdown、HTML 等多源文档提取并规范化为高精度的中间表示（Document IR）；
+2. **多阶段 LLM 编译流水线 (Translation Ladder)**：基于支持 ACID 特性的 SQLite WAL 账本驱动，结合分层上下文记忆与术语库，进行高质量翻译与自动化质量门禁（MTQE）靶向修复；
+3. **出版级排版重构 (Typst Typesetting)**：彻底摆脱传统版面拉伸错位的问题，利用现代排版语言 **Typst** 重新编排，原生重建双语对照、数学公式与结构化表格，输出符合印刷标准的出版级 PDF 及伴生格式。
+
+---
+
+## ✨ 核心优势与特性
+
+- 🎨 **印刷级排版重构**：基于 Typst 编译重排，支持 LaTeX 原生数学公式转换（无需光栅化截图）与自适应表格重建，支持双语并排（`dual`）与纯译文（`mono`）。
+- 💾 **ACID 级状态账本与零损耗断点续跑**：底层基于 SQLite WAL 账本维护逐块（Block-level）状态机。任务中途若遭遇断网或中断，直接凭借 `--job-id` 即可恢复，**已翻译分块绝不重复扣费**。
+- 🧠 **分层上下文记忆体系**：
+  - **L1 局部滑动窗口**：感知紧邻语义流，避免脚注干扰正文；
+  - **L2 跨章节滚动宏观摘要**：保持长文主线剧情与学术推导一致性；
+  - **L3 宏观 Epoch 摘要**：结合 System Prompt 前缀缓存，兼顾长书记忆与 Token 成本。
+- 🛡️ **术语挖掘与质量门禁**：内置 Bible 挖掘阶段自提取全书专有名词；集成 FastPass 启发式初筛与 MQM 严重度分级门禁，自动识别漏译、幻觉并进入二次修复循环。
+- 🖥️ **现代化开箱即用 Web 控制台**：前端基于 React 19 + TypeScript + Radix UI 构建，**已预编译打包并随 Python wheel 内嵌分发**。用户无需安装 Node.js/pnpm，一条命令即可启动可视化向导与审校工作台。
+- 🤖 **创新的 Agent 协同范式 (MCP)**：
+  - **自主流水线模式**：通过标准 MCP 工具调度 UBT 执行长任务；
+  - **Agent-Hosted 模式**：外部大模型（如 Claude / GPT-4）**自身充当翻译大脑**，UBT 专职负责文档 AST 解析、样式占位符保护、上下文分包认领与 Typst 排版编译。
+
+---
+
+## 🛠️ 安装指南
+
+当前项目尚未正式推送至公共 PyPI（预发版），推荐通过源码检出或 Docker 容器运行：
+
+### 1. 源码本地安装（推荐使用 `uv`）
+
+要求 **Python >= 3.12**：
 
 ```bash
 git clone https://github.com/kylesean/universal_book_translator.git
 cd universal_book_translator
-pip install .                                  # users (Python 3.12+; docling semantic PDF engine included)
-pip install '.[mcp]'                           # users who want the MCP server
-pip install '.[ocr]'                           # scanned-book OCR (rapidocr measured-box engine)
-uv sync --all-extras                           # development (all extras: dev, ocr, cels, …)
+
+# 推荐使用现代 Python 包管理器 uv（超快依赖解析）：
+uv sync --extra dev                            # 开发与基础运行环境
+uv sync --all-extras                           # 安装所有扩展（dev, pdf, ocr, cels, mcp 等）
+
+# 或使用标准 pip 安装：
+pip install .                                  # 基础安装（含 Docling 语义解析）
+pip install '.[mcp]'                           # 安装 MCP Server 依赖
+pip install '.[ocr]'                           # 安装图片扫描件 OCR 依赖
+pip install '.[all]'                           # 全功能完整安装
 ```
 
-### Docker Container (Out-of-the-Box)
+> 📌 **外部排版编译器 Typst**：PDF 渲染需要系统 `PATH` 中具备 `typst`（推荐 v0.15.1）。
+> - Linux: 可通过 GitHub Releases 下载预编译可执行文件放入 `/usr/local/bin`，并安装 CJK 字体：`sudo apt-get install fonts-noto-cjk`；
+> - macOS: `brew install typst`；
+> - 运行 `ubt doctor` 可自动检查环境中的 Typst 与中文字体就绪情况。
 
-Run the pre-baked, multi-arch container with **Typst 0.15.1** and **Noto CJK fonts** pre-installed:
+---
+
+### 2. Docker 容器一键部署（免配置 Typst 与字体）
+
+预构建容器内已集成 **Typst 0.15.1** 与 **Noto CJK 中文字体**：
 
 ```bash
-# Using Docker Compose
+# 使用 Docker Compose 启动 Web 控制台与 API 服务
 docker compose up -d
 
-# Or via Docker CLI directly
-docker run -d -p 8000:8000 -v $(pwd)/data:/data universal-book-translator:latest
+# 或直接通过 Docker CLI 运行
+docker run -d \
+  --name ubt-app \
+  -p 8000:8000 \
+  -v $(pwd)/data:/data \
+  -e UBT_PROVIDER=openai-chat \
+  -e UBT_LLM_API_KEY=sk-... \
+  -e UBT_DRAFT_MODEL=gpt-4o-mini \
+  universal-book-translator:latest
 ```
 
-The Web Console and REST API will be available immediately at `http://localhost:8000`.
-See [`deploy/docker/README.md`](deploy/docker/README.md) for complete container options.
+服务就绪后，直接在浏览器中访问 `http://localhost:8000` 即可使用 Web 控制台。
+更多容器化启动与持久化挂载说明参见 [`deploy/docker/README.md`](deploy/docker/README.md)。
 
-### Sample Book & Verification Runner
+---
 
-To verify the complete ingestion, container fit, and Typst rendering pipeline offline without external API keys:
+## 🚀 快速上手
+
+### 1. 配置模型凭证
+
+UBT 采用**单键规范（Single-Key Design）**以确保安全性（不读取 `OPENAI_API_KEY` 等第三方混淆变量），请通过 `UBT_*` 环境变量或 `ubt.toml` 文件配置：
 
 ```bash
+export UBT_LLM_API_KEY="sk-..."                 # 访问大模型的 API Key
+export UBT_BASE_URL="https://api.openai.com/v1" # 接口端点（兼容各种中转网关/自建服务）
+export UBT_DRAFT_MODEL="gpt-4o-mini"            # 一级初翻模型
+export UBT_REPAIR_MODEL="gpt-4o"                # 二级审校修复模型（可选）
+```
+
+> 💡 **提示**：UBT 内建 4 种底层线缆协议（`openai-chat`, `openai-responses`, `anthropic-messages`, `gemini-native`）。如需使用自建端点（如 vLLM、Ollama 或中转服务），可参考 [`ubt.toml.example`](ubt.toml.example) 在当前目录或 `~/.config/ubt/config.toml` 中声明 `[providers.<name>]` 配置块。
+
+---
+
+### 2. CLI 命令行使用
+
+#### ① 翻译书籍
+```bash
+# 将书籍翻译为中文（-l 目标语言，-s 源语言，默认源语言为 en）
+ubt translate sample.pdf -l zh
+
+# 零成本全真演练（使用内置 Mock Echo 引擎，不消耗任何 Token，快速验证排版流水线）
+ubt translate sample.pdf -l zh --dry-run
+
+# 仅翻译前 5 页进行抽样验证
+ubt translate sample.pdf -l zh --pages 1-5
+```
+
+执行开始后终端会打印专属任务 ID：
+```text
+Job ID: job_da4c06edac50_zh (resume with: ubt translate sample.pdf --job-id job_da4c06edac50_zh)
+```
+若任务因故中断，再次运行上述带 `--job-id` 的命令即可**原地秒级继续断点翻译**；若想推倒重来，追加 `--fresh` 参数即可。
+
+#### ② 实用工具命令
+```bash
+# 零 Token 计费全书预检（预估所需 Token 费用、耗时、公式密度与版面风险）
+ubt assess book.pdf
+
+# 查看已提交任务的进度与状态统计
+ubt status job_da4c06edac50_zh
+
+# 环境健康体检（检查 Typst 编译器、系统字体、账本路径、模型连通性）
+ubt doctor
+
+# 离线验证内置排版样本（无需任何 API Key，验证 Typst 编译链路）
 uv run python scripts/verify_sample_book.py
 ```
-This runs against [`examples/sample_book/deep_learning_primer.md`](examples/sample_book/deep_learning_primer.md) and compiles a validated PDF with zero margin spills.
 
-Extras: `ocr` / `academic` (RapidOCR + ONNX runtime, for scanned books), `cels`
-(the constraint solver the faithful channel measures with), `mcp` (the MCP
-server). `pdf` and `academic` re-state the Docling pin, but Docling is a base
-dependency — a bare install already has the semantic PDF engine. PDF output needs
-the `typst` compiler on `PATH` — a PDF job fails at the render stage without it.
-`ubt doctor` checks the key, the ledger directory, Typst and CJK fonts, and says
-what breaks.
+---
 
-## Quick start
+### 3. 可视化 Web 控制台 (Operator Console)
 
-Set the credential and the models. Every config-model setting has one canonical
-`UBT_*` variable, and `ubt config` prints those with the variable that sets
-each one; a provider block in `ubt.toml` / `~/.config/ubt/config.toml` can
-supply the same values instead. A few process-level switches
-(`UBT_OUTPUT_DIR`, `UBT_ALLOW_NO_AUTH`, `UBT_UI_LANG`, `UBT_LOG_LEVEL`,
-`UBT_PDF_STREAM_CHUNK_SIZE`) are read directly and are not
-part of that table.
+无需记忆繁杂的 CLI 参数，运行控制台命令即可唤起沉浸式交互界面：
 
 ```bash
-export UBT_LLM_API_KEY=sk-...              # the outbound LLM key
-export UBT_BASE_URL=https://api.openai.com/v1
-export UBT_DRAFT_MODEL=gpt-4o-mini         # tier-1 draft model
-export UBT_REPAIR_MODEL=gpt-4o             # tier-2 repair model
+ubt console
 ```
+命令会自动打开浏览器访问 `http://127.0.0.1:8000/`：
+- **向导式新建任务 (`/wizard`)**：拖拽上传文档，右侧实时显示基于 `/jobs/assess` 的全书预检与预算核算；
+- **全景观控中心 (`/jobs/{id}`)**：实时 SSE 数据流展示当前翻译阶梯（Extract → Segment → TM → Translate → QE → Repair → Render）；
+- **L3 人工审校工作台 (`/jobs/{id}/review`)**：双语对齐列表沉浸式校对，集成 KaTeX 实时预览公式。在某一处修改译文后，支持**全书术语一键传播（Propagate）**，并可直接触发**无损重新排版导出（Re-export，不消耗任何模型 Token）**；
+- **系统诊断与 Provider 可视化编辑 (`/system`)**：免终端直观配置各类大模型提供商端点与密钥。
 
-`UBT_PROVIDER` selects a named provider from that registry; without one,
-`UBT_BASE_URL` is used directly. To run the whole pipeline without spending
-anything, add `--dry-run`: it uses a deterministic echo provider, so no key is
-needed and no tokens are billed.
+---
 
-One entry-point difference worth knowing: with no credential configured for a
-remote endpoint, the CLI refuses the run (set `UBT_LLM_API_KEY` or pass
-`--dry-run`), while the REST API and MCP server auto-run the same rehearsal
-and label it — the submit response carries `"rehearsal": true`, and the
-console badges the job. Nothing is silently translated by a mock.
+### 4. AI Agent 集成 (MCP Server)
 
-```bash
-ubt translate book.pdf -l zh
-```
-
-`-l` is `--target-lang`; `-s` is `--source-lang` (default `en`). Without `-o`
-the deliverable is written to `<documents>/UBT/<stem>_bilingual<suffix>` — or
-`<stem>_mono<suffix>` when the run resolves monolingual (for example
-`--profile paper`), with the suffix following the input format. The run
-prints a Job ID at start, and that id is the resume handle:
-
-```
-Job ID: job_da4c06edac50_zh  (resume with: ubt translate <input> --job-id job_da4c06edac50_zh)
-```
-
-The id is derived from the run's identity, so its suffix grows with what you
-selected — the same book with `--dry-run --profile paper` becomes
-`job_da4c06edac50_zh_mock_prpaper`. Copy the whole id, not the prefix. Resume is
-the default: re-running with the same `--job-id` picks up from the ledger's
-checkpoints instead of re-paying for finished blocks, and `--fresh` discards the
-ledger and re-ingests. `--fresh` keeps `tm.sqlite` (the cross-job translation
-memory) and any external glossary: those are assets, not job state, so a re-run
-starts from a clean ledger but still benefits from what earlier runs learned.
-Other useful commands: `ubt assess book.pdf` for a
-zero-token quote, `ubt status <job-id>` for checkpoint statistics, and
-`ubt verify <artifact>` to re-reconcile a delivery.
-
-A run restricted with `--pages 1-6` gets that scope in its default filename
-(`book_mono_p1-6.pdf`) instead of the full document's name. Sampling a few pages
-to check a gate therefore cannot overwrite the complete delivery — an explicit
-`-o` is always used exactly as given.
-
-### Operator console
-
-```bash
-ubt console                  # opens http://127.0.0.1:8000/ in a browser
-```
-
-`ubt console` serves the same FastAPI app as the `ubt-api` entry point, on
-`127.0.0.1:8000` by default, and opens the browser for you; for a loopback bind
-it also opens the server without an auth gate.
-
-For a console that survives closing its terminal, run `ubt console --no-browser`
-under a service manager of your choice: the repo ships no unit file, so a systemd
-user unit is something you write yourself (an `ExecStart=` for that command, and
-`journalctl --user -u <your-unit> -f` to follow its log). Either way the console
-stays on `127.0.0.1:8000` unless `--host`/`--port` say otherwise; `--dev`/Vite is
-for frontend development only and is not needed to use the console.
-
-**Configuring a model in the browser.** You do not need a shell to get started.
-Engine Doctor (`/system`) lists every provider block in `ubt.toml`, lets you add
-one, pick which is in force, and edit its endpoint, wire protocol, model ids and
-capability flags. On a loopback server the credential field is available too;
-beyond loopback, or under `UBT_STRICT_AUTH`, it is refused and the panel says
-where the secret belongs instead. Saves go to `ubt.toml` and take effect on the
-next job — no restart. Settings bound at startup (ledger directory, job mode, auth
-gate) are reported as needing a restart rather than silently ignored. Running `ubt-api` directly
-refuses to start without one and prints the two ways to supply it: set
-`UBT_API_KEY` (the inbound `X-API-Key`, not the LLM key), or opt into an open
-local server for development. The console also runs the review workbench, where
-a human edit is applied to the ledger under the job's writer lock.
-
-### MCP server
+UBT 提供了标准的 stdio 模式 Model Context Protocol (MCP) 服务，可无缝接入 Claude Desktop、Cursor 等支持 MCP 的 AI 开发工具中：
 
 ```bash
 pip install 'universal-book-translator[mcp]'
-ubt-mcp                      # stdio transport
+ubt-mcp
 ```
 
-The stdio server exposes the engine's operations as `ubt_*` tools
-(`ubt_translate_book`, `ubt_job_status`, `ubt_list_issues`, `ubt_edit_segment`,
-`ubt_re_export`, `ubt_list_jobs`, `ubt_doctor`, …). It is local-trust — same
-user, no API-key gate — so front the REST API instead when exposing it beyond
-one machine.
+在客户端工具中配置对应的 `ubt-mcp` 可执行路径后，即可直接赋予智能体以下工具能力：
+- `ubt_translate_book` / `ubt_job_status` / `ubt_cancel_job`：长任务自动托管；
+- `ubt_assess_book` / `ubt_inspect_book`：全书目录与预检感知；
+- `ubt_agent_prepare` / `ubt_agent_claim` / `ubt_agent_submit` / `ubt_agent_finish`：Agent-Hosted 交互模式。
 
-## Rendering
+---
 
-There is one export pipeline, and the run's delivery mode picks the renderer
-behind it. A `readable` delivery — `auto`'s choice for long books and mobile,
-and its fallback when a structured paper cannot go faithful — rebuilds the
-document from the IR and lets Typst lay it out: uniform body type
-(10.5pt), translated table headers, and native math from LaTeX→Typst conversion.
-It is reading-grade, not DTP-grade — text reflows and the page count changes, so
-that artifact is a new document rather than a copy of the source layout. A
-`faithful` delivery keeps the source geometry instead: the facsimile renderer
-draws the translated text onto a text-stripped copy of the source page, and the
-page-locked one reflows it inside 1:1 page-aligned geometry, either way stopping
-at the 7.5pt body floor rather than shrinking the type past readable.
+## 🎨 排版与交付模式说明
 
-The reader-facing choice is `dual_mode` (`mono` / `dual` / `auto`, default
-`auto`): `dual` pairs each block's source line above its translation, `mono`
-delivers the target only, and `auto` starts bilingual and lets the advisor step
-it down to target-only when the layout cannot pair cleanly. This is the only
-knob for the pairing itself; what the document is (`--mode`) and which delivery
-contract it gets (`--delivery`) are separate switches. Effort and engine
-details are chosen by a **preset**
-(`high_fidelity` / `standard` / `vector_math` / `preview` / `fast`), which
-selects the prompt depth, formula handling and parser (a preset does pick
-`pdf_engine`, but never a model).
+输出文档由任务的交付模式（Delivery Contract）驱动：
+- **`readable`（流式重排，默认推荐）**：依据语义 IR 由 Typst 重新编排版面，具有统一优美的正文字号（10.5pt）、自适应表格及原生数学公式，阅读体验最佳；
+- **`faithful`（版面保真）**：基于原 PDF 页面几何坐标进行精准图文擦除回贴，适用于需要严格保留原始几何版式的排版场景。
 
-Formula enrichment is not a quality gradient: only `vector_math` sets it
-to `on`, which runs the VLM math transcription to vector LaTeX (slow — roughly
-15–60 s per formula on CPU). `high_fidelity` and `standard` leave it `auto`, which
-resolves to cropping the source region, so those two render identical math and
-differ only in prompt depth; `preview` and `fast` set it `off`.
+输出模式通过 `--dual-mode` 控制：
+- `auto`：默认模式，尝试生成中英双语对照版；
+- `dual`：严格中英双语上下逐段对照；
+- `mono`：纯目标语言译文排版。
 
-Measured on the reference paper (arXiv 2101.03961): distinct font sizes drop
-from 44 to 3–5, formula residue from 0.857 to 0.000, untranslated-block markers
-from 17 to 0, and page count from 41 to 29. CJK coverage of the blocks meant to
-be translated reaches the 0.55 target; the whole-document ratio is lower
-because the bibliography is deliberately kept in the source language and
-counted in the denominator.
+---
 
-### Visual gate
+## ⚠️ 已知局限与缺陷 (Known Limitations)
 
-Every export runs a zero-token gate over the rendered PDF and writes
-`{stem}_{ext}_visual_report.json` beside the deliverable (for example
-`book_mono_pdf_visual_report.json`). Tiers: `geometry` (line overlap,
-out-of-bounds), `source` (the Typst source scan), `type` (glyph size), `pixel`
-(blank page, black blocks), `canvas` (ink collision against the facsimile
-background, only when that background exists), and optionally `vlm`. The
-report's `skipped_reason`
-names the tiers that ran and the ones that did not, so a missing tier is never
-mistaken for a pass.
+为了秉持开源求实精神，以下为当前实现中客观存在的局限与已知边界，请在实际使用中留意：
 
-The `type` tier exists because a layout can lose every structural check while
-being unreadable. An 83-page paper was once delivered at 22 pages with 10 pages
-below 4pt and the last at 0.49pt: all 137k characters were present, nothing
-overflowed, and no page was blank. It measures each page's rendered glyph
-heights (letters, digits and ideographs only — punctuation ink is short, and a
-TOC's leader dots measure 1.29pt on a healthy page) and reports:
+1. **输入格式支持度差异**：
+   - **Word (DOCX)**：当前版本中整篇 DOCX 文档被视为单一逻辑章节处理，超长 Word 书籍暂无法享受多章节并行流式并发；
+   - **Markdown / TXT**：章节划分严格依赖一级标题（`# `），若文档全部采用二级标题（`## `）起头，会被整体作为单章节处理；
+   - **PDF 几何模式限制**：若强制使用纯轻量的 `pdfium` 引擎，解析时会跳过文档内的复杂表格、插图与数学公式；
+   - **格式转换单向性**：输入何种格式即输出何种格式（PDF 额外附带 HTML/EPUB 伴生格式），暂不支持将 Markdown 或 DOCX 直接转换为 Typst PDF。
+2. **依赖体积与外部环境**：
+   - 默认安装绑定了深度学习版面引擎 `docling`，初次安装会拉取 PyTorch 等依赖，环境体积较大；
+   - 依赖宿主机 `PATH` 中的外部二进制 `typst` 与中文字体，若环境缺失字体可能导致排版回退。
+3. **版面与特殊内容暂不支持**：
+   - 暂不支持垂直排版（日文/中文传统竖排文本）；
+   - 暂不支持带密码加密的 PDF（提取阶段直接拒绝）；
+   - 暂不支持深色背景/复杂彩色艺术水印背景的 PDF（可能存在背景反差不足问题）；
+   - 暂不支持从栅格位图插图中自动擦除并翻译内嵌文字。
 
-- `type_illegible` — the page's median glyph is under 4pt. **Fails closed**,
-  even with the opt-in blocking gate off and outside the short-document window:
-  a document nobody can read is broken, not styled differently.
-- `type_collapsed` — a majority of one page's glyphs are under 4pt while the
-  median is readable. A `major`, so a legitimately small table warns instead of
-  blocking.
+---
 
-Sizes come from rendered rect heights, not `FPDFText_GetFontSize`: that returns
-a font *state* size which a text matrix can scale (one healthy file in the
-corpus reports 1.00pt on pages that render at ~5.8pt).
+## 🤝 参与贡献
 
-## Known limits
+项目文档、指南及架构决策记录（ADR）统一维护在 [`docs/`](docs/) 目录下。
+欢迎查阅：
+- [架构设计白皮书 (`ARCHITECTURE.md`)](ARCHITECTURE.md)
+- [术语与领域词典 (`GLOSSARY.md`)](GLOSSARY.md)
+- [贡献者指南 (`CONTRIBUTING.md`)](CONTRIBUTING.md)
 
-Measured against the current implementation, not aspirational:
+在提交 Pull Request 前，请确保本地通过核心检查：
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy --strict ubt tests
+uv run python scripts/dump_compiler_edges.py
+uv run pytest -m fast -q
+```
 
-- **Best-supported input**: born-digital, white-background, single- or
-  double-column text PDFs. The pdfium fast lane does not emit tables or
-  figures, and the Docling path maps merged cells to the top-left value only.
-- **Tables**: table cells are translated in the IR (and scored by QE), then
-  re-typeset with translated headers. EPUB/DOCX/HTML/Markdown outputs carry the
-  translated cells too.
-- **Not supported**: vertical CJK, encrypted PDFs (refused before extraction, at
-  both assessment and translate, rather than reported as a parse failure),
-  colour/watermarked backgrounds (no background-colour probe, so
-  light text on dark pages is invisible), and text drawn inside figures.
-- **Text expansion**: on the readable delivery there is no fixed box to
-  overflow — the page reflows and pagination changes — so a translation is never
-  shrunk to fit a source box. The faithful channel does fit source boxes, down to
-  the 7.5pt body floor, and records a page-overflow finding when it runs out.
-- **Per format**: DOCX footnotes/endnotes, column settings and TOC fields are
-  not read; a PDF up to 50 pages is ingested as one chapter, so per-chapter
-  resume and billing do not apply to it.
-- **Bilingual output**: `dual` pairs each block's source line above its
-  translation; headings and tables pair too, while formulas come out
-  monolingual. With `--emit-both`, a complementary mono/dual companion file is
-  written alongside the primary artifact (off by default).
-- **Exchange formats**: XLIFF 2.1 and TMX import exist but are not
-  standards-complete (no TBX/SRX), so hand-off to external CAT tooling is
-  limited.
+---
 
-Design notes are maintained in the working tree under `docs/` — the
-adaptive-delivery PRD and the refactor design in `docs/design/`, the delivery
-tech design and implementation plan in `docs/guides/` — and `docs/` is
-intentionally unversioned (gitignored): a clone carries the code and tests only,
-not those notes. So a `docs/...` citation inside a code comment is a **citation**,
-not a link: it names where a decision was recorded. The reason that governs the
-code is written in the comment itself, because you cannot open the note from a
-clone. Policy and the full convention: `ARCHITECTURE.md`, "Docs are not in the
-repo".
+## 📄 开源许可证
+
+本项目采用 [MIT 许可证](LICENSE) 开源发布。

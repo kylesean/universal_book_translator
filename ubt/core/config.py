@@ -498,6 +498,7 @@ class TypstConfig(BaseModel):
     strict_contract: bool = False
     spill_policy: SpillPolicy = "error"
     table_render_mode: TableRenderMode = "auto"
+    allow_landscape_tables: bool | None = None
     font_family: str | None = None
     translate_chrome: bool = False
     toc_mode: TocMode = "auto"
@@ -1363,6 +1364,10 @@ class UBTConfig(BaseSettings):
     table_render_mode: TableRenderMode = Field(
         default="auto",
         description="Table handling mode for PDF ('auto', 'appendix', 'skip').",
+    )
+    allow_landscape_tables: bool | None = Field(
+        default=None,
+        description="Whether wide tables in single-column pages may flip to landscape pages (default: false for academic papers, true for books).",
     )
 
     # -- PDF render engine --------------------------------------------------------

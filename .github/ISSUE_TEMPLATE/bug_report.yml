@@ -1,0 +1,51 @@
+name: Bug Report
+description: Create a report to help us improve UBT
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue! Please provide as much context as possible.
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Steps or minimal command to reproduce the behavior.
+      placeholder: |
+        1. Run command '...'
+        2. With input file '...'
+        3. See error '...'
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: A clear description of what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Info
+      description: OS version, Python version, UBT version, Typst version.
+      placeholder: |
+        - OS: [e.g. Ubuntu 24.04, macOS 14.5, Windows 11]
+        - Python Version: [e.g. 3.12.3]
+        - UBT Version: [e.g. 0.1.0 or git commit]
+        - Model / Provider: [e.g. openai-chat / gpt-4o-mini]
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Logs or Traceback
+      description: Paste any error messages, terminal logs, or `ubt doctor` output.
+      render: shell

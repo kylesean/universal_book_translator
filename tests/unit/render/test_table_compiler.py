@@ -344,3 +344,27 @@ def test_compile_typst_booktabs_dense_cjk_proportional_allocation_and_height_sol
     assert scale_match is not None
     scale = float(scale_match.group(1))
     assert scale < 1.0
+
+
+def test_is_dense_numerical_table() -> None:
+    from ubt.render.table_compiler import is_dense_numerical_table
+
+    # Academic benchmark table with lots of numbers, metrics and model IDs
+    benchmark_md = """
+| Model | pass@1 | pass@10 | Mean Δ |
+|---|---|---|---|
+| Looped-Qwen3 | 64.79 | 82.91 | - |
+| LoopCD, fixed | 61.88<br>-2.91 | 86.17 +3.26 | ▲ +1.90 |
+| LoopCD, adaptive | 61.04<br>-3.75 | 86.10 +3.19 | ▲ +3.18 |
+"""
+    assert is_dense_numerical_table(benchmark_md) is True
+
+    # Prose-heavy table
+    prose_md = """
+| Concept | Description | Architectural Note |
+|---|---|---|
+| Attention | Focuses on relevant parts of context | Standard multi-head mechanism |
+| FeedForward | Applies non-linear transformations | Two-layer MLP with activation |
+| LayerNorm | Stabilizes hidden state activations | Applied pre-layer in modern networks |
+"""
+    assert is_dense_numerical_table(prose_md) is False

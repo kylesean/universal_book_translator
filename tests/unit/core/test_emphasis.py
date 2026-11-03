@@ -187,3 +187,31 @@ def test_unclosed_markers_are_parsed_and_stripped() -> None:
 
     assert strip_emphasis_markers("CPU ⟦/B 资源") == "CPU 资源"
     assert strip_emphasis_markers(r"CPU \llbracket /B 资源") == "CPU 资源"
+
+
+def test_symmetrical_and_malformed_closing_brackets_are_supported() -> None:
+    # LLM closes bold with bare ⟧
+    clean, runs = parse_emphasis("⟦B⟧循环 Transformer 与循环计算。⟧ 复用 Transformer 层最初被提出")
+    assert clean == "循环 Transformer 与循环计算。 复用 Transformer 层最初被提出"
+    assert [(r.text, r.bold) for r in runs] == [("循环 Transformer 与循环计算。", True)]
+    assert "⟦" not in clean and "⟧" not in clean
+
+    # LLM closes bold with /B⟧ without leading ⟦
+    clean, runs = parse_emphasis("这是 ⟦B 重要参数/B⟧ 的说明")
+    assert clean == "这是 重要参数 的说明"
+    assert [(r.text, r.bold) for r in runs] == [("重要参数", True)]
+    assert "⟦" not in clean and "⟧" not in clean
+
+    # Stray bare ⟧ in text is safely stripped without poisoning clean text
+    clean, runs = parse_emphasis("弱到强对比解码。⟧ 对比解码（CD）将专家模型的预测")
+    assert clean == "弱到强对比解码。 对比解码（CD）将专家模型的预测"
+    assert runs == ()
+    assert "⟦" not in clean and "⟧" not in clean
+
+    # Formula with bare ⟧ in text like b0361
+    clean, runs = parse_emphasis(
+        "说明了随着固定强度 ⟦B⟧$\\omega$ 从 0.25 增至 1.0⟧，在将作用范围扩展"
+    )
+    assert clean == "说明了随着固定强度 $\\omega$ 从 0.25 增至 1.0，在将作用范围扩展"
+    assert [(r.text, r.bold) for r in runs] == [("$\\omega$ 从 0.25 增至 1.0", True)]
+    assert "⟦" not in clean and "⟧" not in clean

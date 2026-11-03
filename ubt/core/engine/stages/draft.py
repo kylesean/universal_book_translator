@@ -1162,7 +1162,17 @@ class _DraftProcessor:
                 # including blocks already drafted and paid for — and the resume
                 # path then cleared their target text and re-billed them.
                 try:
-                    clean_by_id[b.id] = await self.finalize_draft(b, text.strip(), inp)
+                    clean = await self.finalize_draft(b, text.strip(), inp)
+                    clean_by_id[b.id] = clean
+                    if not clean:
+                        # Macro-chunk cross-contamination: the draft carries corrupted
+                        # or leaked tokens from sibling blocks. Schedule this block to be
+                        # redrafted individually in isolation outside the semaphore.
+                        logger.info(
+                            "Macro-chunk block %s draft is dirty; scheduling individual redraft in isolation",
+                            b.id,
+                        )
+                        missing.append((b, inp))
                 except (
                     asyncio.CancelledError,
                     JobInterruptedError,

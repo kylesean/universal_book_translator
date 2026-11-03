@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ubt.api.app import JobManager
@@ -176,6 +176,50 @@ class ApiScope:
         def _read() -> list[IRBlock]:
             with _Ledger(db_path, read_only=True) as ledger:
                 return ledger.get_all_blocks(valid_id)
+
+        return await asyncio.to_thread(_read)
+
+    async def read_segments_paged(
+        self,
+        valid_id: str,
+        *,
+        status_filter: str | None = None,
+        block_type: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        filter_fn: Any = None,
+    ) -> tuple[int, list[IRBlock]] | None:
+        """A page of blocks for a job, or ``None`` when the ledger does not exist."""
+        from ubt.core.engine.ledger import SQLiteJobLedger as _Ledger
+
+        db_path = self.job_db_path(valid_id)
+        if not db_path.exists():
+            return None
+
+        def _read() -> tuple[int, list[IRBlock]]:
+            with _Ledger(db_path, read_only=True) as ledger:
+                return ledger.query_segments_paged(
+                    valid_id,
+                    status_filter=status_filter,
+                    block_type=block_type,
+                    limit=limit,
+                    offset=offset,
+                    filter_fn=filter_fn,
+                )
+
+        return await asyncio.to_thread(_read)
+
+    async def read_job_block(self, valid_id: str, block_id: str) -> IRBlock | None:
+        """Fetch a single block by ID, or ``None`` when absent."""
+        from ubt.core.engine.ledger import SQLiteJobLedger as _Ledger
+
+        db_path = self.job_db_path(valid_id)
+        if not db_path.exists():
+            return None
+
+        def _read() -> IRBlock | None:
+            with _Ledger(db_path, read_only=True) as ledger:
+                return ledger.get_block(block_id, job_id=valid_id)
 
         return await asyncio.to_thread(_read)
 

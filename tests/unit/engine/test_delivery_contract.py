@@ -69,6 +69,7 @@ def _evidence(
     overflow_records: tuple[OverflowRecord, ...] = (),
     style_samples: tuple[StyleSample, ...] = (),
     declared_page_expansion: bool = False,
+    exhibit_texts: tuple[str, ...] = (),
 ) -> ContractEvidence:
     pages = page_count if page_count is not None else len(page_texts)
     return ContractEvidence(
@@ -84,6 +85,7 @@ def _evidence(
         overflow_records=overflow_records,
         style_samples=style_samples,
         declared_page_expansion=declared_page_expansion,
+        exhibit_texts=exhibit_texts,
     )
 
 
@@ -620,3 +622,97 @@ def test_a_declared_flow_expansion_passes_with_more_pages() -> None:
     )
     assert not shrunk.passed
     assert "page_count_mismatch" in _codes(shrunk)
+
+
+def test_shared_phrases_or_labels_across_blocks_do_not_falsely_trigger_text_duplicated() -> None:
+    # b1 is a short label/list item, b2 is a larger table/paragraph that contains the same label
+    b1 = _block("b1", "ARC-Challenge HellaSwag", page=12)
+    b2 = _block("b2", "| 模型 | ARC-Challenge HellaSwag | 分数 |\n| Ouro | 75.2 |", page=32)
+
+    # In the rendered document, each page legitimately renders its respective block
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(b1, b2),
+            page_texts=(
+                "• ARC-Challenge HellaSwag",
+                "| 模型 | ARC-Challenge HellaSwag | 分数 |\n| Ouro | 75.2 |",
+            ),
+            page_count=2,
+            contract="readable",
+        )
+    )
+    assert report.passed, report.summary_line()
+    assert "text_duplicated" not in _codes(report)
+
+    # Formula-split block whose short prose run is shared with another block
+    b3 = _block("b3", "LoopCD-Hidden 将 $h_1$ 和 $h_R$ 合并并求值一次。", page=4)
+    b4 = _block("b4", "在评估中，LoopCD-Hidden 将准确率大幅提升。", page=1)
+    report_formula = evaluate_delivery_contract(
+        _evidence(
+            blocks=(b3, b4),
+            page_texts=(
+                "在评估中，LoopCD-Hidden 将准确率大幅提升。",
+                "LoopCD-Hidden 将 ℎ1 和 ℎ𝑅 合并并求值一次。",
+            ),
+            page_count=2,
+            contract="readable",
+        )
+    )
+    assert report_formula.passed, report_formula.summary_line()
+    assert "text_duplicated" not in _codes(report_formula)
+
+
+def test_cross_page_run_with_kerning_spaces_passes() -> None:
+    # A multi-page block whose prose run crosses the page boundary
+    text = "对于LoopCD-Hidden，参考状态的选择会考虑模型的初始化（附录E.1）。Parcae1.3B具有确定性前奏，因此其对比在R=8时生效。"
+    b = ContractBlock(
+        block_id="b_cross",
+        text=text,
+        page=1,
+        kind="narrative",
+        allow_cross_page=True,
+    )
+    # Page 1 ends with first half; Page 2 starts with second half with Typst-style spacing around Latin/punctuation
+    p1 = "对于LoopCD-Hidden，参考状态的选择会考虑模型的初始化"
+    p2 = "（附录 E.1） 。Parcae1.3B 具有确定性前奏，因此其对比在 R = 8 时生效。"
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(b,),
+            page_texts=(p1, p2),
+            page_count=2,
+            expected_page_count=2,
+            contract="faithful",
+        )
+    )
+    assert report.passed, report.summary_line()
+    assert "clipped_overflow" not in _codes(report)
+
+
+def test_block_text_shared_with_multipage_exhibit_not_flagged_duplicated() -> None:
+    # A block whose text is a benchmark name or header that recurs in a table header spanning pages
+    prose_block = ContractBlock(
+        block_id="b0092",
+        text="ARC-Challenge HellaSwag",
+        page=1,
+        kind="list_item",
+        allow_cross_page=True,
+    )
+    table_markup = "| ARC-Challenge HellaSwag | Model |\n|---|---|\n| 80.5 | Ouro |"
+    # Page 1 has the prose block.
+    # Pages 2 and 3 repeat the table header across pages (repeat: true).
+    p1 = "Benchmark names: ARC-Challenge HellaSwag on page 1."
+    p2 = "Table A11 (Part 1)\nARC-Challenge HellaSwag | Model\n80.5 | Ouro"
+    p3 = "Table A11 (Part 2)\nARC-Challenge HellaSwag | Model\n75.2 | Huginn"
+
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(prose_block,),
+            exhibit_texts=(table_markup,),
+            page_texts=(p1, p2, p3),
+            page_count=3,
+            expected_page_count=3,
+            contract="readable",
+        )
+    )
+    assert report.passed, report.summary_line()
+    assert "text_duplicated" not in _codes(report)

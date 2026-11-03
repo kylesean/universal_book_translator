@@ -1367,7 +1367,7 @@ def _delivery_contract_evidence(
     selected_pages = ctx.config.get_selected_pages()
     exhibit_texts: list[str] = []
     for block in final_blocks:
-        if block.skip_translate or dropped_page_furniture(block):
+        if dropped_page_furniture(block):
             continue
         if is_toc_entry(block) or (block.provenance and block.provenance.toc_entry):
             continue
@@ -1384,6 +1384,8 @@ def _delivery_contract_evidence(
             exhibit_text = delivered_text(block).strip()
             if exhibit_text:
                 exhibit_texts.append(exhibit_text)
+            continue
+        if block.skip_translate:
             continue
         if block.block_type in (BlockType.FORMULA, BlockType.IMAGE):
             continue

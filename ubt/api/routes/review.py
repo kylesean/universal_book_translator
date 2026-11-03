@@ -76,18 +76,19 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
         valid_id = validate_job_id(job_id)
         if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):
             raise cross_tenant_404(valid_id)
-        blocks = await _read_job_blocks(valid_id)
-        if blocks is None:
+        paged_result = await scope.read_segments_paged(
+            valid_id,
+            status_filter=status_filter,
+            block_type=block_type,
+            limit=limit,
+            offset=offset,
+            filter_fn=segment_matches_filter,
+        )
+        if paged_result is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {valid_id}"
             )
-
-        filtered = [b for b in blocks if segment_matches_filter(b, status_filter)]
-        if block_type:
-            filtered = [b for b in filtered if b.block_type.value == block_type]
-        total = len(filtered)
-        start = max(offset, 0)
-        window = filtered[start : start + min(max(limit, 1), 500)]
+        total, window = paged_result
         return JSONResponse(
             {
                 "job_id": valid_id,
@@ -177,11 +178,8 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
         except ReviewEditError as exc:
             raise HTTPException(status_code=UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
-        updated = None
-        blocks = await _read_job_blocks(valid_id)
-        if blocks is not None:
-            match = next((b for b in blocks if b.id == block_id), None)
-            updated = serialize_segment(match) if match is not None else None
+        match = await scope.read_job_block(valid_id, block_id)
+        updated = serialize_segment(match) if match is not None else None
         return JSONResponse({**result, "job_id": valid_id, "segment": updated})
 
     @api_app.post("/jobs/{job_id}/re-export", tags=["Jobs"])

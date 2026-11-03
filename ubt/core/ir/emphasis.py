@@ -35,8 +35,16 @@ ITALIC_CLOSE = "⟦/I⟧"
 #: inside the brackets are accepted too, so ``⟦ B ⟧`` and ``⟦/b⟧`` match.
 #: Models also frequently omit the closing bracket (e.g. ``⟦/B`` or ``⟦B``) before
 #: punctuation, spaces, or CJK text, which previously leaked into the rendered text.
+#: Many LLMs also naturally close an emphasis span with a symmetrical ``⟧`` (or
+#: ``/B⟧`` without leading ``⟦``) rather than verbatim ``⟦/B⟧``.
 _MARKER_RE = re.compile(
+    r"(?:"
     r"(?:\u27e6|\\+llbracket)\s*(/)?\s*([BbIi])\s*(?:\u27e7|\\+rrbracket|(?=[^a-zA-Z0-9_\\]|$))"
+    r"|/\s*([BbIi])\s*(?:\u27e7|\\+rrbracket)"
+    r"|(\u27e7)"
+    r"|(\u27e6)"
+    r"|(\\+rrbracket)"
+    r")"
 )
 
 #: A pdfium char probe and the docling text can disagree on a dash or quote
@@ -188,30 +196,50 @@ def parse_emphasis(text: str) -> tuple[str, tuple[InlineRun, ...]]:
     clean_chars: list[str] = []
     style_flags: list[tuple[bool, bool]] = []
     last = 0
-    bold_depth = 0
-    italic_depth = 0
+    tag_stack: list[str] = []
+
     for match in _MARKER_RE.finditer(text):
+        m_latex_close = match.group(6)
+        if m_latex_close and not tag_stack:
+            # Bare \rrbracket with no active emphasis in text/math: keep it
+            continue
+
         chunk = text[last : match.start()]
         clean_chars.append(chunk)
-        style_flags.extend([(bold_depth > 0, italic_depth > 0)] * len(chunk))
-        is_close = bool(match.group(1))
-        tag_type = (match.group(2) or "b").lower()
-        if tag_type == "i":
-            if is_close:
-                if italic_depth > 0:
-                    italic_depth -= 1
+        has_bold = "b" in tag_stack
+        has_italic = "i" in tag_stack
+        style_flags.extend([(has_bold, has_italic)] * len(chunk))
+
+        is_close_slash = bool(match.group(1))
+        tag_std = match.group(2)
+        tag_no_open = match.group(3)
+        is_bare_close = bool(match.group(4) or m_latex_close)
+        is_bare_open = bool(match.group(5))
+
+        if tag_std:
+            tag_type = tag_std.lower()
+            if is_close_slash:
+                if tag_type in tag_stack:
+                    tag_stack.remove(tag_type)
             else:
-                italic_depth += 1
-        else:
-            if is_close:
-                if bold_depth > 0:
-                    bold_depth -= 1
-            else:
-                bold_depth += 1
+                tag_stack.append(tag_type)
+        elif tag_no_open:
+            tag_type = tag_no_open.lower()
+            if tag_type in tag_stack:
+                tag_stack.remove(tag_type)
+        elif is_bare_close:
+            if tag_stack:
+                tag_stack.pop()
+        elif is_bare_open:
+            pass
+
         last = match.end()
+
     tail = text[last:]
     clean_chars.append(tail)
-    style_flags.extend([(bold_depth > 0, italic_depth > 0)] * len(tail))
+    has_bold = "b" in tag_stack
+    has_italic = "i" in tag_stack
+    style_flags.extend([(has_bold, has_italic)] * len(tail))
     clean_text = "".join(clean_chars)
 
     runs: list[InlineRun] = []
@@ -239,7 +267,7 @@ def parse_bold(text: str) -> tuple[str, tuple[InlineRun, ...]]:
 
 def strip_emphasis_markers(text: str) -> str:
     """``text`` with every bold marker removed (for display/length checks)."""
-    return _MARKER_RE.sub("", text)
+    return parse_emphasis(text)[0]
 
 
 def runs_to_json(runs: Sequence[InlineRun]) -> str:
