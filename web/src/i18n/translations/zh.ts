@@ -918,9 +918,9 @@ export const zh: TranslationDictionary = {
   doctor: {
     title: '系统设置',
     subtitle: '模型服务、环境诊断与数据安全设置。',
-    tabDiagnostics: '诊断',
-    tabModels: '模型',
-    tabSecurity: '安全',
+    tabDiagnostics: '系统诊断',
+    tabModels: '模型与质量',
+    tabSecurity: '安全与边界',
     auth: {
       title: '需要服务器鉴权',
       subtitle: '该服务已启用 X-API-Key 门禁，请输入密钥以打开控制台。',

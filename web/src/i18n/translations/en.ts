@@ -948,8 +948,8 @@ export const en: TranslationDictionary = {
     title: 'System settings',
     subtitle: 'Model services, runtime diagnostics and security boundaries.',
     tabDiagnostics: 'Diagnostics',
-    tabModels: 'Models',
-    tabSecurity: 'Security',
+    tabModels: 'Models & Quality',
+    tabSecurity: 'Security & Sandbox',
     auth: {
       title: 'Server authentication required',
       subtitle:

@@ -2,12 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Check,
+  CheckCircle2,
   Copy,
+  Folder,
+  Globe,
   Loader2,
   Pencil,
   Plus,
   RefreshCw,
+  ShieldAlert,
   Trash2,
+  XCircle,
 } from 'lucide-react'
 
 import {
@@ -221,9 +226,52 @@ export function SystemDoctorView() {
     <div className="mx-auto w-full max-w-6xl flex-1 space-y-5 px-4 py-6 sm:px-7">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border/70 pb-4">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
-            {t.doctor.title}
-          </h1>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
+              {t.doctor.title}
+            </h1>
+            {checks.length > 0 ? (
+              <Badge
+                variant="outline"
+                className={cn(
+                  'h-6 gap-1 px-2 text-xs font-medium',
+                  hasFail
+                    ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                    : problems.length > 0
+                      ? 'border-amber-600/30 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                      : 'border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+                )}
+              >
+                {hasFail ? (
+                  <XCircle className="size-3.5" />
+                ) : problems.length > 0 ? (
+                  <AlertTriangle className="size-3.5" />
+                ) : (
+                  <CheckCircle2 className="size-3.5" />
+                )}
+                <span>
+                  {hasFail
+                    ? t.doctor.overviewBlocked
+                    : problems.length > 0
+                      ? t.doctor.overviewNeedsAttention.replace('{n}', String(problems.length))
+                      : t.doctor.overviewReady}
+                </span>
+              </Badge>
+            ) : null}
+            {active ? (
+              <Badge
+                variant="outline"
+                className={cn(
+                  'h-6 px-2 text-xs font-normal',
+                  canTranslate
+                    ? 'border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                    : 'border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400',
+                )}
+              >
+                {canTranslate ? t.doctor.runtimeRunnable : t.doctor.runtimeRehearsal}
+              </Badge>
+            ) : null}
+          </div>
           <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
             {t.doctor.subtitle}
           </p>
@@ -233,7 +281,7 @@ export function SystemDoctorView() {
           variant="outline"
           size="sm"
           disabled={isPinging || loading}
-          className="self-start bg-card sm:self-auto"
+          className="self-start bg-card sm:self-auto gap-1.5"
         >
           <RefreshCw className={cn('size-3.5', (isPinging || loading) && 'animate-spin')} />
           {t.doctor.pingAll}
@@ -247,101 +295,6 @@ export function SystemDoctorView() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
-
-      <Card className="overflow-hidden">
-        <CardContent className="p-0">
-          <div className="p-5 sm:p-6">
-            <div className="min-w-0 space-y-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-base font-semibold tracking-[-0.02em]">
-                  {checks.length === 0
-                    ? t.doctor.emptyChecksTitle
-                    : hasFail
-                      ? t.doctor.overviewBlocked
-                      : problems.length > 0
-                        ? t.doctor.overviewNeedsAttention.replace('{n}', String(problems.length))
-                        : t.doctor.overviewReady}
-                </h2>
-                {active ? (
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      canTranslate
-                        ? 'border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                        : 'border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400'
-                    )}
-                  >
-                    {canTranslate ? t.doctor.runtimeRunnable : t.doctor.runtimeRehearsal}
-                  </Badge>
-                ) : null}
-              </div>
-              {checks.length > 0 ? (
-                <div>
-                  <div
-                    aria-hidden
-                    className="flex h-2 overflow-hidden rounded-full bg-muted"
-                  >
-                    <div
-                      className="bg-emerald-500"
-                      style={{ flexGrow: passing }}
-                    />
-                    <div
-                      className="bg-amber-500"
-                      style={{ flexGrow: warnCount }}
-                    />
-                    <div
-                      className="bg-destructive"
-                      style={{ flexGrow: failCount }}
-                    />
-                    <div
-                      className="bg-muted-foreground/30"
-                      style={{ flexGrow: skipCount }}
-                    />
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                    {(
-                      [
-                        ['OK', passing, 'text-emerald-700 dark:text-emerald-400'],
-                        ['WARN', warnCount, 'text-amber-700 dark:text-amber-400'],
-                        ['FAIL', failCount, 'text-destructive'],
-                        ['SKIP', skipCount, ''],
-                      ] as const
-                    )
-                      .filter(([, count]) => count > 0)
-                      .map(([status, count, tone]) => (
-                        <span key={status} className="inline-flex items-center gap-1.5">
-                          <span className={cn('size-1.5 rounded-full', tone)} />
-                          <span className="font-medium tabular-nums text-foreground">{count}</span>
-                          {statusLabel(status)}
-                        </span>
-                      ))}
-                  </div>
-                </div>
-              ) : null}
-              {problems.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5 pt-0.5">
-                  {problems.map(({ item, rowId }) => (
-                    <button
-                      key={rowId}
-                      type="button"
-                      onClick={() => jumpToCheck(rowId)}
-                      className={cn(
-                        'inline-flex min-h-7 items-center gap-1.5 rounded-md border px-2 py-0.5 text-left text-xs transition-colors hover:bg-muted/50',
-                        item.check.status === 'FAIL'
-                          ? 'border-destructive/25 bg-destructive/5 text-destructive'
-                          : 'border-amber-600/25 bg-amber-500/5 text-amber-700 dark:text-amber-400'
-                      )}
-                    >
-                      <span className="font-medium">{statusLabel(item.check.status)}</span>
-                      <span className="truncate">{item.text.name}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
 
       <Tabs defaultValue="diagnostics" className="space-y-4">
         <TabsList className="h-auto w-full justify-start gap-1 bg-transparent p-0 sm:w-auto">
@@ -366,6 +319,100 @@ export function SystemDoctorView() {
         </TabsList>
 
         <TabsContent value="diagnostics" className="mt-0 space-y-4">
+          <Card className="overflow-hidden">
+            <CardContent className="p-0">
+              <div className="p-5 sm:p-6">
+                <div className="min-w-0 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-base font-semibold tracking-[-0.02em]">
+                      {checks.length === 0
+                        ? t.doctor.emptyChecksTitle
+                        : hasFail
+                          ? t.doctor.overviewBlocked
+                          : problems.length > 0
+                            ? t.doctor.overviewNeedsAttention.replace('{n}', String(problems.length))
+                            : t.doctor.overviewReady}
+                    </h2>
+                    {active ? (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          canTranslate
+                            ? 'border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                            : 'border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                        )}
+                      >
+                        {canTranslate ? t.doctor.runtimeRunnable : t.doctor.runtimeRehearsal}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  {checks.length > 0 ? (
+                    <div>
+                      <div
+                        aria-hidden
+                        className="flex h-2 overflow-hidden rounded-full bg-muted"
+                      >
+                        <div
+                          className="bg-emerald-500"
+                          style={{ flexGrow: passing }}
+                        />
+                        <div
+                          className="bg-amber-500"
+                          style={{ flexGrow: warnCount }}
+                        />
+                        <div
+                          className="bg-destructive"
+                          style={{ flexGrow: failCount }}
+                        />
+                        <div
+                          className="bg-muted-foreground/30"
+                          style={{ flexGrow: skipCount }}
+                        />
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        {(
+                          [
+                            ['OK', passing, 'text-emerald-700 dark:text-emerald-400'],
+                            ['WARN', warnCount, 'text-amber-700 dark:text-amber-400'],
+                            ['FAIL', failCount, 'text-destructive'],
+                            ['SKIP', skipCount, ''],
+                          ] as const
+                        )
+                          .filter(([, count]) => count > 0)
+                          .map(([status, count, tone]) => (
+                            <span key={status} className="inline-flex items-center gap-1.5">
+                              <span className={cn('size-1.5 rounded-full', tone)} />
+                              <span className="font-medium tabular-nums text-foreground">{count}</span>
+                              {statusLabel(status)}
+                            </span>
+                          ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {problems.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      {problems.map(({ item, rowId }) => (
+                        <button
+                          key={rowId}
+                          type="button"
+                          onClick={() => jumpToCheck(rowId)}
+                          className={cn(
+                            'inline-flex min-h-7 items-center gap-1.5 rounded-md border px-2 py-0.5 text-left text-xs transition-colors hover:bg-muted/50',
+                            item.check.status === 'FAIL'
+                              ? 'border-destructive/25 bg-destructive/5 text-destructive'
+                              : 'border-amber-600/25 bg-amber-500/5 text-amber-700 dark:text-amber-400'
+                          )}
+                        >
+                          <span className="font-medium">{statusLabel(item.check.status)}</span>
+                          <span className="truncate">{item.text.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
           <DoctorPanel
             title={t.doctor.diagnosticsTitle}
             action={
@@ -641,6 +688,8 @@ export function SystemDoctorView() {
               </Alert>
             ) : null}
 
+            <QESettingsCard providerNames={declaredProviders.map((provider) => provider.name)} />
+
             <DoctorPanel
               title={t.doctor.providerListTitle}
               action={
@@ -688,7 +737,7 @@ export function SystemDoctorView() {
                                 </Badge>
                               ) : null}
                             </div>
-                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                            <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs text-muted-foreground">
                               <span className="inline-flex items-center gap-1">
                                 <DoctorStatusIcon
                                   status={tone === 'ok' ? 'OK' : 'WARN'}
@@ -696,21 +745,30 @@ export function SystemDoctorView() {
                                 />
                                 {readiness}
                               </span>
-                              <span
-                                className="truncate font-mono"
+                              <Badge
+                                variant="outline"
+                                className="h-5 px-1.5 font-mono text-[11px] font-normal bg-background/50"
                                 title={provider.draft_model || undefined}
                               >
                                 {provider.draft_model || t.doctor.notConfigured}
-                              </span>
-                              <span
-                                className="truncate font-mono"
-                                title={provider.base_url || undefined}
-                              >
-                                {provider.base_url || '—'}
-                              </span>
-                              <span className="truncate font-mono">
-                                {provider.api_mode || '—'}
-                              </span>
+                              </Badge>
+                              {provider.api_mode ? (
+                                <Badge
+                                  variant="secondary"
+                                  className="h-5 px-1.5 font-mono text-[10px] font-normal"
+                                >
+                                  {provider.api_mode}
+                                </Badge>
+                              ) : null}
+                              {provider.base_url ? (
+                                <span
+                                  className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground"
+                                  title={provider.base_url}
+                                >
+                                  <Globe className="size-3 shrink-0 text-muted-foreground/70" />
+                                  <span className="max-w-[240px] truncate">{provider.base_url}</span>
+                                </span>
+                              ) : null}
                             </div>
                           </div>
                           <div className="flex flex-wrap items-center gap-1">
@@ -827,10 +885,7 @@ export function SystemDoctorView() {
         </TabsContent>
 
         <TabsContent value="security" className="mt-0 space-y-4">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <QESettingsCard providerNames={declaredProviders.map((provider) => provider.name)} />
-            <EgressSettingsCard />
-          </div>
+          <EgressSettingsCard />
 
           <DoctorPanel
             title={t.doctor.securityBoundary}
@@ -880,7 +935,7 @@ export function SystemDoctorView() {
                     <span className="shrink-0 text-muted-foreground">
                       {t.doctor.allowedRoots}
                     </span>
-                    <span className="flex min-w-0 flex-wrap gap-1 sm:justify-end">
+                    <span className="flex min-w-0 flex-wrap gap-1.5 sm:justify-end">
                       {info.allowed_bases.length === 0 ? (
                         <span className="text-muted-foreground">—</span>
                       ) : (
@@ -888,9 +943,10 @@ export function SystemDoctorView() {
                           <span
                             key={base}
                             title={base}
-                            className="max-w-[18rem] truncate rounded border border-border bg-muted/30 px-1.5 py-0.5 font-mono text-xs"
+                            className="inline-flex max-w-[20rem] items-center gap-1.5 truncate rounded-md border border-border/80 bg-muted/40 px-2 py-0.5 font-mono text-xs text-foreground"
                           >
-                            {base}
+                            <Folder className="size-3 shrink-0 text-muted-foreground" />
+                            <span className="truncate">{base}</span>
                           </span>
                         ))
                       )}
@@ -900,13 +956,21 @@ export function SystemDoctorView() {
                     <span className="shrink-0 text-muted-foreground">
                       {t.doctor.forbiddenPaths}
                     </span>
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span
-                        className="truncate font-mono text-xs"
-                        title={boundary?.forbidden_prefixes.join(', ')}
-                      >
-                        {boundary ? boundary.forbidden_prefixes.join(', ') : '—'}
-                      </span>
+                    <span className="flex min-w-0 flex-wrap gap-1.5 sm:justify-end">
+                      {!boundary || boundary.forbidden_prefixes.length === 0 ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        boundary.forbidden_prefixes.map((prefix) => (
+                          <span
+                            key={prefix}
+                            title={prefix}
+                            className="inline-flex max-w-[20rem] items-center gap-1.5 truncate rounded-md border border-destructive/20 bg-destructive/5 px-2 py-0.5 font-mono text-xs text-destructive"
+                          >
+                            <ShieldAlert className="size-3 shrink-0 text-destructive/70" />
+                            <span className="truncate">{prefix}</span>
+                          </span>
+                        ))
+                      )}
                     </span>
                   </div>
                 </div>
