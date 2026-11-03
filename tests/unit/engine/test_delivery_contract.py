@@ -214,6 +214,37 @@ def test_formula_subfragment_outside_aggregate_is_not_an_overlap() -> None:
     assert "text_overlap" not in _codes(report)
 
 
+def test_single_line_formula_with_larger_subtoken_is_not_an_overlap() -> None:
+    # A single-line formula where an inner token has a larger font size
+    # and extends vertically beyond the aggregate line box.
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(),
+            page_texts=("R R = lm_head(coda(h",),
+            boxes=(
+                _box(1, 242.7, 323.1, 342.1, 328.2, text="R R = lm_head(coda(h", font_size_pt=5.01),
+                _box(1, 263.0, 323.8, 299.4, 331.0, text="lm_head", font_size_pt=7.19),
+            ),
+        )
+    )
+    assert "text_overlap" not in _codes(report)
+
+
+def test_symbol_aggregate_tokens_are_not_an_overlap() -> None:
+    # Axis / table symbol tokens such as (%) inside (%)(%)k \omega
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(),
+            page_texts=("(%)(%)k ω",),
+            boxes=(
+                _box(1, 160.2, 614.4, 172.9, 621.7, text="(%)", font_size_pt=7.33),
+                _box(1, 97.3, 615.7, 273.4, 622.0, text="(%)(%)k ω", font_size_pt=6.31),
+            ),
+        )
+    )
+    assert "text_overlap" not in _codes(report)
+
+
 def test_equal_sized_duplicate_boxes_are_still_an_overlap() -> None:
     report = evaluate_delivery_contract(
         _evidence(

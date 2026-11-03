@@ -329,15 +329,29 @@ def _box_area(box: ContractTextBox) -> float:
     return max(0.0, box.x1 - box.x0) * max(0.0, box.y1 - box.y0)
 
 
-def _text_key(text: str) -> str:
-    """Normalized text without whitespace or punctuation.
+def _text_keys(text: str) -> tuple[str, str]:
+    """Return both (word_only, compact_no_space) normalized text forms.
 
     PDFium's aggregate formula rect and its glyph rects often disagree on
-    ``$ % #`` punctuation around the same symbols; stripping it makes the
-    subset check stable without weakening the block-level text realization
-    check (which uses the original text).
+    ``$ % #`` punctuation around the same symbols. Stripping punctuation makes
+    the subset check stable for words and variables, but for pure-symbol
+    tokens (e.g. ``(%)``, ``---``, ``+=``) stripping leaves an empty string.
+    Providing both representations ensures tokens of any character class can
+    be verified.
     """
-    return re.sub(r"\W+", "", _normalize(text)).casefold()
+    norm = _normalize(text).casefold()
+    word_only = re.sub(r"\W+", "", norm)
+    compact = re.sub(r"\s+", "", norm)
+    return word_only, compact
+
+
+def _text_subset(needle_text: str, haystack_text: str) -> bool:
+    """Whether needle text is a substring of haystack text in either representation."""
+    n_w, n_c = _text_keys(needle_text)
+    h_w, h_c = _text_keys(haystack_text)
+    if n_w and h_w and n_w in h_w:
+        return True
+    return bool(n_c and h_c and n_c in h_c)
 
 
 def _nested_aggregate_text(bigger: ContractTextBox, smaller: ContractTextBox) -> bool:
@@ -368,10 +382,6 @@ def _nested_aggregate_text(bigger: ContractTextBox, smaller: ContractTextBox) ->
     small_area = _box_area(smaller)
     if big_area <= 0.0 or small_area <= 0.0:
         return False
-    big_text = _text_key(bigger.text)
-    small_text = _text_key(smaller.text)
-    if not big_text or not small_text:
-        return False
     small_size = smaller.font_size_pt
     big_size = bigger.font_size_pt
     # Two sizes on the same text already prove it is a glyph cluster. The area
@@ -382,6 +392,32 @@ def _nested_aggregate_text(bigger: ContractTextBox, smaller: ContractTextBox) ->
     sizes_differ = small_size is not None and big_size is not None and small_size < big_size * 0.9
     if big_area < small_area * (1.05 if sizes_differ else 1.25):
         return False
+
+    has_text_containment = _text_subset(smaller.text, bigger.text) or (
+        sizes_differ and _text_subset(bigger.text, smaller.text)
+    )
+    if not has_text_containment:
+        return False
+
+    small_h = smaller.y1 - smaller.y0
+    big_h = bigger.y1 - bigger.y0
+    small_w = smaller.x1 - smaller.x0
+    x_overlap = max(0.0, min(bigger.x1, smaller.x1) - max(bigger.x0, smaller.x0))
+    y_overlap = max(0.0, min(bigger.y1, smaller.y1) - max(bigger.y0, smaller.y0))
+
+    # Single-line aggregate formula/run check: when both boxes are single-line heights,
+    # font size differences or ascenders/descenders can reduce the 2D area intersection below 80%
+    # (e.g. an inner token with larger font size or subscripts).
+    # Horizontal containment >= 75% plus vertical overlap confirms the token lives inside the line.
+    if (
+        small_h <= 18.0
+        and big_h <= 24.0
+        and small_w > 0
+        and x_overlap / small_w >= 0.75
+        and y_overlap > 0
+    ):
+        return True
+
     # For non-trivial boxes (body lines, paragraphs, captions > 300pt²), the
     # smaller box must actually lie inside the larger box (>= 80% geometric
     # containment) to qualify as a PDFium aggregate/sub-rect pair. Edge
@@ -391,9 +427,7 @@ def _nested_aggregate_text(bigger: ContractTextBox, smaller: ContractTextBox) ->
         overlap = _intersection(bigger, smaller)
         if overlap / small_area < _MIN_AGGREGATE_CONTAINMENT:
             return False
-    if small_text in big_text:
-        return True
-    return sizes_differ and big_text in small_text
+    return True
 
 
 def _intersection(a: ContractTextBox, b: ContractTextBox) -> float:

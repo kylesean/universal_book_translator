@@ -389,22 +389,23 @@ def _facsimile_strip_plan(
             if b.bbox.page != pno:
                 continue
             erase_y0 = float(b.bbox.y0)
+            erase_y1 = float(b.bbox.y1)
             if not keeps_source and _is_caption_like(b):
                 # The cross-check exempts captions from opaque demotion (their
                 # text is author content), but their Docling box can stop above
-                # the last source line: measured on arXiv 2609.22978, page 6's
-                # box ended at 178.2 while the caption's last line reached 159.5
-                # (18.7pt below). Erasing only the box leaves that English tail
-                # under the Chinese caption. Pad by two caption lines so the
-                # strip covers it; a keep rect below still wins.
+                # the last source line or below top ascenders: measured on
+                # arXiv 2609.22978 and 2610.02185.
+                # Pad by two caption lines in both vertical directions so the
+                # strip cleanly covers it; a keep rect below/above still wins.
                 erase_y0 -= 24.0
+                erase_y1 += 16.0
             _add_rect(
                 keeps_source,
                 pno,
                 float(b.bbox.x0),
                 erase_y0,
                 float(b.bbox.x1),
-                float(b.bbox.y1),
+                erase_y1,
             )
 
     # No furniture bands are added here. See the docstring: a blanket
@@ -846,11 +847,13 @@ class DoclingRenderStrategy:
                 policy_reason = table_block.policy_reason or ""
                 if policy_reason.startswith(reason_prefix) and policy_reason.endswith(")"):
                     table_reason = policy_reason[len(reason_prefix) : -1]
-                    render_flags.append((table_block.id, "table_source_preserved"))
-                    preserved_table_reasons.append((table_block.id, table_reason))
-                    exhibit_ids = _preserve_table_exhibit_text(table_block, page_blocks)
-                    if exhibit_ids:
-                        preserved_table_exhibit_text[table_block.id] = exhibit_ids
+                else:
+                    table_reason = policy_reason.removeprefix("skip:") or "skip_translate"
+                render_flags.append((table_block.id, "table_source_preserved"))
+                preserved_table_reasons.append((table_block.id, table_reason))
+                exhibit_ids = _preserve_table_exhibit_text(table_block, page_blocks)
+                if exhibit_ids:
+                    preserved_table_exhibit_text[table_block.id] = exhibit_ids
                 continue
             table_ok, table_reason = table_is_reconstructable(
                 table_block.source_text or "", delivered_text(table_block) or ""

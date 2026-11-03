@@ -640,6 +640,66 @@ def test_a_preserved_table_caption_and_legend_share_its_disposition() -> None:
     assert heading.skip_translate is False
 
 
+@pytest.mark.asyncio
+async def test_dense_numerical_table_preserves_associated_caption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pikepdf
+
+    from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
+
+    src_pdf = tmp_path / "dense_table_src.pdf"
+    with pikepdf.Pdf.new() as pdf:
+        pdf.add_blank_page(page_size=(500, 700))
+        pdf.save(src_pdf)
+
+    tbl = _exhibit_block(
+        "tbl1",
+        "| A | B |\n| 1 | 2 |",
+        (50.0, 200.0, 400.0, 400.0),
+        block_type=BlockType.TABLE,
+    )
+    tbl.skip_translate = True
+    tbl.policy_reason = "skip:dense_numerical_table"
+
+    cap = _exhibit_block(
+        "cap1",
+        "Table 1 Selected numerical experiments.",
+        (50.0, 405.0, 350.0, 420.0),
+        parent_id="tbl1",
+        target="表 1 所选数值实验。",
+    )
+
+    strategy = DoclingRenderStrategy(delivery_mode="facsimile", enable_pdf_optimization=False)
+    manifest = BookManifest(
+        doc_id="doc_dense_tbl",
+        title="Dense Table Test",
+        source_path=str(src_pdf),
+        metadata={"source_path": str(src_pdf)},
+    )
+    out_pdf = tmp_path / "out_dense_tbl.pdf"
+
+    def fake_render_doc(
+        self: FacsimileRenderer,
+        pages: list[FacsimilePageSpec],
+        bg_pdf_path: Path,
+        output_path: Path,
+        build_dir: Path,
+        **kwargs: object,
+    ) -> Path:
+        output_path.write_bytes(src_pdf.read_bytes())
+        return output_path
+
+    monkeypatch.setattr(FacsimileRenderer, "render_document", fake_render_doc)
+    await strategy.render_blocks(manifest, [tbl, cap], "zh", out_pdf)
+
+    assert cap.skip_translate is True
+    assert cap.policy_reason == "skip:table_exhibit_source_preserved"
+    assert manifest.metadata.get("table_exhibit_source_preserved") == [
+        {"table_id": "tbl1", "block_ids": ["cap1"]}
+    ]
+
+
 def test_a_caption_keeps_the_sources_left_alignment() -> None:
     placement = FacsimileBlockPlacement(
         block_id="cap",
