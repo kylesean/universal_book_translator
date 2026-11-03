@@ -166,7 +166,7 @@ export function InfoTip({ children, label, className }: InfoTipProps) {
             // click-through means the control underneath stays operable and the
             // panel dismisses on the next pointerdown (the outside-click
             // handler ignores it by design), so the overlap costs nothing.
-            className="pointer-events-none z-50 rounded-md border border-border bg-card p-2 text-xs font-normal normal-case tracking-normal leading-relaxed text-muted-foreground shadow-[0_2px_10px_rgba(0,0,0,0.10)]"
+            className="pointer-events-none z-50 whitespace-pre-line rounded-md border border-border bg-card p-2 text-xs font-normal normal-case tracking-normal leading-relaxed text-muted-foreground shadow-[0_2px_10px_rgba(0,0,0,0.10)]"
           >
             {children}
           </span>,

@@ -262,15 +262,17 @@ export const en: TranslationDictionary = {
     faithfulInfeasibleScanned:
       'Pre-flight classifies the source as scan/image-dominant; the text layer is untrustworthy, so page-locked 1:1 is infeasible.',
     faithfulInfeasibleDegrade:
-      '“Auto-degrade when 1:1 is infeasible” is on, so this run will deliver an adaptive reflow copy.',
+      '“Auto-fallback to Reflow on Conflict” is enabled, so this run will deliver an adaptive reflow copy.',
     faithfulInfeasibleRefuse:
-      'Auto-degrade is off, so the run will be refused before any model call. Choose Adaptive Reflow, or fix the source first.',
+      'Auto-fallback is disabled (Strict 1:1 mode), so the run will be intercepted pre-flight. Choose Adaptive Reflow, or fix the source first.',
     faithfulFixHint:
       'How to fix: re-export the original PDF, or repair the font encoding with OCR/manual proofing, then run again.',
-    allowDegrade: 'Auto-degrade when 1:1 is infeasible',
-    allowDegradeHelp: 'When the source cannot promise 1:1 (font-encoding damage, a scan, or layout conflicts), deliver adaptive reflow instead of refusing the run. With this off, an infeasible 1:1 request fails at pre-flight.',
-    enableCels: 'CELS Solver',
-    enableCelsHelp: 'Elastic constraint solving for inline formulas and vertical balance.',
+    allowDegrade: 'Auto-fallback to Reflow on Conflict',
+    allowDegradeHelp:
+      'Enabled: Prioritizes 1:1 facsimile; if scanned pages or font damage prevent layout locking, automatically falls back to reflow to ensure smooth output.\nDisabled: Strictly preserves original page-locked 1:1 geometry; if the document cannot meet 1:1 standards, the job is intercepted pre-flight to prevent unwanted layout changes.',
+    enableCels: 'Smart Layout Balancing (CELS)',
+    enableCelsHelp:
+      'Automatically adjusts kerning, line pitch, and font stretch to prevent text from colliding with formulas and figures. Recommended to keep enabled.',
     dualMode: 'Delivery Mode',
     dualModeHelp:
       'Smart Auto starts bilingual and lets the layout advisor step it down to target-only when the layout cannot pair cleanly.',
