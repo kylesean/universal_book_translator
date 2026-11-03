@@ -70,6 +70,7 @@ _DEGRADE_COPY: dict[str, str] = {
     "scanned_source": "源文档以扫描/图像页为主，文本层不可信，无法保证页级 1:1 锁定",
     "source_overlap": "源文档存在重叠文本层，无法保证页级 1:1 锁定",
     "page_lock_infeasible": "源文档无法解出页级 1:1 版面（page-lock 不可行）",
+    "post_render_fallback": "1:1 版面在渲染阶段未能满足交付契约",
     "faithful_ineligible": "该文档不满足 1:1 物理复本的交付条件",
 }
 
@@ -113,7 +114,15 @@ def _degrade_codes(plan: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
     if signals.get("page_lock_feasible") is False:
         codes.append("page_lock_infeasible")
     if not codes:
-        codes.append("faithful_ineligible")
+        # No signal vetoed the request, yet the render did not keep the
+        # contract: the export's own faithful->reflow fallback wrote the actual
+        # mode to ``delivery_mode``. Name that case instead of claiming the
+        # document was ineligible.
+        codes.append(
+            "post_render_fallback"
+            if _as_mode(plan.get("contract")) == "faithful"
+            else "faithful_ineligible"
+        )
     return codes, params
 
 
@@ -142,8 +151,12 @@ def _delivery_report(meta: dict[str, Any]) -> dict[str, Any]:
     plan = meta.get("delivery_plan")
     plan = plan if isinstance(plan, dict) else {}
     effective = (
-        _as_mode(meta.get("delivery_mode_effective"))
-        or _as_mode(meta.get("delivery_mode"))
+        # The export's post-render fallback writes the mode it actually
+        # produced to ``delivery_mode``; the planner's decision lives in
+        # ``delivery_mode_effective``. Prefer the rendered fact, or a faithful
+        # run that fell back at render time would read as still faithful.
+        _as_mode(meta.get("delivery_mode"))
+        or _as_mode(meta.get("delivery_mode_effective"))
         or _as_mode(plan.get("effective_mode"))
         or _as_mode(plan.get("contract"))
     )

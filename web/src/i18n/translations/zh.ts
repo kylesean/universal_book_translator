@@ -462,6 +462,7 @@ export const zh: TranslationDictionary = {
       scanned_source: '源文档以扫描/图像页为主，文本层不可信，无法保证页级 1:1 锁定。',
       source_overlap: '源文档存在重叠文本层，无法保证页级 1:1 锁定。',
       page_lock_infeasible: '源文档无法解出页级 1:1 版面（page-lock 不可行）。',
+      post_render_fallback: '1:1 版面在渲染阶段未能满足交付契约，已回退为流式重排。',
       faithful_ineligible: '该文档不满足 1:1 物理复本的交付条件。',
     },
     deliveryModeBadgeFaithful: '1:1 物理复本',

@@ -484,6 +484,8 @@ export const en: TranslationDictionary = {
       source_overlap:
         'The source carries overlapping text layers, so page-locked 1:1 cannot be promised.',
       page_lock_infeasible: 'No page-locked 1:1 layout could be solved for this source.',
+      post_render_fallback:
+        'The 1:1 layout failed its delivery contract at render time, so it fell back to reflow.',
       faithful_ineligible: 'This document does not meet the 1:1 facsimile delivery conditions.',
     },
     deliveryModeBadgeFaithful: '1:1 Facsimile',

@@ -423,6 +423,48 @@ def test_a_faithful_run_that_kept_its_contract_is_not_degraded(tmp_path: Path) -
     assert body["degrade_reason"] is None
 
 
+def test_a_post_render_fallback_to_reflow_is_reported_as_degraded(tmp_path: Path) -> None:
+    """The export's own faithful->reflow fallback is not a planner downgrade.
+
+    That path writes the rendered mode to ``delivery_mode`` and leaves the
+    planner's ``delivery_mode_effective`` at ``facsimile``; reading the planner
+    value first would report a failed 1:1 render as still 1:1. The signals were
+    eligible, so the reason is the render-time contract failure, not
+    ineligibility.
+    """
+    config = _config(tmp_path)
+    _seed_job(config, tmp_path)
+    _seed_delivery_metadata(
+        config,
+        requested="faithful",
+        effective="facsimile",
+        damaged_pages=0,
+        plan={
+            "schema_version": 1,
+            "requested_mode": "faithful",
+            "contract": "faithful",
+            "eligibility": {"eligible": True, "reasons": []},
+            "signals": {
+                "text_trust": 0.95,
+                "page_kind": "native",
+                "source_overlap": False,
+                "page_lock_feasible": True,
+            },
+        },
+    )
+    with SQLiteJobLedger(config.db_dir / f"{_JOB}.sqlite") as ledger:
+        ledger.set_job_metadata_value(_JOB, "delivery_mode", "reflow")
+    client = TestClient(create_app(config))
+
+    body = client.get(f"/jobs/{_JOB}/deliverables", headers=_AUTH).json()
+    assert body["delivery_mode"] == "reflow"
+    assert body["requested_delivery_mode"] == "faithful"
+    assert body["planned_delivery_mode"] == "faithful"
+    assert body["degraded"] is True
+    assert body["degrade_reason_codes"] == ["post_render_fallback"]
+    assert "渲染阶段" in body["degrade_reason"]
+
+
 def test_a_job_with_no_report_is_not_treated_as_blocked(tmp_path: Path) -> None:
     config = _config(tmp_path)
     _seed_job(config, tmp_path, blocked_human_blocks=0)
