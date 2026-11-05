@@ -390,6 +390,76 @@ def test_layout_solver_floor_is_not_a_target() -> None:
     assert sol.uniform_size_pt > FLOOR_PT
 
 
+def test_a_table_that_cannot_fit_is_left_to_the_source_layer() -> None:
+    renderer = FacsimileRenderer()
+    table = "\n".join(
+        ["| Index | Measurement |", "|---|---|"] + [f"| item_{i} | value_{i} |" for i in range(10)]
+    )
+    placement = FacsimileBlockPlacement(
+        block_id="t1",
+        page=1,
+        x0=50.0,
+        y0=400.0,
+        x1=250.0,
+        y1=410.0,
+        text=table,
+        is_table=True,
+    )
+
+    content = renderer._placement_content(
+        placement,
+        width_pt=200.0,
+        target_lang="zh",
+        base_font_size_pt=9.0,
+    )
+
+    assert content == "", "a clipped min-scale grid must not be emitted"
+    assert ("t1", "table_preserved_source") in renderer.preserved_placements
+
+
+def test_effective_tracking_clamps_negative_values_for_cjk_only() -> None:
+    from ubt.adapters.pdf.docling_render import _effective_tracking_em
+
+    # The canvas clamps negative page tracking for ideographs; the planner and
+    # fit check must use the same value or a page accepted at -0.015em is drawn
+    # at 0em and overflows.
+    assert _effective_tracking_em(-0.015, "zh") == 0.0
+    assert _effective_tracking_em(-0.015, "ja-JP") == 0.0
+    assert _effective_tracking_em(-0.015, "en") == -0.015
+    assert _effective_tracking_em(0.02, "zh") == 0.02
+
+
+def test_fit_to_box_floor_keeps_small_body_text_at_the_solver_floor() -> None:
+    markup = FacsimileRenderer()._fit_to_box(
+        dx=0.0,
+        dy=0.0,
+        width=100.0,
+        height=20.0,
+        base_size_pt=8.9,
+        outset="0pt",
+        content="Body",
+    )
+
+    # 0.6 × 8.9pt would draw at 5.34pt, below the 7.5pt the solver promises.
+    assert f"calc.max({FLOOR_PT / 8.9:.4f}," in markup
+    assert "calc.max(0.6000," not in markup
+
+
+def test_fit_to_box_floor_keeps_the_ratio_when_the_base_size_is_large() -> None:
+    markup = FacsimileRenderer()._fit_to_box(
+        dx=0.0,
+        dy=0.0,
+        width=100.0,
+        height=20.0,
+        base_size_pt=20.0,
+        outset="0pt",
+        content="Body",
+    )
+
+    # 7.5/20 = 0.375 is below the 0.6 minimum fit, so 0.6 still governs.
+    assert "calc.max(0.6000," in markup
+
+
 def test_layout_solver_overlap_detection_and_resolution() -> None:
     records = [
         {"id": "p1", "top": 500.0, "bot": 400.0, "w": 300.0, "glyphs": 30.0, "n": 2},
@@ -509,6 +579,36 @@ def test_block_font_size_falls_back_to_a_footer_sized_chrome_face() -> None:
     assert _block_font_size(block, is_hdr=False, body_size=10.65, is_chrome=True) == pytest.approx(
         9.0
     )
+
+
+@pytest.mark.parametrize("source_size", [8.0, 10.0])
+def test_block_font_size_keeps_a_measured_caption_size(source_size: float) -> None:
+    # Both an 8pt and a 10pt source caption used to become the hardcoded 9pt
+    # fallback because captions were not passed to ``_block_font_size`` at all.
+    block = SimpleNamespace(
+        style=SimpleNamespace(font_size=source_size),
+        provenance=SimpleNamespace(font_size=source_size),
+    )
+    assert _block_font_size(block, is_hdr=False, body_size=10.65, is_caption=True) == pytest.approx(
+        source_size
+    )
+
+
+def test_block_font_size_keeps_an_unmeasured_caption_furniture_sized() -> None:
+    # No measurement: the old 9pt furniture fallback is still the honest
+    # default, but it is now owned by ``_block_font_size`` (not the renderer).
+    block = SimpleNamespace(style=None, provenance=None)
+    assert _block_font_size(block, is_hdr=False, body_size=10.65, is_caption=True) == pytest.approx(
+        9.0
+    )
+
+
+def test_block_font_size_body_prose_cannot_be_mistaken_for_a_caption() -> None:
+    block = SimpleNamespace(
+        style=SimpleNamespace(font_size=11.0),
+        provenance=SimpleNamespace(font_size=11.0),
+    )
+    assert _block_font_size(block, is_hdr=False, body_size=10.65) is None
 
 
 def test_a_listing_caption_does_not_become_a_figure_caption() -> None:
@@ -641,6 +741,66 @@ def test_a_preserved_table_caption_and_legend_share_its_disposition() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source_size", [8.0, 10.0])
+async def test_a_measured_caption_keeps_its_source_size_in_the_placement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_size: float
+) -> None:
+    """End-to-end: the caption's measured size reaches ``font_size_pt``.
+
+    The renderer used to hardcode 9pt (or inherit the body size because
+    ``is_caption`` never reached ``_block_font_size``). Capture the placement
+    the strategy hands the facsimile renderer and assert the source size.
+    """
+    from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
+    from ubt.core.ir.models import StyleMeta
+
+    src_pdf = tmp_path / "caption_src.pdf"
+    with pikepdf.Pdf.new() as pdf:
+        pdf.add_blank_page(page_size=(500, 700))
+        pdf.save(src_pdf)
+
+    cap = _exhibit_block(
+        "cap1",
+        "Figure 1 | A measured caption.",
+        (50.0, 405.0, 350.0, 420.0),
+        target="图 1 | 一条已测量的图注。",
+    )
+    cap.style = StyleMeta(font_size=source_size)
+
+    captured: list[FacsimileBlockPlacement] = []
+
+    def fake_render_doc(
+        self: FacsimileRenderer,
+        pages: list[FacsimilePageSpec],
+        bg_pdf_path: Path,
+        output_path: Path,
+        build_dir: Path,
+        **kwargs: object,
+    ) -> Path:
+        for page in pages:
+            for pl in page.placements:
+                if pl.is_caption:
+                    captured.append(pl)
+        output_path.write_bytes(src_pdf.read_bytes())
+        return output_path
+
+    monkeypatch.setattr(FacsimileRenderer, "render_document", fake_render_doc)
+
+    strategy = DoclingRenderStrategy(delivery_mode="facsimile", enable_pdf_optimization=False)
+    manifest = BookManifest(
+        doc_id="doc_cap_size",
+        title="Caption Size Test",
+        source_path=str(src_pdf),
+        metadata={"source_path": str(src_pdf)},
+    )
+    await strategy.render_blocks(manifest, [cap], "zh", tmp_path / "out_cap.pdf")
+
+    assert captured, "the caption must be placed"
+    assert captured[0].font_size_pt == pytest.approx(source_size)
+    assert captured[0].is_caption is True
+
+
+@pytest.mark.asyncio
 async def test_dense_numerical_table_preserves_associated_caption(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -723,6 +883,55 @@ def test_a_caption_keeps_the_sources_left_alignment() -> None:
     markup = FacsimileRenderer().build_markup([page_spec], "bg.pdf", target_lang="zh")
 
     assert "#align(left)" in markup
+    assert "#align(center)" not in markup
+
+
+def test_facsimile_renderer_recenters_a_measured_centered_heading() -> None:
+    placement = FacsimileBlockPlacement(
+        block_id="h1",
+        page=1,
+        x0=50.0,
+        y0=600.0,
+        x1=350.0,
+        y1=650.0,
+        text="A Centered Chapter Title",
+        is_heading=True,
+        font_size_pt=16.2,
+        align="center",
+    )
+    page_spec = FacsimilePageSpec(
+        page_no=1,
+        page_w=500.0,
+        page_h=700.0,
+        uniform_size_pt=10.0,
+        leading_em=0.35,
+        placements=[placement],
+    )
+    markup = FacsimileRenderer().build_markup([page_spec], "bg.pdf", target_lang="zh")
+    assert "#align(center)" in markup
+    assert "size: 16.2pt" in markup
+
+
+def test_facsimile_renderer_does_not_center_a_flush_left_heading() -> None:
+    placement = FacsimileBlockPlacement(
+        block_id="h1",
+        page=1,
+        x0=50.0,
+        y0=600.0,
+        x1=350.0,
+        y1=650.0,
+        text="A Flush Left Heading",
+        is_heading=True,
+    )
+    page_spec = FacsimilePageSpec(
+        page_no=1,
+        page_w=500.0,
+        page_h=700.0,
+        uniform_size_pt=10.0,
+        leading_em=0.35,
+        placements=[placement],
+    )
+    markup = FacsimileRenderer().build_markup([page_spec], "bg.pdf", target_lang="zh")
     assert "#align(center)" not in markup
 
 
@@ -1378,14 +1587,15 @@ def test_facsimile_table_respects_its_source_box_height() -> None:
         leading_em=0.35,
         placements=[placement],
     )
-    markup = FacsimileRenderer().build_markup([page_spec], "bg.pdf", target_lang="zh")
-    scales = [
-        float(line.strip().split(":")[1].strip().removesuffix("em)"))
-        for line in markup.splitlines()
-        if line.strip().startswith("#set text(size:") and line.strip().endswith("em)")
-    ]
-    assert scales, "expected a shrunk table text size in the markup"
-    assert min(scales) < 0.84
+    renderer = FacsimileRenderer()
+    markup = renderer.build_markup([page_spec], "bg.pdf", target_lang="zh")
+
+    # 6 rows cannot fit a 40pt box at the 6.5pt floor. The canvas keeps the
+    # source table (the background image still carries it) rather than drawing
+    # a min-scale grid whose last rows the outer clip would hide while their
+    # text stayed in the PDF text layer.
+    assert "op0" not in markup
+    assert ("b0100", "table_preserved_source") in renderer.preserved_placements
 
 
 def test_facsimile_page_level_stretch_emitted() -> None:
@@ -1472,7 +1682,11 @@ def test_facsimile_caption_rigid_anchoring_and_no_flow_grouping() -> None:
     markup = renderer.build_markup([page_spec], "bg.pdf", target_lang="zh")
 
     assert "flow-group: 2 blocks" not in markup
-    assert "clip: false" in markup
+    # A long caption is fit to its own box instead of being drawn with
+    # ``clip: false`` (which let two lines escape past the 20pt box while the
+    # text layer kept every word). The rigid anchor and source text survive.
+    assert "clip: false" not in markup
+    assert "clip: true" in markup
     assert "图 1：系统架构与执行流程示意图" in markup
 
 
@@ -1837,3 +2051,58 @@ def test_facsimile_elastic_typography_ladder_emitted() -> None:
     assert "eff-track" in markup
     assert "eff-stretch" in markup
     assert "tracking: eff-track, stretch: eff-stretch" in markup
+
+
+def test_the_page_tracking_rung_is_the_in_box_ladders_base() -> None:
+    # A page set at -0.030em must not be overwritten by a box-local 0em table:
+    # the plan's compression has to reach the drawn glyphs.
+    renderer = FacsimileRenderer()
+    placement = FacsimileBlockPlacement(
+        block_id="b_dense",
+        page=1,
+        x0=50.0,
+        y0=500.0,
+        x1=450.0,
+        y1=540.0,
+        text="A body paragraph that the fit wrapper has to measure.",
+    )
+    p = FacsimilePageSpec(
+        page_no=1,
+        page_w=500.0,
+        page_h=700.0,
+        uniform_size_pt=9.0,
+        leading_em=0.55,
+        tracking_em=-0.030,
+        placements=[placement],
+        tier="L1",
+    )
+    markup = renderer.build_markup(pages=[p], bg_pdf_filename="bg.pdf", target_lang="en")
+    assert "let base-track = -0.0300em" in markup
+    assert "eff-track = if ratio" in markup
+
+
+def test_a_caption_uses_the_page_tracking_without_the_ladder() -> None:
+    renderer = FacsimileRenderer()
+    placement = FacsimileBlockPlacement(
+        block_id="b_cap",
+        page=1,
+        x0=50.0,
+        y0=176.0,
+        x1=250.0,
+        y1=196.0,
+        text="Figure 1 | A caption.",
+        is_caption=True,
+    )
+    p = FacsimilePageSpec(
+        page_no=1,
+        page_w=500.0,
+        page_h=700.0,
+        uniform_size_pt=9.0,
+        leading_em=0.55,
+        tracking_em=-0.015,
+        placements=[placement],
+        tier="L1",
+    )
+    markup = renderer.build_markup(pages=[p], bg_pdf_filename="bg.pdf", target_lang="en")
+    assert "let eff-track = -0.0150em" in markup
+    assert "eff-stretch = 100%" in markup

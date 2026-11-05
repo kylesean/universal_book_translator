@@ -94,17 +94,18 @@ def _build_services(
     ``concurrency_sem``; the QE runner and repair loop are built for completeness
     but never invoked, because every block is already terminal.
 
-    The policy is constructed directly rather than re-derived from a route probe:
-    a re-export re-renders existing blocks, so ``visual_blocking`` (whether the
-    post-render gate may refuse delivery) and ``deterministic_glossary`` (the
-    export-time term enforcement) are the only fields it reads, and both are
-    properties of the *config*, not of a fresh document probe.
+    The policy is read back from ``manifest.run.adaptive_policy`` when the
+    manifest carries it — the original route decision is not available to a
+    re-export, and a short document's export reads ``visual_blocking`` and
+    ``deterministic_glossary`` (both true on that route). Rebuilding from
+    today's config silently turned both off. The config-derived values are the
+    fallback for manifests written before the run stored the policy.
     """
     from ubt.core.engine.repair_loop import RepairLoop
     from ubt.core.engine.services import RunServices
     from ubt.core.policy.adaptive_policy import AdaptivePolicy
 
-    adaptive_policy = AdaptivePolicy(
+    fallback_policy = AdaptivePolicy(
         fast_lane_bible=False,
         visual_blocking=config.visual_blocking_gate_enabled,
         # Same source of truth as the original run's export: when the config
@@ -114,6 +115,10 @@ def _build_services(
         # with nothing flagging the difference.
         deterministic_glossary=config.deterministic_glossary_long_route,
         reason="re-export (render-only; no route probe)",
+    )
+    adaptive_policy = AdaptivePolicy.from_dict(
+        manifest.run.adaptive_policy,
+        fallback=fallback_policy,
     )
     return RunServices(
         fast_pass=FastPassFilter(

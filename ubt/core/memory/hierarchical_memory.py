@@ -13,6 +13,7 @@ enters the prefix.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass
@@ -22,6 +23,7 @@ from ubt.core.ir.models import IRBlock
 from ubt.core.memory.neighbor_window import DEFAULT_NEIGHBOR_CHARS, NeighborContextBuilder
 from ubt.core.memory.rolling_summary import (
     collect_chapter_text,
+    deterministic_epoch_summary,
     deterministic_summary,
     extract_chapter_id,
     llm_summary,
@@ -251,7 +253,7 @@ class HierarchicalMemoryManager:
         # result to ``_MAX_L3_CHARS`` (1200) was dead and the epoch text rode
         # the static prompt prefix at a third of the reserved budget. Pass the
         # L3 cap through instead.
-        compressed = deterministic_summary(combined, _MAX_L3_CHARS).strip()
+        compressed = deterministic_epoch_summary(combined, _MAX_L3_CHARS).strip()
         if not compressed:
             compressed = combined[:_MAX_L3_CHARS]
         epoch_idx = (self._epochs[-1].epoch_index + 1) if self._epochs else 0
@@ -302,6 +304,54 @@ class HierarchicalMemoryManager:
         if use_sliding:
             kept.reverse()
         return "\n".join(kept)[: self.max_l3_chars]
+
+    def rebuild_epochs(self) -> None:
+        """Recompute L3 epochs deterministically from the current L2 snapshots.
+
+        Used after a repair refresh replaces a chapter's snapshots: the old
+        epochs were built from the pre-repair text and would otherwise keep
+        feeding the corrected chapter's stale renderings to later prompts.
+        """
+        self._epochs = []
+        for start in range(0, len(self._snapshots), self.l3_epoch_steps):
+            window = self._snapshots[start : start + self.l3_epoch_steps]
+            combined = " ".join(s.summary_text for s in window if s.summary_text).strip()
+            if not combined:
+                continue
+            epoch = EpochSnapshot(
+                epoch_index=len(self._epochs),
+                start_spine=window[0].start_spine,
+                end_spine=window[-1].end_spine,
+                summary_text=deterministic_epoch_summary(combined, self.max_l3_chars),
+            )
+            self._epochs.append(epoch)
+        if self.max_epochs is not None:
+            self._epochs = self._epochs[-self.max_epochs :]
+
+    def replace_chapter_snapshot(
+        self,
+        chapter_id: str,
+        *,
+        start_spine: int,
+        end_spine: int,
+        summary_text: str,
+        char_count: int,
+    ) -> None:
+        """Replace every L2 snapshot for one chapter with its post-repair recap."""
+        self._snapshots = [s for s in self._snapshots if s.chapter_id != chapter_id]
+        self._snapshots.append(
+            StepSnapshot(
+                step_index=self._step_counter,
+                start_spine=start_spine,
+                end_spine=end_spine,
+                chapter_id=chapter_id,
+                summary_text=summary_text,
+                char_count=char_count,
+            )
+        )
+        self._step_counter += 1
+        self._snapshots.sort(key=lambda s: (s.start_spine, s.end_spine, s.step_index))
+        self.rebuild_epochs()
 
     def get_latest_macro_summary(self) -> str:
         if not self._snapshots:
@@ -382,6 +432,67 @@ class HierarchicalMemoryManager:
         )
 
 
+async def refresh_chapter_memory(
+    ledger: Any,
+    job_id: str,
+    chapter_id: str,
+    blocks: list[IRBlock],
+    complete_fn: Callable[[str, str], Awaitable[str]],
+    target_lang: str,
+    *,
+    step_chars: int = DEFAULT_STEP_CHARS,
+    max_epochs: int | None = DEFAULT_MAX_EPOCHS,
+    sliding_window: bool = False,
+) -> bool:
+    """Rebuild one chapter's L2 recap from the *post-repair* target text.
+
+    The draft stage summarizes the draft it just produced. Repair can rewrite
+    that text afterwards, and the old summary then keeps feeding the superseded
+    rendering to every later prompt. This replaces the chapter's snapshots with
+    one recap of the final text and recomputes L3 deterministically.
+    """
+    if not chapter_id:
+        return False
+    chapter_blocks = sorted(
+        (b for b in blocks if extract_chapter_id(b.id) == chapter_id),
+        key=lambda b: b.spine_index,
+    )
+    if not chapter_blocks:
+        return False
+    content = collect_chapter_text(chapter_blocks, max_chars=step_chars * 2)
+    if not content.strip():
+        return False
+    summary = await llm_summary(
+        content,
+        complete_fn,
+        target_lang,
+        context="Post-repair chapter memory refresh failed",
+    ) or deterministic_summary(content)
+    if not summary.strip():
+        return False
+
+    manager = HierarchicalMemoryManager(
+        step_chars=step_chars,
+        enabled=True,
+        max_epochs=max_epochs,
+        sliding_window=sliding_window,
+    )
+    state = await asyncio.to_thread(ledger.get_job_metadata_value, job_id, "memory_state")
+    if isinstance(state, dict):
+        manager.restore_state(state)
+    manager.replace_chapter_snapshot(
+        chapter_id,
+        start_spine=chapter_blocks[0].spine_index,
+        end_spine=chapter_blocks[-1].spine_index,
+        summary_text=summary,
+        char_count=len(content),
+    )
+    await asyncio.to_thread(
+        ledger.set_job_metadata_value, job_id, "memory_state", manager.export_state()
+    )
+    return True
+
+
 __all__ = [
     "DEFAULT_L3_EPOCH_STEPS",
     "DEFAULT_MAX_EPOCHS",
@@ -389,4 +500,5 @@ __all__ = [
     "EpochSnapshot",
     "HierarchicalMemoryManager",
     "StepSnapshot",
+    "refresh_chapter_memory",
 ]

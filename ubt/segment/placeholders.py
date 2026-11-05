@@ -16,6 +16,7 @@ checksummed contract.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 
 from ubt.core.cleaners.citation_masker import CitationMasker
@@ -141,6 +142,44 @@ class PlaceholderEngine:
         return RestoreOutcome(
             text=email.text, email=email, code=code, math=math, soup=soup, citation=citation
         )
+
+    def missing_literal_spans(
+        self, source_text: str, target_text: str
+    ) -> tuple[tuple[str, str], ...]:
+        """Literal protected spans in ``source_text`` that are absent from ``target_text``.
+
+        The draft stage restores emails/URLs and code *before* repair sees the
+        block, so a repair candidate that drops one leaves no mask token behind
+        for FastPass's residual-token check to find. Compare the maskers'
+        own inventories instead; order is irrelevant (translations reorder
+        spans legitimately), only multiplicity counts.
+
+        Math is deliberately excluded: FastPass already compares math spans.
+        Citations are counted, not value-matched — renumbering is legitimate,
+        a net deletion is not. Soup spans (delimiter-free unicode math mixed
+        into prose) are literal atoms and are compared exactly, like code.
+        """
+        source = self.mask(source_text)
+        target = self.mask(target_text)
+        missing: list[tuple[str, str]] = []
+        for label, source_map, target_map in (
+            ("email", source.email_map, target.email_map),
+            ("code", source.code_map, target.code_map),
+            ("soup", source.soup_map, target.soup_map),
+        ):
+            remainder = Counter(source_map.values()) - Counter(target_map.values())
+            for original, count in remainder.items():
+                missing.extend((label, original) for _ in range(count))
+        # Citations may be renumbered, so values are not compared literally; a
+        # net loss is what matters. A repair that drops one marker leaves the
+        # reader an uncited claim, which the exact-value families above cannot
+        # see because every citation span is different by design.
+        lost_citations = len(source.cite_map) - len(target.cite_map)
+        if lost_citations > 0:
+            missing.extend(
+                ("citation", f"{lost_citations} marker(s) missing") for _ in range(lost_citations)
+            )
+        return tuple(missing)
 
 
 def default_placeholder_engine() -> PlaceholderEngine:

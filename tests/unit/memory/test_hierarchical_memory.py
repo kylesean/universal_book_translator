@@ -12,6 +12,7 @@ from ubt.core.memory.hierarchical_memory import (
     EpochSnapshot,
     HierarchicalMemoryManager,
     StepSnapshot,
+    refresh_chapter_memory,
 )
 
 pytestmark = pytest.mark.fast
@@ -340,6 +341,50 @@ def test_restore_state_caps_max_epochs() -> None:
 
     default_mgr = HierarchicalMemoryManager()
     assert default_mgr.max_epochs == DEFAULT_MAX_EPOCHS == 50
+
+
+def test_replace_chapter_snapshot_drops_stale_recaps_and_rebuilds_epochs() -> None:
+    manager = HierarchicalMemoryManager(l3_epoch_steps=2)
+    manager._snapshots = [
+        StepSnapshot(0, 0, 1, "ch1", "old chapter one", 10),
+        StepSnapshot(1, 2, 3, "ch1", "older chapter one", 10),
+        StepSnapshot(2, 4, 5, "ch2", "chapter two", 10),
+    ]
+    manager.replace_chapter_snapshot(
+        "ch1", start_spine=0, end_spine=3, summary_text="repaired chapter one", char_count=10
+    )
+    ch1 = [s for s in manager.snapshots if s.chapter_id == "ch1"]
+    assert len(ch1) == 1
+    assert ch1[0].summary_text == "repaired chapter one"
+    combined = " ".join(e.summary_text for e in manager.epochs)
+    assert "repaired chapter one" in combined
+    assert "older chapter one" not in combined
+
+
+async def test_refresh_chapter_memory_replaces_the_post_repair_recap() -> None:
+    class _Ledger:
+        def __init__(self) -> None:
+            self.meta: dict[str, Any] = {}
+
+        def get_job_metadata_value(self, _job: str, key: str) -> Any:
+            return self.meta.get(key)
+
+        def set_job_metadata_value(self, _job: str, key: str, value: Any) -> None:
+            self.meta[key] = value
+
+    ledger = _Ledger()
+    blocks = [
+        _block("ch1#b1", 1, target="修复后的第一段"),
+        _block("ch1#b2", 2, target="修复后的第二段"),
+    ]
+
+    async def complete(_system: str, _user: str) -> str:
+        return "修复后的章节摘要内容如下：第一段、第二段。"
+
+    assert await refresh_chapter_memory(ledger, "job", "ch1", blocks, complete, "zh") is True
+    state = ledger.meta["memory_state"]
+    assert state["snapshots"][0]["summary_text"] == "修复后的章节摘要内容如下：第一段、第二段。"
+    assert state["snapshots"][0]["chapter_id"] == "ch1"
 
 
 async def test_get_latest_macro_summary() -> None:

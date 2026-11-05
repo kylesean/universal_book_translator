@@ -477,6 +477,50 @@ def read_artifact_evidence(
             exhibit_texts=tuple(exhibit_texts),
         )
 
+    # The artifact -- not the renderer's plan -- is the fact being audited.
+    # ``style_samples`` (from ``delivered_size_pt``) is what the solver *asked*
+    # for; a box's ``_fit_to_box`` ladder can shrink the text below that, so a
+    # planned sample would read a squeezed page as a pass. Prefer the sizes
+    # measured from the PDF's own glyphs. Keep the planned samples only as the
+    # group-id attribution the style-group check needs, and only for pages the
+    # artifact measured: a page with no body text cannot vote on body size.
+    #
+    # The content stream (exact font sizes, script-independent) leads; the
+    # pdfium rect walk's exhibit hulls and body-page verdicts steer its vote
+    # (a grid is its own style group, PRD FR-L4); the ink-height walk is the
+    # same exhibit-aware mode and serves artifacts whose text hides in Form
+    # XObjects the content-stream parse cannot see -- Typst output. Unsteered,
+    # both estimators read a table-dominated page as the *grid's* size, which
+    # read the ATC'25 replay as a 4.18pt body drift and blocked the export.
+    measured_samples = tuple(measured) or _exact_body_sizes(
+        pdf_path, page_exhibits or None, body_pages or None
+    )
+    # Materialize once: ``style_samples`` is an Iterable, so a generator would
+    # be exhausted by the group-id lookup before the fallback below can use it.
+    planned_samples = tuple(style_samples)
+    group_by_page = {
+        int(sample.page): sample.group_id
+        for sample in planned_samples
+        if isinstance(sample.page, int) and sample.group_id
+    }
+    if measured_samples:
+        final_samples = tuple(
+            StyleSample(
+                page=sample.page,
+                size_pt=sample.size_pt,
+                role=sample.role,
+                group_id=group_by_page.get(sample.page, sample.group_id),
+            )
+            for sample in measured_samples
+        )
+    else:
+        # No measurable artifact text (e.g. a Form-XObject-only page the
+        # content-stream parse cannot see): fall back to the renderer's plan,
+        # which is all we have. This is the read-failure path, not the normal
+        # one, and still beats returning no samples at all for a faithful
+        # artifact (which would be a ``style_unmeasured`` major).
+        final_samples = planned_samples
+
     return ContractEvidence(
         contract=contract,  # type: ignore[arg-type]
         page_count=page_count,
@@ -488,18 +532,7 @@ def read_artifact_evidence(
         missing_assets=tuple(missing_assets),
         font_issues=tuple(font_issues),
         overflow_records=tuple(overflow_records),
-        # Renderer-reported sizes win (they are the fact). Then the content
-        # stream -- exact font sizes, script-independent -- with the pdfium
-        # rect walk's exhibit hulls and body-page verdicts steering its vote
-        # (a grid is its own style group, PRD FR-L4); the ink-height walk is
-        # the same exhibit-aware mode and serves artifacts whose text hides in
-        # Form XObjects the content-stream parse cannot see -- Typst output,
-        # whose text the ATC'25 replay's export was judged from. Unsteered,
-        # both estimators read a table-dominated page as the *grid's* size,
-        # which read that replay as a 4.18pt body drift and blocked the export.
-        style_samples=tuple(style_samples)
-        or measured
-        or _exact_body_sizes(pdf_path, page_exhibits or None, body_pages or None),
+        style_samples=final_samples,
         declared_page_expansion=declared_page_expansion,
         exhibit_texts=tuple(exhibit_texts),
     )

@@ -1261,6 +1261,10 @@ class PipelineOrchestrator:
             ledger = await asyncio.to_thread(
                 SQLiteJobLedger, db_path, fresh=bool(self.config.fresh)
             )
+            # Late writes (checkpoint batches, metadata, finalize) verify this
+            # lease in the write path instead of trusting the heartbeat timer.
+            if hasattr(ledger, "bind_writer_lock"):
+                ledger.bind_writer_lock(writer_lock)
             # An Agent-hosted job is translated by an external host through
             # ubt_agent_claim/submit; running the provider pipeline over the
             # same ledger would draft the same blocks with a second writer (and

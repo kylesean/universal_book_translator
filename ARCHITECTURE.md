@@ -184,9 +184,10 @@ greppable.
 
 `ubt/core/engine/ledger.py` assembles `SQLiteJobLedger` from `LedgerBase`
 (connection, thread-safety, pragmas, and the one flat baseline schema — it opens
-and stamps the schema, it does not migrate anything incrementally) and three
-mixins (job lifecycle, block writes, batch-API partitions). The database is
-SQLite in WAL mode under `db_dir` (default `.ubt/ledgers`).
+and stamps the schema, and applies only additive nullable columns / new
+`CREATE TABLE IF NOT EXISTS` in place) and three mixins (job lifecycle, block
+writes, batch-API partitions). The database is SQLite in WAL mode under
+`db_dir` (default `.ubt/ledgers`).
 
 - `ledger_base.py` owns the flattened baseline schema and `SCHEMA_VERSION`
   (1000). Fresh databases are
@@ -204,6 +205,12 @@ SQLite in WAL mode under `db_dir` (default `.ubt/ledgers`).
 - The primary key is `(job_id, block_id)` — block ids are content-derived
   (`pdf_main#b0001`) and repeat across jobs over the same document, so every
   block-id-keyed write is scoped by job.
+- `blocks.mtqe_score_source` records who produced `mtqe_score`. A heuristic
+  band (`heuristic`) is a defect-class label, not a measurement; the report and
+  the ledger's score SQL both exclude it (and the `tm`/`skip` pass stamps) from
+  `qe_measured`. A judged score (`llm_judge`/`tiered`) is included. This is the
+  one place that keeps a repaired block's 0.92 band from reading as a measured
+  average.
 
 `finalize_job` is fail-closed on `completed`: it refuses when the job row is
 missing or when any non-terminal block remains. `failed` and `cancelled` stay

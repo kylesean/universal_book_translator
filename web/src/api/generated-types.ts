@@ -2525,6 +2525,13 @@ export interface components {
             block_type: string;
             /** Status */
             status: string;
+            /**
+             * Skip Translate
+             * @default false
+             */
+            skip_translate: boolean;
+            /** Policy Reason */
+            policy_reason?: string | null;
             /** Source Text */
             source_text: string;
             /** Target Text */
@@ -2548,6 +2555,8 @@ export interface components {
             quarantined: boolean;
             /** Mtqe Score */
             mtqe_score?: number | null;
+            /** Mtqe Score Source */
+            mtqe_score_source?: string | null;
             /** Error Flags */
             error_flags?: string[];
             /** Issues */

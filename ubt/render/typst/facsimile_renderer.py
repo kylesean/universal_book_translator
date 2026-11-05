@@ -21,6 +21,7 @@ from typing import Any, cast
 
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.fs_perms import restrict_dir_to_owner
+from ubt.render.layout_solver import FLOOR_PT
 from ubt.render.typst.page_locked_renderer import (
     DEFAULT_FONT_STACK,
     PageLockedPageSpec,
@@ -38,9 +39,11 @@ logger = logging.getLogger(__name__)
 #: clips at the block height, so the tail of the text is drawn but cut — and the
 #: clipped glyphs stay in the text layer, which the delivery contract reads as
 #: text overlapping whatever the next block drew there. Shrinking the font is the
-#: only in-box remedy: below this floor the page genuinely cannot hold its text
-#: at a readable size and clipping (with the contract's block) is the honest
-#: outcome. 0.6 keeps a 10.9pt page at ~6.5pt, still legible.
+#: only in-box remedy: below the effective floor the page genuinely cannot hold
+#: its text at a readable size and clipping (with the contract's block) is the
+#: honest outcome. ``_fit_to_box`` never scales below this ratio *or* below
+#: ``FLOOR_PT``, whichever is the stronger bound: a 10.9pt page bottoms out at
+#: 7.5pt, not the old fixed 6.5pt.
 _MIN_FIT_SCALE = 0.6
 
 #: Font weights the renderer will pass through to Typst verbatim. Anything else
@@ -140,6 +143,12 @@ class FacsimileRenderer:
         #: ``frac(a, )``) fails the whole document at the single compile below, so
         #: gating here is what keeps one malformed formula from costing every
         #: page. ``None`` skips the gate (tests, and callers with no probe).
+        #: Ids of placements the canvas intentionally did not draw because the
+        #: translated content cannot fit its fixed box (currently only tables
+        #: that fail even at the minimum scale). The source background image
+        #: still shows these blocks, so the adapter records them as preserved
+        #: rather than as a successful translation.
+        self.preserved_placements: list[tuple[str, str]] = []
         self._math_gate = math_gate
 
     def _placement_content(
@@ -155,11 +164,14 @@ class FacsimileRenderer:
             from ubt.render.table_compiler import compile_typst_booktabs
             from ubt.render.typst.document_renderer import render_table
 
-            # First try dedicated academic booktabs compiler
+            # First try dedicated academic booktabs compiler. ``require_fit``
+            # makes a table that cannot fit its fixed box return empty instead
+            # of a clipped min-scale grid; the source background still carries
+            # the table, and the caller records the block as preserved.
             table_markup = compile_typst_booktabs(
                 pl.text,
                 content_width_pt=width_pt,
-                content_height_pt=max(0.0, float(pl.y1) - float(pl.y0)),
+                content_height_pt=max(10.0, float(pl.y1) - float(pl.y0)),
                 base_font_size_pt=pl.font_size_pt or base_font_size_pt,
                 min_font_size_pt=6.5,
                 stretch_pct=pl.stretch_pct,
@@ -167,6 +179,7 @@ class FacsimileRenderer:
                 is_math_ok=self._math_gate,
                 enable_continuation=True,
                 table_uid=f"src-{pl.block_id}",
+                require_fit=True,
             )
             if table_markup:
                 return table_markup
@@ -176,22 +189,26 @@ class FacsimileRenderer:
                 is_math_ok=self._math_gate,
                 page_columns=1,
                 content_width_pt=width_pt,
-                content_height_pt=max(0.0, float(pl.y1) - float(pl.y0)),
+                content_height_pt=max(10.0, float(pl.y1) - float(pl.y0)),
                 base_font_size_pt=base_font_size_pt,
                 stretch_pct=pl.stretch_pct,
                 target_lang=target_lang,
                 enable_continuation=True,
                 table_uid=f"src-{pl.block_id}",
+                require_fit=True,
             )
             if table_markup:
                 return table_markup
-            # An unparseable grid degrades to escaped text rather than vanishing:
-            # a table the compiler cannot lay out is still content the reader
-            # needs, and an empty block would silently drop a whole exhibit.
+            # Neither compiler can lay this grid out inside its box at a
+            # readable size. Draw nothing: the L1 background image still shows
+            # the source table, and the adapter records the block as preserved
+            # (not as a rebuilt table whose last rows were clipped away).
             logger.warning(
-                "Facsimile: block %s looked like a table but did not parse; delivering it as text",
+                "Facsimile: block %s does not fit its table box; preserving the source table",
                 pl.block_id,
             )
+            self.preserved_placements.append((pl.block_id, "table_preserved_source"))
+            return ""
 
         if pl.is_code:
             from ubt.render.typst.container_repair import repair_code_block_markup
@@ -223,22 +240,30 @@ class FacsimileRenderer:
         )
 
         if pl.is_caption:
-            cap_size = f"size: {pl.font_size_pt}pt, " if pl.font_size_pt else "size: 9pt, "
+            # No absolute size here: the fixed-box wrapper sets the caption's
+            # measured size and scales it to the box. Pinning 9pt inside the
+            # content overrode that wrapper and drew long captions past their
+            # 20pt box with only the drawing clipped.
             fill = f'fill: rgb("{pl.text_color_hex}")' if pl.text_color_hex != "#000000" else ""
             fill_arg = f", {fill}" if fill else ""
             cap_align = pl.align if pl.align in {"left", "center", "right"} else "left"
             return (
                 f"#set par(justify: false, leading: 0.50em)\n"
-                f'    #align({cap_align})[#text({cap_size}{stretch}weight: "regular"{fill_arg})[{escaped}]]'
+                f'    #align({cap_align})[#text({stretch}weight: "regular"{fill_arg})[{escaped}]]'
             )
 
         if pl.is_heading:
             weight = _normalise_weight(pl.font_weight, is_heading=True, bold=True)
-            return (
-                f"#set par(justify: false)\n"
-                f'    #text({size}{stretch}weight: "{weight}", '
+            body = (
+                f'#text({size}{stretch}weight: "{weight}", '
                 f'fill: rgb("{pl.text_color_hex}"))[{escaped}]'
             )
+            # A centered source title carries ``align="center"`` from the
+            # layout annotator; re-center it instead of drawing it flush left.
+            # Other alignments keep the block's own box (left/justify).
+            if pl.align == "center":
+                body = f"#align(center)[{body}]"
+            return f"#set par(justify: false)\n    {body}"
 
         if size or stretch or pl.font_weight not in ("", "regular"):
             weight = _normalise_weight(pl.font_weight, is_heading=False, bold=False)
@@ -256,8 +281,18 @@ class FacsimileRenderer:
         base_size_pt: float,
         outset: str,
         content: str,
+        floor_pt: float = FLOOR_PT,
+        ladder: bool = True,
+        page_tracking_em: float = 0.0,
     ) -> str:
         """Place *content* in its source box, shrinking it until the flow fits.
+
+        ``page_tracking_em`` is the page-level tracking the plan resolved (one
+        owner: the style-group rung). It is the *base* of the in-box ladder —
+        the ladder may only tighten it, never replace it with its own table —
+        so the page-level knob actually reaches the artifact. Passing the page
+        value into the emitted Typst keeps the fit-height estimator (which
+        already uses the same rung) and the drawn glyphs in agreement.
 
         ``#block(height: ..., clip: true)`` does not bound the *text*: Typst
         lays the overflow out past the block and only clips the drawing, so the
@@ -277,16 +312,53 @@ class FacsimileRenderer:
         1. Leading compaction (0.55em -> 0.42em)
         2. Micro-tracking compaction (-0.01em to -0.02em)
         3. Horizontal glyph stretch / condensing (95% to 88%)
-        4. Proportional font-size scaling down to `_MIN_FIT_SCALE`
+        4. Proportional font-size scaling down to the effective floor
+
+        The floor is ``max(_MIN_FIT_SCALE, floor_pt / base_size_pt)``. For body
+        text ``floor_pt`` is ``FLOOR_PT``: the canvas must never draw prose
+        below the same 7.5pt the solver promises. A *caption* is allowed below
+        the body floor (a figure's 8pt caption is not body text), so its caller
+        passes ``floor_pt=6.5`` and ``ladder=False``: the elastic tracking /
+        glyph-stretch rungs are body micro-typography, not caption styling.
         """
+        effective_floor = floor_pt if floor_pt > 0.0 else FLOOR_PT
+        min_fit = (
+            min(1.0, max(_MIN_FIT_SCALE, effective_floor / base_size_pt))
+            if base_size_pt > 0.0
+            else _MIN_FIT_SCALE
+        )
+        # The page-level rung is the tracking's single owner. The in-box ladder
+        # adds a *bounded* extra squeeze on top of it (never a replacement), and
+        # captions opt out of the ladder entirely: their micro-typography is the
+        # page value alone. Without this the page-level -0.030em was overwritten
+        # by a box-local 0em/-0.02em table, so the plan's compression never
+        # reached the artifact (measured: identical last-line x ranges for a
+        # page set at 0 and at -0.030em).
+        if ladder:
+            # The same floor the style-group ladder promises (``TRACKING_FLOOR_EM``),
+            # restated locally because core→render is a forbidden edge. The extra
+            # squeeze is whatever headroom the page rung has NOT already spent.
+            tracking_floor_em = -0.030
+            base_track = max(page_tracking_em, tracking_floor_em)
+            extra = max(0.0, min(0.02, base_track - tracking_floor_em))
+            track_stretch = (
+                f"    let base-track = {base_track:.4f}em\n"
+                "    let eff-track = if ratio < 0.90 { base-track - "
+                f"{extra:.4f}em }} else if ratio < 0.96 {{ base-track - "
+                f"{extra / 2.0:.4f}em }} else {{ base-track }}\n"
+                "    let eff-stretch = if ratio < 0.88 { 90% } else if ratio < 0.95 { 95% } else { 100% }\n"
+            )
+        else:
+            track_stretch = (
+                f"    let eff-track = {page_tracking_em:.4f}em\n    let eff-stretch = 100%\n"
+            )
         return (
             "  #context {\n"
             f"    let box-h = {height}pt\n"
             f"    let natural = measure(block(width: {width}pt)[\n{content}\n    ]).height\n"
             "    let ratio = if natural > 0pt { box-h / natural } else { 1.0 }\n"
-            f"    let fit = calc.max({_MIN_FIT_SCALE}, calc.min(1.0, ratio))\n"
-            "    let eff-track = if ratio < 0.90 { -0.02em } else if ratio < 0.96 { -0.01em } else { 0.0em }\n"
-            "    let eff-stretch = if ratio < 0.88 { 90% } else if ratio < 0.95 { 95% } else { 100% }\n"
+            f"    let fit = calc.max({min_fit:.4f}, calc.min(1.0, ratio))\n"
+            f"{track_stretch}"
             f"    place(top + left, dx: {dx}pt, dy: {dy}pt, "
             f"block(width: {width}pt, height: {height}pt, clip: true, outset: {outset})[\n"
             f"      #set text(size: {base_size_pt}pt * fit, tracking: eff-track, stretch: eff-stretch)\n"
@@ -371,6 +443,7 @@ class FacsimileRenderer:
         """
         fonts_formatted = ", ".join(f'"{f}"' for f in self.font_stack)
         is_cjk = target_lang.lower().startswith(("zh", "ja", "ko"))
+        self.preserved_placements = []
         lines: list[str] = [
             "// Universal Book Translator - 1:1 Facsimile Canvas Document",
             # ``ligatures: false`` is a text-layer decision, not a cosmetic one.
@@ -452,6 +525,10 @@ class FacsimileRenderer:
                     target_lang=target_lang,
                     base_font_size_pt=p.uniform_size_pt,
                 )
+                if not content:
+                    # A preserved table: the background image already carries
+                    # the source block, and the adapter records the skip.
+                    continue
                 valid_items.append([pl, dx, dy, width, height, content])
 
             valid_items = self._resolve_placement_collisions(valid_items, p.page_w, p.page_h)
@@ -552,11 +629,25 @@ class FacsimileRenderer:
                             f"  ])"
                         )
                     elif pl.is_caption:
+                        # Captions used to be drawn with ``clip: false`` and a
+                        # hardcoded 9pt fallback, so a long caption simply ran
+                        # past its 20pt box (measured: two lines outside it)
+                        # while the text layer kept every word. Fit it to its
+                        # own box; the caption floor is lower than body's
+                        # because a figure's 8pt caption is not body prose.
                         lines.append(
-                            f"  #place(top + left, dx: {dx}pt, dy: {dy}pt, "
-                            f"block(width: {width}pt, height: {height}pt, clip: false, outset: (top: 2.0pt, bottom: 2.0pt))[\n"
-                            f"    {content}\n"
-                            f"  ])"
+                            self._fit_to_box(
+                                dx=dx,
+                                dy=dy,
+                                width=width,
+                                height=fit_h,
+                                base_size_pt=pl.font_size_pt or 9.0,
+                                outset="(top: 2.0pt, bottom: 2.0pt)",
+                                content=content,
+                                floor_pt=6.5,
+                                ladder=False,
+                                page_tracking_em=effective_tracking,
+                            )
                         )
                     else:
                         eff_stretch = min(pl.stretch_pct, p.stretch_pct)
@@ -583,6 +674,7 @@ class FacsimileRenderer:
                                     base_size_pt=p.uniform_size_pt,
                                     outset="(top: 2.5pt, bottom: 2.5pt)",
                                     content=f"        {content}",
+                                    page_tracking_em=effective_tracking,
                                 )
                             )
                 else:
@@ -635,6 +727,7 @@ class FacsimileRenderer:
                                 base_size_pt=p.uniform_size_pt,
                                 outset="(top: 3.0pt, bottom: 3.0pt)",
                                 content=flow_content_str,
+                                page_tracking_em=effective_tracking,
                             )
                         )
 

@@ -24,6 +24,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+#: Advisor ``DualMode`` -> adapter ``bilingual_mode``. Kept as a plain mapping
+#: here rather than imported from ``ubt.core.policy``: ``ubt.core.ir`` is the
+#: shared leaf every layer reads, and a ``core.policy -> core.ir.models`` edge
+#: already exists, so importing the other way would close a package cycle.
+_DUAL_TO_ADAPTER_MODE: dict[str, str] = {
+    "dual": "bilingual",
+    "mono": "monolingual",
+}
+
 
 @dataclass
 class RenderPlan:
@@ -40,6 +49,23 @@ class RenderPlan:
     translate_chrome: bool | None = None
     bilingual_advisory: dict[str, Any] | None = None
     emit_secondary_mode: str | None = None
+
+    def adapter_mode(self, *, fallback: str | None = None) -> str | None:
+        """The one value every caller passes to ``render_blocks``.
+
+        The adapter-domain ``bilingual_mode`` wins when present (it is what the
+        advisories wrote and what the export stage persists). A plan carrying
+        only the advisor's ``effective_dual_mode`` is translated here, once, so
+        preflight and export cannot disagree about which vocabulary they were
+        handed: preflight used to map the advisor value itself while export
+        passed the adapter value straight through, and the rehearsal took the
+        bilingual branch when the real render did not.
+        """
+        if self.bilingual_mode:
+            return self.bilingual_mode
+        if self.effective_dual_mode:
+            return _DUAL_TO_ADAPTER_MODE.get(self.effective_dual_mode, self.effective_dual_mode)
+        return fallback
 
 
 @dataclass

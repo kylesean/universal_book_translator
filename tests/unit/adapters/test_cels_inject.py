@@ -201,6 +201,61 @@ def test_inject_line_replaces_the_run_and_restores_the_metrics() -> None:
     assert _numeric_operands(pdf, stream, ("Tc",)) == pytest.approx([-0.3, 0.0])
 
 
+def test_inject_line_preserves_the_implicit_line_advance_of_a_quote_operator() -> None:
+    body: list[tuple[list[Any], str]] = [
+        ([], "BT"),
+        (["/F1", 10], "Tf"),
+        ([12], "TL"),
+        ([1, 0, 0, 1, 50, 200], "Tm"),
+        ([pikepdf.String(b"First")], "Tj"),
+        ([pikepdf.String(b"Second")], "'"),
+        ([], "ET"),
+    ]
+    pdf, page = _build_page(body)
+    lines = scan_lines(page)
+    assert lines[-1].sites[0].op == "'"
+
+    stream = inject_line(page, lines[-1], "Replacement")
+
+    ops = _op_names(pdf, stream)
+    assert "T*" in ops, "the ' operator's implicit line move must survive the rewrite"
+    t_star = ops.index("T*")
+    assert "Tj" in ops[t_star + 1 :], "the replacement is shown after the line move"
+
+
+def test_a_double_quote_operator_carries_its_own_spacing_operands() -> None:
+    # ``aw ac string "`` sets Tw/Tc from its operands, not from the graphics
+    # state's prior values. Those operands must survive the rewrite verbatim.
+    body: list[tuple[list[Any], str]] = [
+        ([], "BT"),
+        (["/F1", 10], "Tf"),
+        ([1.5], "Tw"),
+        ([0.25], "Tc"),
+        ([12], "TL"),
+        ([1, 0, 0, 1, 50, 200], "Tm"),
+        ([pikepdf.String(b"First")], "Tj"),
+        ([3.5, -0.75, pikepdf.String(b"Second")], '"'),
+        ([], "ET"),
+    ]
+    _pdf, page = _build_page(body)
+    lines = scan_lines(page)
+    quote_line = next(line for line in lines if line.sites[0].op == '"')
+
+    assert quote_line.quote_word_spacing == pytest.approx(3.5)
+    assert quote_line.quote_char_spacing == pytest.approx(-0.75)
+    # The scanner's own state also reflects the operands (they are live state
+    # for every operator after the show, per PDF 32000-1).
+    assert quote_line.word_spacing == pytest.approx(3.5)
+    assert quote_line.char_spacing == pytest.approx(-0.75)
+
+    stream = inject_line(page, quote_line, "Replacement")
+    # The original graphics-state Tw/Tc (1.5/0.25) survive before the replaced
+    # line; the injected operands (3.5/-0.75) must also be present. Asserting
+    # the *first* Tw would only ever see the untouched 1.5.
+    assert 3.5 in _numeric_operands(_pdf, stream, ("Tw",))
+    assert -0.75 in _numeric_operands(_pdf, stream, ("Tc",))
+
+
 def test_inject_line_restores_the_values_that_were_in_force() -> None:
     body: list[tuple[list[Any], str]] = [
         ([], "BT"),

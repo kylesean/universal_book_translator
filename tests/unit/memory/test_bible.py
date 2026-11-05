@@ -150,6 +150,74 @@ def test_merge_keeps_distinct_sources_separate() -> None:
     assert [e.source for e in merged] == ["Bar", "Foo"]
 
 
+def test_merge_preserves_scope_and_hints_instead_of_collapsing_to_global() -> None:
+    merged = merge_bible_entries(
+        [
+            BibleEntry(
+                source="Transformer",
+                translation="变换器",
+                scope="chapter:2",
+                context_hints=["encoder"],
+                negative_hints=["decoder"],
+                priority=3,
+            ),
+            BibleEntry(
+                source="Transformer",
+                translation="转换器",
+                scope="chapter:5",
+                context_hints=["decoder"],
+                priority=9,
+            ),
+        ]
+    )
+
+    assert [(e.scope, e.translation) for e in merged] == [
+        ("chapter:2", "变换器"),
+        ("chapter:5", "转换器"),
+    ]
+    assert merged[0].context_hints == ["encoder"]
+    assert merged[0].negative_hints == ["decoder"]
+    assert merged[0].priority == 3
+    assert merged[1].priority == 9
+
+
+def test_merge_same_scope_unions_hints_and_takes_max_priority() -> None:
+    merged = merge_bible_entries(
+        [
+            BibleEntry(
+                source="Transformer",
+                translation="变换器",
+                scope="chapter:2",
+                context_hints=["encoder"],
+                priority=3,
+            ),
+            BibleEntry(
+                source="transformer",
+                translation="变换器",
+                scope="chapter:2",
+                context_hints=["attention"],
+                priority=7,
+            ),
+        ]
+    )
+
+    assert len(merged) == 1
+    assert merged[0].scope == "chapter:2"
+    assert merged[0].context_hints == ["attention", "encoder"]
+    assert merged[0].priority == 7
+
+
+def test_conflict_scan_does_not_report_cross_scope_partitions() -> None:
+    from ubt.core.memory.bible import detect_terminology_conflicts
+
+    entries = [
+        BibleEntry(source="Transformer", translation="变换器", scope="chapter:2"),
+        BibleEntry(source="Transformer", translation="转换器", scope="chapter:5"),
+    ]
+
+    assert detect_terminology_conflicts(entries) == []
+
+
 def test_clean_bible_entry_normalizes_cjk_latin_boundary_spacing() -> None:
     entry = clean_bible_entry(source="Switch Transformer", translation="切换Transformer")
     assert entry is not None

@@ -265,15 +265,21 @@ def detect_terminology_conflicts(entries: list[BibleEntry]) -> list[TerminologyC
       win and the other is enforced against → unresolved.
     """
 
-    # Group by concept, keeping which source surface carried each rendering.
-    by_concept: dict[str, dict[str, str]] = {}  # concept -> {rendering: source}
-    surfaces: dict[str, set[str]] = {}  # concept -> distinct source surfaces
+    # Group by concept *and scope*, keeping which source surface carried each
+    # rendering. Two chapter-scoped renderings for the same source are a
+    # deliberate partition, not a contradiction; reporting them as a conflict
+    # would ask the operator to resolve a rule the glossary already scoped.
+    # (concept, scope) -> {rendering: source}
+    by_concept: dict[tuple[str, str], dict[str, str]] = {}
+    # (concept, scope) -> distinct source surfaces
+    surfaces: dict[tuple[str, str], set[str]] = {}
     for entry in entries:
         source = entry.source.strip()
         rendering = entry.translation.strip()
         if not source or not rendering:
             continue
-        key = concept_key(source)
+        scope = (entry.scope or "*").strip().lower() or "*"
+        key = (concept_key(source), scope)
         by_concept.setdefault(key, {}).setdefault(rendering, source)
         surfaces.setdefault(key, set()).add(source.casefold())
 
@@ -281,6 +287,7 @@ def detect_terminology_conflicts(entries: list[BibleEntry]) -> list[TerminologyC
     for key, renderings in sorted(by_concept.items()):
         if len(renderings) < 2:
             continue
+        concept, _scope = key
         # The merge prefers the bare expansion: an acronym-attested surface is
         # an attestation of the concept, not the term to steer a draft towards.
         preferred_rendering, preferred_source = min(
@@ -300,7 +307,7 @@ def detect_terminology_conflicts(entries: list[BibleEntry]) -> list[TerminologyC
         foldable = len(surfaces.get(key, ())) > 1
         conflicts.append(
             TerminologyConflict(
-                concept=key,
+                concept=concept,
                 preferred=preferred_rendering,
                 preferred_source=preferred_source,
                 superseded=superseded,
@@ -313,14 +320,20 @@ def detect_terminology_conflicts(entries: list[BibleEntry]) -> list[TerminologyC
 def merge_bible_entries(entries: list[BibleEntry]) -> list[BibleEntry]:
     """Merge entries by concept: preferred rendering wins, others become admitted.
 
-    Two axes, in order:
+    Three axes, in order:
 
-    1. **Same source surface** (case-insensitive): first translation wins, aliases
-       union, max frequency — the historical behaviour.
-    2. **Same concept** (:func:`concept_key`): one entry survives and the other's
-       rendering becomes an admitted variant on it. Before this, a document could
-       carry two contradictory rules for one concept and the gate enforced both,
-       which no translation can satisfy (see :func:`concept_key`).
+    1. **Same source surface and scope** (case-insensitive): first translation
+       wins, aliases union, max frequency — the historical behaviour.
+    2. **Same concept** (:func:`concept_key`) within the same scope: one entry
+       survives and the other's rendering becomes an admitted variant on it.
+       Before this, a document could carry two contradictory rules for one
+       concept and the gate enforced both, which no translation can satisfy
+       (see :func:`concept_key`).
+    3. **Scope is identity, not decoration.** A ``chapter:2`` entry and a
+       ``chapter:5`` entry for the same source are two deliberate rules, not a
+       conflict to collapse; merging them used to drop ``scope``/hints/priority
+       and turn both into one global ``*`` entry. Scope fields survive the merge
+       and cross-scope entries are never folded together.
 
     The surviving rendering is the one the *document* attests more: frequency
     first, then the shorter source surface (the bare expansion is the preferred
@@ -328,30 +341,43 @@ def merge_bible_entries(entries: list[BibleEntry]) -> list[BibleEntry]:
     disagrees is never discarded — it is recorded as an admitted variant, so the
     text already written under it keeps passing and the enforcer leaves it alone.
     """
-    merged: dict[str, dict[str, Any]] = {}
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
     for e in entries:
-        key = e.source.lower()
+        scope = (e.scope or "*").strip() or "*"
+        key = (e.source.lower(), scope.lower())
         if key not in merged:
             merged[key] = {
+                "key": key,
                 "source": e.source,
                 "translation": e.translation,
                 "aliases": set(e.aliases),
                 "inflected_variants": set(e.inflected_variants),
                 "kind": e.kind,
                 "frequency": e.frequency,
+                "scope": scope,
+                "context_hints": set(e.context_hints),
+                "negative_hints": set(e.negative_hints),
+                "priority": int(e.priority),
                 "order": len(merged),
             }
         else:
-            merged[key]["aliases"] |= set(e.aliases)
-            merged[key]["inflected_variants"] |= set(e.inflected_variants)
-            if not merged[key]["translation"] and e.translation:
-                merged[key]["translation"] = e.translation
-            merged[key]["frequency"] = max(int(merged[key]["frequency"]), e.frequency)
+            record = merged[key]
+            record["aliases"] |= set(e.aliases)
+            record["inflected_variants"] |= set(e.inflected_variants)
+            if not record["translation"] and e.translation:
+                record["translation"] = e.translation
+            record["frequency"] = max(int(record["frequency"]), int(e.frequency))
+            record["context_hints"] |= set(e.context_hints)
+            record["negative_hints"] |= set(e.negative_hints)
+            record["priority"] = max(int(record["priority"]), int(e.priority))
 
     # Pass 2: fold entries that name the same concept through an attested acronym.
-    by_concept: dict[str, list[dict[str, Any]]] = {}
+    # Scope stays in the grouping key: two scopes are two rules.
+    by_concept: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for record in merged.values():
-        by_concept.setdefault(concept_key(str(record["source"])), []).append(record)
+        by_concept.setdefault(
+            (concept_key(str(record["source"])), str(record["scope"]).lower()), []
+        ).append(record)
 
     for group in by_concept.values():
         if len(group) < 2:
@@ -399,12 +425,18 @@ def merge_bible_entries(entries: list[BibleEntry]) -> list[BibleEntry]:
                 if admitted and admitted != winner["translation"]:
                     winner["inflected_variants"].add(admitted)
             winner["frequency"] = max(int(winner["frequency"]), int(loser["frequency"]))
-            merged.pop(str(loser["source"]).lower(), None)
+            winner["context_hints"] |= loser["context_hints"]
+            winner["negative_hints"] |= loser["negative_hints"]
+            winner["priority"] = max(int(winner["priority"]), int(loser["priority"]))
+            merged.pop(loser["key"], None)
 
     # A concept's own source surface and preferred rendering are never aliases
     # or admitted variants of itself.
     result: list[BibleEntry] = []
-    for key in sorted(merged):
+    for key in sorted(
+        merged,
+        key=lambda k: (str(merged[k]["source"]).lower(), str(merged[k]["scope"]).lower()),
+    ):
         m = merged[key]
         own = {str(m["source"]).casefold()}
         aliases = sorted(a for a in m["aliases"] if a and a.casefold() not in own)
@@ -421,6 +453,10 @@ def merge_bible_entries(entries: list[BibleEntry]) -> list[BibleEntry]:
                 inflected_variants=admitted,
                 kind=m["kind"],
                 frequency=int(m["frequency"]),
+                scope=str(m["scope"]),
+                context_hints=sorted(h for h in m["context_hints"] if h),
+                negative_hints=sorted(h for h in m["negative_hints"] if h),
+                priority=int(m["priority"]),
             )
         )
     return result

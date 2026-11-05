@@ -93,6 +93,23 @@ def deterministic_summary(chapter_text: str, max_chars: int = _DETERMINISTIC_CHA
     return cut
 
 
+def deterministic_epoch_summary(text: str, max_chars: int) -> str:
+    """Compress an L3 epoch without losing its newest half.
+
+    ``deterministic_summary`` is a *head* excerpt, which is right for a single
+    snapshot but wrong for an epoch built from a window: it kept the oldest
+    snapshot's opening and dropped the one nearest the reader. The epoch is a
+    long-range anchor, so it keeps both ends — a short head for the epoch's
+    premise and the tail for where the book actually arrived.
+    """
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    head = max(1, max_chars // 3)
+    tail = max(1, max_chars - head)
+    return f"{text[:head].rstrip()}\n[...]\n{text[-tail:].lstrip()}"
+
+
 def _build_summary_prompt(chapter_text: str, target_lang: str) -> tuple[str, str]:
     """The recap the next chapter's translation is conditioned on: key points,
     established terminology renderings and tone, in the target language."""

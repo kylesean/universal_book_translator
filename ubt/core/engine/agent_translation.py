@@ -526,6 +526,7 @@ class AgentTranslationService:
             )
             try:
                 ledger = await asyncio.to_thread(SQLiteJobLedger, db_path, fresh=request.fresh)
+                ledger.bind_writer_lock(lock)
                 try:
                     await self._prepare_in_ledger(
                         ledger=ledger,
@@ -998,7 +999,9 @@ class AgentTranslationService:
         kind: Literal["translate", "repair"] = "repair" if kind_value == "repair" else "translate"
         all_blocks = await asyncio.to_thread(ledger.get_all_blocks, request.job_id)
         terminology = await asyncio.to_thread(terminology_from_ledger, ledger, request.job_id)
-        global_glossary = build_global_glossary_table(terminology.glossary_dicts, max_entries=80)
+        global_glossary = build_global_glossary_table(
+            terminology.glossary_dicts, max_entries=80, include_scoped=False
+        )
         work_blocks = [
             self._block_work(
                 block,
@@ -1082,14 +1085,19 @@ class AgentTranslationService:
         from ubt.core.engine.stages.draft import _source_with_bold_markers
 
         masked = self.engine.mask(_source_with_bold_markers(block))
+        from ubt.core.memory.scoped_glossary import scope_context_for_block
+
         glossary_table = build_chunk_glossary_table(
             terminology.glossary_dicts,
             terminology.abbreviation_entries,
             block.source_text,
+            context=scope_context_for_block(block),
         )
         neighbor = NeighborContextBuilder().extract_from_blocks(block, list(all_blocks))
         section = section_context_for(all_blocks, [block])
-        global_glossary = build_global_glossary_table(terminology.glossary_dicts, max_entries=80)
+        global_glossary = build_global_glossary_table(
+            terminology.glossary_dicts, max_entries=80, include_scoped=False
+        )
         if kind == "repair":
             _, user_prompt = build_rich_repair_prompt(
                 source_text=masked.text,
@@ -1293,6 +1301,7 @@ class AgentTranslationService:
         db_path, ledger = await self._open_job(request.job_id)
         lock = LedgerWriterLock(db_path, request.job_id)
         await asyncio.to_thread(lock.acquire)
+        ledger.bind_writer_lock(lock)
         lease_lost = asyncio.Event()
         renew_task = asyncio.create_task(
             keep_lease_fresh(lock, on_lost=lambda _reason: lease_lost.set()),

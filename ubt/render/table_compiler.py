@@ -585,12 +585,19 @@ def compile_typst_booktabs(
     is_math_ok: Any | None = None,
     enable_continuation: bool = False,
     table_uid: str = "",
+    require_fit: bool = False,
 ) -> str:
     """Compile a Markdown table into an academic Typst booktabs (``#table``).
 
     Three-line booktabs with no vertical rules, column widths from measured
     advance runs, cell clipping with adaptive insets and variable-font stretch,
     and font scaling down to ``min_font_size_pt`` as the last resort.
+
+    ``require_fit`` makes the fixed-box caller (the L1 canvas) get an empty
+    result when the table cannot fit even at the minimum scale. The previous
+    behaviour emitted the min-scale grid anyway and let the outer ``clip`` hide
+    the last rows while their text stayed in the PDF text layer — a table the
+    reader cannot read, recorded as a successful reconstruction.
     """
     parsed = parse_markdown_table(markup, escape=False)
     if parsed is None:
@@ -756,13 +763,19 @@ def compile_typst_booktabs(
                 if found:
                     break
             if not found:
+                if require_fit:
+                    return ""
                 scale = min_scale
                 eff_stretch_pct = stretch_pct
                 inset_y_pt = 1.0
                 inset_x_pt = 1.5
                 widths = _allocate_columns(base_pt * scale, eff_stretch_pct, inset_x_pt)
 
-    column_spec = "(" + ", ".join(f"{max(12.0, w * 0.998):.1f}pt" for w in widths) + ")"
+    # ``_allocate_columns`` already scaled these widths to the container. A
+    # 12pt floor here re-inflated every narrow column, so a 20-column table in
+    # a 200pt box laid out 240pt wide and was silently cut by the outer clip.
+    # Keep the widths the allocator proved fit; only guard against a zero.
+    column_spec = "(" + ", ".join(f"{max(1.0, w * 0.998):.1f}pt" for w in widths) + ")"
 
     start_anchor = ""
     header_continuation_cell = ""

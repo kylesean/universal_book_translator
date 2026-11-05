@@ -22,6 +22,8 @@ from ubt.core.memory.glossary_table import (
     build_chunk_glossary_table,
     build_global_glossary_table,
 )
+from ubt.core.memory.hierarchical_memory import refresh_chapter_memory
+from ubt.core.memory.rolling_summary import extract_chapter_id
 from ubt.core.qe.defect_taxonomy import REPAIR_ERROR_PREFIX
 from ubt.core.qe.error_summary import summarize_provider_error
 from ubt.core.qe.score_policy import is_shippable
@@ -58,6 +60,7 @@ def failed_draft_checkpoint(cand: IRBlock, res: BaseException) -> dict[str, Any]
         "target_text": target_str,
         "status": BlockStatus.FAILED,
         "mtqe_score": cand.mtqe_score,
+        "mtqe_score_source": cand.mtqe_score_source,
         "repair_rounds": cand.repair_rounds,
         # The ledger keeps the full error: only the rendered notice is shortened.
         "error_flags": [*cand.error_flags, f"{REPAIR_ERROR_PREFIX} {res}"],
@@ -89,7 +92,9 @@ async def run_repair_stage(
     glossary_dicts = terminology.glossary_dicts
     abbreviation_entries = terminology.abbreviation_entries
     global_glossary_table = build_global_glossary_table(
-        glossary_dicts or [], getattr(ctx.config, "glossary_max_global_entries", 80)
+        glossary_dicts or [],
+        getattr(ctx.config, "glossary_max_global_entries", 80),
+        include_scoped=False,
     )
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang
@@ -116,6 +121,8 @@ async def run_repair_stage(
                 exc,
             )
 
+    changed_ids: set[str] = set()
+
     for round_idx in range(max_repair_rounds):
         check_stage_cancelled(ctx)
         repair_eligible = await asyncio.to_thread(
@@ -137,8 +144,13 @@ async def run_repair_stage(
         yield event
 
         async def _repair_single_candidate(cand: IRBlock) -> dict[str, Any]:
+            from ubt.core.memory.scoped_glossary import scope_context_for_block
+
             glossary_table = build_chunk_glossary_table(
-                glossary_dicts, abbreviation_entries, cand.source_text
+                glossary_dicts,
+                abbreviation_entries,
+                cand.source_text,
+                context=scope_context_for_block(cand, domain=getattr(ctx.config, "domain", None)),
             )
 
             async with concurrency_sem:
@@ -157,6 +169,7 @@ async def run_repair_stage(
                 "target_text": repaired.target_text or "",
                 "status": repaired.status,
                 "mtqe_score": repaired.mtqe_score,
+                "mtqe_score_source": repaired.mtqe_score_source,
                 "repair_rounds": repaired.repair_rounds,
                 "error_flags": repaired.error_flags,
             }
@@ -189,6 +202,8 @@ async def run_repair_stage(
                 logger.warning("Repair failed for block %s: %s", cand.id, res)
                 update = _record_failure(cand, res)
             await flusher.enqueue(update)
+            if int(update.get("repair_rounds") or 0) > 0:
+                changed_ids.add(str(update["block_id"]))
 
         batch_size = max(5, int(getattr(ctx.config, "repair_batch_size", 10)))
         processed_candidates = 0
@@ -270,8 +285,35 @@ async def run_repair_stage(
                     "target_text": target,
                     "status": final_status,
                     "mtqe_score": b.mtqe_score,
+                    "mtqe_score_source": b.mtqe_score_source,
                     "repair_rounds": b.repair_rounds,
                     "error_flags": b.error_flags,
                 }
             )
         await asyncio.to_thread(ledger.save_checkpoints_batch, terminal_updates)
+
+    # A repair rewrites text after the draft stage already summarized it. The
+    # old L2/L3 recap would keep teaching later prompts the superseded
+    # rendering, so refresh only the chapters that actually changed.
+    if changed_ids:
+        try:
+            all_blocks = await asyncio.to_thread(ledger.get_all_blocks, actual_job_id)
+            chapters = {ch for ch in (extract_chapter_id(bid) for bid in changed_ids) if ch}
+            for ch in sorted(chapters):
+                refreshed = await refresh_chapter_memory(
+                    ledger,
+                    actual_job_id,
+                    ch,
+                    all_blocks,
+                    ctx.raw_completion,
+                    target_lang,
+                    step_chars=int(getattr(ctx.config, "step_chars", 3500)),
+                    max_epochs=int(getattr(ctx.config, "memory_max_epochs", 50)),
+                    sliding_window=bool(getattr(ctx.config, "memory_sliding_window", False)),
+                )
+                if refreshed:
+                    logger.info("Refreshed post-repair memory recap for chapter %s", ch)
+        except Exception as exc:
+            # Memory is context, not delivery: a failed recap must never fail
+            # the repair stage after the paid text has been checkpointed.
+            logger.warning("Post-repair memory refresh failed: %s", exc, exc_info=True)

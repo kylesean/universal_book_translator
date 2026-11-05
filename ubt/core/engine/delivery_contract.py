@@ -89,7 +89,22 @@ _STYLE_DRIFT_PT = DRIFT_TOLERANCE_PT
 #: refused the artifact, and a job with one unrestorable span could never finish
 #: (resume re-exported the same file into the same BLOCKED verdict). Only
 #: machinery the pipeline never means to print belongs in this pattern.
-_PLACEHOLDER_SITE_RE = re.compile(r"⟦[^⟦⟧\n]{0,80}⟧|<v>|<m>|SOUP_MASK|\[SENTINEL_|⟦|⟧")
+#:
+#: ``\llbracket``/``\rrbracket`` is the same marker family in its LaTeX spelling:
+#: a model reading ``⟦B⟧`` as math routinely transcribes it that way, and
+#: ``parse_emphasis`` recognises it (see ``ubt.core.ir.emphasis``). The contract
+#: must recognise it too, or the transcribed marker ships as literal text.
+#: The LaTeX spelling a model uses for the emphasis sentinels: ``⟦B⟧`` becomes
+#: ``\llbracket B \rrbracket`` (and ``⟦/B⟧`` becomes ``\llbracket /B \rrbracket``).
+#: The shape is deliberately the one ``ubt.core.ir.emphasis`` and
+#: ``ubt.render.typst.artifact_guard`` accept: an arbitrary ``\llbracket A
+#: \rrbracket`` is ordinary mathematical bracket notation, not a leaked marker,
+#: and must not be called critical.
+_LLBRACKET_EMPHASIS = r"\\+llbracket\s*(?:/\s*)?[BbIi]\s*\\+rrbracket"
+
+_PLACEHOLDER_SITE_RE = re.compile(
+    rf"⟦[^⟦⟧\n]{{0,80}}⟧|{_LLBRACKET_EMPHASIS}|<v>|<m>|SOUP_MASK|\[SENTINEL_|⟦|⟧"
+)
 
 #: Inline math and sentinel spans are not prose: a correct render draws the
 #: formula as Unicode math, so the block's source characters for that span are

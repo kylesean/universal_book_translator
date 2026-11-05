@@ -308,6 +308,51 @@ def test_a_placeholder_leak_is_critical() -> None:
     assert "placeholder_leak" in _codes(report)
 
 
+def test_a_latex_spelled_placeholder_is_a_leak() -> None:
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b1", "完整译文。"),),
+            page_texts=("完整译文。\\llbracket SOUP_MASK_0001-f2d \\rrbracket",),
+        )
+    )
+    assert not report.passed
+    assert "placeholder_leak" in _codes(report)
+
+
+def test_a_latex_spelled_emphasis_marker_is_a_leak() -> None:
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b1", "完整译文。"),),
+            page_texts=("完整译文。\\llbracket B \\rrbracket",),
+        )
+    )
+    assert not report.passed
+    assert "placeholder_leak" in _codes(report)
+
+
+def test_a_tolerated_italic_marker_spelling_is_a_leak() -> None:
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b1", "完整译文。"),),
+            page_texts=("完整译文。\\\\llbracket / I \\\\rrbracket",),
+        )
+    )
+    assert not report.passed
+    assert "placeholder_leak" in _codes(report)
+
+
+def test_legal_latex_bracket_notation_is_not_a_leak() -> None:
+    excerpt = "区间记法 \\llbracket A \\rrbracket 是标准的。"
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b1", excerpt),),
+            page_texts=(excerpt,),
+        )
+    )
+    assert "placeholder_leak" not in _codes(report)
+    assert report.passed
+
+
 def test_every_placeholder_occurrence_is_reported() -> None:
     report = evaluate_delivery_contract(
         _evidence(

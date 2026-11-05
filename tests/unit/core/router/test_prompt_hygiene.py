@@ -39,6 +39,19 @@ def test_prompts_carry_no_negative_rules(builder: Any) -> None:
         assert fragment not in system, f"negative rule survived: {fragment!r}"
 
 
+def test_macro_prompt_carries_inner_block_coref_and_heading_type() -> None:
+    _system_prompt, user = build_macro_chunk_draft_prompt(
+        [("b1", "The model is large."), ("b2", "It is also fast.")],
+        target_lang="zh",
+        block_contexts=[("b2", '"it" refers to: `the model`')],
+        block_types=[("b1", "narrative"), ("b2", "heading")],
+    )
+    assert "Per-Block Reference Notes" in user
+    assert '"it" refers to: `the model`' in user
+    assert "Heading Blocks" in user
+    assert "`b2`" in user
+
+
 def test_rich_prompt_keeps_positive_register_guidance() -> None:
     system, _ = build_rich_draft_prompt("Measurements were taken.", target_lang="zh")
     assert "fluent" in system.lower()

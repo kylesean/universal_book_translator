@@ -251,6 +251,7 @@ STRUCTURAL_CATEGORIES: tuple[str, ...] = (
     "table_dropped",
     "table_grid",
     "heading_label",
+    "macro_alignment",
     "added_reference",
     "prompt_scaffold",
     "prompt_leak",

@@ -69,6 +69,17 @@ def test_embed_subset_font_builds_a_type0_with_tounicode(tmp_path: Path) -> None
         assert f"<{font.gids[text[0]]:04X}>" in cmap
 
 
+def test_tounicode_cmap_encodes_non_bmp_as_utf16be_surrogates() -> None:
+    from ubt.adapters.pdf.cels_font import _to_unicode_cmap
+
+    cmap = _to_unicode_cmap({"😀": 1, "A": 2})
+
+    # U+1F600 is two UTF-16BE units (D83D DE00), not the five hex digits
+    # ``ord(char):04X`` used to emit.
+    assert "<0001> <D83DDE00>" in cmap
+    assert "<0002> <0041>" in cmap
+
+
 def test_encode_refuses_characters_the_subset_does_not_hold() -> None:
     with pikepdf.Pdf.new() as pdf:
         font = embed_subset_font(pdf, font_path=_cjk_font(), text="自适应")

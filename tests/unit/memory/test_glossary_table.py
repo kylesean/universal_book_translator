@@ -5,6 +5,7 @@ import pytest
 from ubt.core.memory.glossary_table import (
     build_chunk_glossary_table,
     build_global_glossary_table,
+    merge_glossary_tables,
 )
 
 pytestmark = pytest.mark.fast
@@ -89,3 +90,15 @@ def test_chunk_table_omits_abbreviations_absent_from_the_block() -> None:
     abbrevs = [{"source": "Convolutional Neural Network", "aliases": ["CNN"], "kind": "term"}]
     table = build_chunk_glossary_table([], abbrevs, "\u8fd9\u91cc\u6ca1\u6709\u7f29\u5199")
     assert "CNN" not in table
+
+
+def test_merge_glossary_tables_dedups_by_source_not_by_whole_table() -> None:
+    first = (
+        "| 原文 | 别名 | 译文 |\n| :--- | :--- | :--- |\n| model |  | 模型 |\n| cell |  | 电池 |"
+    )
+    second = (
+        "| 原文 | 别名 | 译文 |\n| :--- | :--- | :--- |\n| cell |  | 电池 |\n| model |  | 模型 |"
+    )
+    merged = merge_glossary_tables([first, second])
+    assert merged.count("| model |") == 1
+    assert merged.count("| cell |") == 1

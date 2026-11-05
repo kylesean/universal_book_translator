@@ -241,6 +241,21 @@ def test_compile_typst_booktabs_adaptive_widths() -> None:
     assert widths[1] > widths[2] * 3.0
 
 
+def test_narrow_columns_are_not_floored_at_twelve_points() -> None:
+    header = "| " + " | ".join(f"c{i}" for i in range(20)) + " |"
+    separator = "| " + " | ".join("---" for _ in range(20)) + " |"
+    row = "| " + " | ".join(str(i % 10) for i in range(20)) + " |"
+    md = "\n".join([header, separator, row, row, row])
+
+    result = compile_typst_booktabs(md, content_width_pt=200.0)
+
+    match = re.search(r"columns:\s*\(([^)]+)\)", result)
+    assert match is not None
+    widths = [float(w.strip().removesuffix("pt")) for w in match.group(1).split(",")]
+    assert sum(widths) <= 200.0, "a 12pt floor would lay 20 columns out 240pt wide"
+    assert min(widths) < 12.0
+
+
 def test_compile_typst_booktabs_stretch_compact() -> None:
     md = """
 | Col1 | Col2 |
@@ -255,12 +270,29 @@ def test_compile_typst_booktabs_cell_clipping_height_fit() -> None:
     md = "\n".join(
         ["| Index | Measurement |", "|---|---|"] + [f"| item_{i} | value_{i} |" for i in range(10)]
     )
-    result = compile_typst_booktabs(md, content_height_pt=50.0, base_font_size_pt=10.0)
+    result = compile_typst_booktabs(
+        md, content_height_pt=150.0, base_font_size_pt=10.0, require_fit=True
+    )
     assert result
     match = re.search(r"#set text\(size:\s*([\d\.]+)em", result)
     assert match is not None
     scale = float(match.group(1))
     assert scale < 1.0
+
+
+def test_compile_typst_booktabs_refuses_a_grid_that_cannot_fit() -> None:
+    md = "\n".join(
+        ["| Index | Measurement |", "|---|---|"] + [f"| item_{i} | value_{i} |" for i in range(10)]
+    )
+
+    result = compile_typst_booktabs(
+        md, content_height_pt=50.0, base_font_size_pt=10.0, require_fit=True
+    )
+
+    # Emitting the min-scale grid here would let the outer clip hide its last
+    # rows while their text stayed in the PDF text layer. The L1 caller
+    # preserves the source table instead.
+    assert result == ""
 
 
 def test_compile_typst_booktabs_math_and_breaks() -> None:
@@ -301,7 +333,9 @@ def test_compile_typst_booktabs_multiline_br_height_budget() -> None:
 | --- | --- |
 | Core | Task 1<br>Task 2<br>Task 3<br>Task 4 |
 """
-    result = compile_typst_booktabs(md, content_height_pt=30.0, base_font_size_pt=10.0)
+    result = compile_typst_booktabs(
+        md, content_height_pt=60.0, base_font_size_pt=10.0, require_fit=True
+    )
     assert result
     match = re.search(r"#set text\(size:\s*([\d\.]+)em", result)
     assert match is not None

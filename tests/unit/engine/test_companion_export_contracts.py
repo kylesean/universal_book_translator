@@ -131,7 +131,26 @@ def test_companion_artifact_result_and_summary_contract(tmp_path: Path) -> None:
     assert CompanionExportManifest is CompanionExportSummary
     kind: CompanionKind = "xliff"
     art_kind: ArtifactKind = kind
-    assert art_kind in ("xliff", "html", "epub", "attestation", "table_appendix", "spill_appendix")
+    assert art_kind in (
+        "xliff",
+        "html",
+        "epub",
+        "attestation",
+        "table_appendix",
+        "spill_appendix",
+        "reflow",
+        "complementary_pdf",
+    )
+
+
+def test_complementary_pdf_is_a_declared_companion_kind() -> None:
+    # ``_render_complementary_artifact`` records this kind; it must be part of
+    # the closed Literal so a misspelling is a type error, not a silent string.
+    from typing import get_args
+
+    assert "complementary_pdf" in get_args(CompanionKind)
+    result = CompanionArtifactResult(kind="complementary_pdf", status="generated")
+    assert result.kind == "complementary_pdf"
 
 
 def test_write_xliff_companion_contract(tmp_path: Path) -> None:

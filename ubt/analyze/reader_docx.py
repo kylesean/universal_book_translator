@@ -73,6 +73,21 @@ def _is_list_item(paragraph: DocxParagraph) -> bool:
     return ppr is not None and ppr.find(qn("w:numPr")) is not None
 
 
+def _docx_marked_text(paragraph: DocxParagraph) -> str:
+    """Flatten a DOCX paragraph's run formatting into the pipeline's markers."""
+    parts: list[str] = []
+    for run in getattr(paragraph, "runs", ()) or ():
+        text = str(getattr(run, "text", "") or "")
+        if not text:
+            continue
+        if bool(getattr(run, "bold", False)):
+            text = f"⟦B⟧{text}⟦/B⟧"
+        if bool(getattr(run, "italic", False)):
+            text = f"⟦I⟧{text}⟦/I⟧"
+        parts.append(text)
+    return "".join(parts) if parts else str(getattr(paragraph, "text", "") or "")
+
+
 def _image_assets(paragraph: DocxParagraph, document: _DocxDocument) -> list[str]:
     """Package part names of the images embedded in one paragraph."""
     assets: list[str] = []
@@ -161,7 +176,7 @@ def walk_docx_elements(
                     )
                 )
             continue
-        text = _clean(block.text)
+        text = _clean(_docx_marked_text(block))
         level = _heading_level(block)
         if level is not None and text:
             out.append(

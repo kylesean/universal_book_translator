@@ -105,6 +105,8 @@ export UBT_REPAIR_MODEL="gpt-4o"                # 二级审校修复模型（可
 
 > 💡 **提示**：UBT 内建 4 种底层线缆协议（`openai-chat`, `openai-responses`, `anthropic-messages`, `gemini-native`）。如需使用自建端点（如 vLLM、Ollama 或中转服务），可参考 [`ubt.toml.example`](ubt.toml.example) 在当前目录或 `~/.config/ubt/config.toml` 中声明 `[providers.<name>]` 配置块。
 
+> 🎛️ **质量与成本默认值**：`consistency_enforce=report`（零 token 报告全书术语漂移，不自动重译）；`c_text_enabled=true`（翻译公式内 `\text{}`，可用 `UBT_C_TEXT_ENABLED=false` 关闭）；`memory_sliding_window=false`（L3 保留最早 epoch 作为长程锚点，近期上下文由 L2 负责）；TM 精确命中按文档隔离，设置 `UBT_TM_CROSS_BOOK=true` 才会跨书复用机器命中。语义 judge 仍为显式 opt-in（`UBT_QE_JUDGE_ENABLED=true`）；报告会明确区分“未测量”和“已测量”。
+
 ---
 
 ### 2. CLI 命令行使用

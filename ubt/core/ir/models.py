@@ -381,6 +381,12 @@ class IRBlock(BaseModel):
     tm_hit: bool = False
     glossary_hits: list[str] = Field(default_factory=list)  # Matched glossary terms
     mtqe_score: float | None = None  # Quality metric score (0.00 ~ 1.00)
+    #: Which engine produced ``mtqe_score``. ``"heuristic"`` is a discrete
+    #: defect-class band, not a measurement, and must never be aggregated as
+    #: one. ``"tm"`` is the exact-hit pass stamp. Calibrated runners write
+    #: ``"llm_judge"`` / ``"tiered"``. ``None`` is a legacy row (treated as a
+    #: measurement for backward compatibility).
+    mtqe_score_source: str | None = None
     repair_rounds: int = 0  # Completed targeted repair iterations (max 2)
     error_flags: list[str] = Field(default_factory=list)  # e.g., ["math_token_corrupt"]
 

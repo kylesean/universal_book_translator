@@ -180,6 +180,31 @@ def test_the_expected_structure_is_present(
         assert counts.get(kind, 0) >= minimum, f"{name}: expected >= {minimum} {kind}"
 
 
+def test_html_inline_emphasis_uses_the_pipeline_markers(tmp_path: Path) -> None:
+    document = read_html(_build_html(tmp_path))
+    paragraph = next(e for e in document.elements if e.kind.value == "paragraph")
+    assert "⟦B⟧world⟦/B⟧" in getattr(paragraph, "text", "")
+
+
+def test_docx_inline_emphasis_uses_the_pipeline_markers(tmp_path: Path) -> None:
+    from docx import Document as DocxDocument
+
+    path = tmp_path / "emphasis.docx"
+    doc = DocxDocument()
+    paragraph = doc.add_paragraph()
+    paragraph.add_run("plain ")
+    bold = paragraph.add_run("bold")
+    bold.bold = True
+    italic = paragraph.add_run(" italic")
+    italic.italic = True
+    doc.save(str(path))
+
+    document = read_docx(path)
+    text = getattr(next(e for e in document.elements if e.kind.value == "paragraph"), "text", "")
+    assert "⟦B⟧bold⟦/B⟧" in text
+    assert "⟦I⟧ italic⟦/I⟧" in text
+
+
 def test_docx_vertically_merged_cell_is_emitted_once(tmp_path: Path) -> None:
     from docx import Document as DocxDocument
 

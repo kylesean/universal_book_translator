@@ -13,9 +13,11 @@ from ubt.core.memory.scoped_glossary import (
     ScopeLevel,
     arbitrate_competing_entries,
     audit_glossary_conflicts,
+    glossary_has_block_scope,
     matches_scope,
     parse_scope_spec,
     resolve_effective_glossary,
+    scope_context_for_block,
     score_context_affinity,
 )
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
@@ -43,6 +45,71 @@ def test_parse_scope_spec() -> None:
 
     assert parse_scope_spec("domain:hardware") == (ScopeLevel.DOMAIN, "hardware")
     assert parse_scope_spec("dom:psychology") == (ScopeLevel.DOMAIN, "psychology")
+
+
+def test_glossary_has_block_scope_accepts_both_parser_aliases() -> None:
+    assert glossary_has_block_scope([{"source": "x", "scope": "block:12"}])
+    assert glossary_has_block_scope([{"source": "x", "scope": "blk:12"}])
+    assert not glossary_has_block_scope([{"source": "x", "scope": "chapter:2"}])
+
+
+def test_scope_context_does_not_guess_a_chapter_from_arbitrary_digits() -> None:
+    from types import SimpleNamespace
+
+    pdf = scope_context_for_block(SimpleNamespace(id="pdf_main#b0308"))
+    assert pdf.chapter_index is None
+    assert pdf.chapter_title is None
+
+    namespace = scope_context_for_block(SimpleNamespace(id="pdf_main2#b0001"))
+    assert namespace.chapter_index is None
+    assert namespace.chapter_title is None
+
+    bare = scope_context_for_block(SimpleNamespace(id="b0308"))
+    assert bare.chapter_index is None
+
+    chapter = scope_context_for_block(SimpleNamespace(id="ch_002#b0007"))
+    assert chapter.chapter_index == 2
+
+    from ubt.core.memory.scoped_glossary import chapter_index_from_id
+
+    assert chapter_index_from_id("ch_002") == 2
+    assert chapter_index_from_id("chapter-7") == 7
+    assert chapter_index_from_id("c0003") == 3
+    assert chapter_index_from_id("pdf_main") is None
+    assert chapter_index_from_id("pdf_main2") is None
+    assert chapter_index_from_id("b0308") is None
+
+    explicit = scope_context_for_block(
+        SimpleNamespace(id="pdf_main#b0308"),
+        chapter_index=4,
+        chapter_title="Operating Systems",
+    )
+    assert explicit.chapter_index == 4
+    assert explicit.chapter_title == "Operating Systems"
+
+
+def test_prompt_global_table_excludes_scoped_entries() -> None:
+    entries = [
+        {"source": "Transformer", "translation": "变换器", "scope": "chapter:2"},
+        {"source": "Transformer", "translation": "转换器", "scope": "chapter:5"},
+    ]
+
+    assert build_global_glossary_table(entries, 80, include_scoped=False) == ""
+    # The TM fingerprint keeps seeing both, so a scoped-entry change still
+    # invalidates cached translations.
+    assert build_global_glossary_table(entries, 80).count("Transformer") == 2
+
+
+def test_prompt_global_table_prefers_the_global_rendering() -> None:
+    entries = [
+        {"source": "Transformer", "translation": "变换器", "scope": "*"},
+        {"source": "Transformer", "translation": "转换器", "scope": "chapter:5"},
+    ]
+
+    table = build_global_glossary_table(entries, 80, include_scoped=False)
+
+    assert "变换器" in table
+    assert "转换器" not in table
 
 
 def test_matches_scope() -> None:

@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import functools
 import json
 import logging
 import random
 import re
 from collections.abc import AsyncGenerator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ubt.core import ports
@@ -38,6 +37,7 @@ from ubt.core.memory.abbreviation_miner import format_abbreviations_markdown_tab
 from ubt.core.memory.glossary_table import (
     build_chunk_glossary_table,
     build_global_glossary_table,
+    merge_glossary_tables,
 )
 from ubt.core.memory.hierarchical_memory import (
     DEFAULT_MAX_EPOCHS,
@@ -57,6 +57,7 @@ from ubt.core.qe.defect_taxonomy import (
 )
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.qe.heuristic import glossary_violation_flag
+from ubt.core.router.capabilities import PromptStrategy
 from ubt.core.router.router import (
     ModelRouter,
     classify_provider_error,
@@ -134,6 +135,14 @@ class _DraftInputs:
     neighbor_ctx: str
     macro_ctx: str
     few_shot_reference: str
+    #: Local-only table for a macro chunk: the global sheet already travels in
+    #: the system prompt, so re-selecting its top-N into every block table only
+    #: duplicated rows and consumed the chunk's terminology budget.
+    macro_glossary_table: str = ""
+    #: The block's resolved coreference hints. Kept apart from ``neighbor_ctx``
+    #: because the macro-chunk combiner only extracts the tagged read-only
+    #: regions and silently drops an untagged hint.
+    coref_hint: str = ""
     epoch_ctx: str = ""
     soup_map: Any = None
     email_map: Any = None
@@ -363,6 +372,28 @@ def _paid_block_ids(blocks: Sequence[IRBlock]) -> set[str]:
     }
 
 
+def _macro_alignment_suspect(block: IRBlock, target_text: str) -> bool:
+    """A cheap gross-misalignment guard for one block in a multi-block response.
+
+    The XML id is the only alignment contract. A model that swaps two blocks
+    with very different lengths produces a target that is implausible for its
+    source; FastPass would eventually see the same length band, but flagging it
+    at extraction keeps the block out of memory/cache and sends it straight to
+    repair. Equal-length swaps remain a known residual risk — no deterministic
+    check can see them without a semantic judge.
+    """
+    if block.block_type in (BlockType.HEADING, BlockType.TABLE, BlockType.FORMULA):
+        # A heading legitimately contracts to two characters; a table cell can
+        # be a label. The guard is for prose blocks, not normal short forms.
+        return False
+    source = (block.source_text or "").strip()
+    target = (target_text or "").strip()
+    if not source or not target:
+        return False
+    ratio = len(target) / max(1, len(source))
+    return ratio < 0.08 or ratio > 8.0
+
+
 def _draft_failure_prefix(exc: BaseException) -> str:
     """Choose the resume marker for a failed provider call.
 
@@ -392,13 +423,47 @@ class _DraftProcessor:
 
     runtime: DraftRuntime
     policy: DraftPolicy
+    _validator_cache: dict[str, GlossaryConsistencyValidator] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    #: The streaming chapter this processor was built for, when one exists.
+    #: ``None`` on the single-pass path; the block id may still carry a
+    #: recognised ``ch_002`` namespace and is read in that case.
+    chapter_index: int | None = None
 
-    @functools.cached_property
-    def glossary_validator(self) -> GlossaryConsistencyValidator | None:
-        """Built once per run: the constructor sorts the whole glossary."""
+    def glossary_validator_for(
+        self, block: IRBlock, chapter_id: str | None
+    ) -> GlossaryConsistencyValidator | None:
+        """The validator for this block's *arbitrated* glossary.
+
+        A single run-wide validator used the unarbitrated list, so a term with
+        a global and a chapter-scoped rendering produced two findings: the
+        correct rendering looked like drift against the other entry. Caching by
+        chapter keeps the sort cost bounded while still applying the scope that
+        actually exists at draft time.
+        """
         if not self.policy.glossary_dicts:
             return None
-        return GlossaryConsistencyValidator(glossary=self.policy.glossary_dicts)
+        from ubt.core.memory.scoped_glossary import glossary_has_block_scope
+
+        key = (
+            block.id if glossary_has_block_scope(self.policy.glossary_dicts) else (chapter_id or "")
+        )
+        cached = self._validator_cache.get(key)
+        if cached is not None:
+            return cached
+        from ubt.core.memory.scoped_glossary import (
+            resolve_effective_glossary,
+            scope_context_for_block,
+        )
+
+        effective = resolve_effective_glossary(
+            self.policy.glossary_dicts,
+            scope_context_for_block(block, domain=self.policy.domain or None),
+        )
+        validator = GlossaryConsistencyValidator(glossary=effective)
+        self._validator_cache[key] = validator
+        return validator
 
     def chunk_context(
         self, chunk: list[tuple[IRBlock, _DraftInputs]], section_context: str = ""
@@ -414,11 +479,15 @@ class _DraftProcessor:
         from ubt.cache.store import step_key
         from ubt.core.router.prompts import build_macro_chunk_draft_prompt
 
-        merged_glossary = "\n\n".join(
-            filter(None, dict.fromkeys(inp.glossary_table.strip() for _, inp in chunk))
+        merged_glossary = merge_glossary_tables(
+            [inp.macro_glossary_table or inp.glossary_table for _, inp in chunk]
         )
         first_inp = chunk[0][1]
         last_inp = chunk[-1][1]
+        block_contexts = [
+            (block.id, inp.coref_hint) for block, inp in chunk if inp.coref_hint.strip()
+        ]
+        block_types = [(block.id, str(block.block_type)) for block, _ in chunk]
         from ubt.core.memory.neighbor_window import NeighborContextBuilder
 
         chunk_neighbor_ctx = NeighborContextBuilder.combine_chunk_neighbor_contexts(
@@ -437,6 +506,8 @@ class _DraftProcessor:
             epoch_summary=first_inp.epoch_ctx,
             domain=self.policy.domain,
             section_context=section_context,
+            block_contexts=block_contexts,
+            block_types=block_types,
         )
         return step_key(
             "macro_chunk_prompt",
@@ -495,6 +566,23 @@ class _DraftProcessor:
                 inputs.block_type,
             ],
             {},
+        )
+
+    def _scope_context(self, block: IRBlock) -> Any:
+        """The block's terminology scope, so scoped entries are arbitrated.
+
+        Without this the chunk table was the *unarbitrated* glossary: a term
+        with a global and a chapter-specific rendering emitted both rows, and
+        the model had to guess. The context is best-effort: the block id
+        carries a chapter index only for a recognised ``ch_002``-style
+        namespace, and a PDF's ``pdf_main`` deliberately stays chapter-less.
+        """
+        from ubt.core.memory.scoped_glossary import scope_context_for_block
+
+        return scope_context_for_block(
+            block,
+            domain=self.policy.domain or None,
+            chapter_index=self.chapter_index,
         )
 
     async def prepare_draft_inputs(
@@ -556,14 +644,15 @@ class _DraftProcessor:
                     # stamped 1.0/MTQE_PASSED unseen. A violation falls through
                     # to the LLM instead.
                     violation = None
-                    if self.glossary_validator is not None:
+                    validator = self.glossary_validator_for(block, extract_chapter_id(block.id))
+                    if validator is not None:
                         # Off the loop, like the FastPass check above: this walks
                         # the whole glossary against the block text.
                         violation = await asyncio.to_thread(
                             glossary_violation_flag,
                             block.source_text,
                             exact_hit.target_text,
-                            self.glossary_validator,
+                            validator,
                         )
                     if violation is not None:
                         logger.warning(
@@ -574,8 +663,12 @@ class _DraftProcessor:
                         )
                     else:
                         # Restore the emphasis the entry stored, so a TM hit keeps
-                        # the bold without a model call.
-                        tm_runs = runs_from_json(exact_hit.runs_json)
+                        # the bold without a model call. Run the same marker
+                        # codec as the live draft first: an entry written before
+                        # the ``⟦B⟧`` transcription fix (or by a non-draft path)
+                        # can still carry ``\llbracket`` in its target text.
+                        clean_hit_text, parsed_runs = parse_emphasis(exact_hit.target_text)
+                        tm_runs = runs_from_json(exact_hit.runs_json) or parsed_runs
                         style = (
                             (block.style or StyleMeta()).model_copy(update={"target_runs": tm_runs})
                             if tm_runs or block.style is not None
@@ -583,10 +676,14 @@ class _DraftProcessor:
                         )
                         update = {
                             "block_id": block.id,
-                            "target_text": exact_hit.target_text,
-                            "draft_text": exact_hit.target_text,
-                            "status": BlockStatus.MTQE_PASSED,
-                            "mtqe_score": 1.0,
+                            "target_text": clean_hit_text,
+                            "draft_text": clean_hit_text,
+                            # Route the hit through the quality gate instead of
+                            # stamping it MTQE_PASSED here. It still costs no
+                            # model call (FastPass/glossary are zero-token), but
+                            # it is no longer invisible to pass-sample/judge
+                            # auditing or to a later gate tightening.
+                            "status": BlockStatus.DRAFTED,
                             "tm_hit": True,
                             "style": style,
                         }
@@ -613,8 +710,23 @@ class _DraftProcessor:
                 # on a polarity cue, so an inverted neighbour is never shown.
                 few_shot_reference = format_few_shot_reference(fuzzy_hit, block.source_text)
 
+        current_ch = extract_chapter_id(block.id)
         glossary_table = build_chunk_glossary_table(
-            self.policy.glossary_dicts, self.policy.abbreviation_entries, block.source_text
+            self.policy.glossary_dicts,
+            self.policy.abbreviation_entries,
+            block.source_text,
+            context=self._scope_context(block),
+        )
+        # The global sheet is injected separately into the system prompt. A
+        # macro chunk therefore wants only this block's local hits; re-adding
+        # the global top-N here is what made a chunk carry the same rows once
+        # per block.
+        macro_glossary_table = build_chunk_glossary_table(
+            self.policy.glossary_dicts,
+            self.policy.abbreviation_entries,
+            block.source_text,
+            context=self._scope_context(block),
+            include_global_topup=False,
         )
 
         fallback_prev: str | None = None
@@ -631,7 +743,6 @@ class _DraftProcessor:
             )
 
         fallback_next: str | None = None
-        current_ch = extract_chapter_id(block.id)
         if current_batch and block.id == current_batch[-1].id:
             fallback_next = (
                 await asyncio.to_thread(
@@ -698,6 +809,8 @@ class _DraftProcessor:
             soup_map=masked.soup_map,
             email_map=masked.email_map,
             glossary_table=glossary_table,
+            macro_glossary_table=macro_glossary_table,
+            coref_hint=coref_hint,
             neighbor_ctx=neighbor_ctx,
             macro_ctx=macro_ctx,
             epoch_ctx=epoch_ctx,
@@ -856,6 +969,7 @@ class _DraftProcessor:
                 "target_text": block.source_text,
                 "status": BlockStatus.MTQE_PASSED,
                 "mtqe_score": 1.0,
+                "mtqe_score_source": "skip",
             }
             await self.runtime.flusher.enqueue(skip_update)
             return
@@ -1018,18 +1132,40 @@ class _DraftProcessor:
             await self.draft_single_block(block, current_batch, inp)
             return
 
+        # The macro prompt is a *rich* prompt product. A model declared
+        # minimal/hybrid was still receiving it because this method bypassed
+        # ModelProfile.prompt_strategy entirely, which both violated the
+        # capability declaration and made a weak model more likely to fail the
+        # XML envelope. Single-block drafting is the correct fallback for a
+        # model that cannot take the richer instruction set.
+        strategy_fn = getattr(self.runtime.router, "prompt_strategy_for", None)
+        strategy = strategy_fn() if callable(strategy_fn) else PromptStrategy.RICH
+        if strategy is PromptStrategy.MINIMAL:
+            logger.info(
+                "Macro chunk of %d block(s) falls back to single-block drafting: "
+                "model prompt_strategy=minimal cannot take the structured macro prompt",
+                len(chunk),
+            )
+            for block, inp in chunk:
+                await self.draft_single_block(block, current_batch, inp)
+            return
+
         # Chunk-level prompt inputs, computed once so the cache key and the call
         # cannot drift. Order-preserving dedup: a set of strings iterates in
         # hash-seed order, so a plain set would give the same book a differently
         # ordered term table (and therefore a different prompt) on every run.
-        merged_glossary = "\n\n".join(
-            filter(None, dict.fromkeys(inp.glossary_table.strip() for _, inp in chunk))
+        merged_glossary = merge_glossary_tables(
+            [inp.macro_glossary_table or inp.glossary_table for _, inp in chunk]
         )
         first_inp = chunk[0][1]
         last_inp = chunk[-1][1]
         macro_ctx = first_inp.macro_ctx
         epoch_ctx = first_inp.epoch_ctx
         few_shot = first_inp.few_shot_reference or last_inp.few_shot_reference
+        block_contexts = [
+            (block.id, inp.coref_hint) for block, inp in chunk if inp.coref_hint.strip()
+        ]
+        block_types = [(block.id, str(block.block_type)) for block, _ in chunk]
 
         extracted_by_id: dict[str, str] = {}
         cached_context: str | None = None
@@ -1106,6 +1242,8 @@ class _DraftProcessor:
                                 global_glossary=self.policy.global_glossary_table,
                                 few_shot_reference=few_shot,
                                 section_context=section_context,
+                                block_contexts=block_contexts,
+                                block_types=block_types,
                                 model=current_chunk_model,
                             )
                             break
@@ -1162,6 +1300,11 @@ class _DraftProcessor:
                 # including blocks already drafted and paid for — and the resume
                 # path then cleared their target text and re-billed them.
                 try:
+                    if _macro_alignment_suspect(b, text):
+                        b.error_flags.append(
+                            "macro_alignment:major:target/source length ratio is implausible "
+                            "for this block; the multi-block response may have shifted ids"
+                        )
                     clean = await self.finalize_draft(b, text.strip(), inp)
                     clean_by_id[b.id] = clean
                     if not clean:
@@ -1424,7 +1567,10 @@ class _DraftAssembly:
 
 
 async def _build_draft_runtime(
-    ctx: StageContext, services: RunServices, terminology: Terminology
+    ctx: StageContext,
+    services: RunServices,
+    terminology: Terminology,
+    chapter_id: str | None = None,
 ) -> _DraftAssembly:
     """Assemble the draft stage's collaborators: cache, engine, memory, flusher, policy.
 
@@ -1486,10 +1632,12 @@ async def _build_draft_runtime(
         # calls for summaries the policy then refuses to inject.
         enabled=rolling_enabled,
         max_epochs=getattr(config, "memory_max_epochs", DEFAULT_MAX_EPOCHS),
-        sliding_window=getattr(config, "memory_sliding_window", True),
+        sliding_window=getattr(config, "memory_sliding_window", False),
     )
     global_glossary_table = build_global_glossary_table(
-        glossary_dicts or [], config.glossary_max_global_entries
+        glossary_dicts or [],
+        config.glossary_max_global_entries,
+        include_scoped=False,
     )
     dropped_global = max(0, len(glossary_dicts or []) - config.glossary_max_global_entries)
     if dropped_global:
@@ -1549,6 +1697,7 @@ async def _build_draft_runtime(
         target_lang,
         format_abbreviations_markdown_table(abbreviation_entries),
         model=router.draft_model,
+        doc_id="" if getattr(config, "tm_cross_book", False) else ctx.manifest.doc_id,
     )
 
     flusher = CheckpointBatchFlusher(
@@ -1582,6 +1731,8 @@ async def _build_draft_runtime(
             flagship_model=flagship_m,
         )
 
+    from ubt.core.memory.scoped_glossary import chapter_index_from_id
+
     processor = _DraftProcessor(
         runtime=DraftRuntime(
             ledger=ledger,
@@ -1612,6 +1763,7 @@ async def _build_draft_runtime(
             dynamic_routing_enabled=bool(dynamic_scheduler is not None),
             dynamic_scheduler=dynamic_scheduler,
         ),
+        chapter_index=chapter_index_from_id(chapter_id),
     )
     return _DraftAssembly(
         processor=processor,
@@ -1634,7 +1786,7 @@ async def run_draft_stage(
     chapter_id: str | None = None,
 ) -> AsyncGenerator[TranslationProgressEvent, None]:
     """Execute streaming drafted translation across keyset pagination batches."""
-    assembly = await _build_draft_runtime(ctx, services, terminology)
+    assembly = await _build_draft_runtime(ctx, services, terminology, chapter_id)
     processor = assembly.processor
     flusher = assembly.flusher
     memory_mgr = assembly.memory_mgr

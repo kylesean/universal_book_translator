@@ -144,6 +144,7 @@ def _context(**overrides: str) -> str:
         "tgt_lang": "zh",
         "abbreviation_table": "",
         "model": "draft-model-a",
+        "doc_id": "",
     }
     parts.update(overrides)
     return compute_tm_context(**parts)
@@ -166,6 +167,7 @@ def test_context_is_deterministic_and_32_hex_chars() -> None:
         "tgt_lang",
         "abbreviation_table",
         "model",
+        "doc_id",
     ],
 )
 def test_every_prompt_visible_part_changes_the_context(field: str) -> None:
@@ -174,6 +176,10 @@ def test_every_prompt_visible_part_changes_the_context(field: str) -> None:
 
 def test_a_different_draft_model_does_not_share_identity() -> None:
     assert _context(model="draft-model-b") != _context(model="draft-model-a")
+
+
+def test_a_different_book_does_not_share_an_exact_hit_context() -> None:
+    assert _context(doc_id="book-a") != _context(doc_id="book-b")
 
 
 def test_normalize_collapses_whitespace_and_strips() -> None:

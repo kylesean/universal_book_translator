@@ -825,6 +825,23 @@ def test_a_rendered_table_carries_no_inserted_break_characters() -> None:
     assert "MmioAddr::new(base,len)" in out
 
 
+def test_a_table_that_cannot_fit_its_box_is_refused_when_fit_is_required() -> None:
+    from ubt.render.typst.document_renderer import render_table
+
+    markup = "\n".join(
+        ["| Index | Measurement |", "|---|---|"] + [f"| item_{i} | value_{i} |" for i in range(10)]
+    )
+
+    out = render_table(
+        markup,
+        content_height_pt=30.0,
+        base_font_size_pt=10.0,
+        require_fit=True,
+    )
+
+    assert out == ""
+
+
 def test_a_table_with_a_wide_unbreakable_run_is_typeset_smaller() -> None:
     from ubt.render.typst.document_renderer import _TABLE_TEXT_SCALE, render_table
 

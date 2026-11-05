@@ -9,9 +9,15 @@ Schema policy: a **single flat baseline**. The historical 14-step incremental
 migration ladder (v2..v14) was collapsed into one authoritative
 ``_SCHEMA_SQL`` that creates the final shape directly, with the composite
 ``(job_id, block_id)`` primary key and no dead columns. A database written by
-an older build (``user_version`` below :data:`SCHEMA_VERSION`) is not migrated
+an older build (``user_version`` below :data:`SCHEMA_VERSION`) is not rewritten
 in place: it is refused with instructions, because silently rewriting a
 half-migrated legacy file is the exact data-loss shape the ladder used to risk.
+
+Additive, nullable changes are the one exception: a new nullable column or a
+new ``CREATE TABLE IF NOT EXISTS`` touches no existing row, so it is applied in
+place on open (see ``_ensure_additive_block_columns`` and
+``_ensure_page_geometry_table``). That keeps paid translations readable across
+a minor schema addition without reopening the destructive-migration risk.
 """
 
 import json
@@ -50,8 +56,9 @@ from ubt.model.span import CompositeSpan, boxes_from_provenance
 #: fresh/legacy discrimination unambiguous.
 SCHEMA_VERSION = 1000
 
-#: The authoritative schema. Fresh databases are created from this directly;
-#: it is the *only* definition of the tables (no incremental ALTERs).
+#: The authoritative schema. Fresh databases are created from this directly.
+#: There is no destructive migration ladder; only additive nullable columns and
+#: ``CREATE TABLE IF NOT EXISTS`` are applied to an already-current ledger.
 _SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS job_meta (
         job_id TEXT PRIMARY KEY,
@@ -80,6 +87,7 @@ _SCHEMA_SQL = """
         skip_translate INTEGER DEFAULT 0,
         glossary_hits_json TEXT,
         mtqe_score REAL,
+        mtqe_score_source TEXT DEFAULT NULL,
         repair_rounds INTEGER DEFAULT 0,
         error_flags_json TEXT,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -210,6 +218,7 @@ _REQUIRED_BLOCK_COLUMNS = frozenset(
         "tm_hit",
         "glossary_hits_json",
         "mtqe_score",
+        "mtqe_score_source",
         "repair_rounds",
         "error_flags_json",
         "mqm_severity",
@@ -281,6 +290,7 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
             1 if b.skip_translate else 0,
             json.dumps(b.glossary_hits, ensure_ascii=False),
             b.mtqe_score,
+            b.mtqe_score_source,
             b.repair_rounds,
             json.dumps(b.error_flags, ensure_ascii=False),
             b.region.value if b.region else None,
@@ -312,14 +322,14 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
             block_id, job_id, flow_id, spine_index, block_type,
             bbox_json, style_json, source_text, draft_text, target_text,
             status, skip_translate, glossary_hits_json, mtqe_score,
-            repair_rounds, error_flags_json,
+            mtqe_score_source, repair_rounds, error_flags_json,
             layout_role,
             policy_translate, policy_reason, provenance_json,
             mqm_severity, mqm_spans_json,
             level, marker, confidence, decorative,
             span_chars_json,
             updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(job_id, block_id) DO UPDATE SET
             flow_id = excluded.flow_id,
             spine_index = excluded.spine_index,
@@ -359,6 +369,11 @@ def _upsert_blocks_batch(cursor: sqlite3.Cursor, job_id: str, blocks: Sequence[I
                 WHEN excluded.skip_translate = 0 AND blocks.skip_translate = 1
                 THEN NULL
                 ELSE blocks.mtqe_score
+            END,
+            mtqe_score_source = CASE
+                WHEN excluded.skip_translate = 0 AND blocks.skip_translate = 1
+                THEN NULL
+                ELSE COALESCE(excluded.mtqe_score_source, blocks.mtqe_score_source)
             END,
             error_flags_json = CASE
                 WHEN excluded.skip_translate = 0 AND blocks.skip_translate = 1
@@ -437,6 +452,11 @@ class LedgerBase:
         # across jobs, so an unscoped write on a multi-job file could hit the
         # wrong job's row.
         self._job_scope: str | None = None
+        #: Set by the pipeline after acquiring its :class:`LedgerWriterLock`.
+        #: Mutating methods that can outlive the render call consult it so a
+        #: reclaimed lease stops the write instead of stamping the new owner's
+        #: ledger. ``None`` for read-only/standalone ledgers and tests.
+        self._writer_lock: Any | None = None
         self._init_connection()
         if not read_only:
             self._init_db_with_migrations()
@@ -584,6 +604,23 @@ class LedgerBase:
         # it themselves, exactly as they do on the writer connection.
         yield cached
 
+    def bind_writer_lock(self, lock: Any) -> None:
+        """Attach the process's writer lease so late writes can verify ownership."""
+        self._writer_lock = lock
+
+    def assert_writer_owner(self) -> None:
+        """Raise if the attached writer lease was reclaimed.
+
+        A no-op on an unbound ledger (read-only surfaces, unit tests and
+        standalone tools that never claim a lease). The pipeline binds its lock
+        immediately after acquisition; the check runs before the writes that
+        can happen long after the last render, where a stale process could
+        otherwise overwrite a successor's checkpoints or finalize its job.
+        """
+        lock = self._writer_lock
+        if lock is not None:
+            lock.assert_owned()
+
     def close(self) -> None:
         """Close the underlying persistent connection (idempotent).
 
@@ -636,6 +673,9 @@ class LedgerBase:
             if current_version == SCHEMA_VERSION:
                 # Already at the flat baseline; verify the columns are actually
                 # present (a version stamp is not evidence the schema is right).
+                # Additive nullable columns are safe to add in place: they touch
+                # no row, and old ledgers keep their paid translations.
+                self._ensure_additive_block_columns(conn)
                 self._verify_block_columns(conn, current_version)
                 # An additive table the baseline gained *without* a version bump:
                 # a ledger written before it existed gains it here, in place, with
@@ -683,8 +723,24 @@ class LedgerBase:
                     },
                 )
 
+            self._ensure_additive_block_columns(conn)
             self._verify_block_columns(conn, SCHEMA_VERSION)
             self._ensure_page_geometry_table(conn)
+
+    def _ensure_additive_block_columns(self, conn: sqlite3.Connection) -> None:
+        """Add nullable block columns introduced after the baseline in place.
+
+        A nullable ``ALTER TABLE ADD COLUMN`` is the same safe shape as the
+        additive ``page_geometry`` table: it touches no existing row and does
+        not rewrite the ledger. It is therefore not the in-place migration the
+        schema policy forbids. Required columns are still verified afterwards,
+        so a genuinely malformed file is refused.
+        """
+        columns = {
+            str(row["name"]) for row in conn.execute("PRAGMA table_info(blocks);").fetchall()
+        }
+        if "mtqe_score_source" not in columns:
+            conn.execute("ALTER TABLE blocks ADD COLUMN mtqe_score_source TEXT DEFAULT NULL")
 
     def _ensure_page_geometry_table(self, conn: sqlite3.Connection) -> None:
         """Create ``page_geometry`` if absent, and verify its shape.
@@ -867,6 +923,7 @@ class LedgerBase:
             tm_hit=bool(row["tm_hit"]),
             glossary_hits=glossary_hits,
             mtqe_score=row["mtqe_score"],
+            mtqe_score_source=row["mtqe_score_source"],
             repair_rounds=row["repair_rounds"],
             error_flags=error_flags,
             mqm_severity=row["mqm_severity"],

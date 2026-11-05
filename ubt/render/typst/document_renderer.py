@@ -886,6 +886,7 @@ def render_table(
     span_full_width: bool = False,
     full_page_width_pt: float | None = None,
     stretch_pct: float = 100.0,
+    require_fit: bool = False,
 ) -> str:
     """Render a Markdown table as a Typst ``#table`` with a three-line frame.
 
@@ -901,6 +902,11 @@ def render_table(
     element). The caller needs it to tell a table set at a comfortable size from
     one squashed onto the 0.60 floor, which is the only thing that can emit the
     ``low_legibility_font`` render-quality flag.
+
+    ``require_fit`` is for a fixed box: when the grid still exceeds
+    ``content_height_pt`` at the minimum legible scale, return an empty string
+    instead of emitting rows the outer clip will hide while their text remains
+    in the PDF text layer. The L1 canvas then preserves the source table.
     """
     parsed = parse_markdown_table(markup, escape=False)
     if parsed is None:
@@ -1376,6 +1382,8 @@ def render_table(
 
         inset_y_pt = round(pad_y, 1)
         inset_x_pt = round(min(5.0, max(2.0, 5.0 * fitted)), 1)
+        if require_fit and _natural_height(fitted, pad_y) > content_height_pt + 0.5:
+            return ""
         if fitted < emitted_scale:
             emitted_scale = fitted
             # The width path's ``shrink`` was decided before the budget ran; a

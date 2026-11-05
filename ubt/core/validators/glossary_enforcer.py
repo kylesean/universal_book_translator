@@ -311,6 +311,11 @@ class DeterministicGlossaryEnforcer:
             ctx = ScopeContext()
 
         effective_glossary = resolve_effective_glossary(glossary, ctx)
+        # Keep both views: ``source_glossary`` lets a per-chapter caller
+        # re-arbitrate with a real ScopeContext instead of the default empty
+        # one; ``glossary`` is the already-resolved list.
+        self.source_glossary = list(glossary)
+        self.glossary = effective_glossary
         self._compile_glossary(effective_glossary)
         #: Approved target forms that *contain* a rule pattern as a proper
         #: substring (``深度学习`` contains the alias ``学习``). A rule match

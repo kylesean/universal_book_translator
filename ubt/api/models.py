@@ -683,6 +683,8 @@ class SegmentItem(BaseModel):
     page: int | None = None
     block_type: str
     status: str
+    skip_translate: bool = False
+    policy_reason: str | None = None
     source_text: str
     target_text: str
     delivered_text: str = ""
@@ -690,6 +692,7 @@ class SegmentItem(BaseModel):
     repair_error: str | None = None
     quarantined: bool = False
     mtqe_score: float | None = None
+    mtqe_score_source: str | None = None
     error_flags: list[str] = Field(default_factory=list)
     issues: list[str] = Field(default_factory=list)
     human_verified: bool = False

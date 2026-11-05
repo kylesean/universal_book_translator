@@ -75,6 +75,62 @@ def _patch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake: _FakeTypst) ->
     monkeypatch.setattr("ubt.adapters.pdf.typst_compile.typst_compile", fake)
 
 
+class _ModeCapturingAdapter:
+    engine_name = "fake"
+
+    def __init__(self) -> None:
+        self.bilingual_modes: list[str | None] = []
+
+    async def render_blocks(self, **kwargs: Any) -> None:
+        self.bilingual_modes.append(kwargs.get("bilingual_mode"))
+        Path(kwargs["output_path"]).write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+
+def test_preflight_translates_the_advisor_mode_to_the_adapter_value(
+    tmp_path: Path,
+) -> None:
+    from ubt.core.ir.render_plan import RenderPlan
+
+    adapter = _ModeCapturingAdapter()
+    _source, manifest, blocks = _setup(tmp_path)
+
+    asyncio.run(
+        run_render_preflight(
+            adapter=adapter,  # type: ignore[arg-type]
+            manifest=manifest,
+            blocks=blocks,
+            target_lang="zh",
+            render_plan=RenderPlan(effective_dual_mode="dual"),
+        )
+    )
+
+    assert adapter.bilingual_modes == ["bilingual"]
+
+
+def test_preflight_prefers_the_render_plans_adapter_domain_mode(
+    tmp_path: Path,
+) -> None:
+    from ubt.core.ir.render_plan import RenderPlan
+
+    adapter = _ModeCapturingAdapter()
+    _source, manifest, blocks = _setup(tmp_path)
+
+    asyncio.run(
+        run_render_preflight(
+            adapter=adapter,  # type: ignore[arg-type]
+            manifest=manifest,
+            blocks=blocks,
+            target_lang="zh",
+            render_plan=RenderPlan(bilingual_mode="monolingual", effective_dual_mode="dual"),
+        )
+    )
+
+    # Export reads ``render.bilingual_mode``; the rehearsal must not take the
+    # bilingual branch the advisor's value would imply when a downgrade was
+    # already recorded in the adapter field.
+    assert adapter.bilingual_modes == ["monolingual"]
+
+
 def test_preflight_really_invokes_the_typesetter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

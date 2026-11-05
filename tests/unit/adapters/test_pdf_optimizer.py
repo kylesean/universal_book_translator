@@ -128,6 +128,27 @@ def test_verify_pdf_fidelity_detects_page_count_mismatch(tmp_path: Path) -> None
     assert "Page count mismatch" in reason
 
 
+def test_verify_pdf_fidelity_rejects_a_candidate_it_could_not_compare(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pypdfium2
+
+    pdf1 = _create_minimal_pdf(tmp_path / "p1", num_pages=2)
+    pdf2 = _create_minimal_pdf(tmp_path / "p2", num_pages=2)
+
+    def _explode(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("pdfium failed to open the text layer")
+
+    monkeypatch.setattr(pypdfium2, "PdfDocument", _explode)
+
+    valid, reason = verify_pdf_fidelity(pdf1, pdf2)
+
+    # Structure matched, but an unverified text layer must not pass the gate.
+    assert not valid
+    assert "Fidelity text check failed" in reason
+    assert "pdfium failed" in reason
+
+
 def test_verify_pdf_fidelity_passes_on_identical(tmp_path: Path) -> None:
     pdf1 = _create_minimal_pdf(tmp_path / "p1", num_pages=2)
     pdf2 = _create_minimal_pdf(tmp_path / "p2", num_pages=2)

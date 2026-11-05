@@ -10,6 +10,7 @@ from ubt.core.engine.stage_context import StageContext, check_stage_cancelled
 from ubt.core.exceptions import MTQEEvaluationError
 from ubt.core.ir.models import BlockStatus, IRBlock
 from ubt.core.memory.cjk_matcher import count_term_in_text
+from ubt.core.memory.rolling_summary import extract_chapter_id
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.defect_taxonomy import has_structural_defect
 from ubt.core.qe.fast_pass import FastPassFilter
@@ -36,6 +37,7 @@ def _fast_pass_screen(
     """
     suspicious_blocks: list[IRBlock] = []
     passed_updates: list[dict[str, Any]] = []
+    scoped_validators: dict[str, GlossaryConsistencyValidator] = {}
 
     for b in blocks:
         # Record the enforced glossary terms present in this block's
@@ -57,9 +59,30 @@ def _fast_pass_screen(
         # (the export stage skips them too: substituting terms into a kept
         # bibliography produces Chinglish mash).
         if glossary_validator is not None and b.target_text and not b.skip_translate:
-            glossary_flag = glossary_violation_flag(
-                b.source_text, b.target_text, glossary_validator
+            from ubt.core.memory.scoped_glossary import (
+                glossary_has_block_scope,
+                resolve_effective_glossary,
+                scope_context_for_block,
             )
+
+            chapter_key = (
+                b.id
+                if glossary_has_block_scope(list(glossary_validator.glossary))
+                else extract_chapter_id(b.id)
+            )
+            validator = scoped_validators.get(chapter_key)
+            if validator is None:
+                # The stage builds one validator from the unarbitrated list. A
+                # term with a global and a chapter-scoped rendering would then
+                # report the correct chapter rendering as drift against the
+                # other entry. Resolve the scope once per chapter.
+                effective = resolve_effective_glossary(
+                    list(glossary_validator.glossary),
+                    scope_context_for_block(b),
+                )
+                validator = GlossaryConsistencyValidator(glossary=effective)
+                scoped_validators[chapter_key] = validator
+            glossary_flag = glossary_violation_flag(b.source_text, b.target_text, validator)
             if glossary_flag is not None and glossary_flag not in b.error_flags:
                 b.error_flags.append(glossary_flag)
         # A draft-stage structural marker (e.g. masked-token corruption) is
@@ -182,6 +205,7 @@ async def _audit_pass_sample(
         if index not in measured:
             continue
         block.mtqe_score = float(score)
+        block.mtqe_score_source = qe_runner.score_source()
         scored.append(block)
         if score < threshold:
             demoted.append(block)
@@ -358,6 +382,7 @@ async def run_quality_gate_stage(
                     "target_text": b.target_text or "",
                     "status": BlockStatus.REPAIR_PENDING,
                     "mtqe_score": b.mtqe_score,
+                    "mtqe_score_source": b.mtqe_score_source,
                     "error_flags": b.error_flags,
                     "glossary_hits": b.glossary_hits,
                 }
@@ -474,6 +499,7 @@ async def run_quality_gate_stage(
                     b.error_flags.append("Visual witness discrepancy")
 
             b.mtqe_score = score
+            b.mtqe_score_source = qe_runner.score_source() if score is not None else None
             # Suspicious blocks always enter repair. Every reason the FastPass
             # filter can emit maps to a fatal structural marker, so no measured
             # QE score may release one — the old
@@ -489,6 +515,7 @@ async def run_quality_gate_stage(
                     "target_text": b.target_text or "",
                     "status": b.status,
                     "mtqe_score": score,
+                    "mtqe_score_source": b.mtqe_score_source,
                     "error_flags": b.error_flags,
                     "glossary_hits": b.glossary_hits,
                 }

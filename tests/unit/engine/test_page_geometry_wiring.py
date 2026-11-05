@@ -68,6 +68,27 @@ def _render(strategy: DoclingRenderStrategy, manifest: Any, blocks: Any, out: Pa
     asyncio.run(strategy.render_blocks(manifest, blocks, "zh", out))
 
 
+def test_the_strategy_does_not_optimize_the_pdf_it_compiled(
+    tmp_path: Path, stub_compile: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Optimization belongs to the export stage (one owner). A strategy that
+    # also compressed its output ran the lossless rewrite twice per artifact.
+    import ubt.adapters.pdf.pdf_optimizer as optimizer
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        optimizer,
+        "optimize_pdf_in_place",
+        lambda path, profile: calls.append(str(path)),
+    )
+    src = _source_pdf(tmp_path / "book.pdf", 1)
+    manifest = BookManifest(doc_id="d", title="t", source_path=str(src), target_lang="zh")
+    strategy = DoclingRenderStrategy(delivery_mode="facsimile", enable_pdf_optimization=True)
+    _render(strategy, manifest, [_body("b1", 1)], tmp_path / "out.pdf")
+
+    assert calls == [], "the strategy must leave byte-level optimization to export"
+
+
 def test_a_facsimile_render_records_one_row_per_page(tmp_path: Path, stub_compile: None) -> None:
     src = _source_pdf(tmp_path / "book.pdf", 3)
     manifest = BookManifest(doc_id="d", title="t", source_path=str(src), target_lang="zh")

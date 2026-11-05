@@ -9,10 +9,11 @@ send — all of which exist the moment ingest finishes.
 
 Two deliberate limits on the estimate:
 
-* It prices **draft calls only**. Repair passes, QE judging, backfills and
-  summaries are real but variable spend, and pretending to fold them in with a
-  made-up percentage would make the number look derived when it is guessed. The
-  printed line says so.
+* It prices **draft calls only**. Repair passes, QE judging, backfills,
+  summaries, and the optional formula-text (``C_TEXT``) channel are real but
+  variable spend, and pretending to fold them in with a made-up percentage
+  would make the number look derived when it is guessed. The printed line says
+  so.
 * The per-block prompt is *measured*, not assumed: the fixed scaffolding comes
   from the same prompt builder the draft stage uses. Earlier calibrations of
   "about 1,000 prefix tokens per block" were true of one prompt version and

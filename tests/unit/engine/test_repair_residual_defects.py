@@ -94,6 +94,41 @@ async def test_residual_check_adds_no_flag_on_a_clean_candidate() -> None:
     assert result.status is BlockStatus.REPAIRED
 
 
+@pytest.mark.asyncio
+async def test_a_candidate_that_drops_a_restored_email_is_not_promoted() -> None:
+    block = _block(
+        source="Contact alice@example.com for details of the 42-day trial.",
+        draft="请联系 alice@example.com 了解这项为期 43 天的试验。",
+        flags=["Numeric fidelity: mismatched number '43', expected '42'"],
+    )
+    # The model fixes the number but drops the already-restored address; no
+    # mask token remains for FastPass to notice, so the repair loop must.
+    loop = _loop("请联系了解这项为期42天的试验。")
+
+    result = await loop.repair_single_block(block)
+
+    assert result.status is not BlockStatus.REPAIRED
+    assert any("protected literal span missing" in flag for flag in result.error_flags)
+
+
+@pytest.mark.asyncio
+async def test_repair_parses_emphasis_markers_out_of_the_chosen_text() -> None:
+    block = _block(
+        source="The trial ran for 42 days.",
+        draft="该试验持续了43天。",
+        flags=["Numeric fidelity: mismatched number '43', expected '42'"],
+    )
+    loop = _loop("该试验持续了⟦B⟧42⟧天。")
+
+    result = await loop.repair_single_block(block)
+
+    assert result.status is BlockStatus.REPAIRED
+    assert "⟦" not in (result.target_text or "")
+    assert result.target_text == "该试验持续了42天。"
+    assert result.style is not None
+    assert result.style.target_runs
+
+
 _GLOSSARY: list[dict[str, Any]] = [
     {"source": "framekernel", "translation": "帧内核", "aliases": [], "inflected_variants": []}
 ]

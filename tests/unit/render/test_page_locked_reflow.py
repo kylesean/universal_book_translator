@@ -43,6 +43,7 @@ def _make_block(
     btype: BlockType = BlockType.NARRATIVE,
     color_hex: str = "#000000",
     region: RegionKind | None = None,
+    font_size: float | None = None,
 ) -> IRBlock:
     bb = BoundingBox(
         page=page,
@@ -62,7 +63,7 @@ def _make_block(
     return IRBlock(
         element=el,
         target_text=text,
-        style=StyleMeta(color_hex=color_hex),
+        style=StyleMeta(color_hex=color_hex, font_size=font_size),
     )
 
 
@@ -600,3 +601,73 @@ def test_render_document_records_a_declared_flow_expansion(tmp_path: Path) -> No
         compile_fn=two_page_compile,
     )
     assert (renderer.last_page_overflow or [{}])[-1].get("kind") == "flow_expansion"
+
+
+def test_l2_heading_keeps_its_measured_source_size() -> None:
+    # A 16.2pt chapter title must not be demoted to 1.25em of a 9pt body
+    # (11.25pt). L1 already kept the measurement; L2 now does too.
+    geom = PageGeometry(
+        page_w=595.0,
+        page_h=842.0,
+        margin_top=50.0,
+        margin_bottom=50.0,
+        margin_left=50.0,
+        margin_right=50.0,
+        columns=1,
+    )
+    blocks = [
+        _make_block("h1", "Chapter One", btype=BlockType.HEADING, font_size=16.2),
+        _make_block("p1", "Introduction to particle physics."),
+    ]
+    spec = PageLockedPageSpec(
+        page_no=1,
+        geometry=geom,
+        uniform_size_pt=9.0,
+        leading_em=0.33,
+        par_spacing_em=0.60,
+        blocks=blocks,
+    )
+    markup = PageLockedReflowRenderer().build_page_markup(spec, target_lang="zh")
+    assert "size: 16.2pt" in markup
+    assert "1.25em" not in markup
+    assert "1.10em" not in markup
+
+
+def test_l2_heading_without_a_measurement_keeps_the_em_fallback() -> None:
+    geom = PageGeometry(
+        page_w=595.0,
+        page_h=842.0,
+        margin_top=50.0,
+        margin_bottom=50.0,
+        margin_left=50.0,
+        margin_right=50.0,
+        columns=1,
+    )
+    blocks = [
+        _make_block("h1", "Chapter One", btype=BlockType.HEADING),
+        _make_block("p1", "Introduction to particle physics."),
+    ]
+    spec = PageLockedPageSpec(
+        page_no=1,
+        geometry=geom,
+        uniform_size_pt=9.0,
+        leading_em=0.33,
+        par_spacing_em=0.60,
+        blocks=blocks,
+    )
+    markup = PageLockedReflowRenderer().build_page_markup(spec, target_lang="zh")
+    assert "size: 1.25em" in markup
+
+
+def test_l2_heading_height_reserves_the_measured_size() -> None:
+    # The height estimator must not be optimistic about a heading the markup
+    # now draws at 16.2pt instead of 1.25em of the body size.
+    from ubt.render.typst.page_locked_renderer import _block_height
+
+    block = _make_block("h1", "Chapter One", btype=BlockType.HEADING, font_size=16.2)
+    measured = _block_height(block, col_w=400.0, size=9.0, leading=0.33, spacing=0.60, tracking=0.0)
+    unmeasured = _make_block("h1", "Chapter One", btype=BlockType.HEADING)
+    baseline = _block_height(
+        unmeasured, col_w=400.0, size=9.0, leading=0.33, spacing=0.60, tracking=0.0
+    )
+    assert measured > baseline

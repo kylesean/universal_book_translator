@@ -158,9 +158,12 @@ async def run_render_preflight(
     scratch_blocks = _placeholder_blocks(sample)
     metadata = getattr(manifest, "metadata", None) or {}
     if render_plan is not None:
-        bilingual_mode = (
-            render_plan.effective_dual_mode or render_plan.bilingual_mode
-        ) or metadata.get("bilingual_mode")
+        # The plan owns the vocabulary mapping (``adapter_mode``): export and
+        # this rehearsal must hand ``render_blocks`` the same value. A manifest
+        # fallback is the last resort, for a plan that carries neither mode.
+        bilingual_mode = render_plan.adapter_mode(
+            fallback=str(metadata.get("bilingual_mode") or "") or None
+        )
     else:
         bilingual_mode = metadata.get("bilingual_mode")
     # Render into an isolated copy: the scratch compile must not write its

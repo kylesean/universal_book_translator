@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 
@@ -113,6 +113,7 @@ async def test_run_consistency_stage_passes_abbreviations_to_table(tmp_path: Pat
             terminology.glossary_dicts,
             terminology.abbreviation_entries,
             block.source_text,
+            context=ANY,
         )
 
 

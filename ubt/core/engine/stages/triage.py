@@ -256,8 +256,13 @@ async def run_triage_stage(
     # stage and extends the circuit breaker by escalation_extra_rounds.
     # ------------------------------------------------------------------
     async def _escalate(cand: IRBlock) -> dict[str, Any]:
+        from ubt.core.memory.scoped_glossary import scope_context_for_block
+
         glossary_table = build_chunk_glossary_table(
-            glossary_dicts, abbreviation_entries, cand.source_text
+            glossary_dicts,
+            abbreviation_entries,
+            cand.source_text,
+            context=scope_context_for_block(cand, domain=getattr(ctx.config, "domain", None)),
         )
         async with concurrency_sem:
             repaired = await repair_loop.repair_single_block(
@@ -274,6 +279,7 @@ async def run_triage_stage(
             "target_text": repaired.target_text or "",
             "status": repaired.status,
             "mtqe_score": repaired.mtqe_score,
+            "mtqe_score_source": repaired.mtqe_score_source,
             "repair_rounds": repaired.repair_rounds,
             "error_flags": repaired.error_flags,
         }
@@ -374,6 +380,7 @@ async def run_triage_stage(
                         "status": BlockStatus.REPAIRED,
                         "target_text": escalation["target_text"],
                         "mtqe_score": escalation["mtqe_score"],
+                        "mtqe_score_source": escalation.get("mtqe_score_source"),
                         "repair_rounds": escalation["repair_rounds"],
                         "error_flags": escalation["error_flags"],
                         **mqm_update,
@@ -394,6 +401,7 @@ async def run_triage_stage(
                         "target_text": cand.target_text or cand.draft_text or "",
                         "status": BlockStatus.REPAIR_PENDING,
                         "mtqe_score": cand.mtqe_score,
+                        "mtqe_score_source": cand.mtqe_score_source,
                         "repair_rounds": cand.repair_rounds,
                         "error_flags": cand.error_flags,
                         **mqm_update,
@@ -433,6 +441,7 @@ async def run_triage_stage(
                         "status": BlockStatus.NEEDS_HUMAN,
                         "target_text": cand.target_text or cand.draft_text or cand.source_text,
                         "mtqe_score": cand.mtqe_score,
+                        "mtqe_score_source": cand.mtqe_score_source,
                         "repair_rounds": cand.repair_rounds,
                         "error_flags": flags,
                         **mqm_update,
@@ -452,6 +461,7 @@ async def run_triage_stage(
                     "status": BlockStatus.BLOCKED_HUMAN,
                     "target_text": _blocked_human_target(cand.source_text),
                     "mtqe_score": cand.mtqe_score,
+                    "mtqe_score_source": cand.mtqe_score_source,
                     "repair_rounds": cand.repair_rounds,
                     "error_flags": flags,
                     **mqm_update,
@@ -466,6 +476,7 @@ async def run_triage_stage(
                     "block_id": cand.id,
                     "status": BlockStatus.NEEDS_HUMAN,
                     "mtqe_score": cand.mtqe_score,
+                    "mtqe_score_source": cand.mtqe_score_source,
                     "repair_rounds": cand.repair_rounds,
                     "error_flags": _needs_human_flags(cand),
                     **mqm_update,
@@ -498,6 +509,7 @@ async def run_triage_stage(
                     "block_id": cand.id,
                     "status": BlockStatus.MTQE_PASSED,
                     "mtqe_score": cand.mtqe_score,
+                    "mtqe_score_source": cand.mtqe_score_source,
                     "repair_rounds": cand.repair_rounds,
                     "error_flags": cand.error_flags,
                     **mqm_update,
@@ -510,6 +522,7 @@ async def run_triage_stage(
                     "block_id": cand.id,
                     "status": BlockStatus.NEEDS_HUMAN,
                     "mtqe_score": cand.mtqe_score,
+                    "mtqe_score_source": cand.mtqe_score_source,
                     "repair_rounds": cand.repair_rounds,
                     "error_flags": _needs_human_flags(cand),
                     **mqm_update,

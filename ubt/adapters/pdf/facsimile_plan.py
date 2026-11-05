@@ -154,6 +154,18 @@ def group_multi_region_boxes(block: IRBlock, page_width: float) -> list[Physical
     return grouped_boxes
 
 
+def obstacle_top(bbox: Any) -> float:
+    """The top edge a preserved or own-size block contributes to the flow model.
+
+    A prose box above the obstacle may not expand down past this edge. The plan
+    and the render both read the obstacle's ``y1``: the render used
+    ``bbox.y0`` for headings/tables, so the planner rejected a page for a
+    deficit the renderer then reported as fitting, and a table could be
+    overrun by the full height of its own box.
+    """
+    return float(bbox.y1)
+
+
 def build_page_fit_models(
     blocks_by_page: Mapping[int, Sequence[IRBlock]],
     page_dims: Sequence[tuple[float, float]],
@@ -189,13 +201,21 @@ def build_page_fit_models(
             preserved = block.skip_translate or block.block_type in (
                 BlockType.FORMULA,
                 BlockType.IMAGE,
+                # Headings and tables are placed at their own size by their own
+                # layout paths (the renderer's heading branch and the table
+                # compiler). Feeding them into the body group's flow model at
+                # the body size both under-estimates their height and lets one
+                # long title/table drag the whole body group down. Treat the
+                # box as an obstacle, exactly like a figure.
+                BlockType.HEADING,
+                BlockType.TABLE,
             )
             if preserved:
                 if block.bbox.page != page_no:
                     continue
                 # A preserved figure/formula is a vertical obstacle for the prose
                 # above it: glue may not expand into it. Same rule as the loop.
-                obs_top = float(block.bbox.y1)
+                obs_top = obstacle_top(block.bbox)
                 straddles = float(block.bbox.x0) < pw * 0.50 < float(block.bbox.x1)
                 if width > 0.50 * pw or straddles:
                     obstacles.setdefault(0, []).append(obs_top)

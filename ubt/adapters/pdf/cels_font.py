@@ -385,11 +385,12 @@ def _to_unicode_cmap(glyph_ids: dict[str, int]) -> str:
         chunk = entries[start : start + 100]
         lines.append(f"{len(chunk)} beginbfchar")
         for char, gid in chunk:
-            code = (
-                f"{ord(char):04X}"
-                if len(char) == 1
-                else "".join(f"{ord(part):04X}" for part in char)
-            )
+            # ``beginbfchar`` destinations are UTF-16BE strings: a BMP char is
+            # four hex digits, a non-BMP code point must travel as its surrogate
+            # pair (eight digits). ``ord(char):04X`` emitted five digits for a
+            # non-BMP code point, which is not a valid UTF-16BE unit and made
+            # the text layer unsearchable.
+            code = char.encode("utf-16-be").hex().upper()
             lines.append(f"<{gid:04X}> <{code}>")
         lines.append("endbfchar")
     lines.extend(

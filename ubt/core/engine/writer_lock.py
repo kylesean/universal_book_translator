@@ -198,6 +198,45 @@ class LedgerWriterLock:
         finally:
             conn.close()
 
+    def assert_owned(self) -> None:
+        """Raise unless this instance still holds a live, unexpired lease.
+
+        ``renew()`` only notices a reclaim when its conditional ``UPDATE``
+        matches no row. A process that lost the lease between heartbeats could
+        still write the ledger for up to one heartbeat interval. The ledger
+        calls this before its late writes (checkpoint batches, metadata and the
+        terminal ``finalize_job``) so the ownership check is in the same write
+        path, not only in the timer.
+        """
+        if not self._held:
+            raise LedgerWriterLeaseLostError(
+                f"Writer lease for job {self.job_id} was reclaimed; refusing to write"
+            )
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT owner_token, lease_expires_at FROM job_locks WHERE job_id = ?",
+                (self.job_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None or str(row[0]) != self._token:
+            self._held = False
+            raise LedgerWriterLeaseLostError(
+                f"Writer lease for job {self.job_id} now belongs to another process; "
+                "refusing to write its ledger"
+            )
+        try:
+            expires_at = float(row[1])
+        except (TypeError, ValueError):
+            expires_at = 0.0
+        if expires_at < time.time():
+            self._held = False
+            raise LedgerWriterLeaseLostError(
+                f"Writer lease for job {self.job_id} expired without renewal; "
+                "refusing to write its ledger"
+            )
+
     @staticmethod
     def lease_holder(db_path: Path, job_id: str) -> int | None:
         """The pid holding a *live* lease for ``job_id``, or ``None``.

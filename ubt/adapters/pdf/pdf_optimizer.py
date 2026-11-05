@@ -33,6 +33,8 @@ from typing import Literal
 import pikepdf
 from pydantic import BaseModel, ConfigDict, Field
 
+from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK
+
 logger = logging.getLogger(__name__)
 
 
@@ -302,11 +304,10 @@ def verify_pdf_fidelity(
 
     The hard invariants are parseability by pikepdf and an identical page count;
     either failing rejects the candidate outright. The character-level text
-    comparison is best-effort beside them: it is wrapped in ``except
-    ImportError: pass`` (both libraries ship in the base dependency set, so the
-    branch only fires on a broken environment) and any other exception inside it
-    is logged rather than propagated. A True result on such an environment
-    therefore means "structure is sound", not "the text layer was diffed".
+    comparison is best-effort only in what it can inspect: when extraction or
+    the similarity diff raises (or pypdfium2/rapidfuzz is unavailable), the
+    candidate is rejected as unverified rather than accepted on structure
+    alone. Accepting it would let a broken text layer replace the source.
     """
     try:
         with pikepdf.open(original_path) as orig_pdf, pikepdf.open(candidate_path) as cand_pdf:
@@ -322,7 +323,12 @@ def verify_pdf_fidelity(
     try:
         import pypdfium2
 
+        # pypdfium2 shares one process-global native library with every other
+        # PDFium caller. Hold the same gate docling's parse threads use, but
+        # only around the native reads: the similarity diff below is pure
+        # Python and must not extend the critical section.
         with (
+            PDFIUM_LOCK,
             pypdfium2.PdfDocument(original_path) as orig_doc,
             pypdfium2.PdfDocument(candidate_path) as cand_doc,
         ):
@@ -340,10 +346,11 @@ def verify_pdf_fidelity(
                 return False, (
                     f"Text fidelity dropped to {ratio:.3f} (required >= {min_text_similarity:.3f})"
                 )
-    except ImportError:
-        pass
+    except ImportError as exc:
+        return False, f"Text fidelity check unavailable: {exc}"
     except Exception as exc:
-        logger.debug("Fidelity text check encountered non-fatal exception: %s", exc)
+        logger.warning("Fidelity text check failed; rejecting the candidate: %s", exc)
+        return False, f"Fidelity text check failed: {type(exc).__name__}: {exc}"
 
     return True, "Fidelity verified"
 

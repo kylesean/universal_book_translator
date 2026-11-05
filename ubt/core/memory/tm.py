@@ -148,6 +148,7 @@ def compute_tm_context(
     tgt_lang: str,
     abbreviation_table: str = "",
     model: str = "",
+    doc_id: str = "",
 ) -> str:
     """Fingerprint the translation context an exact TM hit is valid under.
 
@@ -160,7 +161,11 @@ def compute_tm_context(
     ``glossary_table`` and ``abbreviation_table`` are the two prompt-visible
     terminology channels (the rendered global term table and abbreviation
     table); both must be hashed, else a prompt-visible change is invisible to
-    the identity and a stale exact hit survives it.
+    the identity and a stale exact hit survives it. ``doc_id`` scopes the
+    exact-hit channel to the book that produced it: a common sentence shared by
+    two books must not bypass semantic QE simply because both were translated
+    under the same model and glossary. Operators who deliberately want a shared
+    TM can import ``human_pe`` rows, which remain exempt by provenance.
     """
     h = hashlib.sha256()
     for part in (
@@ -171,6 +176,7 @@ def compute_tm_context(
         src_lang,
         tgt_lang,
         abbreviation_table,
+        doc_id,
     ):
         h.update(part.encode("utf-8"))
         h.update(b"\x00")

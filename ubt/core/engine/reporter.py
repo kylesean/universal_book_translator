@@ -82,10 +82,11 @@ class ReportScoreMetrics(BaseModel):
     percentiles of such values are routing statistics, not calibrated
     quality measurements.
 
-    The population is *QE-scored blocks only*. Verbatim skips and TM exact
-    hits carry a 1.0 placeholder instead of a score and are excluded, so
-    ``avg_qe`` never reads as covering every block; ``scored_blocks``
-    states the population size it was computed over.
+    The population is *QE-scored blocks only*. Verbatim skips, heuristic
+    bands, and unjudged TM hits are excluded; a TM hit the semantic tier
+    actually scored is included. ``avg_qe`` therefore never reads as covering
+    every block; ``scored_blocks`` states the population size it was computed
+    over.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -483,6 +484,19 @@ def build_quality_report(
             continue
         family = reason.split("(", 1)[0].strip()
         skip_families[family or flag] = skip_families.get(family or flag, 0) + count
+    # Ingest's zero-token skips record their reason in ``policy_reason``, not in
+    # an ``error_flags`` marker. Without this the report had a preserved-block
+    # total but no breakdown, so a misclassified caption/bibliography entry
+    # could not be found from the quality report.
+    for block in all_blocks:
+        reason = (block.policy_reason or "").strip()
+        if not block.skip_translate or not reason:
+            continue
+        # ``skip:short_label`` and ``verdict:short_label`` name the same
+        # family; the prefix is the layer, not the reason.
+        family = reason.split(":", 1)[-1].split(":", 1)[0].strip()
+        if family:
+            skip_families[family] = skip_families.get(family, 0) + 1
     # ``completed`` counts every terminal MTQE_PASSED/REPAIRED block, but a
     # fail-closed render skip KEEPS that status, so those blocks were counted as
     # rendered AND as fail-closed — making rendered+fail_closed exceed the total.

@@ -502,8 +502,16 @@ def build_macro_chunk_draft_prompt(
     epoch_summary: str = "",
     domain: str | None = None,
     section_context: str = "",
+    block_contexts: list[tuple[str, str]] | None = None,
+    block_types: list[tuple[str, str]] | None = None,
 ) -> tuple[str, str]:
-    """Construct structured multi-block prompt for high-throughput macro-chunk drafting."""
+    """Construct structured multi-block prompt for high-throughput macro-chunk drafting.
+
+    ``block_contexts`` carries per-block coreference hints. The earlier shape
+    only kept the first/last block's neighbour text, so a hint resolved for an
+    inner block was computed and then discarded; the macro path was silently
+    less context-aware than the single-block path for most of its blocks.
+    """
     src_profile = PROFILES.get(source_lang.strip().lower()) if source_lang else None
     tgt_profile = PROFILES.get(target_lang.strip().lower()) if target_lang else None
     src_name = (
@@ -565,6 +573,30 @@ def build_macro_chunk_draft_prompt(
         user_parts.append(f"### Section Context\n{b_section.strip()}\n")
     if b_chunk.strip():
         user_parts.append(f"### Translation Bible (Strict Mappings)\n{b_chunk.strip()}\n")
+
+    heading_ids = [bid for bid, kind in (block_types or []) if kind == "heading"]
+    if heading_ids:
+        user_parts.append(
+            "### Heading Blocks (do not expand)\n"
+            "The following block ids are headings or titles. Translate them as "
+            "headings: do not turn them into a full sentence and do not append "
+            "an explanatory paragraph:\n"
+            + "\n".join(f"- `{html.escape(bid)}`" for bid in heading_ids)
+            + "\n"
+        )
+
+    if block_contexts:
+        notes = "\n".join(
+            f"- block `{html.escape(bid)}`: {hint.strip()}"
+            for bid, hint in block_contexts
+            if hint.strip()
+        )
+        b_block_contexts = truncate_text_to_budget(notes, 2048)
+        if b_block_contexts.strip():
+            user_parts.append(
+                "### Per-Block Reference Notes (read-only, NOT part of the task)\n"
+                f"{b_block_contexts.strip()}\n"
+            )
 
     if b_neighbor.strip():
         user_parts.append(f"{b_neighbor.strip()}\n")

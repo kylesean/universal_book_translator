@@ -884,6 +884,10 @@ CompanionKind = Literal[
     "table_appendix",
     "spill_appendix",
     "reflow",
+    # The 1:1 delivery's second (mono/dual) PDF, rendered by
+    # ``_render_complementary_artifact``. It was emitted as a bare string while
+    # the audit type claimed a closed Literal, so a typo could not be caught.
+    "complementary_pdf",
 ]
 
 #: Recognized artifact kinds for delivery packages and companion audit.

@@ -139,3 +139,43 @@ def test_a_table_dominated_page_samples_the_body_not_the_grid(tmp_path: Path) ->
     from ubt.core.engine.delivery_contract import _style_findings
 
     assert _style_findings(evidence) == []
+
+
+def test_the_artifacts_measured_size_beats_a_planned_sample(tmp_path: Path) -> None:
+    # The renderer planned 12pt, but the fixed-box fit ladder drew the body at
+    # 10pt. Auditing the plan would read the squeezed page as a pass.
+    from ubt.core.engine.delivery_contract import StyleSample
+
+    path = tmp_path / "planned_vs_real.pdf"
+    with pikepdf.Pdf.new() as pdf:
+        _page(pdf, body_size=10.0, caption_size=8.0)
+        pdf.save(path)
+
+    planned = (StyleSample(page=1, size_pt=12.0, group_id="group-A"),)
+    evidence = read_artifact_evidence(
+        path, contract="faithful", blocks=(), read_geometry=True, style_samples=planned
+    )
+
+    assert len(evidence.style_samples) == 1
+    assert evidence.style_samples[0].size_pt == pytest.approx(10.0)
+    # The plan still owns group membership, even though its number lost.
+    assert evidence.style_samples[0].group_id == "group-A"
+
+
+def test_a_planned_sample_is_the_read_failure_fallback(tmp_path: Path) -> None:
+    # No measurable text (blank page): the plan is all we have, so keep it
+    # rather than reporting a faithful artifact as style_unmeasured.
+    from ubt.core.engine.delivery_contract import StyleSample
+
+    path = tmp_path / "blank_with_plan.pdf"
+    with pikepdf.Pdf.new() as pdf:
+        pdf.add_blank_page(page_size=(400, 300))
+        pdf.save(path)
+
+    planned = (StyleSample(page=1, size_pt=11.0, group_id="group-A"),)
+    evidence = read_artifact_evidence(
+        path, contract="faithful", blocks=(), read_geometry=True, style_samples=planned
+    )
+
+    assert len(evidence.style_samples) == 1
+    assert evidence.style_samples[0].size_pt == pytest.approx(11.0)

@@ -12,7 +12,11 @@ from pathlib import Path
 import pytest
 
 from ubt.core.engine.writer_lock import LedgerWriterLock
-from ubt.core.exceptions import LedgerError, LedgerWriterLockConflictError
+from ubt.core.exceptions import (
+    LedgerError,
+    LedgerWriterLeaseLostError,
+    LedgerWriterLockConflictError,
+)
 
 pytestmark = pytest.mark.fast
 
@@ -241,6 +245,32 @@ def test_exclusion_holds_between_processes(tmp_path: Path) -> None:
     successor = LedgerWriterLock(db_path, "child-job")
     successor.acquire()
     successor.release()
+
+
+def test_assert_owned_detects_a_reclaimed_or_expired_lease(tmp_path: Path) -> None:
+    db_path = tmp_path / "job.db"
+    holder = LedgerWriterLock(db_path, "job-a", lease_seconds=60.0)
+    holder.acquire()
+    try:
+        holder.assert_owned()
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("UPDATE job_locks SET owner_token = 'someone-else' WHERE job_id = 'job-a'")
+        conn.commit()
+        conn.close()
+        with pytest.raises(LedgerWriterLeaseLostError):
+            holder.assert_owned()
+    finally:
+        holder.release()
+
+    expired = LedgerWriterLock(db_path, "job-b", lease_seconds=0.05)
+    expired.acquire()
+    try:
+        time.sleep(0.1)
+        with pytest.raises(LedgerWriterLeaseLostError, match="expired"):
+            expired.assert_owned()
+    finally:
+        expired.release()
 
 
 def test_renew_extends_the_lease_so_a_long_run_keeps_exclusivity(tmp_path: Path) -> None:

@@ -28,6 +28,8 @@ from ubt.core.memory.glossary_table import (
     build_chunk_glossary_table,
     build_global_glossary_table,
 )
+from ubt.core.memory.hierarchical_memory import refresh_chapter_memory
+from ubt.core.memory.rolling_summary import extract_chapter_id
 from ubt.core.qe.consistency_enforce import ConsistencyTask, plan_consistency_tasks
 from ubt.core.qe.heuristic import GLOSSARY_VIOLATION_MARKER
 from ubt.core.qe.term_metrics import evaluate_terms
@@ -88,7 +90,9 @@ async def run_consistency_stage(
     glossary_dicts = terminology.glossary_dicts
     abbreviation_entries = terminology.abbreviation_entries
     global_glossary_table = build_global_glossary_table(
-        glossary_dicts or [], getattr(ctx.config, "glossary_max_global_entries", 80)
+        glossary_dicts or [],
+        getattr(ctx.config, "glossary_max_global_entries", 80),
+        include_scoped=False,
     )
     target_lang = ctx.target_lang
     source_lang = ctx.source_lang
@@ -204,8 +208,13 @@ async def run_consistency_stage(
                 "repair_rounds": min(block.repair_rounds, budget),
             }
         )
+        from ubt.core.memory.scoped_glossary import scope_context_for_block
+
         glossary_table = build_chunk_glossary_table(
-            glossary_dicts, abbreviation_entries, block.source_text
+            glossary_dicts,
+            abbreviation_entries,
+            block.source_text,
+            context=scope_context_for_block(block, domain=getattr(ctx.config, "domain", None)),
         )
         async with concurrency_sem:
             repaired = await repair_loop.repair_single_block(
@@ -236,6 +245,7 @@ async def run_consistency_stage(
             "target_text": repaired.target_text or "",
             "status": status,
             "mtqe_score": repaired.mtqe_score,
+            "mtqe_score_source": repaired.mtqe_score_source,
             "repair_rounds": repaired.repair_rounds,
             "error_flags": error_flags,
         }
@@ -254,6 +264,28 @@ async def run_consistency_stage(
         await asyncio.to_thread(
             ledger.save_checkpoints_batch, updates, allow_terminal_override=True
         )
+        # A consistency repair rewrites terminal text after the draft summary
+        # was written. Refresh only the chapters that actually changed, so the
+        # next prompt does not inherit the pre-consistency rendering.
+        try:
+            all_blocks = await asyncio.to_thread(ledger.get_all_blocks, actual_job_id)
+            chapters = {
+                ch for ch in (extract_chapter_id(str(u.get("block_id", ""))) for u in updates) if ch
+            }
+            for ch in sorted(chapters):
+                await refresh_chapter_memory(
+                    ledger,
+                    actual_job_id,
+                    ch,
+                    all_blocks,
+                    ctx.raw_completion,
+                    target_lang,
+                    step_chars=int(getattr(ctx.config, "step_chars", 3500)),
+                    max_epochs=int(getattr(ctx.config, "memory_max_epochs", 50)),
+                    sliding_window=bool(getattr(ctx.config, "memory_sliding_window", False)),
+                )
+        except Exception as exc:
+            logger.warning("Post-consistency memory refresh failed: %s", exc, exc_info=True)
 
     event = await create_event_fn(
         EventType.REPAIR_BATCH_COMPLETED,

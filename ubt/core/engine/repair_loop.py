@@ -1,11 +1,14 @@
 import asyncio
 import logging
 from collections import Counter
+from functools import cache
 from pathlib import Path
 from typing import Any
 
-from ubt.core.ir.models import BlockStatus, IRBlock
+from ubt.core.ir.emphasis import parse_emphasis
+from ubt.core.ir.models import BlockStatus, IRBlock, StyleMeta
 from ubt.core.memory.glossary_table import build_global_glossary_table
+from ubt.core.ports import placeholder_engine
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.defect_taxonomy import CONSTRAINT_PREFIX, classify_defect, is_format_only
 from ubt.core.qe.fast_pass import FastPassFilter
@@ -14,6 +17,37 @@ from ubt.core.router.router import ModelRouter
 from ubt.core.validators.span_repair import MQMSpanAnnotator, SpanRepairSplicer
 
 logger = logging.getLogger(__name__)
+
+
+@cache
+def _literal_placeholder_engine() -> Any:
+    """The masker inventory used to prove a repair kept literal spans.
+
+    The draft stage restores emails/URLs/code before repair, so the mask maps
+    are gone by the time a candidate is judged. Remasking both sides here is
+    the only place the inventory exists; it is regex-only and reused across
+    candidates.
+
+    Resolved through ``ubt.core.ports``: ``ubt.segment`` is a compiler-side
+    package, and the layering gate forbids a direct ``core.engine -> segment``
+    edge.
+    """
+    return placeholder_engine()
+
+
+def _assign_target_text(block: IRBlock, text: str) -> str:
+    """Store a repaired draft with the same emphasis codec the draft stage uses.
+
+    The draft path runs ``parse_emphasis`` before persisting, which strips the
+    ``⟦B⟧`` family (including a model's ``\\llbracket B \\rrbracket``
+    transcription). Repair used to assign the raw candidate, so a marker the
+    draft path would have removed could re-enter the delivered text.
+    """
+    clean_text, target_runs = parse_emphasis(text)
+    if target_runs or block.style is not None:
+        block.style = (block.style or StyleMeta()).model_copy(update={"target_runs": target_runs})
+    block.target_text = clean_text
+    return clean_text
 
 
 def _out_of_span_content_preserved(draft: str, spans: list[Any], candidate: str) -> bool:
@@ -95,20 +129,28 @@ class RepairLoop:
         accept by one rule -- is what makes this repair verifiable and what an
         LLM rewrite cannot offer.
         """
+        from ubt.core.memory.scoped_glossary import (
+            resolve_effective_glossary,
+            scope_context_for_block,
+        )
         from ubt.core.validators.consistency import GlossaryConsistencyValidator
         from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
+
+        effective_entries = resolve_effective_glossary(
+            glossary_entries, scope_context_for_block(block)
+        )
 
         cache = getattr(self, "_enforcer_cache", None)
         if cache is None:
             cache = {}
             self._enforcer_cache = cache
 
-        cache_key = (id(glossary_entries), target_lang)
+        cache_key = (id(glossary_entries), target_lang, block.id)
         enforcer = cache.get(cache_key)
         if enforcer is None:
             try:
                 enforcer = DeterministicGlossaryEnforcer(
-                    glossary=glossary_entries, target_lang=target_lang
+                    glossary=effective_entries, target_lang=target_lang
                 )
                 cache[cache_key] = enforcer
             except Exception as exc:
@@ -128,10 +170,10 @@ class RepairLoop:
             val_cache = {}
             self._validator_cache = val_cache
 
-        val_key = id(glossary_entries)
+        val_key = (id(glossary_entries), block.id)
         validator = val_cache.get(val_key)
         if validator is None:
-            validator = GlossaryConsistencyValidator(glossary=glossary_entries)
+            validator = GlossaryConsistencyValidator(glossary=effective_entries)
             val_cache[val_key] = validator
         if not validator.validate(block.source_text or "", enforced).is_valid:
             return None
@@ -415,7 +457,7 @@ class RepairLoop:
                 logger.debug("Visual scalpel crop skipped for block %s: %s", block.id, exc)
 
         effective_global = global_glossary or (
-            build_global_glossary_table(glossary_entries, max_entries=80)
+            build_global_glossary_table(glossary_entries, 80, include_scoped=False)
             if glossary_entries
             else ""
         )
@@ -446,6 +488,19 @@ class RepairLoop:
         # Closed-loop invariant check: 0-Token structural validation when a
         # filter is configured. Returns (valid, flags); valid implies no flags.
         def _structural_check(candidate_text: str) -> tuple[bool, list[str]]:
+            # A restored email/URL/code span has no mask token left to find, so
+            # FastPass's residual-token gate cannot see it disappear. Check the
+            # literal inventory before the language gates: a candidate that
+            # dropped one is structurally wrong, not merely awkward.
+            missing = _literal_placeholder_engine().missing_literal_spans(
+                block.source_text, candidate_text
+            )
+            if missing:
+                label, original = missing[0]
+                return False, [
+                    "repair_structural_failure: protected literal span missing "
+                    f"({len(missing)} total; first {label}={original[:80]!r})"
+                ]
             if active_fast_pass is None:
                 return True, []
             # evaluate() already runs validate_structural_invariants first and
@@ -572,7 +627,7 @@ class RepairLoop:
         # absence of error flags alone.
         if valid_tier1:
             t1_chosen_text, _, t1_chosen_flags = valid_tier1[0]
-            block.target_text = t1_chosen_text
+            t1_chosen_text = _assign_target_text(block, t1_chosen_text)
             # Measure the repaired text instead of clearing the score. A
             # ``None`` here is not "cleared" downstream: the checkpoint SQL
             # uses ``COALESCE(?, mtqe_score)`` so that an omitted key
@@ -585,14 +640,16 @@ class RepairLoop:
             block.mtqe_score = await self.qe_runner.score(
                 block.source_text, t1_chosen_text, block_type=block.block_type
             )
+            block.mtqe_score_source = self.qe_runner.score_source()
             block.error_flags = list(t1_chosen_flags) + _residual_defect_flags(t1_chosen_text)
         elif valid_tier2:
             t2_chosen_text, _, t2_chosen_flags = valid_tier2[0]
-            block.target_text = t2_chosen_text
+            t2_chosen_text = _assign_target_text(block, t2_chosen_text)
             # Same reason as the tier1 branch above: measure, do not clear.
             block.mtqe_score = await self.qe_runner.score(
                 block.source_text, t2_chosen_text, block_type=block.block_type
             )
+            block.mtqe_score_source = self.qe_runner.score_source()
             block.error_flags = list(t2_chosen_flags) + _residual_defect_flags(t2_chosen_text)
         else:
             all_fallback = tier1_candidates + tier2_candidates

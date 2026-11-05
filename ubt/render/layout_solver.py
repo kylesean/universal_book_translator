@@ -63,7 +63,13 @@ def estimate_needed_height(
     else:
         aspect = float(record.get("glyph_aspect", 1.0))
         eff_glyph_w = size * max(0.85, (1.0 + tracking_em)) * aspect
-        per_line = max(1.0, w / eff_glyph_w)
+        # Typst wraps at whole-glyph boundaries, so a line holds floor(w /
+        # eff_glyph_w) glyphs, not the fractional w / eff_glyph_w. Using the
+        # fractional value under-counted lines: 344pt / 8.9pt = 38.65 read as
+        # 38.65 glyphs, a 40-glyph paragraph as 2 lines when Typst set 3 (the
+        # fix-box ladder then shrank it to 7.83pt to pay for a line the plan
+        # said did not exist). Model the same integer step the typesetter takes.
+        per_line = max(1, math.floor(w / eff_glyph_w)) if eff_glyph_w > 0.0 else 1
         glyphs = float(record.get("glyphs", 0.0))
         lines = max(1, math.ceil(glyphs / per_line))
     # A single line has no internal inter-line leading gap; its height is strictly

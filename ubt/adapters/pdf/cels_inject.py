@@ -293,6 +293,12 @@ class ShowSite:
     horizontal_scale: float
     char_spacing: float
     word_spacing: float
+    #: The ``"`` operator's own ``aw`` / ``ac`` operands (word spacing, char
+    #: spacing). PDF 32000-1 sets these *as part of the show*, before the
+    #: implicit ``T*``; they are operands, not the graphics state's prior
+    #: values. ``None`` for every other show operator.
+    quote_word_spacing: float | None = None
+    quote_char_spacing: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,6 +316,10 @@ class LineSite:
     horizontal_scale: float
     char_spacing: float
     word_spacing: float
+    #: ``"`` operands from the line's first show site, for the rewrite to emit
+    #: verbatim instead of the graphics state's stale spacing values.
+    quote_word_spacing: float | None = None
+    quote_char_spacing: float | None = None
 
     @property
     def first_index(self) -> int:
@@ -318,6 +328,11 @@ class LineSite:
     @property
     def last_index(self) -> int:
         return self.sites[-1].index
+
+    @property
+    def implicit_line_advance(self) -> bool:
+        """Whether the first show operator (``'`` or ``"``) moved the line itself."""
+        return bool(self.sites) and self.sites[0].op in ("'", '"')
 
     @property
     def width(self) -> float:
@@ -380,6 +395,8 @@ def scan_lines(
                     horizontal_scale=pending[-1].horizontal_scale,
                     char_spacing=pending[-1].char_spacing,
                     word_spacing=pending[-1].word_spacing,
+                    quote_word_spacing=pending[0].quote_word_spacing,
+                    quote_char_spacing=pending[0].quote_char_spacing,
                 )
             )
         pending = []
@@ -396,6 +413,10 @@ def scan_lines(
     for index, inst in enumerate(instructions):
         operands, operator = inst[0], inst[1]
         op = str(operator)
+        # ``"`` carries its own spacing operands; keep them for the ShowSite
+        # built at the bottom of this iteration.
+        quote_aw: float | None = None
+        quote_ac: float | None = None
 
         if op == "q":
             saved.append(ctm)
@@ -449,6 +470,19 @@ def scan_lines(
             word_spacing = float(operands[0])
         elif op in ("'", '"'):
             flush()
+            # ``"`` is ``aw ac string "``: it sets word/char spacing from its
+            # own operands *before* the implicit T* + show. They must become the
+            # graphics state too, or the next line measures with stale values.
+            if op == '"' and len(operands) >= 3:
+                try:
+                    quote_aw = float(operands[0])
+                    quote_ac = float(operands[1])
+                except (TypeError, ValueError) as exc:
+                    raise InjectionUnsupported(
+                        f'unparsable " spacing operands {operands[:2]!r}'
+                    ) from exc
+                word_spacing = quote_aw
+                char_spacing = quote_ac
             line_matrix = _compose(_translate(0.0, -leading), line_matrix)
             text_matrix = line_matrix
             origin_x, origin_y = _device_origin(text_matrix, ctm)
@@ -481,6 +515,8 @@ def scan_lines(
             horizontal_scale=horizontal_scale,
             char_spacing=char_spacing,
             word_spacing=word_spacing,
+            quote_word_spacing=quote_aw,
+            quote_char_spacing=quote_ac,
         )
         pending.append(site)
         pending_width += _show_advance(
@@ -531,11 +567,30 @@ def inject_line(
     # matrix scale. ``Tz`` is a percentage and needs no conversion.
     scale = line.text_scale if line.text_scale > 0.0 else 1.0
     tracking_operand = char_spacing / scale
-    replacement: list[Any] = [
-        ([round(horizontal_scale * 100.0, 4)], pikepdf.Operator("Tz")),
-        ([round(tracking_operand, 4)], pikepdf.Operator("Tc")),
-        ([pikepdf.String(encode_probe(text))], pikepdf.Operator("Tj")),
-    ]
+    replacement: list[Any] = []
+    if line.implicit_line_advance:
+        # ``'`` and ``"`` perform an implicit ``T*`` before showing. Replacing
+        # the whole run with a bare ``Tj`` dropped that move, so the translated
+        # line was drawn one leading above its source baseline (measured 12pt).
+        # ``T*`` reproduces it from the line matrix; the operator's own leading
+        # operand is not consumed again because the original op is gone.
+        replacement.append(([], pikepdf.Operator("T*")))
+    if line.quote_word_spacing is not None:
+        # ``"`` is ``aw ac string "``: its *operands*, not the graphics state's
+        # prior values, set word/char spacing for the show. Emit both verbatim
+        # so the rewritten Tj inherits exactly what the source operator set.
+        # (``line.word_spacing`` / ``line.char_spacing`` already equal these
+        # values after scan; using the recorded operands keeps the source of
+        # truth explicit and survives a future change to the state tracker.)
+        replacement.append(([round(line.quote_word_spacing, 4)], pikepdf.Operator("Tw")))
+        replacement.append(([round(line.quote_char_spacing or 0.0, 4)], pikepdf.Operator("Tc")))
+    replacement.extend(
+        [
+            ([round(horizontal_scale * 100.0, 4)], pikepdf.Operator("Tz")),
+            ([round(tracking_operand, 4)], pikepdf.Operator("Tc")),
+            ([pikepdf.String(encode_probe(text))], pikepdf.Operator("Tj")),
+        ]
+    )
     if leading_probe is not None:
         probe_text, leading = leading_probe
         replacement.extend(

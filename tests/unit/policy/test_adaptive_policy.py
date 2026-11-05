@@ -98,6 +98,75 @@ def test_long_route_glossary_is_config_opt_in() -> None:
     assert short.deterministic_glossary is True
 
 
+def test_from_dict_restores_the_policy_the_run_persisted() -> None:
+    fallback = AdaptivePolicy(False, False, False, "re-export")
+    restored = AdaptivePolicy.from_dict(
+        {
+            "granularity": "micro",
+            "fast_lane_bible": True,
+            "visual_blocking": True,
+            "deterministic_glossary": True,
+            "reason": "Canonical frozen-math publication pipeline (5pp, fast-lane seed bible)",
+        },
+        fallback=fallback,
+    )
+
+    assert restored == AdaptivePolicy(
+        fast_lane_bible=True,
+        visual_blocking=True,
+        deterministic_glossary=True,
+        reason="Canonical frozen-math publication pipeline (5pp, fast-lane seed bible)",
+    )
+
+
+def test_from_dict_falls_back_per_field_for_old_manifests() -> None:
+    fallback = AdaptivePolicy(False, True, False, "re-export")
+
+    assert AdaptivePolicy.from_dict(None, fallback=fallback) is fallback
+    restored = AdaptivePolicy.from_dict({"fast_lane_bible": True}, fallback=fallback)
+    assert restored == AdaptivePolicy(
+        fast_lane_bible=True,
+        visual_blocking=True,
+        deterministic_glossary=False,
+        reason="re-export",
+    )
+
+    # A string "false" and a numeric 0 are not booleans; trusting Python
+    # truthiness would turn the first into True.
+    malformed = AdaptivePolicy.from_dict(
+        {"fast_lane_bible": "false", "visual_blocking": 0, "reason": "   "},
+        fallback=fallback,
+    )
+    assert malformed == fallback
+
+
+def test_re_export_reads_the_policy_the_run_persisted(tmp_path: Path) -> None:
+    from ubt.core.engine.re_export import _build_services
+
+    manifest = _manifest(
+        RunMetadata(
+            adaptive_policy={
+                "granularity": "micro",
+                "fast_lane_bible": True,
+                "visual_blocking": True,
+                "deterministic_glossary": True,
+                "reason": "short route",
+            }
+        )
+    )
+    services = _build_services(
+        UBTConfig(db_dir=tmp_path / "db"),
+        router=cast(ModelRouter, object()),
+        qe_runner=cast(BaseQERunner, object()),
+        manifest=manifest,
+    )
+
+    # The config defaults are both False; a re-export of a short run must not
+    # silently strip the gates the original export used.
+    assert services.adaptive_policy.visual_blocking is True
+    assert services.adaptive_policy.deterministic_glossary is True
+
+
 def test_re_export_enforcement_follows_the_config(tmp_path: Path) -> None:
     from ubt.core.engine.re_export import _build_services
 

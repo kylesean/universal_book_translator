@@ -46,3 +46,24 @@ def test_the_result_channel_lives_on_the_render_outcome(name: str) -> None:
 def test_plan_and_outcome_are_dataclasses() -> None:
     assert dataclasses.is_dataclass(RenderPlan)
     assert dataclasses.is_dataclass(RenderOutcome)
+
+
+def test_adapter_mode_prefers_the_adapter_domain_value() -> None:
+    plan = RenderPlan(bilingual_mode="monolingual", effective_dual_mode="dual")
+    assert plan.adapter_mode() == "monolingual"
+
+
+def test_adapter_mode_translates_an_advisor_only_plan() -> None:
+    assert RenderPlan(effective_dual_mode="dual").adapter_mode() == "bilingual"
+    assert RenderPlan(effective_dual_mode="mono").adapter_mode() == "monolingual"
+
+
+def test_adapter_mode_falls_back_when_the_plan_carries_no_mode() -> None:
+    assert RenderPlan().adapter_mode(fallback="monolingual") == "monolingual"
+    assert RenderPlan().adapter_mode() is None
+
+
+def test_preflight_and_export_resolve_the_same_mode() -> None:
+    # The two callers must not disagree about which vocabulary they were handed.
+    plan = RenderPlan(effective_dual_mode="mono")
+    assert plan.adapter_mode() == plan.adapter_mode(fallback="bilingual")

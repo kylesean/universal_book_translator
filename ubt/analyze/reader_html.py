@@ -118,6 +118,38 @@ def _list_marker(item: Tag, index: int) -> str:
     return "•"
 
 
+def _inline_marked_text(node: Tag | NavigableString) -> str:
+    """Flatten inline emphasis into the pipeline's own marker syntax.
+
+    The document model has no inline tree yet, but ``<em>``/``<strong>`` are
+    the two inline facts a translation must preserve. Reusing the existing
+    ``⟦B⟧``/``⟦I⟧`` protocol keeps the change inside the renderer's established
+    emphasis path instead of inventing a second inline representation.
+    """
+    if isinstance(node, NavigableString):
+        return str(node)
+    parts: list[str] = []
+    for child in node.children:
+        if isinstance(child, NavigableString):
+            parts.append(str(child))
+            continue
+        if not isinstance(child, Tag):
+            continue
+        name = (child.name or "").lower()
+        if name in ("script", "style", "noscript"):
+            continue
+        inner = _inline_marked_text(child)
+        if name in ("em", "i"):
+            parts.append(f"⟦I⟧{inner}⟦/I⟧")
+        elif name in ("strong", "b"):
+            parts.append(f"⟦B⟧{inner}⟦/B⟧")
+        elif name == "br":
+            parts.append(" ")
+        else:
+            parts.append(inner)
+    return "".join(parts)
+
+
 def walk_markup_elements(
     node: Tag,
     *,
@@ -152,7 +184,7 @@ def walk_markup_elements(
             continue
         if name in _HEADINGS:
             flush()
-            text = _clean(child.get_text(" ", strip=True))
+            text = _clean(_inline_marked_text(child))
             if text:
                 out.append(
                     (
@@ -176,7 +208,7 @@ def walk_markup_elements(
             # no text, so the block produced nothing and the picture was never
             # visited — the ``img`` branch below only fires for a direct child.
             images = child.find_all("img")
-            text = _clean(child.get_text(" ", strip=True))
+            text = _clean(_inline_marked_text(child))
             if text:
                 out.append(
                     (Paragraph(id="", spine_index=0, span=Span(page=page), text=text), child)
@@ -200,7 +232,7 @@ def walk_markup_elements(
         if name in ("ul", "ol"):
             flush()
             for index, item in enumerate(child.find_all("li", recursive=False), start=1):
-                text = _clean(item.get_text(" ", strip=True))
+                text = _clean(_inline_marked_text(item))
                 if text:
                     out.append(
                         (
@@ -217,7 +249,7 @@ def walk_markup_elements(
             continue
         if name == "li":
             flush()
-            text = _clean(child.get_text(" ", strip=True))
+            text = _clean(_inline_marked_text(child))
             if text:
                 out.append(
                     (
@@ -280,7 +312,7 @@ def walk_markup_elements(
             continue
         if name == "figcaption":
             flush()
-            text = _clean(child.get_text(" ", strip=True))
+            text = _clean(_inline_marked_text(child))
             if text:
                 out.append((Caption(id="", spine_index=0, span=Span(page=page), text=text), child))
             continue
@@ -289,7 +321,7 @@ def walk_markup_elements(
             out.extend(walk_markup_elements(child, page=page, resolve_asset=resolve))
             continue
         # Unknown/inline tag: fold its text into the pending paragraph.
-        inline = _clean(child.get_text(" ", strip=True))
+        inline = _clean(_inline_marked_text(child))
         if inline:
             pending.append(NavigableString(inline))
     flush()

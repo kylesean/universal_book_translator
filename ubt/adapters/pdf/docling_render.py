@@ -105,7 +105,12 @@ class _SizedBlock(Protocol):
 
 
 def _block_font_size(
-    block: _SizedBlock, *, is_hdr: bool, body_size: float, is_chrome: bool = False
+    block: _SizedBlock,
+    *,
+    is_hdr: bool,
+    body_size: float,
+    is_chrome: bool = False,
+    is_caption: bool = False,
 ) -> float | None:
     """A block's own size in points, or ``None`` to inherit the page's body size.
 
@@ -114,9 +119,10 @@ def _block_font_size(
     chapter title was being drawn at ~10pt and every page read as a flat wall of
     uniform text. A *chrome* block (header/footer) must not either: its source
     size is part of the page furniture, and a 9pt page footer drawn at the
-    10.65pt body size is visibly the wrong object. The size is taken from the
-    block's own style/provenance measurement, and only when that measurement is
-    plausible.
+    10.65pt body size is visibly the wrong object. A *caption* has the same
+    rule for a different reason: both an 8pt and a 10pt source caption used to
+    become the hardcoded 9pt fallback. The size is taken from the block's own
+    style/provenance measurement, and only when that measurement is plausible.
 
     Takes ``_SizedBlock`` rather than ``IRBlock`` because only two attributes
     are read. Requiring the full model forced callers with a measured size but
@@ -129,17 +135,30 @@ def _block_font_size(
         candidates.append(float(block.provenance.font_size))
     measured = next((size for size in candidates if size >= _MIN_BLOCK_SIZE_PT), None)
 
-    if not is_hdr and not is_chrome:
+    if not is_hdr and not is_chrome and not is_caption:
         # Body prose: the page's uniform size is the whole point of the channel.
         return None
     if measured is not None:
         return round(measured, 2)
     if is_hdr:
         return round(body_size * _HEADING_SIZE_RATIO, 2)
-    # Chrome with no measurement: keep it a footer-sized object rather than
-    # promoting it to body size. Nine points is the common running-head size
-    # and still below every body size the corpus measured.
+    # Chrome/caption with no measurement: keep it a furniture-sized object
+    # rather than promoting it to body size. Nine points is the common
+    # running-head size and still below every body size the corpus measured.
     return round(min(body_size, 9.0), 2)
+
+
+def _effective_tracking_em(tracking_em: float, target_lang: str) -> float:
+    """The tracking the canvas actually applies: CJK cannot take a negative value.
+
+    ``facsimile_renderer`` clamps negative page tracking to zero for CJK
+    because ideographs have no side bearings and negative tracking collides
+    the strokes. The planner and the fit check must use the same value, or a
+    page accepted at ``-0.015em`` is drawn at ``0em`` and overflows.
+    """
+    if tracking_em < 0.0 and target_lang.lower().startswith(("zh", "ja", "ko")):
+        return 0.0
+    return tracking_em
 
 
 def _normalise_caption_label(source_text: str, target_text: str, *, target_lang: str) -> str:
@@ -680,15 +699,14 @@ class DoclingRenderStrategy:
         # and both ASSET_*_RECONSTRUCTION violation kinds were unreachable.
         self.last_render_reconstructions = list(renderer.table_reconstructions)
 
-        # Miniaturization & lossless stream compression pass
-        if getattr(self, "enable_pdf_optimization", True) and output_path.exists():
-            from ubt.adapters.pdf.pdf_optimizer import optimize_pdf_in_place
-
-            opt_prof = getattr(self, "pdf_optimize_profile", "lossless")
-            opt_res = optimize_pdf_in_place(output_path, profile=opt_prof)
-            if opt_res.status == "optimized":
-                manifest.metadata["pdf_optimization"] = opt_res.model_dump()
-
+        # No optimization pass here. The export stage owns miniaturization for
+        # the *final* delivered artifact (see ``run_export_stage``); optimizing
+        # inside the strategy ran the same lossless rewrite twice per PDF — once
+        # on the just-compiled file and again after the visual gate — and each
+        # pass re-verifies fidelity and recompresses every stream.
+        # ``enable_pdf_optimization`` remains an accepted constructor argument
+        # (the adapter sets it from config) but is read only by the export
+        # stage, which decides whether that one pass runs at all.
         return output_path
 
     async def _render_facsimile(
@@ -707,6 +725,7 @@ class DoclingRenderStrategy:
             build_page_fit_models,
             exceptions_from_fit,
             group_multi_region_boxes,
+            obstacle_top,
             plan_facsimile_body_group,
         )
         from ubt.adapters.pdf.strip_pdf_text import strip_text_streams
@@ -714,7 +733,12 @@ class DoclingRenderStrategy:
         from ubt.core.layout import Box, PageLayoutBlock, solve_page_cels
         from ubt.render.delivered_text import delivered_text
         from ubt.render.flow import approximate_measure, solve_flow
-        from ubt.render.layout_solver import FitReport, fit_at_size, solve_page_2d
+        from ubt.render.layout_solver import (
+            FitReport,
+            apply_width_borrow,
+            fit_at_size,
+            solve_page_2d,
+        )
         from ubt.render.typst.artifact_guard import has_sentinel
         from ubt.render.typst.elastic_solver import TypeElasticitySolver
         from ubt.render.typst.facsimile_renderer import (
@@ -972,6 +996,7 @@ class DoclingRenderStrategy:
         )
         style_plan = plan_facsimile_body_group(fit_models, block_count=translatable_blocks)
         body_group = style_plan.group
+        body_tracking_em = _effective_tracking_em(body_group.tracking_em, target_lang)
         page_fits: dict[int, Any] = {}
         l2_blocks_by_page: dict[int, list[IRBlock]] = {}
 
@@ -1044,51 +1069,13 @@ class DoclingRenderStrategy:
                     RegionKind.HEADER,
                     RegionKind.FOOTER,
                 }
-                block_size = _block_font_size(
-                    b, is_hdr=is_hdr, body_size=source_size_pt, is_chrome=is_chrome
-                )
 
-                # A block that is not re-drawn keeps its own box protected in the
-                # background layer: a formula or figure must survive untouched.
-                skip_render = b.skip_translate or b.block_type in (
-                    BlockType.FORMULA,
-                    BlockType.IMAGE,
-                )
-                if skip_render:
-                    # The background layer carries this block's ink; it draws no
-                    # translated text and must not enter the 2D solver's column
-                    # records as a text box. However, its top edge IS a vertical
-                    # obstacle for any translated prose box above it in the same
-                    # column (or full-width across both columns), so the solver's
-                    # vertical glue must clamp at ``b.bbox.y1``.
-                    page_preserved.append(b)
-                    page_l2_blocks.append(b)
-                    if b.bbox.page == pno:
-                        obs_top = float(b.bbox.y1)
-                        if w > 0.65 * pw:
-                            obstacles_by_column.setdefault(0, []).append(obs_top)
-                            obstacles_by_column.setdefault(1, []).append(obs_top)
-                        else:
-                            obs_mid_x = (b.bbox.x0 + b.bbox.x1) / 2.0
-                            obs_col = 0 if obs_mid_x < pw * 0.50 else 1
-                            obstacles_by_column.setdefault(obs_col, []).append(obs_top)
-                    continue
-
-                bx0 = float(b.bbox.x0)
-                by0 = float(b.bbox.y0)
-                bx1 = float(b.bbox.x1)
-                by1 = float(b.bbox.y1)
-                if pno in page_crop_origins:
-                    off_x, off_y = page_crop_origins[pno]
-                    # Defensive detection: if the block's coordinates still reside in
-                    # unnormalized MediaBox space (by1 exceeds page height by ~off_y),
-                    # translate into the CropBox frame.
-                    if by1 > ph + 0.5:
-                        bx0 -= off_x
-                        bx1 -= off_x
-                        by0 -= off_y
-                        by1 -= off_y
-
+                # Caption detection must precede ``_block_font_size``: a caption
+                # is a furniture-sized object too, and both an 8pt and a 10pt
+                # source caption used to become the hardcoded 9pt fallback. The
+                # regexes read only the source text, which is source-text based
+                # and therefore safe to classify before the crop-box handling
+                # below (that handling mutates only the bbox coordinates).
                 is_table_cap = bool(
                     re.match(
                         r"^(?:table|表|표)\.?\s*[\d\w]+",
@@ -1116,6 +1103,56 @@ class DoclingRenderStrategy:
                     )
                 ) and not is_table_cap
                 is_caption = is_fig_cap or is_table_cap
+
+                block_size = _block_font_size(
+                    b,
+                    is_hdr=is_hdr,
+                    body_size=source_size_pt,
+                    is_chrome=is_chrome,
+                    is_caption=is_caption,
+                )
+
+                # A block that is not re-drawn keeps its own box protected in the
+                # background layer: a formula or figure must survive untouched.
+                skip_render = b.skip_translate or b.block_type in (
+                    BlockType.FORMULA,
+                    BlockType.IMAGE,
+                )
+                if skip_render:
+                    # The background layer carries this block's ink; it draws no
+                    # translated text and must not enter the 2D solver's column
+                    # records as a text box. However, its top edge IS a vertical
+                    # obstacle for any translated prose box above it in the same
+                    # column (or full-width across both columns), so the solver's
+                    # vertical glue must clamp at ``b.bbox.y1``.
+                    page_preserved.append(b)
+                    page_l2_blocks.append(b)
+                    if b.bbox.page == pno:
+                        obs_top = obstacle_top(b.bbox)
+                        if w > 0.65 * pw:
+                            obstacles_by_column.setdefault(0, []).append(obs_top)
+                            obstacles_by_column.setdefault(1, []).append(obs_top)
+                        else:
+                            obs_mid_x = (b.bbox.x0 + b.bbox.x1) / 2.0
+                            obs_col = 0 if obs_mid_x < pw * 0.50 else 1
+                            obstacles_by_column.setdefault(obs_col, []).append(obs_top)
+                    continue
+
+                bx0 = float(b.bbox.x0)
+                by0 = float(b.bbox.y0)
+                bx1 = float(b.bbox.x1)
+                by1 = float(b.bbox.y1)
+                if pno in page_crop_origins:
+                    off_x, off_y = page_crop_origins[pno]
+                    # Defensive detection: if the block's coordinates still reside in
+                    # unnormalized MediaBox space (by1 exceeds page height by ~off_y),
+                    # translate into the CropBox frame.
+                    if by1 > ph + 0.5:
+                        bx0 -= off_x
+                        bx1 -= off_x
+                        by0 -= off_y
+                        by1 -= off_y
+
                 if is_caption or is_listing_cap:
                     normalised_caption = _normalise_caption_label(
                         b.source_text, target_content, target_lang=target_lang
@@ -1329,9 +1366,14 @@ class DoclingRenderStrategy:
                     needed_h = needed_lines * block_size * 1.25
                     if needed_h > h + 2.0:
                         fitted_size = math.sqrt((w * h) / (max(1, glyphs) * 1.25))
-                        block_size = max(
-                            source_size_pt * 0.85, min(block_size, round(fitted_size, 2))
-                        )
+                        # 0.85 is a *warning* threshold, not a lower bound: a
+                        # title that needs smaller type to fit its own box was
+                        # previously floored at 85% of the source size and then
+                        # overflowed the box anyway. Let the computed size win
+                        # and record the legibility loss on the block.
+                        block_size = min(block_size, max(1.0, round(fitted_size, 2)))
+                        if source_size_pt > 0.0 and block_size < source_size_pt * 0.85:
+                            render_flags.append((b.id, "low_legibility_font"))
 
                 # Column bucket for the 2D solver: a left-column paragraph must
                 # not be bounded by where the right column happens to start.
@@ -1341,8 +1383,18 @@ class DoclingRenderStrategy:
                 glyph_aspect = (len(target_content) - ascii_count + ascii_count * 0.50) / max(
                     1, len(target_content)
                 )
-                if is_caption:
-                    obstacles_by_column.setdefault(column, []).append(by0)
+                if is_caption or is_hdr or b.block_type == BlockType.TABLE:
+                    # Captions, headings and tables are placed at their own
+                    # size; they are obstacles for the body flow, not body-flow
+                    # records. Adding a heading here made the solver estimate a
+                    # 19.4pt title as 8.9pt body text, and adding a table made
+                    # the table compiler's glyph demand vote on the body group.
+                    # The obstacle is the block's TOP edge, matching the plan
+                    # (``facsimile_plan.obstacle_top``): using the bottom edge
+                    # let prose expand over the heading/table by its full
+                    # height, and made the plan reject pages the render called
+                    # fitting.
+                    obstacles_by_column.setdefault(column, []).append(obstacle_top(b.bbox))
                 else:
                     records_by_column.setdefault(column, []).append(
                         {
@@ -1366,9 +1418,18 @@ class DoclingRenderStrategy:
                         )
                     )
 
-                caption_align = (
-                    getattr(b.style, "alignment", None) or "left" if is_caption else "justify"
-                )
+                # Measurement, not policy: a centered source heading is recorded
+                # as ``alignment="center"`` by the layout annotator, and that
+                # fact must reach the renderer (which centers by its own rules
+                # only when told). Captions default to left; headings default to
+                # no alignment claim so the renderer keeps its justify setting.
+                measured_align = getattr(b.style, "alignment", None) if b.style else None
+                if is_caption:
+                    caption_align = measured_align or "left"
+                elif is_hdr and measured_align == "center":
+                    caption_align = "center"
+                else:
+                    caption_align = "justify"
                 placements.append(
                     FacsimileBlockPlacement(
                         block_id=b.id,
@@ -1429,10 +1490,34 @@ class DoclingRenderStrategy:
                 columns,
                 size_pt=body_group.size_pt,
                 pitch=body_group.pitch,
-                tracking_em=body_group.tracking_em,
+                tracking_em=body_tracking_em,
                 width_borrow_pt=body_group.width_borrow_pt,
             )
             page_fits[pno] = page_fit
+
+            # Make the placement geometry agree with the fit that accepted it.
+            # ``fit_at_size`` widens each record into the free right-margin
+            # budget (``width_borrow_pt``), so a group was accepted as fitting
+            # three lines in 344pt while the placement below drew it in the
+            # source box (340pt), wrapped to four lines and was shrunk by the
+            # canvas. Apply the same borrowed x1 to the placements now.
+            if body_group.width_borrow_pt > 0.0:
+                import dataclasses
+
+                borrowed_columns, _ = apply_width_borrow(columns, body_group.width_borrow_pt)
+                borrowed_x1 = {
+                    str(record.get("id")): float(record.get("x1", 0.0))
+                    for column in borrowed_columns
+                    for record in column
+                    if record.get("id")
+                }
+                if borrowed_x1:
+                    placements = [
+                        dataclasses.replace(placement, x1=borrowed_x1[placement.block_id])
+                        if placement.block_id in borrowed_x1
+                        else placement
+                        for placement in placements
+                    ]
 
             # CELS layout coordinator & distortion check (optional via self.enable_cels)
             cels_sol = None
@@ -1473,7 +1558,7 @@ class DoclingRenderStrategy:
                         aspect = (len(target_txt) - n_ascii + n_ascii * 0.50) / max(
                             1, len(target_txt)
                         )
-                        eff_glyph_w = eff_size * max(0.85, 1.0 + body_group.tracking_em) * aspect
+                        eff_glyph_w = eff_size * max(0.85, 1.0 + body_tracking_em) * aspect
                         chars_per_line = max(1.0, pl_w / eff_glyph_w)
                         lines_count = max(1, math.ceil(len(target_txt) / chars_per_line))
                         target_h = (
@@ -1612,7 +1697,7 @@ class DoclingRenderStrategy:
                             columns,
                             size_pt=body_group.size_pt,
                             pitch=body_group.pitch,
-                            tracking_em=body_group.tracking_em,
+                            tracking_em=body_tracking_em,
                             width_borrow_pt=body_group.width_borrow_pt,
                         )
                         page_fits[pno] = page_fit
@@ -1733,6 +1818,7 @@ class DoclingRenderStrategy:
                     target_lang=target_lang,
                     preferred_pt=body_group.size_pt,
                 )
+                l2_tracking = _effective_tracking_em(l2_tracking, target_lang)
                 chrome_size_pt = next(
                     (
                         _block_font_size(
@@ -1852,7 +1938,7 @@ class DoclingRenderStrategy:
                         page_h=round(ph, 2),
                         uniform_size_pt=elastic_size_pt,
                         leading_em=elastic_leading,
-                        tracking_em=body_group.tracking_em,
+                        tracking_em=body_tracking_em,
                         stretch_pct=elastic_stretch,
                         placements=placements,
                         tier="L1",
@@ -1867,7 +1953,7 @@ class DoclingRenderStrategy:
                         "measured_leading_pt": round(source_leading_pt, 3),
                         "delivered_size_pt": round(elastic_size_pt, 3),
                         "delivered_leading_em": elastic_leading,
-                        "tracking_em": round(body_group.tracking_em, 4),
+                        "tracking_em": round(body_tracking_em, 4),
                         "tier": "L1",
                         "fits": bool(page_fits[pno].fits),
                         "style_group_id": body_group.group_id,
@@ -2022,6 +2108,7 @@ class DoclingRenderStrategy:
                                 preferred_pt=body_group.size_pt,
                             )
                         )
+                        l2_tracking = _effective_tracking_em(l2_tracking, target_lang)
                         l2_page = PageLockedPageSpec(
                             page_no=pno,
                             geometry=geom,
@@ -2090,6 +2177,17 @@ class DoclingRenderStrategy:
                         formula_cropper=formula_cropper,
                     )
                     manifest.metadata["l1_ink_collision_rerouted_pages"] = sorted(colliding)
+            # Tables the canvas could not fit at a readable size were not drawn;
+            # the background image carries the source table. Record them as
+            # preserved and drop the optimistic "rebuilt table" verdict, so the
+            # contract reports a preserved asset instead of a clipped
+            # reconstruction. Read after the optional L1->L2 reroute: a page
+            # that moved to L2 reflows its tables and no longer needs this.
+            for preserved_id, preserved_reason in renderer.preserved_placements:
+                skipped.append((preserved_id, preserved_reason))
+                reconstructions = [
+                    record for record in reconstructions if record.block_id != preserved_id
+                ]
             manifest.metadata["delivery_mode"] = "facsimile"
             # Hand the stripped background to the visual gate. Without it the
             # ink-collision tier cannot run, and "the L1 channel was verified"
@@ -2134,20 +2232,14 @@ class DoclingRenderStrategy:
                 sorted(rendered_plan.exception_pages),
             )
 
-        # Miniaturization & lossless stream compression pass
-        if getattr(self, "enable_pdf_optimization", True) and output_path.exists():
-            from ubt.adapters.pdf.pdf_optimizer import optimize_pdf_in_place
-
-            opt_prof = getattr(self, "pdf_optimize_profile", "lossless")
-            opt_res = optimize_pdf_in_place(output_path, profile=opt_prof)
-            if opt_res.status == "optimized":
-                manifest.metadata["pdf_optimization"] = opt_res.model_dump()
-
-        # Chapter bookmarks, written *after* the optimization pass so the
-        # outline belongs to the file that ships (an optimizer that rewrites the
-        # object graph is exactly the step that could drop a tree written
-        # before it). The source book had a working sidebar and the translation
-        # had none — the reader's only way back to chapter 7 was scrolling.
+        # Chapter bookmarks, written on the file the strategy compiled. The
+        # export stage's single optimization pass runs *after* the outline is
+        # written, and pikepdf preserves an existing outline through a stream
+        # recompress. Writing it here (rather than after optimization) keeps
+        # the one-owner rule: the strategy owns content, the export stage owns
+        # the byte-level rewrite. The source book had a working sidebar and the
+        # translation had none — the reader's only way back to chapter 7 was
+        # scrolling.
         #
         # Only these two channels qualify. Both emit exactly one output page per
         # source page (``range(1, total_pages + 1)`` above), so a heading's
@@ -2229,6 +2321,10 @@ class DoclingRenderStrategy:
         # the same strategy must not report the first render's verdicts if it
         # fails before that copy runs.
         self.last_render_reconstructions = []
+        # A reflow render measures no page geometry. Clearing here keeps a
+        # previous facsimile render on the same adapter from leaking its pages
+        # into this artifact's contract and style samples.
+        self.last_page_geometry = []
 
         out_path = Path(output_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)

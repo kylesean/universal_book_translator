@@ -13,6 +13,7 @@ has proved different.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from collections.abc import AsyncIterator, Sequence
@@ -25,8 +26,10 @@ from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import DocumentParseError
+from ubt.core.ir.continuation import fuse_continuation_blocks
 from ubt.core.ir.models import BlockStatus, BlockType, IRBlock
 from ubt.core.ir.serializer import compute_file_sha256
+from ubt.core.memory.rolling_summary import extract_chapter_id
 from ubt.core.policy.verdict import apply_verdict, judge_block
 from ubt.model.ast import RegionKind
 
@@ -37,6 +40,59 @@ logger = logging.getLogger(__name__)
 # "we could not compare", so resume must neither clear blocks (a fully
 # translated book would be destroyed and re-billed) nor raise a mismatch.
 _FINGERPRINT_UNAVAILABLE = "fingerprint_unavailable"
+
+
+async def _fuse_chapter_boundaries(
+    ledger: SQLiteJobLedger,
+    job_id: str,
+    chapter_ids: Sequence[str],
+) -> int:
+    """Fuse a continuation that crosses the PDF page-chunk boundary.
+
+    The adapter fuses continuation runs *inside* each 50-page chunk. A
+    paragraph split at page 50/51 therefore never met its other half, because
+    the two halves were separate ``ChapterIR`` streams. This book-level pass
+    reconnects exactly the adjacent chapter pair, before any drafting, and lets
+    the survivor carry the combined ``CompositeSpan``.
+    """
+    blocks = await asyncio.to_thread(ledger.get_all_blocks, job_id)
+    grouped: dict[str, list[IRBlock]] = {}
+    for block in blocks:
+        chapter_id = extract_chapter_id(block.id)
+        if chapter_id:
+            grouped.setdefault(chapter_id, []).append(block)
+    fused_count = 0
+    for previous_id, next_id in zip(chapter_ids, chapter_ids[1:], strict=False):
+        previous = grouped.get(previous_id) or []
+        following = grouped.get(next_id) or []
+        if not previous or not following:
+            continue
+        last, first = previous[-1], following[0]
+        fused = fuse_continuation_blocks([last, first])
+        if len(fused) != 1 or fused[0].id != last.id:
+            continue
+        survivor = fused[0]
+        provenance_json = json.dumps(
+            survivor.provenance.model_dump(exclude_none=True), ensure_ascii=False
+        )
+        await asyncio.to_thread(
+            ledger.apply_continuation_merge,
+            last.id,
+            first.id,
+            source_text=survivor.source_text,
+            provenance_json=provenance_json,
+            job_id=job_id,
+        )
+        fused_count += 1
+        logger.info(
+            "Fused cross-chapter continuation %s + %s -> %s (%d chars)",
+            last.id,
+            first.id,
+            last.id,
+            len(survivor.source_text),
+        )
+    return fused_count
+
 
 _BIB_SECTION_HEADING_RE = re.compile(
     r"^(?:(?:\d+(?:\.\d+)*|[IVXLCDM]+)\s*[\.\-–—:]?\s*)?"
@@ -495,6 +551,7 @@ async def run_ingest_stage(
     stats = await asyncio.to_thread(ledger.get_job_stats, actual_job_id)
     if int(stats.get("total", 0)) == 0:
         loaded_count = 0
+        did_ingest = False
         async for chapter in adapter.parse_stream(input_path, selected_pages):
             parsed_count += 1
             if parsed_count < start_chapter:
@@ -605,8 +662,16 @@ async def run_ingest_stage(
             chapter.blocks = cleaned_blocks
             await asyncio.to_thread(ledger.append_chapter, actual_job_id, chapter)
             loaded_count += 1
+            did_ingest = True
             if max_chapters is not None and loaded_count >= max_chapters:
                 break
+
+        if did_ingest:
+            await _fuse_chapter_boundaries(
+                ledger,
+                actual_job_id,
+                [chapter.chapter_id for chapter in ctx.manifest.chapters],
+            )
 
     final_stats = await asyncio.to_thread(ledger.get_job_stats, actual_job_id)
     # A job that ends ingest with zero blocks is an empty book however it got

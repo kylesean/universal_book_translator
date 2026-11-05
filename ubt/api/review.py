@@ -113,12 +113,18 @@ _ISSUE_MARKERS: dict[str, tuple[str, ...]] = {
 _RENDER_SKIP_PREFIXES = ("render_skip:",)
 
 #: Every issue kind, in ribbon display order.
-ISSUE_KINDS: tuple[str, ...] = (*_ISSUE_MARKERS, "render")
+ISSUE_KINDS: tuple[str, ...] = (*_ISSUE_MARKERS, "render", "skip")
 
 
 def segment_issue_kinds(block: IRBlock) -> list[str]:
     """Classify a block's flags into workbench issue kinds (order-stable)."""
     kinds: list[str] = []
+    # A verbatim keep is a *decision*, not a clean translation. Surfacing it as
+    # an issue kind is what lets a reviewer audit a misclassified caption or
+    # bibliography entry instead of never seeing it (``issues`` used to filter
+    # it out because a skip carries no defect flag).
+    if block.skip_translate:
+        kinds.append("skip")
     for flag in block.error_flags or ():
         if not flag:
             continue
@@ -169,6 +175,8 @@ def serialize_segment(block: IRBlock) -> dict[str, Any]:
         "page": bbox.page if bbox is not None else None,
         "block_type": block.block_type.value,
         "status": block.status.value,
+        "skip_translate": bool(block.skip_translate),
+        "policy_reason": block.policy_reason,
         "source_text": block.source_text or "",
         "target_text": target,
         "delivered_text": delivered_text(block),
@@ -176,6 +184,7 @@ def serialize_segment(block: IRBlock) -> dict[str, Any]:
         "repair_error": _mark_title(target) if is_failed_draft(target) else None,
         "quarantined": is_placeholder(target),
         "mtqe_score": block.mtqe_score,
+        "mtqe_score_source": block.mtqe_score_source,
         "error_flags": list(block.error_flags or ()),
         "issues": segment_issue_kinds(block),
         "human_verified": FLAG_HUMAN_PE_IMPORTED in (block.error_flags or ()),

@@ -264,6 +264,28 @@ def _page_capacity(geometry: PageGeometry) -> float:
     return 0.92 * max(1, geometry.columns) * avail_h
 
 
+#: Same plausibility floor the L1 canvas uses (``_MIN_BLOCK_SIZE_PT``): a
+#: measured size below this is debris, not a heading face.
+_MIN_HEADING_SIZE_PT: float = 4.5
+
+
+def _measured_heading_size(block: IRBlock) -> float | None:
+    """A heading's own measured source size, or ``None`` for the em fallback.
+
+    The L1 canvas keeps a measured 16.2pt chapter title at 16.2pt. The L2
+    reflow tier used to set *every* heading at 1.25em/1.10em of the body
+    size, so a 9pt body silently demoted that title to 11.25pt. Read the
+    same style/provenance measurement the canvas reads so a page-locked
+    heading keeps its source size; unmeasured headings keep the old ratio.
+    """
+    candidates: list[float] = []
+    if block.style is not None and block.style.font_size is not None:
+        candidates.append(float(block.style.font_size))
+    if block.provenance is not None and block.provenance.font_size is not None:
+        candidates.append(float(block.provenance.font_size))
+    return next((size for size in candidates if size >= _MIN_HEADING_SIZE_PT), None)
+
+
 def _block_height(
     block: IRBlock,
     *,
@@ -308,7 +330,21 @@ def _block_height(
     lines = max(1, math.ceil(len(txt) / chars_per_line))
 
     if block.block_type == BlockType.HEADING:
-        return lines * (size * 1.25) * 1.35 + 8.0 + spacing * size
+        measured = _measured_heading_size(block)
+        if measured is None:
+            # Unmeasured heading: the historical 1.25em-of-body model, kept
+            # byte-for-byte so ``solve_page_lock`` is unchanged for documents
+            # whose headings carry no source measurement.
+            return lines * (size * 1.25) * 1.35 + 8.0 + spacing * size
+        # A measured heading is drawn at its own point size, not at 1.25em of
+        # the body. Both its wrap count and its line height must use the drawn
+        # size: reserving 16.2pt lines but counting them at the 9pt body width
+        # would *underestimate* a title that wraps to two lines, which is the
+        # one error direction this pessimistic model must never take.
+        eff_glyph_w = measured * max(0.85, 1.0 + tracking)
+        chars_per_line = max(1.0, col_w / eff_glyph_w)
+        heading_lines = max(1, math.ceil(len(txt) / chars_per_line))
+        return heading_lines * measured * 1.35 + 8.0 + spacing * size
     if block.block_type == BlockType.FORMULA:
         return max(24.0, size * 2.0) + spacing * size
     if block.block_type == BlockType.TABLE:
@@ -859,10 +895,17 @@ class PageLockedReflowRenderer:
             runs = block_runs(b)
 
             if b.block_type == BlockType.HEADING:
-                lvl = getattr(b.element, "level", 1) if hasattr(b, "element") else 1
-                size_em = "1.25em" if lvl <= 1 else "1.10em"
+                # A measured source size wins over the em fallback: keep a
+                # 16.2pt chapter title at 16.2pt instead of demoting it to
+                # 1.25em of a 9pt body (11.25pt). L1 already does this.
+                measured_size = _measured_heading_size(b)
+                if measured_size is None:
+                    lvl = getattr(b.element, "level", 1) if hasattr(b, "element") else 1
+                    size_arg = "1.25em" if lvl <= 1 else "1.10em"
+                else:
+                    size_arg = f"{round(measured_size, 2)}pt"
                 lines.append(
-                    f'  #block(above: 0.8em, below: 0.5em)[#text(weight: "bold", size: {size_em}, fill: rgb("{geom.theme_color_hex}"))[{render_prose(txt, runs, is_math_ok=self._math_gate)}]]'
+                    f'  #block(above: 0.8em, below: 0.5em)[#text(weight: "bold", size: {size_arg}, fill: rgb("{geom.theme_color_hex}"))[{render_prose(txt, runs, is_math_ok=self._math_gate)}]]'
                 )
             elif b.block_type == BlockType.LIST_ITEM:
                 lines.append(f"  - {render_prose(txt, runs, is_math_ok=self._math_gate)}")

@@ -387,6 +387,10 @@ class ModelRouter:
             profile = profile.model_copy(update={"prompt_strategy": self.prompt_strategy_override})
         return profile
 
+    def prompt_strategy_for(self, model: str | None = None) -> PromptStrategy:
+        """The prompt product this model accepts, for callers that must branch."""
+        return self._get_profile(model or self.draft_model).prompt_strategy
+
     def build_draft_prompt(
         self,
         source_text: str,
@@ -1341,6 +1345,8 @@ class ModelRouter:
         model: str | None = None,
         domain: str | None = None,
         section_context: str = "",
+        block_contexts: list[tuple[str, str]] | None = None,
+        block_types: list[tuple[str, str]] | None = None,
     ) -> dict[str, str]:
         """Draft a group of blocks in a single structured XML prompt.
 
@@ -1366,6 +1372,8 @@ class ModelRouter:
                 epoch_summary=epoch_summary,
                 domain=domain,
                 section_context=section_context,
+                block_contexts=block_contexts,
+                block_types=block_types,
             )
 
         def _calc_max_tokens(cand_model: str, cand_profile: ModelProfile) -> int | None:

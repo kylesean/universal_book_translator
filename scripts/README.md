@@ -78,10 +78,6 @@ It takes `--corpus corpus` (default) and exits 0 on pass.
 - `check_console_bundle.py` — the local mirror of CI's bundle check: rebuilds the
   console and exits 1 when `ubt/api/static` no longer matches the source. Runs as
   the `console-bundle-fresh` pre-push hook.
-- `check_doc_refs.py` — read-only check of the `path:line` references in the
-  (unversioned) `docs/` tree: exit 1 when a cited UBT file does not exist or a
-  line number is past its file's end. Run it after a refactor that moves code
-  the docs cite. Comparison-repo and draft references are skipped by design.
 - `export_pdf_to_markdown.py` — one-off PDF → Markdown extraction helper.
 - `check_ocr_endpoint.py` — posts one rendered page to an OpenAI-compatible
   vision OCR endpoint and reports whether it answers and returns usable text.

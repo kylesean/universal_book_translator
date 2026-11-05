@@ -77,6 +77,74 @@ class ScopeContext(BaseModel):
         return " ".join(filter(None, parts)).lower()
 
 
+def glossary_has_block_scope(entries: Sequence[Any]) -> bool:
+    """Whether any entry needs the per-block context for arbitration.
+
+    ``parse_scope_spec`` accepts both ``block:`` and its ``blk:`` alias; the
+    cache-key probe must recognise the same pair, or an entry written with the
+    alias silently degrades to the chapter cache and reuses the first block's
+    validator for the whole chapter.
+    """
+    for entry in entries:
+        scope = str(_get_entry_field(entry, "scope", "") or "").strip().lower()
+        if scope.startswith(("block:", "blk:")):
+            return True
+    return False
+
+
+#: Recognised chapter namespaces. ``ch_002``/``chapter-2`` are the EPUB forms;
+#: ``c0001`` is a page-chunk chapter id; ``pdf_main`` is deliberately absent —
+#: it names the one PDF flow, not a chapter.
+_CHAPTER_ID_RE = re.compile(r"(?:ch|chapter)[_-]?(\d+)|c(\d{3,})", re.IGNORECASE)
+
+
+def chapter_index_from_id(value: str | None) -> int | None:
+    """The chapter number an id genuinely encodes, or ``None``.
+
+    This is the single place that decides what a chapter id looks like. A
+    trailing number on any other name (``pdf_main2``, ``b0308``) is not a
+    chapter and must not be treated as one.
+    """
+    if not value:
+        return None
+    match = _CHAPTER_ID_RE.fullmatch(value)
+    if match is None:
+        return None
+    return int(next(group for group in match.groups() if group))
+
+
+def scope_context_for_block(
+    block: Any,
+    *,
+    domain: str | None = None,
+    chapter_title: str | None = None,
+    chapter_index: int | None = None,
+) -> ScopeContext:
+    """Build the best scope context the ledger/IR actually carries for a block.
+
+    A block id is a *name*, not a chapter number. ``pdf_main#b0308`` is the
+    308th block of a PDF with no chapter namespace at all, and ``pdf_main2`` is
+    a namespace, not chapter 2; treating the trailing digits as a chapter made
+    a scoped entry apply to an arbitrary block. Only the recognised chapter
+    spellings (``ch_002`` / ``chapter-2``) yield an index, and the caller can
+    pass an explicit ``chapter_index``/``chapter_title`` when it holds the
+    chapter record. Everything else stays ``None``.
+
+    The namespace is also not a chapter title: calling ``pdf_main`` a title
+    let title-scoped entries match a string the reader never sees. A caller
+    that has a real title passes it.
+    """
+    block_id = str(getattr(block, "id", "") or "")
+    prefix = block_id.split("#", 1)[0].split(":", 1)[0]
+    detected_index = chapter_index_from_id(prefix)
+    return ScopeContext(
+        chapter_index=chapter_index if chapter_index is not None else detected_index,
+        chapter_title=chapter_title or None,
+        block_id=block_id or None,
+        domain=domain or None,
+    )
+
+
 class GlossaryConflictVerdict(StrEnum):
     """Verdict of homograph arbitration."""
 

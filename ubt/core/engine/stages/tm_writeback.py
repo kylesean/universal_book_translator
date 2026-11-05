@@ -155,6 +155,7 @@ async def run_tm_writeback_stage(
             # Same draft-tier identity axis as the draft-stage lookup: a
             # different model must not inherit the previous model's hits.
             model=ctx.router.draft_model,
+            doc_id=("" if getattr(ctx.config, "tm_cross_book", False) else ctx.manifest.doc_id),
         )
         written = await asyncio.to_thread(
             writeback_tm_from_ledger,

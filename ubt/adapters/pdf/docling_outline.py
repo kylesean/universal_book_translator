@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK
 from ubt.core.cleaners.lnds_pruner import normalize_academic_pdf_math
 from ubt.core.ir.models import (
     BlockProvenance,
@@ -53,27 +54,33 @@ def read_pdf_outline_entries(
         return []
     try:
         import pypdfium2 as pdfium
-
-        doc = pdfium.PdfDocument(str(pdf_path))
     except Exception as exc:  # pragma: no cover - library/loader failure
         logger.debug("PDF outline unavailable: %s", exc)
         return []
-    try:
-        entries: list[tuple[int, str, int]] = []
-        for bookmark in doc.get_toc():
-            title = (bookmark.get_title() or "").strip()
-            if not title:
-                continue
-            page = 0
-            try:
-                dest = bookmark.get_dest()
-                page = int(dest.get_index()) + 1 if dest is not None else 0
-            except Exception:
+    # pypdfium2 is a process-global native library; docling's parsing threads
+    # hold the same gate while they read. A bare open here could race them.
+    with PDFIUM_LOCK:
+        try:
+            doc = pdfium.PdfDocument(str(pdf_path))
+        except Exception as exc:  # pragma: no cover - library/loader failure
+            logger.debug("PDF outline unavailable: %s", exc)
+            return []
+        try:
+            entries: list[tuple[int, str, int]] = []
+            for bookmark in doc.get_toc():
+                title = (bookmark.get_title() or "").strip()
+                if not title:
+                    continue
                 page = 0
-            entries.append((int(bookmark.level), title, page))
-        return entries
-    finally:
-        doc.close()
+                try:
+                    dest = bookmark.get_dest()
+                    page = int(dest.get_index()) + 1 if dest is not None else 0
+                except Exception:
+                    page = 0
+                entries.append((int(bookmark.level), title, page))
+            return entries
+        finally:
+            doc.close()
 
 
 def _toc_rows_from_lines(

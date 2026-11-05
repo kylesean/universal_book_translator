@@ -458,6 +458,7 @@ class LedgerJobsMixin(_LedgerHost):
         already-billed block to re-ingest it.
         """
         val_json = json.dumps(value, ensure_ascii=False)
+        self.assert_writer_owner()
         with self._get_conn() as conn:
             actual_id = self._resolve_actual_job_id(conn, job_id)
             conn.execute("BEGIN IMMEDIATE;")
@@ -860,6 +861,7 @@ class LedgerJobsMixin(_LedgerHost):
         to download and every surface reporting success. Both now commit
         together or not at all.
         """
+        self.assert_writer_owner()
         with self._get_conn() as conn:
             actual_id = self._resolve_actual_job_id(conn, job_id)
             conn.execute("BEGIN IMMEDIATE;")
@@ -1879,6 +1881,7 @@ class LedgerBlocksMixin(_LedgerHost):
         if not updates and not clear_verdict_for:
             return 0
 
+        self.assert_writer_owner()
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             scope = self._block_scope(conn, job_id)
@@ -1890,6 +1893,7 @@ class LedgerBlocksMixin(_LedgerHost):
                 target_text = item.get("target_text")
                 draft_text = item.get("draft_text")
                 mtqe_score = item.get("mtqe_score")
+                mtqe_score_source = item.get("mtqe_score_source")
                 repair_rounds = item.get("repair_rounds")
                 # Default None so an omitted key preserves
                 # the stored flags instead of overwriting them with "[]".
@@ -1930,6 +1934,7 @@ class LedgerBlocksMixin(_LedgerHost):
                         target_text = COALESCE(?, target_text),
                         draft_text = COALESCE(?, draft_text),
                         mtqe_score = COALESCE(?, mtqe_score),
+                        mtqe_score_source = COALESCE(?, mtqe_score_source),
                         repair_rounds = COALESCE(?, repair_rounds),
                         error_flags_json = COALESCE(?, error_flags_json),
                         tm_hit = COALESCE(?, tm_hit),
@@ -1945,6 +1950,7 @@ class LedgerBlocksMixin(_LedgerHost):
                     target_text,
                     draft_text,
                     mtqe_score,
+                    mtqe_score_source,
                     repair_rounds,
                     json.dumps(error_flags, ensure_ascii=False)
                     if error_flags is not None
@@ -1996,7 +2002,8 @@ class LedgerBlocksMixin(_LedgerHost):
                 conn.execute(
                     f"""
                     UPDATE blocks
-                       SET mtqe_score = NULL, mqm_severity = NULL,
+                       SET mtqe_score = NULL, mtqe_score_source = NULL,
+                           mqm_severity = NULL,
                            mqm_spans_json = NULL, updated_at = CURRENT_TIMESTAMP
                      WHERE block_id IN ({placeholders}){scope_clause}
                     """,
@@ -2005,6 +2012,69 @@ class LedgerBlocksMixin(_LedgerHost):
             conn.execute("COMMIT;")
             self._mark_blocks_changed()
             return updated
+
+    def apply_continuation_merge(
+        self,
+        survivor_id: str,
+        absorbed_id: str,
+        *,
+        source_text: str,
+        provenance_json: str,
+        job_id: str | None = None,
+    ) -> int:
+        """Fold a cross-chapter continuation into one block before drafting.
+
+        The page-chunked PDF path runs ``fuse_continuation_blocks`` inside each
+        50-page chunk, so a paragraph split at the chunk boundary never met its
+        other half. This is the ledger half of the book-level repair: extend the
+        survivor's source and box chain, clear any stale target, and delete the
+        absorbed row (it is not an empty block to render; it is the same prose).
+        """
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            scope = self._block_scope(conn, job_id)
+            scope_clause = " AND job_id = ?" if scope is not None else ""
+            cursor = conn.execute(
+                f"""
+                UPDATE blocks
+                   SET source_text = ?,
+                       provenance_json = ?,
+                       target_text = NULL,
+                       draft_text = NULL,
+                       status = ?,
+                       mtqe_score = NULL,
+                       mtqe_score_source = NULL,
+                       tm_hit = 0,
+                       error_flags_json = NULL,
+                       repair_rounds = 0,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE block_id = ?{scope_clause}
+                """,
+                [
+                    source_text,
+                    provenance_json,
+                    BlockStatus.PENDING.value,
+                    survivor_id,
+                    *([scope] if scope is not None else []),
+                ],
+            )
+            conn.execute(
+                f"DELETE FROM blocks WHERE block_id = ?{scope_clause}",
+                [absorbed_id, *([scope] if scope is not None else [])],
+            )
+            if scope is not None:
+                conn.execute(
+                    """
+                    UPDATE job_meta
+                       SET total_blocks = (SELECT COUNT(*) FROM blocks WHERE job_id = ?),
+                           updated_at = CURRENT_TIMESTAMP
+                     WHERE job_id = ?
+                    """,
+                    (scope, scope),
+                )
+            conn.execute("COMMIT;")
+            self._mark_blocks_changed()
+            return int(cursor.rowcount)
 
     def reset_blocks_to_pending(self, block_ids: list[str], job_id: str | None = None) -> int:
         """Re-queue blocks by clearing their translation state. Returns rows changed.
@@ -2033,7 +2103,8 @@ class LedgerBlocksMixin(_LedgerHost):
                 f"""
                 UPDATE blocks
                    SET status = ?, target_text = NULL, draft_text = NULL,
-                       tm_hit = 0, mtqe_score = NULL, error_flags_json = NULL,
+                       tm_hit = 0, mtqe_score = NULL, mtqe_score_source = NULL,
+                       error_flags_json = NULL,
                        mqm_severity = NULL, mqm_spans_json = NULL,
                        repair_rounds = 0, updated_at = CURRENT_TIMESTAMP
                  WHERE block_id IN ({placeholders}){scope_clause}

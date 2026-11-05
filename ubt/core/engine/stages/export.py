@@ -112,7 +112,9 @@ async def _render_adapter_output(
     explicitly.
     """
     if bilingual_mode is None and render_plan is not None:
-        bilingual_mode = render_plan.bilingual_mode
+        # Same single mapping as preflight; an explicit bilingual_mode argument
+        # (e.g. the secondary companion) still wins.
+        bilingual_mode = render_plan.adapter_mode()
 
     if adapter.engine_name is not None:
         return await adapter.render_blocks(
@@ -237,6 +239,7 @@ def _terminology_and_structure_pass(
     glossary_validator: GlossaryConsistencyValidator,
     html_validator: HTMLDeltaValidator,
     target_lang: str,
+    source_lang: str = "en",
 ) -> tuple[list[dict[str, Any]], int]:
     """Edit every final block once and return the checkpoints its edits changed.
 
@@ -248,6 +251,48 @@ def _terminology_and_structure_pass(
     """
     modified_checkpoints: list[dict[str, Any]] = []
     enforced_spans = 0
+    enforcer_cache: dict[str, DeterministicGlossaryEnforcer | None] = {}
+    validator_cache: dict[str, GlossaryConsistencyValidator] = {}
+
+    def _enforcer_for(block: IRBlock) -> DeterministicGlossaryEnforcer | None:
+        if glossary_enforcer is None:
+            return None
+        from ubt.core.memory.rolling_summary import extract_chapter_id
+        from ubt.core.memory.scoped_glossary import (
+            glossary_has_block_scope,
+            resolve_effective_glossary,
+            scope_context_for_block,
+        )
+
+        source_entries = list(getattr(glossary_enforcer, "source_glossary", ()))
+        key = block.id if glossary_has_block_scope(source_entries) else extract_chapter_id(block.id)
+        if key not in enforcer_cache:
+            effective = resolve_effective_glossary(
+                source_entries,
+                scope_context_for_block(block),
+            )
+            enforcer_cache[key] = DeterministicGlossaryEnforcer(
+                glossary=effective,
+                target_lang=glossary_enforcer.target_lang,
+                source_lang=getattr(glossary_enforcer, "source_lang", source_lang),
+            )
+        return enforcer_cache[key]
+
+    def _validator_for(block: IRBlock) -> GlossaryConsistencyValidator:
+        from ubt.core.memory.rolling_summary import extract_chapter_id
+        from ubt.core.memory.scoped_glossary import (
+            glossary_has_block_scope,
+            resolve_effective_glossary,
+            scope_context_for_block,
+        )
+
+        entries = list(glossary_validator.glossary)
+        key = block.id if glossary_has_block_scope(entries) else extract_chapter_id(block.id)
+        if key not in validator_cache:
+            validator_cache[key] = GlossaryConsistencyValidator(
+                glossary=resolve_effective_glossary(entries, scope_context_for_block(block))
+            )
+        return validator_cache[key]
 
     for fb in blocks:
         # Verbatim-skipped blocks (watermarks, bibliography, symbol
@@ -260,10 +305,9 @@ def _terminology_and_structure_pass(
             # A quarantined block ships the source verbatim, so substituting
             # target-language terms into it (and later validating it against the
             # glossary) can only produce Chinglish mash and false drift.
-            if glossary_enforcer and fb.status is not BlockStatus.BLOCKED_HUMAN:
-                enforced_text, records, quarantined = glossary_enforcer.enforce_audited(
-                    fb.target_text
-                )
+            enforcer = _enforcer_for(fb) if fb.status is not BlockStatus.BLOCKED_HUMAN else None
+            if enforcer is not None:
+                enforced_text, records, quarantined = enforcer.enforce_audited(fb.target_text)
                 if records:
                     enforced_spans += len(records)
                     fb.target_text = enforced_text
@@ -314,7 +358,7 @@ def _terminology_and_structure_pass(
                 from ubt.core.qe.heuristic import glossary_violation_flag
 
                 canonical = glossary_violation_flag(
-                    fb.source_text, fb.target_text, glossary_validator
+                    fb.source_text, fb.target_text, _validator_for(fb)
                 )
                 if canonical is not None:
                     flag = canonical
@@ -771,12 +815,15 @@ async def _render_complementary_artifact(
     final_blocks: list[IRBlock],
     artifact: DeliveredArtifact,
     render: RenderPlan,
-) -> Path | None:
-    """Render the requested complementary dual-mode or secondary-engine PDF, or None.
+) -> tuple[Path | None, str | None]:
+    """Render the requested complementary dual-mode or secondary-engine PDF.
 
-    Same translated blocks, no extra LLM cost; PDF only (other adapters
-    have no render-mode override plumbing), and never fatal: a failed
-    secondary render must not sink the delivered primary artifact.
+    Returns ``(path, None)`` on success, ``(None, None)`` when no secondary
+    artifact was requested, and ``(None, reason)`` when the render failed.
+    The failure is *never fatal* — a secondary render must not sink the
+    delivered primary artifact — but it is returned to the caller so the
+    companion audit record says "failed" instead of silently omitting the
+    artifact from the result set.
     """
     manifest = ctx.manifest
     secondary_render = str(render.emit_secondary_mode or "")
@@ -804,8 +851,8 @@ async def _render_complementary_artifact(
             logger.info("Dual output rendered complementary artifact: %s", secondary_path)
         except Exception as exc:
             logger.warning("Complementary dual render failed (non-fatal): %s", exc)
-            secondary_path = None
-    return secondary_path
+            return None, f"{type(exc).__name__}: {exc}"
+    return secondary_path, None
 
 
 def _delivery_translations(blocks: Sequence[IRBlock]) -> dict[str, str]:
@@ -1323,6 +1370,8 @@ def _delivery_contract_evidence(
     final_blocks: list[IRBlock],
     rendered_path: Path,
     delivery_contract: dict[str, Any] | None,
+    *,
+    page_geometry: list[dict[str, Any]] | None = None,
 ) -> Any:
     """Build artifact evidence for the delivery contract.
 
@@ -1334,6 +1383,15 @@ def _delivery_contract_evidence(
     from ubt.core.engine.delivery_contract import ContractBlock, OverflowRecord, StyleSample
     from ubt.core.ports import read_delivery_evidence
     from ubt.render.delivered_text import delivered_text, dropped_page_furniture, is_toc_entry
+
+    # A snapshot taken before the complementary render: that render replaces
+    # the adapter's side channel with the *secondary* artifact's page geometry,
+    # and the primary contract must describe the primary file.
+    geometry = (
+        page_geometry
+        if page_geometry is not None
+        else (getattr(adapter, "last_page_geometry", None) or [])
+    )
 
     mode = str(getattr(getattr(ctx.config, "typst", None), "delivery_mode", "") or "")
     actual_mode = str((getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_mode", "") or "")
@@ -1355,9 +1413,7 @@ def _delivery_contract_evidence(
     # page that held the body group's size and flowed onto continuation pages
     # shifts every later block's output page, so faithful's per-page pinning
     # yields to the declared expansion (the page-count check carries it).
-    declared_page_expansion = any(
-        bool(pg.get("flow_expanded")) for pg in getattr(adapter, "last_page_geometry", None) or []
-    )
+    declared_page_expansion = any(bool(pg.get("flow_expanded")) for pg in geometry)
     # Table grids are verified as assets, not as text blocks -- but the style
     # sampler needs their delivered text to recognize a grid's own characters
     # on the page and keep them out of the body-size vote (a grid is its own
@@ -1449,33 +1505,33 @@ def _delivery_contract_evidence(
                 missing_assets.append(str(violation.get("node_id", "")))
 
     overflow_records: list[OverflowRecord] = []
-    for page in getattr(adapter, "last_page_geometry", None) or []:
-        if page.get("fits") in (0, False):
+    for page_geom in geometry:
+        if page_geom.get("fits") in (0, False):
             overflow_records.append(
                 OverflowRecord(
-                    block_id=f"page:{page.get('page_no')}",
-                    page=int(page.get("page_no", 0) or 0),
+                    block_id=f"page:{page_geom.get('page_no')}",
+                    page=int(page_geom.get("page_no", 0) or 0),
                     deficit_pt=0.0,
                     reason="page_lock_overflow",
                 )
             )
 
     style_samples: list[StyleSample] = []
-    for page in getattr(adapter, "last_page_geometry", None) or []:
+    for page_geom in geometry:
         # A page the solver flagged as a style exception (shrunk past the body
         # group to fit an exhibit) is not a body-group vote: its recorded size
         # is the *exception's* size, and letting it vote reads the document as
         # a body drift that is really one page's overflow -- which the
         # overflow records above already account for.
-        if page.get("style_exception"):
+        if page_geom.get("style_exception"):
             continue
-        size = page.get("delivered_size_pt")
+        size = page_geom.get("delivered_size_pt")
         if isinstance(size, (int, float)) and size > 0:
             style_samples.append(
                 StyleSample(
-                    page=int(page.get("page_no", 0) or 0),
+                    page=int(page_geom.get("page_no", 0) or 0),
                     size_pt=float(size),
-                    group_id=str(page.get("style_group_id") or ""),
+                    group_id=str(page_geom.get("style_group_id") or ""),
                 )
             )
 
@@ -1512,6 +1568,7 @@ def _evaluate_delivery(
     final_blocks: list[IRBlock],
     rendered_path: Path,
     delivery_contract: dict[str, Any] | None,
+    page_geometry: list[dict[str, Any]] | None = None,
 ) -> Any | None:
     """Evaluate the artifact contract and write its sidecar.
 
@@ -1525,9 +1582,43 @@ def _evaluate_delivery(
     from ubt.core.engine.delivery_contract import evaluate_delivery_contract
 
     evidence = _delivery_contract_evidence(
-        ctx, adapter, final_blocks, rendered_path, delivery_contract
+        ctx,
+        adapter,
+        final_blocks,
+        rendered_path,
+        delivery_contract,
+        page_geometry=page_geometry,
     )
     report = evaluate_delivery_contract(evidence)
+    # ``sentinel_leaked`` is written by the renderers when an unrestorable
+    # protected span was replaced with ``⟨missing⟩``. The contract deliberately
+    # does not treat the marker itself as a leak (the pipeline wrote it on
+    # purpose), but the block flag must not be a dead end: surface it as a
+    # minor (informational) finding on the delivery record. Minor findings do
+    # not change ``passed`` or ``deliverable``; the artifact still ships, and
+    # the loss is now visible to every consumer of the contract sidecar.
+    sentinel_ids = [
+        block.id for block in final_blocks if "sentinel_leaked" in (block.error_flags or [])
+    ]
+    if sentinel_ids:
+        from ubt.core.engine.delivery_contract import ContractFinding
+
+        report = dataclasses.replace(
+            report,
+            findings=report.findings
+            + (
+                ContractFinding(
+                    severity="minor",
+                    code="sentinel_leaked",
+                    message=(
+                        f"{len(sentinel_ids)} block(s) shipped ⟨missing⟩ because a protected "
+                        "span could not be restored; inspect the quality report for the "
+                        f"affected block(s), starting with {sentinel_ids[0]}"
+                    ),
+                    block_id=sentinel_ids[0],
+                ),
+            ),
+        )
     path = sidecar_path(rendered_path, "delivery_contract.json")
     try:
         payload = report.to_payload()
@@ -1535,7 +1626,12 @@ def _evaluate_delivery(
         if isinstance(plan_meta, dict):
             payload["delivery_plan"] = plan_meta
         page_distortions = []
-        for page in getattr(adapter, "last_page_geometry", None) or []:
+        geometry = (
+            page_geometry
+            if page_geometry is not None
+            else (getattr(adapter, "last_page_geometry", None) or [])
+        )
+        for page in geometry:
             if "cels_distortion_score" in page:
                 page_distortions.append(
                     {
@@ -1887,6 +1983,7 @@ async def run_export_stage(
             glossary_validator=glossary_validator,
             html_validator=html_validator,
             target_lang=target_lang,
+            source_lang=source_lang,
         )
 
     if modified_checkpoints:
@@ -1942,7 +2039,7 @@ async def run_export_stage(
     target_output.parent.mkdir(parents=True, exist_ok=True)
 
     ctx.check_cancelled()
-    effective_bilingual_mode = render.bilingual_mode
+    effective_bilingual_mode = render.adapter_mode()
     # Persist the render decision before rendering: a re-export (a human edit
     # re-rendered into the delivered file) has no advisory stage to re-derive it
     # from, so the mode a re-export reproduces is read back from here. Without
@@ -2110,9 +2207,41 @@ async def run_export_stage(
     from ubt.core.job_options import delivered_artifact
 
     artifact = delivered_artifact(rendered_path, target_output)
-    secondary_path = await _render_complementary_artifact(
+    secondary_path, secondary_error = await _render_complementary_artifact(
         ctx, adapter, final_blocks, artifact, render
     )
+    if secondary_error is not None:
+        # Keep the failure in the same audit record operators already read for
+        # HTML/EPUB/XLIFF companions. The job stays completed (the primary
+        # deliverable is sound), but "the secondary artifact is missing" is no
+        # longer indistinguishable from "no secondary artifact was requested".
+        companion_results.append(
+            CompanionArtifactResult(
+                kind="complementary_pdf",
+                status="failed",
+                error=secondary_error,
+            )
+        )
+    elif secondary_path is not None:
+        companion_results.append(
+            CompanionArtifactResult(
+                kind="complementary_pdf",
+                status="generated",
+                path=secondary_path,
+                size_bytes=secondary_path.stat().st_size if secondary_path.exists() else None,
+            )
+        )
+    if secondary_path is not None or secondary_error is not None:
+        companion_summary = CompanionExportSummary(results=companion_results)
+        companion_summary_dict = companion_summary.model_dump(mode="json")
+        await asyncio.to_thread(
+            ledger.set_job_metadata_value,
+            actual_job_id,
+            "companion_artifacts",
+            companion_summary_dict,
+        )
+        if hasattr(ctx.manifest, "metadata") and isinstance(ctx.manifest.metadata, dict):
+            ctx.manifest.metadata["companion_artifacts"] = companion_summary_dict
     if (
         secondary_path is not None
         and secondary_path.suffix.lower() == ".pdf"
@@ -2177,6 +2306,7 @@ async def run_export_stage(
             final_blocks,
             rendered_path,
             delivery_contract,
+            page_geometry,
         )
         if rendered_path.suffix.lower() == ".pdf"
         else None
@@ -2320,6 +2450,11 @@ async def run_export_stage(
     # (finalize, then digest) left a window where the job read ``completed``
     # with no digest, and a missing digest is the one state the freshness check
     # has to treat as "not stale".
+    # The last cooperative boundary before the terminal write. The visual gate
+    # checks once after its own run, but a lease reclaimed during the companion
+    # render, report writing or blocking-gate enforcement would otherwise let
+    # the old owner stamp ``completed`` over the new owner's ledger.
+    ctx.check_cancelled()
     deliverable_digest = await asyncio.to_thread(rendered_digest_for, ledger, actual_job_id)
     if claims_finality:
         # The download pointers commit with the status. Persisting them from the

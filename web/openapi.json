@@ -7512,6 +7512,22 @@
             "type": "string",
             "title": "Status"
           },
+          "skip_translate": {
+            "type": "boolean",
+            "title": "Skip Translate",
+            "default": false
+          },
+          "policy_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Reason"
+          },
           "source_text": {
             "type": "string",
             "title": "Source Text"
@@ -7556,6 +7572,17 @@
               }
             ],
             "title": "Mtqe Score"
+          },
+          "mtqe_score_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtqe Score Source"
           },
           "error_flags": {
             "items": {

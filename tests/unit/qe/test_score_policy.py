@@ -20,6 +20,7 @@ class _B:
     mtqe_score: float | None = None
     skip_translate: bool = False
     tm_hit: bool = False
+    mtqe_score_source: str | None = None
 
 
 def test_an_unscored_block_is_not_qe_scored() -> None:
@@ -34,8 +35,24 @@ def test_a_tm_hit_is_not_qe_scored() -> None:
     assert is_qe_scored(_B(mtqe_score=1.0, tm_hit=True)) is False
 
 
+def test_a_judged_tm_hit_is_qe_scored() -> None:
+    assert is_qe_scored(_B(mtqe_score=0.88, tm_hit=True, mtqe_score_source="llm_judge")) is True
+
+
 def test_a_real_perfect_score_is_qe_scored() -> None:
     assert is_qe_scored(_B(mtqe_score=1.0)) is True
+
+
+def test_a_heuristic_band_is_not_a_measurement() -> None:
+    assert is_qe_scored(_B(mtqe_score=0.92, mtqe_score_source="heuristic")) is False
+
+
+def test_a_tm_pass_stamp_is_not_a_measurement() -> None:
+    assert is_qe_scored(_B(mtqe_score=1.0, mtqe_score_source="tm")) is False
+
+
+def test_a_judge_score_is_a_measurement() -> None:
+    assert is_qe_scored(_B(mtqe_score=0.88, mtqe_score_source="llm_judge")) is True
 
 
 def test_an_ordinary_score_is_qe_scored() -> None:
@@ -66,4 +83,5 @@ def test_no_scored_blocks_yields_no_values() -> None:
 def test_the_sql_predicate_matches_the_python_predicate_shape() -> None:
     assert "mtqe_score IS NOT NULL" in QE_SCORED_SQL
     assert "skip_translate = 0" in QE_SCORED_SQL
-    assert "COALESCE(tm_hit, 0) = 0" in QE_SCORED_SQL
+    assert "tm_hit" in QE_SCORED_SQL
+    assert "mtqe_score_source" in QE_SCORED_SQL

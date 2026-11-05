@@ -539,7 +539,10 @@ class QualityConfig(BaseModel):
     qe_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
     max_repair_rounds: int = Field(default=2, ge=0)
     bottom_percentile: float = Field(default=0.15, ge=0.0, le=1.0)
-    consistency_enforce: Literal["off", "report", "repair"] = "off"
+    #: ``report`` is the zero-token default: the stage detects and logs
+    #: terminology drift without spending a repair call. ``repair`` opts into
+    #: targeted rewrites; ``off`` disables even detection.
+    consistency_enforce: Literal["off", "report", "repair"] = "report"
     consistency_max_repairs: int = Field(default=50, ge=0)
     qe_engine: QeEngine = "heuristic"
     qe_judge_enabled: bool = False
@@ -608,7 +611,11 @@ class EngineConfig(BaseModel):
     chapter_streaming_queue_size: int = Field(default=2, gt=0)
     step_chars: int = Field(default=3500, gt=0)
     enable_rolling_summary: bool = True
-    memory_sliding_window: bool = True
+    #: L3 is the *long-range* anchor; the recent side is already carried by L2.
+    #: Keeping the earliest whole epochs matches the documented "chapter 30
+    #: remembers chapters 1-10" contract. Set true to make L3 a recent-window
+    #: duplicate instead.
+    memory_sliding_window: bool = False
     memory_max_epochs: int = Field(default=50, gt=0)
     glossary_path: Path | None = None
     glossary_max_global_entries: int = Field(default=100, ge=0)
@@ -620,9 +627,16 @@ class EngineConfig(BaseModel):
     formula_crop_margin: float = Field(default=0.08, ge=0.0, le=0.5)
     pages: str | None = None
     fresh: bool = False
-    c_text_enabled: bool = False
+    #: Translate natural-language ``\text{...}`` spans inside formulas. On by
+    #: default: leaving them verbatim made an otherwise translated academic
+    #: page carry English words in the middle of a Chinese equation.
+    c_text_enabled: bool = True
     tm_enabled: bool = True
     tm_fuzzy_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    #: Exact TM hits are document-scoped by default. Set this to reuse a hit
+    #: across books that share the same model/profile/glossary fingerprint;
+    #: human PE imports remain global either way.
+    tm_cross_book: bool = False
     enable_cels: bool = Field(default=True, validation_alias="UBT_ENABLE_CELS")
 
 
@@ -980,7 +994,10 @@ class UBTConfig(BaseSettings):
     # "off"    = detect + report only (default; no extra LLM spend)
     # "report" = plan the targeted re-translations and log them, still no spend
     # "repair" = run the constrained re-translations (bounded by the cap below)
-    consistency_enforce: Literal["off", "report", "repair"] = "off"
+    #: ``report`` is the zero-token default: the stage detects and logs
+    #: terminology drift without spending a repair call. ``repair`` opts into
+    #: targeted rewrites; ``off`` disables even detection.
+    consistency_enforce: Literal["off", "report", "repair"] = "report"
     #: Budget for "repair" mode. Zero with ``consistency_enforce="repair"`` is
     #: rejected: the stage would plan drift repairs and then discard every one,
     #: reading "on" while being a guaranteed no-op.
@@ -1230,8 +1247,12 @@ class UBTConfig(BaseSettings):
     # -- Cross-chapter rolling summary (one bulk call per chapter transition) --
     enable_rolling_summary: bool = True
     memory_sliding_window: bool = Field(
-        default=True,
-        description="Enable sliding window on L3 compressed history so long-form books retain the most recent epochs within budget",
+        default=False,
+        description=(
+            "Keep the most recent L3 epochs instead of the earliest whole epochs. "
+            "Off by default: L3 is the long-range anchor and L2 already carries "
+            "the recent window; turning this on makes L3 duplicate L2."
+        ),
     )
     memory_max_epochs: int = Field(
         default=50,
@@ -1455,12 +1476,19 @@ class UBTConfig(BaseSettings):
     # FORMULA blocks with translatable \text{...} phrases route those spans
     # through the draft LLM; the math skeleton must stay byte-identical or
     # the block fails closed to source-verbatim (Gate 3 holds).
-    c_text_enabled: bool = False
+    #: Translate natural-language ``\text{...}`` spans inside formulas. On by
+    #: default: leaving them verbatim made an otherwise translated academic
+    #: page carry English words in the middle of a Chinese equation.
+    c_text_enabled: bool = True
 
     # -- Translation Memory (shared across jobs via {db_dir}/tm.sqlite) ---------
     # Exact hits skip the LLM entirely; fuzzy hits become few-shot references.
     tm_enabled: bool = True
     tm_fuzzy_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    #: Exact TM hits are document-scoped by default. Set this to reuse a hit
+    #: across books that share the same model/profile/glossary fingerprint;
+    #: human PE imports remain global either way.
+    tm_cross_book: bool = False
     enable_cels: bool = Field(default=True, validation_alias="UBT_ENABLE_CELS")
 
     # -- Service hardening / deployment (single source of truth) ----
