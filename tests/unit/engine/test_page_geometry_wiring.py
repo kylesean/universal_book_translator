@@ -176,3 +176,67 @@ def test_the_rows_load_into_the_ledger(
 def test_a_non_facsimile_render_records_no_geometry(tmp_path: Path) -> None:
     strategy = DoclingRenderStrategy(delivery_mode="reflow", enable_pdf_optimization=False)
     assert strategy.last_page_geometry == []
+
+
+def test_a_reflow_render_clears_the_previous_facsimile_geometry(
+    tmp_path: Path, stub_compile: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = _source_pdf(tmp_path / "book.pdf", 1)
+    manifest = BookManifest(doc_id="d", title="t", source_path=str(src), target_lang="zh")
+    strategy = DoclingRenderStrategy(delivery_mode="facsimile", enable_pdf_optimization=False)
+    _render(strategy, manifest, [_body("b1", 1)], tmp_path / "a.pdf")
+    assert len(strategy.last_page_geometry) == 1
+
+    def _fake_publish(
+        manifest: Any,
+        blocks: Any,
+        target_lang: str,
+        output_path: Path | str,
+        bilingual: bool = False,
+    ) -> Path:
+        return _source_pdf(Path(output_path), 1)
+
+    # The reflow channel is Typst-only; stub its compile to isolate the
+    # geometry side channel under test.
+    monkeypatch.setattr(strategy, "_render_publish_sync", _fake_publish)
+    strategy.delivery_mode = "reflow"
+    _render(strategy, manifest, [_body("b1", 1)], tmp_path / "b.pdf")
+
+    assert strategy.last_page_geometry == [], (
+        "a reflow render must not inherit the previous facsimile geometry"
+    )
+
+
+def test_render_publish_sync_clears_geometry_at_entry(
+    tmp_path: Path, stub_compile: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The clear belongs to the entry, not to ``render_blocks``' caller.
+
+    ``_render_publish_sync`` is reachable directly (the companion path, resumed
+    jobs, tests). An emit-both run snapshots the primary geometry before the
+    secondary render; the secondary's geometry channel must be empty unless it
+    measured its own pages.
+    """
+    from ubt.core.exceptions import DocumentParseError
+
+    src = _source_pdf(tmp_path / "book.pdf", 1)
+    manifest = BookManifest(doc_id="d", title="t", source_path=str(src), target_lang="zh")
+    strategy = DoclingRenderStrategy(delivery_mode="facsimile", enable_pdf_optimization=False)
+    _render(strategy, manifest, [_body("b1", 1)], tmp_path / "a.pdf")
+
+    # The snapshot the export stage takes before the second render.
+    primary_snapshot = list(strategy.last_page_geometry)
+    assert primary_snapshot, "the facsimile render measured its page"
+
+    def _fail_compile(*args: Any, **kwargs: Any) -> tuple[bool, str]:
+        return False, "stub compile"
+
+    monkeypatch.setattr("ubt.adapters.pdf.typst_compile.typst_compile", _fail_compile)
+
+    with pytest.raises(DocumentParseError):
+        strategy._render_publish_sync(manifest, [_body("b1", 1)], "en", tmp_path / "b.pdf")
+
+    assert strategy.last_page_geometry == [], (
+        "the entry must clear geometry even when the reflow compile fails"
+    )
+    assert primary_snapshot[0]["page_no"] == 1

@@ -198,28 +198,28 @@ class LedgerWriterLock:
         finally:
             conn.close()
 
-    def assert_owned(self) -> None:
-        """Raise unless this instance still holds a live, unexpired lease.
+    def _assert_owned_on(self, conn: sqlite3.Connection) -> None:
+        """The ownership assertion, executed on a caller-provided connection.
 
-        ``renew()`` only notices a reclaim when its conditional ``UPDATE``
-        matches no row. A process that lost the lease between heartbeats could
-        still write the ledger for up to one heartbeat interval. The ledger
-        calls this before its late writes (checkpoint batches, metadata and the
-        terminal ``finalize_job``) so the ownership check is in the same write
-        path, not only in the timer.
+        Kept separate from :meth:`assert_owned` so a ledger write can run this
+        inside its own ``BEGIN IMMEDIATE`` transaction: the SELECT of
+        ``job_locks`` and the row write then see one consistent snapshot, and a
+        reclaim between a pre-check and the commit cannot slip through.
         """
         if not self._held:
             raise LedgerWriterLeaseLostError(
                 f"Writer lease for job {self.job_id} was reclaimed; refusing to write"
             )
-        conn = self._connect()
         try:
             row = conn.execute(
                 "SELECT owner_token, lease_expires_at FROM job_locks WHERE job_id = ?",
                 (self.job_id,),
             ).fetchone()
-        finally:
-            conn.close()
+        except sqlite3.Error as exc:
+            self._held = False
+            raise LedgerWriterLeaseLostError(
+                f"Writer lease for job {self.job_id} cannot be verified: {exc}"
+            ) from exc
         if row is None or str(row[0]) != self._token:
             self._held = False
             raise LedgerWriterLeaseLostError(
@@ -236,6 +236,36 @@ class LedgerWriterLock:
                 f"Writer lease for job {self.job_id} expired without renewal; "
                 "refusing to write its ledger"
             )
+
+    def assert_owned(self) -> None:
+        """Raise unless this instance still holds a live, unexpired lease.
+
+        ``renew()`` only notices a reclaim when its conditional ``UPDATE``
+        matches no row. A process that lost the lease between heartbeats could
+        still write the ledger for up to one heartbeat interval. The ledger
+        calls this before its late writes (checkpoint batches, metadata and the
+        terminal ``finalize_job``) so the ownership check is in the same write
+        path, not only in the timer.
+
+        This opens its own connection, so it is the standalone probe. A ledger
+        write must use :meth:`assert_owned_in_transaction` instead, with the
+        same connection as the write.
+        """
+        conn = self._connect()
+        try:
+            self._assert_owned_on(conn)
+        finally:
+            conn.close()
+
+    def assert_owned_in_transaction(self, conn: sqlite3.Connection) -> None:
+        """Raise unless this lease owns the row visible on ``conn``.
+
+        The caller must already be inside its write transaction (``BEGIN
+        IMMEDIATE``). The ownership check and the write then commit or roll
+        back together, which closes the TOCTOU window a separate pre-check
+        leaves between its SELECT and the write.
+        """
+        self._assert_owned_on(conn)
 
     @staticmethod
     def lease_holder(db_path: Path, job_id: str) -> int | None:

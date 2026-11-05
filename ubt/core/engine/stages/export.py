@@ -1143,10 +1143,21 @@ async def _write_reflow_companion(
     # Same base name, distinct suffix, so ``book_mono.pdf`` yields
     # ``book_mono_reflow.pdf`` and never overwrites the delivery.
     target = rendered_path.with_name(f"{rendered_path.stem}_reflow{rendered_path.suffix}")
+    # ``render_blocks`` clears the strategy's page geometry at entry. The
+    # companion render must not erase the primary artifact's measurement, which
+    # export records later (``page_geometry = adapter.last_page_geometry``).
+    # Snapshot both side channels and put them back after the swap.
+    strategy = getattr(adapter, "_renderer", None)
+    primary_geometry = list(getattr(adapter, "last_page_geometry", None) or [])
+    primary_strategy_geometry = (
+        list(getattr(strategy, "last_page_geometry", None) or [])
+        if strategy is not None and hasattr(strategy, "last_page_geometry")
+        else None
+    )
+    had_adapter_geometry = hasattr(adapter, "last_page_geometry")
     t0 = time.perf_counter()
     swapped = False
     try:
-        strategy = getattr(adapter, "_renderer", None)
         if strategy is not None and hasattr(strategy, "delivery_mode"):
             strategy.delivery_mode = "reflow"
             swapped = True
@@ -1165,6 +1176,10 @@ async def _write_reflow_companion(
                 # Restore before anything else can read the strategy, so the
                 # primary's mode is never left saying "reflow".
                 strategy.delivery_mode = delivered_mode
+            if strategy is not None and primary_strategy_geometry is not None:
+                strategy.last_page_geometry = primary_strategy_geometry
+            if had_adapter_geometry:
+                cast(Any, adapter).last_page_geometry = primary_geometry
         duration_ms = round((time.perf_counter() - t0) * 1000, 2)
         if not target.exists():
             return CompanionArtifactResult(
@@ -1173,6 +1188,26 @@ async def _write_reflow_companion(
                 duration_ms=duration_ms,
                 error="the reflow render returned without writing the artifact",
             )
+        # The export stage owns PDF miniaturization for every delivered PDF.
+        # The reflow reading copy is user-visible and downloadable like the
+        # primary/secondary artifacts, so it gets exactly one pass here — not
+        # the old strategy-internal pass plus an export pass. An optimization
+        # failure must not turn a successfully written companion into "failed":
+        # the file is intact, only its size is unoptimized.
+        if target.suffix.lower() == ".pdf" and getattr(ctx.config, "enable_pdf_optimization", True):
+            opt_prof = getattr(ctx.config, "pdf_optimize_profile", "lossless")
+            try:
+                opt_res = await asyncio.to_thread(optimize_pdf_deliverable, target, opt_prof)
+                if getattr(opt_res, "status", None) == "failed":
+                    logger.warning(
+                        "Reflow companion optimization failed for job %s: %s",
+                        ctx.job_id,
+                        getattr(opt_res, "error", "unknown error"),
+                    )
+            except Exception as exc:  # optimization is best-effort, the file is already written
+                logger.warning(
+                    "Reflow companion optimization skipped for job %s: %s", ctx.job_id, exc
+                )
         logger.info("Reflow reading copy generated: %s", target.name)
         return CompanionArtifactResult(
             kind="reflow",
@@ -2180,7 +2215,7 @@ async def run_export_stage(
     # solver already made these decisions, and a second measurement could
     # disagree with what actually shipped. Empty for a non-facsimile render,
     # which measures no page — recorded as nothing rather than as zeroes.
-    page_geometry = getattr(adapter, "last_page_geometry", None) or []
+    page_geometry = list(getattr(adapter, "last_page_geometry", None) or [])
     if page_geometry:
         await asyncio.to_thread(ctx.ledger.record_page_geometry, actual_job_id, page_geometry)
         if hasattr(manifest, "metadata") and isinstance(manifest.metadata, dict):
@@ -2376,7 +2411,10 @@ async def run_export_stage(
                 "reflow",
             )
 
-            # Re-evaluate delivery under the degraded readable contract
+            # Re-evaluate delivery under the degraded readable contract.
+            # The primary geometry snapshot travels with it: reading the
+            # adapter here would return whatever the last companion render left
+            # behind, which is the secondary artifact's measurement at best.
             delivery_report = await asyncio.to_thread(
                 _evaluate_delivery,
                 ctx,
@@ -2384,6 +2422,7 @@ async def run_export_stage(
                 final_blocks,
                 rendered_path,
                 delivery_contract,
+                page_geometry,
             )
             contract_ok = (
                 (delivery_report.passed if allow_major else delivery_report.deliverable)

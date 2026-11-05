@@ -4,8 +4,8 @@
 timeout) would lose whatever frames were emitted while the client was away.
 Each frame is stamped with a monotonic ``id:`` and kept in a small ring buffer
 per job, so a reconnecting client that sends ``Last-Event-ID`` gets the missed
-frames before the live stream resumes — §9.2 of
-``docs/design/adaptive_delivery_prd.md``.
+frames before the live stream resumes — the replay contract described in
+``ARCHITECTURE.md`` § The render path.
 
 The history is deliberately small and per-process: a frame is a full state
 snapshot, so a client that reconnects *without* a cursor still converges on the

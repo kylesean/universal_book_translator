@@ -14,8 +14,12 @@ from ubt.core.ir.render_plan import RenderPlan
 pytestmark = pytest.mark.fast
 
 
-def _ctx(tmp_path: Path, *, enabled: bool = True) -> StageContext:
-    config = SimpleNamespace(companion_reflow=enabled)
+def _ctx(tmp_path: Path, *, enabled: bool = True, optimize: bool = False) -> StageContext:
+    config = SimpleNamespace(
+        companion_reflow=enabled,
+        enable_pdf_optimization=optimize,
+        pdf_optimize_profile="lossless",
+    )
     input_file = tmp_path / "sample.pdf"
     input_file.write_bytes(b"%PDF-1.4 mock")
     return StageContext(
@@ -147,6 +151,69 @@ async def test_a_render_that_writes_nothing_is_a_failure_not_a_success(
 
     assert result.status == "failed"
     assert result.error is not None and "without writing" in result.error
+
+
+async def test_the_companion_render_keeps_the_primary_page_geometry(
+    tmp_path: Path,
+) -> None:
+    primary_geometry = [
+        {"page_no": 1, "tier": "L1", "delivered_size_pt": 9.5},
+        {"page_no": 2, "tier": "L1", "delivered_size_pt": 9.5},
+    ]
+    strategy = SimpleNamespace(
+        delivery_mode="facsimile",
+        last_page_geometry=list(primary_geometry),
+    )
+    adapter = SimpleNamespace(
+        _renderer=strategy,
+        engine_name="docling",
+        last_page_geometry=list(primary_geometry),
+    )
+
+    async def _render_blocks(**kwargs: Any) -> Path:
+        # ``DoclingRenderStrategy.render_blocks`` clears geometry at entry; a
+        # reflow render leaves it empty. The companion must restore the primary
+        # side channel before export records it.
+        strategy.last_page_geometry = []
+        adapter.last_page_geometry = []
+        out = Path(kwargs["output_path"])
+        out.write_bytes(b"%PDF-1.4 reflow")
+        return out
+
+    adapter.render_blocks = _render_blocks
+    primary = tmp_path / "book.pdf"
+    primary.write_bytes(b"%PDF")
+
+    await _write_reflow_companion(_ctx(tmp_path), adapter, [], primary, RenderPlan())
+
+    assert adapter.last_page_geometry == primary_geometry
+    assert strategy.last_page_geometry == primary_geometry
+
+
+async def test_the_companion_is_optimized_once_by_the_export_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ubt.core.engine.stages import export as export_module
+
+    calls: list[Path] = []
+
+    def _record_optimization(path: Path, _profile: str) -> Any:
+        calls.append(Path(path))
+        return SimpleNamespace(status="skipped_already_optimal", error=None)
+
+    monkeypatch.setattr(export_module, "optimize_pdf_deliverable", _record_optimization)
+    adapter, _ = _adapter(tmp_path)
+    primary = tmp_path / "book.pdf"
+    primary.write_bytes(b"%PDF")
+
+    result = await _write_reflow_companion(
+        _ctx(tmp_path, optimize=True), adapter, [], primary, RenderPlan()
+    )
+
+    assert result.status == "generated"
+    assert calls == [primary.with_name("book_reflow.pdf")], (
+        "the reflow companion must be optimized exactly once, by export"
+    )
 
 
 def test_the_companion_is_wired_into_the_export_stage() -> None:

@@ -258,6 +258,7 @@ def apply_human_edit(
     tm: TranslationMemory | None = None
     try:
         ledger = SQLiteJobLedger(db_path)
+        ledger.bind_writer_lock(lock)
         block = ledger.get_block(block_id, job_id=job_id)
         if block is None:
             raise ReviewBlockNotFound(f"unknown block: {block_id}")
@@ -437,6 +438,7 @@ def apply_term_propagation(
     tm: TranslationMemory | None = None
     try:
         ledger = SQLiteJobLedger(db_path)
+        ledger.bind_writer_lock(lock)
         blocks = ledger.get_all_blocks(job_id)
         pivot = next((b for b in blocks if b.id == block_id), None)
         if pivot is None:

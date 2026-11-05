@@ -1030,6 +1030,7 @@ def register_job_routes(
                             time.sleep(0.1)
                     try:
                         with SQLiteJobLedger(db_path) as ledger:
+                            ledger.bind_writer_lock(lock)
                             # Prevent rewriting a finished job to CANCELLED if it
                             # already reached a terminal status.
                             if ledger.get_job_status(valid_id) in TERMINAL_JOB_STATUSES:

@@ -534,7 +534,7 @@ export interface paths {
          *     started. Every frame carries an ``id:`` cursor, so a client reconnecting
          *     with ``Last-Event-ID`` (header or ``?last_event_id=``) receives the
          *     frames it missed before the live stream resumes — the replay contract of
-         *     ``docs/design/adaptive_delivery_prd.md`` §9.2, carried by
+         *     ``ARCHITECTURE.md`` § The render path, carried by
          *     :class:`~ubt.api.sse_replay.SseReplayBuffer`.
          */
         get: operations["stream_progress_jobs__job_id__stream_get"];

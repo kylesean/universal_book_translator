@@ -299,6 +299,9 @@ async def re_export_job(
     ledger: SQLiteJobLedger | None = None
     try:
         ledger = await asyncio.to_thread(SQLiteJobLedger, db_path)
+        # Same ownership guard as a live run: without the binding every ledger
+        # write below would treat a reclaimed lease as "unbound" and proceed.
+        ledger.bind_writer_lock(lock)
         # Resolve every precondition BEFORE building collaborators: building the
         # router needs a configured provider, and a job with no source or no
         # output path must fail with its own reason rather than a "no draft

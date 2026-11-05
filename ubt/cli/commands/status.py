@@ -740,6 +740,7 @@ def pe_import(
             f"refusing to import PE revisions concurrently.[/] {escape(str(exc))}"
         )
         raise typer.Exit(code=1) from exc
+    ledger.bind_writer_lock(writer_lock)
     try:
         if write_tm:
             from ubt.core.memory.tm import TranslationMemory

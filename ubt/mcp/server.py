@@ -977,6 +977,7 @@ async def ubt_cancel_job(job_id: str, db_dir: str | None = None) -> dict[str, An
                 time.sleep(0.1)
         try:
             ledger = SQLiteJobLedger(db_path)
+            ledger.bind_writer_lock(lock)
             try:
                 status = ledger.get_job_status(jid)
                 if status is None:

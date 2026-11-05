@@ -272,6 +272,7 @@ class JobManager:
                 return
             try:
                 with SQLiteJobLedger(db_path) as ledger:
+                    ledger.bind_writer_lock(lock)
                     current = ledger.get_job_status(job_id)
                     if current in {status.value for status in TERMINAL_JOB_STATUSES}:
                         return

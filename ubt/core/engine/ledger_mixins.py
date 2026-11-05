@@ -458,10 +458,12 @@ class LedgerJobsMixin(_LedgerHost):
         already-billed block to re-ingest it.
         """
         val_json = json.dumps(value, ensure_ascii=False)
-        self.assert_writer_owner()
         with self._get_conn() as conn:
             actual_id = self._resolve_actual_job_id(conn, job_id)
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             row = conn.execute(
                 "SELECT metadata_json FROM job_meta WHERE job_id = ?", (actual_id,)
             ).fetchone()
@@ -524,6 +526,9 @@ class LedgerJobsMixin(_LedgerHost):
         with self._get_conn() as conn:
             actual_id = self._resolve_actual_job_id(conn, job_id)
             conn.execute("BEGIN IMMEDIATE;")
+            # Billing is one of the late writes (export bills after the visual
+            # gate); the ownership SELECT shares this transaction with it.
+            self.assert_writer_owner(conn)
             row = conn.execute(
                 "SELECT metadata_json FROM job_meta WHERE job_id = ?", (actual_id,)
             ).fetchone()
@@ -861,10 +866,12 @@ class LedgerJobsMixin(_LedgerHost):
         to download and every surface reporting success. Both now commit
         together or not at all.
         """
-        self.assert_writer_owner()
         with self._get_conn() as conn:
             actual_id = self._resolve_actual_job_id(conn, job_id)
             conn.execute("BEGIN IMMEDIATE;")
+            # The terminal write is the one a stale owner most wants to land;
+            # verify the lease on this transaction's own connection.
+            self.assert_writer_owner(conn)
             row = conn.execute(
                 "SELECT job_id, status FROM job_meta WHERE job_id = ?", (actual_id,)
             ).fetchone()
@@ -1054,6 +1061,9 @@ class LedgerJobsMixin(_LedgerHost):
         with self._get_conn() as conn:
             actual_id = self._resolve_actual_job_id(conn, job_id)
             conn.execute("BEGIN IMMEDIATE;")
+            # Page geometry is recorded after the visual gate, long after the
+            # render; a stale owner must not overwrite the successor's audit.
+            self.assert_writer_owner(conn)
             try:
                 conn.executemany(
                     """
@@ -1881,9 +1891,11 @@ class LedgerBlocksMixin(_LedgerHost):
         if not updates and not clear_verdict_for:
             return 0
 
-        self.assert_writer_owner()
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Checkpoint batches are written long after the last render; the
+            # ownership check belongs to this transaction, not a pre-check.
+            self.assert_writer_owner(conn)
             scope = self._block_scope(conn, job_id)
             cursor = conn.cursor()
             updated = 0

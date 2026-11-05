@@ -608,7 +608,7 @@ class LedgerBase:
         """Attach the process's writer lease so late writes can verify ownership."""
         self._writer_lock = lock
 
-    def assert_writer_owner(self) -> None:
+    def assert_writer_owner(self, conn: sqlite3.Connection | None = None) -> None:
         """Raise if the attached writer lease was reclaimed.
 
         A no-op on an unbound ledger (read-only surfaces, unit tests and
@@ -616,10 +616,20 @@ class LedgerBase:
         immediately after acquisition; the check runs before the writes that
         can happen long after the last render, where a stale process could
         otherwise overwrite a successor's checkpoints or finalize its job.
+
+        ``conn`` must be the connection that is already inside the caller's
+        ``BEGIN IMMEDIATE`` transaction. Passing it makes the ownership SELECT
+        part of the same transaction as the write, so a reclaim cannot land
+        between the check and the commit. Omitting it is the standalone probe
+        for callers that are not writing (tests, preflight checks).
         """
         lock = self._writer_lock
-        if lock is not None:
+        if lock is None:
+            return
+        if conn is None:
             lock.assert_owned()
+        else:
+            lock.assert_owned_in_transaction(conn)
 
     def close(self) -> None:
         """Close the underlying persistent connection (idempotent).

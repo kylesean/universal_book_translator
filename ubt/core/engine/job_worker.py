@@ -225,6 +225,7 @@ class JobWorker:
                 return
             try:
                 with SQLiteJobLedger(db_path) as ledger:
+                    ledger.bind_writer_lock(lock)
                     if ledger.get_job_status(job.job_id) == "completed":
                         return
                     ledger.set_job_metadata_value(job.job_id, "abort_reason", reason)

@@ -1870,7 +1870,7 @@
           "Jobs"
         ],
         "summary": "Stream Progress",
-        "description": "SSE: ``event: progress`` snapshots until one ``event: <status>`` terminal frame.\n\nBoth deployment modes emit that one contract (see ``progress_frame`` /\n``terminal_frame``); the payload never depends on how the server was\nstarted. Every frame carries an ``id:`` cursor, so a client reconnecting\nwith ``Last-Event-ID`` (header or ``?last_event_id=``) receives the\nframes it missed before the live stream resumes \u2014 the replay contract of\n``docs/design/adaptive_delivery_prd.md`` \u00a79.2, carried by\n:class:`~ubt.api.sse_replay.SseReplayBuffer`.",
+        "description": "SSE: ``event: progress`` snapshots until one ``event: <status>`` terminal frame.\n\nBoth deployment modes emit that one contract (see ``progress_frame`` /\n``terminal_frame``); the payload never depends on how the server was\nstarted. Every frame carries an ``id:`` cursor, so a client reconnecting\nwith ``Last-Event-ID`` (header or ``?last_event_id=``) receives the\nframes it missed before the live stream resumes \u2014 the replay contract of\n``ARCHITECTURE.md`` \u00a7 The render path, carried by\n:class:`~ubt.api.sse_replay.SseReplayBuffer`.",
         "operationId": "stream_progress_jobs__job_id__stream_get",
         "parameters": [
           {
