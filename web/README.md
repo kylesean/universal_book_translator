@@ -2,9 +2,6 @@
 
 Frontend for **Universal Book Translator (UBT)**: a local-first Single Page Application (SPA) designed as an operator cockpit and post-editing workbench for high-fidelity bilingual book translation.
 
-See also:
-- [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the engine architecture the console drives.
-
 ---
 
 ## Architecture & Views
