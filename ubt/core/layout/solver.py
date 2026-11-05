@@ -113,10 +113,10 @@ class CELSSolverUnavailableError(UBTError):
 class MeasuredLike(Protocol):
     """The slice of a measurement result the solver reads.
 
-    Structural on purpose: :class:`ubt.delivery.measurement.MeasuredBlock`
-    satisfies it, and importing that type here would point ``ubt.core.layout``
-    at ``ubt.delivery`` -- a package whose own errors module already reaches
-    back into ``ubt.core``. The solver must not close that cycle.
+    Structural on purpose: any object carrying these attributes satisfies it,
+    so the solver never imports a concrete measurement type from a package
+    whose own errors module already reaches back into ``ubt.core``. The solver
+    must not close that cycle.
     """
 
     line_count: int
@@ -127,8 +127,7 @@ class MeasuredLike(Protocol):
 #:
 #: The caller closes over its own style template (font family, version,
 #: language, justify) and builds the backend's style object per call, so the
-#: solver never touches a style type it cannot import. A real delegate wraps
-#: :class:`ubt.delivery.measurement.MeasurementService`; tests pass a pure
+#: solver never touches a style type it cannot import. Tests pass a pure
 #: function, which is what keeps this module's tier fast and offline.
 BlockMeasureFn = Callable[[str, float, float, float, float], MeasuredLike]
 

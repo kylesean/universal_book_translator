@@ -35,10 +35,6 @@ It takes `--corpus corpus` (default) and exits 0 on pass.
   Deterministic geometry scanner over rendered PDF artifacts to detect margin
   breaches, multi-column gutter overruns, table/formula clipping, and type collapse;
   emits 2D spatial terminal heatmaps, structured JSON, and actionable fix advice.
-- `calibrate_measurement.py` — Typst MeasurementService calibration: compiles one
-  block with the requested width/style and reports real height, line boxes and
-  overflow. Zero model tokens; use it to spot-check a font/width before changing
-  the layout solver.
 - `style_group_probe.py` — read-only document-body-group probe. Reads a job's ledger
   (translated text) plus its source PDF, builds the same per-page fit models the
   renderer uses, and reports the document body size the planner would choose, the

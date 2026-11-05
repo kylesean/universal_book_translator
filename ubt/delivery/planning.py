@@ -93,8 +93,8 @@ def build_delivery_signals(
     """Derive the router's inputs from the Phase 0 structure census.
 
     The census is a *prefilter*, not a page-lock feasibility proof. A clean
-    native PDF is marked ``page_lock_feasible=True`` provisionally; the
-    MeasurementService replaces that with the real per-page feasibility result.
+    native PDF is marked ``page_lock_feasible=True`` provisionally, and stays
+    provisional because no artifact-level page-lock solve exists yet.
     A scanned or font-damaged PDF is vetoed here, because no later stage can
     make its text layer trustworthy without OCR/VLM.
     """
@@ -210,7 +210,7 @@ def _mark_faithful_provisional(plan: DeliveryPlan) -> DeliveryPlan:
             "eligibility": plan.eligibility.model_copy(update={"provisional": True}),
             "reasons": (
                 *plan.reasons,
-                "page_lock_feasible is provisional (structure census; MeasurementService pending)",
+                "page_lock_feasible is provisional (structure census only)",
             ),
         }
     )

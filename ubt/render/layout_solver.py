@@ -40,9 +40,9 @@ def estimate_needed_height(
 ) -> float:
     """Vertical height (pt) this record's text occupies at ``size`` and ``em_ratio``.
 
-    When ``record`` carries a measured height from ``MeasurementService`` for the
-    requested ``(size, em_ratio, tracking_em, w)``, the real measurement is used
-    directly; otherwise falls back to the glyph-advance model.
+    When ``record`` carries a measured height for the requested
+    ``(size, em_ratio, tracking_em, w)``, it is used directly; otherwise the
+    helper falls back to the glyph-advance model.
     """
     measured_h = record.get("measured_height_pt")
     if isinstance(measured_h, (int, float)) and measured_h > 0.0:

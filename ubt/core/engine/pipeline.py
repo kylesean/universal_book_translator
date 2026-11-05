@@ -162,7 +162,7 @@ def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryD
 
     This is intentionally a preflight, not a page-lock proof: a clean native
     PDF is provisionally feasible and a scan/font-damaged page is vetoed. The
-    MeasurementService replaces the provisional signal with a real solve.
+    signal stays provisional because no artifact-level solve exists yet.
     """
     is_pdf = input_path.suffix.lower() == ".pdf"
     requested = str(getattr(config, "delivery_mode", "auto") or "auto")

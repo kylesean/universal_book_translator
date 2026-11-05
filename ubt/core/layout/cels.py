@@ -193,8 +193,7 @@ class ElasticFlowSegment:
     """A paragraph stream assigned to one track: the unit Stage 3A measures.
 
     Kept as plain data on purpose. ``char_budget`` is Stage 4's to compute, from
-    a real :class:`~ubt.delivery.measurement.MeasuredBlock`, never from a
-    characters-per-line guess.
+    a real measured block, never from a characters-per-line guess.
     """
 
     track_index: int

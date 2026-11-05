@@ -110,7 +110,7 @@ class FaithfulEligibility(BaseModel):
 
     eligible: bool
     #: True when the decision came from a prefilter (structure census/legacy
-    #: compatibility), not from the per-page MeasurementService solve.
+    #: compatibility), not from an artifact-level page-lock solve.
     provisional: bool = False
     #: Machine-readable enough for the report and the CLI error: each reason
     #: names the signal that failed (``text_trust``, ``page_kind``, ...).
