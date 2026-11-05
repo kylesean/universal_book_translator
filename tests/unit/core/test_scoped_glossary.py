@@ -13,6 +13,7 @@ from ubt.core.memory.scoped_glossary import (
     ScopeLevel,
     arbitrate_competing_entries,
     audit_glossary_conflicts,
+    chapter_scope_from_manifest,
     glossary_has_block_scope,
     matches_scope,
     parse_scope_spec,
@@ -86,6 +87,60 @@ def test_scope_context_does_not_guess_a_chapter_from_arbitrary_digits() -> None:
     )
     assert explicit.chapter_index == 4
     assert explicit.chapter_title == "Operating Systems"
+
+
+def test_manifest_chapter_records_resolve_the_real_adapter_ids() -> None:
+    from types import SimpleNamespace
+
+    from ubt.core.ir.models import ChapterMeta
+
+    chapters = (
+        ChapterMeta(chapter_id="ch_001_foo.xhtml", title="Foundations", spine_index=1),
+        ChapterMeta(chapter_id="pdf_main", title="Monograph", spine_index=7),
+        ChapterMeta(chapter_id="docx_main", title="Report", spine_index=9),
+        ChapterMeta(chapter_id="html_main", title="Web Export", spine_index=11),
+    )
+
+    for block_id, expected_index, expected_title in (
+        ("ch_001_foo.xhtml#b0001", 1, "Foundations"),
+        ("pdf_main#b0308", 7, "Monograph"),
+        ("docx_main#b0002", 9, "Report"),
+        ("html_main#b0001", 11, "Web Export"),
+    ):
+        ctx = scope_context_for_block(SimpleNamespace(id=block_id), chapters=chapters)
+        assert (ctx.chapter_index, ctx.chapter_title) == (expected_index, expected_title)
+
+    assert chapter_scope_from_manifest("ch_001_foo.xhtml", chapters) == (1, "Foundations")
+    assert chapter_scope_from_manifest("pdf_main", chapters) == (7, "Monograph")
+    assert chapter_scope_from_manifest("missing_main", chapters) == (None, None)
+    assert chapter_scope_from_manifest(None, chapters) == (None, None)
+
+
+def test_a_manifest_chapter_applies_its_scoped_term_and_unknowns_fall_back() -> None:
+    from types import SimpleNamespace
+
+    from ubt.core.ir.models import ChapterMeta
+
+    entries = [
+        BibleEntry(source="driver", translation="驾驶员", scope="*"),
+        BibleEntry(source="driver", translation="驱动程序", scope="chapter:1"),
+    ]
+    chapters = [ChapterMeta(chapter_id="ch_001_foo.xhtml", title="Foundations", spine_index=1)]
+
+    scoped = scope_context_for_block(
+        SimpleNamespace(id="ch_001_foo.xhtml#b0001"), chapters=chapters
+    )
+    assert scoped.chapter_index == 1
+    assert scoped.chapter_title == "Foundations"
+    lookup = {e["source"]: e["translation"] for e in resolve_effective_glossary(entries, scoped)}
+    assert lookup["driver"] == "驱动程序"
+
+    unknown = scope_context_for_block(
+        SimpleNamespace(id="ch_002_bar.xhtml#b0001"), chapters=chapters
+    )
+    assert (unknown.chapter_index, unknown.chapter_title) == (None, None)
+    fallback = {e["source"]: e["translation"] for e in resolve_effective_glossary(entries, unknown)}
+    assert fallback["driver"] == "驾驶员"
 
 
 def test_prompt_global_table_excludes_scoped_entries() -> None:

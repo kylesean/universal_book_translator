@@ -16,6 +16,7 @@ checksummed contract.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from dataclasses import dataclass
 
@@ -28,6 +29,20 @@ from ubt.core.cleaners.soup_math import SoupMathMasker
 from ubt.model.segment import Placeholder
 
 _KINDS = ("email", "code", "math", "soup", "citation")
+
+#: Citation reference identifiers, not citation spans. ``[1][2]`` and
+#: ``[1,2]`` both carry two references, so a span count would call the first
+#: form a loss of one; bracket groups contribute one per number, author-year
+#: references one per year.
+_CITATION_NUMBERS_RE = re.compile(r"\d+")
+_CITATION_YEARS_RE = re.compile(r"(?:19|20)\d{2}")
+#: Localized Chinese punctuation around a citation: full-width parentheses,
+#: brackets, comma and semicolon. A translated ``（Smith，2020）`` is the same
+#: reference as ``(Smith, 2020)``, not a deleted one.
+_FULLWIDTH_CITATION_RE = re.compile(r"[（），；［］]")
+_CITATION_WIDTH_TRANSLATION = str.maketrans(
+    {"（": "(", "）": ")", "，": ",", "；": ";", "［": "[", "］": "]"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +158,22 @@ class PlaceholderEngine:
             text=email.text, email=email, code=code, math=math, soup=soup, citation=citation
         )
 
+    def _citation_reference_count(self, cite_map: dict[str, str]) -> int:
+        """Count reference identifiers, not citation spans.
+
+        ``[1][2]`` and ``[1,2]`` are two references written two ways; a span
+        count called the first form a loss of one. A bracket group contributes
+        one reference per number and an author-year group one per year.
+        """
+        total = 0
+        for original in cite_map.values():
+            token = original.lstrip()
+            if token.startswith("["):
+                total += len(_CITATION_NUMBERS_RE.findall(token))
+            else:
+                total += len(_CITATION_YEARS_RE.findall(token))
+        return total
+
     def missing_literal_spans(
         self, source_text: str, target_text: str
     ) -> tuple[tuple[str, str], ...]:
@@ -155,9 +186,10 @@ class PlaceholderEngine:
         spans legitimately), only multiplicity counts.
 
         Math is deliberately excluded: FastPass already compares math spans.
-        Citations are counted, not value-matched — renumbering is legitimate,
-        a net deletion is not. Soup spans (delimiter-free unicode math mixed
-        into prose) are literal atoms and are compared exactly, like code.
+        Citations are counted by reference identifier, not by span or value —
+        renumbering and grouping are legitimate, a net deletion is not. Soup
+        spans (delimiter-free unicode math mixed into prose) are literal atoms
+        and are compared exactly, like code.
         """
         source = self.mask(source_text)
         target = self.mask(target_text)
@@ -170,11 +202,19 @@ class PlaceholderEngine:
             remainder = Counter(source_map.values()) - Counter(target_map.values())
             for original, count in remainder.items():
                 missing.extend((label, original) for _ in range(count))
-        # Citations may be renumbered, so values are not compared literally; a
-        # net loss is what matters. A repair that drops one marker leaves the
-        # reader an uncited claim, which the exact-value families above cannot
-        # see because every citation span is different by design.
-        lost_citations = len(source.cite_map) - len(target.cite_map)
+        # Citations may be renumbered and regrouped, so values are not compared
+        # literally; a net loss of reference identifiers is what matters. A
+        # repair that drops one marker leaves the reader an uncited claim,
+        # which the exact-value families above cannot see because every citation
+        # span is different by design. Localized full-width punctuation is
+        # normalized only when the raw count looks short, so an ordinary
+        # Chinese sentence is not re-masked on every repair candidate.
+        source_citations = self._citation_reference_count(source.cite_map)
+        target_citations = self._citation_reference_count(target.cite_map)
+        if source_citations > target_citations and _FULLWIDTH_CITATION_RE.search(target_text):
+            normalized = target_text.translate(_CITATION_WIDTH_TRANSLATION)
+            target_citations = self._citation_reference_count(self.mask(normalized).cite_map)
+        lost_citations = source_citations - target_citations
         if lost_citations > 0:
             missing.extend(
                 ("citation", f"{lost_citations} marker(s) missing") for _ in range(lost_citations)

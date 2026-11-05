@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
+
 import pytest
 
 from ubt.core.engine.delivery_contract import (
@@ -12,6 +16,7 @@ from ubt.core.engine.delivery_contract import (
     StyleSample,
     evaluate_delivery_contract,
 )
+from ubt.core.ir.models import BlockType, IRBlock, make_element
 
 pytestmark = pytest.mark.fast
 
@@ -792,3 +797,45 @@ def test_block_text_shared_with_multipage_exhibit_not_flagged_duplicated() -> No
     )
     assert report.passed, report.summary_line()
     assert "text_duplicated" not in _codes(report)
+
+
+def test_a_sentinel_leaked_block_is_a_minor_advisory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``sentinel_leaked`` surfaces on the delivery record without blocking it."""
+    from ubt.core.engine.stages import export
+
+    evidence = _evidence(blocks=(_block("b1", "完整译文。"),), page_texts=("完整译文。",))
+    monkeypatch.setattr(export, "_delivery_contract_evidence", lambda *args, **kwargs: evidence)
+    final_block = IRBlock(
+        element=make_element(
+            id="b1",
+            spine_index=1,
+            block_type=BlockType.NARRATIVE,
+            source_text="完整译文。",
+        ),
+        error_flags=["sentinel_leaked"],
+    )
+    ctx = cast(
+        Any,
+        SimpleNamespace(
+            job_id="job-test",
+            manifest=SimpleNamespace(metadata={}),
+            config=SimpleNamespace(allow_major=False),
+        ),
+    )
+
+    report = export._evaluate_delivery(
+        ctx,
+        cast(Any, SimpleNamespace()),
+        [final_block],
+        tmp_path / "artifact.pdf",
+        None,
+        page_geometry=[],
+    )
+
+    assert report is not None
+    finding = next(f for f in report.findings if f.code == "sentinel_leaked")
+    assert finding.severity == "minor"
+    assert report.passed
+    assert report.deliverable

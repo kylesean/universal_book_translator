@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
 from ubt.core.engine.events import EventType, TranslationProgressEvent
@@ -28,6 +28,7 @@ def _fast_pass_screen(
     glossary_validator: GlossaryConsistencyValidator | None,
     glossary_terms: list[str] | None = None,
     rehearsal: bool = False,
+    chapters: Sequence[Any] | None = None,
 ) -> tuple[list[IRBlock], list[dict[str, Any]]]:
     """Split drafted blocks into auto-passes and scoring candidates.
 
@@ -78,7 +79,7 @@ def _fast_pass_screen(
                 # other entry. Resolve the scope once per chapter.
                 effective = resolve_effective_glossary(
                     list(glossary_validator.glossary),
-                    scope_context_for_block(b),
+                    scope_context_for_block(b, chapters=chapters),
                 )
                 validator = GlossaryConsistencyValidator(glossary=effective)
                 scoped_validators[chapter_key] = validator
@@ -132,6 +133,7 @@ def screen_drafted_blocks(
     glossary_validator: GlossaryConsistencyValidator | None,
     glossary_terms: list[str] | None = None,
     rehearsal: bool = False,
+    chapters: Sequence[Any] | None = None,
 ) -> tuple[list[IRBlock], list[dict[str, Any]]]:
     """The deterministic FastPass screen, shared with Agent mode.
 
@@ -145,6 +147,7 @@ def screen_drafted_blocks(
         glossary_validator=glossary_validator,
         glossary_terms=glossary_terms,
         rehearsal=rehearsal,
+        chapters=chapters,
     )
 
 
@@ -338,6 +341,7 @@ async def run_quality_gate_stage(
         glossary_validator=glossary_validator,
         glossary_terms=glossary_terms,
         rehearsal=bool(getattr(ctx, "is_mock_run", False)),
+        chapters=getattr(getattr(ctx, "manifest", None), "chapters", ()),
     )
 
     # Audit a sample of FastPass passes when the runner supports it

@@ -112,6 +112,41 @@ async def test_a_candidate_that_drops_a_restored_email_is_not_promoted() -> None
 
 
 @pytest.mark.asyncio
+async def test_a_candidate_that_drops_a_soup_span_is_not_promoted() -> None:
+    block = _block(
+        source="参数βSI=e−ψpert在42天内稳定。",
+        draft="参数βSI=e−ψpert在43天内稳定。",
+        flags=["Numeric fidelity: mismatched number '43', expected '42'"],
+    )
+    # The number is corrected but the delimiter-free math span is dropped.
+    loop = _loop("该参数在42天内稳定。")
+
+    result = await loop.repair_single_block(block)
+
+    assert result.status is not BlockStatus.REPAIRED
+    assert any("protected literal span missing" in flag for flag in result.error_flags)
+    assert any("soup" in flag for flag in result.error_flags)
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_that_deletes_a_citation_is_not_promoted() -> None:
+    block = _block(
+        source="See (Smith, 2020) for the 2020 review of 42 cases.",
+        draft="见（Smith，2020）关于2020年的43例审查。",
+        flags=["Numeric fidelity: mismatched number '43', expected '42'"],
+    )
+    # The year and the number both remain in the candidate; only the citation
+    # marker itself is gone, which the numeric validator cannot see.
+    loop = _loop("见关于2020年的42例审查。")
+
+    result = await loop.repair_single_block(block)
+
+    assert result.status is not BlockStatus.REPAIRED
+    assert any("protected literal span missing" in flag for flag in result.error_flags)
+    assert any("citation" in flag for flag in result.error_flags)
+
+
+@pytest.mark.asyncio
 async def test_repair_parses_emphasis_markers_out_of_the_chosen_text() -> None:
     block = _block(
         source="The trial ran for 42 days.",

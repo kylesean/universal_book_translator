@@ -180,7 +180,6 @@ async def run_consistency_stage(
         )
         return
 
-    glossary_validator = GlossaryConsistencyValidator(glossary=glossary_dicts)
     per_block: dict[str, list[ConsistencyTask]] = {}
     for task in tasks:
         per_block.setdefault(task.block_id, []).append(task)
@@ -208,14 +207,23 @@ async def run_consistency_stage(
                 "repair_rounds": min(block.repair_rounds, budget),
             }
         )
-        from ubt.core.memory.scoped_glossary import scope_context_for_block
+        from ubt.core.memory.scoped_glossary import (
+            resolve_effective_glossary,
+            scope_context_for_block,
+        )
 
+        context = scope_context_for_block(
+            block,
+            domain=getattr(ctx.config, "domain", None),
+            chapters=getattr(getattr(ctx, "manifest", None), "chapters", ()),
+        )
         glossary_table = build_chunk_glossary_table(
             glossary_dicts,
             abbreviation_entries,
             block.source_text,
-            context=scope_context_for_block(block, domain=getattr(ctx.config, "domain", None)),
+            context=context,
         )
+        effective_entries = resolve_effective_glossary(glossary_dicts, context)
         async with concurrency_sem:
             repaired = await repair_loop.repair_single_block(
                 block=flagged,
@@ -223,7 +231,7 @@ async def run_consistency_stage(
                 target_lang=target_lang,
                 source_lang=source_lang,
                 fast_pass=fast_pass,
-                glossary_entries=glossary_dicts,
+                glossary_entries=effective_entries,
                 source_pdf_path=source_pdf_path,
                 global_glossary=global_glossary_table,
             )
@@ -236,7 +244,9 @@ async def run_consistency_stage(
         # constraint flag is dropped and a still-drifted block would be promoted
         # REPAIRED — which triage never re-reads. Verify the postcondition here.
         if status is BlockStatus.REPAIRED:
-            check = glossary_validator.validate(repaired.source_text, repaired.target_text)
+            check = GlossaryConsistencyValidator(glossary=effective_entries).validate(
+                repaired.source_text, repaired.target_text
+            )
             if not check.is_valid:
                 status = BlockStatus.REPAIR_PENDING
                 error_flags.append(f"{GLOSSARY_VIOLATION_MARKER}: {check.message}")

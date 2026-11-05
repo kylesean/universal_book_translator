@@ -427,9 +427,15 @@ class _DraftProcessor:
         default_factory=dict, init=False, repr=False
     )
     #: The streaming chapter this processor was built for, when one exists.
-    #: ``None`` on the single-pass path; the block id may still carry a
-    #: recognised ``ch_002`` namespace and is read in that case.
+    #: ``None`` on the single-pass path; the block's ``ChapterMeta`` is used
+    #: when the caller supplies the manifest chapter list.
     chapter_index: int | None = None
+    #: The reader-facing title of that chapter, from its ``ChapterMeta``. Never
+    #: the block namespace (``pdf_main`` is a name, not a title).
+    chapter_title: str | None = None
+    #: The manifest chapter records, so a block's scope is read from its
+    #: ``ChapterMeta`` (spine index + title) rather than decoded from its id.
+    chapters: tuple[Any, ...] = ()
 
     def glossary_validator_for(
         self, block: IRBlock, chapter_id: str | None
@@ -459,7 +465,13 @@ class _DraftProcessor:
 
         effective = resolve_effective_glossary(
             self.policy.glossary_dicts,
-            scope_context_for_block(block, domain=self.policy.domain or None),
+            scope_context_for_block(
+                block,
+                domain=self.policy.domain or None,
+                chapter_index=self.chapter_index,
+                chapter_title=self.chapter_title,
+                chapters=self.chapters,
+            ),
         )
         validator = GlossaryConsistencyValidator(glossary=effective)
         self._validator_cache[key] = validator
@@ -573,9 +585,9 @@ class _DraftProcessor:
 
         Without this the chunk table was the *unarbitrated* glossary: a term
         with a global and a chapter-specific rendering emitted both rows, and
-        the model had to guess. The context is best-effort: the block id
-        carries a chapter index only for a recognised ``ch_002``-style
-        namespace, and a PDF's ``pdf_main`` deliberately stays chapter-less.
+        the model had to guess. Chapter identity comes from the manifest's
+        ``ChapterMeta`` (``spine_index`` + reader-facing ``title``), not from
+        the block id; a chapter absent from the manifest stays chapter-less.
         """
         from ubt.core.memory.scoped_glossary import scope_context_for_block
 
@@ -583,6 +595,8 @@ class _DraftProcessor:
             block,
             domain=self.policy.domain or None,
             chapter_index=self.chapter_index,
+            chapter_title=self.chapter_title,
+            chapters=self.chapters,
         )
 
     async def prepare_draft_inputs(
@@ -1571,6 +1585,7 @@ async def _build_draft_runtime(
     services: RunServices,
     terminology: Terminology,
     chapter_id: str | None = None,
+    chapter_title: str | None = None,
 ) -> _DraftAssembly:
     """Assemble the draft stage's collaborators: cache, engine, memory, flusher, policy.
 
@@ -1731,7 +1746,12 @@ async def _build_draft_runtime(
             flagship_model=flagship_m,
         )
 
-    from ubt.core.memory.scoped_glossary import chapter_index_from_id
+    from ubt.core.memory.scoped_glossary import chapter_scope_from_manifest
+
+    chapters = tuple(getattr(ctx.manifest, "chapters", []))
+    chapter_index, manifest_title = chapter_scope_from_manifest(chapter_id, chapters)
+    if chapter_title is None:
+        chapter_title = manifest_title
 
     processor = _DraftProcessor(
         runtime=DraftRuntime(
@@ -1763,7 +1783,9 @@ async def _build_draft_runtime(
             dynamic_routing_enabled=bool(dynamic_scheduler is not None),
             dynamic_scheduler=dynamic_scheduler,
         ),
-        chapter_index=chapter_index_from_id(chapter_id),
+        chapter_index=chapter_index,
+        chapter_title=chapter_title,
+        chapters=chapters,
     )
     return _DraftAssembly(
         processor=processor,
@@ -1784,9 +1806,10 @@ async def run_draft_stage(
     services: RunServices,
     terminology: Terminology,
     chapter_id: str | None = None,
+    chapter_title: str | None = None,
 ) -> AsyncGenerator[TranslationProgressEvent, None]:
     """Execute streaming drafted translation across keyset pagination batches."""
-    assembly = await _build_draft_runtime(ctx, services, terminology, chapter_id)
+    assembly = await _build_draft_runtime(ctx, services, terminology, chapter_id, chapter_title)
     processor = assembly.processor
     flusher = assembly.flusher
     memory_mgr = assembly.memory_mgr

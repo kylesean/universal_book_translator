@@ -113,12 +113,36 @@ def chapter_index_from_id(value: str | None) -> int | None:
     return int(next(group for group in match.groups() if group))
 
 
+def chapter_scope_from_manifest(
+    chapter_id: str | None,
+    chapters: Sequence[Any],
+) -> tuple[int | None, str | None]:
+    """Resolve a chapter's ``(spine_index, title)`` from the manifest chapter list.
+
+    The chapter id is a lookup key, not a source of the number: real adapters
+    name chapters ``ch_001_foo.xhtml`` (EPUB), ``pdf_main`` (one PDF flow),
+    ``docx_main`` and ``html_main``, and only the chapter record knows the
+    reader-facing title. An id that is not in the manifest stays ``(None, None)``
+    -- this function never guesses from trailing digits.
+    """
+    if not chapter_id:
+        return None, None
+    for chapter in chapters:
+        if str(getattr(chapter, "chapter_id", "") or "") != chapter_id:
+            continue
+        index = getattr(chapter, "spine_index", None)
+        title = getattr(chapter, "title", None)
+        return (int(index) if index is not None else None), (str(title) if title else None)
+    return None, None
+
+
 def scope_context_for_block(
     block: Any,
     *,
     domain: str | None = None,
     chapter_title: str | None = None,
     chapter_index: int | None = None,
+    chapters: Sequence[Any] | None = None,
 ) -> ScopeContext:
     """Build the best scope context the ledger/IR actually carries for a block.
 
@@ -130,15 +154,26 @@ def scope_context_for_block(
     pass an explicit ``chapter_index``/``chapter_title`` when it holds the
     chapter record. Everything else stays ``None``.
 
+    When ``chapters`` (the manifest's ``ChapterMeta`` records) is supplied, the
+    chapter is resolved from that record by id and the id-parsing fallback is
+    disabled: an unknown chapter stays ``None`` rather than being guessed.
+
     The namespace is also not a chapter title: calling ``pdf_main`` a title
     let title-scoped entries match a string the reader never sees. A caller
     that has a real title passes it.
     """
     block_id = str(getattr(block, "id", "") or "")
     prefix = block_id.split("#", 1)[0].split(":", 1)[0]
-    detected_index = chapter_index_from_id(prefix)
+    if chapters is not None:
+        resolved_index, resolved_title = chapter_scope_from_manifest(prefix, chapters)
+        if chapter_index is None:
+            chapter_index = resolved_index
+        if chapter_title is None:
+            chapter_title = resolved_title
+    elif chapter_index is None:
+        chapter_index = chapter_index_from_id(prefix)
     return ScopeContext(
-        chapter_index=chapter_index if chapter_index is not None else detected_index,
+        chapter_index=chapter_index,
         chapter_title=chapter_title or None,
         block_id=block_id or None,
         domain=domain or None,

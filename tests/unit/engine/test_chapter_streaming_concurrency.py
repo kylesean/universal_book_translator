@@ -73,7 +73,13 @@ async def test_chapter_streaming_normal_completion(monkeypatch: pytest.MonkeyPat
     ]
     ctx, _ = _make_context(chapters, queue_size=2)
 
-    async def mock_draft(ctx: Any, services: Any, term: Any, chapter_id: str | None = None) -> Any:
+    async def mock_draft(
+        ctx: Any,
+        services: Any,
+        term: Any,
+        chapter_id: str | None = None,
+        chapter_title: str | None = None,
+    ) -> Any:
         yield _make_event(EventType.DRAFT_BATCH_COMPLETED, f"drafted {chapter_id}")
 
     async def mock_qg(
@@ -115,7 +121,13 @@ async def test_chapter_streaming_consumer_crash_does_not_deadlock(
     ]
     ctx, _ = _make_context(chapters, queue_size=1)
 
-    async def mock_draft(ctx: Any, services: Any, term: Any, chapter_id: str | None = None) -> Any:
+    async def mock_draft(
+        ctx: Any,
+        services: Any,
+        term: Any,
+        chapter_id: str | None = None,
+        chapter_title: str | None = None,
+    ) -> Any:
         yield _make_event(EventType.DRAFT_BATCH_COMPLETED, f"drafted {chapter_id}")
         await asyncio.sleep(0.01)
 
@@ -158,7 +170,13 @@ async def test_a_cancelled_stream_drains_the_per_chapter_generators(
 
     closed: list[str] = []
 
-    async def mock_draft(ctx: Any, services: Any, term: Any, chapter_id: str | None = None) -> Any:
+    async def mock_draft(
+        ctx: Any,
+        services: Any,
+        term: Any,
+        chapter_id: str | None = None,
+        chapter_title: str | None = None,
+    ) -> Any:
         try:
             yield _make_event(EventType.DRAFT_BATCH_COMPLETED, f"drafted {chapter_id}")
             await asyncio.sleep(10)

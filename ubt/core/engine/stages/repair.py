@@ -144,14 +144,23 @@ async def run_repair_stage(
         yield event
 
         async def _repair_single_candidate(cand: IRBlock) -> dict[str, Any]:
-            from ubt.core.memory.scoped_glossary import scope_context_for_block
+            from ubt.core.memory.scoped_glossary import (
+                resolve_effective_glossary,
+                scope_context_for_block,
+            )
 
+            context = scope_context_for_block(
+                cand,
+                domain=getattr(ctx.config, "domain", None),
+                chapters=getattr(getattr(ctx, "manifest", None), "chapters", ()),
+            )
             glossary_table = build_chunk_glossary_table(
                 glossary_dicts,
                 abbreviation_entries,
                 cand.source_text,
-                context=scope_context_for_block(cand, domain=getattr(ctx.config, "domain", None)),
+                context=context,
             )
+            effective_entries = resolve_effective_glossary(glossary_dicts, context)
 
             async with concurrency_sem:
                 repaired = await repair_loop.repair_single_block(
@@ -160,7 +169,7 @@ async def run_repair_stage(
                     target_lang=target_lang,
                     source_lang=source_lang,
                     fast_pass=fast_pass,
-                    glossary_entries=glossary_dicts,
+                    glossary_entries=effective_entries,
                     source_pdf_path=resolved_pdf_path,
                     global_glossary=global_glossary_table,
                 )

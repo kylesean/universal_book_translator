@@ -83,7 +83,9 @@ async def run_chapter_streaming_pipeline(
                 # ``async for`` left the generator unclosed on cancellation, so
                 # up to ``ledger_flush_batch_size`` paid checkpoints were lost.
                 async with aclosing(
-                    run_draft_stage(ctx, services, terminology, chapter_id=ch.chapter_id)
+                    run_draft_stage(
+                        ctx, services, terminology, chapter_id=ch.chapter_id, chapter_title=ch.title
+                    )
                 ) as stage_events:
                     async for event in stage_events:
                         await event_queue.put(event)

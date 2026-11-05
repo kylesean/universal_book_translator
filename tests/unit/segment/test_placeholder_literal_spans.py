@@ -58,6 +58,36 @@ def test_citations_are_counted_not_value_matched() -> None:
     assert [label for label, _ in missing] == ["citation"]
 
 
+def test_adjacent_citations_merged_into_one_group_are_not_a_loss() -> None:
+    engine = default_placeholder_engine()
+    source = "See [1][2] for the trial."
+
+    assert engine.missing_literal_spans(source, "见[1,2]关于该试验。") == ()
+    assert engine.missing_literal_spans("See [1,2] for it.", "见[1][2]关于它。") == ()
+
+
+def test_a_fullwidth_localized_citation_is_not_a_loss() -> None:
+    engine = default_placeholder_engine()
+    source = "See (Smith, 2020) for the review."
+
+    assert engine.missing_literal_spans(source, "见（Smith，2020）关于该综述。") == ()
+
+
+def test_net_deletion_of_a_citation_group_is_still_reported() -> None:
+    engine = default_placeholder_engine()
+    source = "See [1][2] for the trial."
+
+    missing = engine.missing_literal_spans(source, "见[1]关于该试验。")
+
+    assert [label for label, _ in missing] == ["citation"]
+
+
+def test_renumbering_a_citation_is_not_a_loss() -> None:
+    engine = default_placeholder_engine()
+
+    assert engine.missing_literal_spans("See [1] for it.", "见[2]关于它。") == ()
+
+
 def test_math_and_citations_are_not_literal_span_checks() -> None:
     engine = default_placeholder_engine()
     source = "The value $x_{i}$ is defined in [1]."
