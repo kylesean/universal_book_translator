@@ -43,23 +43,18 @@ The module is pure: it takes measured page metrics and a feasibility callback,
 and returns the decision. It imports no renderer, which keeps it testable as
 data and stops it from growing a second layout engine.
 
-Boundary with :mod:`ubt.core.layout.solver` (CELS Stage 3A)
------------------------------------------------------------
-``solver.solve_style_group`` is the *target* engine: it searches tracking,
-leading, borrow and size against real measured heights for a group of blocks on
-one track, and feeds Stage 3B's Cassowary solve. This module answers the
-narrower question the legacy facsimile channel can act on today — one size for
-the document body group, decided from cheap geometry before a single page is
-drawn, plus the exception policy and the record the delivery contract reads.
+Boundary with :mod:`ubt.core.layout.solver`
+-------------------------------------------
+The solver's former Stage 3A style-group search was removed: it had no
+production caller and its measurement backend was deleted with the measurement
+stack. This module answers the question the legacy facsimile channel can act on
+today — one size for the document body group, decided from cheap geometry
+before a single page is drawn, plus the exception policy and the record the
+delivery contract reads.
 
-They share the same body-floor / expansion-band / step / tracking / pitch
-limits, and the constants are mirrored here rather than imported: the facsimile
-path must not start failing when the CELS engine is refactored. Mirroring is a
-coupling that has to be edited in both places, so the names here match
-:mod:`ubt.core.layout.solver` on purpose and stay greppable against it. When the
-CELS renderer replaces the facsimile one, the plan this module produces becomes
-the *input* to ``solve_style_group``: same group, same size, measured instead of
-estimated.
+The size floor, expansion band, step and tracking/pitch limits are owned here
+rather than imported: the facsimile path must not start failing when the CELS
+engine is refactored.
 """
 
 from __future__ import annotations
@@ -233,7 +228,7 @@ class StyleGroupException:
 
 @dataclass(frozen=True, slots=True)
 class StyleGroupPlan:
-    """The Stage 3A decision plus the evidence of how it was reached."""
+    """The body-group plan plus the evidence of how it was reached."""
 
     group: StyleGroup
     exceptions: tuple[StyleGroupException, ...] = ()

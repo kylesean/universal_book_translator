@@ -190,7 +190,7 @@ class PinnedObstacle:
 
 @dataclass(frozen=True, slots=True)
 class ElasticFlowSegment:
-    """A paragraph stream assigned to one track: the unit Stage 3A measures.
+    """A paragraph stream assigned to one track.
 
     Kept as plain data on purpose. ``char_budget`` is Stage 4's to compute, from
     a real measured block, never from a characters-per-line guess.

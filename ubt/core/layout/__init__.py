@@ -1,11 +1,11 @@
 """Layout geometry and solving for adaptive delivery (CELS).
 
 Stage 1–2 turns measured boxes into column tracks / pinned obstacles /
-elastic segments (:mod:`ubt.core.layout.cels`); Stage 3 solves the style group
-and the vertical flow (:mod:`ubt.core.layout.solver`). Both are deliberately
-pure: no PDF, no render backend; measurement and the Cassowary solver arrive
-through injected delegates, so the modules stay unit-testable against
-synthetic pages and importable without the ``[cels]`` extra.
+elastic segments (:mod:`ubt.core.layout.cels`); Stage 3B solves the vertical
+flow (:mod:`ubt.core.layout.solver`). Both are deliberately pure: no PDF, no
+render backend; measured inputs and the Cassowary solver arrive through
+injected values, so the modules stay unit-testable against synthetic pages and
+importable without the ``[cels]`` extra.
 """
 
 from __future__ import annotations
@@ -38,13 +38,8 @@ from ubt.core.layout.distortion import (
 )
 from ubt.core.layout.solver import (
     SolvedBlockSpec,
-    StyleBlockInput,
-    StyleFit,
-    StyleGroupSolution,
     VerticalBlockInput,
     VerticalTrack,
-    condensation_char_budget,
-    solve_style_group,
     solve_vertical,
 )
 
@@ -62,20 +57,15 @@ __all__ = [
     "PinnedObstacle",
     "SolvedBlockSpec",
     "Stage4CondensationItem",
-    "StyleBlockInput",
-    "StyleFit",
-    "StyleGroupSolution",
     "TrackLayoutSolution",
     "TrackOverrun",
     "VerticalBlockInput",
     "VerticalTrack",
     "assign_lines",
     "compute_page_distortion",
-    "condensation_char_budget",
     "detect_columns",
     "pin_from",
     "solve_page_cels",
-    "solve_style_group",
     "solve_vertical",
     "track_overruns",
 ]

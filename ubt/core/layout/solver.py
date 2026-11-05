@@ -1,39 +1,15 @@
-"""CELS Stage 3: the two-phase style and vertical solve.
+"""CELS Stage 3B: the vertical solve.
 
-The math form is a Cassowary linear system; the shape is two phases, and the
-split is the point of the module. Like the rest of ``ubt.core.layout`` this
-module is deliberately pure: measured inputs in, solved geometry out. It opens
-no PDF and owns no renderer; measurement arrives as an injected callback of
-``(text, size_pt, tracking_em, leading_pt, width_pt) -> (line_count, height_pt)``,
-and the Cassowary solver arrives through ``kiwisolver`` (the ``[cels]`` extra),
-imported lazily so a default install can still import this module.
+The math form is a Cassowary linear system. Like the rest of
+``ubt.core.layout`` this module is deliberately pure: inputs in, solved
+geometry out. It opens no PDF and owns no renderer, and the Cassowary solver
+arrives through ``kiwisolver`` (the ``[cels]`` extra), imported lazily so a
+default install can still import this module.
 
-The two phases, and why they must not merge
--------------------------------------------
-``N_i`` (a block's line count) is a ``ceil()`` over wrapping -- a piecewise
-constant that changes discontinuously with size, tracking and width. Cassowary
-only solves continuous systems, so handing it ``N_i`` as something to derive is
-the "pseudo-linear, fake-feasible" failure this split exists to prevent. Phase
-3A therefore fixes the style (and with it every ``N_i``, via real measurement),
-and Phase 3B solves only the continuous vertical degrees of freedom.
-
-Phase 3A -- ``solve_style_group``
-    One size per style group: a size difference may only come from the style
-    role a block carries, never from per-block ad-hoc scaling. The
-    search walks the knobs in preference order -- tracking, then leading, then
-    right-borrow, and size reduction last, because shrinking the font is the
-    final resort -- and accepts the first candidate whose measured heights fit
-    the track.
-
-    One documented deviation from that order: the ladder lists ``γ_x`` first,
-    but no available measurement path can change advance widths -- Typst's
-    static-font ``stretch`` does not -- so a γ_x swept here would be measured
-    on a lie. 3A therefore pins γ_x = 1.0 and leaves horizontal compression to
-    Stage 5's line-level fitting (``solve_horizontal``), which reads widths
-    from the PDF's own ``/Widths``. When a shaping-aware measure path
-    (HarfBuzz) lands, γ_x joins the search; until then sweeping it here would
-    violate the project's "代理估算只能做预筛" rule at the moment it matters
-    most.
+Only the continuous vertical degrees of freedom live here. Line counts are a
+``ceil()`` over wrapping -- a piecewise constant that changes discontinuously
+with size, tracking and width -- so a Cassowary system must never be asked to
+derive them; the caller fixes each block's required height before the solve.
 
 Phase 3B -- ``solve_vertical``
     kiwisolver over ``y_top/y_bottom`` and ``deficit`` per block. The strength
@@ -51,59 +27,25 @@ Phase 3B -- ``solve_vertical``
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 from ubt.core.exceptions import UBTError
 
 __all__ = [
-    "BODY_FLOOR_PT",
-    "BLOCKED_BY_GEOMETRY",
     "DEFICIT_TRIGGER_PT",
     "DEFAULT_MIN_GAP_PT",
-    "MAX_EXPANSION_RATIO",
-    "NON_BODY_FLOOR_PT",
-    "SIZE_STEP_PT",
-    "StyleBlockInput",
-    "StyleFit",
-    "StyleGroupSolution",
     "SolvedBlockSpec",
     "VerticalBlockInput",
     "VerticalTrack",
-    "condensation_char_budget",
-    "solve_style_group",
     "solve_vertical",
 ]
 
-#: Absolute body floor: a body group never solves below this.
-BODY_FLOOR_PT = 7.5
-#: Non-body roles (captions, table cells) may go lower, but must warn.
-NON_BODY_FLOOR_PT = 5.5
-#: Candidate size step for the discrete 3A search.
-SIZE_STEP_PT = 0.25
-#: ``faithful`` may enlarge a group to at most this multiple of its source size.
-MAX_EXPANSION_RATIO = 1.10
 #: Stage 4 trigger: a deficit above this is a real shortfall.
 DEFICIT_TRIGGER_PT = 1.5
 #: Default minimum gap between consecutive blocks in one track.
 DEFAULT_MIN_GAP_PT = 2.0
-#: Micro-typography bounds. Tracking is only ever *compressed* here (the search
-#: walks down from 0 to :data:`TRACKING_MIN_EM`); there is no loosening bound
-#: because no candidate asks for positive tracking. Leading is clamped to
-#: :data:`LEADING_MIN_RATIO`..:data:`LEADING_MAX_RATIO`.
-TRACKING_MIN_EM = -0.03
-TRACKING_STEP_EM = 0.005
-LEADING_MIN_RATIO = 1.08
-LEADING_MAX_RATIO = 1.55
-LEADING_STEP = 0.05
-#: Right-borrow fractions tried before any size reduction.
-BORROW_FRACTIONS = (0.0, 0.5, 1.0)
-#: Reason codes on :attr:`StyleGroupSolution.reason`.
-SOURCE_STYLE_FITS = "source_style_fits"
-ADJUSTED_TO_FIT = "adjusted_to_fit"
-FLOOR_EXHAUSTED = "floor_exhausted"
-BLOCKED_BY_GEOMETRY = "blocked_by_geometry"
 
 
 class CELSSolverUnavailableError(UBTError):
@@ -111,58 +53,13 @@ class CELSSolverUnavailableError(UBTError):
 
 
 @dataclass(frozen=True, slots=True)
-class StyleBlockInput:
-    """One block of a style group, as 3A sees it.
-
-    ``borrowable_pt`` is the room between the block's current right edge and
-    the track's right limit (``X_col_right``); the caller computes it from the
-    geometry it already holds, so the solver stays box-free.
-    """
-
-    index: int
-    text: str
-    role: Literal["body", "caption", "table_cell"]
-    source_size_pt: float
-    source_leading_pt: float
-    source_width_pt: float
-    source_height_pt: float
-    borrowable_pt: float = 0.0
-
-
-@dataclass(frozen=True, slots=True)
-class StyleFit:
-    """One block's measured outcome under the group's solved style."""
-
-    index: int
-    width_pt: float
-    line_count: int
-    height_pt: float
-    #: Set only when the group does not fit: the character budget Stage 4 may
-    #: condense this block to, measured (not estimated) at the floor style.
-    char_budget: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class StyleGroupSolution:
-    """The 3A result: one style for the whole group, per-block line facts."""
-
-    size_pt: float
-    tracking_em: float
-    leading_ratio: float
-    leading_pt: float
-    fits: bool
-    blocks: tuple[StyleFit, ...]
-    reason: str
-
-
-@dataclass(frozen=True, slots=True)
 class VerticalBlockInput:
     """One block entering the 3B vertical solve.
 
-    ``required_height_pt`` is 3A's *measured* height at the solved style; the
-    solver never derives it. ``source_top_pt`` is the source block's top edge
-    in PDF user space (y up), and inputs are ordered top-down, so block 1 is
-    the highest on the page.
+    ``required_height_pt`` is the height the caller chose for the block's
+    style; the solver never derives it. ``source_top_pt`` is the source block's
+    top edge in PDF user space (y up), and inputs are ordered top-down, so
+    block 1 is the highest on the page.
     """
 
     index: int
@@ -200,266 +97,6 @@ class SolvedBlockSpec:
     deficit_pt: float
     gap_to_next_pt: float | None
     needs_stage4: bool
-
-
-# ---------------------------------------------------------------------------
-# Phase 3A: the discrete style search
-# ---------------------------------------------------------------------------
-
-
-def _floor_for(role: Literal["body", "caption", "table_cell"]) -> float:
-    return BODY_FLOOR_PT if role == "body" else NON_BODY_FLOOR_PT
-
-
-def _leading_candidates(source_ratio: float) -> tuple[float, ...]:
-    """Source leading first, then tighter, down to the floor; never looser than
-    the maximum ratio.
-
-    The floor is always a candidate even when the step lands past it: a style
-    that only fits at the exact floor must be reachable, or the search would
-    walk the font size past a leading solution that exists.
-    """
-    start = min(max(source_ratio, LEADING_MIN_RATIO), LEADING_MAX_RATIO)
-    out: list[float] = []
-    ratio = start
-    while ratio >= LEADING_MIN_RATIO - 1e-9:
-        out.append(round(ratio, 4))
-        ratio -= LEADING_STEP
-    if out[-1] > LEADING_MIN_RATIO + 1e-9:
-        out.append(LEADING_MIN_RATIO)
-    return tuple(out)
-
-
-def _tracking_candidates() -> tuple[float, ...]:
-    """Zero first (no distortion), then tighter, down to :data:`TRACKING_MIN_EM`."""
-    out: list[float] = []
-    value = 0.0
-    while value >= TRACKING_MIN_EM - 1e-9:
-        out.append(round(value, 4))
-        value -= TRACKING_STEP_EM
-    return tuple(out)
-
-
-def _measure_group(
-    blocks: Sequence[StyleBlockInput],
-    *,
-    measure: Callable[[str, float, float, float, float], tuple[int, float]],
-    size_pt: float,
-    tracking_em: float,
-    leading_pt: float,
-    borrow_fraction: float,
-) -> tuple[StyleFit, ...]:
-    fits: list[StyleFit] = []
-    for block in blocks:
-        width = block.source_width_pt + borrow_fraction * block.borrowable_pt
-        if not block.text.strip():
-            fits.append(StyleFit(index=block.index, width_pt=width, line_count=0, height_pt=0.0))
-            continue
-        line_count, height_pt = measure(block.text, size_pt, tracking_em, leading_pt, width)
-        fits.append(
-            StyleFit(
-                index=block.index,
-                width_pt=width,
-                line_count=line_count,
-                height_pt=height_pt,
-            )
-        )
-    return tuple(fits)
-
-
-def _group_fits(fits: Sequence[StyleFit], *, available_height_pt: float, min_gap_pt: float) -> bool:
-    total = sum(fit.height_pt for fit in fits)
-    gaps = max(0, len(fits) - 1) * min_gap_pt
-    return total + gaps <= available_height_pt + 1e-9
-
-
-def solve_style_group(
-    blocks: Sequence[StyleBlockInput],
-    *,
-    available_height_pt: float,
-    measure: Callable[[str, float, float, float, float], tuple[int, float]],
-    min_gap_pt: float = DEFAULT_MIN_GAP_PT,
-    size_step_pt: float = SIZE_STEP_PT,
-) -> StyleGroupSolution:
-    """Solve one style group's shared style: Phase 3A.
-
-    Walks the knobs in the preference order this module documents -- tracking,
-    leading, right-borrow, and size last -- accepting the first candidate whose
-    *measured* heights (never estimates) fit ``available_height_pt``. Size
-    descends from the group's source size toward the role floor (``BODY_FLOOR_PT``
-    for body text, ``NON_BODY_FLOOR_PT`` for captions and table cells, and never
-    below 80 % of the source size) in ``size_step_pt`` steps.
-
-    When even the floor style does not fit, the returned solution carries
-    ``fits=False`` and a measured :attr:`StyleFit.char_budget` per block --
-    Stage 4's condensation budget -- instead of pretending a style works.
-    """
-    if not blocks:
-        raise ValueError("solve_style_group needs at least one block")
-    role = blocks[0].role
-    if any(block.role != role for block in blocks):
-        raise ValueError("a style group must share one role; split by role first")
-
-    base_size = max(block.source_size_pt for block in blocks)
-    densest = max(blocks, key=lambda block: block.source_size_pt)
-    source_ratio = densest.source_leading_pt / densest.source_size_pt
-    floor = _floor_for(role)
-    size_floor = max(floor, 0.80 * base_size)
-    size_ceiling = MAX_EXPANSION_RATIO * base_size
-    sizes: list[float] = []
-    size = min(base_size, size_ceiling)
-    while size >= size_floor - 1e-9:
-        sizes.append(round(size, 4))
-        size -= size_step_pt
-    if not sizes:
-        # A source below the role floor (a 7pt body block): the floor is the
-        # only candidate, and the artifact QA's type tier will judge it.
-        sizes.append(round(size_floor, 4))
-
-    taus = _tracking_candidates()
-    lambdas = _leading_candidates(source_ratio)
-
-    def accept(
-        size_pt: float,
-        tracking_em: float,
-        leading_ratio: float,
-        borrow_fraction: float,
-        fits: tuple[StyleFit, ...],
-        reason: str,
-    ) -> StyleGroupSolution:
-        return StyleGroupSolution(
-            size_pt=size_pt,
-            tracking_em=tracking_em,
-            leading_ratio=leading_ratio,
-            leading_pt=round(leading_ratio * size_pt, 4),
-            fits=True,
-            blocks=fits,
-            reason=reason,
-        )
-
-    last_candidate: tuple[float, float, float, float, tuple[StyleFit, ...]] | None = None
-    for size_pt in sizes:
-        for tracking_em in taus:
-            for leading_ratio in lambdas:
-                leading_pt = leading_ratio * size_pt
-                for borrow_fraction in BORROW_FRACTIONS:
-                    fits = _measure_group(
-                        blocks,
-                        measure=measure,
-                        size_pt=size_pt,
-                        tracking_em=tracking_em,
-                        leading_pt=leading_pt,
-                        borrow_fraction=borrow_fraction,
-                    )
-                    if any(
-                        fit.line_count < 1
-                        for fit, block in zip(fits, blocks, strict=True)
-                        if block.text.strip()
-                    ):
-                        continue
-                    last_candidate = (size_pt, tracking_em, leading_ratio, borrow_fraction, fits)
-                    if _group_fits(
-                        fits, available_height_pt=available_height_pt, min_gap_pt=min_gap_pt
-                    ):
-                        reduced = size_pt < base_size - 1e-9
-                        adjusted = (
-                            reduced
-                            or tracking_em < 0
-                            or leading_ratio < source_ratio - 1e-9
-                            or borrow_fraction > 0
-                        )
-                        return accept(
-                            size_pt,
-                            tracking_em,
-                            leading_ratio,
-                            borrow_fraction,
-                            fits,
-                            ADJUSTED_TO_FIT if adjusted else SOURCE_STYLE_FITS,
-                        )
-
-    # Even the floor style does not fit: report the floor candidate and hand
-    # Stage 4 a measured char budget per block. Heights are shared out
-    # proportionally to source heights (the gaps come off the total first).
-    floor_size = sizes[-1]
-    floor_tau = taus[-1]
-    floor_lam = lambdas[-1]
-    fits = _measure_group(
-        blocks,
-        measure=measure,
-        size_pt=floor_size,
-        tracking_em=floor_tau,
-        leading_pt=floor_lam * floor_size,
-        borrow_fraction=1.0,
-    )
-    total_source = sum(block.source_height_pt for block in blocks) or 1.0
-    shareable = max(0.0, available_height_pt - max(0, len(blocks) - 1) * min_gap_pt)
-    budgeted: list[StyleFit] = []
-    for block, fit in zip(blocks, fits, strict=True):
-        share = shareable * (block.source_height_pt / total_source)
-        budget = condensation_char_budget(
-            block.text,
-            measure,
-            size_pt=floor_size,
-            tracking_em=floor_tau,
-            leading_pt=floor_lam * floor_size,
-            width_pt=fit.width_pt,
-            available_height_pt=share,
-        )
-        budgeted.append(
-            StyleFit(
-                index=block.index,
-                width_pt=fit.width_pt,
-                line_count=fit.line_count,
-                height_pt=fit.height_pt,
-                char_budget=budget,
-            )
-        )
-    return StyleGroupSolution(
-        size_pt=floor_size,
-        tracking_em=floor_tau,
-        leading_ratio=floor_lam,
-        leading_pt=round(floor_lam * floor_size, 4),
-        fits=False,
-        blocks=tuple(budgeted),
-        reason=BLOCKED_BY_GEOMETRY if last_candidate is None else FLOOR_EXHAUSTED,
-    )
-
-
-def condensation_char_budget(
-    text: str,
-    measure: Callable[[str, float, float, float, float], tuple[int, float]],
-    *,
-    size_pt: float,
-    tracking_em: float,
-    leading_pt: float,
-    width_pt: float,
-    available_height_pt: float,
-) -> int:
-    """The largest prefix of ``text`` whose *measured* height fits.
-
-    Stage 4 hands an LLM a character budget, and the only honest way to size
-    one is to measure: binary-search the prefix length against the real
-    backend. A prefix cut can split a word or an atom; the budget is guidance
-    for the rewrite, not the rewrite itself -- the delivered text is re-measured
-    by the artifact QA either way.
-    """
-    if not text.strip() or available_height_pt <= 0:
-        return 0
-
-    def fits_prefix(n: int) -> bool:
-        _, height_pt = measure(text[:n], size_pt, tracking_em, leading_pt, width_pt)
-        return height_pt <= available_height_pt + 1e-9
-
-    if fits_prefix(len(text)):
-        return len(text)
-    low, high = 0, len(text)
-    while low < high:
-        mid = (low + high + 1) // 2
-        if fits_prefix(mid):
-            low = mid
-        else:
-            high = mid - 1
-    return low
 
 
 # ---------------------------------------------------------------------------
