@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 # The operator console is a prebuilt Vite bundle copied into ubt/api/static by
 # scripts/build_console_assets.py. It ships inside the ``ubt`` package, so
 # ``packages = ["ubt"]`` already includes it and a `pip install`ed wheel serves
-# the console with no Node.js/pnpm on the end-user machine (PRD §7.1.2 / §9).
+# the console with no Node.js/pnpm on the end-user machine.
 #
 # There is deliberately NO ``force-include`` for ubt/api/static: it would add
 # every static file to the archive a *second* time (already covered by

@@ -60,29 +60,12 @@ capability.
 - Both run as gates: a pre-push hook and a CI step
   (`.pre-commit-config.yaml`, `.github/workflows/ci.yml`).
 
-## Documentation and architecture records
-
-`docs/` holds the project's documentation, guides (e.g. `docs/guides/`), and
-Architecture Decision Records (ADRs). Working transient notes should be placed
-under `docs/scratch/` (gitignored).
-
-Two rules govern documentation in UBT:
-
-1. **A `docs/...§N` citation inside a comment or docstring names where a decision was
-   recorded.** The core rationale that governs the code should always be summarized
-   in the comment itself for quick readability.
-2. **References to documentation paths should resolve.** Pointers should remain
-   accurate across refactors.
-
-In addition to `docs/`, key root documentation includes `README.md`, `ARCHITECTURE.md`,
-`GLOSSARY.md`, `SEMANTIC_JUDGE.md`, `scripts/README.md`, `web/README.md`, and
-`deploy/docker/README.md`.
+## No changelog
 
 There is no changelog. The tree is still changing fast enough that a
 per-release narrative restates it and then lags it, and a changelog that is
 wrong is worse than none. Until the interfaces stabilize, `git log` is the
-record, and the review notes under `docs/` hold the argument behind a
-decision (see rule 1).
+record.
 
 ## Sanctioned duplication
 

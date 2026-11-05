@@ -212,7 +212,7 @@ ubt-mcp
 
 ## 🤝 参与贡献
 
-项目文档、指南及架构决策记录（ADR）统一维护在 [`docs/`](docs/) 目录下。
+项目文档以根目录的 [`ARCHITECTURE.md`](ARCHITECTURE.md) 与 [`GLOSSARY.md`](GLOSSARY.md) 为准；`docs/` 不纳入版本控制，评审记录不随仓库分发，工作区当前也没有保留副本。
 欢迎查阅：
 - [架构设计白皮书 (`ARCHITECTURE.md`)](ARCHITECTURE.md)
 - [术语与领域词典 (`GLOSSARY.md`)](GLOSSARY.md)

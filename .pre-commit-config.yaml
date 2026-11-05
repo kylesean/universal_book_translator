@@ -37,9 +37,7 @@ repos:
         # web/*.md) included. Without markdown here, a
         # docs-only commit passed this hook and failed CI on the same tree; that
         # gap kept every CI run since Oct 23 red while the local gates stayed
-        # green. (`docs/` itself is un-versioned, so its notes are only checked
-        # when they are also tracked -- see ARCHITECTURE.md, "Docs are not in the
-        # repo".)
+        # green.
         types_or: [python, pyi, markdown]
         require_serial: true
 
