@@ -16,22 +16,14 @@ from ubt.core.layout.solver import (
 pytestmark = pytest.mark.fast
 
 
-class _Measured:
-    __slots__ = ("line_count", "height_pt")
-
-    def __init__(self, line_count: int, height_pt: float) -> None:
-        self.line_count = line_count
-        self.height_pt = height_pt
-
-
 def fake_measure(
     text: str, size_pt: float, tracking_em: float, leading_pt: float, width_pt: float
-) -> _Measured:
+) -> tuple[int, float]:
     if not text.strip():
-        return _Measured(0, 0.0)
+        return (0, 0.0)
     capacity = max(1, int(width_pt / (0.5 * size_pt)))
     lines = math.ceil(len(text) / capacity)
-    return _Measured(lines, lines * leading_pt)
+    return (lines, lines * leading_pt)
 
 
 def make_block(
@@ -146,22 +138,22 @@ def test_no_fit_returns_floor_style_with_measured_char_budgets() -> None:
     assert solution.size_pt == 8.0, "reported at the body floor, not the failed source style"
     budget = solution.blocks[0].char_budget
     assert budget is not None and 0 < budget < len(text), "the budget must be a real prefix bound"
-    at_budget = fake_measure(
+    _, at_budget_height = fake_measure(
         text[:budget],
         solution.size_pt,
         solution.tracking_em,
         solution.leading_pt,
         solution.blocks[0].width_pt,
     )
-    assert at_budget.height_pt <= 50.0 + 1e-9
-    over_budget = fake_measure(
+    assert at_budget_height <= 50.0 + 1e-9
+    _, over_budget_height = fake_measure(
         text[: budget + 1],
         solution.size_pt,
         solution.tracking_em,
         solution.leading_pt,
         solution.blocks[0].width_pt,
     )
-    assert over_budget.height_pt > 50.0
+    assert over_budget_height > 50.0
 
 
 def test_budget_is_balanced_across_blocks_by_source_height_share() -> None:

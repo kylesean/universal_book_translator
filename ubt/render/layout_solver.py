@@ -38,25 +38,11 @@ def estimate_needed_height(
     em_ratio: float,
     tracking_em: float = 0.0,
 ) -> float:
-    """Vertical height (pt) this record's text occupies at ``size`` and ``em_ratio``.
+    """Estimate the vertical height (pt) at ``size`` and ``em_ratio``.
 
-    When ``record`` carries a measured height for the requested
-    ``(size, em_ratio, tracking_em, w)``, it is used directly; otherwise the
-    helper falls back to the glyph-advance model.
+    The estimate is derived from the record's glyph-advance model; the source
+    geometry supplies the width, glyph count and aspect it needs.
     """
-    measured_h = record.get("measured_height_pt")
-    if isinstance(measured_h, (int, float)) and measured_h > 0.0:
-        m_size = record.get("measured_size_pt")
-        m_pitch = record.get("measured_pitch")
-        m_track = record.get("measured_tracking_em", 0.0)
-        m_w = record.get("measured_w")
-        if (
-            (m_size is None or abs(float(m_size) - size) <= 1e-3)
-            and (m_pitch is None or abs(float(m_pitch) - em_ratio) <= 1e-3)
-            and abs(float(m_track) - tracking_em) <= 1e-4
-            and (m_w is None or abs(float(m_w) - float(record.get("w", 0.0))) <= 0.1)
-        ):
-            return float(measured_h)
     w = float(record.get("w", 0.0))
     if w <= 0.0:
         lines = float(record.get("n", 1))

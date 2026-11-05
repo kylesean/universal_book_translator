@@ -3,10 +3,10 @@
 The math form is a Cassowary linear system; the shape is two phases, and the
 split is the point of the module. Like the rest of ``ubt.core.layout`` this
 module is deliberately pure: measured inputs in, solved geometry out. It opens
-no PDF and owns no renderer; the Typst-backed measurement arrives as an
-injected :data:`BlockMeasureFn`, and the Cassowary solver arrives through
-``kiwisolver`` (the ``[cels]`` extra), imported lazily so a default install can
-still import this module.
+no PDF and owns no renderer; measurement arrives as an injected callback of
+``(text, size_pt, tracking_em, leading_pt, width_pt) -> (line_count, height_pt)``,
+and the Cassowary solver arrives through ``kiwisolver`` (the ``[cels]`` extra),
+imported lazily so a default install can still import this module.
 
 The two phases, and why they must not merge
 -------------------------------------------
@@ -26,14 +26,14 @@ Phase 3A -- ``solve_style_group``
     the track.
 
     One documented deviation from that order: the ladder lists ``γ_x`` first,
-    but the only measurement backend that exists (the Typst probe) **refuses
-    non-unity horizontal scale** -- Typst's static-font ``stretch`` does not
-    change advance widths, so a γ_x swept here would be measured on a lie. 3A
-    therefore pins γ_x = 1.0 and leaves horizontal compression to Stage 5's
-    line-level fitting (``solve_horizontal``), which reads widths from the
-    PDF's own ``/Widths``. When a shaping-aware measure path (HarfBuzz) lands,
-    γ_x joins the search; until then sweeping it here would violate the
-    project's "代理估算只能做预筛" rule at the moment it matters most.
+    but no available measurement path can change advance widths -- Typst's
+    static-font ``stretch`` does not -- so a γ_x swept here would be measured
+    on a lie. 3A therefore pins γ_x = 1.0 and leaves horizontal compression to
+    Stage 5's line-level fitting (``solve_horizontal``), which reads widths
+    from the PDF's own ``/Widths``. When a shaping-aware measure path
+    (HarfBuzz) lands, γ_x joins the search; until then sweeping it here would
+    violate the project's "代理估算只能做预筛" rule at the moment it matters
+    most.
 
 Phase 3B -- ``solve_vertical``
     kiwisolver over ``y_top/y_bottom`` and ``deficit`` per block. The strength
@@ -53,7 +53,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Literal
 
 from ubt.core.exceptions import UBTError
 
@@ -108,28 +108,6 @@ BLOCKED_BY_GEOMETRY = "blocked_by_geometry"
 
 class CELSSolverUnavailableError(UBTError):
     """``kiwisolver`` (the ``[cels]`` extra) is not installed."""
-
-
-class MeasuredLike(Protocol):
-    """The slice of a measurement result the solver reads.
-
-    Structural on purpose: any object carrying these attributes satisfies it,
-    so the solver never imports a concrete measurement type from a package
-    whose own errors module already reaches back into ``ubt.core``. The solver
-    must not close that cycle.
-    """
-
-    line_count: int
-    height_pt: float
-
-
-#: ``(text, size_pt, tracking_em, leading_pt, width_pt) -> measurement``.
-#:
-#: The caller closes over its own style template (font family, version,
-#: language, justify) and builds the backend's style object per call, so the
-#: solver never touches a style type it cannot import. Tests pass a pure
-#: function, which is what keeps this module's tier fast and offline.
-BlockMeasureFn = Callable[[str, float, float, float, float], MeasuredLike]
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,7 +243,7 @@ def _tracking_candidates() -> tuple[float, ...]:
 def _measure_group(
     blocks: Sequence[StyleBlockInput],
     *,
-    measure: BlockMeasureFn,
+    measure: Callable[[str, float, float, float, float], tuple[int, float]],
     size_pt: float,
     tracking_em: float,
     leading_pt: float,
@@ -277,13 +255,13 @@ def _measure_group(
         if not block.text.strip():
             fits.append(StyleFit(index=block.index, width_pt=width, line_count=0, height_pt=0.0))
             continue
-        measured = measure(block.text, size_pt, tracking_em, leading_pt, width)
+        line_count, height_pt = measure(block.text, size_pt, tracking_em, leading_pt, width)
         fits.append(
             StyleFit(
                 index=block.index,
                 width_pt=width,
-                line_count=measured.line_count,
-                height_pt=measured.height_pt,
+                line_count=line_count,
+                height_pt=height_pt,
             )
         )
     return tuple(fits)
@@ -299,7 +277,7 @@ def solve_style_group(
     blocks: Sequence[StyleBlockInput],
     *,
     available_height_pt: float,
-    measure: BlockMeasureFn,
+    measure: Callable[[str, float, float, float, float], tuple[int, float]],
     min_gap_pt: float = DEFAULT_MIN_GAP_PT,
     size_step_pt: float = SIZE_STEP_PT,
 ) -> StyleGroupSolution:
@@ -449,7 +427,7 @@ def solve_style_group(
 
 def condensation_char_budget(
     text: str,
-    measure: BlockMeasureFn,
+    measure: Callable[[str, float, float, float, float], tuple[int, float]],
     *,
     size_pt: float,
     tracking_em: float,
@@ -469,8 +447,8 @@ def condensation_char_budget(
         return 0
 
     def fits_prefix(n: int) -> bool:
-        measured = measure(text[:n], size_pt, tracking_em, leading_pt, width_pt)
-        return measured.height_pt <= available_height_pt + 1e-9
+        _, height_pt = measure(text[:n], size_pt, tracking_em, leading_pt, width_pt)
+        return height_pt <= available_height_pt + 1e-9
 
     if fits_prefix(len(text)):
         return len(text)
