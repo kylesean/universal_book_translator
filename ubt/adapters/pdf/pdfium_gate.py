@@ -53,8 +53,7 @@ sites are individually locked and converge on it as they are touched.
 
 Longer term (crash isolation): move rasterization behind a subprocess
 boundary like ``vlm/drivers/sidecar_driver.py`` — a pdfium segfault then
-kills only the child. Not implemented; this docstring is the contract (there
-is no separate design doc).
+kills only the child. Not implemented; this docstring is the contract.
 """
 
 from __future__ import annotations

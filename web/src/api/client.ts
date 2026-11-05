@@ -392,7 +392,7 @@ export async function getDeliveryContract(jobId: string): Promise<Record<string,
 //: Terminal SSE event names the backend emits (``event: <status>``).
 const TERMINAL_EVENTS = ['completed', 'failed', 'cancelled'] as const
 
-//: Reconnect backoff bounds (PRD §9.2): 1s, 2s, 4s … capped at 30s.
+//: Reconnect backoff bounds: 1s, 2s, 4s … capped at 30s.
 const _RECONNECT_BASE_MS = 1000
 const _RECONNECT_MAX_MS = 30000
 

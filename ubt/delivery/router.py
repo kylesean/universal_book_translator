@@ -6,9 +6,10 @@ explicit ``faithful`` request. ``feasible=False`` is a first-class result that
 the export stage must turn into an explicit failure or an authorized
 ``allow_degrade`` re-route.
 
-The rules mirror the PRD's §5.2 matrix and §5.3 eligibility formula. They are
-intentionally pure functions over :class:`DeliverySignals` so routing can be
-unit-tested without a PDF, Typst, or a model call.
+The rules form a matrix over document class × available signals, plus an
+eligibility formula for ``faithful``. They are intentionally pure functions over
+:class:`DeliverySignals` so routing can be unit-tested without a PDF, Typst, or a
+model call.
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ _PAGE_IDENTITY_CLASSES: frozenset[DocumentClass] = frozenset(
 
 
 def evaluate_faithful_eligibility(signals: DeliverySignals) -> FaithfulEligibility:
-    """Apply the PRD's ``faithful`` eligibility formula.
+    """Apply the ``faithful`` eligibility formula.
 
     A page-lock promise requires a trustworthy native text layer, no source
     overlap, and a measured feasible page-lock solution at the body floor.

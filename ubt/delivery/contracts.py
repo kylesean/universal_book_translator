@@ -1,6 +1,5 @@
 """Delivery-contract vocabulary for the adaptive delivery program.
 
-Target design: ``ARCHITECTURE.md`` § The render path.
 This module is the typed boundary only: it does not render, measure, or route.
 Keeping the vocabulary here lets the CLI, API, router, render strategy and QA
 share one spelling of ``readable`` / ``faithful`` / ``auto`` instead of
@@ -111,7 +110,7 @@ class FaithfulEligibility(BaseModel):
 
     eligible: bool
     #: True when the decision came from a prefilter (structure census/legacy
-    #: compatibility), not from the G2 per-page MeasurementService solve.
+    #: compatibility), not from the per-page MeasurementService solve.
     provisional: bool = False
     #: Machine-readable enough for the report and the CLI error: each reason
     #: names the signal that failed (``text_trust``, ``page_kind``, ...).
@@ -139,7 +138,7 @@ class DeliveryPlan(BaseModel):
     page_strategies: dict[int, PageStrategy] = Field(default_factory=dict)
     degrade_policy: DegradePolicy = DegradePolicy.FAIL
     #: Whether a ``readable`` reflow companion copy should be emitted alongside
-    #: a ``faithful`` artifact (PRD §5.2).
+    #: a ``faithful`` artifact.
     companion_reflow: bool = False
     reasons: tuple[str, ...] = ()
     signals: DeliverySignals

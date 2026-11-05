@@ -1,12 +1,12 @@
-"""CELS Stage 5 CJK spike: embed a target font and keep Chinese copyable.
+"""CELS CJK font spike: embed a target font and keep Chinese copyable.
 
-AD-018 is the reason this exists. Every text font in ``chapter-3.pdf`` is a
-single-byte ``Type1`` subset with no ``/ToUnicode``, so a Chinese translation
-cannot ride the source font: the glyphs do not exist and the code space has no
-room for them. G3 proved the injection *mechanism* with an ASCII probe; this
-spike proves the missing half — an embedded, subsetted TrueType font with its
-own ``/ToUnicode`` CMap renders Chinese at the original position and stays
-extractable (copyable, searchable) in the delivered PDF.
+Why this exists: every text font in ``chapter-3.pdf`` is a single-byte
+``Type1`` subset with no ``/ToUnicode``, so a Chinese translation cannot ride
+the source font: the glyphs do not exist and the code space has no room for
+them. The content-stream spike proved the injection *mechanism* with an ASCII
+probe; this spike proves the missing half — an embedded, subsetted TrueType
+font with its own ``/ToUnicode`` CMap renders Chinese at the original position
+and stays extractable (copyable, searchable) in the delivered PDF.
 
 Run::
 
@@ -78,7 +78,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     out_dir: Path = args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     evidence: dict[str, Any] = {
-        "spike": "G3 CELS font pipeline (AD-018)",
+        "spike": "CELS font pipeline with embedded /ToUnicode",
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "pdf": str(pdf_path),
         "pdf_sha256": hashlib.sha256(pdf_path.read_bytes()).hexdigest(),

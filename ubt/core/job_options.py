@@ -463,7 +463,7 @@ def run_kwargs_from_request(request: Mapping[str, Any]) -> dict[str, Any]:
 
 
 #: With no explicit ``-o`` a deliverable lands in the user's documents folder so
-#: a forgotten flag never pollutes the input directory (or docs/). Every derived
+#: a forgotten flag never pollutes the input directory. Every derived
 #: artifact (secondary render, quality/visual reports, .typ sidecar, PE queue)
 #: hangs off this path, so all three surfaces must derive it the same way.
 #:

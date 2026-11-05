@@ -84,7 +84,7 @@ PROSE_BLOCK_TYPES = frozenset(
 # MTQE_PASSED/1.0 so a whole book of source-language tables reported a perfect
 # pass rate. The publication renderer rebuilds tables from the IR (see
 # ``render.typst.document_renderer``), so a table marked skip would ship in the
-# source language; see README "Tables".
+# source language.
 NON_TEXT_BLOCK_TYPES = frozenset({BlockType.FORMULA, BlockType.CODE, BlockType.IMAGE})
 NON_PROSE_FLOWS = frozenset({FlowID.FOOTNOTE, FlowID.CAPTION, FlowID.TABLE_GRID})
 CAPTION_RE = re.compile(r"^(FIG\.|Fig\.|Figure|Table|TAB\.|图|表)\s*[A-Za-z0-9]", re.IGNORECASE)
@@ -264,8 +264,7 @@ PROBE_FORMULA_SHARE = 0.10
 #: reads as two columns — while two pages is a signal. A plain majority is too
 #: strict with a five-page sample: a 296-page maths textbook whose formula pages
 #: are 41% of the document draws only 2 of 5 samples, so a >50% bar would send
-#: it to pdfium and shatter its equations. See
-#: ARCHITECTURE.md § The render path (L2 tier).
+#: it to pdfium and shatter its equations.
 PROBE_MIN_SIGNAL_PAGES = 2
 PROSE_SINGLE_LETTERS = frozenset({"a", "A", "I"})
 #: Name initials in reference entries (``P. Zijlstra``, ``D. Guo``,

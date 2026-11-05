@@ -1,6 +1,4 @@
-"""G2 Calibration Corpus: 80 standardized test cases across 4 layout roles.
-
-Specification: ``ARCHITECTURE.md`` § The render path.
+"""Calibration corpus: 80 standardized test cases across 4 layout roles.
 
 This module provides the golden calibration suite for MeasurementService:
 - 20 Body cases (prose, CJK-Latin mixing, inline math formulas, varied lengths)

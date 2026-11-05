@@ -19,7 +19,7 @@ def ui_msg(en: str, zh: str) -> str:
     The operator-facing language is an explicit switch (``UBT_UI_LANG``), not a
     property of the terminal: a Chinese-locale shell on an English team is
     common, and the reverse. English is the default so logs and console output
-    match the code and the docs.
+    match the code.
     """
     return zh if os.environ.get("UBT_UI_LANG", "en").strip().lower().startswith("zh") else en
 

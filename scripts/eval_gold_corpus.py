@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Batch baseline over the semantic-path gold corpus (RFC-2026-02 Sprint 1).
+"""Batch baseline over the semantic-path gold corpus.
 
 Runs ``scripts/eval_semantic.py`` over every case in
 ``corpus/semantic_gold/manifest.json`` that has a delivered artifact, and writes

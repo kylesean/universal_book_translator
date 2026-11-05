@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Semantic-path baseline metrics for the reflow (RFC-2026-02) programme.
+"""Semantic-path baseline metrics for the reflow programme.
 
 Measures the *product* of a translation run on the dimensions the semantic
 rearchitecture is meant to move, so a refactor can be judged against numbers
@@ -222,7 +222,7 @@ def _typst_table_cells(typst: Path | None) -> list[str]:
 
 
 def _table_header_cjk(typst: Path | None) -> float:
-    """Fraction of table-header cells carrying CJK (RFC §9 「表格单元格 CJK 覆盖」).
+    """Fraction of table-header cells carrying CJK (「表格单元格 CJK 覆盖」).
 
     Read from the generated Typst rather than the compiled PDF: a Typst table is
     a ``#table(...)`` call whose cells are literal markup, so the header row is
@@ -345,7 +345,7 @@ def _ledger_stats(ledger_path: Path) -> dict[str, Any]:
     kept = [r for r in rows if _keeps_source_row(r)]
     translatable = [r for r in rows if not _keeps_source_row(r)]
 
-    # The RFC's third target is the "表格中文化率" (table sinicization rate). The
+    # The third target is the "表格中文化率" (table sinicization rate). The
     # unambiguous form of that question is decided per *block*: a table block
     # whose delivered text differs from its source was worked on. Counting cells
     # instead (see ``_table_header_cjk``) conflates "not translated" with a cell

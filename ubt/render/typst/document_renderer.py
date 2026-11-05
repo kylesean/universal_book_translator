@@ -2,7 +2,7 @@ r"""Typst document renderer: IRBlock sequence → one Typst document → PDF.
 
 This renderer rebuilds the document from the IR and lets Typst lay it out,
 which is what makes a uniform body size, native tables and correct math
-possible at all (RFC-2026-02 §1.2). It does not draw fragments back onto the
+possible at all. It does not draw fragments back onto the
 source page: that would inherit every limit of the source geometry (font sizes
 shrunk to fit a fixed box, tables left in the source language, a block that
 cannot fit quarantined).
@@ -893,7 +893,7 @@ def render_table(
     Rebuilt from the IR rather than drawn over the source: a source-layer table
     cannot change its contents at all, which is why table headers stayed in the
     source language when tables were left on the source page (measured 0.96
-    source-term leakage; RFC §9).
+    source-term leakage).
 
     ``is_math_ok`` is the same compile gate :func:`render_prose` takes; a cell's
     ``$\\frac{a}{}$`` reaches the compiler exactly as a paragraph's does.
@@ -1897,8 +1897,7 @@ class TypstDocumentRenderer:
     def spans_dual_columns(self, width_pt: float | None) -> bool:
         """Whether a block/figure/table should span across both columns in a multi-column layout.
 
-        Triggered when page has columns > 1 and width_pt > 0.60 * page_width_pt
-        (ARCHITECTURE.md § The render path).
+        Triggered when page has columns > 1 and width_pt > 0.60 * page_width_pt.
         """
         columns = max(1, int(getattr(self, "columns", 1) or 1))
         if columns <= 1 or width_pt is None or width_pt <= 0:

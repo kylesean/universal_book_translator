@@ -10,9 +10,9 @@
 A parallel node-tree here would be a second source of truth for those same
 facts — the exact failure mode this rearchitecture exists to remove. So this
 module provides what was actually *missing*: a **grouping** of the existing
-blocks into sections, so translation can run at section scope
-(RFC-2026-02 §2.3 — the one citation this module carries; the reasons it asks
-for are written out at each rule below) instead of one block at a time.
+blocks into sections, so translation can run at section scope (the reasons the
+grouping asks for are written out at each rule below) instead of one block at a
+time.
 
 Nothing here is stored. The section list is derived on demand from a block
 sequence and holds no state of its own; the ledger keeps the block-level record

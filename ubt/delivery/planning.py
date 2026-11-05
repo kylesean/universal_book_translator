@@ -35,9 +35,10 @@ from ubt.delivery.router import route_delivery
 
 logger = logging.getLogger(__name__)
 
-#: Legacy delivery values remain accepted for one release after the G1 default
-#: switch. This date is the documented sunset window; removing the values is a
-#: separate compatibility PR, not an implicit cleanup.
+#: Legacy delivery values remain accepted for one release after the default
+#: delivery mode switched to ``auto``. This date is the documented sunset
+#: window; removing the values is a separate compatibility PR, not an implicit
+#: cleanup.
 LEGACY_DELIVERY_SUNSET = "2027-03-31"
 
 _LEGACY_MODES: frozenset[str] = frozenset({"reflow", "facsimile", "page_locked"})
@@ -45,7 +46,8 @@ _TARGET_MODES: frozenset[str] = frozenset({mode.value for mode in DeliveryMode})
 
 #: Provisional text trust for a clean native PDF with no confirmed font damage:
 #: the extraction witness has not produced a calibrated score yet, but the page
-#: is not known to be damaged. G2 replaces this with the measured value.
+#: is not known to be damaged. The measurement service replaces this with the
+#: measured value.
 _CLEAN_NATIVE_TEXT_TRUST = 0.95
 
 
@@ -91,7 +93,7 @@ def build_delivery_signals(
     """Derive the router's inputs from the Phase 0 structure census.
 
     The census is a *prefilter*, not a page-lock feasibility proof. A clean
-    native PDF is marked ``page_lock_feasible=True`` provisionally; G2's
+    native PDF is marked ``page_lock_feasible=True`` provisionally; the
     MeasurementService replaces that with the real per-page feasibility result.
     A scanned or font-damaged PDF is vetoed here, because no later stage can
     make its text layer trustworthy without OCR/VLM.
@@ -208,7 +210,7 @@ def _mark_faithful_provisional(plan: DeliveryPlan) -> DeliveryPlan:
             "eligibility": plan.eligibility.model_copy(update={"provisional": True}),
             "reasons": (
                 *plan.reasons,
-                "page_lock_feasible is provisional (structure census; G2 MeasurementService pending)",
+                "page_lock_feasible is provisional (structure census; MeasurementService pending)",
             ),
         }
     )

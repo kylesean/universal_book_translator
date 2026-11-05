@@ -1,15 +1,14 @@
 """Adaptive delivery vocabulary: contracts, routing, planning, measurement.
 
-This package carries the adaptive-delivery vocabulary
-(``ARCHITECTURE.md`` § The render path): the request/response contract,
-the pure-function router, the structure-census planner, and the measurement
-protocol/cache. ``plan_for_document`` is wired into the pipeline preflight
-(CLI, API and MCP requests all funnel through it), with legacy modes mapped
-through :func:`ubt.delivery.contracts.legacy_delivery_contract`.
+This package carries the adaptive-delivery vocabulary: the request/response
+contract, the pure-function router, the structure-census planner, and the
+measurement protocol/cache. ``plan_for_document`` is wired into the pipeline
+preflight (CLI, API and MCP requests all funnel through it), with legacy modes
+mapped through :func:`ubt.delivery.contracts.legacy_delivery_contract`.
 
 Not wired yet: the MeasurementService has no production caller (fit decisions
-still come from the render-side estimators), and the Stage 3A/5 CELS solvers
-live in ``ubt.core.layout`` and ``ubt.adapters.pdf.cels_*``.
+still come from the render-side estimators), and the CELS layout and font
+solvers live in ``ubt.core.layout`` and ``ubt.adapters.pdf.cels_*``.
 
 The artifact-side verdict lives in ``ubt.core.engine.delivery_contract`` and
 the PDF evidence reader in ``ubt.adapters.pdf.delivery_evidence``; this package

@@ -1452,7 +1452,7 @@ def _delivery_contract_evidence(
     # Table grids are verified as assets, not as text blocks -- but the style
     # sampler needs their delivered text to recognize a grid's own characters
     # on the page and keep them out of the body-size vote (a grid is its own
-    # style group, PRD FR-L4; without the corpus the replay's lmbench page had
+    # style group; without the corpus the replay's lmbench page had
     # its 5.3pt grid characters win the body vote and the document read as a
     # 4.18pt body drift).
     selected_pages = ctx.config.get_selected_pages()
@@ -2056,7 +2056,7 @@ async def run_export_stage(
         )
 
     # Default output is isolated under tmp/output/ so a forgotten -o
-    # never pollutes the input directory (or docs/). All derived artifacts
+    # never pollutes the input directory. All derived artifacts
     # (secondary render, quality/visual reports, .typ sidecar, PE queue)
     # hang off target_output and follow it automatically. A target-only primary
     # gets the honest ``_mono`` default name; an explicit -o is respected as

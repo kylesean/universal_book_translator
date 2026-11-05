@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measure one block or the full 80-item calibration suite with Typst MeasurementService.
 
-This is the G2 calibration tool: it compiles the requested text through the
+This calibration tool compiles the requested text through the
 same Typst binary the renderer uses and reports the measured height, line
 count, line boxes and overflow. It spends no model tokens.
 
@@ -105,7 +105,7 @@ def run_full_suite(service: TypstMeasurementService, out_dir: Path) -> int:
     # run's own records: the report must be able to fail.
     total_overflows = sum(int(stats["overflows"]) for stats in role_stats.values())
     lines: list[str] = [
-        "# G2 MeasurementService 校准报告",
+        "# MeasurementService 校准报告",
         "",
         f"- **生成时间**：{datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}",
         f"- **Typst 编译器版本**：{service.typst_version}",

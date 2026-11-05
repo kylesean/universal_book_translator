@@ -519,7 +519,7 @@ class TypstConfig(BaseModel):
     #: instead of refusing the run. Legacy ``facsimile``/``page_locked`` are
     #: grandfathered and do not consult this flag.
     allow_degrade: bool = False
-    #: When False (the default per PRD §9.2), ``major`` findings in the
+    #: When False (the default), ``major`` findings in the
     #: artifact delivery contract block delivery just like ``critical``
     #: findings. Set True (``--allow-major``) to accept ``major`` findings.
     allow_major: bool = False
@@ -891,15 +891,13 @@ class UBTConfig(BaseSettings):
     # ``auto`` therefore *tries* docling first and, when the ``pdf`` extra is
     # absent, degrades to the geometric pdfium reader with a warning that names
     # what is lost (``factory._resolve_pdf_adapter``); only an explicit
-    # ``--pdf-engine docling`` is refused. See
-    # ARCHITECTURE.md § The render path.
+    # ``--pdf-engine docling`` is refused.
     pdf_engine: PdfEngine = "auto"
 
     # -- Docling accelerator device -------------------------------------------
     # Decouples *whether* Docling runs from *where* it runs. 'auto' keeps
     # Docling's own CUDA probe; 'cpu' keeps it off the GPU so a local LLM
-    # sharing the card can still load its weights. See
-    # ARCHITECTURE.md § The render path (L4 tier).
+    # sharing the card can still load its weights.
     docling_device: DoclingDevice = "auto"
 
     # -- Docling process isolation & worker pool ------------------------------
@@ -1107,10 +1105,11 @@ class UBTConfig(BaseSettings):
     # Mirrors of the pricing helper's endpoint knobs (ubt/core/router/pricing.py
     # reads the environment directly — this decision is made deep in the pricing
     # path, where no config object is in scope). Surfaced here so `ubt config`
-    # and the docs-completeness gate can see them. There is no dotenv source
-    # (see ``model_config``), so the process environment is the one external
-    # source: reading ``os.environ`` there and reading this field resolve the
-    # same value.
+    # (``ubt/cli/commands/config_cmd.py``) and the option-surface parity test
+    # (``tests/unit/test_option_surface_parity.py``) can see them. There is no
+    # dotenv source (see ``model_config``), so the process environment is the
+    # one external source: reading ``os.environ`` there and reading this field
+    # resolve the same value.
     #
     # Extra hosts declared self-hosted (a LAN inference box), comma/`os.pathsep`
     # separated. Loopback and the container-host aliases need no declaration.
@@ -1363,7 +1362,7 @@ class UBTConfig(BaseSettings):
     #: See ``TypstConfig.allow_degrade``. Mirrored on the flat surface so CLI,
     #: REST and MCP resolve the same field.
     allow_degrade: bool = False
-    #: When False (the default per PRD §9.2), ``major`` findings in the
+    #: When False (the default), ``major`` findings in the
     #: artifact delivery contract block delivery just like ``critical``
     #: findings. Set True (``--allow-major``) to accept ``major`` findings.
     allow_major: bool = False
@@ -1922,8 +1921,8 @@ def env_var_names(field_name: str) -> list[str]:
     A declared ``validation_alias`` is an absolute env name (pydantic-settings
     uses it as-is, e.g. ``api_key`` -> ``UBT_LLM_API_KEY``); a field without one
     resolves through the ``UBT_`` prefix. Deriving this from the schema keeps the
-    introspection command and the docs-completeness test off a hand-maintained
-    list that would drift the moment a field is renamed.
+    introspection command and the option-surface parity test off a
+    hand-maintained list that would drift the moment a field is renamed.
     """
     field = UBTConfig.model_fields[field_name]
     alias = field.validation_alias

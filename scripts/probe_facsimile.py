@@ -4,8 +4,8 @@
 Answers, for a real PDF, one question that gates the `faithful` contract:
 **can this page's translation be set at one uniform size inside the source
 geometry, and how big can that size be?** It is a prefilter, not the delivery
-acceptance criterion: the v3.0 PRD requires artifact-level measurement before
-a `faithful` page may ship (ARCHITECTURE.md § The render path).
+acceptance criterion: a `faithful` page may only ship after artifact-level
+measurement.
 
 That question has a clean answer because English→Chinese is *compression*, not
 expansion: one Han glyph costs ~3.5 Latin characters of source text but is one
@@ -13,8 +13,7 @@ em wide, so the target needs roughly half the source's area. Measured on the
 five corpus documents, 91–100% of paragraphs fit their source box at the source
 size. This probe is therefore a **prefilter**: it can rule a page out cheaply,
 but the production solver must still measure real Typst layout before it
-decides `faithful` is deliverable (see
-``ARCHITECTURE.md`` § The render path).
+decides `faithful` is deliverable.
 
 Two numbers per page come out of the probe; they are prefilter evidence, not
 the delivery acceptance criterion. The probe can measure either of two
@@ -357,8 +356,8 @@ def probe_page(
 
     paragraphs = [rec for records, _ in columns_paras for rec in records]
     # Area the target wants over the area the source used, at the source size.
-    # This is the "how much room is left over" number the v2.1 design doc
-    # quoted. It is a prefilter statistic, not a delivery acceptance criterion.
+    # This is the "how much room is left over" number. It is a prefilter
+    # statistic, not a delivery acceptance criterion.
     src_area = sum(rec["w"] * rec["n"] * source_leading for rec in paragraphs)
     target_area = sum(rec["w"] * needed(rec, source_size) for rec in paragraphs)
     fill = target_area / src_area if src_area > 0 else 0.0

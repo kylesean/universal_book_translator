@@ -188,7 +188,7 @@ def chunk_by_section(
     on the arXiv 2101.03961 run with the default size 5: one chunk ended in the
     middle of the Abstract, so the model saw a heading whose prose lived in the
     *next* request. A heading and the paragraph it introduces are one translation
-    unit (RFC-2026-02 §2.3); splitting them is how a draft loses the antecedent
+    unit; splitting them is how a draft loses the antecedent
     for a pronoun or mistranslates a title in isolation.
 
     Rules, in order:

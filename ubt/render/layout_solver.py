@@ -203,7 +203,7 @@ def _find_bottlenecks(
 class FitReport:
     """Feasibility of one page at a *fixed* size — no search.
 
-    G4 Stage 3A picks the size once for the whole document body group
+    The document body group picks one size for the whole document
     (``ubt/core/layout/style_group.py``); the per-page question left is only
     "does this page hold it?", and the answer must carry the numbers a reviewer
     needs (worst deficit, which blocks) rather than a bare boolean.
@@ -227,7 +227,7 @@ def apply_width_borrow(
     """Widen each record toward the same column's right whitespace, up to ``borrow_pt``.
 
     The limit for a record is its ``right_budget`` (set by the caller that knows
-    the column track; see AD-020's trailing-ink pad). A record without one is
+    the column track and its trailing-ink pad). A record without one is
     left alone: guessing a bound from page width would let a left-column
     paragraph borrow through the gutter, which is the cross-column bleed
     Stage 1 exists to prevent.

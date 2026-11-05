@@ -1,6 +1,4 @@
-"""CELS Stage 5 Formula Follower: InlineRigidBox & Form XObject tracking.
-
-Design: ``ARCHITECTURE.md`` § The render path. Resolves GAP-14.
+"""CELS Formula Follower: InlineRigidBox & Form XObject tracking.
 
 When technical documents are translated (e.g. EN -> ZH), the sentence structure
 and word order change, causing inline formulas to move to new semantic positions.

@@ -415,9 +415,9 @@ def build_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--job-id", default=None)
     ap.add_argument(
         "--metrics-dir",
-        default="docs/benchmarks",
+        default="output/benchmarks",
         help="where to write the text-free cost record so it can be committed "
-        "(default: docs/benchmarks; pass '' to skip). Prompts and translations "
+        "(default: output/benchmarks; pass '' to skip). Prompts and translations "
         "never land here.",
     )
     return ap.parse_args(argv)

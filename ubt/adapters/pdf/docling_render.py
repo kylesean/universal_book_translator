@@ -964,7 +964,7 @@ class DoclingRenderStrategy:
             for p in pages_for_block:
                 blocks_by_page.setdefault(p, []).append(b)
 
-        # One body size for the whole document (G4 Stage 3A). Decided before the
+        # One body size for the whole document. Decided before the
         # strip plan and the table pre-pass: a table that cannot be laid out
         # inside its source box even at the 6.5pt floor has to be known before
         # the strip decides whether to erase its source ink.
@@ -1759,8 +1759,7 @@ class DoclingRenderStrategy:
                     cels_sol = None
 
             # If layout failed to fit due to bottleneck containers,
-            # attempt controlled concise repair before falling back to L2
-            # (ARCHITECTURE.md § The render path).
+            # attempt controlled concise repair before falling back to L2.
             if (
                 not is_pure_page_locked
                 and (
@@ -1800,7 +1799,7 @@ class DoclingRenderStrategy:
                             # The budget targets the group size, not the global floor:
                             # a repair sized for 7.5pt produces text the page cannot
                             # hold at 9pt, so the "rescue" would only fit a size this
-                            # page is no longer allowed to use (G4 Stage 3A).
+                            # page is no longer allowed to use.
                             floor_pt=body_group.size_pt,
                             target_lang=target_lang,
                         )

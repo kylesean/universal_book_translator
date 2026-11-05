@@ -267,7 +267,7 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
         req: TermPropagationRequest,
         x_ubt_tenant: str | None = Header(default=None),
     ) -> JSONResponse:
-        """Replace one offending term surface across the job (PRD §5.2.2).
+        """Replace one offending term surface across the job.
 
         Rewrites the selected block and, per ``scope``, every matching block;
         each rewritten block is promoted to a human revision and its pair fed

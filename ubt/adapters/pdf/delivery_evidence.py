@@ -74,7 +74,7 @@ def _exact_body_sizes(
 
     ``exhibit_hulls`` and ``body_pages`` come from the pdfium rect walk: a show
     operator whose text origin falls inside a table's covering hull is left out
-    of the vote (a grid is its own style group, PRD FR-L4, and on the ATC'25
+    of the vote (a grid is its own style group, and on the ATC'25
     replay the lmbench page's glyph-weighted mode was the *grid's* size), and a
     page the walk found no body-block text on is not sampled at all -- its
     leftover caption characters must not pose as a body.
@@ -360,7 +360,7 @@ def read_artifact_evidence(
     from ubt.adapters.pdf.pdfium_gate import open_document, pdfium_serialized
 
     # Exhibit text the body-size sampler must not count: a table legitimately
-    # renders smaller than the body (its own style group, PRD FR-L4), and on a
+    # renders smaller than the body (its own style group), and on a
     # page a dense grid dominates, the page's size statistic is the *table's*.
     # Measured on the ATC'25 replay: the lmbench page read as a 5.32pt body and
     # the appendix pages as 5.25pt -- a 4.18pt "drift" that blocked the export
@@ -487,7 +487,7 @@ def read_artifact_evidence(
     #
     # The content stream (exact font sizes, script-independent) leads; the
     # pdfium rect walk's exhibit hulls and body-page verdicts steer its vote
-    # (a grid is its own style group, PRD FR-L4); the ink-height walk is the
+    # (a grid is its own style group); the ink-height walk is the
     # same exhibit-aware mode and serves artifacts whose text hides in Form
     # XObjects the content-stream parse cannot see -- Typst output. Unsteered,
     # both estimators read a table-dominated page as the *grid's* size, which

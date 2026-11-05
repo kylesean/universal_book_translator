@@ -126,8 +126,7 @@ def register_stream_routes(api_app: FastAPI, scope: ApiScope) -> None:
             ),
         )
 
-    # Bounded per-job frame history for Last-Event-ID replay
-    # (``ARCHITECTURE.md`` § The render path).
+    # Bounded per-job frame history for Last-Event-ID replay.
     sse_replay = SseReplayBuffer()
     api_app.state.sse_replay = sse_replay
     api_app.state.sse_broadcaster = sse_broadcaster
@@ -160,9 +159,8 @@ def register_stream_routes(api_app: FastAPI, scope: ApiScope) -> None:
         ``terminal_frame``); the payload never depends on how the server was
         started. Every frame carries an ``id:`` cursor, so a client reconnecting
         with ``Last-Event-ID`` (header or ``?last_event_id=``) receives the
-        frames it missed before the live stream resumes — the replay contract of
-        ``ARCHITECTURE.md`` § The render path, carried by
-        :class:`~ubt.api.sse_replay.SseReplayBuffer`.
+        frames it missed before the live stream resumes — the replay contract
+        implemented by :class:`~ubt.api.sse_replay.SseReplayBuffer`.
         """
         valid_id = validate_job_id(job_id)
         if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):

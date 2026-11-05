@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch the semantic-path gold corpus from arXiv (RFC-2026-02 Sprint 1).
+"""Fetch the semantic-path gold corpus from arXiv.
 
 Downloads the documents named in ``manifest.json`` into ``corpus/semantic_gold/
 documents/``. Documents are deliberately not committed (size + licensing, same

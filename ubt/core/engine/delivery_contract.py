@@ -70,8 +70,9 @@ _MIN_OVERLAP_AREA_PT2 = 40.0
 #: Page-edge tolerance, matching the visual gate's own allowance.
 _OUT_OF_BOUNDS_TOLERANCE_PT = 1.0
 
-#: Style drift tolerance: the PRD's "body group p5–p95 <= 0.5pt". The value lives
-#: in the style-group module so the planner cannot widen it by editing one file.
+#: Style drift tolerance: the body group's p5–p95 spread must stay within 0.5pt.
+#: The value lives in the style-group module so the planner cannot widen it by
+#: editing one file.
 _STYLE_DRIFT_PT = DRIFT_TOLERANCE_PT
 
 #: One entry per leak *site*, not per character: ``⟦SOUP_MASK_0001-f2d⟧`` would

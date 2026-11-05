@@ -161,7 +161,7 @@ def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryD
     """Resolve the requested delivery mode from the Phase 0 structure census.
 
     This is intentionally a preflight, not a page-lock proof: a clean native
-    PDF is provisionally feasible and a scan/font-damaged page is vetoed. G2's
+    PDF is provisionally feasible and a scan/font-damaged page is vetoed. The
     MeasurementService replaces the provisional signal with a real solve.
     """
     is_pdf = input_path.suffix.lower() == ".pdf"

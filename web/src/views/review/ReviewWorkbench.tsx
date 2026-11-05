@@ -459,7 +459,7 @@ export function ReviewWorkbench() {
     virtualizer.scrollToIndex(issueIndices[next])
   }
 
-  // F8 / Shift+F8 walk the fault list (PRD §5.1). J / K navigate segments. Escape closes the inspector.
+  // F8 / Shift+F8 walk the fault list. J / K navigate segments. Escape closes the inspector.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const active = document.activeElement
@@ -1727,7 +1727,7 @@ interface TermPanelProps {
 }
 
 /**
- * Terminology recommendations for one segment (PRD §5.2.2). Each mounted
+ * Terminology recommendations for one segment. Each mounted
  * segment issues its own request on mount, and the panel provides a 3-way Scope
  * Selector ('block' | 'subsequent' | 'all') with diff preview and TM feedback
  * indicators.

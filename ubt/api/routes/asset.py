@@ -185,7 +185,7 @@ def register_asset_routes(api_app: FastAPI, scope: ApiScope) -> None:
         tags=["Assets"],
     )
     async def get_glossary_conflicts() -> JSONResponse:
-        """Sources configured with more than one target rendering (PRD §4.4.2)."""
+        """Sources configured with more than one target rendering."""
         path = _resolved_glossary_path()
         try:
             terms = await asyncio.to_thread(read_glossary_terms, path)

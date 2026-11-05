@@ -190,9 +190,9 @@ academic = [
 # it is a C++ extension: default installs must not acquire a compile fallback.
 cels = [
     "kiwisolver>=1.4.0",
-    # Subsetting the target font is part of CELS Stage 5: the corpus fonts are
+    # Subsetting the target font is part of the CELS font pipeline: the corpus fonts are
     # single-byte Type1 with no /ToUnicode, so a CJK translation needs an
-    # embedded, subsetted font with its own ToUnicode CMap (AD-018). Pure Python
+    # embedded, subsetted font with its own ToUnicode CMap. Pure Python
     # and MIT-licensed; ``fontTools.subset`` is the only API used.
     "fonttools>=4.50.0",
 ]

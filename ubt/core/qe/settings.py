@@ -12,7 +12,7 @@ the intended runner but does not select one: the pipeline wraps the heuristic
 runner in :class:`TieredQERunner` whenever ``qe_judge_enabled`` is true, and only
 *logs a warning* when ``qe_engine = "tiered"`` was written without it. So
 ``qe_engine = "tiered"`` alone is a no-op, and ``qe_judge_enabled = true`` alone
-does score — a distinction the documentation states but no surface enforced.
+does score — a distinction no surface enforced.
 
 :func:`is_qe_measurable` therefore keys on the judge, not the label. The console
 card writes both keys together so the no-op combination is unreachable from the

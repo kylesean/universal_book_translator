@@ -258,8 +258,8 @@ def _delivery_verdict(summary: dict[str, Any]) -> tuple[str, str]:
 
     Returns ``(state, message)`` where ``state`` is ``"passed"``,
     ``"warning"``, or ``"blocked"`` -- the PASSED / WARNING / BLOCKED
-    vocabulary of the operator console (defined in the unversioned
-    operator-console PRD under docs/).
+    vocabulary of the operator console, defined by
+    :func:`ubt.core.job_options.delivery_verdict_from_summary`.
     The artifact is delivered in all three cases; the state only says whether
     the reader will meet untranslated source.
     """

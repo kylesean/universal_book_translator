@@ -1052,7 +1052,7 @@ def register_job_routes(
     async def resume_job(
         job_id: str, x_ubt_tenant: str | None = Header(default=None)
     ) -> JSONResponse:
-        """Re-run a failed/cancelled job from its ledger checkpoints (PRD §4.2.4).
+        """Re-run a failed/cancelled job from its ledger checkpoints.
 
         The pipeline resumes from the blocks still pending in the ledger, so no
         finished segment is re-translated. The request is recovered from the

@@ -1,4 +1,4 @@
-"""Fast per-page fit models for the document style group (G4 Stage 3A).
+"""Fast per-page fit models for the document style group.
 
 The style group has to be decided *before* the page loop can start, because the
 decision is a single body size for the whole document. The loop itself cannot

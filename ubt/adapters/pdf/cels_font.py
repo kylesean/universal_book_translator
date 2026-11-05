@@ -1,7 +1,7 @@
-"""CELS Stage 5 font pipeline: embed a subsetted target font with /ToUnicode.
+"""CELS font pipeline: embed a subsetted target font with /ToUnicode.
 
-Why this exists (AD-018)
-------------------------
+Why this exists
+---------------
 Measured on ``chapter-3.pdf``: p9 carries 17 font resources of which 12 have no
 ``/ToUnicode``, p12 carries 10 of which 7 have none, and every one is a
 single-byte ``Type1`` subset with a ``MacRomanEncoding``/``/Differences``
@@ -17,7 +17,7 @@ to *bring* the font: a subsetted TrueType/OpenType with
 
 Scope: one font, one subset per document, upright horizontal text. Vertical
 writing, ``GSUB`` shaping (ligatures, Indic reordering) and CID-keyed CFF are
-out of scope for the G3 spike; a font that needs them is refused rather than
+out of scope for this spike; a font that needs them is refused rather than
 embedded in a way that silently drops the mapping.
 """
 
@@ -115,7 +115,7 @@ def embed_subset_font(
         raise FontPipelineError(f"cannot read font {font_path}: {exc}") from exc
     if "glyf" not in font:
         raise FontPipelineError(
-            f"{font_path.name} has no 'glyf' table (CFF outlines): the G3 spike "
+            f"{font_path.name} has no 'glyf' table (CFF outlines): this spike "
             "embeds TrueType subsets only"
         )
 

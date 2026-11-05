@@ -1,8 +1,8 @@
-"""CELS Stage 5 spike: rewrite one text line's glyph run in a PDF content stream.
+"""CELS content-stream spike: rewrite one text line's glyph run in a PDF stream.
 
-G3 scope (``ARCHITECTURE.md`` § The render path): prove
-that ``Tz`` / ``Tc`` / ``TL`` injection survives text extraction, colours,
-clipping and ``q``/``Q`` **before** G4 builds a solver on top of it.
+Scope: prove that ``Tz`` / ``Tc`` / ``TL`` injection survives text extraction,
+colours, clipping and ``q``/``Q`` **before** a full solver is built on top of
+it.
 
 Why the probe is ASCII
 ----------------------
@@ -10,7 +10,7 @@ Measured on ``chapter-3.pdf`` p9/p12, every text font is a single-byte Type1
 with a ``MacRomanEncoding`` / ``/Differences`` encoding and the body fonts carry
 **no** ``/ToUnicode``. A CJK translation therefore cannot be written with the
 source font at all; it needs an embedded, subsetted target font with its own
-``ToUnicode`` — which is Stage 5 work for G4, not this spike. Using an ASCII
+``ToUnicode`` — which the font pipeline must supply, not this spike. Using an ASCII
 probe against the source font is what isolates the *mechanism* (metrics
 operators, text extraction, graphics state) from the *coverage* question, and
 the spike reports coverage separately as its own go/no-go item.
@@ -24,16 +24,16 @@ advance. What this module does *not* model is a font whose ``/Widths`` is
 missing (base-14 without metrics): it fails closed with
 :class:`InjectionUnsupported` instead of inventing numbers.
 
-Text space versus device space (measured G3 finding)
------------------------------------------------------
+Text space versus device space (measured finding)
+-------------------------------------------------
 ``Tc``, ``Tw`` and ``TL`` are **text-space** operands: the text matrix scales
 them afterwards. ``chapter-3.pdf`` sets ``Tf … 1`` and carries the real size in
 ``Tm`` (``9.9626``), so ``Tc -0.164`` is a **-1.64pt** device shift per glyph and
 ``TL 11.45`` moves a line **114pt**, not 11.45. Every device-space delta this
 module computes is therefore divided by :attr:`LineSite.text_scale` before it is
 written. ``Tz`` is a percentage of the already-scaled advance and needs no
-conversion. This is exactly the class of defect G3 exists to find: the operator
-sequence looks right, the PDF parses, and the page is silently wrong.
+conversion. This is exactly the class of defect this spike exists to find: the
+operator sequence looks right, the PDF parses, and the page is silently wrong.
 
 Graphics state is never touched: the rewrite inserts operators and replaces
 show operators, but every ``q``/``Q``/``cm``/``re``/``W``/colour/``Do``
@@ -71,10 +71,10 @@ _LINE_MOVE_OPS: frozenset[str] = frozenset({"Td", "TD", "T*", "Tm", "'", '"'})
 #: elastic run.
 BASELINE_TOL_PT: float = 1.0
 
-#: Stage 3A's search bounds. The PRD's micro-typography order is *tracking
-#: before scaling*: negative ``Tc`` changes spacing without altering the face,
-#: while ``Tz`` visibly narrows the glyphs, so ``Tz`` is only spent after the
-#: tracking budget is exhausted.
+#: Search bounds. The micro-typography order is *tracking before scaling*:
+#: negative ``Tc`` changes spacing without altering the face, while ``Tz``
+#: visibly narrows the glyphs, so ``Tz`` is only spent after the tracking budget
+#: is exhausted.
 DEFAULT_MAX_TRACKING_EM: float = 0.12
 DEFAULT_MAX_SCALE_LOSS: float = 0.12
 
@@ -96,7 +96,7 @@ class InjectionUnsupported(RuntimeError):
 
     Raised for a composite (``Type0``) font, a font without ``/Widths``, a
     page whose content stream cannot be parsed, and any non-ASCII probe text.
-    Each of those needs the G4 machinery this spike deliberately does not have.
+    Each of those needs solver machinery this spike deliberately does not have.
     """
 
 
@@ -113,7 +113,7 @@ class FontMetrics:
         subtype = str(obj.get("/Subtype", ""))
         if subtype == "/Type0":
             raise InjectionUnsupported(
-                "composite /Type0 font: needs CMap + CID widths, i.e. the G4 "
+                "composite /Type0 font: needs CMap + CID widths, i.e. the "
                 "font pipeline, not a single-byte rewrite"
             )
         widths = obj.get("/Widths")
@@ -145,7 +145,7 @@ def encode_probe(text: str) -> bytes:
     except UnicodeEncodeError as exc:
         raise InjectionUnsupported(
             "probe text is not ASCII; a non-Latin target needs an embedded font "
-            "with its own /Encoding and /ToUnicode (G4 Stage 5), not the source font"
+            "with its own /Encoding and /ToUnicode, not the source font"
         ) from exc
     if any(byte < 0x20 or byte > 0x7E for byte in raw):
         raise InjectionUnsupported("probe text must stay inside printable ASCII 0x20–0x7E")

@@ -1,7 +1,7 @@
-"""G3 CELS spike: content-stream feasibility evidence on real pages.
+"""CELS spike: content-stream feasibility evidence on real pages.
 
-Runs the two questions G3 has to answer before G4 builds a solver
-(``ARCHITECTURE.md`` § The render path):
+Runs the two questions a content-stream solver has to answer before it is
+built:
 
 1. **Stage 1 geometry** — does the page split into the columns a human sees,
    and is every near-miss gutter refused with a reason? (``ubt.core.layout``.)
@@ -165,7 +165,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     digest = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
 
     evidence: dict[str, Any] = {
-        "spike": "G3 CELS feasibility",
+        "spike": "CELS content-stream feasibility",
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "pdf": str(pdf_path),
         "pdf_sha256": digest,
@@ -286,7 +286,8 @@ def _page_spike(
         out_path=out_dir / f"p{page_number}_scaled.pdf",
         label="tz",
     )
-    # A tz arm that cannot fit is evidence for Stage 4, not a G3 failure.
+    # A tz arm that cannot fit is evidence for a later compression stage, not a
+    # spike failure.
     failures.extend(failure for failure in tz_failures if "deficit" not in failure)
 
     leading, leading_failures = _leading_probe(
@@ -620,7 +621,7 @@ def _graphics_state(pdf_path: Path, page_number: int, out_dir: Path) -> dict[str
 
 
 def _font_coverage(pdf_path: Path, pages: Sequence[int]) -> dict[str, Any]:
-    """The known G4 blocker: the source fonts cannot carry the target script."""
+    """The known blocker: the source fonts cannot carry the target script."""
     findings: dict[str, Any] = {"target_script_probe": "自适应文本测试"}
     try:
         encode_probe("自适应文本测试")
@@ -651,8 +652,9 @@ def _font_coverage(pdf_path: Path, pages: Sequence[int]) -> dict[str, Any]:
     findings["fonts"] = per_page
     findings["implication"] = (
         "A non-Latin translation needs an embedded, subsetted target font with its own "
-        "/Encoding and /ToUnicode; the source Type1 fonts cannot encode it. That is G4 "
-        "Stage 5 work, not a G3 blocker: the mechanism above is proven with the source font."
+        "/Encoding and /ToUnicode; the source Type1 fonts cannot encode it. That is "
+        "font-pipeline work, not a blocker for the mechanism: the mechanism above is "
+        "proven with the source font."
     )
     return findings
 

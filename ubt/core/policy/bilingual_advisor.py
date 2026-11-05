@@ -8,8 +8,8 @@ module fills that gap as a differentiator, but aligned with the mainstream:
 - it never blocks a job and never silently overrides an explicit user mode;
 - its "discourage dual" verdict promotes the industry-standard answer for
   figure-dense docs (target-only mono), not a broken pairing;
-- thresholds are documented as BIoU-calibration targets (see
-  ``scripts/biou_score.py`` and the evaluation guide), not ground truth.
+- thresholds are BIoU-calibration targets (see ``scripts/biou_score.py``), not
+  ground truth.
 
 Two phases, both zero-LLM:
 
@@ -50,7 +50,7 @@ _SUGGEST_CUTOFF = 0.40
 
 # Profile sensitivity multipliers on rule penalties: technical profiles keep
 # full weight (figures/formulas break the pairing fast); general prose
-# (novels, essays) is lenient. BIoU-calibration targets, see docs.
+# (novels, essays) is lenient. BIoU-calibration targets, not fixed rules.
 _PROFILE_SENSITIVITY = {"paper": 1.0, "textbook": 1.0, "general": 0.8}
 
 # Advisor DualMode -> adapter render bilingual_mode value. The adapter domain

@@ -266,7 +266,7 @@ async def re_export_job(
 
     ``delivery`` re-renders the same translations under a different contract
     (``auto``/``readable``/``faithful``) without calling a model. It exists so
-    G1 can compare the two paths on one ledger — a readable replay of a faithful
+    the two paths can be compared on one ledger — a readable replay of a faithful
     job — instead of paying for a second translation run just to change the
     renderer. The override is resolved through the same
     :func:`ubt.delivery.planning.plan_for_document` the pipeline uses, so an

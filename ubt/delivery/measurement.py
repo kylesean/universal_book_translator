@@ -1,6 +1,6 @@
 """MeasurementService contract and cache scaffold.
 
-The PRD's central rule is "measure the artifact, not a proxy" (§7.3, §8.1).
+The central rule is "measure the artifact, not a proxy".
 This module owns the typed request/result and a deterministic cache key so the
 eventual Typst probe, HarfBuzz path, and tests all agree about what a
 measurement *is*. It deliberately contains no estimator: a delegate must

@@ -439,7 +439,7 @@ def page_overflow_at_floor(
 
 
 #: A shrink within this distance of the group size is inside the style group's
-#: own tolerance (the PRD's 0.5pt body promise) and keeps the strict 1:1 page.
+#: own tolerance (a 0.5pt body tolerance) and keeps the strict 1:1 page.
 #: Below it, the middle contract prefers holding the group exactly and flowing
 #: the excess onto continuation pages.
 _FLOW_EXPANSION_TOLERANCE_PT = 0.5
@@ -512,7 +512,7 @@ def solve_page_lock(
     reported via :func:`page_overflow_at_floor` and allowed to run long rather
     than shrunk further.
 
-    ``preferred_pt`` is the document's body-group size (G4 Stage 3A). A page-lock
+    ``preferred_pt`` is the document's body-group size. A page-lock
     page is a *different placement strategy*, not a different style: it may
     re-typeset the page, but it starts from the group's size and only goes below
     it when the content genuinely cannot fit. Going below is reported by the

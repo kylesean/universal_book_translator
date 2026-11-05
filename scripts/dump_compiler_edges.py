@@ -125,8 +125,8 @@ def main() -> int:
     # ``core`` is the domain layer: it must not import an adapter. Without this the
     # gate only watched the compiler packages, so any core module that reached for
     # ``ubt.adapters`` (docling, typst, playwright) passed CI green while dragging
-    # those trees into the domain's import graph — the exact edge
-    # ARCHITECTURE.md says is forbidden and claims is enforced.
+    # those trees into the domain's import graph — an edge the layer graph
+    # forbids.
     #
     # ``sys.modules`` lookups from a function body and ``TYPE_CHECKING`` imports do
     # not enter the runtime graph and are excluded by ``scan``.

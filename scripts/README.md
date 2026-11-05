@@ -20,38 +20,39 @@ It takes `--corpus corpus` (default) and exits 0 on pass.
 
 ## Benchmarks & sweeps (not tests)
 
-- `cost_benchmark.py` — writes `docs/benchmarks/` (see that README).
+- `cost_benchmark.py` — writes `output/benchmarks/`.
 - `knob_sweep.py`, `biou_score.py` — experiment/benchmark harnesses for
   tuning runs.
 - `probe_facsimile.py` — cheap feasibility prefilter for the `faithful`
-  delivery contract (design: `docs/design/adaptive_delivery_prd.md`). For a
+  delivery contract. For a
   source PDF it reports, per page, the largest single body size at which every
   paragraph still fits its source box. Pure geometry: no render, no model, no
   ledger, so it is safe to run before paying for a job. It is not the delivery
-  acceptance criterion; the PRD requires artifact-level measurement.
+  acceptance criterion; artifact-level measurement is required before a page may
+  ship.
   `--json` for machine reading, `--summary` to skip the page table.
 - `diagnose_spills.py` — Typst layout spill and physical overflow diagnostic tool.
   Deterministic geometry scanner over rendered PDF artifacts to detect margin
   breaches, multi-column gutter overruns, table/formula clipping, and type collapse;
   emits 2D spatial terminal heatmaps, structured JSON, and actionable fix advice.
-- `calibrate_measurement.py` — G2 Typst MeasurementService calibration: compiles one
+- `calibrate_measurement.py` — Typst MeasurementService calibration: compiles one
   block with the requested width/style and reports real height, line boxes and
   overflow. Zero model tokens; use it to spot-check a font/width before changing
   the layout solver.
-- `style_group_probe.py` — G4 Stage 3A read-only probe. Reads a job's ledger
+- `style_group_probe.py` — read-only document-body-group probe. Reads a job's ledger
   (translated text) plus its source PDF, builds the same per-page fit models the
   renderer uses, and reports the document body size the planner would choose, the
   micro-typography rung it needs, the exception pages with their deficits, and a
   size sweep. No render, no model calls — run it before rewiring a renderer or to
   explain a blocked `style_group_exception`. Writes `style_group_probe.json` and
   `STYLE_GROUP_PROBE.md` under `--out-dir`.
-- `cels_spike.py` — G3 CELS feasibility probe on real pages: Stage 1 column
+- `cels_spike.py` — CELS feasibility probe on real pages: Stage 1 column
   detection (with every refused gutter and its reason) plus Stage 5 content-stream
   injection arms (`Tc`, forced `Tz`, `TL`+`T*` twin). Verifies the rewritten PDF by
   re-extracting text and char boxes with PDFium, counting graphics operators, and
   diffing full-page rasters; writes `evidence.json` to the given out dir. Zero
   model tokens; the go/no-go report cites its output.
-- `cels_cjk_spike.py` — G3 Stage 5 font pipeline (AD-018): subsets a CJK TrueType
+- `cels_cjk_spike.py` — CELS font pipeline: subsets a CJK TrueType
   font with `fontTools`, embeds it as `/Type0` + `/Identity-H` with a generated
   `/ToUnicode` CMap, writes a Chinese sentence at the original line position, and
   verifies with PDFium that the text extracts verbatim, stays inside the column,

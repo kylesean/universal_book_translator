@@ -1,4 +1,4 @@
-"""Read-only probe for the G4 Stage 3A document body group.
+"""Read-only probe for the document body group.
 
 Answers one question before any renderer changes: **which single body size can
 this document's translated text actually hold**, and what does the micro-typography

@@ -8,8 +8,8 @@ unhandled ``FileNotFoundError`` / ``TimeoutExpired``.
 
 **Compiles are byte-reproducible.** Typst stamps ``/CreationDate`` and
 ``/ModDate`` with the wall clock by default, so two compiles of the same source
-produced different bytes — which contradicted ``ARCHITECTURE.md``'s "same blocks
-in, same bytes out" and made every artifact diff a false positive. The compile
+produced different bytes — violating the renderer's "same blocks in, same bytes
+out" invariant and making every artifact diff a false positive. The compile
 now pins the timestamp (see :data:`REPRODUCIBLE_TIMESTAMP`).
 """
 
