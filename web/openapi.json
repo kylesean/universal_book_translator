@@ -1511,7 +1511,7 @@
           "Jobs"
         ],
         "summary": "Resume Job",
-        "description": "Re-run a failed/cancelled job from its ledger checkpoints (PRD \u00a74.2.4).\n\nThe pipeline resumes from the blocks still pending in the ledger, so no\nfinished segment is re-translated. The request is recovered from the\nledger when this process no longer has an in-memory record (the normal\ncase after a restart). New ledgers store the exact accepted request;\nolder ledgers are reconstructed from the run metadata they do carry.",
+        "description": "Re-run a failed/cancelled job from its ledger checkpoints.\n\nThe pipeline resumes from the blocks still pending in the ledger, so no\nfinished segment is re-translated. The request is recovered from the\nledger when this process no longer has an in-memory record (the normal\ncase after a restart). New ledgers store the exact accepted request;\nolder ledgers are reconstructed from the run metadata they do carry.",
         "operationId": "resume_job_jobs__job_id__resume_post",
         "parameters": [
           {
@@ -1870,7 +1870,7 @@
           "Jobs"
         ],
         "summary": "Stream Progress",
-        "description": "SSE: ``event: progress`` snapshots until one ``event: <status>`` terminal frame.\n\nBoth deployment modes emit that one contract (see ``progress_frame`` /\n``terminal_frame``); the payload never depends on how the server was\nstarted. Every frame carries an ``id:`` cursor, so a client reconnecting\nwith ``Last-Event-ID`` (header or ``?last_event_id=``) receives the\nframes it missed before the live stream resumes \u2014 the replay contract of\n``ARCHITECTURE.md`` \u00a7 The render path, carried by\n:class:`~ubt.api.sse_replay.SseReplayBuffer`.",
+        "description": "SSE: ``event: progress`` snapshots until one ``event: <status>`` terminal frame.\n\nBoth deployment modes emit that one contract (see ``progress_frame`` /\n``terminal_frame``); the payload never depends on how the server was\nstarted. Every frame carries an ``id:`` cursor, so a client reconnecting\nwith ``Last-Event-ID`` (header or ``?last_event_id=``) receives the\nframes it missed before the live stream resumes \u2014 the replay contract\nimplemented by :class:`~ubt.api.sse_replay.SseReplayBuffer`.",
         "operationId": "stream_progress_jobs__job_id__stream_get",
         "parameters": [
           {
@@ -3044,7 +3044,7 @@
           "Jobs"
         ],
         "summary": "Propagate Term",
-        "description": "Replace one offending term surface across the job (PRD \u00a75.2.2).\n\nRewrites the selected block and, per ``scope``, every matching block;\neach rewritten block is promoted to a human revision and its pair fed\nback to the shared TM, exactly like a manual edit.",
+        "description": "Replace one offending term surface across the job.\n\nRewrites the selected block and, per ``scope``, every matching block;\neach rewritten block is promoted to a human revision and its pair fed\nback to the shared TM, exactly like a manual edit.",
         "operationId": "propagate_term_jobs__job_id__term_propagation_post",
         "parameters": [
           {
@@ -3789,7 +3789,7 @@
           "Assets"
         ],
         "summary": "Get Glossary Conflicts",
-        "description": "Sources configured with more than one target rendering (PRD \u00a74.4.2).",
+        "description": "Sources configured with more than one target rendering.",
         "operationId": "get_glossary_conflicts_assets_glossary_conflicts_get",
         "parameters": [
           {

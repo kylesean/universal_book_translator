@@ -421,7 +421,7 @@ export interface paths {
         put?: never;
         /**
          * Resume Job
-         * @description Re-run a failed/cancelled job from its ledger checkpoints (PRD §4.2.4).
+         * @description Re-run a failed/cancelled job from its ledger checkpoints.
          *
          *     The pipeline resumes from the blocks still pending in the ledger, so no
          *     finished segment is re-translated. The request is recovered from the
@@ -533,9 +533,8 @@ export interface paths {
          *     ``terminal_frame``); the payload never depends on how the server was
          *     started. Every frame carries an ``id:`` cursor, so a client reconnecting
          *     with ``Last-Event-ID`` (header or ``?last_event_id=``) receives the
-         *     frames it missed before the live stream resumes — the replay contract of
-         *     ``ARCHITECTURE.md`` § The render path, carried by
-         *     :class:`~ubt.api.sse_replay.SseReplayBuffer`.
+         *     frames it missed before the live stream resumes — the replay contract
+         *     implemented by :class:`~ubt.api.sse_replay.SseReplayBuffer`.
          */
         get: operations["stream_progress_jobs__job_id__stream_get"];
         put?: never;
@@ -800,7 +799,7 @@ export interface paths {
         put?: never;
         /**
          * Propagate Term
-         * @description Replace one offending term surface across the job (PRD §5.2.2).
+         * @description Replace one offending term surface across the job.
          *
          *     Rewrites the selected block and, per ``scope``, every matching block;
          *     each rewritten block is promoted to a human revision and its pair fed
@@ -933,7 +932,7 @@ export interface paths {
         };
         /**
          * Get Glossary Conflicts
-         * @description Sources configured with more than one target rendering (PRD §4.4.2).
+         * @description Sources configured with more than one target rendering.
          */
         get: operations["get_glossary_conflicts_assets_glossary_conflicts_get"];
         put?: never;
