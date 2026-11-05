@@ -110,6 +110,9 @@ def test_legacy_drift_never_joins_the_inner_loop() -> None:
 
 _FAST_SUBPROCESS_ALLOWLIST: dict[str, str] = {
     "tests/unit/adapters/test_visual_gate.py": "one-page typst render for the gate's type tier",
+    "tests/unit/adapters/test_facsimile_table_preservation.py": (
+        "single-page facsimile render + pdftotext, skipped when tools are absent"
+    ),
     "tests/unit/render/test_academic_template.py": "single-snippet typst compile",
     "tests/unit/render/test_document_renderer.py": "single-snippet typst compile",
     "tests/unit/render/test_math_ast_transpiler.py": "single-snippet typst compile",

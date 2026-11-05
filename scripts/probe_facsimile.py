@@ -5,7 +5,7 @@ Answers, for a real PDF, one question that gates the `faithful` contract:
 **can this page's translation be set at one uniform size inside the source
 geometry, and how big can that size be?** It is a prefilter, not the delivery
 acceptance criterion: the v3.0 PRD requires artifact-level measurement before
-a `faithful` page may ship (docs/design/adaptive_delivery_prd.md §7.3, §8.1).
+a `faithful` page may ship (ARCHITECTURE.md § The render path).
 
 That question has a clean answer because English→Chinese is *compression*, not
 expansion: one Han glyph costs ~3.5 Latin characters of source text but is one
@@ -14,7 +14,7 @@ five corpus documents, 91–100% of paragraphs fit their source box at the sourc
 size. This probe is therefore a **prefilter**: it can rule a page out cheaply,
 but the production solver must still measure real Typst layout before it
 decides `faithful` is deliverable (see
-``docs/design/adaptive_delivery_prd.md`` §7.3, §8.1, §10.2).
+``ARCHITECTURE.md`` § The render path).
 
 Two numbers per page come out of the probe; they are prefilter evidence, not
 the delivery acceptance criterion. The probe can measure either of two

@@ -1,6 +1,6 @@
 """Delivery-contract vocabulary for the adaptive delivery program.
 
-Target design: ``docs/design/adaptive_delivery_prd.md`` §5 and §7.7.
+Target design: ``ARCHITECTURE.md`` § The render path.
 This module is the typed boundary only: it does not render, measure, or route.
 Keeping the vocabulary here lets the CLI, API, router, render strategy and QA
 share one spelling of ``readable`` / ``faithful`` / ``auto`` instead of

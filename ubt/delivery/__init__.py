@@ -1,7 +1,7 @@
 """Adaptive delivery vocabulary: contracts, routing, planning, measurement.
 
-This package carries the target PRD's delivery vocabulary
-(``docs/design/adaptive_delivery_prd.md``): the request/response contract,
+This package carries the adaptive-delivery vocabulary
+(``ARCHITECTURE.md`` § The render path): the request/response contract,
 the pure-function router, the structure-census planner, and the measurement
 protocol/cache. ``plan_for_document`` is wired into the pipeline preflight
 (CLI, API and MCP requests all funnel through it), with legacy modes mapped

@@ -27,7 +27,7 @@ right edge to borrow, and the ladder is capped at a few points.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from ubt.core.ir.models import BlockType, IRBlock
@@ -164,6 +164,20 @@ def obstacle_top(bbox: Any) -> float:
     overrun by the full height of its own box.
     """
     return float(bbox.y1)
+
+
+def effective_render_tracking(tracking_em: float, target_lang: str) -> float:
+    """The tracking the canvas actually draws: CJK never takes a negative value.
+
+    Ideographs have no side bearings, so negative tracking collides their
+    strokes; ``FacsimileRenderer`` clamps it to zero for ``zh``/``ja``/``ko``.
+    The planner must probe with the same number, or a page is accepted at
+    ``-0.030em`` and drawn at ``0em`` (measured: a CJK boundary record fit at
+    the raw rung and overflowed by 1.28pt at the effective one).
+    """
+    if tracking_em < 0.0 and target_lang.lower().startswith(("zh", "ja", "ko")):
+        return 0.0
+    return tracking_em
 
 
 def build_page_fit_models(
@@ -336,8 +350,15 @@ def plan_facsimile_body_group(
     *,
     group_id: str = "body:document",
     block_count: int = 0,
+    target_lang: str | None = None,
 ) -> StyleGroupPlan:
     """Choose the document body group from the per-page models.
+
+    ``target_lang`` makes the probe use the tracking the canvas can actually
+    draw (see :func:`effective_render_tracking`), and the returned group carries
+    that same number. The two sides must agree: the plan's ``fits`` verdict is
+    what accepts a page for the group, and the renderer's fit check is what
+    decides whether the artifact holds it.
 
     A page whose source boxes overlap cannot be judged by a fixed-box probe: it
     will be re-typeset by the page-locked reflow, so its fit is decided *later*,
@@ -359,7 +380,11 @@ def plan_facsimile_body_group(
             model,
             size_pt=size_pt,
             pitch=pitch,
-            tracking_em=rung.tracking_em,
+            tracking_em=(
+                effective_render_tracking(rung.tracking_em, target_lang)
+                if target_lang is not None
+                else rung.tracking_em
+            ),
             width_borrow_pt=rung.width_borrow_pt,
         )
         return PageFit(
@@ -369,12 +394,20 @@ def plan_facsimile_body_group(
             block_ids=report.block_ids,
         )
 
-    return plan_body_group(
+    plan = plan_body_group(
         metrics,
         probe,
         group_id=group_id,
         block_count=block_count,
         deferred_pages=deferred,
+    )
+    if target_lang is None:
+        return plan
+    return replace(
+        plan,
+        group=replace(
+            plan.group, tracking_em=effective_render_tracking(plan.group.tracking_em, target_lang)
+        ),
     )
 
 

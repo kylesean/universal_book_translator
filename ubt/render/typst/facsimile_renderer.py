@@ -161,54 +161,69 @@ class FacsimileRenderer:
     ) -> str:
         """Typst markup for one placement's text, sized and styled by its block type."""
         if pl.is_table:
-            from ubt.render.table_compiler import compile_typst_booktabs
+            from ubt.render.table_compiler import compile_typst_booktabs, parse_markdown_table
             from ubt.render.typst.document_renderer import render_table
 
-            # First try dedicated academic booktabs compiler. ``require_fit``
-            # makes a table that cannot fit its fixed box return empty instead
-            # of a clipped min-scale grid; the source background still carries
-            # the table, and the caller records the block as preserved.
-            table_markup = compile_typst_booktabs(
-                pl.text,
-                content_width_pt=width_pt,
-                content_height_pt=max(10.0, float(pl.y1) - float(pl.y0)),
-                base_font_size_pt=pl.font_size_pt or base_font_size_pt,
-                min_font_size_pt=6.5,
-                stretch_pct=pl.stretch_pct,
-                target_lang=target_lang,
-                is_math_ok=self._math_gate,
-                enable_continuation=True,
-                table_uid=f"src-{pl.block_id}",
-                require_fit=True,
-            )
-            if table_markup:
-                return table_markup
+            # Markup that is not a Markdown grid is not a table that failed to
+            # fit: the source box is still there to be repainted, and the old
+            # behaviour was to draw it as escaped text. Treating the parse
+            # failure as "preserve the source" blanked such blocks (measured:
+            # ``"this is not a pipe table"`` produced no drawing at all).
+            parsed = parse_markdown_table(pl.text, escape=False)
+            if parsed is None or not parsed[0]:
+                logger.warning(
+                    "Facsimile: block %s is marked as a table but is not a Markdown grid; "
+                    "drawing it as prose",
+                    pl.block_id,
+                )
+            else:
+                # First try dedicated academic booktabs compiler. ``require_fit``
+                # makes a table that cannot fit its fixed box return empty instead
+                # of a clipped min-scale grid; the source ink stays in the
+                # background (the strip plan kept the bbox) and the caller
+                # records the block as preserved.
+                table_markup = compile_typst_booktabs(
+                    pl.text,
+                    content_width_pt=width_pt,
+                    content_height_pt=max(10.0, float(pl.y1) - float(pl.y0)),
+                    base_font_size_pt=pl.font_size_pt or base_font_size_pt,
+                    min_font_size_pt=6.5,
+                    stretch_pct=pl.stretch_pct,
+                    target_lang=target_lang,
+                    is_math_ok=self._math_gate,
+                    enable_continuation=True,
+                    table_uid=f"src-{pl.block_id}",
+                    require_fit=True,
+                )
+                if table_markup:
+                    return table_markup
 
-            table_markup = render_table(
-                pl.text,
-                is_math_ok=self._math_gate,
-                page_columns=1,
-                content_width_pt=width_pt,
-                content_height_pt=max(10.0, float(pl.y1) - float(pl.y0)),
-                base_font_size_pt=base_font_size_pt,
-                stretch_pct=pl.stretch_pct,
-                target_lang=target_lang,
-                enable_continuation=True,
-                table_uid=f"src-{pl.block_id}",
-                require_fit=True,
-            )
-            if table_markup:
-                return table_markup
-            # Neither compiler can lay this grid out inside its box at a
-            # readable size. Draw nothing: the L1 background image still shows
-            # the source table, and the adapter records the block as preserved
-            # (not as a rebuilt table whose last rows were clipped away).
-            logger.warning(
-                "Facsimile: block %s does not fit its table box; preserving the source table",
-                pl.block_id,
-            )
-            self.preserved_placements.append((pl.block_id, "table_preserved_source"))
-            return ""
+                table_markup = render_table(
+                    pl.text,
+                    is_math_ok=self._math_gate,
+                    page_columns=1,
+                    content_width_pt=width_pt,
+                    content_height_pt=max(10.0, float(pl.y1) - float(pl.y0)),
+                    base_font_size_pt=base_font_size_pt,
+                    stretch_pct=pl.stretch_pct,
+                    target_lang=target_lang,
+                    enable_continuation=True,
+                    table_uid=f"src-{pl.block_id}",
+                    require_fit=True,
+                )
+                if table_markup:
+                    return table_markup
+                # Neither compiler can lay this grid out inside its box at a
+                # readable size. Draw nothing: the strip plan kept this table's
+                # bbox, so the L1 background still carries the source grid, and
+                # the adapter records the block as preserved (not as a rebuilt
+                # table whose last rows were clipped away).
+                logger.warning(
+                    "Facsimile: block %s does not fit its table box; preserving the source table",
+                    pl.block_id,
+                )
+                self.preserved_placements.append((pl.block_id, "table_preserved_source"))
+                return ""
 
         if pl.is_code:
             from ubt.render.typst.container_repair import repair_code_block_markup
@@ -284,6 +299,7 @@ class FacsimileRenderer:
         floor_pt: float = FLOOR_PT,
         ladder: bool = True,
         page_tracking_em: float = 0.0,
+        allow_negative_tracking: bool = True,
     ) -> str:
         """Place *content* in its source box, shrinking it until the flow fits.
 
@@ -293,6 +309,12 @@ class FacsimileRenderer:
         so the page-level knob actually reaches the artifact. Passing the page
         value into the emitted Typst keeps the fit-height estimator (which
         already uses the same rung) and the drawn glyphs in agreement.
+
+        ``allow_negative_tracking`` is false for CJK targets. Ideographs have no
+        side bearings, so a negative value collides adjacent strokes; the page
+        level already clamps it to zero, and the in-box ladder must not add the
+        squeeze back. With it false the box emits the page value as-is and the
+        ladder's tracking rung is disabled (leading/stretch/scale still run).
 
         ``#block(height: ..., clip: true)`` does not bound the *text*: Typst
         lays the overflow out past the block and only clips the drawing, so the
@@ -334,7 +356,12 @@ class FacsimileRenderer:
         # by a box-local 0em/-0.02em table, so the plan's compression never
         # reached the artifact (measured: identical last-line x ranges for a
         # page set at 0 and at -0.030em).
-        if ladder:
+        #
+        # The emitted ``#set text`` below is the *final* owner for this box: it
+        # re-sets size/tracking/stretch inside the placed block, overriding the
+        # page-level ``#set text`` for the content it wraps. The page-level set
+        # is the default for content that has no box of its own (tables).
+        if ladder and allow_negative_tracking:
             # The same floor the style-group ladder promises (``TRACKING_FLOOR_EM``),
             # restated locally because core→render is a forbidden edge. The extra
             # squeeze is whatever headroom the page rung has NOT already spent.
@@ -349,9 +376,13 @@ class FacsimileRenderer:
                 "    let eff-stretch = if ratio < 0.88 { 90% } else if ratio < 0.95 { 95% } else { 100% }\n"
             )
         else:
-            track_stretch = (
-                f"    let eff-track = {page_tracking_em:.4f}em\n    let eff-stretch = 100%\n"
+            base_track = page_tracking_em if allow_negative_tracking else max(page_tracking_em, 0.0)
+            eff_stretch = (
+                "let eff-stretch = if ratio < 0.88 { 90% } else if ratio < 0.95 { 95% } else { 100% }\n"
+                if ladder
+                else "let eff-stretch = 100%\n"
             )
+            track_stretch = f"    let eff-track = {base_track:.4f}em\n    {eff_stretch}"
         return (
             "  #context {\n"
             f"    let box-h = {height}pt\n"
@@ -491,6 +522,14 @@ class FacsimileRenderer:
             # ideograph stroke collisions. Clamp negative tracking to 0 for CJK.
             effective_tracking = 0.0 if (is_cjk and p.tracking_em < 0) else p.tracking_em
             tracking = f", tracking: {effective_tracking}em" if effective_tracking else ""
+            # This page-level ``#set text`` owns the *unboxed* content only
+            # (tables paint their own block). Boxed prose is re-set inside
+            # ``_fit_to_box``'s emitted ``#set text``, and that inner value is
+            # the final one for its box; it already starts from the same
+            # ``effective_tracking`` so the page rung still reaches the artifact.
+            # The CJK clamp lives here, and ``_fit_to_box`` receives the clamped
+            # value plus ``allow_negative_tracking=False`` for CJK, so the box
+            # ladder cannot reintroduce a negative value.
             stretch = (
                 f", stretch: {p.stretch_pct:.0f}%"
                 if p.stretch_pct and p.stretch_pct < 100.0
@@ -675,6 +714,7 @@ class FacsimileRenderer:
                                     outset="(top: 2.5pt, bottom: 2.5pt)",
                                     content=f"        {content}",
                                     page_tracking_em=effective_tracking,
+                                    allow_negative_tracking=not is_cjk,
                                 )
                             )
                 else:
@@ -728,6 +768,7 @@ class FacsimileRenderer:
                                 outset="(top: 3.0pt, bottom: 3.0pt)",
                                 content=flow_content_str,
                                 page_tracking_em=effective_tracking,
+                                allow_negative_tracking=not is_cjk,
                             )
                         )
 

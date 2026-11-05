@@ -3,7 +3,7 @@
 The heading color and body size a document really uses are measured, not guessed:
 ``TypstDocumentRenderer`` reads these profiles so a translated page keeps its
 source's typography instead of a hard-coded default
-(G3, docs/design/adaptive_delivery_prd.md §10.2).
+(G3, ARCHITECTURE.md § The render path).
 """
 
 from __future__ import annotations

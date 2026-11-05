@@ -1898,7 +1898,7 @@ class TypstDocumentRenderer:
         """Whether a block/figure/table should span across both columns in a multi-column layout.
 
         Triggered when page has columns > 1 and width_pt > 0.60 * page_width_pt
-        (docs/design/adaptive_delivery_prd.md §8.3).
+        (ARCHITECTURE.md § The render path).
         """
         columns = max(1, int(getattr(self, "columns", 1) or 1))
         if columns <= 1 or width_pt is None or width_pt <= 0:

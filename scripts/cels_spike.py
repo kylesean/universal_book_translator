@@ -1,7 +1,7 @@
 """G3 CELS spike: content-stream feasibility evidence on real pages.
 
 Runs the two questions G3 has to answer before G4 builds a solver
-(``docs/guides/ADAPTIVE_DELIVERY_IMPLEMENTATION_PLAN.md`` §4.3):
+(``ARCHITECTURE.md`` § The render path):
 
 1. **Stage 1 geometry** — does the page split into the columns a human sees,
    and is every near-miss gutter refused with a reason? (``ubt.core.layout``.)

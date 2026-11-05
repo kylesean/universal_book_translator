@@ -92,7 +92,7 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
         # for every fuzzy signal, but
         # a scanned (text-less) document still escapes to docling — pdfium
         # extracts zero blocks from one, which is a capability boundary, not a
-        # routing preference. See docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md.
+        # routing preference. See ARCHITECTURE.md § The render path.
         if path is None or engine_key == "auto":
             # No path to probe (a registry lookup) is conservative for an
             # explicit ``pdfium``; ``auto`` never consults the probe at all.

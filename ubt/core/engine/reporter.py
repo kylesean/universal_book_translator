@@ -678,10 +678,15 @@ RENDER_SKIP_PREFIXES = ("render_skip:",)
 #:   figure ink in the background layer and protects its box in the strip plan;
 #:   the asset is the opposite of missing, which is why
 #:   :mod:`ubt.core.content.adapt` already treats this reason as preserved.
+#: * ``table_preserved_source`` — same claim for a table the canvas cannot fit
+#:   inside its source box: the strip plan keeps the table's bbox, so the grid
+#:   ships as source ink rather than disappearing.
 #:
 #: Names mirror the producers in ``ubt.adapters.pdf.docling_render`` and
 #: ``ubt.core.content.adapt``; a rename must update all three.
-PRESERVED_SKIP_FAMILIES = frozenset({"skip_translate", "facsimile_preserved_opaque"})
+PRESERVED_SKIP_FAMILIES = frozenset(
+    {"skip_translate", "facsimile_preserved_opaque", "table_preserved_source"}
+)
 
 
 def _skip_reason(flag: str) -> str | None:

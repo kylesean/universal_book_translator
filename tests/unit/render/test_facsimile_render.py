@@ -429,6 +429,94 @@ def test_effective_tracking_clamps_negative_values_for_cjk_only() -> None:
     assert _effective_tracking_em(0.02, "zh") == 0.02
 
 
+def test_cjk_plan_and_render_probe_the_same_tracking() -> None:
+    """The plan's ``fits`` verdict must be computed at the drawn tracking.
+
+    This record fits a 40pt box at 8.9pt only with ``-0.030em`` (the smaller
+    advance sets three lines instead of four). For CJK the canvas draws 0em, so
+    the planner must see the same rung fail; otherwise it accepts a page the
+    renderer then shrinks.
+    """
+    from ubt.adapters.pdf.facsimile_plan import PageFitModel, plan_facsimile_body_group
+
+    record = {
+        "id": "p1",
+        "top": 500.0,
+        "bot": 460.0,
+        "w": 340.0,
+        "glyphs": 117.0,
+        "glyph_aspect": 1.0,
+    }
+    model = PageFitModel(
+        page=1,
+        columns=((record,),),
+        source_size_pt=8.9,
+        source_pitch=1.35,
+        text_weight=117,
+        source_overlap=False,
+    )
+
+    latin = plan_facsimile_body_group({1: model})
+    latin_rung = next(
+        entry
+        for entry in latin.rounds
+        if entry["size_pt"] == 8.9 and entry["rung"] == "tracking_-0.030"
+    )
+    assert latin_rung["fits"] is True
+    assert latin.group.tracking_em == -0.030
+
+    cjk = plan_facsimile_body_group({1: model}, target_lang="zh")
+    cjk_rung = next(
+        entry
+        for entry in cjk.rounds
+        if entry["size_pt"] == 8.9 and entry["rung"] == "tracking_-0.030"
+    )
+    assert cjk_rung["failing_pages"] == [1]
+    assert cjk.group.tracking_em == 0.0
+
+
+def test_the_in_box_ladder_cannot_add_negative_tracking_for_cjk() -> None:
+    markup = FacsimileRenderer()._fit_to_box(
+        dx=10.0,
+        dy=20.0,
+        width=200.0,
+        height=30.0,
+        base_size_pt=9.0,
+        outset="(top: 2.5pt, bottom: 2.5pt)",
+        content="这是一段需要压缩的中文正文。",
+        page_tracking_em=0.0,
+        allow_negative_tracking=False,
+    )
+
+    assert "base-track -" not in markup
+    assert "let eff-track = 0.0000em" in markup
+
+
+def test_a_cjk_page_draws_its_boxes_at_zero_tracking() -> None:
+    placement = FacsimileBlockPlacement(
+        block_id="b1",
+        page=1,
+        x0=50.0,
+        y0=100.0,
+        x1=250.0,
+        y1=140.0,
+        text="一段中文正文。",
+    )
+    page_spec = FacsimilePageSpec(
+        page_no=1,
+        page_w=500.0,
+        page_h=700.0,
+        uniform_size_pt=9.0,
+        leading_em=0.35,
+        tracking_em=-0.030,
+        placements=[placement],
+    )
+    markup = FacsimileRenderer().build_markup([page_spec], "bg.pdf", target_lang="zh")
+
+    assert "tracking: -0.0300em" not in markup
+    assert "let eff-track = 0.0000em" in markup
+
+
 def test_fit_to_box_floor_keeps_small_body_text_at_the_solver_floor() -> None:
     markup = FacsimileRenderer()._fit_to_box(
         dx=0.0,
@@ -1591,9 +1679,11 @@ def test_facsimile_table_respects_its_source_box_height() -> None:
     markup = renderer.build_markup([page_spec], "bg.pdf", target_lang="zh")
 
     # 6 rows cannot fit a 40pt box at the 6.5pt floor. The canvas keeps the
-    # source table (the background image still carries it) rather than drawing
-    # a min-scale grid whose last rows the outer clip would hide while their
-    # text stayed in the PDF text layer.
+    # source table rather than drawing a min-scale grid whose last rows the
+    # outer clip would hide while their text stayed in the PDF text layer. The
+    # adapter's strip plan keeps this table's bbox (it is marked skip_translate
+    # before the strip), so "kept" means the source ink really is in the
+    # delivered background — not merely that no translation was drawn.
     assert "op0" not in markup
     assert ("b0100", "table_preserved_source") in renderer.preserved_placements
 

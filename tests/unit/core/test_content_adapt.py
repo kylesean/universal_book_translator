@@ -34,6 +34,23 @@ def test_non_text_assets_are_preserved_opaque() -> None:
     assert node.descriptor.integrity is AssetIntegrity.PRESERVED_OPAQUE
 
 
+def test_a_table_preserved_in_the_source_layer_is_preserved_opaque() -> None:
+    block = IRBlock(
+        element=make_element(
+            id="t1",
+            spine_index=0,
+            block_type=BlockType.TABLE,
+            source_text="| A | B |",
+            bbox=BoundingBox(page=1, x0=0.0, y0=0.0, x1=100.0, y1=10.0),
+        )
+    )
+    block.error_flags = ["render_skip:table_preserved_source"]
+    graph = graph_from_blocks([block])
+    (node,) = graph.nodes
+    assert isinstance(node, AssetNode)
+    assert node.descriptor.integrity is AssetIntegrity.PRESERVED_OPAQUE
+
+
 def test_a_verified_reconstruction_record_is_recorded_reconstructed() -> None:
     graph = graph_from_blocks(
         [_formula_block("t1")],

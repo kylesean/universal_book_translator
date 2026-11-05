@@ -151,14 +151,13 @@ def _block_font_size(
 def _effective_tracking_em(tracking_em: float, target_lang: str) -> float:
     """The tracking the canvas actually applies: CJK cannot take a negative value.
 
-    ``facsimile_renderer`` clamps negative page tracking to zero for CJK
-    because ideographs have no side bearings and negative tracking collides
-    the strokes. The planner and the fit check must use the same value, or a
-    page accepted at ``-0.015em`` is drawn at ``0em`` and overflows.
+    One implementation lives in :mod:`ubt.adapters.pdf.facsimile_plan`, which
+    also probes page feasibility with it. Keeping this a delegation means the
+    planner and the render cannot disagree about whether a page fits.
     """
-    if tracking_em < 0.0 and target_lang.lower().startswith(("zh", "ja", "ko")):
-        return 0.0
-    return tracking_em
+    from ubt.adapters.pdf.facsimile_plan import effective_render_tracking
+
+    return effective_render_tracking(tracking_em, target_lang)
 
 
 def _normalise_caption_label(source_text: str, target_text: str, *, target_lang: str) -> str:
@@ -308,6 +307,115 @@ def _page_metrics(source_path: Path, page_no: int) -> _PageMetrics | None:
     except Exception as exc:
         logger.debug("Could not measure source metrics for page %d: %s", page_no, exc)
         return None
+
+
+def _sync_l1_geometry_with_artifact(
+    *,
+    output_path: Path,
+    page_geometry: list[dict[str, Any]],
+    page_fits: dict[int, Any],
+    blocks_by_page: Mapping[int, Sequence[IRBlock]],
+    group_size_pt: float,
+) -> None:
+    """Replace planned L1 body sizes with the ones the artifact actually drew.
+
+    ``_fit_to_box`` may shrink a block below the page's group size, and that
+    shrink is invisible in the plan: the geometry row would promise 8.9pt while
+    the delivered glyphs are 7.5pt. The contract measures the artifact and
+    would report the shrink as an *unbudgeted* style drift. Recording it as the
+    page's style exception puts the shrink in the budget (the contract reports
+    a declared exception instead), and the recorded size stops lying.
+
+    Pages carrying a table/formula/figure are excluded: those glyphs are their
+    own style group (and the exhibit page's character-weighted mode can be the
+    grid's size, not the body's). An upward reading is ignored for the same
+    reason: ``fit`` never exceeds 1, so no boxed body can be drawn larger than
+    the page's own size — a larger mode is a heading or background-reading
+    artefact, not a shrink.
+    """
+    from ubt.adapters.pdf.delivery_evidence import _exact_body_sizes
+    from ubt.render.layout_solver import FitReport
+
+    samples = {int(sample.page): float(sample.size_pt) for sample in _exact_body_sizes(output_path)}
+    for row in page_geometry:
+        if row.get("tier") != "L1":
+            continue
+        page_no = int(row.get("page_no") or 0)
+        measured = samples.get(page_no)
+        if measured is None or measured <= 0.0:
+            continue
+        if any(
+            block.block_type in (BlockType.TABLE, BlockType.FORMULA, BlockType.IMAGE)
+            for block in blocks_by_page.get(page_no, ())
+        ):
+            continue
+        planned = float(row.get("delivered_size_pt") or 0.0)
+        if planned <= 0.0 or measured >= planned:
+            continue
+        row["delivered_size_pt"] = round(measured, 3)
+        prior = page_fits.get(page_no)
+        if measured < group_size_pt - DRIFT_TOLERANCE_PT:
+            row["fits"] = False
+            row["style_exception"] = True
+            if prior is None or prior.fits:
+                page_fits[page_no] = FitReport(
+                    fits=False,
+                    deficit_pt=round(group_size_pt - measured, 3),
+                    block_ids=(f"page:{page_no}",),
+                    reason="fit_to_box_shrink",
+                )
+
+
+def _table_fits_source_box(block: IRBlock, *, base_size_pt: float, target_lang: str) -> bool:
+    """Will the L1 canvas draw this table, or must the background carry it?
+
+    Called *before* the strip plan, because the strip plan decides whether the
+    table's source ink survives. The renderer draws a table through two
+    compilers (``compile_typst_booktabs``, then ``render_table``) and gives up
+    when both fail with ``require_fit`` at the 6.5pt floor. This mirrors those
+    calls with the same text, box and floor — both are pure estimates, so the
+    answer cannot change between here and the page loop.
+
+    Markup that is not a Markdown grid is deliberately *not* a fit failure: the
+    canvas falls back to drawing it as escaped prose, which still repaints the
+    box and is safe to erase.
+    """
+    from ubt.render.delivered_text import delivered_text
+    from ubt.render.table_compiler import compile_typst_booktabs, parse_markdown_table
+    from ubt.render.typst.document_renderer import render_table
+
+    text = delivered_text(block) or block.source_text
+    parsed = parse_markdown_table(text, escape=False)
+    if block.bbox is None or not text.strip() or parsed is None or not parsed[0]:
+        return True
+    width = max(10.0, float(block.bbox.x1) - float(block.bbox.x0))
+    height = max(10.0, float(block.bbox.y1) - float(block.bbox.y0))
+    uid = f"src-{block.id}"
+    if compile_typst_booktabs(
+        text,
+        content_width_pt=width,
+        content_height_pt=height,
+        base_font_size_pt=base_size_pt,
+        min_font_size_pt=6.5,
+        target_lang=target_lang,
+        enable_continuation=True,
+        table_uid=uid,
+        require_fit=True,
+    ):
+        return True
+    return bool(
+        render_table(
+            text,
+            page_columns=1,
+            content_width_pt=width,
+            content_height_pt=height,
+            base_font_size_pt=base_size_pt,
+            target_lang=target_lang,
+            enable_continuation=True,
+            table_uid=uid,
+            require_fit=True,
+        )
+    )
 
 
 def _facsimile_strip_plan(
@@ -548,6 +656,12 @@ class DoclingRenderStrategy:
         from ubt.adapters.pdf.typst_compile import typst_compile
         from ubt.adapters.pdf.typst_math_probe import TypstMathProbe
         from ubt.render.typst.document_renderer import TypstDocumentRenderer
+
+        # The reflow channel measures no page geometry. Clear here rather than
+        # trusting the caller: this method is reachable directly (tests, resumed
+        # jobs, the companion path) and an inherited facsimile geometry would
+        # be read as this artifact's pages by the delivery contract.
+        self.last_page_geometry = []
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         build_dir = output_path.parent / f".{output_path.stem}_typst"
@@ -850,6 +964,47 @@ class DoclingRenderStrategy:
             for p in pages_for_block:
                 blocks_by_page.setdefault(p, []).append(b)
 
+        # One body size for the whole document (G4 Stage 3A). Decided before the
+        # strip plan and the table pre-pass: a table that cannot be laid out
+        # inside its source box even at the 6.5pt floor has to be known before
+        # the strip decides whether to erase its source ink.
+        from ubt.render.typst.style_profile import extract_document_style_profile
+
+        style_profile = extract_document_style_profile(
+            blocks, source_path=source_path, page_dims=page_dims
+        )
+        manifest.metadata["document_style_profile"] = style_profile.to_metadata_dict()
+        # The plan is computed from page-level fit models; the per-page verdicts
+        # inside the loop are the authority and replace any prediction that
+        # disagrees (``replacing_exceptions``).
+        measured_by_page: dict[int, Any] = {
+            page_no: _page_metrics(source_path, page_no) for page_no in range(1, total_pages + 1)
+        }
+        body_metrics: dict[int, tuple[float, float]] = {}
+        for page_no, measured in measured_by_page.items():
+            if measured is None:
+                continue
+            pitch = measured.leading_pt / measured.size_pt if measured.size_pt > 0 else 1.348
+            body_metrics[page_no] = (round(measured.size_pt, 3), round(pitch, 3))
+        translatable_blocks = sum(
+            1
+            for block in blocks
+            if not block.skip_translate
+            and block.block_type not in (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE)
+            and (block.target_text or "").strip()
+        )
+        fit_models = build_page_fit_models(
+            blocks_by_page,
+            page_dims,
+            body_metrics,
+            total_pages=total_pages,
+        )
+        style_plan = plan_facsimile_body_group(
+            fit_models, block_count=translatable_blocks, target_lang=target_lang
+        )
+        body_group = style_plan.group
+        body_tracking_em = _effective_tracking_em(body_group.tracking_em, target_lang)
+
         # A table whose source grid is already corrupt cannot be rebuilt from
         # its Markdown: Docling maps dot glyphs to U+FFFD and drops the cells
         # they occupied, so re-typesetting it would deliver a shattered table.
@@ -882,12 +1037,37 @@ class DoclingRenderStrategy:
             table_ok, table_reason = table_is_reconstructable(
                 table_block.source_text or "", delivered_text(table_block) or ""
             )
+            fit_failure = False
+            if table_ok and self.delivery_mode != "page_locked":
+                # Mirror the canvas's own fit decision here, before the strip
+                # plan: that plan erases exactly the boxes the page loop will
+                # repaint, and a table the canvas cannot fit at the 6.5pt floor
+                # must not lose its source ink first. Probe at the lowest base
+                # the page loop can hand a table (an elastic page may shrink the
+                # group by ``SCALE_MIN``); the smaller base can only fit fewer
+                # sizes, so a "fits" verdict is valid for any page base above
+                # it. ``page_locked`` delivery has no background layer, so this
+                # pre-pass would drop the table instead of preserving it.
+                from ubt.render.typst.elastic_solver import TypeElasticitySolver
+
+                if not _table_fits_source_box(
+                    table_block,
+                    base_size_pt=round(body_group.size_pt * TypeElasticitySolver.SCALE_MIN, 2),
+                    target_lang=target_lang,
+                ):
+                    table_ok = False
+                    table_reason = "does_not_fit_at_6.5pt"
+                    fit_failure = True
             if table_ok:
                 continue
             table_block.skip_translate = True
             table_block.target_text = table_block.source_text
             table_block.policy_translate = False
-            table_block.policy_reason = f"skip:table_unreconstructable({table_reason})"
+            table_block.policy_reason = (
+                f"skip:table_does_not_fit({table_reason})"
+                if fit_failure
+                else f"skip:table_unreconstructable({table_reason})"
+            )
             render_flags.append((table_block.id, "table_source_preserved"))
             preserved_table_reasons.append((table_block.id, table_reason))
             exhibit_ids = _preserve_table_exhibit_text(table_block, page_blocks)
@@ -958,45 +1138,6 @@ class DoclingRenderStrategy:
         # build-relative name so ``image()`` can address it.
         asset_copier = make_asset_copier(build_dir, self._assets_root(manifest))
         formula_cropper = make_formula_cropper(build_dir, source_path)
-        from ubt.render.typst.style_profile import extract_document_style_profile
-
-        style_profile = extract_document_style_profile(
-            blocks, source_path=source_path, page_dims=page_dims
-        )
-        manifest.metadata["document_style_profile"] = style_profile.to_metadata_dict()
-
-        # 4. One body size for the whole document (G4 Stage 3A). Decided here,
-        #    before the page loop, because the alternative — searching per page —
-        #    is exactly what produced the 2.29pt style drift: roomy pages climbed
-        #    to their ceiling while tight pages were pushed to the floor. The
-        #    plan is computed from page-level fit models; the per-page verdicts
-        #    inside the loop are the authority and replace any prediction that
-        #    disagrees (``replacing_exceptions``).
-        measured_by_page: dict[int, Any] = {
-            page_no: _page_metrics(source_path, page_no) for page_no in range(1, total_pages + 1)
-        }
-        body_metrics: dict[int, tuple[float, float]] = {}
-        for page_no, measured in measured_by_page.items():
-            if measured is None:
-                continue
-            pitch = measured.leading_pt / measured.size_pt if measured.size_pt > 0 else 1.348
-            body_metrics[page_no] = (round(measured.size_pt, 3), round(pitch, 3))
-        translatable_blocks = sum(
-            1
-            for block in blocks
-            if not block.skip_translate
-            and block.block_type not in (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE)
-            and (block.target_text or "").strip()
-        )
-        fit_models = build_page_fit_models(
-            blocks_by_page,
-            page_dims,
-            body_metrics,
-            total_pages=total_pages,
-        )
-        style_plan = plan_facsimile_body_group(fit_models, block_count=translatable_blocks)
-        body_group = style_plan.group
-        body_tracking_em = _effective_tracking_em(body_group.tracking_em, target_lang)
         page_fits: dict[int, Any] = {}
         l2_blocks_by_page: dict[int, list[IRBlock]] = {}
 
@@ -1619,7 +1760,7 @@ class DoclingRenderStrategy:
 
             # If layout failed to fit due to bottleneck containers,
             # attempt controlled concise repair before falling back to L2
-            # (docs/design/adaptive_delivery_prd.md §8.6; old §6.2).
+            # (ARCHITECTURE.md § The render path).
             if (
                 not is_pure_page_locked
                 and (
@@ -2203,6 +2344,18 @@ class DoclingRenderStrategy:
             # delivery listing. The gate checks the path exists before using it
             # and reports a skipped tier — never an error — when it does not.
             manifest.metadata["background_pdf"] = str(bg_stripped)
+
+        # The plan's per-page body size is a promise; the glyphs in the file are
+        # the fact. Align the geometry with the artifact before the group's
+        # exceptions are closed out below, so an in-box shrink is a *declared*
+        # exception instead of an unbudgeted style drift at the contract.
+        _sync_l1_geometry_with_artifact(
+            output_path=output_path,
+            page_geometry=page_geometry,
+            page_fits=page_fits,
+            blocks_by_page=blocks_by_page,
+            group_size_pt=body_group.size_pt,
+        )
 
         record_toolchain_versions(manifest)
         # The delivery contract reads these to record preserved assets and to

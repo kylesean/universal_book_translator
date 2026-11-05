@@ -265,7 +265,7 @@ PROBE_FORMULA_SHARE = 0.10
 #: strict with a five-page sample: a 296-page maths textbook whose formula pages
 #: are 41% of the document draws only 2 of 5 samples, so a >50% bar would send
 #: it to pdfium and shatter its equations. See
-#: docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md §L2.
+#: ARCHITECTURE.md § The render path (L2 tier).
 PROBE_MIN_SIGNAL_PAGES = 2
 PROSE_SINGLE_LETTERS = frozenset({"a", "A", "I"})
 #: Name initials in reference entries (``P. Zijlstra``, ``D. Guo``,

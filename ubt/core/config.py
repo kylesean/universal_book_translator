@@ -892,14 +892,14 @@ class UBTConfig(BaseSettings):
     # absent, degrades to the geometric pdfium reader with a warning that names
     # what is lost (``factory._resolve_pdf_adapter``); only an explicit
     # ``--pdf-engine docling`` is refused. See
-    # docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md.
+    # ARCHITECTURE.md § The render path.
     pdf_engine: PdfEngine = "auto"
 
     # -- Docling accelerator device -------------------------------------------
     # Decouples *whether* Docling runs from *where* it runs. 'auto' keeps
     # Docling's own CUDA probe; 'cpu' keeps it off the GPU so a local LLM
     # sharing the card can still load its weights. See
-    # docs/guides/PDF_ENGINE_ROUTING_REDESIGN.md §L4.
+    # ARCHITECTURE.md § The render path (L4 tier).
     docling_device: DoclingDevice = "auto"
 
     # -- Docling process isolation & worker pool ------------------------------

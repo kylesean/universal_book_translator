@@ -1,6 +1,6 @@
 """CELS Stage 5 spike: rewrite one text line's glyph run in a PDF content stream.
 
-G3 scope (``docs/guides/ADAPTIVE_DELIVERY_IMPLEMENTATION_PLAN.md`` §4.3): prove
+G3 scope (``ARCHITECTURE.md`` § The render path): prove
 that ``Tz`` / ``Tc`` / ``TL`` injection survives text extraction, colours,
 clipping and ``q``/``Q`` **before** G4 builds a solver on top of it.
 

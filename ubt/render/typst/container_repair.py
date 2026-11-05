@@ -216,7 +216,7 @@ def compute_container_char_budget(
 ) -> int:
     """Compute maximum character capacity budget for a rigid container.
 
-    Formula from docs/design/adaptive_delivery_prd.md §8.6:
+    Formula from the render-path geometry model (ARCHITECTURE.md § The render path):
     B_chars = floor(W / (alpha_lang * s_floor)) * N_max
     where alpha_zh = 1.0 (full-width ideograph), alpha_en = 0.48 (Latin average).
     """

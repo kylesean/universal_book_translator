@@ -44,8 +44,10 @@ _SKIP_PREFIXES = ("render_skip:",)
 #: plan). The block still carries a ``render_skip:`` flag, but the asset is the
 #: opposite of missing: recording it MISSING produced 94 phantom errors — one
 #: per figure and formula — on a real chapter where every figure was visible
-#: in the delivered PDF.
-_PRESERVED_OPAQUE_SKIP_REASONS = frozenset({"facsimile_preserved_opaque"})
+#: in the delivered PDF. ``table_preserved_source`` is the same claim for a
+#: table grid the canvas could not typeset inside its source box: the strip
+#: plan keeps the table's bbox, so its ink is present in the deliverable.
+_PRESERVED_OPAQUE_SKIP_REASONS = frozenset({"facsimile_preserved_opaque", "table_preserved_source"})
 
 
 def _region(block: IRBlock) -> SourceRegion | None:

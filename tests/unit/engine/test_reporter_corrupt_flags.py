@@ -42,3 +42,13 @@ def test_render_skips_split_into_fail_closed_and_preserved() -> None:
     assert (fail_closed, preserved) == (0, 146)
     assert "No lost translations" in verdict
     assert "keeps" in verdict
+
+
+def test_a_preserved_source_table_is_not_a_lost_translation() -> None:
+    from ubt.core.engine.reporter import summarize_render_skips
+
+    fail_closed, preserved, verdict = summarize_render_skips(
+        {"render_skip:table_preserved_source": 3}
+    )
+    assert (fail_closed, preserved) == (0, 3)
+    assert "No lost translations" in verdict
