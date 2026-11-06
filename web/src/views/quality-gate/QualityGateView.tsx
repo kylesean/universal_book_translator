@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ShieldCheck,
@@ -115,37 +115,67 @@ export function QualityGateView() {
     setTimeout(() => setCopiedId(false), 1500)
   }
 
+  // Guards against a slow response for the previous job landing on this one:
+  // /jobs/A/quality and /jobs/B/quality share a route template, so the component
+  // is not remounted on navigation and A's reply would overwrite B's verdicts.
+  const loadSeqRef = useRef(0)
+
   const loadAll = useCallback(async () => {
     if (!jobId) return
+    const seq = ++loadSeqRef.current
+    const isCurrent = () => seq === loadSeqRef.current
     try {
       const rep = await getJobReport(jobId)
+      if (!isCurrent()) return
       setReport(rep)
     } catch (err) {
+      if (!isCurrent()) return
       if (err instanceof ApiError && err.status === 404) setJobMissing(true)
       else setJobMissing(false)
       return
     }
     try {
       const listing = await listDeliverables(jobId)
+      if (!isCurrent()) return
       setDeliverables(listing.items)
       setCompanionArtifacts(listing.companionArtifacts ?? [])
       setDeliveryStale(listing.stale)
     } catch {
+      if (!isCurrent()) return
       setDeliverables([])
       setCompanionArtifacts([])
     }
     try {
-      setVisual(await getVisualReport(jobId))
+      const nextVisual = await getVisualReport(jobId)
+      if (!isCurrent()) return
+      setVisual(nextVisual)
       setVisualMissing(false)
     } catch {
+      if (!isCurrent()) return
       setVisual(null)
       setVisualMissing(true)
     }
     try {
-      setDeliveryContract(await getDeliveryContract(jobId))
+      const contract = await getDeliveryContract(jobId)
+      if (!isCurrent()) return
+      setDeliveryContract(contract)
     } catch {
+      if (!isCurrent()) return
       setDeliveryContract(null)
     }
+  }, [jobId])
+
+  useEffect(() => {
+    // A new job means none of the previous job's results apply, and leaving
+    // ``report`` set also disabled the polling effect below for good.
+    loadSeqRef.current += 1
+    // oxlint-disable-next-line react/set-state-in-effect
+    setReport(null)
+    setJobMissing(false)
+    setDeliverables([])
+    setCompanionArtifacts([])
+    setVisual(null)
+    setDeliveryContract(null)
   }, [jobId])
 
   useEffect(() => {

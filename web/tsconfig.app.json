@@ -1,5 +1,9 @@
 {
   "compilerOptions": {
+    /* On by default now: the tree already compiles clean under it, and every
+       "field may be missing" white-screen bug this codebase has had (stale job
+       results, a failed first status poll) was exactly the class it catches. */
+    "strict": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
@@ -22,7 +26,7 @@
     },
 
     /* Linting */
-    "noUnusedLocals": false,
+    "noUnusedLocals": true,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true
   },

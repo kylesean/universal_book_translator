@@ -532,10 +532,20 @@ export function LanguageAssetsView() {
       return
     }
     const escapeCsv = (str: string) => {
-      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-        return `"${str.replace(/"/g, '""')}"`
+      // A term mined from a book is attacker-controlled text. Excel and Sheets
+      // treat a leading =, +, - or @ as a formula, so a glossary entry such as
+      // `=cmd|'/c calc'!A1` executed when the file was opened. A leading single
+      // quote is the standard neutralisation and stays readable.
+      const neutralized = /^[=+\-@\t\r]/.test(str) ? `'${str}` : str
+      if (
+        neutralized.includes(',') ||
+        neutralized.includes('"') ||
+        neutralized.includes('\n') ||
+        neutralized.includes('\r')
+      ) {
+        return `"${neutralized.replace(/"/g, '""')}"`
       }
-      return str
+      return neutralized
     }
     const rows = ['source,target', ...terms.map((term) => `${escapeCsv(term.source)},${escapeCsv(term.target)}`)]
     const blob = new Blob([rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' })
@@ -544,7 +554,8 @@ export function LanguageAssetsView() {
     link.href = url
     link.download = `glossary_${new Date().toISOString().slice(0, 10)}.csv`
     link.click()
-    URL.revokeObjectURL(url)
+    // Revoking in the same tick cancels the download in some Firefox builds.
+    setTimeout(() => URL.revokeObjectURL(url), 0)
   }
 
   const exportGlossaryJson = () => {
@@ -560,7 +571,8 @@ export function LanguageAssetsView() {
     link.href = url
     link.download = `glossary_${new Date().toISOString().slice(0, 10)}.json`
     link.click()
-    URL.revokeObjectURL(url)
+    // Revoking in the same tick cancels the download in some Firefox builds.
+    setTimeout(() => URL.revokeObjectURL(url), 0)
   }
 
   const importGlossaryFile = async () => {

@@ -1194,8 +1194,16 @@ export function MissionControl() {
           }
         }
       } catch (err) {
-        if (isMounted && err instanceof ApiError && err.status === 404) {
+        if (!isMounted) return
+        if (err instanceof ApiError && err.status === 404) {
           stopForMissingJob()
+          return
+        }
+        // Only the success branch used to arm the poller, so a single transient
+        // network/5xx error on the very first request left the panel frozen on
+        // "running" for good — no interval, no stream, no message. Retry.
+        if (timer === undefined) {
+          timer = setTimeout(() => void fetchStatus(), 3000)
         }
       }
     }
