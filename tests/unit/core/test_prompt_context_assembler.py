@@ -175,3 +175,32 @@ def test_repair_builders_directly_accept_global_glossary() -> None:
     assert "Translation Bible (Global Terminology)" in user_rich
     assert "Translation Bible\n| Iteratively | 迭代地 |" in user_rich
     assert draft_source_from_prompt(user_rich) == source
+
+
+def test_rich_repair_prompt_carries_the_read_only_story_context() -> None:
+    """Repair used to get no narrative context at all.
+
+    A tier-2 rewrite of a whole block had nothing to bind a pronoun or an
+    elided subject to, so it could fix the flagged defect inside the block while
+    breaking the prose around it — a failure mode every in-block gate misses.
+    """
+    excerpt = "### Reference Context (read-only, NOT part of the task)\n\nThe duke arrived."
+    _system, user = build_rich_repair_prompt(
+        source_text="He arrived.",
+        draft_text="他抵达了。",
+        error_flags=["omission"],
+        context_block=excerpt,
+    )
+    assert "The duke arrived." in user
+    assert "read-only" in user
+    # The excerpt must precede the block being fixed, never replace it.
+    assert user.index("The duke arrived.") < user.index("He arrived.")
+
+
+def test_repair_prompt_without_context_is_unchanged() -> None:
+    _system, user = build_rich_repair_prompt(
+        source_text="He arrived.",
+        draft_text="他抵达了。",
+        error_flags=["omission"],
+    )
+    assert "Reference Context" not in user

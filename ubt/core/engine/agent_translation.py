@@ -107,6 +107,31 @@ _AGENT_ENGINE_SIGNATURE = "agent"
 _DEFAULT_PACKAGE_SIZE = 8
 _MAX_PACKAGE_SIZE = 64
 _DEFAULT_LEASE_SECONDS = 900.0
+#: Repair ceiling used when the job's ``agent_config`` metadata is absent
+#: (a hand-migrated or damaged ledger). Mirrors ``UBTConfig.max_repair_rounds``.
+_DEFAULT_MAX_REPAIR_ROUNDS = 2
+
+
+def _repair_rounds_cap(config_meta: Any) -> int:
+    """The repair-round ceiling for claiming Agent work.
+
+    ``0`` means repair is disabled — that is the provider path's meaning, and
+    ``claim_next_agent_work`` now honours it by skipping repair packages. It must
+    be preserved: the previous ``int(value or 0) or None`` collapsed an explicit
+    ``0`` into ``None``, and ``None`` emitted no ``repair_rounds`` filter, so
+    "repair off" became "unbounded repair". Missing metadata falls back to the
+    config default rather than to no limit.
+    """
+    raw = config_meta.get("max_repair_rounds") if isinstance(config_meta, dict) else None
+    if not isinstance(raw, (int, float, str)):
+        return _DEFAULT_MAX_REPAIR_ROUNDS
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_MAX_REPAIR_ROUNDS
+    return max(0, value)
+
+
 _MIN_LEASE_SECONDS = 30.0
 _MAX_LEASE_SECONDS = 86_400.0
 
@@ -963,11 +988,7 @@ class AgentTranslationService:
             expires_at=expires_at,
             now=_now(),
             limit=max(1, min(package_size, _MAX_PACKAGE_SIZE)),
-            repair_rounds_cap=int(
-                (config_meta.get("max_repair_rounds") if isinstance(config_meta, dict) else None)
-                or 0
-            )
-            or None,
+            repair_rounds_cap=_repair_rounds_cap(config_meta),
         )
         if not candidates:
             stats = await asyncio.to_thread(ledger.get_job_stats, request.job_id)

@@ -143,6 +143,7 @@ class PromptContextAssembler:
         source_lang: str = "en",
         annotated_draft: str = "",
         has_error_spans: bool = False,
+        context_block: str = "",
     ) -> tuple[str, str]:
         """Assemble a budgeted repair prompt with unified terminology and critique formatting."""
         from ubt.core.router.prompts import (
@@ -191,6 +192,10 @@ class PromptContextAssembler:
             annotated_draft=annotated_draft,
             has_error_spans=has_error_spans,
             global_glossary=b_global,
+            # Only the rich strategy carries the excerpt: minimal/hybrid are
+            # deliberately terse tiers, and growing them would change their
+            # whole cost profile for a gain their prompt shape cannot hold.
+            context_block=context_block,
         )
 
 

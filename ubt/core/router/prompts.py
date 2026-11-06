@@ -785,6 +785,7 @@ def build_rich_repair_prompt(
     annotated_draft: str = "",
     has_error_spans: bool = False,
     global_glossary: str = "",
+    context_block: str = "",
 ) -> tuple[str, str]:
     """Targeted repair prompt following 2026 Task-Structured Reasoning and MQM Infilling standards."""
     src_profile = PROFILES.get(source_lang.strip().lower()) if source_lang else None
@@ -806,6 +807,15 @@ def build_rich_repair_prompt(
         user_parts.append(f"### Translation Bible (Global Terminology)\n{b_global.strip()}\n")
     if b_chunk.strip():
         user_parts.append(f"### Translation Bible\n{b_chunk.strip()}\n")
+
+    # Repair used to run with *no* narrative context at all: a tier-2 rewrite of
+    # a whole block (or a no-span omission/echo rewrite) had nothing to resolve
+    # "he/she", "the duke", or an elided subject against, so it could fix the
+    # flagged defect inside the block while introducing an inter-block break no
+    # in-block gate can see. The excerpt is read-only reference; the repair
+    # still has to satisfy every structural validator on the block itself.
+    if context_block.strip():
+        user_parts.append(f"{context_block.strip()}\n")
 
     if grid_info:
         rows, cols = grid_info

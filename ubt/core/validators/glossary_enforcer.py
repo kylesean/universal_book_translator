@@ -11,6 +11,7 @@ identical and only the scanning cost differs (see
 from __future__ import annotations
 
 import re
+import threading
 import unicodedata
 from dataclasses import dataclass
 from typing import Any
@@ -56,38 +57,69 @@ def _is_latin_word_char(ch: str) -> bool:
     return False
 
 
+#: Tokenizers keyed by the exact set of CJK words they were seeded with. Shared
+#: rather than per-enforcer: see ``_make_tokenizer`` for why the dictionary load
+#: must not repeat per block.
+_TOKENIZER_CACHE: dict[frozenset[str], Any] = {}
+_TOKENIZER_CACHE_LOCK = threading.Lock()
+_MAX_CACHED_TOKENIZERS = 32
+
+
 def _make_tokenizer(
     rules: dict[str, tuple[str, str, bool, bool]],
     guard_forms: set[str] | None = None,
 ) -> Any | None:
     """A private jieba tokenizer seeded with this glossary's CJK patterns.
 
-    Returns ``None`` when jieba is unavailable. A per-instance
-    :class:`jieba.Tokenizer` is used deliberately: the module-level
-    ``jieba.dt`` is process-global, so seeding it made one job's glossary
-    change another concurrent job's token boundaries (``worker --concurrency``)
-    and made enforcement non-deterministic across resumes. ``add_word`` also
-    grows ``Tokenizer.total`` without bound, so a shared instance leaked memory
-    per job. A private instance keeps both problems local to the glossary that
-    owns them.
+    Returns ``None`` when jieba is unavailable or the glossary seeds no CJK word.
+    A :class:`jieba.Tokenizer` (not the module-level ``jieba.dt``, which is
+    process-global) is used deliberately: seeding the global made one job's
+    glossary change another concurrent job's token boundaries
+    (``worker --concurrency``) and made enforcement non-deterministic across
+    resumes. ``add_word`` also grows ``Tokenizer.total`` without bound, so a
+    shared instance leaked memory per job.
 
     ``guard_forms`` are the approved target forms that contain a rule pattern
     (the enforcer's own ``_compute_protected_compounds``). Seeding them keeps a
     legitimate long
     form whole — without it, boosting the alias ``学习`` is exactly what makes
     jieba split the approved ``深度学习`` at that boundary.
+
+    The instance is private per *word set*, not per enforcer. ``jieba.Tokenizer()``
+    is lazy, but the first ``add_word`` loads the full ~60 MB default dictionary,
+    and the repair path builds an enforcer per block (measured 295 ms + 56 MB RSS
+    each, none of it released while the run lives). Caching by the seeded word
+    set keeps the isolation the note above asks for — two jobs with different
+    glossaries still get different tokenizers — while making the dictionary load
+    scale with the number of distinct glossaries, not with the block count.
     """
     try:
         import jieba  # type: ignore[import-untyped]
     except Exception:  # pragma: no cover - jieba is a hard dependency
         return None
+    words = frozenset(
+        pat
+        for pat in (*rules, *(guard_forms or ()))
+        if len(pat) >= 2 and all(is_cjk_char(ch) for ch in pat)
+    )
+    if not words:
+        # Nothing to seed: the enforcer only consults the tokenizer behind a CJK
+        # match, so an unseeded one is a 60 MB load that can never be used.
+        return None
+    with _TOKENIZER_CACHE_LOCK:
+        cached = _TOKENIZER_CACHE.get(words)
+    if cached is not None:
+        return cached
     tokenizer = jieba.Tokenizer()
-    for pat in rules:
-        if len(pat) >= 2 and all(is_cjk_char(ch) for ch in pat):
-            tokenizer.add_word(pat, freq=1000000)
-    for form in guard_forms or ():
-        if len(form) >= 2 and all(is_cjk_char(ch) for ch in form):
-            tokenizer.add_word(form, freq=1000000)
+    for word in words:
+        tokenizer.add_word(word, freq=1000000)
+    with _TOKENIZER_CACHE_LOCK:
+        if len(_TOKENIZER_CACHE) >= _MAX_CACHED_TOKENIZERS:
+            # Bounded: a pathological per-block glossary must not turn this into
+            # a second unbounded cache. A few dozen distinct glossaries is an
+            # ordinary book, so clearing wholesale is adequate and simple.
+            _TOKENIZER_CACHE.clear()
+        _TOKENIZER_CACHE[words] = tokenizer
     return tokenizer
 
 

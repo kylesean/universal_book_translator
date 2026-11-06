@@ -79,6 +79,44 @@ def _out_of_span_content_preserved(draft: str, spans: list[Any], candidate: str)
     return kept / total >= 0.8
 
 
+def _build_enforcer(entries: list[dict[str, Any]], target_lang: str) -> Any | None:
+    """Construct a glossary enforcer off the event loop; None on failure."""
+    from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
+
+    try:
+        return DeterministicGlossaryEnforcer(glossary=entries, target_lang=target_lang)
+    except Exception as exc:
+        logger.debug("Deterministic glossary enforcer init failed: %s", exc)
+        return None
+
+
+def _enforce_audited(enforcer: Any, draft_text: str) -> Any | None:
+    """Run one enforcement pass off the event loop; None when it raises."""
+    try:
+        return enforcer.enforce_audited(draft_text)
+    except Exception as exc:  # an enforcer bug must not block the repair path
+        logger.debug("Deterministic glossary pre-repair skipped: %s", exc)
+        return None
+
+
+def _glossary_signature(entries: list[dict[str, Any]]) -> tuple[tuple[str, str], ...]:
+    """A hashable content key for one effective glossary.
+
+    Source/target pairs are what the enforcer actually acts on, so two jobs whose
+    glossaries resolve to the same pairs share one enforcer (and one jieba
+    dictionary); anything that changes the pairs produces a new key.
+    """
+    return tuple(
+        sorted(
+            (
+                str(entry.get("source", "")).lower(),
+                str(entry.get("translation") or entry.get("target") or ""),
+            )
+            for entry in entries
+        )
+    )
+
+
 class RepairLoop:
     """Targeted repair orchestrator focusing expensive models strictly on degraded blocks."""
 
@@ -134,7 +172,6 @@ class RepairLoop:
             scope_context_for_block,
         )
         from ubt.core.validators.consistency import GlossaryConsistencyValidator
-        from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
 
         effective_entries = resolve_effective_glossary(
             glossary_entries, scope_context_for_block(block)
@@ -145,23 +182,26 @@ class RepairLoop:
             cache = {}
             self._enforcer_cache = cache
 
-        cache_key = (id(glossary_entries), target_lang, block.id)
+        # Keyed by glossary *content*, not by ``id(list)`` or ``block.id``. The
+        # stage rebuilds ``effective_entries`` for every candidate, so ``id()``
+        # changed per block and produced one enforcer per repair attempt — the
+        # accumulation the tokenizer cache exists to bound.
+        cache_key = (target_lang, _glossary_signature(effective_entries))
         enforcer = cache.get(cache_key)
         if enforcer is None:
-            try:
-                enforcer = DeterministicGlossaryEnforcer(
-                    glossary=effective_entries, target_lang=target_lang
-                )
-                cache[cache_key] = enforcer
-            except Exception as exc:
-                logger.debug("Deterministic glossary enforcer init failed: %s", exc)
+            # Construction loads jieba's dictionary on first use and
+            # ``enforce_audited`` runs an Aho-Corasick sweep plus a family of
+            # protected-span regexes: both are CPU work that would stall the
+            # event loop (SSE frames, queue heartbeat) once per repair candidate.
+            enforcer = await asyncio.to_thread(_build_enforcer, effective_entries, target_lang)
+            if enforcer is None:
                 return None
+            cache[cache_key] = enforcer
 
-        try:
-            enforced, _records, _quarantined = enforcer.enforce_audited(draft_text)
-        except Exception as exc:  # an enforcer bug must not block the repair path
-            logger.debug("Deterministic glossary pre-repair skipped for %s: %s", block.id, exc)
+        enforced_result = await asyncio.to_thread(_enforce_audited, enforcer, draft_text)
+        if enforced_result is None:
             return None
+        enforced, _records, _quarantined = enforced_result
         if enforced == draft_text:
             return None
 
@@ -170,7 +210,7 @@ class RepairLoop:
             val_cache = {}
             self._validator_cache = val_cache
 
-        val_key = (id(glossary_entries), block.id)
+        val_key = (target_lang, _glossary_signature(effective_entries))
         validator = val_cache.get(val_key)
         if validator is None:
             validator = GlossaryConsistencyValidator(glossary=effective_entries)
@@ -335,9 +375,14 @@ class RepairLoop:
         escalated: bool = False,
         source_pdf_path: Path | None = None,
         global_glossary: str = "",
+        context_block: str = "",
     ) -> IRBlock:
         """Execute one targeted repair iteration with hard circuit breaker at max_rounds.
 
+        ``context_block`` is the read-only neighbouring-context excerpt (L1
+        window / L2 summary) the caller builds from the book. Repair used to get
+        none, so a tier-2 rewrite resolved pronouns and elided subjects against
+        nothing.
         With ``escalated=True`` (MQM Critical triage) the
         circuit breaker extends by ``escalation_extra_rounds`` and the reasoning
         effort is pinned to the strongest setting regardless of format-only
@@ -475,6 +520,7 @@ class RepairLoop:
                 has_error_spans=has_spans,
                 image_b64=image_b64,
                 global_glossary=effective_global,
+                context_block=context_block,
             )
 
         # Best-of-n repair (MBR-lite): when enabled and the QE runner can rank,

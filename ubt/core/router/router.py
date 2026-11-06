@@ -171,6 +171,20 @@ class ModelRouter:
         # Ordered model-level fallback chain. Duplicates of the
         # primary model are dropped when the chain is walked.
         self.fallback_models = list(fallback_models or [])
+        if self.fallback_models and self.repair_provider is not None:
+            # Repair resolves its provider with ``is_repair=True``, so *every*
+            # candidate in a repair chain — including these fallbacks — is sent to
+            # ``repair_provider``'s endpoint. That is the right default (an
+            # operator who configures a separate repair endpoint expects repair
+            # traffic to stay there), but a fallback model that only exists on the
+            # main provider then answers 404 and the repair fails fast. Say so
+            # once at construction rather than leaving it to be discovered.
+            logger.warning(
+                "repair_provider is set together with fallback_models %s: every repair "
+                "fallback will be requested from the repair provider's endpoint. "
+                "Remove the fallbacks or make sure that endpoint serves them.",
+                self.fallback_models,
+            )
         # Local self-hosted retry provider, built lazily: models whose registry
         # profile declares a self-hosted deployment_backend (Ollama, llama.cpp,
         # llama-swap, vLLM, LM Studio) run against a remote gateway by default,
@@ -463,6 +477,7 @@ class ModelRouter:
         has_error_spans: bool = False,
         model: str | None = None,
         global_glossary: str = "",
+        context_block: str = "",
     ) -> tuple[str, str]:
         """Construct repair prompt using strategy configured on the model capability profile."""
         profile = self._get_profile(model or self.repair_model)
@@ -498,6 +513,7 @@ class ModelRouter:
             annotated_draft=annotated_draft,
             has_error_spans=has_error_spans,
             global_glossary=global_glossary,
+            context_block=context_block,
         )
 
     def _local_fallback_base_url(self) -> str:
@@ -1412,6 +1428,7 @@ class ModelRouter:
         has_error_spans: bool = False,
         image_b64: str | None = None,
         global_glossary: str = "",
+        context_block: str = "",
     ) -> str:
         """Route to repair model tier with strategy-driven prompt construction and extraction."""
         effort = reasoning_effort or self.repair_reasoning_effort
@@ -1445,6 +1462,7 @@ class ModelRouter:
                     has_error_spans=has_error_spans,
                     model=self.repair_model,
                     global_glossary=global_glossary,
+                    context_block=context_block,
                 )
                 vision_prompt = (
                     f"{user_prompt}\n\n"
@@ -1490,6 +1508,7 @@ class ModelRouter:
                 has_error_spans=has_error_spans,
                 model=cand_model,
                 global_glossary=global_glossary,
+                context_block=context_block,
             )
 
         def _calc_repair_max_tokens(cand_model: str, cand_profile: ModelProfile) -> int | None:

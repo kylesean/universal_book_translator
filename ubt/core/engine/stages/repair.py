@@ -22,13 +22,41 @@ from ubt.core.memory.glossary_table import (
     build_chunk_glossary_table,
     build_global_glossary_table,
 )
-from ubt.core.memory.hierarchical_memory import refresh_chapter_memory
+from ubt.core.memory.hierarchical_memory import (
+    HierarchicalMemoryManager,
+    refresh_chapter_memory,
+)
+from ubt.core.memory.neighbor_window import NeighborContextBuilder
 from ubt.core.memory.rolling_summary import extract_chapter_id
 from ubt.core.qe.defect_taxonomy import REPAIR_ERROR_PREFIX
 from ubt.core.qe.error_summary import summarize_provider_error
 from ubt.core.qe.score_policy import is_shippable
 
 logger = logging.getLogger(__name__)
+
+
+def _restored_memory(
+    ctx: StageContext, ledger: Any, job_id: str
+) -> HierarchicalMemoryManager | None:
+    """The draft stage's L2/L3 memory as persisted in ``job_meta``, or None.
+
+    Repair reads it for the prompt's Story Context only: a failure to restore
+    costs narrative continuity, never the paid repair itself, so every error
+    path here degrades to "no macro context" and logs.
+    """
+    try:
+        manager = HierarchicalMemoryManager(
+            step_chars=int(getattr(ctx.config, "step_chars", 3500)),
+            max_epochs=int(getattr(ctx.config, "memory_max_epochs", 50)),
+            sliding_window=bool(getattr(ctx.config, "memory_sliding_window", False)),
+        )
+        raw = ledger.get_job_metadata_value(job_id, "memory_state")
+        if isinstance(raw, dict):
+            manager.restore_state(raw)
+        return manager
+    except Exception as exc:
+        logger.warning("Repair story context unavailable for %s: %s", job_id, exc)
+        return None
 
 
 def failed_draft_checkpoint(cand: IRBlock, res: BaseException) -> dict[str, Any]:
@@ -123,6 +151,34 @@ async def run_repair_stage(
 
     changed_ids: set[str] = set()
 
+    # Read-only narrative context for the repair prompt. A tier-2 rewrite used to
+    # run with none, so a pronoun or an elided subject had no antecedent to bind
+    # to: the block could pass every in-block gate while breaking the prose
+    # around it. Both sources are loaded once per stage, not once per block.
+    memory_mgr = _restored_memory(ctx, ledger, actual_job_id)
+    _blocks_cache: list[IRBlock] = []
+    _neighbor_builder = NeighborContextBuilder()
+
+    async def _context_for(block: IRBlock) -> str:
+        parts: list[str] = []
+        try:
+            if not _blocks_cache:
+                _blocks_cache.extend(await asyncio.to_thread(ledger.get_all_blocks, actual_job_id))
+            parts.append(_neighbor_builder.extract_from_blocks(block, _blocks_cache))
+        except Exception as exc:  # context is an enhancement, never a blocker
+            logger.debug("Neighbour context unavailable for %s: %s", block.id, exc)
+        if memory_mgr is not None:
+            try:
+                macro = memory_mgr.get_macro_context_for_block(block)
+            except Exception as exc:
+                logger.debug("Macro context unavailable for %s: %s", block.id, exc)
+                macro = ""
+            if macro.strip():
+                parts.append(
+                    "### Story Context (read-only, NOT part of the task)\n\n" + macro.strip()
+                )
+        return "\n\n".join(part for part in parts if part and part.strip())
+
     for round_idx in range(max_repair_rounds):
         check_stage_cancelled(ctx)
         repair_eligible = await asyncio.to_thread(
@@ -172,6 +228,7 @@ async def run_repair_stage(
                     glossary_entries=effective_entries,
                     source_pdf_path=resolved_pdf_path,
                     global_glossary=global_glossary_table,
+                    context_block=await _context_for(cand),
                 )
             return {
                 "block_id": repaired.id,

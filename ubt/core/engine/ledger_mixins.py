@@ -1188,7 +1188,12 @@ class LedgerBlocksMixin(_LedgerHost):
                 raise LedgerError(
                     f"Agent job {job_id} is finishing; wait for ubt_agent_finish to return"
                 )
-            status = BlockStatus.REPAIR_PENDING
+            # ``repair_rounds_cap == 0`` is the provider path's spelling of "repair
+            # disabled" (``fetch_repair_eligible_blocks`` then matches no block).
+            # It must not fall through to "no filter at all", which is what an
+            # unguarded ``cap > 0`` branch did: an operator who turned repair off
+            # still had repair packages handed out to a paying Agent host.
+            status = BlockStatus.PENDING if repair_rounds_cap == 0 else BlockStatus.REPAIR_PENDING
             # Exhausted repairs are not re-leasable. The provider path's
             # ``fetch_repair_eligible_blocks`` has always applied the rounds
             # cap; this query did not, so an Agent host could re-claim the same
