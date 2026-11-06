@@ -16,6 +16,7 @@ from ubt.core.router.pricing import (
     cache_hit_rate_from_usage,
     estimate_cost_usd,
     has_unmeasured_calls,
+    unpriced_models,
 )
 
 UsageTotals = dict[str, dict[str, int]]
@@ -42,6 +43,25 @@ class JobBill:
         silently-inert cap (see :func:`budget_violation`).
         """
         return has_unmeasured_calls(self.lifetime_usage)
+
+    @property
+    def unpriced(self) -> tuple[str, ...]:
+        """Models that spent tokens but have no price-table entry.
+
+        The cap cannot bound them: ``cost_usd`` is None for exactly this reason,
+        and the old ``budget_violation`` read that None as "nothing to enforce"
+        and returned silently, so ``UBT_BUDGET_USD`` stayed inert for the whole
+        run. Names it so the stop message can point at the missing entry.
+        """
+        return tuple(
+            sorted(
+                unpriced_models(
+                    self.lifetime_usage,
+                    base_url=self.base_url,
+                    endpoint_map=self.endpoint_map,
+                )
+            )
+        )
 
     @property
     def cost_usd(self) -> float | None:
@@ -127,6 +147,17 @@ def budget_violation(bill: JobBill, budget_usd: float | None, job_id: str) -> st
     if budget_usd is None:
         return None
     if cost is None:
+        unpriced = bill.unpriced
+        if unpriced:
+            return (
+                "Budget unenforceable: no price-table entry for "
+                f"{', '.join(unpriced)}, which already spent tokens, so this "
+                f"job's spend cannot be measured against "
+                f"--budget-usd/UBT_BUDGET_USD ${budget_usd:.4f}. "
+                f"Job {job_id} stopped; blocks and spend so far are kept in the "
+                "ledger. Add the rate to ubt/resources/prices.toml (or a "
+                "prices.toml override), or unset the budget to run uncapped."
+            )
         if bill.unmeasurable:
             return (
                 "Budget unenforceable: a provider response carried no usage block, "

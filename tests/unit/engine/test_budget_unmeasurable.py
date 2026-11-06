@@ -40,3 +40,38 @@ def test_a_measured_under_budget_bill_passes() -> None:
     usage = {"cheap-model": {"prompt_tokens": 100, "completion_tokens": 100}}
     bill = JobBill(run_usage=usage, lifetime_usage=usage)
     assert budget_violation(bill, budget_usd=1.0, job_id="j1") is None
+
+
+def test_an_unpriced_model_hard_stops_a_capped_job() -> None:
+    """A model with no price entry must not leave ``UBT_BUDGET_USD`` inert.
+
+    ``cost_usd`` is None for an unpriced model (correctly: unknown beats wrong),
+    and the cap used to read that None as "nothing to enforce" and return
+    silently. A dot-version name such as ``gpt-5.1`` has no table entry, so an
+    operator who set a budget got no bound at all while spend continued.
+    """
+    usage = {"gpt-5.1": {"prompt_tokens": 100, "completion_tokens": 50}}
+    bill = JobBill(run_usage=usage, lifetime_usage=usage)
+    assert bill.cost_usd is None
+    assert bill.unmeasurable is False
+    assert bill.unpriced == ("gpt-5.1",)
+
+    violation = budget_violation(bill, budget_usd=1.0, job_id="j1")
+    assert violation is not None
+    assert "unenforceable" in violation.lower()
+    assert "gpt-5.1" in violation
+    assert "j1" in violation
+
+
+def test_an_unpriced_model_without_a_cap_is_left_alone() -> None:
+    usage = {"gpt-5.1": {"prompt_tokens": 100, "completion_tokens": 50}}
+    bill = JobBill(run_usage=usage, lifetime_usage=usage)
+    assert budget_violation(bill, budget_usd=None, job_id="j1") is None
+
+
+def test_a_locally_served_model_is_not_unpriced() -> None:
+    """Self-hosted models bill $0 by construction — not "unknown"."""
+    usage = {"qwen3:8b": {"prompt_tokens": 100, "completion_tokens": 50}}
+    bill = JobBill(run_usage=usage, lifetime_usage=usage, base_url="http://127.0.0.1:11434/v1")
+    assert bill.unpriced == ()
+    assert bill.cost_usd is not None

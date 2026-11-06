@@ -698,14 +698,7 @@ def estimate_cost_usd(
             )
             _models_warned_unmeasured.update(novel)
         return None
-    unpriced = [
-        model
-        for model, totals in model_totals.items()
-        if (
-            int(totals.get("prompt_tokens", 0) or 0) or int(totals.get("completion_tokens", 0) or 0)
-        )
-        and not price_is_known(model, base_url=base_url, endpoint_map=endpoint_map)
-    ]
+    unpriced = unpriced_models(model_totals, base_url=base_url, endpoint_map=endpoint_map)
     if unpriced:
         # One line per model, not per call: this runs on every priced progress
         # event, so an unbounded warning would add a line per block for a book
@@ -773,6 +766,30 @@ def has_unmeasured_calls(model_totals: dict[str, dict[str, int]]) -> bool:
     this to hard-stop a job it cannot measure rather than going inert.
     """
     return any(int(t.get("unmeasured_calls", 0) or 0) for t in model_totals.values())
+
+
+def unpriced_models(
+    model_totals: dict[str, dict[str, int]],
+    *,
+    base_url: str | None = None,
+    endpoint_map: Mapping[str, str] | None = None,
+) -> list[str]:
+    """Models that consumed tokens but have no knowable price.
+
+    ``estimate_cost_usd`` refuses to sum these (unknown beats wrong), and the
+    budget cap reads the same fact to hard-stop instead of going permanently
+    inert. That inertness was a real hole: a dot-version name such as
+    ``gpt-5.1`` has no table entry, so under ``UBT_BUDGET_USD`` the cap silently
+    stopped applying while spend continued.
+    """
+    return [
+        model
+        for model, totals in model_totals.items()
+        if (
+            int(totals.get("prompt_tokens", 0) or 0) or int(totals.get("completion_tokens", 0) or 0)
+        )
+        and not price_is_known(model, base_url=base_url, endpoint_map=endpoint_map)
+    ]
 
 
 def cache_hit_rate_from_usage(model_totals: dict[str, dict[str, int]]) -> float:
