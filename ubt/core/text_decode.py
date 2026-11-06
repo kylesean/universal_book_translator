@@ -44,9 +44,23 @@ def decode_markup(raw: bytes) -> str:
     a replacement marker makes the loss visible.
     """
     if raw.startswith(b"\xef\xbb\xbf"):
-        return raw.decode("utf-8-sig")
+        try:
+            return raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            # A truncated UTF-8-BOM file: fall through to the ordinary ladder
+            # instead of raising out of an adapter's ``DocumentParseError``
+            # contract.
+            pass
     if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
-        return raw.decode("utf-16")
+        try:
+            return raw.decode("utf-16")
+        except UnicodeDecodeError:
+            # An odd byte count (truncated file) or an unpaired surrogate used to
+            # raise a bare UnicodeDecodeError straight through the Markdown/EPUB
+            # readers. Decode leniently: the BOM still tells us the family, and a
+            # visible replacement is better than a job that dies with an
+            # unclassified error.
+            return raw.decode("utf-16", errors="replace")
     try:
         return raw.decode("utf-8")
     except UnicodeDecodeError:
