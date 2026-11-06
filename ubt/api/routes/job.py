@@ -581,9 +581,14 @@ def register_job_routes(
             raise
         except OSError as exc:
             dest.unlink(missing_ok=True)
+            # ``str(OSError)`` routinely embeds the absolute path (for example
+            # "Permission denied: '/data/dbs/…'"), handing the host directory
+            # layout to any caller. ``strerror`` says what went wrong without
+            # saying where; the full text stays in the server log.
+            logger.warning("Failed to store upload %s: %s", dest.name, exc)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to store upload: {exc}",
+                detail=f"Failed to store upload: {exc.strerror or 'storage error'}",
             ) from exc
         finally:
             await file.close()

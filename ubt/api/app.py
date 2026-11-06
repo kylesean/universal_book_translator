@@ -258,6 +258,45 @@ def _insecure_bind_allowed() -> bool:
     return os.environ.get("UBT_ALLOW_INSECURE_BIND", "").lower() in ("1", "true", "yes")
 
 
+#: How often the staging area is re-swept while the server keeps running.
+#: Hourly: the retention window is measured in days, so this is about bounding
+#: growth, not about reacting quickly.
+_UPLOAD_SWEEP_INTERVAL_S = 3600.0
+
+
+async def _reap_uploads_periodically(
+    uploads_dir: Path,
+    *,
+    max_age_days: float,
+    job_queue: JobQueue | None,
+    db_dir: Path | None,
+) -> None:
+    """Sweep the staging area on a timer for the life of the server.
+
+    Never raises: a failed sweep is logged and the next tick retries, because
+    disk hygiene must not be able to take the console down.
+    """
+    while True:
+        await asyncio.sleep(_UPLOAD_SWEEP_INTERVAL_S)
+        try:
+            removed = await asyncio.to_thread(
+                reap_stale_uploads,
+                uploads_dir,
+                max_age_days=max_age_days,
+                job_queue=job_queue,
+                db_dir=db_dir,
+            )
+        except Exception as exc:  # never let the timer die
+            logger.warning("periodic upload sweep failed: %s", exc)
+            continue
+        if removed:
+            logger.info(
+                "Removed %d staged upload(s) older than %g days",
+                removed,
+                max_age_days,
+            )
+
+
 def create_app(
     config: UBTConfig | None = None,
     router: ModelRouter | None = None,
@@ -355,10 +394,26 @@ def create_app(
                 removed,
                 app_config.upload_retention_days,
             )
-        yield
-        # Stop the SSE fan-out poller so it does not outlive the app.
-        if sse_broadcaster is not None:
-            await sse_broadcaster.close()
+        # ...and keep sweeping. A long-running container never restarts, so a
+        # startup-only pass meant the staging area only ever grew: 512 MiB per
+        # upload, no total quota, and "7 days" never actually applied.
+        reaper = asyncio.create_task(
+            _reap_uploads_periodically(
+                scope.uploads_dir(),
+                max_age_days=app_config.upload_retention_days,
+                job_queue=job_queue,
+                db_dir=app_config.db_dir,
+            )
+        )
+        try:
+            yield
+        finally:
+            reaper.cancel()
+            with suppress(asyncio.CancelledError):
+                await reaper
+            # Stop the SSE fan-out poller so it does not outlive the app.
+            if sse_broadcaster is not None:
+                await sse_broadcaster.close()
 
     async def _verify_request_key(
         request: Request,
