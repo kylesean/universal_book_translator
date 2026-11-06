@@ -316,11 +316,19 @@ def test_get_l3_summary_sliding_window() -> None:
 
 
 async def test_max_epochs_capping_in_ultra_long_books() -> None:
+    """Epoch 0 stays pinned; the rest of the budget holds the newest epochs.
+
+    This used to assert a plain FIFO tail ``[7, 8, 9]``, which is exactly the
+    bug: once a book passed ``max_epochs`` the L3 slot stopped being the
+    long-range anchor ("chapter 30 knows what happened in chapters 1-10") and
+    became another sliding window, rotating the static prompt prefix each time.
+    """
     manager = HierarchicalMemoryManager(l3_epoch_steps=1, max_epochs=3)
     for i in range(10):
         await _snapshot(manager, [_block(f"ch1#b{i}", i, target="x" * 40)], f"summary_{i}")
     assert len(manager.epochs) == 3
-    assert [e.epoch_index for e in manager.epochs] == [7, 8, 9]
+    assert [e.epoch_index for e in manager.epochs] == [0, 8, 9]
+    assert manager.get_l3_summary().startswith(manager.epochs[0].summary_text.strip()[:16])
 
 
 def test_restore_state_caps_max_epochs() -> None:

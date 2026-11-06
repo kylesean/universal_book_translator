@@ -253,9 +253,14 @@ class HierarchicalMemoryManager:
         # result to ``_MAX_L3_CHARS`` (1200) was dead and the epoch text rode
         # the static prompt prefix at a third of the reserved budget. Pass the
         # L3 cap through instead.
-        compressed = deterministic_epoch_summary(combined, _MAX_L3_CHARS).strip()
+        # Use the instance budget, not the module default: the rebuild path
+        # (:meth:`rebuild_epochs`) already uses ``self.max_l3_chars``, and the two
+        # only agreed because the default happens to be the same value. Once the
+        # knob is configured, a mismatch would make a repaired chapter's epochs
+        # differ from the ones built incrementally and drift the static prefix.
+        compressed = deterministic_epoch_summary(combined, self.max_l3_chars).strip()
         if not compressed:
-            compressed = combined[:_MAX_L3_CHARS]
+            compressed = combined[: self.max_l3_chars]
         epoch_idx = (self._epochs[-1].epoch_index + 1) if self._epochs else 0
         epoch = EpochSnapshot(
             epoch_index=epoch_idx,
@@ -264,8 +269,7 @@ class HierarchicalMemoryManager:
             summary_text=compressed,
         )
         self._epochs.append(epoch)
-        if self.max_epochs is not None and len(self._epochs) > self.max_epochs:
-            self._epochs = self._epochs[-self.max_epochs :]
+        self._trim_epochs()
         logger.info(
             "L3 epoch %d compressed (%d L2 steps, spine %d-%d)",
             epoch.epoch_index,
@@ -273,6 +277,23 @@ class HierarchicalMemoryManager:
             epoch.start_spine,
             epoch.end_spine,
         )
+
+    def _trim_epochs(self) -> None:
+        """Enforce ``max_epochs`` while pinning epoch 0 as the long-range anchor.
+
+        A plain FIFO slice evicted the earliest epoch once a long book passed
+        ``max_epochs`` (50 epochs ≈ 700k target characters), which quietly turned
+        this slot from "the anchor that remembers chapters 1-10" into one more
+        sliding window — the opposite of its documented purpose — and rotated the
+        static prompt prefix every few L2 steps.
+        """
+        if self.max_epochs is None or len(self._epochs) <= self.max_epochs:
+            return
+        if self.max_epochs <= 1:
+            self._epochs = self._epochs[:1]
+            return
+        anchor = self._epochs[0]
+        self._epochs = [anchor, *self._epochs[-(self.max_epochs - 1) :]]
 
     def get_l3_summary(self, *, sliding_window: bool | None = None) -> str:
         """Cumulative L3 epoch summary text across closed epochs (clamped to max_l3_chars).
@@ -287,7 +308,8 @@ class HierarchicalMemoryManager:
         if not self.enabled:
             return ""
         use_sliding = self.sliding_window if sliding_window is None else sliding_window
-        epochs = self._epochs[-self.max_epochs :] if self.max_epochs is not None else self._epochs
+        self._trim_epochs()
+        epochs = self._epochs
         parts = [e.summary_text.strip() for e in epochs if e.summary_text.strip()]
         if not parts:
             return ""
