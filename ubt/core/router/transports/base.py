@@ -376,6 +376,11 @@ class BaseTransport(ABC):
         # evidence is about *this* endpoint, and a shared cache would let one
         # gateway's rejection strip a parameter from a different one's calls.
         self._learned_omissions: dict[str, frozenset[str]] = {}
+        #: Renames a 400 heal proved for a model (``max_tokens`` →
+        #: ``max_completion_tokens`` on gpt-5 / o-series). Kept apart from the
+        #: omission set because a rename must *move* the value: dropping the key
+        #: would silently remove the output-token cap.
+        self._learned_renames: dict[str, dict[str, str]] = {}
         # NOTE: only the Anthropic transport reads this. The OpenAI
         # chat/responses transports leave it inert — real OpenAI caches a static
         # prefix automatically, and a compat server that does not is simply not
@@ -578,15 +583,29 @@ class BaseTransport(ABC):
             return frozenset()
         return self._learned_omissions.get(model, frozenset())
 
+    def _learned_renames_for(self, model: Any) -> dict[str, str]:
+        """Parameter renames this endpoint already demanded for ``model``."""
+        if not isinstance(model, str) or not model:
+            return {}
+        return self._learned_renames.get(model, {})
+
     def _apply_learned_omissions(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Drop parameters a previous 400 proved this endpoint rejects.
+        """Drop/rename parameters a previous 400 proved this endpoint rejects.
 
         Without this, every block paid the same failed round-trip: the heal rules
         fixed the *retry* but nothing remembered the outcome, so a model that
         rejects ``temperature`` (the gpt-5 / o-series endpoints do) sent it again
         on the next block and ate another 400. Measured on a 137-block job that is
         137 wasted requests.
+
+        Renames are applied too. ``max_tokens`` was excluded from the learned set
+        because dropping it would lose the cap, which left the rename to be
+        re-derived by a 400 on *every* call: measured, 3 calls produced 6
+        requests against a gpt-5 endpoint.
         """
+        renames = self._learned_renames_for(payload.get("model"))
+        if renames:
+            payload = {renames.get(key, key): value for key, value in payload.items()}
         omitted = self._learned_omissions_for(payload.get("model"))
         if not omitted:
             return payload
@@ -602,7 +621,16 @@ class BaseTransport(ABC):
         model = before.get("model")
         if not isinstance(model, str) or not model:
             return
+        added = {key for key in after if key not in before}
         removed = {key for key in before if key not in after}
+        # A rename is learned as a rename, not as an omission — see
+        # ``_apply_learned_omissions``.
+        if (
+            "max_tokens" in before
+            and "max_completion_tokens" not in before
+            and "max_completion_tokens" in added
+        ):
+            self._learned_renames.setdefault(model, {})["max_tokens"] = "max_completion_tokens"
         # ``max_tokens`` is renamed rather than removed, and the nested
         # ``reasoning`` object is dialect-specific: neither is a plain omission.
         removed -= {"model", "max_tokens", "reasoning"}

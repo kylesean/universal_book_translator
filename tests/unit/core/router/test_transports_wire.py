@@ -213,6 +213,17 @@ async def test_openai_chat_renames_max_tokens_for_a_gpt5_endpoint() -> None:
     assert "max_tokens" not in calls[1]
     assert calls[1]["max_completion_tokens"] == 64
 
+    # The rename must be *remembered*, not rediscovered per call. It used to be
+    # excluded from the learned set (a rename is not an omission: dropping the
+    # key would lose the cap), so every later block paid the same 400 again —
+    # measured, three calls produced six requests against this handler.
+    before = len(calls)
+    text, _ = await t.generate_with_finish_reason("hi", max_tokens=64)
+    assert text == "译文"
+    assert len(calls) - before == 1, "a learned rename must not cost a 400 on every call"
+    assert calls[-1]["max_completion_tokens"] == 64
+    assert "max_tokens" not in calls[-1]
+
 
 async def test_openai_chat_surfaces_a_400_that_is_not_a_max_tokens_rename() -> None:
     calls: list[dict[str, Any]] = []

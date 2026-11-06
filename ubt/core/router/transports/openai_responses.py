@@ -107,6 +107,12 @@ class OpenAIResponsesTransport(BaseTransport):
         payload: dict[str, Any] = {
             "model": target_model,
             "input": input_body,
+            # Do not leave the book on OpenAI's side. The Responses API stores
+            # the input by default for ~30 days; this project treats "the page
+            # never leaves the machine" as a hard promise (see
+            # ubt.core.router.endpoint_locality), so an implicit retention
+            # window on every block contradicts its own privacy stance.
+            "store": False,
         }
         if temperature is not None:
             payload["temperature"] = temperature
