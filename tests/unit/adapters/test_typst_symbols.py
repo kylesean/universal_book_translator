@@ -45,11 +45,13 @@ _SPECIAL_BODIES = {
         (r"\hat{x}", "hat(x)"),
         (r"\hat x", "hat(x)"),
         (r"\tilde{y}", "tilde(y)"),
-        (r"\vec{v}", "vec(v)"),
+        # Typst's `vec` builds a column vector, not an arrow accent: `vec(v)`
+        # rendered as a 1x1 bracketed "(v)". The accent has to be spelled out.
+        (r"\vec{v}", "accent(v, arrow)"),
         (r"\bar{y}", "overline(y)"),
         (r"\overline{AB}", 'overline(#"AB")'),
         (r"\dot{x} + \ddot{y}", "dot(x) + diaer(y)"),
-        (r"\vec{v} \cdot \hat{n}", "vec(v) dot hat(n)"),
+        (r"\vec{v} \cdot \hat{n}", "accent(v, arrow) dot hat(n)"),
     ],
 )
 @pytest.mark.fast

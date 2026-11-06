@@ -172,28 +172,41 @@ def repair_code_block_markup(
     )
 
 
-def inject_soft_breaks(text: str, max_token_len: int = 32) -> str:
-    """Inject zero-width break hints (\\u200b) into long unbreakable tokens in prose.
+#: A zero-width, breakable space. Typst's weak spacing gives the layout engine a
+#: place to wrap without leaving a character behind: the text layer of the
+#: compiled PDF is byte-identical to the input. This replaced an injected U+200B,
+#: which *is* a real character in the text layer — the same defect
+#: ``escape._escape_slash_run`` documents at length (77 URLs on a 22-page paper,
+#: none searchable or pasteable). Users must be able to copy a URL out of the
+#: finished book.
+_SOFT_BREAK = "#h(0pt, weak: true)"
 
-    Targets URLs, filesystem paths, and long identifiers to prevent right-margin spills.
-    Does not touch LaTeX math delimiters ($...$) or Typst directives.
+
+def inject_soft_breaks(text: str, max_token_len: int = 32) -> str:
+    """Add break opportunities inside long unbreakable tokens in prose.
+
+    Targets URLs, filesystem paths, and long identifiers to prevent right-margin
+    spills. Math spans (``$...$``) are left alone: inserted code-mode markup
+    there reaches ``typstify_math`` as part of the formula body, and the previous
+    U+200B version ended up inside ``sum_{i=1}``.
     """
     if len(text) < max_token_len:
         return text
 
-    # Word boundary regex matching contiguous non-space strings >= max_token_len
     token_pattern = re.compile(r"(\S{" + str(max_token_len) + r",})")
 
     def _break_token(match: re.Match[str]) -> str:
         tok = match.group(1)
-        # Skip tokens inside Typst math ($...$) or code
+        # Skip tokens that are already Typst math, code, or a reference.
         if tok.startswith("$") or tok.startswith("#") or tok.startswith("@"):
             return tok
+        return re.sub(r"([/_.\-?&=])", lambda m: m.group(1) + _SOFT_BREAK, tok)
 
-        # Inject \u200b after slashes, dots, underscores, hyphens, and query params
-        return re.sub(r"([/_.\-?&=])", lambda m: m.group(1) + "\u200b", tok)
-
-    return token_pattern.sub(_break_token, text)
+    # Odd-indexed segments are inside a ``$...$`` span; transform prose only.
+    segments = text.split("$")
+    for index in range(0, len(segments), 2):
+        segments[index] = token_pattern.sub(_break_token, segments[index])
+    return "$".join(segments)
 
 
 class ContainerFitSpec(BaseModel):

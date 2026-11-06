@@ -50,7 +50,10 @@ def test_uncompilable_math_does_not_leak_latex_into_the_page() -> None:
     assert r"\frac" not in rendered
     assert r"\phi" not in rendered
     assert r"\gamma" not in rendered
-    assert "$frac(1, 2) phi s_2 gamma s_1 phi d$" in rendered
+    # `\phi` is the closed form, which Typst spells `phi.alt` (bare `phi` is
+    # the open form that LaTeX writes `\varphi`). The point of this test is that
+    # no LaTeX leaks, not the accent spelling.
+    assert "$frac(1, 2) phi.alt s_2 gamma s_1 phi.alt d$" in rendered
 
 
 def test_an_unconvertible_formula_degrades_to_unicode_not_latex() -> None:

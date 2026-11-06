@@ -50,7 +50,7 @@ def test_font_command_does_not_fuse_with_a_preceding_command() -> None:
 
 def test_accent_takes_the_whole_operand_not_its_first_letter() -> None:
     assert typstify_math(r"\hat\mathcal{T}") == "hat(cal(T))"
-    assert typstify_math(r"\vec\mathcal{X}") == "vec(cal(X))"
+    assert typstify_math(r"\vec\mathcal{X}") == "accent(cal(X), arrow)"
     assert typstify_math(r"\bar\mathbb{R}") == "overline(bb(R))"
     assert typstify_math(r"\hat{\mathcal{T}}") == "hat(cal(T))"
     assert typstify_math(r"\hat x") == "hat(x)"
@@ -247,3 +247,72 @@ def test_layout_and_operator_commands_never_print_their_own_name(
         assert command not in converted, f"{command} leaked into {converted!r}"
     if expected is not None:
         assert converted == expected
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        r"a \over b",
+        r"n \choose k",
+        r"\stackrel{d}{=}",
+        r"\overset{a}{b}",
+        r"\underset{x}{a}",
+        r"\substack{a \\ b}",
+        r"\phantom{x}",
+    ],
+)
+def test_structural_commands_fail_closed_instead_of_printing_their_name(body: str) -> None:
+    """A structural command has no faithful one-token Typst spelling.
+
+    The dynamic fallback used to emit the command as a quoted string, which
+    compiled and printed the English word into the page (``a \\over b`` rendered
+    "a over b", ``n \\choose k`` rendered "n choose k"). Nothing in the render
+    pipeline could see it: the formula compiled, the probe passed it, and the
+    only symptom was a wrong glyph in the delivered PDF. Failing closed degrades
+    the formula to readable Unicode instead.
+    """
+    assert typstify_math(body) is None
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (r"\oint_C f", "integral.cont_C f"),
+        (r"\iint_D f", "integral.double_D f"),
+        (r"\iiint_V f", "integral.triple_V f"),
+        (r"\bigcup_i A_i", "union.big_i A_i"),
+        (r"\bigsqcup_i A_i", "union.sq.big_i A_i"),
+        (r"\bigoplus_i G_i", "xor.big_i G_i"),
+        (r"\bigvee_i P_i", "or.big_i P_i"),
+        (r"\bigwedge_i P_i", "and.big_i P_i"),
+        (r"f^\prime", "f^prime"),
+        (r"90^{\degree}", "90^(degree)"),
+        (r"x^\ast", "x^ast"),
+        (r"\angle ABC", 'angle #"ABC"'),
+    ],
+)
+def test_nary_and_script_symbols_use_their_typst_spelling(body: str, expected: str) -> None:
+    """These fell through the dynamic fallback and printed their own name.
+
+    Each value was verified against typst 0.15: ``\\oint`` rendered "oint",
+    ``\\bigoplus`` rendered "bigoplus", ``\\degree`` rendered "degree".
+    """
+    assert typstify_math(body) == expected
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        # Typst's bare `phi`/`epsilon` are the *variant* glyphs, so the LaTeX
+        # defaults have to reach for `.alt` and the LaTeX variants take the bare
+        # name. Before this the two command pairs printed the same glyph.
+        (r"\phi", "phi.alt"),
+        (r"\varphi", "phi"),
+        (r"\epsilon", "epsilon.alt"),
+        (r"\varepsilon", "epsilon"),
+        (r"\theta", "theta"),
+        (r"\vartheta", "theta.alt"),
+    ],
+)
+def test_greek_variants_keep_their_distinct_glyphs(body: str, expected: str) -> None:
+    assert typstify_math(body) == expected

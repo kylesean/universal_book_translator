@@ -61,8 +61,14 @@ _SHARED: dict[str, str] = {
     "mapsto": "|->",
     "to": "->",
     "rightsquigarrow": "⇝",
-    "varepsilon": "epsilon.alt",
-    "varphi": "phi.alt",
+    # Typst's bare `epsilon`/`phi` are the *variant* glyphs, not the LaTeX
+    # defaults: measured with typst 0.15, `epsilon` renders 𝜀 (= LaTeX
+    # \varepsilon) and `phi` renders 𝜑 (= LaTeX \varphi). The LaTeX default
+    # forms live behind `.alt`. Mapping the plain commands to the plain Typst
+    # names silently swapped every φ/ϵ in the book, so both directions are
+    # spelled out here and the inline/display tables agree.
+    "varepsilon": "epsilon",
+    "varphi": "phi",
     "vartheta": "theta.alt",
 }
 
@@ -181,7 +187,7 @@ _INLINE_ONLY: dict[str, str] = {
     "chi": "chi",
     "delta": "delta",
     "det": "det",
-    "epsilon": "epsilon",
+    "epsilon": "epsilon.alt",
     "eta": "eta",
     "frac": "frac",
     "gamma": "gamma",
@@ -191,7 +197,7 @@ _INLINE_ONLY: dict[str, str] = {
     "mu": "mu",
     "nu": "nu",
     "omega": "omega",
-    "phi": "phi",
+    "phi": "phi.alt",
     "pi": "pi",
     "psi": "psi",
     "rho": "rho",
@@ -290,7 +296,8 @@ INLINE_VALUE_OVERRIDES: dict[str, str] = {
     "neq": "eq.not",
     "varepsilon": "epsilon",
     "varphi": "phi",
-    "vartheta": "theta",
+    # theta.alt is the script form (ϑ); the old `theta` dropped it.
+    "vartheta": "theta.alt",
 }
 
 #: Commands the inline converter handles with a dedicated pre-pass rather than
@@ -332,6 +339,47 @@ SPECIAL_LATEX_COMMANDS: frozenset[str] = frozenset(
 )
 
 
+#: N-ary operators, integral variants and accent-adjacent glyphs that LaTeX code
+#: reaches for constantly and that the tables above did not cover. Left out,
+#: they fell through the transpiler's dynamic "emit the command name" fallback,
+#: which produced *compiling* Typst that printed the English word into the PDF:
+#: ``\oint_C f`` rendered as "oint_C f", ``a \over b`` as "a over b", ``90^\circ``
+#: fine but ``90^{\degree}`` as "90degree". Every value below was verified to
+#: exist and render the intended glyph on typst 0.15 (see the module tests).
+#:
+#: Merged LAST so these spellings win over any looser earlier layer; the
+#: structural commands that genuinely cannot be expressed (``\over``,
+#: ``\choose``, ``\stackrel``, ...) are rejected in ``math_transpiler`` instead
+#: of being mapped here — emitting a wrong glyph would be worse than the
+#: fail-closed Unicode degradation.
+_NARY_AND_SCRIPT_SYMBOLS: dict[str, str] = {
+    # integral variants
+    "oint": "integral.cont",
+    "iint": "integral.double",
+    "iiint": "integral.triple",
+    "iiiint": "integral.quad",
+    # N-ary operators (Typst spells the "big" forms with a .big suffix)
+    "bigvee": "or.big",
+    "bigwedge": "and.big",
+    "bigoplus": "xor.big",
+    "bigotimes": "times.o.big",
+    "bigodot": "dot.o.big",
+    "biguplus": "union.plus.big",
+    "bigsqcup": "union.sq.big",
+    "vee": "or",
+    "wedge": "and",
+    "oplus": "xor",
+    "otimes": "times.o",
+    "odot": "dot.o",
+    "uplus": "union.plus",
+    # accents-as-symbols and degree/angle/primes
+    "prime": "prime",
+    "degree": "degree",
+    "angle": "angle",
+    "ast": "ast",
+}
+
+
 def _merged(*layers: dict[str, str]) -> dict[str, str]:
     merged: dict[str, str] = {}
     for layer in layers:
@@ -346,7 +394,11 @@ def _merged(*layers: dict[str, str]) -> dict[str, str]:
 # general/display vocabulary; TypstMathProbe remains the final compile gate for
 # syntax this lightweight converter cannot represent.
 INLINE_SYMBOLS: dict[str, str] = _merged(
-    _SHARED, INLINE_VALUE_OVERRIDES, _DISPLAY_ONLY, _INLINE_ONLY
+    _SHARED,
+    INLINE_VALUE_OVERRIDES,
+    _DISPLAY_ONLY,
+    _INLINE_ONLY,
+    _NARY_AND_SCRIPT_SYMBOLS,
 )
 
 #: Every LaTeX command the Typst math transpiler recognises. The QE gate

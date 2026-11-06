@@ -135,8 +135,12 @@ _TYPST_MATH_WORDS = frozenset(_LATEX_CMD_MAP.values()) | {
     "cal",
     "hat",
     "tilde",
-    "vec",
+    # `\vec` and `\underline` are emitted as accent(base, mark) again, so both
+    # the function and its mark must stay bare Typst identifiers.
+    "accent",
+    "arrow",
     "overline",
+    "underline",
     "dot",
     "ddot",
     "diaer",
@@ -173,7 +177,11 @@ _LATEX_SPACES_RE = re.compile(
 #: The negative lookahead stops ``\right`` from eating the head of a real
 #: command (``\rightleftharpoons``, ``\leftrightarrow``), and ``[lmr]?``
 #: consumes the ``\bigl``/``\bigr``/``\bigm`` variants before that check.
-_LATEX_DELIM_SIZE_RE = re.compile(r"\\(?:bigg|Bigg|big|Big|left|right)(?:[lmr])?(?![a-zA-Z])")
+#: A trailing ``.`` is LaTeX's *null* delimiter (``\left. \frac{df}{dx} \right|``),
+#: not punctuation: leaving it in printed a stray period in the formula.
+_LATEX_DELIM_SIZE_RE = re.compile(
+    r"\\(?:bigg|Bigg|big|Big|left|right)(?:[lmr])?(?:\.)?(?![a-zA-Z])"
+)
 
 #: LaTeX permits whitespace between a control word and its brace argument
 #: (``\frac {a}{b}``); every regex below requires them adjacent. Docling emits
@@ -544,10 +552,10 @@ def typstify_math(body: str) -> str | None:
     # -> \hat cal(T), the font pass above rewrote it) must take the *whole* call.
     # The single-character form below would otherwise steal the call's first
     # letter: ``hat(c)al(T)`` — a silent mis-render.
-    _accent_names = "hat|tilde|vec|bar|overline|dot|ddot"
+    _accent_names = "hat|tilde|vec|bar|overline|underline|dot|ddot"
 
     def _accent_call(match: re.Match[str]) -> str:
-        return f"{_ACCENT_FN_MAP.get(match.group(1), match.group(1))}({match.group(2)})"
+        return _accent_typst(match.group(1), match.group(2))
 
     _accent_call_re = re.compile(
         rf"\\({_accent_names})\s*((?:bb|frak|cal|bold|italic)\((?:[^()]|\([^()]*\))*\))"
@@ -559,8 +567,7 @@ def typstify_math(body: str) -> str | None:
     _accent_over_cmd_re = re.compile(rf"\\({_accent_names})\s*(\\[a-zA-Z]+)")
 
     def _accent_over_cmd(match: re.Match[str]) -> str:
-        name = _ACCENT_FN_MAP.get(match.group(1), match.group(1))
-        return f"{name}({match.group(2)})"
+        return _accent_typst(match.group(1), match.group(2))
 
     for _ in range(4):
         previous = body
@@ -586,6 +593,13 @@ def typstify_math(body: str) -> str | None:
         if any(ord(c) > 127 for c in argument):
             cjk_labels.append(argument)
             return f"\x01{len(cjk_labels) - 1}\x02"
+        # A one-letter label never reached the word-run quoter (it demands two
+        # letters), so ``\mathrm{d}x`` produced the bare identifier ``dx`` and
+        # Typst failed with ``unknown variable: dx`` — the whole formula then
+        # degraded to plain text. The upright differential is the single most
+        # common construct in a physics book, so quote it here instead.
+        if len(argument) == 1 and argument.isalnum():
+            return f'#"{argument}"'
         # The marked form keeps the label's own spaces out of the quoter's way;
         # ``_WORD_RUN_RE`` then quotes it as one word (``\0off\0`` -> ``#"off"``).
         return "\0" + argument + "\0"
@@ -612,7 +626,9 @@ def typstify_math(body: str) -> str | None:
         # Dynamic fallback for simple alphabetical operator/function names (e.g. \sinc, \relu, \sign, \poly)
         # Emits the identifier so the word-run quoter turns it into a valid Typst string operator #"name".
         # Parameterized commands (followed by '{') stay fail-closed so they degrade cleanly.
-        if name.isalpha() and 2 <= len(name) <= 15:
+        # Structural commands never take this path: they have no faithful
+        # one-token spelling, so quoting them would print the command name.
+        if name.isalpha() and 2 <= len(name) <= 15 and name not in _STRUCTURAL_COMMANDS:
             rem = marked[match.end() :].lstrip()
             if not rem.startswith("{"):
                 start = match.start()
@@ -691,9 +707,73 @@ _LABEL_GROUP_RE = re.compile(r'([_^])\{((?:[^#"{}]|#"[^"]*")*)\}')
 _LABEL_SEP_RE = re.compile(r"^[\s,;:|/\-\u00b7\d]*$")
 _STRING_RE = re.compile(r'#"([^"]*)"')
 
-_ACCENT_CMD_RE = re.compile(r"\\(hat|tilde|vec|bar|overline|dot|ddot)\{([^{}]*)\}")
-_ACCENT_BARE_CMD_RE = re.compile(r"\\(hat|tilde|vec|bar|overline|dot|ddot)\s+([A-Za-z0-9])")
+_ACCENT_CMD_RE = re.compile(r"\\(hat|tilde|vec|bar|overline|underline|dot|ddot)\{([^{}]*)\}")
+_ACCENT_BARE_CMD_RE = re.compile(
+    r"\\(hat|tilde|vec|bar|overline|underline|dot|ddot)\s+([A-Za-z0-9])"
+)
 _ACCENT_FN_MAP: dict[str, str] = {"bar": "overline", "ddot": "diaer"}
+#: Accents Typst spells with two arguments, ``accent(base, mark)``. ``vec`` is
+#: deliberately NOT Typst's ``vec``: that builds a *column vector*, so
+#: ``\vec{v}`` used to render as a 1x1 bracketed vector "(v)" — compiling,
+#: probe-clean, and wrong on every vector in a physics book (measured).
+_ACCENT_MARK_MAP: dict[str, str] = {"vec": "arrow"}
+
+
+def _accent_typst(name: str, argument: str) -> str:
+    """Typst spelling of one LaTeX accent applied to ``argument``."""
+    mark = _ACCENT_MARK_MAP.get(name)
+    if mark is not None:
+        return f"accent({argument}, {mark})"
+    return f"{_ACCENT_FN_MAP.get(name, name)}({argument})"
+
+
+#: LaTeX commands that are *structure*, not symbols. The dynamic fallback below
+#: emits an unknown command name as a quoted Typst string, which compiles and
+#: prints the English word into the page: `a \over b` became "a over b",
+#: `n \choose k` became "n choose k", `f^\prime` became "f prime". Symbols are
+#: mapped in ``math_symbols``; nothing here has a faithful one-token Typst
+#: spelling (fractions/two-dimensional layout), so the formula fails closed and
+#: degrades to readable Unicode instead of shipping a wrong page.
+_STRUCTURAL_COMMANDS: frozenset[str] = frozenset(
+    {
+        "above",
+        "atop",
+        "brace",
+        "brack",
+        "choose",
+        "displaystyle",
+        "hbox",
+        "hline",
+        "hphantom",
+        "hspace",
+        "kern",
+        "limits",
+        "mathbin",
+        "mathclose",
+        "mathinner",
+        "mathopen",
+        "mathop",
+        "mathord",
+        "mathpunct",
+        "mathrel",
+        "mkern",
+        "nolimits",
+        "over",
+        "overset",
+        "phantom",
+        "raisebox",
+        "scriptstyle",
+        "sideset",
+        "smash",
+        "stackrel",
+        "substack",
+        "textstyle",
+        "underset",
+        "vbox",
+        "vphantom",
+        "vspace",
+    }
+)
 
 
 def _collapse_label_group(match: re.Match[str]) -> str:

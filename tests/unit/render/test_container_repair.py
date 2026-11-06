@@ -94,10 +94,22 @@ def test_repair_code_block_markup_quotes_and_slashes() -> None:
 
 
 def test_inject_soft_breaks_url_and_paths() -> None:
+    """Break opportunities must be invisible in the text layer.
+
+    The old implementation inserted U+200B, which *is* a real character: every
+    URL in a delivered PDF came out as ``https:/\u200b/…`` so it could not be
+    searched or pasted. ``escape._escape_slash_run`` documents the same defect
+    from the other direction, so this test pins both halves — a break mark is
+    there, and no zero-width character was added.
+    """
     long_url = "https://github.com/universal-book-translator/blob/main/ubt/render/typst/document_renderer.py"
     prose = f"Please refer to the repository link: {long_url} for the implementation details."
     repaired = inject_soft_breaks(prose, max_token_len=30)
-    assert "\u200b" in repaired
+    assert "#h(0pt, weak: true)" in repaired
+    assert "\u200b" not in repaired
+    assert "\u200c" not in repaired
+    # Stripping the break marks must give back the exact original prose.
+    assert repaired.replace("#h(0pt, weak: true)", "") == prose
     assert "refer" in repaired
     assert "repository" in repaired
 
