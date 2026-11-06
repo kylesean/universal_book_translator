@@ -160,6 +160,24 @@ VALID_EXTRACTION_STRATEGIES = frozenset({"auto", "xml_tag", "raw", "cp"})
 VALID_REASONING_DIALECTS = frozenset({"nested", "flat"})
 
 
+def _normalize_model_chain(value: object) -> object:
+    """Normalize a model fallback chain written as a string.
+
+    Shared by :attr:`ProviderConfig.fallback_models` and
+    :attr:`UBTConfig.fallback_models` so both surfaces accept exactly the same
+    spellings: ``a,b``, ``["a", "b"]`` JSON, or a real list. Non-string values
+    pass through unchanged for the field to validate; blank items are dropped.
+    """
+    if not isinstance(value, str):
+        return value
+    raw = value.strip()
+    if not raw:
+        return []
+    if raw.startswith("["):
+        return json.loads(raw)
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
 class ProviderConfig(BaseModel):
     """Strongly typed model for a provider configuration block or [defaults] block."""
 
@@ -241,9 +259,10 @@ class ProviderConfig(BaseModel):
     def _validate_fallback_models(cls, v: Any) -> list[str] | None:
         if v is None:
             return None
-        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+        normalized = _normalize_model_chain(v)
+        if not isinstance(normalized, list) or not all(isinstance(x, str) for x in normalized):
             raise ValueError("fallback_models must be a list of model ids")
-        return [x for x in v if x.strip()]
+        return [x for x in normalized if x.strip()]
 
     @field_validator(
         "api_key",
@@ -1564,17 +1583,10 @@ class UBTConfig(BaseSettings):
         comma spelling reaches this validator instead of raising a
         SettingsError that names neither the variable nor the expected format.
         JSON and a real list still work; a single bare model id is a
-        one-element chain.
+        one-element chain. The parsing itself is shared with the provider block
+        via :func:`_normalize_model_chain`.
         """
-        if not isinstance(value, str):
-            return value
-        raw = value.strip()
-        if not raw:
-            return []
-        if raw.startswith("["):
-            # NoDecode means this is the one place the JSON spelling is parsed.
-            return json.loads(raw)
-        return [item.strip() for item in raw.split(",") if item.strip()]
+        return _normalize_model_chain(value)
 
     @field_validator("db_dir", "cache_dir", mode="before")
     @classmethod

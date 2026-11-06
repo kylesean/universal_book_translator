@@ -211,8 +211,12 @@ def test_provider_config_strict_validation() -> None:
     with pytest.raises(ValidationError):
         ProviderConfig(base_url="ftp://server.invalid/v1")
 
+    # A bare string is a one-element chain, matching UBTConfig's env spelling;
+    # a value that is neither a list nor a string still fails.
+    assert ProviderConfig(fallback_models="not-a-list").fallback_models == ["not-a-list"]  # type: ignore[arg-type]
+
     with pytest.raises(ValidationError):
-        ProviderConfig(fallback_models="not-a-list")  # type: ignore[arg-type]
+        ProviderConfig(fallback_models=123)  # type: ignore[arg-type]
 
     norm = ProviderConfig(qe_engine="comet")
     assert norm.qe_engine == "heuristic"
@@ -248,3 +252,19 @@ def test_validate_block_rejects_invalid_values_in_toml(tmp_path: Path) -> None:
 def test_an_unknown_config_section_is_rejected() -> None:
     with pytest.raises(ValidationError):
         UBTConfigFile.model_validate({"defaults": {}, "providers": {}, "typst": {}})
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("model-a, model-b", ["model-a", "model-b"]),
+        ('["model-a", "model-b"]', ["model-a", "model-b"]),
+        (["model-a", "model-b"], ["model-a", "model-b"]),
+        ("", []),
+    ],
+)
+def test_provider_fallback_models_accepts_the_ubt_config_spellings(
+    raw: object, expected: list[str]
+) -> None:
+    cfg = ProviderConfig.model_validate({"fallback_models": raw})
+    assert cfg.fallback_models == expected
