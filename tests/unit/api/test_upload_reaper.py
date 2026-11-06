@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import time
+import types
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
+from ubt.api import app as app_module
+from ubt.api import uploads as uploads_module
 from ubt.api.app import create_app
 from ubt.api.uploads import (
     prune_stale_uploads,
@@ -248,3 +253,72 @@ def test_the_retention_window_is_configurable(tmp_path: Path) -> None:
         assert ten_days.exists(), "a 30-day window keeps a 10-day-old upload"
 
     assert config.upload_retention_days == 30.0
+
+
+#: Free-standing clock for the periodic-sweep tests. The staging files are
+#: stamped relative to it and ``ubt.api.uploads.time`` is replaced with it, so
+#: the age decision is deterministic instead of racing wall-clock time.
+_FIXED_NOW = 1_800_000_000.0
+
+
+def _stage_at(directory: Path, name: str, *, age_days: float) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    path.write_bytes(b"%PDF-1.4 staged upload")
+    stamp = _FIXED_NOW - age_days * _DAY
+    os.utime(path, (stamp, stamp))
+    return path
+
+
+async def _run_one_periodic_sweep(monkeypatch: pytest.MonkeyPatch, uploads: Path) -> list[float]:
+    """Let the timer fire once, then stop it at the next tick.
+
+    ``asyncio.sleep`` is the loop's only clock: the fake records the interval
+    and raises ``CancelledError`` on the second call, which is exactly the
+    shutdown path the lifespan takes. No test waits an hour.
+    """
+    delays: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        delays.append(delay)
+        if len(delays) > 1:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await app_module._reap_uploads_periodically(
+            uploads, max_age_days=_WINDOW_DAYS, job_queue=None, db_dir=None
+        )
+    return delays
+
+
+async def test_the_periodic_sweep_reaps_expired_uploads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    uploads = tmp_path / "uploads"
+    stale = _stage_at(uploads, "old.pdf", age_days=30)
+    fresh = _stage_at(uploads, "new.pdf", age_days=1)
+    monkeypatch.setattr(uploads_module, "time", types.SimpleNamespace(time=lambda: _FIXED_NOW))
+
+    delays = await _run_one_periodic_sweep(monkeypatch, uploads)
+
+    assert len(delays) == 2, "the timer must ask to sleep again after one sweep"
+    assert delays[0] == app_module._UPLOAD_SWEEP_INTERVAL_S
+    assert not stale.exists(), "the sweep must remove an upload past the window"
+    assert fresh.exists(), "the sweep must keep an upload inside the window"
+
+
+async def test_a_failed_periodic_sweep_is_logged_and_the_timer_survives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def explode(*args: object, **kwargs: object) -> int:
+        raise OSError("staging area is read-only")
+
+    monkeypatch.setattr(app_module, "reap_stale_uploads", explode)
+
+    with caplog.at_level(logging.WARNING, logger="ubt.api.app"):
+        delays = await _run_one_periodic_sweep(monkeypatch, tmp_path / "uploads")
+
+    assert len(delays) == 2, "a failed sweep must not kill the timer"
+    assert "periodic upload sweep failed" in caplog.text
+    assert "read-only" in caplog.text
