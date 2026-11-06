@@ -125,6 +125,9 @@ _FAST_SUBPROCESS_ALLOWLIST: dict[str, str] = {
     "tests/unit/test_writer_lock.py": "subprocess holds the lock to prove cross-process exclusion",
     "tests/unit/test_config_construction.py": "fresh interpreter per case to observe a deadlock",
     "tests/unit/cli/test_console_dev.py": "throwaway parent+child to prove SIGTERM reaches the child",
+    "tests/unit/test_docker_entrypoint.py": (
+        "one bash invocation of the container entrypoint to assert its fail-closed exit"
+    ),
 }
 
 _SUBPROCESS_CALLS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
