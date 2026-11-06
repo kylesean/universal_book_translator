@@ -5,7 +5,7 @@ This directory provides production-ready, reproducible container deployment conf
 ## Highlights
 - **All-in-One Out-of-the-Box**: Pre-baked with **Typst 0.15.1** compiler and **Noto CJK fonts** (`fonts-noto-cjk`), ensuring 100% tofu-free document rendering for Chinese, Japanese, and Korean books without local host setup.
 - **Multi-Architecture**: Supports both `linux/amd64` (Intel/AMD) and `linux/arm64` (Apple Silicon / AWS Graviton) with pinned SHA256 integrity checks.
-- **Security Hardened**: Runs as non-root user `ubt` (UID 10001) under least-privilege principles.
+- **Security Hardened**: Runs as non-root user `ubt` (UID 10001) under least-privilege principles, and **fails closed**: the API will not start without `UBT_API_KEY`.
 - **Zero-Friction Local Deployment**: Built-in Web Console, REST API, CLI, Queue Worker, and MCP server options.
 
 ---
@@ -18,21 +18,32 @@ This directory provides production-ready, reproducible container deployment conf
    cd universal_book_translator
    ```
 
-2. Start the UBT service:
+2. Set an API key. **The console refuses to start without one** — it can read
+   any parseable document under `/data` and spend your LLM key:
+   ```bash
+   echo "UBT_API_KEY=$(openssl rand -hex 24)" > .env
+   ```
+
+3. Start the UBT service. The host port is published on `127.0.0.1` by default;
+   set `UBT_BIND_ADDR=0.0.0.0` only if you also keep the API key set:
    ```bash
    docker compose up -d
    ```
 
-3. Open the Web Console in your browser:
+4. Open the Web Console in your browser (paste the key when prompted):
    ```
    http://localhost:8000
    ```
 
-4. View service health and logs:
+5. View service health and logs:
    ```bash
    docker compose ps
    docker compose logs -f ubt
    ```
+
+> **Keyless local instance (development only)**: `UBT_ALLOW_NO_AUTH=1` starts the
+> console without a key. Keep the port mapping on `127.0.0.1` — on a shared
+> network anyone could read `/data` and burn your `UBT_LLM_API_KEY`.
 
 ---
 
@@ -42,8 +53,9 @@ This directory provides production-ready, reproducible container deployment conf
 ```bash
 docker run -d \
   --name ubt-app \
-  -p 8000:8000 \
+  -p 127.0.0.1:8000:8000 \
   -v "$(pwd)/data:/data" \
+  -e UBT_API_KEY="$(openssl rand -hex 24)" \
   -e UBT_PROVIDER=openai-chat \
   -e UBT_LLM_API_KEY=sk-... \
   -e UBT_DRAFT_MODEL=gpt-4o-mini \

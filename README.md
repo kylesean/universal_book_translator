@@ -71,19 +71,26 @@ pip install '.[all]'                           # 全功能完整安装
 预构建容器内已集成 **Typst 0.15.1** 与 **Noto CJK 中文字体**：
 
 ```bash
-# 使用 Docker Compose 启动 Web 控制台与 API 服务
+# 控制台默认 fail-closed：未设置 UBT_API_KEY 会拒绝启动（它能读取 /data 下的
+# 任何文档、并消耗你的 LLM 密钥）。先生成一个访问令牌：
+echo "UBT_API_KEY=$(openssl rand -hex 24)" > .env
+
+# 使用 Docker Compose 启动 Web 控制台与 API 服务（宿主端口默认只绑 127.0.0.1）
 docker compose up -d
 
 # 或直接通过 Docker CLI 运行
 docker run -d \
   --name ubt-app \
-  -p 8000:8000 \
+  -p 127.0.0.1:8000:8000 \
   -v $(pwd)/data:/data \
+  -e UBT_API_KEY=<你生成的令牌> \
   -e UBT_PROVIDER=openai-chat \
   -e UBT_LLM_API_KEY=sk-... \
   -e UBT_DRAFT_MODEL=gpt-4o-mini \
   universal-book-translator:latest
 ```
+
+> ⚠️ 只有在你确认网络环境可信、且愿意承担风险时，才把 `-p 127.0.0.1:8000:8000` 改为 `-p 8000:8000` 暴露到局域网；如需无鉴权的本地实例，显式设置 `UBT_ALLOW_NO_AUTH=1`（务必保留回环绑定）。
 
 服务就绪后，直接在浏览器中访问 `http://localhost:8000` 即可使用 Web 控制台。
 更多容器化启动与持久化挂载说明参见 [`deploy/docker/README.md`](deploy/docker/README.md)。

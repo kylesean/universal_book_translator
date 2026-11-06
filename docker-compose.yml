@@ -6,8 +6,12 @@ services:
     image: universal-book-translator:latest
     container_name: ubt-app
     restart: unless-stopped
+    # Bind to the host loopback by default. Publishing on 0.0.0.0 next to the
+    # no-auth default below would expose an unauthenticated console (and the
+    # operator's LLM key) to every device on the LAN. Set UBT_BIND_ADDR=0.0.0.0
+    # deliberately, together with UBT_API_KEY.
     ports:
-      - "${UBT_PORT:-8000}:8000"
+      - "${UBT_BIND_ADDR:-127.0.0.1}:${UBT_PORT:-8000}:8000"
     environment:
       # --- Outbound LLM Provider Configuration (UBT Single-Key Design) ---
       # UBT uses a unified UBT_LLM_API_KEY for all providers (third-party names like
@@ -23,9 +27,14 @@ services:
       - UBT_ALLOWED_DIRS=/data
       - UBT_DB_DIR=/data/dbs
       - UBT_OUTPUT_DIR=/data/output
-      - UBT_ALLOW_NO_AUTH=${UBT_ALLOW_NO_AUTH:-1}
-      - UBT_ALLOW_INSECURE_BIND=${UBT_ALLOW_INSECURE_BIND:-1}
-      # Set UBT_API_KEY to require authentication on public networks:
+      # Fail closed by default: the application refuses to start without an API
+      # key unless the operator explicitly opts out. Shipping these as "1" made
+      # `docker compose up` an unauthenticated console reachable from the whole
+      # network, which is the opposite of the API layer's own default-secure
+      # design (ubt/api/security.py).
+      - UBT_ALLOW_NO_AUTH=${UBT_ALLOW_NO_AUTH:-0}
+      - UBT_ALLOW_INSECURE_BIND=${UBT_ALLOW_INSECURE_BIND:-0}
+      # Required for the default (fail-closed) startup:
       # - UBT_API_KEY=your-secure-token
     volumes:
       - ./data:/data
