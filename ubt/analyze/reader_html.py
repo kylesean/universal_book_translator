@@ -25,6 +25,7 @@ from bs4.element import NavigableString
 from ubt.analyze._identity import file_digest
 from ubt.analyze.assemble import assemble, number
 from ubt.analyze.normalize import collapse_whitespace as _clean
+from ubt.core.exceptions import DocumentParseError
 from ubt.model.ast import (
     Caption,
     CodeBlock,
@@ -100,25 +101,125 @@ def pipe_table(rows: list[list[str]]) -> str:
 
 
 def _pipe_table(table: Tag) -> str:
-    """A ``<table>`` as GitHub-flavoured Markdown pipe markup (its grid)."""
-    rows: list[list[str]] = []
-    for tr in table.find_all("tr"):
-        cells = tr.find_all(["th", "td"])
-        row = [_clean(cell.get_text(" ", strip=True)) for cell in cells]
-        if any(cell for cell in row):
-            rows.append(row)
+    """A ``<table>`` as GitHub-flavoured Markdown pipe markup (its grid).
+
+    ``colspan``/``rowspan`` are expanded into the grid with the covered cells
+    left empty. Without that, a merged cell silently shifted every later column
+    of the row: a table with one ``colspan=2`` header rendered each row one cell
+    short. The source and the translated grid are read by this same function, so
+    the replacement verifier saw two wrong grids that agreed.
+
+    Rows are collected from *this* table only (``find_parent("table") is table``),
+    so a nested table's rows no longer appear twice — once inside the outer cell
+    text and once as their own rows.
+    """
+    own_rows = [tr for tr in table.find_all("tr") if tr.find_parent("table") is table]
+    grid: dict[tuple[int, int], str] = {}
+    occupied: set[tuple[int, int]] = set()
+    width = 0
+    for row_index, tr in enumerate(own_rows):
+        column = 0
+        for cell in tr.find_all(["th", "td"]):
+            if cell.find_parent("table") is not table:
+                continue
+            while (row_index, column) in occupied:
+                column += 1
+            text = _clean(cell.get_text(" ", strip=True))
+            col_span = _int_attr(cell, "colspan")
+            row_span = _int_attr(cell, "rowspan")
+            for dr in range(row_span):
+                for dc in range(col_span):
+                    key = (row_index + dr, column + dc)
+                    # Only the anchor cell carries the text; the cells it spans
+                    # are rendered empty, which is as close as pipe markup gets
+                    # to a merge.
+                    grid[key] = text if (dr == 0 and dc == 0) else ""
+                    occupied.add(key)
+            column += col_span
+            width = max(width, column)
+    rows = [
+        [grid.get((row_index, column), "") for column in range(width)]
+        for row_index in range(len(own_rows))
+    ]
+    rows = [row for row in rows if any(cell for cell in row)]
     return pipe_table(rows)
+
+
+#: Upper bound on one cell's span. A hostile/degenerate document can declare
+#: ``colspan="100000"``; expanding it literally would allocate a list per row
+#: for no reader's benefit.
+_MAX_TABLE_SPAN = 64
+
+
+def _int_attr(cell: Tag, name: str, *, default: int = 1, minimum: int = 1) -> int:
+    """A bounded positive integer attribute, or ``default`` when unusable."""
+    try:
+        value = int(str(cell.get(name, "")).strip())
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(value, _MAX_TABLE_SPAN))
 
 
 def _list_marker(item: Tag, index: int) -> str:
     parent = item.find_parent(["ul", "ol"])
     if parent is not None and parent.name == "ol":
         value = item.get("value")
-        return f"{value if value else index}."
+        if value:
+            return f"{value}."
+        # ``<ol start="5">`` continued numbering was ignored, so a list split
+        # across pages restarted at 1.
+        try:
+            start = int(str(parent.get("start", "")).strip())
+        except (TypeError, ValueError):
+            start = 1
+        return f"{max(1, start) + index - 1}."
     return "•"
 
 
-def _inline_marked_text(node: Tag | NavigableString) -> str:
+#: Block-level tags whose text must not be glued to the surrounding inline run.
+#: Without a separator ``<li>parent<ul><li>child</li></ul></li>`` flattened to
+#: ``"parentchild"`` — the parent item and its sub-item fused into one word that
+#: the translator then has to guess at.
+_INLINE_BLOCK_TAGS = frozenset(
+    {
+        "address",
+        "article",
+        "aside",
+        "blockquote",
+        "div",
+        "dl",
+        "dd",
+        "dt",
+        "figcaption",
+        "figure",
+        "footer",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "li",
+        "main",
+        "nav",
+        "ol",
+        "p",
+        "pre",
+        "section",
+        "table",
+        "ul",
+    }
+)
+
+#: Nesting deeper than this is not a book — it is a crafted or broken document.
+#: Recursing through it raised a bare ``RecursionError`` (which escapes the
+#: adapter's ``DocumentParseError`` contract) somewhere past ~500 levels; a typed
+#: refusal names the real problem instead.
+_MAX_DOM_DEPTH = 200
+
+
+def _inline_marked_text(node: Tag | NavigableString, *, _depth: int = 0) -> str:
     """Flatten inline emphasis into the pipeline's own marker syntax.
 
     The document model has no inline tree yet, but ``<em>``/``<strong>`` are
@@ -128,6 +229,12 @@ def _inline_marked_text(node: Tag | NavigableString) -> str:
     """
     if isinstance(node, NavigableString):
         return str(node)
+    if _depth > _MAX_DOM_DEPTH:
+        raise DocumentParseError(
+            f"HTML nesting exceeds {_MAX_DOM_DEPTH} levels at <{node.name}>; "
+            "refusing to walk this document (it is malformed or deliberately "
+            "pathological)."
+        )
     parts: list[str] = []
     for child in node.children:
         if isinstance(child, NavigableString):
@@ -138,13 +245,15 @@ def _inline_marked_text(node: Tag | NavigableString) -> str:
         name = (child.name or "").lower()
         if name in ("script", "style", "noscript"):
             continue
-        inner = _inline_marked_text(child)
+        inner = _inline_marked_text(child, _depth=_depth + 1)
         if name in ("em", "i"):
             parts.append(f"⟦I⟧{inner}⟦/I⟧")
         elif name in ("strong", "b"):
             parts.append(f"⟦B⟧{inner}⟦/B⟧")
         elif name == "br":
             parts.append(" ")
+        elif name in _INLINE_BLOCK_TAGS:
+            parts.append(f" {inner} ")
         else:
             parts.append(inner)
     return "".join(parts)
@@ -155,8 +264,18 @@ def walk_markup_elements(
     *,
     page: int = 0,
     resolve_asset: Callable[[str], str] | None = None,
+    _depth: int = 0,
 ) -> list[tuple[ElementT, Tag | list[NavigableString]]]:
     """Emit (Element, DOM node) pairs for one DOM node's block-level children, in reading order."""
+    if _depth > _MAX_DOM_DEPTH:
+        # A bare RecursionError escaped the adapter's DocumentParseError contract
+        # and reached the job as an unclassified exception; fail with the real
+        # cause while the document is still identifiable.
+        raise DocumentParseError(
+            f"HTML nesting exceeds {_MAX_DOM_DEPTH} levels at <{node.name}>; "
+            "refusing to walk this document (it is malformed or deliberately "
+            "pathological)."
+        )
     resolve = resolve_asset or (lambda src: src)
     out: list[tuple[ElementT, Tag | list[NavigableString]]] = []
     pending: list[NavigableString] = []
@@ -318,7 +437,9 @@ def walk_markup_elements(
             continue
         if name in _CONTAINERS:
             flush()
-            out.extend(walk_markup_elements(child, page=page, resolve_asset=resolve))
+            out.extend(
+                walk_markup_elements(child, page=page, resolve_asset=resolve, _depth=_depth + 1)
+            )
             continue
         # Unknown/inline tag: fold its text into the pending paragraph.
         inline = _clean(_inline_marked_text(child))

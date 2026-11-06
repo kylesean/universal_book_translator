@@ -334,3 +334,121 @@ def test_a_repeated_spine_member_contributes_one_chapter() -> None:
         with zipfile.ZipFile(path) as archive:
             members = spine_chapters(archive, "OEBPS/content.opf")
     assert members == ["OEBPS/ch1.xhtml", "OEBPS/ch2.xhtml"]
+
+
+def _write_html(tmp_path: Path, body: str) -> Path:
+    path = tmp_path / "table.html"
+    path.write_text(f"<html><body>{body}</body></html>", encoding="utf-8")
+    return path
+
+
+def _only_table(document: Document) -> Table:
+    table = next(e for e in document.elements if e.kind.value == "table")
+    assert isinstance(table, Table), f"expected a Table element, got {type(table).__name__}"
+    return table
+
+
+def test_html_colspan_does_not_shift_the_rest_of_the_row(tmp_path: Path) -> None:
+    """A merged cell must occupy its columns, not disappear.
+
+    Without expansion every later cell slid left, so a table with one
+    ``colspan=2`` header came out one column short. The translated grid is read
+    by this same function, so the replacement verifier compared two identically
+    wrong grids and passed them.
+    """
+    document = read_html(
+        _write_html(
+            tmp_path,
+            '<table><tr><th colspan="2">H</th><th>V</th></tr>'
+            "<tr><td>a</td><td>b</td><td>c</td></tr></table>",
+        )
+    )
+    markup = _only_table(document).markup
+    assert markup.splitlines()[0] == "| H |  | V |"
+    assert markup.splitlines()[2] == "| a | b | c |"
+
+
+def test_html_nested_table_rows_are_not_collected_twice(tmp_path: Path) -> None:
+    document = read_html(
+        _write_html(
+            tmp_path,
+            "<table><tr><td>outer<table><tr><td>inner</td></tr></table></td></tr></table>",
+        )
+    )
+    markup = _only_table(document).markup
+    rows = [line for line in markup.splitlines() if line.startswith("|") and "---" not in line]
+    assert len(rows) == 1, f"the inner table's row must not become its own outer row: {markup}"
+
+
+def test_html_nested_list_does_not_fuse_the_parent_with_its_children(tmp_path: Path) -> None:
+    """`<li>parent<ul><li>child</li></ul></li>` used to flatten to "parentchild"."""
+    document = read_html(
+        _write_html(tmp_path, "<ul><li>parent<ul><li>child1</li><li>child2</li></ul></li></ul>")
+    )
+    texts = [getattr(e, "text", "") for e in document.elements if e.kind.value == "list_item"]
+    assert texts, "the list items must survive"
+    assert all("parentchild" not in text for text in texts), texts
+    assert any("parent" in text and "child1" in text for text in texts), texts
+
+
+def test_html_ordered_list_honours_its_start_attribute(tmp_path: Path) -> None:
+    document = read_html(_write_html(tmp_path, '<ol start="5"><li>first</li><li>second</li></ol>'))
+    markers = [getattr(e, "marker", "") for e in document.elements if e.kind.value == "list_item"]
+    assert markers == ["5.", "6."]
+
+
+def test_html_nesting_past_the_limit_fails_as_a_document_error() -> None:
+    """A crafted 600-deep document raised a bare RecursionError.
+
+    That exception is outside the adapter's ``DocumentParseError`` contract, so
+    the job failed with an unclassified error instead of a readable one.
+    """
+    from ubt.core.exceptions import DocumentParseError
+
+    deep = "<div>" * 600 + "x" + "</div>" * 600
+    with pytest.raises(DocumentParseError, match="nesting"):
+        read_html_from_markup(deep)
+
+
+def read_html_from_markup(markup: str):  # type: ignore[no-untyped-def]
+    from bs4 import BeautifulSoup
+
+    from ubt.analyze.reader_html import walk_markup_elements
+
+    return walk_markup_elements(BeautifulSoup(markup, "html.parser"))
+
+
+def test_docx_hyperlink_anchor_text_survives(tmp_path: Path) -> None:
+    """`paragraph.runs` excludes hyperlink runs, so the link text vanished.
+
+    Measured: "See [the manual](…) chapter three" extracted as "See the manual"
+    — the word "chapter three" was silently dropped from the book.
+    """
+    from docx import Document as DocxDocument
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    path = tmp_path / "link.docx"
+    doc = DocxDocument()
+    paragraph = doc.add_paragraph()
+    paragraph.add_run("See ")
+    rel_id = doc.part.relate_to(
+        "https://example.com/manual",
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+        is_external=True,
+    )
+    link = OxmlElement("w:hyperlink")
+    link.set(qn("r:id"), rel_id)
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = "the manual"
+    run.append(text)
+    link.append(run)
+    paragraph._p.append(link)
+    paragraph.add_run(" chapter three.")
+    doc.save(str(path))
+
+    document = read_docx(path)
+    text = getattr(next(e for e in document.elements if e.kind.value == "paragraph"), "text", "")
+    assert "the manual" in text
+    assert "chapter three" in text

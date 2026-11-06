@@ -73,16 +73,41 @@ def _is_list_item(paragraph: DocxParagraph) -> bool:
     return ppr is not None and ppr.find(qn("w:numPr")) is not None
 
 
+def _iter_docx_inline(paragraph: DocxParagraph) -> Iterator[tuple[str, bool, bool]]:
+    """Yield ``(text, bold, italic)`` for every inline run, in document order.
+
+    ``paragraph.runs`` (python-docx >= 1.1) does **not** include the runs inside
+    a ``<w:hyperlink>``, so a mixed paragraph lost its link text outright:
+    "See [the manual](…) chapter three" came out as "See the manual". Iterating
+    ``iter_inner_content`` yields Run *and* Hyperlink items; a hyperlink's anchor
+    text is part of the sentence even though its target is not part of the IR.
+    """
+    inner = getattr(paragraph, "iter_inner_content", None)
+    if callable(inner):
+        for item in inner():
+            runs = getattr(item, "runs", None)
+            for run in runs if runs is not None else [item]:
+                text = str(getattr(run, "text", "") or "")
+                if text:
+                    yield (
+                        text,
+                        bool(getattr(run, "bold", False)),
+                        bool(getattr(run, "italic", False)),
+                    )
+        return
+    for run in getattr(paragraph, "runs", ()) or ():
+        text = str(getattr(run, "text", "") or "")
+        if text:
+            yield text, bool(getattr(run, "bold", False)), bool(getattr(run, "italic", False))
+
+
 def _docx_marked_text(paragraph: DocxParagraph) -> str:
     """Flatten a DOCX paragraph's run formatting into the pipeline's markers."""
     parts: list[str] = []
-    for run in getattr(paragraph, "runs", ()) or ():
-        text = str(getattr(run, "text", "") or "")
-        if not text:
-            continue
-        if bool(getattr(run, "bold", False)):
+    for text, bold, italic in _iter_docx_inline(paragraph):
+        if bold:
             text = f"⟦B⟧{text}⟦/B⟧"
-        if bool(getattr(run, "italic", False)):
+        if italic:
             text = f"⟦I⟧{text}⟦/I⟧"
         parts.append(text)
     return "".join(parts) if parts else str(getattr(paragraph, "text", "") or "")
