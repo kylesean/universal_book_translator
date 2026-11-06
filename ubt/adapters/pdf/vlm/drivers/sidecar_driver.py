@@ -118,7 +118,7 @@ class SidecarOcrDriver:
                 "Ensure the OCR server referenced by UBT_OCR_ENDPOINT is running."
             ) from exc
         except Exception as exc:
-            raise RuntimeError(f"OCR Sidecar request failed at {ocr_url}: {exc}") from exc
+            raise RuntimeError(f"OCR sidecar request failed at {ocr_url}: {exc}") from exc
 
         raw_lines = payload.get("lines") or []
         resolver = PageBBoxResolver(
