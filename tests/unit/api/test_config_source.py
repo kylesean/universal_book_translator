@@ -151,3 +151,44 @@ def test_a_file_selected_provider_is_read_back_onto_the_config(config_dir: Path)
     assert cfg.draft_model == "model-a"
     assert cfg.provider == "demo"
     assert "provider" in cfg.model_fields_set
+
+
+def test_fallback_models_accepts_a_comma_separated_env(
+    config_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ubt.core.config import UBTConfig
+
+    monkeypatch.setenv("UBT_FALLBACK_MODELS", "model-a, model-b")
+    assert UBTConfig.from_env().fallback_models == ["model-a", "model-b"]
+
+
+def test_fallback_models_drops_blank_env_items(
+    config_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ubt.core.config import UBTConfig
+
+    monkeypatch.setenv("UBT_FALLBACK_MODELS", " model-a , , model-b , ")
+    assert UBTConfig.from_env().fallback_models == ["model-a", "model-b"]
+
+
+def test_fallback_models_still_accepts_the_json_env_spelling(
+    config_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ubt.core.config import UBTConfig
+
+    monkeypatch.setenv("UBT_FALLBACK_MODELS", '["model-a", "model-b"]')
+    assert UBTConfig.from_env().fallback_models == ["model-a", "model-b"]
+
+
+def test_a_blank_fallback_chain_is_empty(config_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from ubt.core.config import UBTConfig
+
+    monkeypatch.setenv("UBT_FALLBACK_MODELS", "   ")
+    assert UBTConfig.from_env().fallback_models == []
+
+
+def test_fallback_models_normalizes_an_explicit_string() -> None:
+    from ubt.core.config import UBTConfig
+
+    cfg = UBTConfig.model_validate({"fallback_models": "model-a,model-b"})
+    assert cfg.fallback_models == ["model-a", "model-b"]

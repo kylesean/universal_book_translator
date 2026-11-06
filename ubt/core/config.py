@@ -31,11 +31,12 @@ Design contract:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -51,6 +52,7 @@ from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
     EnvSettingsSource,
+    NoDecode,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
@@ -426,22 +428,6 @@ class UBTEnvSettingsSource(EnvSettingsSource):
         "api_key": "UBT_LLM_API_KEY",
         "service_api_key": "UBT_API_KEY",
     }
-
-    #: List-valued fields that also accept a plain comma-separated env spelling.
-    #: pydantic-settings decodes a "complex" field as JSON *before* any
-    #: ``field_validator`` runs, so ``UBT_FALLBACK_MODELS=a,b`` raised a
-    #: SettingsError naming neither the variable nor the expected format — and
-    #: every ubt command died on it.
-    _COMMA_LIST_FIELDS: ClassVar[frozenset[str]] = frozenset({"fallback_models"})
-
-    def prepare_field_value(
-        self, field_name: str, field: FieldInfo, value: Any, value_is_complex: bool
-    ) -> Any:
-        if field_name in self._COMMA_LIST_FIELDS and isinstance(value, str):
-            raw = value.strip()
-            if raw and not raw.startswith("["):
-                return [item.strip() for item in raw.split(",") if item.strip()]
-        return super().prepare_field_value(field_name, field, value, value_is_complex)
 
     def _extract_field_info(self, field: FieldInfo, field_name: str) -> list[tuple[str, str, bool]]:
         info = super()._extract_field_info(field, field_name)
@@ -887,7 +873,13 @@ class UBTConfig(BaseSettings):
     # Ordered model-level fallback chain. When the draft/repair
     # model fails (fail-fast client errors or exhausted retries), the router
     # retries the request on the next entry instead of failing every block.
-    fallback_models: list[str] = Field(default_factory=list)
+    #
+    # ``NoDecode`` keeps the raw env string instead of letting pydantic-settings
+    # JSON-decode this "complex" field before validation: the field validator
+    # below is the single normalizer for every source (env, JSON, explicit
+    # init), so ``UBT_FALLBACK_MODELS=a,b`` reaches it rather than dying with
+    # a SettingsError.
+    fallback_models: Annotated[list[str], NoDecode] = Field(default_factory=list)
     draft_reasoning_effort: str = "low"
     repair_reasoning_effort: str = "high"
 
@@ -1566,11 +1558,13 @@ class UBTConfig(BaseSettings):
     def _normalize_fallback_models(cls, value: object) -> object:
         """Accept the natural comma-separated spelling for the env variable.
 
-        ``UBT_FALLBACK_MODELS=a,b`` is what anyone would write; pydantic-settings
-        tries ``json.loads`` on list fields and aborted with a SettingsError that
-        named neither the variable nor the expected format, so *every* ubt
-        command died with an unactionable traceback. JSON and a real list still
-        work; a single bare model id is a one-element chain.
+        ``UBT_FALLBACK_MODELS=a,b`` is what anyone would write. This is the
+        single normalizer for the field: ``NoDecode`` on the annotation keeps
+        pydantic-settings from JSON-decoding the raw env string first, so the
+        comma spelling reaches this validator instead of raising a
+        SettingsError that names neither the variable nor the expected format.
+        JSON and a real list still work; a single bare model id is a
+        one-element chain.
         """
         if not isinstance(value, str):
             return value
@@ -1578,7 +1572,8 @@ class UBTConfig(BaseSettings):
         if not raw:
             return []
         if raw.startswith("["):
-            return value
+            # NoDecode means this is the one place the JSON spelling is parsed.
+            return json.loads(raw)
         return [item.strip() for item in raw.split(",") if item.strip()]
 
     @field_validator("db_dir", "cache_dir", mode="before")
