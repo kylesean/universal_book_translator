@@ -137,7 +137,7 @@ CHECK_CODES: dict[str, tuple[str, ...]] = {
         "ocr_engine.vlm_blocked",
         "ocr_engine.none",
         "ocr_engine.off",
-        "render.ok",
+        "render.configured",
         "typst.ok",
         "typst.missing",
         "typst_math.ok",
@@ -1185,7 +1185,7 @@ def collect_checks(
                 "OCR engine",
                 "WARN",
                 "no local OCR engine operational (sidecar offline, rapidocr/onnxruntime not installed, no local vision endpoint) — scanned PDFs will fail",
-                fix="uv sync --all-extras, or set UBT_OCR_ENDPOINT+UBT_OCR_MODEL to a localhost vision server, or docker run -d -p 8765:8765 ubt-ocr-sidecar",
+                fix="uv sync --all-extras, or set UBT_OCR_ENDPOINT+UBT_OCR_MODEL to a local OCR/vision server you run",
                 code="ocr_engine",
                 detail_code="ocr_engine.none",
                 fix_code="ocr_engine.none",
@@ -1199,12 +1199,16 @@ def collect_checks(
             detail_code="ocr_engine.off",
         )
 
+    # Configuration echo, not a probe. Reporting it as OK made the row look like
+    # a passing check next to the real Typst/font probes — and it stayed green
+    # even with no typst binary at all. SKIP says exactly that: nothing was
+    # measured here.
     record(
-        "Render",
-        "OK",
-        f"dual_mode={config.dual_mode}, pdf=typst-reflow",
+        "Render profile",
+        "SKIP",
+        f"configured (no probe): dual_mode={config.dual_mode}, pdf=typst-reflow",
         code="render",
-        detail_code="render.ok",
+        detail_code="render.configured",
         params={"dual_mode": config.dual_mode},
     )
 

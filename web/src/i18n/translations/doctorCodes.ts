@@ -124,7 +124,7 @@ export const doctorCodesZh: DoctorCodeTables = {
     'ocr_engine.none':
       '没有可用的本地 OCR；扫描版 PDF 将无法处理',
     'ocr_engine.off': 'OCR 已关闭',
-    'render.ok': 'PDF 重排渲染可用',
+    'render.configured': '渲染配置（未探测）',
     'typst.ok': 'PDF 高保真重排渲染可用',
     'typst.missing': 'PDF 排版组件不可用；交付阶段会失败',
     'typst_math.ok': '公式排版可用',
