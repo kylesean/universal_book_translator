@@ -22,8 +22,8 @@ draft_model = "model-a"
 def config_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (tmp_path / "ubt.toml").write_text(_CONFIG, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    for key in ("UBT_PROVIDER", "UBT_DRAFT_MODEL", "UBT_BASE_URL"):
-        monkeypatch.delenv(key, raising=False)
+    # Every UBT_* variable is cleared by the autouse ``clean_ubt_env`` fixture
+    # in tests/conftest.py, so this fixture only supplies the file and the cwd.
     return tmp_path
 
 
