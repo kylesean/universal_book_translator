@@ -178,7 +178,9 @@ def _block(bid: str, block_type: BlockType, source: str, target: str) -> IRBlock
     )
 
 
-def test_single_column_academic_paper_renders_clean_single_column(tmp_path: Path) -> None:
+def test_single_column_academic_paper_renders_clean_single_column(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import asyncio
 
     from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
@@ -194,6 +196,9 @@ def test_single_column_academic_paper_renders_clean_single_column(tmp_path: Path
     ]
     out = tmp_path / "paper.pdf"
     strategy = DoclingRenderStrategy()
+    # The scratch directory is removed after a successful render; this test
+    # asserts on the generated Typst source, so it opts into keeping it.
+    monkeypatch.setenv("UBT_KEEP_BUILD_DIR", "1")
     asyncio.run(
         strategy.render_blocks(manifest=manifest, blocks=blocks, target_lang="zh", output_path=out)
     )
@@ -205,7 +210,9 @@ def test_single_column_academic_paper_renders_clean_single_column(tmp_path: Path
     assert "Attention Is All You Need" in typ
 
 
-def test_dual_column_academic_paper_renders_dual_column(tmp_path: Path) -> None:
+def test_dual_column_academic_paper_renders_dual_column(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import asyncio
 
     from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
@@ -222,6 +229,7 @@ def test_dual_column_academic_paper_renders_dual_column(tmp_path: Path) -> None:
     ]
     out = tmp_path / "ieee.pdf"
     strategy = DoclingRenderStrategy()
+    monkeypatch.setenv("UBT_KEEP_BUILD_DIR", "1")
     asyncio.run(
         strategy.render_blocks(manifest=manifest, blocks=blocks, target_lang="zh", output_path=out)
     )

@@ -11,7 +11,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import os
 import re
+import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,6 +68,32 @@ _MIN_BLOCK_SIZE_PT: float = 4.5
 #: unmeasured. 1.6 is the smallest ratio that still reads as a heading against a
 #: page of uniform body text.
 _HEADING_SIZE_RATIO: float = 1.6
+
+#: Set to a truthy value to keep a successful render's scratch directory.
+#: Failures keep it regardless — the error message points at the generated source.
+_KEEP_BUILD_DIR_ENV = "UBT_KEEP_BUILD_DIR"
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _cleanup_build_dir(build_dir: Path) -> None:
+    """Delete a render's scratch directory after the PDF has been written.
+
+    The directory holds a *second* copy of every figure (assets are copied in,
+    content-addressed), the background-stripped PDF and the full generated
+    Typst source. Nothing ever removed it, so each delivery left a hidden
+    directory roughly the size of the book sitting next to the finished PDF.
+    Removing it is safe: a re-render copies what it needs again.
+    """
+    if os.environ.get(_KEEP_BUILD_DIR_ENV, "").strip().lower() in _TRUTHY:
+        return
+    if not build_dir.exists():
+        return
+    try:
+        shutil.rmtree(build_dir)
+    except OSError as exc:  # never fail a delivered book over scratch space
+        logging.getLogger(__name__).warning(
+            "could not remove render scratch dir %s: %s", build_dir, exc
+        )
 
 
 class _StripPlannable(Protocol):
@@ -821,6 +849,7 @@ class DoclingRenderStrategy:
         # ``enable_pdf_optimization`` remains an accepted constructor argument
         # (the adapter sets it from config) but is read only by the export
         # stage, which decides whether that one pass runs at all.
+        _cleanup_build_dir(build_dir)
         return output_path
 
     async def _render_facsimile(
@@ -2410,6 +2439,7 @@ class DoclingRenderStrategy:
         if outline_written:
             manifest.metadata["pdf_outline_entries"] = outline_written
 
+        _cleanup_build_dir(build_dir)
         return output_path
 
     def _font_stack_for(self, target_lang: str) -> tuple[str, ...]:

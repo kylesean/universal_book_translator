@@ -482,15 +482,25 @@ class EPUBAdapter(BaseDocumentAdapter):
                 # Per-chapter zip read + BeautifulSoup parse + block build is
                 # synchronous CPU + IO; offload it so a concurrent task is not
                 # stalled once per chapter.
-                chapter_blocks = await asyncio.to_thread(
-                    _parse_chapter_blocks,
-                    zf,
-                    chapter,
-                    fp,
-                    is_page_slice,
-                    global_spine,
-                    budget,
-                )
+                try:
+                    chapter_blocks = await asyncio.to_thread(
+                        _parse_chapter_blocks,
+                        zf,
+                        chapter,
+                        fp,
+                        is_page_slice,
+                        global_spine,
+                        budget,
+                    )
+                except DocumentParseError as err:
+                    # Name the chapter. A single unreadable member used to abort
+                    # the whole book with an error that pointed at no particular
+                    # file; silently skipping is worse (a delivered book would be
+                    # missing a chapter), so fail with the location.
+                    raise DocumentParseError(
+                        f"EPUB chapter {chapter.chapter_id!r} ({chapter.source_file}) "
+                        f"could not be parsed: {err}"
+                    ) from err
                 global_spine += len(chapter_blocks)
 
                 if chapter_blocks:

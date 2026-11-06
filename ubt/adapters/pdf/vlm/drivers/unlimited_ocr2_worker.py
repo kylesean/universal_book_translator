@@ -24,6 +24,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from ubt.core.env import subprocess_env
+
 
 def _worker_dir() -> Path:
     """The directory that carries model.gguf and mmproj.gguf."""
@@ -90,6 +92,10 @@ def _infer_text(image_b64: str) -> str:
             errors="replace",
             timeout=540,
             check=False,
+            # A freshly spawned third-party binary per page gets the stripped
+            # environment: it is downloaded from outside this project, so it must
+            # not inherit the operator's LLM credentials (ubt.core.env contract).
+            env=subprocess_env(),
         )
         if result.returncode != 0:
             stderr_tail = result.stderr.strip().splitlines()[-3:]

@@ -34,6 +34,7 @@ import pikepdf
 from pydantic import BaseModel, ConfigDict, Field
 
 from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK
+from ubt.core.env import subprocess_env
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +289,11 @@ def subset_fonts_with_ghostscript(
             text=True,
             timeout=120.0,
             check=False,
+            # Ghostscript parses a PDF we just generated from untrusted input.
+            # It gets the stripped environment like every other third-party
+            # spawn (see ubt.core.env): a hardened-but-compromised gs must not
+            # inherit UBT_LLM_API_KEY.
+            env=subprocess_env(),
         )
         return proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0
     except Exception as exc:

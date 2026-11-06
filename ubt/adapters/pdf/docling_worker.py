@@ -113,6 +113,21 @@ class DoclingWorkerPool:
             logger.error("Docling worker process died (native segfault or OOM): %s", exc)
             self.close()
             raise
+        except TimeoutError as exc:
+            # ``result(timeout=)`` starts counting at submit, so the window
+            # includes any time spent queued behind another job's conversion on
+            # this single worker. Say so: the actionable answer is "the pool is
+            # busy", not "docling hung".
+            logger.warning(
+                "Docling worker did not finish %s within %.0fs (the window includes "
+                "queueing behind another conversion on a single-worker pool)",
+                Path(path).name,
+                timeout,
+            )
+            raise TimeoutError(
+                f"Docling conversion timed out after {timeout:.0f}s: the isolated worker "
+                "is still busy with another conversion or this one exceeded the budget"
+            ) from exc
         except Exception as exc:
             logger.warning("Docling worker conversion failed: %s", exc)
             raise

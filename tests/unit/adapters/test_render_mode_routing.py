@@ -170,7 +170,9 @@ def test_the_missing_asset_channel_is_reported(
     assert any("asset_not_found" in reason for _asset, reason in strategy.last_render_skips)
 
 
-def test_the_publish_path_applies_the_math_compile_gate(tmp_path: Path) -> None:
+def test_the_publish_path_applies_the_math_compile_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     pytest.importorskip("ubt.adapters.pdf.typst_compile")
     from ubt.adapters.pdf.typst_compile import typst_version
 
@@ -179,6 +181,9 @@ def test_the_publish_path_applies_the_math_compile_gate(tmp_path: Path) -> None:
 
     strategy = DoclingRenderStrategy()
     manifest = BookManifest(doc_id="d", title="T", source_path=str(tmp_path / "x.pdf"), chapters=[])
+    # A successful render removes its scratch dir; this test asserts on the
+    # generated source, so it keeps it.
+    monkeypatch.setenv("UBT_KEEP_BUILD_DIR", "1")
     strategy._render_publish_sync(
         manifest,
         [_block("m1", BlockType.NARRATIVE, "s", r"Bad $\frac{a}{}$ here.")],
@@ -188,3 +193,28 @@ def test_the_publish_path_applies_the_math_compile_gate(tmp_path: Path) -> None:
     generated = (tmp_path / ".out_typst" / "main.typ").read_text(encoding="utf-8")
     assert "frac(a, )" not in generated
     assert "Bad" in generated
+
+
+def test_a_successful_publish_render_removes_its_scratch_dir(tmp_path: Path) -> None:
+    """Each delivery used to leave a hidden copy of the book's assets behind.
+
+    ``.out_typst`` holds every figure copied in (content-addressed), the
+    generated source and, for facsimile, the stripped background PDF — a second
+    copy of the book next to the delivered file, and nothing removed it.
+    """
+    from ubt.adapters.pdf.typst_compile import typst_version
+
+    if typst_version() is None:  # pragma: no cover - environment without typst
+        pytest.skip("typst binary not available")
+
+    strategy = DoclingRenderStrategy()
+    manifest = BookManifest(doc_id="d", title="T", source_path=str(tmp_path / "x.pdf"), chapters=[])
+    output = tmp_path / "out.pdf"
+    strategy._render_publish_sync(
+        manifest,
+        [_block("b1", BlockType.NARRATIVE, "Source.", "译文。")],
+        "zh",
+        output,
+    )
+    assert output.exists()
+    assert not (tmp_path / ".out_typst").exists()

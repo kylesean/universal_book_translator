@@ -41,6 +41,12 @@ logger = logging.getLogger(__name__)
 # Marker class added to injected bilingual target nodes.
 _TARGET_CSS_CLASS = BILINGUAL_TARGET_CLASS
 
+#: Largest HTML file this adapter will read into memory. DOCX and EPUB already
+#: have package-size guards; a bare .html file had none, so a multi-hundred-MB
+#: page was decoded whole and expanded into a DOM (typically ~10x the bytes)
+#: with nothing to stop it.
+_MAX_HTML_BYTES = 64 * 1024 * 1024
+
 
 class HTMLAdapter(BaseDocumentAdapter):
     """Adapter for standalone HTML documents (.html/.htm) with DOM injection."""
@@ -51,8 +57,17 @@ class HTMLAdapter(BaseDocumentAdapter):
         if not input_path.exists():
             raise DocumentParseError(f"HTML file not found: {input_path}")
         try:
+            size = input_path.stat().st_size
+            if size > _MAX_HTML_BYTES:
+                raise DocumentParseError(
+                    f"HTML document {input_path} is {size // (1024 * 1024)} MiB, over the "
+                    f"{_MAX_HTML_BYTES // (1024 * 1024)} MiB limit for a single HTML file; "
+                    "split it or convert it to EPUB."
+                )
             raw = decode_markup(input_path.read_bytes())
             return BeautifulSoup(raw, "html.parser")
+        except DocumentParseError:
+            raise
         except Exception as err:
             raise DocumentParseError(f"Failed to parse HTML document {input_path}: {err}") from err
 

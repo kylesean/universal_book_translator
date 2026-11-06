@@ -1350,6 +1350,13 @@ def extract_with_docling(
             )
             if cached_doc is not None:
                 return map_docling_document_to_blocks(cached_doc, path, file_sha256)
+        except TimeoutError as exc:
+            # Do NOT fall back to in-process conversion here. The isolated
+            # worker exists so a docling segfault or OOM cannot take the server
+            # down with it; falling back on a timeout loaded the multi-GB model
+            # into the API process and made every later crash fatal to all jobs.
+            # A timed-out slice fails this chunk, and ``--job-id`` resumes it.
+            raise DocumentParseError(str(exc)) from exc
         except Exception as exc:
             logger.warning(
                 "Docling isolated worker pool conversion failed (%s); falling back to in-process conversion.",
@@ -1454,6 +1461,38 @@ def _place_toc_rows(blocks: list[IRBlock], rows: list[IRBlock], insert_at: int) 
     blocks[:] = ordered
 
 
+#: A PICTURE covering at least this share of its page is a page background or a
+#: full-page plate, not a figure. Treating it as a figure made every paragraph
+#: on that page "in-figure text" and dropped the page's prose entirely.
+_FULL_PAGE_PICTURE_SHARE = 0.7
+
+
+def _bbox_area(box: Any) -> float:
+    """Area of a Docling bbox, 0 for a degenerate/absent one."""
+    try:
+        return max(0.0, float(box.r) - float(box.l)) * max(0.0, float(box.t) - float(box.b))
+    except (AttributeError, TypeError, ValueError):
+        return 0.0
+
+
+def _page_areas(doc: Any) -> dict[int, float]:
+    """Page number -> area in points, from the DoclingDocument's page sizes."""
+    areas: dict[int, float] = {}
+    pages = getattr(doc, "pages", None)
+    if not isinstance(pages, dict):
+        return areas
+    for page_no, page in pages.items():
+        size = getattr(page, "size", None)
+        try:
+            width = float(getattr(size, "width", 0.0) or 0.0)
+            height = float(getattr(size, "height", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if width > 0 and height > 0:
+            areas[int(page_no)] = width * height
+    return areas
+
+
 def map_iterated_items(
     items: list[Any],
     doc: Any,
@@ -1496,10 +1535,26 @@ def map_iterated_items(
             footer_counts[key] = footer_counts.get(key, 0) + 1
 
     # Pass 1: collect picture bounding boxes (for in-figure text exclusion).
+    # A picture that covers most of the page is not a figure, it is the page:
+    # a full-page background/plate makes every paragraph's centre fall "inside
+    # the picture", so the whole page's prose was dropped as in-figure labels —
+    # silently, at parse time, before the delivery contract or the renderer's
+    # skip channel could see it.
+    page_areas = _page_areas(doc)
     picture_boxes: list[tuple[int, Any]] = []
     for item, _level in items:
         if item.label == DocItemLabel.PICTURE:
             for prov in getattr(item, "prov", []) or []:
+                area = page_areas.get(int(getattr(prov, "page_no", 0) or 0), 0.0)
+                box = prov.bbox
+                if area > 0 and _bbox_area(box) >= _FULL_PAGE_PICTURE_SHARE * area:
+                    logger.debug(
+                        "ignoring full-page PICTURE on page %s (%.0f%% of the page): "
+                        "it is a page background, not a figure",
+                        prov.page_no,
+                        100.0 * _bbox_area(box) / area,
+                    )
+                    continue
                 picture_boxes.append((prov.page_no, prov.bbox))
 
     blocks: list[IRBlock] = []
@@ -2256,10 +2311,10 @@ def _ocr_unavailable_hint() -> str:
     """
     return (
         "To enable OCR for scanned pages:\n"
-        "  1. Local measured-box engine (recommended): "
-        "docker build -t ubt-ocr-sidecar deploy/docker/ocr-sidecar && "
-        "docker run -d -p 8765:8765 ubt-ocr-sidecar:latest\n"
-        "  2. Or install local rapidocr: pip install rapidocr-onnxruntime\n"
+        "  1. In-process measured-box engine: pip install rapidocr onnxruntime "
+        "(the [ocr] extra), or\n"
+        "  2. Point UBT_OCR_ENDPOINT at an OCR server you run yourself "
+        "(any HTTP service implementing the UBT sidecar contract)\n"
         "Note: --ocr cloud (vision LLM) returns text without geometry, so it can "
         "proofread a page that already has a text layer but cannot transcribe a "
         "scanned page.\n"
