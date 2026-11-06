@@ -35,17 +35,3 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-
-  # Optional dedicated OCR sidecar service for heavy in-process image OCR
-  ubt-ocr-sidecar:
-    profiles: ["ocr"]
-    build:
-      context: ./deploy/docker/ocr-sidecar
-      dockerfile: Dockerfile
-    image: ubt-ocr-sidecar:latest
-    container_name: ubt-ocr-sidecar
-    restart: unless-stopped
-    ports:
-      - "8765:8765"
-    environment:
-      - UBT_OCR_SIDECAR_TOKEN=${UBT_OCR_SIDECAR_TOKEN:-local-dev-token}

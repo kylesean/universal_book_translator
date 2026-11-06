@@ -226,9 +226,6 @@ select = [
 ignore = ["E501", "ASYNC240"]
 
 [tool.ruff.lint.per-file-ignores]
-# FastAPI's dependency-injection idiom requires File(...)/Form(...) as
-# argument defaults; B008 is a false positive there.
-"deploy/docker/ocr-sidecar/server.py" = ["B008"]
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

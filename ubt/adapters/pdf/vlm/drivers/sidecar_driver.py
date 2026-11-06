@@ -63,8 +63,8 @@ class SidecarOcrDriver:
             "/"
         )
         health_url = f"{target}/health"
-        # A sidecar behind UBT_OCR_SIDECAR_TOKEN requires the bearer on /health
-        # too (any caller); send the same client key the OCR request uses.
+        # A sidecar behind its own bearer token requires the key on /health too
+        # (any caller); send the same client key the OCR request uses.
         key = api_key or os.environ.get("UBT_OCR_API_KEY")
         headers = {"Authorization": f"Bearer {key}"} if key else None
         try:
@@ -114,8 +114,8 @@ class SidecarOcrDriver:
                 payload = resp.json()
         except httpx.ConnectError as exc:
             raise RuntimeError(
-                f"OCR Sidecar connection failed at {ocr_url}. "
-                f"Ensure your OCR container is running (e.g. `docker run -d -p 8765:8765 ubt-ocr-sidecar:latest`)."
+                f"OCR sidecar connection failed at {ocr_url}. "
+                "Ensure the OCR server referenced by UBT_OCR_ENDPOINT is running."
             ) from exc
         except Exception as exc:
             raise RuntimeError(f"OCR Sidecar request failed at {ocr_url}: {exc}") from exc
