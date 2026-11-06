@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v0.1.0)"
+        description: "Release tag to publish (e.g. v0.1.0). Must be an existing tag."
         required: true
         default: "v0.1.0"
 
@@ -27,7 +27,24 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
+          # ``workflow_dispatch`` runs on a branch ref, so the release tag has to
+          # be checked out explicitly. Without this the declared ``tag`` input was
+          # a dead parameter: the run built the branch and the release step had no
+          # tag to attach to.
+          ref: ${{ inputs.tag || github.ref }}
           persist-credentials: false
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          if [ -z "$tag" ]; then
+            echo "::error::no release tag resolved (inputs.tag and github.ref_name are both empty)"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
       - name: Install uv
         uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
@@ -39,13 +56,39 @@ jobs:
           uv python install 3.12
           uv sync --extra dev --locked
 
+      - name: Verify the tag matches the packaged version
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          uv run python - <<'PY'
+          import os
+          import sys
+          import tomllib
+
+          with open("pyproject.toml", "rb") as fh:
+              packaged = tomllib.load(fh)["project"]["version"]
+          tagged = os.environ["VERSION"]
+          if tagged != packaged:
+              sys.exit(
+                  f"release tag version {tagged!r} does not match pyproject version "
+                  f"{packaged!r}: bump the version (or retag) before publishing."
+              )
+          print(f"version {packaged} matches the tag")
+          PY
+
       - name: Lint & Format Check
         run: |
           uv run ruff check
           uv run ruff format --check
 
+      - name: Type Check
+        run: uv run mypy --strict ubt tests
+
       - name: Layering Invariant
         run: uv run python scripts/dump_compiler_edges.py
+
+      - name: Console Bundle Present
+        run: uv run python scripts/check_console_bundle.py
 
       - name: Install typst and CJK fonts
         env:
@@ -75,6 +118,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Install pnpm + Node
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
@@ -147,12 +192,25 @@ jobs:
           if-no-files-found: error
 
   build-docker:
-    name: Build Multi-Arch Docker Container
-    needs: [gate]
+    name: Build & Push Multi-Arch Docker Container
+    # Waits for the wheel smoke test. It used to push in parallel with
+    # ``build-dist``, so a failed distribution left an un-retractable image tag on
+    # GHCR — a "published image, no release" half-state.
+    needs: [gate, build-dist]
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU (multi-architecture emulation)
         uses: docker/setup-qemu-action@49b3bc8e6bdd4480b82f6f5b219a11cac4b779f9  # v3.2.0
@@ -175,7 +233,11 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ steps.tag.outputs.version }}
+            # ``is_default_branch`` is false on a tag ref, so ``:latest`` was
+            # never updated by an actual release. Every release tag is the
+            # newest stable image, so tag it here.
+            type=raw,value=latest
 
       - name: Build and Push Multi-Arch Image (amd64, arm64)
         uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75  # v6.9.0
@@ -195,6 +257,15 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Download Distribution Artifacts
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
@@ -205,6 +276,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191  # v2.0.8
         with:
+          # Required on workflow_dispatch, where github.ref is a branch: the
+          # action refuses to guess a tag.
+          tag_name: ${{ steps.tag.outputs.tag }}
           files: |
             dist/*.whl
             dist/*.tar.gz
