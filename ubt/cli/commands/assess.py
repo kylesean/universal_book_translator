@@ -232,8 +232,10 @@ def assess_cmd(
             engine_signature=f"preset{effective_preset.value}",
         ),
     ]
-    if report.route.recommended_dual_mode != "dual":
-        command_parts += ["--dual-mode", report.route.recommended_dual_mode]
+    # Always carried, including the default "dual". The quote below promises a
+    # reproducible command; leaving the flag off meant a config default of "auto"
+    # silently re-ran the job under a different layout than the one priced.
+    command_parts += ["--dual-mode", report.route.recommended_dual_mode]
     rec_mode = "paper" if report.document.category == "academic_paper" else "book"
     command_parts += ["--mode", rec_mode]
     # The profile decides prompt assembly, glossary seeding and whether

@@ -319,7 +319,12 @@ DefaultsConfig = ProviderConfig
 class UBTConfigFile(BaseModel):
     """Strongly typed model representing the entire ubt.toml configuration document."""
 
-    model_config = ConfigDict(extra="ignore")
+    # Forbid unknown top-level sections: a typo (``[defualts]``) or a section
+    # written the way the *sub-config* views are named (``[typst]``, ``[engine]``)
+    # used to be dropped in silence, so the operator's settings simply did not
+    # apply while the run fell back to defaults. ``[defaults]`` already fails
+    # loudly on an unknown key; the document level now matches it.
+    model_config = ConfigDict(extra="forbid")
 
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
@@ -421,6 +426,22 @@ class UBTEnvSettingsSource(EnvSettingsSource):
         "api_key": "UBT_LLM_API_KEY",
         "service_api_key": "UBT_API_KEY",
     }
+
+    #: List-valued fields that also accept a plain comma-separated env spelling.
+    #: pydantic-settings decodes a "complex" field as JSON *before* any
+    #: ``field_validator`` runs, so ``UBT_FALLBACK_MODELS=a,b`` raised a
+    #: SettingsError naming neither the variable nor the expected format — and
+    #: every ubt command died on it.
+    _COMMA_LIST_FIELDS: ClassVar[frozenset[str]] = frozenset({"fallback_models"})
+
+    def prepare_field_value(
+        self, field_name: str, field: FieldInfo, value: Any, value_is_complex: bool
+    ) -> Any:
+        if field_name in self._COMMA_LIST_FIELDS and isinstance(value, str):
+            raw = value.strip()
+            if raw and not raw.startswith("["):
+                return [item.strip() for item in raw.split(",") if item.strip()]
+        return super().prepare_field_value(field_name, field, value, value_is_complex)
 
     def _extract_field_info(self, field: FieldInfo, field_name: str) -> list[tuple[str, str, bool]]:
         info = super()._extract_field_info(field, field_name)
@@ -1540,6 +1561,42 @@ class UBTConfig(BaseSettings):
             return lowered
         return value
 
+    @field_validator("fallback_models", mode="before")
+    @classmethod
+    def _normalize_fallback_models(cls, value: object) -> object:
+        """Accept the natural comma-separated spelling for the env variable.
+
+        ``UBT_FALLBACK_MODELS=a,b`` is what anyone would write; pydantic-settings
+        tries ``json.loads`` on list fields and aborted with a SettingsError that
+        named neither the variable nor the expected format, so *every* ubt
+        command died with an unactionable traceback. JSON and a real list still
+        work; a single bare model id is a one-element chain.
+        """
+        if not isinstance(value, str):
+            return value
+        raw = value.strip()
+        if not raw:
+            return []
+        if raw.startswith("["):
+            return value
+        return [item.strip() for item in raw.split(",") if item.strip()]
+
+    @field_validator("db_dir", "cache_dir", mode="before")
+    @classmethod
+    def _expand_state_dirs(cls, value: object) -> object:
+        """Expand ``~`` in the state directories.
+
+        ``export UBT_DB_DIR="~/.ubt"`` (quoted, therefore not shell-expanded)
+        used to create a literal directory named ``~`` under the CWD, and
+        ``doctor`` still reported the directory writable because the mkdir
+        succeeded.
+        """
+        if isinstance(value, str) and value.startswith("~"):
+            return Path(value).expanduser()
+        if isinstance(value, Path):
+            return value.expanduser()
+        return value
+
     @field_validator("qe_engine", mode="before")
     @classmethod
     def _normalize_qe_engine(cls, value: object) -> object:
@@ -1906,11 +1963,17 @@ def _env_supplied_field_names() -> set[str]:
     test counted it as set. The mismatch let a provider block's ``base_url`` be
     stripped (so it fell back to ``api.openai.com``) while the block's ``api_key``
     was kept: a private-gateway credential then went to the public endpoint.
-    Mirror the parser: a variable counts only when present and non-empty.
+    Mirror the parser: a variable counts only when present and non-empty, and
+    spelled case-insensitively. pydantic-settings resolves env names without
+    case sensitivity, so ``ubt_draft_model=x`` reaches the field — but this
+    probe only looked for the exact uppercase spelling, so a provider block then
+    overrode it. The same ladder produced two different answers depending on how
+    the operator capitalised the variable.
     """
+    present = {key.upper() for key, value in os.environ.items() if value != ""}
     supplied: set[str] = set()
     for name in UBTConfig.model_fields:
-        if any(os.environ.get(var, "") != "" for var in env_var_names(name)):
+        if any(var.upper() in present for var in env_var_names(name)):
             supplied.add(name)
     return supplied
 

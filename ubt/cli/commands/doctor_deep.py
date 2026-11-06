@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -181,58 +182,62 @@ def probe_system_memory(record: Callable[..., None]) -> None:
 
 def probe_local_inference(config: UBTConfig, record: Callable[..., None]) -> None:
     """Probe local LLM inference engines (Ollama, vLLM, llama.cpp)."""
-    ollama_url = "http://localhost:11434"
-    probed = False
-
-    # Check Ollama
-    try:
-        with httpx.Client(timeout=1.0) as client:
-            resp = client.get(f"{ollama_url}/api/tags")
-            if resp.status_code == 200:
-                probed = True
-                data = resp.json()
-                models = [m.get("name") for m in data.get("models", []) if m.get("name")]
-                clean_model = config.draft_model.split("/")[-1]
-                matches = [m for m in models if clean_model in m or m.startswith(clean_model)]
-
-                if matches:
-                    record(
-                        "Local inference engine",
-                        "OK",
-                        f"Ollama online at {ollama_url}; model '{matches[0]}' verified",
-                        code="local_inference",
-                        detail_code="local_inference.online",
-                        params={
-                            "engine": "Ollama",
-                            "url": ollama_url,
-                            "rtt_ms": "12",
-                            "model": matches[0],
-                        },
-                    )
-                    return
-                else:
-                    sample = ", ".join(models[:4]) or "none"
-                    record(
-                        "Local inference engine",
-                        "WARN",
-                        f"Ollama online, but model '{config.draft_model}' not found. Available: {sample}",
-                        fix=f"ollama pull {config.draft_model}",
-                        code="local_inference",
-                        detail_code="local_inference.model_missing",
-                        fix_code="local_inference.model_missing",
-                        params={"model": config.draft_model},
-                    )
-                    return
-    except Exception:  # ollama probe failed; the configured base_url check below is the fallback
-        pass
-
-    # Check configured base_url if local
     from ubt.core.router.pricing import endpoint_is_local
 
+    ollama_url = "http://localhost:11434"
+    # Probe Ollama only when the configured endpoint could plausibly be it. The
+    # unconditional probe made a hosted base_url report "model not found" with
+    # the fix "ollama pull <hosted-model>" — a diagnosis that cannot apply.
+    if endpoint_is_local(config.base_url) or ":11434" in config.base_url:
+        try:
+            with httpx.Client(timeout=1.0) as client:
+                started = time.perf_counter()
+                resp = client.get(f"{ollama_url}/api/tags")
+                rtt_ms = (time.perf_counter() - started) * 1000.0
+                if resp.status_code == 200:
+                    data = resp.json()
+                    models = [m.get("name") for m in data.get("models", []) if m.get("name")]
+                    clean_model = config.draft_model.split("/")[-1]
+                    matches = [m for m in models if clean_model in m or m.startswith(clean_model)]
+
+                    if matches:
+                        record(
+                            "Local inference engine",
+                            "OK",
+                            f"Ollama online at {ollama_url}; model '{matches[0]}' verified",
+                            code="local_inference",
+                            detail_code="local_inference.online",
+                            params={
+                                "engine": "Ollama",
+                                "url": ollama_url,
+                                "rtt_ms": f"{rtt_ms:.0f}",
+                                "model": matches[0],
+                            },
+                        )
+                        return
+                    else:
+                        sample = ", ".join(models[:4]) or "none"
+                        record(
+                            "Local inference engine",
+                            "WARN",
+                            f"Ollama online, but model '{config.draft_model}' not found. Available: {sample}",
+                            fix=f"ollama pull {config.draft_model}",
+                            code="local_inference",
+                            detail_code="local_inference.model_missing",
+                            fix_code="local_inference.model_missing",
+                            params={"model": config.draft_model},
+                        )
+                        return
+        except Exception:  # ollama probe failed; the base_url check below is the fallback
+            pass
+
+    # Check configured base_url if local
     if endpoint_is_local(config.base_url):
         try:
             with httpx.Client(timeout=1.0) as client:
+                started = time.perf_counter()
                 resp = client.get(f"{config.base_url.rstrip('/')}/models")
+                rtt_ms = (time.perf_counter() - started) * 1000.0
                 if resp.status_code == 200:
                     record(
                         "Local inference engine",
@@ -243,7 +248,7 @@ def probe_local_inference(config: UBTConfig, record: Callable[..., None]) -> Non
                         params={
                             "engine": "LocalServer",
                             "url": config.base_url,
-                            "rtt_ms": "8",
+                            "rtt_ms": f"{rtt_ms:.0f}",
                             "model": config.draft_model,
                         },
                     )
@@ -261,14 +266,13 @@ def probe_local_inference(config: UBTConfig, record: Callable[..., None]) -> Non
             )
             return
 
-    if not probed:
-        record(
-            "Local inference engine",
-            "SKIP",
-            "No active local LLM service detected (Ollama / vLLM / llama.cpp)",
-            code="local_inference",
-            detail_code="local_inference.none",
-        )
+    record(
+        "Local inference engine",
+        "SKIP",
+        "No active local LLM service detected (Ollama / vLLM / llama.cpp)",
+        code="local_inference",
+        detail_code="local_inference.none",
+    )
 
 
 def probe_ghostscript(record: Callable[..., None]) -> None:
@@ -352,13 +356,17 @@ def probe_typst_version(record: Callable[..., None]) -> None:
     except Exception:  # version probe failed; the verdict below reports what was found
         pass
 
+    # Timeout, a non-zero exit, or unparseable output means the binary did NOT
+    # answer — this used to be recorded as OK ("Typst executable responded"),
+    # so a wedged typst read as healthy in the one report operators trust.
     record(
         "Typst version",
-        "OK",
-        "Typst executable responded",
+        "WARN",
+        "Typst binary is on PATH but did not report a version (timed out or crashed)",
+        fix="run `typst --version` manually; reinstall if it hangs",
         code="typst_version",
-        detail_code="typst_version.ok",
-        params={"version": "unknown"},
+        detail_code="typst_version.unresponsive",
+        fix_code="typst_version.unresponsive",
     )
 
 

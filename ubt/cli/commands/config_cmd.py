@@ -16,7 +16,7 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 from urllib.parse import urlparse
 
 import typer
@@ -27,6 +27,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ubt.core.config import (
+    DualMode,
     EngineConfig,
     QualityConfig,
     RouterConfig,
@@ -36,6 +37,19 @@ from ubt.core.config import (
 )
 
 console = Console()
+
+
+def _literal_values(annotation: object) -> tuple[str, ...]:
+    """The allowed values of a ``Literal`` annotation, as strings.
+
+    ``--validate`` used to keep a hand-written copy of these vocabularies, and
+    the copy drifted: ``dual_mode="dual"`` (the only non-default value the
+    schema accepts) was reported as ``FAIL``, while three retired spellings sat
+    in the tuple where pydantic had already rejected them. Deriving the set
+    from the annotation makes the check and the schema the same fact.
+    """
+    return tuple(str(value) for value in get_args(annotation))
+
 
 #: Fields whose value must never be printed; shown as a length, not the secret.
 _SECRET_FIELDS = frozenset({"api_key", "ocr_api_key", "service_api_key", "qe_judge_api_key"})
@@ -171,7 +185,7 @@ def validate_configuration(config: UBTConfig, domain: str | None = None) -> list
                 )
             )
 
-        if config.dual_mode in ("auto", "mono", "bilingual", "side_by_side", "interleaved"):
+        if config.dual_mode in _literal_values(DualMode):
             findings.append(
                 ValidationFinding(
                     "typst", "dual_mode", "OK", f"Valid dual mode: {config.dual_mode}"
@@ -184,7 +198,9 @@ def validate_configuration(config: UBTConfig, domain: str | None = None) -> list
                 )
             )
 
-        if config.pdf_optimize_profile in ("lossless", "ebook", "screen"):
+        if config.pdf_optimize_profile in _literal_values(
+            TypstConfig.model_fields["pdf_optimize_profile"].annotation
+        ):
             findings.append(
                 ValidationFinding(
                     "typst",
