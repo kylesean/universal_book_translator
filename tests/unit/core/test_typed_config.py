@@ -243,3 +243,8 @@ def test_validate_block_rejects_invalid_values_in_toml(tmp_path: Path) -> None:
     )
     with pytest.raises(ProviderConfigError):
         load_provider_config("bad_url", custom_path=bad_url_toml)
+
+
+def test_an_unknown_config_section_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        UBTConfigFile.model_validate({"defaults": {}, "providers": {}, "typst": {}})
