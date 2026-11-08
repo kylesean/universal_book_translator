@@ -325,6 +325,7 @@ export interface TranslationDictionary {
     cancelFailed: string
     jobMissingDesc: string
     backToQueue: string
+    recheckJob: string
     noActiveJobDesc: string
     phaseParse: string
     phaseTranslate: string

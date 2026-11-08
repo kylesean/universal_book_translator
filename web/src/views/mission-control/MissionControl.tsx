@@ -1849,9 +1849,22 @@ export function MissionControl() {
             <p className="text-xs text-muted-foreground leading-relaxed">
               {t.mission.jobMissingDesc}
             </p>
-            <Button onClick={() => navigate('/jobs')} variant="secondary" size="sm">
-              {t.mission.backToQueue}
-            </Button>
+            <div className="flex items-center justify-center gap-2">
+              {/* A 404 is usually permanent (the job was deleted), but it can
+                  also be a transient server-side window; re-running the whole
+                  polling effect — the same rebuild a job switch does — gives
+                  the operator a way back without auto-retrying into noise. */}
+              <Button
+                onClick={() => setStreamGeneration((g) => g + 1)}
+                variant="secondary"
+                size="sm"
+              >
+                {t.mission.recheckJob}
+              </Button>
+              <Button onClick={() => navigate('/jobs')} variant="ghost" size="sm">
+                {t.mission.backToQueue}
+              </Button>
+            </div>
           </div>
         </div>
       ) : !currentJobId ? (

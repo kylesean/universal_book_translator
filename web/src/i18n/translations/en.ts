@@ -383,6 +383,7 @@ export const en: TranslationDictionary = {
     cancelFailed: 'Could not stop the run',
     jobMissingDesc: 'This job could not be read. It may have been deleted, or it belongs to an earlier server session.',
     backToQueue: 'Back to the queue',
+    recheckJob: 'Check again',
     noActiveJobDesc: 'Submit a document from New job, then return here to follow progress and results.',
     phaseParse: 'Understand',
     phaseTranslate: 'Translate',

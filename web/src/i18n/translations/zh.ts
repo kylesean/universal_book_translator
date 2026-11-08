@@ -360,6 +360,7 @@ export const zh: TranslationDictionary = {
     cancelFailed: '无法停止该运行',
     jobMissingDesc: '无法读取该任务——它可能已被删除，或属于更早的服务会话。',
     backToQueue: '返回任务队列',
+    recheckJob: '重新检查',
     noActiveJobDesc: '请在新建任务中提交一份文档，然后在这里查看进度与结果。',
     phaseParse: '理解原书',
     phaseTranslate: '生成译文',
