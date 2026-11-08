@@ -69,6 +69,7 @@ from ubt.core.providers import (
     PROTOCOL_ALIASES,
     PROVIDER_ALLOWED_KEYS,
     PROVIDER_FORBIDDEN_KEYS,
+    ProviderNotFoundError,
     _read_shipped_providers,
     credential_resolution,
     find_config_file,
@@ -99,7 +100,15 @@ class ProviderEditModel(BaseModel):
             "message says to use the environment or the file."
         ),
     )
-    base_url: str | None = Field(default=None, description="Endpoint base URL (http/https)")
+    base_url: str | None = Field(
+        default=None,
+        description=(
+            "Endpoint base URL (http/https). On deployments that refuse "
+            "credential writes, re-pointing a block that holds a credential is "
+            "refused for the same reason: the URL decides where the stored "
+            "credential is sent."
+        ),
+    )
     api_mode: str | None = Field(
         default=None, description="Wire protocol (openai-chat, openai-responses, …)"
     )
@@ -214,11 +223,15 @@ CREDENTIAL_MASK = "********"
 #:
 #: ``api_key`` is here but gated separately (:func:`credential_write_allowed`) —
 #: it is listed so the field reaches validation, and refused there when the
-#: deployment is not local. Excluded on purpose: ``ocr_api_key`` (a different
-#: channel's credential, set by the OCR driver, not the LLM path), and every key
-#: that selects *another* provider (``repair_provider``, ``qe_judge_provider``) or
-#: a global path (``db_dir``, ``prices_file``) — editing those from a provider
-#: form would silently reconfigure a different part of the engine.
+#: deployment is not local. ``base_url`` is gated the same way *for blocks that
+#: hold a credential*: the URL decides where the stored key is sent, so
+#: re-pointing one off-machine without the credential gate would mint the very
+#: bearer token the api_key gate refuses. Excluded on purpose: ``ocr_api_key``
+#: (a different channel's credential, set by the OCR driver, not the LLM path),
+#: and every key that selects *another* provider (``repair_provider``,
+#: ``qe_judge_provider``) or a global path (``db_dir``, ``prices_file``) —
+#: editing those from a provider form would silently reconfigure a different
+#: part of the engine.
 WRITABLE_FIELDS: tuple[str, ...] = tuple(
     name for name in ProviderEditModel.model_fields if name != "make_default"
 )
@@ -336,6 +349,35 @@ def credential_write_allowed(*, is_loopback: bool, is_strict: bool) -> bool:
     return bool(is_loopback) and not bool(is_strict)
 
 
+def _block_holds_credential(name: str) -> bool:
+    """Whether the stored ``[providers.<name>]`` block declares an api_key.
+
+    Read through :func:`credential_resolution` and its ``kind`` state — not the
+    merged block, whose ``${VAR}`` reference has already been expanded (an
+    unset variable collapses to ``""`` and would look keyless while the file
+    still declares one). ``literal`` and ``variable`` both count: either way
+    the credential travels to whatever host ``base_url`` names. A missing
+    block (the create path) holds nothing and stays writable — creating a
+    keyless block from the console is the documented remote-provider flow,
+    and a shipped preset must not carry a key in the first place.
+    """
+    try:
+        return credential_resolution(name).get("kind") in ("literal", "variable")
+    except ProviderNotFoundError:
+        return False
+
+
+def _url_names_loopback(base_url: str) -> bool:
+    """True when the endpoint's host is this machine (no wire to expose)."""
+    from urllib.parse import urlsplit
+
+    try:
+        host = (urlsplit(base_url).hostname or "").lower()
+    except ValueError:
+        return False
+    return host in _LOOPBACK_HOSTS
+
+
 def validate_edit(
     name: str,
     changes: dict[str, Any],
@@ -353,6 +395,29 @@ def validate_edit(
             "a credential cannot be written from the console on this deployment: it is "
             "reachable beyond loopback, or strict auth is on. Set it in ubt.toml or "
             "export UBT_LLM_API_KEY instead."
+        )
+    if (
+        "base_url" in changes
+        and not allow_credential
+        and not _url_names_loopback(str(changes["base_url"]))
+        and _block_holds_credential(name)
+    ):
+        # The credential gate above is defeated by the back door: rewriting
+        # only the endpoint sends the stored key to whatever host the request
+        # names — ``https://attacker.example/v1`` passes the plaintext check
+        # below untouched. On the loopback deployments where credential writes
+        # are allowed this is the operator's own decision; on the shared ones
+        # it is exactly the bearer-token-mints-a-bearer-token move the gate
+        # exists to refuse. Loopback targets are exempt (a local model server
+        # has no wire to expose, the same premise the plaintext guard below
+        # uses), and keyless blocks stay re-pointable: creating a provider
+        # from the console is the documented remote flow.
+        raise ProviderEditError(
+            "this block holds a credential, and the endpoint URL decides where "
+            "that credential is sent — so base_url cannot be re-pointed off "
+            "this machine from the console on this deployment (reachable "
+            "beyond loopback, or strict auth is on). Set base_url in ubt.toml "
+            "instead."
         )
     unknown = sorted(set(changes) - set(WRITABLE_FIELDS))
     if unknown:

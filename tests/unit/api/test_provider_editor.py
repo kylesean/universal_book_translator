@@ -500,11 +500,18 @@ draft_model = "demo-model"
 def test_a_plaintext_remote_base_url_is_refused_while_a_credential_is_stored(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The downgrade guard governs local deployments, where re-pointing is allowed.
+
+    On deployments that refuse credential writes, re-pointing a credentialed
+    block is refused wholesale (see the credential-gate test below); the
+    cleartext check is the one that still applies where the operator may
+    re-point at all.
+    """
     from ubt.api.provider_editor import ProviderEditError, upsert_provider
 
     path = _write_block(tmp_path, _CREDENTIAL_BLOCK, monkeypatch)
     with pytest.raises(ProviderEditError, match="cleartext"):
-        upsert_provider("demo", {"base_url": "http://attacker.invalid/v1"})
+        upsert_provider("demo", {"base_url": "http://attacker.invalid/v1"}, allow_credential=True)
     assert "attacker.invalid" not in path.read_text(encoding="utf-8")
     assert "sk-REAL-SECRET" in path.read_text(encoding="utf-8")
 
@@ -512,10 +519,11 @@ def test_a_plaintext_remote_base_url_is_refused_while_a_credential_is_stored(
 def test_an_https_remote_base_url_is_allowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """https re-pointing is allowed where the operator may re-point at all."""
     from ubt.api.provider_editor import upsert_provider
 
     path = _write_block(tmp_path, _CREDENTIAL_BLOCK, monkeypatch)
-    upsert_provider("demo", {"base_url": "https://new.example/v1"})
+    upsert_provider("demo", {"base_url": "https://new.example/v1"}, allow_credential=True)
     text = path.read_text(encoding="utf-8")
     assert 'base_url = "https://new.example/v1"' in text
     assert "sk-REAL-SECRET" in text
@@ -562,3 +570,47 @@ def test_the_plaintext_predicate(url: str, expected: bool) -> None:
     from ubt.api.provider_editor import _is_plaintext_nonlocal
 
     assert _is_plaintext_nonlocal(url) is expected
+
+
+def test_a_credentialed_block_cannot_be_repointed_without_the_credential_gate(
+    config_dir: Path,
+) -> None:
+    """Re-pointing a credentialed block forwards its stored key to the new host.
+
+    The api_key gate refuses credential writes on shared deployments; letting
+    the same caller rewrite base_url would defeat it — the stored credential
+    (or the ${VAR} reference the message told the operator to use) is sent to
+    whatever endpoint the request names, and https passes the plaintext check.
+    """
+    from ubt.api.provider_editor import ProviderEditError, upsert_provider, validate_edit
+
+    with pytest.raises(ProviderEditError) as excinfo:
+        validate_edit("demo", {"base_url": "https://attacker.example/v1"})
+    assert "credential" in str(excinfo.value)
+
+    with pytest.raises(ProviderEditError):
+        upsert_provider("demo", {"base_url": "https://attacker.example/v1"})
+    assert "attacker.example" not in (config_dir / "ubt.toml").read_text(encoding="utf-8")
+
+
+def test_a_credentialed_block_can_be_repointed_on_a_local_deployment(
+    config_dir: Path,
+) -> None:
+    """allow_credential is the same opt-in for the endpoint as for the key."""
+    from ubt.api.provider_editor import upsert_provider
+
+    upsert_provider("demo", {"base_url": "http://127.0.0.1:9090/v1"}, allow_credential=True)
+    assert 'base_url = "http://127.0.0.1:9090/v1"' in (config_dir / "ubt.toml").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_a_keyless_block_stays_repointable_from_the_console(config_dir: Path) -> None:
+    """Creating and adjusting a keyless block is the documented remote flow."""
+    from ubt.api.provider_editor import upsert_provider
+
+    upsert_provider("local", {"base_url": "http://127.0.0.1:9090/v1", "api_mode": "openai-chat"})
+    upsert_provider("local", {"base_url": "http://127.0.0.1:9091/v1"})
+    assert 'base_url = "http://127.0.0.1:9091/v1"' in (config_dir / "ubt.toml").read_text(
+        encoding="utf-8"
+    )

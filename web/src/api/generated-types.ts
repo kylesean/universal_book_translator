@@ -2121,7 +2121,7 @@ export interface components {
             api_key?: string | null;
             /**
              * Base Url
-             * @description Endpoint base URL (http/https)
+             * @description Endpoint base URL (http/https). On deployments that refuse credential writes, re-pointing a block that holds a credential is refused for the same reason: the URL decides where the stored credential is sent.
              */
             base_url?: string | null;
             /**
