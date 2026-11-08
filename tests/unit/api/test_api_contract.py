@@ -433,7 +433,7 @@ def test_concurrent_resumes_spawn_exactly_one_pipeline(
 
     doc = _write_doc(tmp_path)
     app = create_app(config=_config(tmp_path))
-    manager: JobManager = app.state.job_manager  # type: ignore[attr-defined]
+    manager: JobManager = app.state.job_manager
     record = manager.create_job(
         JobSubmitRequest(
             input_path=str(doc),

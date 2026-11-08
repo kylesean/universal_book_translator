@@ -25,13 +25,13 @@ def test_extraction_thread_inherits_the_usage_sink(monkeypatch: pytest.MonkeyPat
     adapter = DoclingPDFAdapter()
     seen: dict[str, Any] = {}
 
-    def _fake_extract(path: Path, page_range: tuple[int, int] | None = None) -> list[str]:
+    def _fake_extract(path: Path, page_range: tuple[int, int] | None = None) -> list[Any]:
         seen["sink"] = _usage_sink.get()
         return []
 
     monkeypatch.setattr(adapter, "_extract_blocks_sync", _fake_extract)
 
-    async def scenario() -> list[str]:
+    async def scenario() -> list[Any]:
         attach_usage_sink()
         return await adapter._extract_blocks_off_loop(Path("book.pdf"), None)
 
@@ -49,12 +49,12 @@ def test_without_a_sink_the_hop_still_returns_the_blocks(
     adapter = DoclingPDFAdapter()
     marker = object()
 
-    def _fake_extract(path: Path, page_range: tuple[int, int] | None = None) -> list[object]:
+    def _fake_extract(path: Path, page_range: tuple[int, int] | None = None) -> list[Any]:
         return [marker]
 
     monkeypatch.setattr(adapter, "_extract_blocks_sync", _fake_extract)
 
-    async def scenario() -> list[object]:
+    async def scenario() -> list[Any]:
         assert _usage_sink.get() is None
         return await adapter._extract_blocks_off_loop(Path("book.pdf"), None)
 
