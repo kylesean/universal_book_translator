@@ -37,6 +37,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # Known failure mode (2026-11-08, two runs lost): GitHub's release CDN
+      # returned 504 while the status page stayed green, killing this step
+      # and the typst fetch below before any test ran. setup-uv exposes no
+      # retry knob (checked through v10.3.3) and a third-party retry action
+      # would trade one failure mode for a supply-chain surface, so the
+      # typst curl retries on its own while this step's mitigation is
+      # "Re-run failed jobs" once the CDN recovers.
       - name: Install uv
         uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
         with:
