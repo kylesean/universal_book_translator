@@ -76,7 +76,7 @@ if TYPE_CHECKING:
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket
 from ubt.core.router.registry import registry_from_config
 from ubt.core.router.router import ModelRouter, set_run_cancel_token
-from ubt.core.router_mode import decide
+from ubt.core.router_mode import RouteDecision, decide
 
 logger = logging.getLogger(__name__)
 
@@ -1174,6 +1174,192 @@ class PipelineOrchestrator:
             fast_pass=runtime_fast_pass,
         )
 
+    def _decide_route(self, input_path: Path, manifest: BookManifest) -> RouteDecision:
+        """Adaptive short/long chain router (heuristic features per carrier; see
+        ``ubt.core.router_mode.decide``).
+
+        Pure run bookkeeping: it raises before any resource exists, and
+        everything it writes lands on the manifest the abort arms already treat
+        as read-only state.
+        """
+        route_decision = decide(
+            input_path,
+            short_max_pages=self.config.short_max_pages,
+            exec_mode=self.config.exec_mode,
+        )
+        short_chain = route_decision.mode == "short"
+        if self.config.exec_mode == "short" and not short_chain:
+            raise DocumentParseError(
+                f"exec_mode='short' forced but {input_path.name} routed "
+                f"{route_decision.mode} ({route_decision.reason}) — refusing to "
+                "burn chapter-scale context on a long book; use --mode auto/long"
+            )
+        manifest.run.route_decision = route_decision.to_dict()
+        manifest.run.route_mode = route_decision.mode
+        # Explicit ``--columns`` override (a run decision, so it rides on
+        # ``run``). ``None`` keeps the default: align the delivered layout to
+        # the source's own column count, read from the route decision above.
+        manifest.run.layout_columns = self.config.layout_columns
+        manifest.run.config_snapshot = {
+            "draft_model": self.config.draft_model,
+            "repair_model": self.config.repair_model,
+            "qe_engine": self.config.qe_engine,
+            # Without this the report can say "nothing was scored" but not
+            # *why*, and the console could only offer the generic "QE not
+            # measured". The judge flag is the whole answer: the heuristic
+            # engine emits discrete defect bands (never a continuous score)
+            # unless the LLM judge is switched on, and that is a separate
+            # opt-in (UBT_QE_JUDGE_ENABLED).
+            "qe_judge_enabled": self.config.qe_judge_enabled,
+            "qe_threshold": self.config.qe_threshold,
+            "max_repair_rounds": self.config.max_repair_rounds,
+            "prompt_strategy": self.config.prompt_strategy,
+        }
+        return route_decision
+
+    async def _acquire_run_ledger(
+        self, actual_job_id: str, acquired: dict[str, Any]
+    ) -> tuple[LedgerWriterLock, SQLiteJobLedger]:
+        """Open the job's ledger under its single-writer lease.
+
+        ``acquired`` records each resource the moment it exists, so a failure
+        mid-acquisition (ledger migrations, the Agent-mode refusal below)
+        leaves the caller holding exactly what was created: the abort arms and
+        the run's ``finally`` tear it down the same way they did when this code
+        lived inline. This method itself cleans up nothing — releasing a lock
+        whose ledger the abort arms still have to finalize would break the
+        terminal-write ordering.
+        """
+        db_path = self.config.db_dir / f"{actual_job_id}.sqlite"
+        # Single-writer guard, taken *before* the failure-marking try/finally:
+        # a losing second writer must not write job state into the winner's
+        # ledger (the engine claims no per-block leases; this lock is the only
+        # cross-process job mutual exclusion).
+        writer_lock = LedgerWriterLock(db_path, actual_job_id)
+        # Off-loop, like every other sqlite call: a losing claimant parks on
+        # the lock's busy_timeout (30 s -- writer_lock.py) and a fresh ledger
+        # runs its migrations, so taking either inline stalls every slot's
+        # loop — the missed-heartbeat path that reclaims a still-running job
+        # and bills the book twice (see job_worker's ``_q``).
+        await asyncio.to_thread(writer_lock.acquire)
+        acquired["writer_lock"] = writer_lock
+
+        ledger = await asyncio.to_thread(SQLiteJobLedger, db_path, fresh=bool(self.config.fresh))
+        acquired["ledger"] = ledger
+        # Late writes (checkpoint batches, metadata, finalize) verify this
+        # lease in the write path instead of trusting the heartbeat timer.
+        if hasattr(ledger, "bind_writer_lock"):
+            ledger.bind_writer_lock(writer_lock)
+        # An Agent-hosted job is translated by an external host through
+        # ubt_agent_claim/submit; running the provider pipeline over the
+        # same ledger would draft the same blocks with a second writer (and
+        # pay the provider for work the Agent host is also doing). Refuse
+        # before any spend instead of letting ingest reinterpret the job.
+        from ubt.core.engine.agent_translation import AGENT_MODE
+
+        stored_mode = await asyncio.to_thread(
+            ledger.get_job_metadata_value, actual_job_id, "translation_mode"
+        )
+        if stored_mode == AGENT_MODE:
+            raise UBTError(
+                f"Job {actual_job_id} is an Agent-hosted translation; run it "
+                "through ubt_agent_claim/ubt_agent_submit, or start a new job "
+                "id for a provider translation."
+            )
+        return writer_lock, ledger
+
+    def _build_stage_context(
+        self,
+        prep: _RunPreparation,
+        *,
+        ledger: SQLiteJobLedger,
+        tm: TranslationMemory | None,
+        route_decision: RouteDecision,
+        short_chain: bool,
+        cancel_token: asyncio.Event | None,
+        input_path: Path,
+        output_path: Path | None,
+        target_lang: str,
+        profile_name: str,
+        start_chapter: int,
+        max_chapters: int | None,
+    ) -> tuple[RunServices, StageContext]:
+        """Assemble the run's policy, shared-state carriers and stage context.
+
+        Pure construction — nothing here owns a resource that needs teardown.
+        The policy carries no granularity axis: the translation unit is always
+        the micro block, and ``config.macro_chunk_size`` (default 8) only
+        decides how many micro blocks share one draft call. The render engine
+        stays a separate decision (see adaptive_policy).
+        """
+        adaptive_policy = resolve_adaptive_policy(
+            manifest=prep.manifest,
+            route_decision=route_decision,
+            config=self.config,
+        )
+        prep.manifest.run.adaptive_policy = adaptive_policy.to_dict()
+
+        # One object carries the run's shared state into each stage, so a
+        # stage's signature says what is *its own* (the visual-gate knobs,
+        # the repair-round cap) rather than restating ledger, job id,
+        # languages, event factory and semaphore every time. The per-run
+        # language-bound collaborators are built here rather than at the
+        # stage that uses them so the whole set is visible in one place, and
+        # are handed to the plan instead of becoming fields on the shared
+        # context. ``fast_pass`` is the run's single filter, created above
+        # next to the runner it is bound to.
+        concurrency_sem = asyncio.Semaphore(self.config.max_concurrency)
+        services = RunServices(
+            fast_pass=prep.fast_pass,
+            qe_runner=prep.qe_runner,
+            repair_loop=prep.repair_loop,
+            adaptive_policy=adaptive_policy,
+            concurrency_sem=concurrency_sem,
+            tm=tm,
+            # Loaded lazily, after ingest has produced the blocks; why it is
+            # shared lives in :class:`SourceDocumentIndex`.
+            source_document=SourceDocumentIndex(),
+            qe_runner_explicit=self._qe_runner_explicit,
+            repair_loop_explicit=self._repair_loop_explicit,
+        )
+        ctx = StageContext(
+            config=self.config,
+            router=self.router,
+            ledger=ledger,
+            manifest=prep.manifest,
+            adapter=prep.adapter,
+            job_id=prep.actual_job_id,
+            input_path=input_path,
+            output_path=output_path,
+            source_lang=prep.source_lang,
+            target_lang=target_lang,
+            profile_name=profile_name,
+            create_event=self._create_progress_event,
+            short_chain=short_chain,
+            start_chapter=start_chapter,
+            max_chapters=max_chapters,
+            # The fast lane may still be refused by the file probe the bible
+            # stage runs; this is the policy's wish, not the verdict.
+            fast_lane=adaptive_policy.fast_lane_bible,
+            # A callable, so the export stage reads the provider's counters
+            # when it renders rather than when the loop started.
+            measure_run_usage=lambda: self._session_usage(prep.run_session),
+            bill_run_usage=lambda: self._bill_session(
+                prep.run_session, prep.actual_job_id, ledger, raise_on_budget=False
+            ),
+            cancel_token=cancel_token,
+            # Separate stop channel: fires when another process reclaims this
+            # run's writer lease. Present on every path, including the REST
+            # embedding path that passes no ``cancel_token``.
+            lease_lost=self._lease_lost_event,
+        )
+        logger.info(
+            "Adaptive execution policy for %s: %s",
+            prep.actual_job_id,
+            adaptive_policy.reason,
+        )
+        return services, ctx
+
     async def run(
         self,
         input_path: Path,
@@ -1200,12 +1386,7 @@ class PipelineOrchestrator:
         )
         adapter = prep.adapter
         manifest = prep.manifest
-        source_lang = prep.source_lang
-        runtime_qe_runner = prep.qe_runner
-        runtime_repair_loop = prep.repair_loop
-        runtime_fast_pass = prep.fast_pass
         actual_job_id = prep.actual_job_id
-        run_session = prep.run_session
         # The renewal task signals a lost lease through its own event; reset the
         # per-run flags so a reused orchestrator cannot inherit a previous run's
         # verdict. A fresh Event per run is required: the old one may already be
@@ -1222,41 +1403,8 @@ class PipelineOrchestrator:
         writer_lock: LedgerWriterLock | None = None
 
         try:
-            # Adaptive short/long chain router (heuristic features per carrier;
-            # see ubt.core.router_mode.decide).
-            route_decision = decide(
-                input_path,
-                short_max_pages=self.config.short_max_pages,
-                exec_mode=self.config.exec_mode,
-            )
+            route_decision = self._decide_route(input_path, manifest)
             short_chain = route_decision.mode == "short"
-            if self.config.exec_mode == "short" and not short_chain:
-                raise DocumentParseError(
-                    f"exec_mode='short' forced but {input_path.name} routed "
-                    f"{route_decision.mode} ({route_decision.reason}) — refusing to "
-                    "burn chapter-scale context on a long book; use --mode auto/long"
-                )
-            manifest.run.route_decision = route_decision.to_dict()
-            manifest.run.route_mode = route_decision.mode
-            # Explicit ``--columns`` override (a run decision, so it rides on
-            # ``run``). ``None`` keeps the default: align the delivered layout to
-            # the source's own column count, read from the route decision above.
-            manifest.run.layout_columns = self.config.layout_columns
-            manifest.run.config_snapshot = {
-                "draft_model": self.config.draft_model,
-                "repair_model": self.config.repair_model,
-                "qe_engine": self.config.qe_engine,
-                # Without this the report can say "nothing was scored" but not
-                # *why*, and the console could only offer the generic "QE not
-                # measured". The judge flag is the whole answer: the heuristic
-                # engine emits discrete defect bands (never a continuous score)
-                # unless the LLM judge is switched on, and that is a separate
-                # opt-in (UBT_QE_JUDGE_ENABLED).
-                "qe_judge_enabled": self.config.qe_judge_enabled,
-                "qe_threshold": self.config.qe_threshold,
-                "max_repair_rounds": self.config.max_repair_rounds,
-                "prompt_strategy": self.config.prompt_strategy,
-            }
             if short_chain:
                 logger.info(
                     "Short chain for job %s: %s",
@@ -1264,120 +1412,37 @@ class PipelineOrchestrator:
                     route_decision.reason,
                 )
 
-            # Shared translation memory across jobs. Created lazily per run inside
-            # the guarded block so construction failures are handled cleanly.
-            db_path = self.config.db_dir / f"{actual_job_id}.sqlite"
-            # Single-writer guard, taken *before* the failure-marking try/finally:
-            # a losing second writer must not write job state into the winner's
-            # ledger (the engine claims no per-block leases; this lock is the only
-            # cross-process job mutual exclusion).
-            writer_lock = LedgerWriterLock(db_path, actual_job_id)
-            # Off-loop, like every other sqlite call: a losing claimant parks on
-            # the lock's busy_timeout (30 s -- writer_lock.py) and a fresh ledger
-            # runs its migrations, so taking either inline stalls every slot's
-            # loop — the missed-heartbeat path that reclaims a still-running job
-            # and bills the book twice (see job_worker's ``_q``).
-            await asyncio.to_thread(writer_lock.acquire)
-
-            ledger = await asyncio.to_thread(
-                SQLiteJobLedger, db_path, fresh=bool(self.config.fresh)
-            )
-            # Late writes (checkpoint batches, metadata, finalize) verify this
-            # lease in the write path instead of trusting the heartbeat timer.
-            if hasattr(ledger, "bind_writer_lock"):
-                ledger.bind_writer_lock(writer_lock)
-            # An Agent-hosted job is translated by an external host through
-            # ubt_agent_claim/submit; running the provider pipeline over the
-            # same ledger would draft the same blocks with a second writer (and
-            # pay the provider for work the Agent host is also doing). Refuse
-            # before any spend instead of letting ingest reinterpret the job.
-            from ubt.core.engine.agent_translation import AGENT_MODE
-
-            stored_mode = await asyncio.to_thread(
-                ledger.get_job_metadata_value, actual_job_id, "translation_mode"
-            )
-            if stored_mode == AGENT_MODE:
-                raise UBTError(
-                    f"Job {actual_job_id} is an Agent-hosted translation; run it "
-                    "through ubt_agent_claim/ubt_agent_submit, or start a new job "
-                    "id for a provider translation."
-                )
+            # Partial-acquisition holder: _acquire_run_ledger records each
+            # resource the moment it exists, so a failure mid-acquisition lands
+            # in the abort arms below holding exactly what was created — the
+            # same teardown this code performed when it lived inline.
+            acquired: dict[str, Any] = {}
+            try:
+                writer_lock, ledger = await self._acquire_run_ledger(actual_job_id, acquired)
+            except BaseException:
+                writer_lock = acquired.get("writer_lock", writer_lock)
+                ledger = acquired.get("ledger", ledger)
+                raise
             if self.config.tm_enabled:
+                # Shared translation memory across jobs. Created lazily per run
+                # inside the guarded block so construction failures are handled
+                # cleanly.
                 self.config.db_dir.mkdir(parents=True, exist_ok=True)
                 tm = TranslationMemory(self.config.db_dir / "tm.sqlite")
 
-            # -----------------------------------------------------------------
-            # Adaptive Policy Resolution (single pipeline)
-            # The policy carries no granularity axis: the translation unit is
-            # always the micro block, and ``config.macro_chunk_size`` (default 8)
-            # only decides how many micro blocks share one draft call. The render
-            # engine stays a separate decision (see adaptive_policy).
-            # -----------------------------------------------------------------
-            adaptive_policy = resolve_adaptive_policy(
-                manifest=manifest,
-                route_decision=route_decision,
-                config=self.config,
-            )
-            manifest.run.adaptive_policy = adaptive_policy.to_dict()
-
-            # One object carries the run's shared state into each stage, so a
-            # stage's signature says what is *its own* (the visual-gate knobs,
-            # the repair-round cap) rather than restating ledger, job id,
-            # languages, event factory and semaphore every time. The per-run
-            # language-bound collaborators are built here rather than at the
-            # stage that uses them so the whole set is visible in one place, and
-            # are handed to the plan instead of becoming fields on the shared
-            # context. ``fast_pass`` is the run's single filter, created above
-            # next to the runner it is bound to.
-            concurrency_sem = asyncio.Semaphore(self.config.max_concurrency)
-            services = RunServices(
-                fast_pass=runtime_fast_pass,
-                qe_runner=runtime_qe_runner,
-                repair_loop=runtime_repair_loop,
-                adaptive_policy=adaptive_policy,
-                concurrency_sem=concurrency_sem,
-                tm=tm,
-                # Loaded lazily, after ingest has produced the blocks; why it is
-                # shared lives in :class:`SourceDocumentIndex`.
-                source_document=SourceDocumentIndex(),
-                qe_runner_explicit=self._qe_runner_explicit,
-                repair_loop_explicit=self._repair_loop_explicit,
-            )
-            ctx = StageContext(
-                config=self.config,
-                router=self.router,
+            services, ctx = self._build_stage_context(
+                prep,
                 ledger=ledger,
-                manifest=manifest,
-                adapter=adapter,
-                job_id=actual_job_id,
+                tm=tm,
+                route_decision=route_decision,
+                short_chain=short_chain,
+                cancel_token=cancel_token,
                 input_path=input_path,
                 output_path=output_path,
-                source_lang=source_lang,
                 target_lang=target_lang,
                 profile_name=profile_name,
-                create_event=self._create_progress_event,
-                short_chain=short_chain,
                 start_chapter=start_chapter,
                 max_chapters=max_chapters,
-                # The fast lane may still be refused by the file probe the bible
-                # stage runs; this is the policy's wish, not the verdict.
-                fast_lane=adaptive_policy.fast_lane_bible,
-                # A callable, so the export stage reads the provider's counters
-                # when it renders rather than when the loop started.
-                measure_run_usage=lambda: self._session_usage(run_session),
-                bill_run_usage=lambda: self._bill_session(
-                    run_session, actual_job_id, ledger, raise_on_budget=False
-                ),
-                cancel_token=cancel_token,
-                # Separate stop channel: fires when another process reclaims this
-                # run's writer lease. Present on every path, including the REST
-                # embedding path that passes no ``cancel_token``.
-                lease_lost=self._lease_lost_event,
-            )
-            logger.info(
-                "Adaptive execution policy for %s: %s",
-                actual_job_id,
-                adaptive_policy.reason,
             )
 
             # -----------------------------------------------------------------
@@ -1513,26 +1578,11 @@ class PipelineOrchestrator:
                     error=public_job_error(exc, actual_job_id),
                 )
             )
-            # Report the job's real progress on the failure event: a run that
-            # paid for 900/1000 blocks must not read as 0% on /status, SSE, or
-            # the queue row just because it ended in failure.
-            failure_stats = (
-                await asyncio.to_thread(ledger.get_job_stats, actual_job_id)
-                if ledger is not None
-                else None
-            )
-            failure_event = TranslationProgressEvent(
-                event_type=EventType.PIPELINE_FAILED,
-                job_id=actual_job_id,
-                total_blocks=int((failure_stats or {}).get("total", 0) or 0),
-                drafted_blocks=int((failure_stats or {}).get("drafted", 0) or 0),
-                repair_pending_blocks=int((failure_stats or {}).get("repair_pending", 0) or 0),
-                completed_blocks=int((failure_stats or {}).get("completed", 0) or 0),
-                failed_blocks=int((failure_stats or {}).get("failed", 0) or 0),
-                needs_human_blocks=int((failure_stats or {}).get("needs_human", 0) or 0),
-                blocked_human_blocks=int((failure_stats or {}).get("blocked_human", 0) or 0),
-                message=public_job_error(exc, actual_job_id),
-            )
+            # Report the job's real progress on the failure event (see
+            # _failure_progress_event): a run that paid for 900/1000 blocks must
+            # not read as 0% on /status, SSE, or the queue row just because it
+            # ended in failure.
+            failure_event = await self._failure_progress_event(ledger, actual_job_id, exc)
             try:
                 yield failure_event
             except Exception as report_exc:
@@ -1547,51 +1597,105 @@ class PipelineOrchestrator:
             # token bound made the next job's first backoff raise
             # JobInterruptedError for a cancel that belonged to its predecessor.
             set_run_cancel_token(None, None)
-            # Release the WAL + connection per run, and close the
-            # provider's HTTP pool (it is recreated lazily on the next call, so
-            # reusing this orchestrator for another job stays correct).
-            if ledger is not None:
-                try:
-                    ledger.close()
-                except Exception as ledger_exc:
-                    logger.debug("Error closing ledger for job %s: %s", actual_job_id, ledger_exc)
-            if tm is not None:
-                try:
-                    tm.close()
-                except Exception as tm_exc:
-                    logger.debug("Error closing TM for job %s: %s", actual_job_id, tm_exc)
-            # Adapters may own subprocesses; close
-            # them per run so a long-lived server does not accumulate children.
-            if adapter is not None and self.custom_adapter is None:
-                await _close_adapter_off_loop(adapter, actual_job_id)
-            if self._owns_router:
-                try:
-                    await self.router.aclose()
-                except Exception as router_exc:
-                    logger.debug("Error closing router for job %s: %s", actual_job_id, router_exc)
-            if self._owns_qe_runner:
-                try:
-                    await self.qe_runner.aclose()
-                except Exception as qe_exc:
-                    logger.debug("Error closing QE runner for job %s: %s", actual_job_id, qe_exc)
-            # The judge's own provider is created per orchestrator and owns an
-            # httpx.AsyncClient; nothing else ever closed it, so a long-lived
-            # API/worker leaked one connection pool per judged run. It is closed
-            # after the QE runner (which may still be unwinding a call).
-            if self._judge_provider is not None:
-                try:
-                    await self._judge_provider.aclose()
-                except Exception as judge_exc:
-                    logger.debug(
-                        "Error closing judge provider for job %s: %s", actual_job_id, judge_exc
-                    )
-            if writer_lock is not None:
-                try:
-                    writer_lock.release()
-                except Exception as lock_exc:
-                    logger.debug(
-                        "Error releasing writer lock for job %s: %s", actual_job_id, lock_exc
-                    )
-            # Nothing reads the session after the run ends (one orchestrator per
-            # job), so the pop is pure teardown.
-            self._billing_sessions.pop(actual_job_id, None)
+            # Release the run's resource ladder (ledger, TM, adapter, router,
+            # QE runner, judge provider, writer lock, billing session) — see
+            # _teardown_run_resources for the ordering constraints.
+            await self._teardown_run_resources(
+                ledger=ledger,
+                tm=tm,
+                adapter=adapter,
+                writer_lock=writer_lock,
+                actual_job_id=actual_job_id,
+            )
+
+    async def _failure_progress_event(
+        self,
+        ledger: SQLiteJobLedger | None,
+        actual_job_id: str,
+        exc: Exception,
+    ) -> TranslationProgressEvent:
+        """Build the PIPELINE_FAILED event a run's abort reports.
+
+        The stats query rides a worker thread (see _create_progress_event), and
+        the event carries the run's real progress: a run that paid for
+        900/1000 blocks must not read as 0% on /status, SSE, or the queue row
+        just because it ended in failure.
+        """
+        failure_stats = (
+            await asyncio.to_thread(ledger.get_job_stats, actual_job_id)
+            if ledger is not None
+            else None
+        )
+        return TranslationProgressEvent(
+            event_type=EventType.PIPELINE_FAILED,
+            job_id=actual_job_id,
+            total_blocks=int((failure_stats or {}).get("total", 0) or 0),
+            drafted_blocks=int((failure_stats or {}).get("drafted", 0) or 0),
+            repair_pending_blocks=int((failure_stats or {}).get("repair_pending", 0) or 0),
+            completed_blocks=int((failure_stats or {}).get("completed", 0) or 0),
+            failed_blocks=int((failure_stats or {}).get("failed", 0) or 0),
+            needs_human_blocks=int((failure_stats or {}).get("needs_human", 0) or 0),
+            blocked_human_blocks=int((failure_stats or {}).get("blocked_human", 0) or 0),
+            message=public_job_error(exc, actual_job_id),
+        )
+
+    async def _teardown_run_resources(
+        self,
+        *,
+        ledger: SQLiteJobLedger | None,
+        tm: TranslationMemory | None,
+        adapter: DocumentAdapter | None,
+        writer_lock: LedgerWriterLock | None,
+        actual_job_id: str,
+    ) -> None:
+        """Release the run's resource ladder in acquisition order.
+
+        Every close is failure-tolerant by design: the run has already decided
+        its outcome by the time this runs, and a teardown error must not mask
+        it — each step logs at debug and moves to the next resource. The
+        ledger closes before the writer lock releases, and the judge provider
+        closes after the QE runner (which may still be unwinding a call).
+        """
+        if ledger is not None:
+            try:
+                ledger.close()
+            except Exception as ledger_exc:
+                logger.debug("Error closing ledger for job %s: %s", actual_job_id, ledger_exc)
+        if tm is not None:
+            try:
+                tm.close()
+            except Exception as tm_exc:
+                logger.debug("Error closing TM for job %s: %s", actual_job_id, tm_exc)
+        # Adapters may own subprocesses; close them per run so a long-lived
+        # server does not accumulate children.
+        if adapter is not None and self.custom_adapter is None:
+            await _close_adapter_off_loop(adapter, actual_job_id)
+        if self._owns_router:
+            try:
+                await self.router.aclose()
+            except Exception as router_exc:
+                logger.debug("Error closing router for job %s: %s", actual_job_id, router_exc)
+        if self._owns_qe_runner:
+            try:
+                await self.qe_runner.aclose()
+            except Exception as qe_exc:
+                logger.debug("Error closing QE runner for job %s: %s", actual_job_id, qe_exc)
+        # The judge's own provider is created per orchestrator and owns an
+        # httpx.AsyncClient; nothing else ever closed it, so a long-lived
+        # API/worker leaked one connection pool per judged run. It is closed
+        # after the QE runner (which may still be unwinding a call).
+        if self._judge_provider is not None:
+            try:
+                await self._judge_provider.aclose()
+            except Exception as judge_exc:
+                logger.debug(
+                    "Error closing judge provider for job %s: %s", actual_job_id, judge_exc
+                )
+        if writer_lock is not None:
+            try:
+                writer_lock.release()
+            except Exception as lock_exc:
+                logger.debug("Error releasing writer lock for job %s: %s", actual_job_id, lock_exc)
+        # Nothing reads the session after the run ends (one orchestrator per
+        # job), so the pop is pure teardown.
+        self._billing_sessions.pop(actual_job_id, None)
