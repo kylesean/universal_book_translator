@@ -347,8 +347,12 @@ class HierarchicalMemoryManager:
                 summary_text=deterministic_epoch_summary(combined, self.max_l3_chars),
             )
             self._epochs.append(epoch)
-        if self.max_epochs is not None:
-            self._epochs = self._epochs[-self.max_epochs :]
+        # Route through the same trim as the incremental path: a bare FIFO
+        # slice evicted the epoch-0 long-range anchor, so a book that outgrew
+        # ``max_epochs`` lost its "chapters 1-10" memory on the very repair
+        # refresh that was supposed to renew it — and the rebuild path then
+        # disagreed with the incremental path about what the anchor slot holds.
+        self._trim_epochs()
 
     def replace_chapter_snapshot(
         self,
@@ -402,9 +406,12 @@ class HierarchicalMemoryManager:
         snapshots = [StepSnapshot(**s) for s in state.get("snapshots", []) if isinstance(s, dict)]
         epochs = [EpochSnapshot(**e) for e in state.get("epochs", []) if isinstance(e, dict)]
         self._snapshots = snapshots
-        if self.max_epochs is not None and len(epochs) > self.max_epochs:
-            epochs = epochs[-self.max_epochs :]
         self._epochs = epochs
+        # Same trim contract as the incremental path (epoch 0 pinned as the
+        # long-range anchor): a bare slice here made a resumed run forget the
+        # book's opening exactly when ``max_epochs`` was first exceeded
+        # across the restart.
+        self._trim_epochs()
         try:
             self._step_counter = int(state.get("step_counter", len(snapshots)))
         except (TypeError, ValueError):

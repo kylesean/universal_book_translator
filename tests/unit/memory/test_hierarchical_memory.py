@@ -345,7 +345,12 @@ def test_restore_state_caps_max_epochs() -> None:
     }
     manager.restore_state(state)
     assert len(manager.epochs) == 3
-    assert [e.epoch_index for e in manager.epochs] == [7, 8, 9]
+    # The anchor semantics match the incremental path (see
+    # test_max_epochs_capping_in_ultra_long_books): epoch 0 is the book's
+    # long-range anchor and survives the cap, not a FIFO casualty. The
+    # hand-built 10-epoch state below could never come from export_state
+    # (which is already trimmed) — it exists to pin the trim contract itself.
+    assert [e.epoch_index for e in manager.epochs] == [0, 8, 9]
 
     default_mgr = HierarchicalMemoryManager()
     assert default_mgr.max_epochs == DEFAULT_MAX_EPOCHS == 50
@@ -565,3 +570,31 @@ def test_a_chapter_transition_triggers_once_the_buffer_has_content() -> None:
     assert manager.should_trigger_snapshot() is False
     assert manager.should_trigger_snapshot(_block("ch2#b1", 2, target="第二章。")) is True
     assert manager.should_trigger_snapshot(_block("ch1#b2", 2, target="同章。")) is False
+
+
+async def test_the_epoch_zero_anchor_survives_rebuild_and_restore() -> None:
+    """Rebuild and restore must honour _trim_epochs' pinned epoch-0 anchor.
+
+    Both paths used a bare ``[-max_epochs:]`` slice, so a book that outgrew
+    ``max_epochs`` lost its "chapters 1-10" anchor on the next repair refresh
+    or resume — the incremental path kept the anchor while the two rebuild
+    paths silently dropped it, forking what the anchor slot holds.
+    """
+    manager = HierarchicalMemoryManager(l3_epoch_steps=2, max_epochs=2)
+    for chapter in range(6):
+        await _snapshot(manager, [_block(f"c{chapter}#b1", chapter, target="x" * 300)])
+    # The incremental path trims as it appends: three epochs were generated
+    # and the trim already pinned the first as the anchor.
+    assert len(manager.epochs) == 2
+    anchor = manager.epochs[0]
+
+    manager.rebuild_epochs()
+    assert manager.epochs[0].summary_text == anchor.summary_text
+    assert manager.epochs[0].start_spine == anchor.start_spine
+    assert len(manager.epochs) <= 2
+
+    fresh = HierarchicalMemoryManager(l3_epoch_steps=2, max_epochs=2)
+    fresh.restore_state(manager.export_state())
+    assert fresh.epochs[0].summary_text == anchor.summary_text
+    assert fresh.epochs[0].start_spine == anchor.start_spine
+    assert len(fresh.epochs) <= 2
