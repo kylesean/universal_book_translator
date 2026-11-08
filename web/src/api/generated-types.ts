@@ -1590,6 +1590,11 @@ export interface components {
              * @default 0
              */
             bottom_15_avg_qe: number;
+            /**
+             * Qe Measured
+             * @default false
+             */
+            qe_measured: boolean;
             /** Estimated Cost Usd */
             estimated_cost_usd?: number | null;
             /** Stage */
@@ -1806,6 +1811,12 @@ export interface components {
              * @default false
              */
             dry_run: boolean;
+            /**
+             * Rehearsal Auto
+             * @description True when the server (not the client) forced dry_run; resume then runs for real
+             * @default false
+             */
+            rehearsal_auto: boolean;
             /**
              * Fresh
              * @description Discard prior ledger state instead of resuming (unset follows UBT_FRESH)

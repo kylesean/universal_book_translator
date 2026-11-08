@@ -5489,6 +5489,11 @@
             "title": "Bottom 15 Avg Qe",
             "default": 0.0
           },
+          "qe_measured": {
+            "type": "boolean",
+            "title": "Qe Measured",
+            "default": false
+          },
           "estimated_cost_usd": {
             "anyOf": [
               {
@@ -6060,6 +6065,12 @@
             "type": "boolean",
             "title": "Dry Run",
             "description": "Zero-token rehearsal run (echo provider)",
+            "default": false
+          },
+          "rehearsal_auto": {
+            "type": "boolean",
+            "title": "Rehearsal Auto",
+            "description": "True when the server (not the client) forced dry_run; resume then runs for real",
             "default": false
           },
           "fresh": {

@@ -419,6 +419,12 @@ export function NewJobWizard() {
           // A silent re-price failure must not blank the panel: the last quote
           // stays, visibly flagged as possibly outdated. Record the attempted
           // fingerprint so the drift check does not loop on the same failure.
+          // This list MUST stay identical to the success fingerprint below
+          // (and to ``assessFingerprint``): omitting a field — repairProvider
+          // was once missing here — makes the attempted fingerprint never
+          // equal the live one, and the completion-time recheck then re-armed
+          // itself every 350ms in a no-backoff loop for as long as the
+          // assessment endpoint kept failing.
           setAssessStale(true)
           assessedFingerprintRef.current = [
             path.trim(),
@@ -427,6 +433,7 @@ export function NewJobWizard() {
             activeTarget,
             activeSource,
             provider,
+            repairProvider,
             ocrMode,
             visualJudge,
             concurrency.trim(),
@@ -727,6 +734,9 @@ export function NewJobWizard() {
     glossary: glossaryFile?.path ?? null,
     priority: 0,
     dry_run: dryRun,
+    // The intake-forced-rehearsal marker is server-owned: a client request
+    // always carries false, and the server normalizes it regardless.
+    rehearsal_auto: false,
     budget_usd: budgetUsd,
   })
 
