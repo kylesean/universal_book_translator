@@ -43,6 +43,7 @@ from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.ledger_mixins import (
     AGENT_REQUEST_FINGERPRINT_KEY,
     AGENT_SESSION_KEY,
+    AgentSessionState,
     agent_package_accepted_blocks,
 )
 from ubt.core.engine.ledger_reading import (
@@ -832,7 +833,7 @@ class AgentTranslationService:
                 "agent_session",
                 {
                     "mode": AGENT_MODE,
-                    "state": "awaiting_agent",
+                    "state": AgentSessionState.AWAITING_AGENT.value,
                     "packages": {},
                     "created_at": _now(),
                     "updated_at": _now(),
@@ -1328,7 +1329,7 @@ class AgentTranslationService:
             keep_lease_fresh(lock, on_lost=lambda _reason: lease_lost.set()),
             name=f"renew-agent-finish:{request.job_id}",
         )
-        session_state = "awaiting_agent"
+        session_state: AgentSessionState = AgentSessionState.AWAITING_AGENT
         try:
             await self._assert_agent_job(ledger, request.job_id)
             persisted = await asyncio.to_thread(ledger.get_job_status, request.job_id)
@@ -1351,7 +1352,7 @@ class AgentTranslationService:
                 ledger.begin_agent_finish, request.job_id, now=_now()
             )
             if active_packages:
-                session_state = "awaiting_agent"
+                session_state = AgentSessionState.AWAITING_AGENT
                 return AgentFinishResult(
                     job_id=request.job_id,
                     status="awaiting_agent",
@@ -1389,7 +1390,7 @@ class AgentTranslationService:
                 status: Literal["repair_required", "needs_attention"] = (
                     "repair_required" if repairs else "needs_attention"
                 )
-                session_state = status
+                session_state = AgentSessionState(status)
                 await asyncio.to_thread(
                     ledger.set_agent_session_state,
                     request.job_id,
@@ -1422,11 +1423,11 @@ class AgentTranslationService:
             report_path = await asyncio.to_thread(
                 ledger.get_job_metadata_value, request.job_id, "report_file"
             )
-            session_state = "completed"
+            session_state = AgentSessionState.COMPLETED
             await asyncio.to_thread(
                 ledger.set_agent_session_state,
                 request.job_id,
-                "completed",
+                session_state,
                 now=_now(),
             )
             self._lease_lost = None
@@ -1441,7 +1442,7 @@ class AgentTranslationService:
         finally:
             if lease_lost.is_set():
                 logger.error("Agent finish for %s lost its writer lease", request.job_id)
-            elif session_state != "completed":
+            elif session_state is not AgentSessionState.COMPLETED:
                 try:
                     await asyncio.to_thread(
                         ledger.set_agent_session_state,

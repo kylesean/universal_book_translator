@@ -13,6 +13,7 @@ import json
 import sqlite3
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import suppress
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -87,6 +88,38 @@ else:
 #: session is a small, job-scoped state machine and must commit atomically with
 #: the block rows it owns.
 AGENT_SESSION_KEY = "agent_session"
+
+
+class AgentSessionState(StrEnum):
+    """The durable Agent session machine (``job_meta.agent_session.state``).
+
+    One quiescence state, one quiescence guard, and three resting outcomes.
+    Every transition is a ledger transaction, and the finishing guard is what
+    makes them safe::
+
+        awaiting_agent ── begin_agent_finish, no active leases ──▶ finishing
+        finishing ── begin_agent_finish, active leases ──────────▶ awaiting_agent
+        finishing ── finish success, gate clean ─────────────────▶ completed
+        finishing ── finish success, repairs pending ────────────▶ repair_required
+        finishing ── finish success, human attention ────────────▶ needs_attention
+        finishing ── finish failure ─────────────────────────────▶ awaiting_agent
+
+    While ``finishing``, claims are refused outright (``begin_agent_claim``)
+    and only already-leased packages may submit. ``AgentFinishResult.status``
+    reports these same values (finish re-derives them from the blocks) plus
+    the report-only ``failed``. A rest state such as ``repair_required`` is
+    re-derived from the blocks on the next finish, never trusted as fact.
+
+    ``set_agent_session_state`` accepts only these values so the matrix above
+    stays the one way in.
+    """
+
+    AWAITING_AGENT = "awaiting_agent"
+    FINISHING = "finishing"
+    COMPLETED = "completed"
+    REPAIR_REQUIRED = "repair_required"
+    NEEDS_ATTENTION = "needs_attention"
+
 
 #: Metadata key holding the deterministic request fingerprint used by Agent
 #: prepare. A repeated prepare with the same id and different inputs must not
@@ -1183,7 +1216,10 @@ class LedgerBlocksMixin(_LedgerHost):
                 conn.execute("ROLLBACK;")
                 raise LedgerError(f"job_meta.metadata_json for '{actual_id}' is not a JSON object")
             session = meta.get(AGENT_SESSION_KEY)
-            if isinstance(session, dict) and session.get("state") == "finishing":
+            if (
+                isinstance(session, dict)
+                and session.get("state") == AgentSessionState.FINISHING.value
+            ):
                 conn.execute("ROLLBACK;")
                 raise LedgerError(
                     f"Agent job {job_id} is finishing; wait for ubt_agent_finish to return"
@@ -1255,7 +1291,7 @@ class LedgerBlocksMixin(_LedgerHost):
             # carries every prior package's per-block payload.
             _compact_submitted_packages(packages)
             session["packages"] = packages
-            session["state"] = "awaiting_agent"
+            session["state"] = AgentSessionState.AWAITING_AGENT.value
             session["updated_at"] = float(now)
             meta[AGENT_SESSION_KEY] = session
             conn.execute(
@@ -1329,7 +1365,7 @@ class LedgerBlocksMixin(_LedgerHost):
                 conn.execute("ROLLBACK;")
                 raise LedgerError("Agent package map is not an object")
             state = str(package.get("state") or "")
-            if session.get("state") == "finishing" and state != "submitted":
+            if session.get("state") == AgentSessionState.FINISHING.value and state != "submitted":
                 conn.execute("ROLLBACK;")
                 raise LedgerError(
                     f"Agent job {job_id} is finishing; this package can no longer be submitted"
@@ -1428,7 +1464,7 @@ class LedgerBlocksMixin(_LedgerHost):
             # every previously submitted package in the same write.
             _compact_submitted_packages(packages)
             session["packages"] = packages
-            session["state"] = "awaiting_agent"
+            session["state"] = AgentSessionState.AWAITING_AGENT.value
             session["updated_at"] = float(now)
             meta[AGENT_SESSION_KEY] = session
             conn.execute(
@@ -1587,7 +1623,11 @@ class LedgerBlocksMixin(_LedgerHost):
                 package["state"] = "expired"
                 package["expired_at"] = float(now)
             session["packages"] = packages
-            session["state"] = "awaiting_agent" if active else "finishing"
+            session["state"] = (
+                AgentSessionState.AWAITING_AGENT.value
+                if active
+                else AgentSessionState.FINISHING.value
+            )
             session["updated_at"] = float(now)
             meta[AGENT_SESSION_KEY] = session
             conn.execute(
@@ -1599,8 +1639,22 @@ class LedgerBlocksMixin(_LedgerHost):
             self._mark_blocks_changed()
             return active
 
-    def set_agent_session_state(self, job_id: str, state: str, *, now: float) -> None:
-        """Update only the durable Agent state, preserving packages and leases."""
+    def set_agent_session_state(
+        self, job_id: str, state: AgentSessionState | str, *, now: float
+    ) -> None:
+        """Update only the durable Agent state, preserving packages and leases.
+
+        The state is the enumerated session machine (see
+        :class:`AgentSessionState`); accepting raw strings unchecked would let
+        a typo mint a state no guard reads.
+        """
+        try:
+            state_value = AgentSessionState(state).value
+        except ValueError as exc:
+            raise LedgerError(
+                f"unknown Agent session state {state!r}; expected one of "
+                f"{[s.value for s in AgentSessionState]}"
+            ) from exc
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             actual_id = self._resolve_actual_job_id(conn, job_id)
@@ -1621,7 +1675,7 @@ class LedgerBlocksMixin(_LedgerHost):
             session = meta.get(AGENT_SESSION_KEY)
             if not isinstance(session, dict):
                 session = {}
-            session["state"] = state
+            session["state"] = state_value
             session["updated_at"] = float(now)
             meta[AGENT_SESSION_KEY] = session
             conn.execute(

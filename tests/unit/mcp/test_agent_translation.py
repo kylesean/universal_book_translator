@@ -689,3 +689,28 @@ async def test_submitted_packages_compact_and_replay_reports_their_count(
 
         raw = _json.dumps(session, ensure_ascii=False)
         assert "block_ids" not in raw
+
+
+async def test_set_agent_session_state_rejects_values_outside_the_machine(
+    tmp_path: Path,
+) -> None:
+    """The enumerated session machine is the one way in: no typo states.
+
+    The setter used to persist raw strings unchecked, so a misspelled state
+    would sit in the ledger matching no guard — claims and submits would flow
+    as if the session were awaiting_agent while the value matched nothing.
+    """
+    from ubt.core.engine.ledger_mixins import AGENT_SESSION_KEY, AgentSessionState
+    from ubt.core.exceptions import LedgerError
+
+    db_path = tmp_path / "session-state.sqlite"
+    with SQLiteJobLedger(db_path) as ledger:
+        ledger.init_job_placeholder("agent-typo", "book.pdf", "zh")
+
+        ledger.set_agent_session_state("agent-typo", AgentSessionState.AWAITING_AGENT, now=1.0)
+        with pytest.raises(LedgerError, match="unknown Agent session state"):
+            ledger.set_agent_session_state("agent-typo", "finshed", now=2.0)
+
+        ledger.set_agent_session_state("agent-typo", AgentSessionState.FINISHING, now=3.0)
+        session = ledger.get_job_metadata_value("agent-typo", AGENT_SESSION_KEY)
+        assert session["state"] == "finishing"
