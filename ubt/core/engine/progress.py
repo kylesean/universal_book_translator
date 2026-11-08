@@ -152,6 +152,10 @@ class ProgressSnapshot(BaseModel):
     progress_percent: float = 0.0
     current_avg_qe: float = 0.0
     bottom_15_avg_qe: float = 0.0
+    #: False means QE never scored anything on this job, so ``current_avg_qe``
+    #: is the placeholder 0.0 and not a measurement. Mirrors the event and the
+    #: ledger's ``qe_measured``; the console hides the QE chip when it is false.
+    qe_measured: bool = False
     # None means "no usage reported yet", never a fabricated zero: a polling
     # client reads 0.0 as "confirmed no spend".
     estimated_cost_usd: float | None = None
@@ -220,6 +224,7 @@ class ProgressSnapshot(BaseModel):
             progress_percent=live_percent,
             current_avg_qe=event.current_avg_qe,
             bottom_15_avg_qe=event.bottom_15_avg_qe,
+            qe_measured=event.qe_measured,
             estimated_cost_usd=event.estimated_cost_usd,
             stage=_STAGE_BY_EVENT.get(event.event_type),
             message=message,
@@ -270,6 +275,7 @@ class ProgressSnapshot(BaseModel):
             progress_percent=live_percent,
             current_avg_qe=float(stats.get("avg_qe_score", 0.0)),
             bottom_15_avg_qe=float(stats.get("bottom_15_avg_qe", 0.0)),
+            qe_measured=bool(stats.get("qe_measured")),
             estimated_cost_usd=_as_float(meta("estimated_cost_usd")),
             stage=stage,
             message=_as_str(meta("message")),

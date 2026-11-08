@@ -162,3 +162,31 @@ def test_progress_snapshot_exposes_a_machine_readable_event_type() -> None:
 
     assert snapshot.event_type == "bible_extracted"
     assert snapshot.message == "Translation Bible established with 30 entries"
+
+
+def test_qe_measured_rides_the_snapshot_projection() -> None:
+    """A 0.0 ``current_avg_qe`` must be tellable from "QE scored nothing".
+
+    The queue/SSE projection dropped the ledger's ``qe_measured`` sentinel and
+    reported the placeholder 0.0 as if it were a measurement.
+    """
+    unmeasured = ProgressSnapshot.from_ledger({"avg_qe_score": 0.0, "qe_measured": False})
+    assert unmeasured.current_avg_qe == 0.0
+    assert unmeasured.qe_measured is False
+
+    measured = ProgressSnapshot.from_ledger({"avg_qe_score": 0.92, "qe_measured": True})
+    assert measured.current_avg_qe == 0.92
+    assert measured.qe_measured is True
+
+
+def test_qe_measured_rides_the_event_projection() -> None:
+    event = TranslationProgressEvent(
+        event_type=EventType.DRAFT_BATCH_COMPLETED,
+        job_id="job_qe_measured",
+        total_blocks=4,
+        completed_blocks=4,
+        qe_measured=True,
+    )
+    snapshot = ProgressSnapshot.from_event(event)
+    assert snapshot.qe_measured is True
+    assert snapshot.to_payload()["qe_measured"] is True

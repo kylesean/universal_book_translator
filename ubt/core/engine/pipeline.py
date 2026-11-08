@@ -899,6 +899,9 @@ class PipelineOrchestrator:
         blocked_human = int(stats.get("blocked_human", 0))
         avg_qe = float(stats.get("avg_qe_score", 0.0))
         bottom_15_avg = float(stats.get("bottom_15_avg_qe", 0.0))
+        # Carried through so a 0.0 ``current_avg_qe`` can be told apart from
+        # "QE measured nothing" (the ledger's own sentinel fact).
+        qe_measured = bool(stats.get("qe_measured"))
 
         # Real per-model token cost from the provider's usage
         # accounting (None when the model has no price-table entry or made calls
@@ -926,6 +929,7 @@ class PipelineOrchestrator:
             blocked_human_blocks=blocked_human,
             current_avg_qe=avg_qe,
             bottom_15_avg_qe=bottom_15_avg,
+            qe_measured=qe_measured,
             estimated_cost_usd=bill.cost_usd,
             cache_hit_rate=bill.cache_hit_rate,
             message=message,

@@ -56,6 +56,11 @@ class TranslationProgressEvent(BaseModel):
 
     current_avg_qe: float = 0.0
     bottom_15_avg_qe: float = 0.0
+    #: False means QE never scored anything (disabled or heuristic-only), so
+    #: ``current_avg_qe`` is a placeholder 0.0 and not a real measurement — the
+    #: same fact the ledger's ``qe_measured`` column carries and the CLI already
+    #: reads. Without it, an API consumer cannot tell "QE off" from "scored 0".
+    qe_measured: bool = False
     # Estimated token spend in USD; None = no usage reported yet (never a
     # fabricated 0.0, which a polling client reads as "confirmed zero spend").
     estimated_cost_usd: float | None = None
