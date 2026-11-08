@@ -126,6 +126,13 @@ class AnthropicMessagesTransport(BaseTransport):
         # temperature alongside thinking; the response parser reads only ``text``
         # blocks, so the extra thinking block is ignored.
         _apply_thinking(payload, reasoning_effort)
+        # Apply what earlier 400s taught this endpoint: one that rejects
+        # ``temperature`` or ``thinking`` gets those keys dropped up front
+        # instead of re-paying a heal round-trip on every block. Only omissions
+        # can ever be learned here (this transport's heal fixes remove keys and
+        # never produce the openai ``max_completion_tokens`` rename), so the
+        # rename half of the helper is inert.
+        payload = self._apply_learned_omissions(payload)
 
         client = self._get_client()
         url = self._messages_url()
@@ -234,6 +241,10 @@ class AnthropicMessagesTransport(BaseTransport):
                 payload["system"] = system_prompt
         if temperature is not None:
             payload["temperature"] = temperature
+        # Same learned-omission apply as the text path: the images path never
+        # heals, so a rejected ``temperature`` would fail here forever unless a
+        # prior text call already taught the transport to drop it.
+        payload = self._apply_learned_omissions(payload)
         client = self._get_client()
         url = self._messages_url()
         response = await self._post_json(client, url, payload)

@@ -891,3 +891,42 @@ async def test_a_rejected_system_role_is_not_self_healed() -> None:
     with pytest.raises(ModelProviderError):
         await t.generate_with_finish_reason("hi", system_prompt="You are a translator.")
     assert len(calls) == 1
+
+
+async def test_anthropic_learns_a_rejected_temperature_and_stops_resending_it() -> None:
+    """One heal round-trip, then the learned omission applies to every later call.
+
+    The transport recorded rejected parameters but the Anthropic payload
+    builder never applied them, so an endpoint that rejects ``temperature``
+    re-sent it on every block — 400, heal, retry — doubling the request count
+    for the whole book.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if "temperature" in body:
+            return httpx.Response(
+                400,
+                json={"error": {"message": "temperature is not supported by this model"}},
+            )
+        return httpx.Response(
+            200,
+            json={
+                "content": [{"type": "text", "text": "ok"}],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        )
+
+    rec = _Recorder(handler)
+    t = AnthropicMessagesTransport(
+        api_key="sk-ant",
+        base_url="https://api.anthropic.com/v1",
+        default_model="claude-x",
+        transport=rec.transport,
+    )
+    assert await t.generate("hello", temperature=0.3) == "ok"
+    assert len(rec.requests) == 2  # the rejected call, then its healed retry
+
+    await t.generate("second", temperature=0.3)
+    assert len(rec.requests) == 3  # no second heal round-trip
+    assert "temperature" not in rec.bodies[2]
