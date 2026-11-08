@@ -97,6 +97,22 @@ class _PDFRenderStackMixin:
     ) -> list[IRBlock]:
         raise NotImplementedError
 
+    async def _extract_blocks_off_loop(
+        self, path: Path, page_range: tuple[int, int] | None = None
+    ) -> list[IRBlock]:
+        """Run block extraction off the event loop through ``to_thread``.
+
+        Only ``asyncio.to_thread`` copies the caller's contextvars;
+        ``run_in_executor`` does not. The remote table reader inside
+        ``_extract_blocks_sync`` attributes its spend through the per-run
+        usage sink — a ContextVar — so under ``run_in_executor`` the sink read
+        ``None`` and every table-crop token silently left the job's bill and
+        the ``UBT_BUDGET_USD`` floor. The page-kind annotation later in the
+        same loop rides the same rule: whatever runs off-loop must see the
+        run's sink, and ``to_thread`` is what guarantees it.
+        """
+        return await asyncio.to_thread(self._extract_blocks_sync, path, page_range)
+
     @staticmethod
     def _annotate_page_kinds(path: Path, blocks: list[IRBlock]) -> dict[int, str]:
         raise NotImplementedError
@@ -232,7 +248,6 @@ class _PDFRenderStackMixin:
                 total_pages = 0
 
         page_chunks = compute_pdf_page_chunks(total_pages, pages=pages, chunk_size=chunk_size)
-        loop = asyncio.get_running_loop()
         global_block_idx = 1
 
         for chunk_idx, chunk_pages in enumerate(page_chunks):
@@ -251,7 +266,7 @@ class _PDFRenderStackMixin:
                 )
             )
 
-            blocks = await loop.run_in_executor(None, self._extract_blocks_sync, path, chunk_range)
+            blocks = await self._extract_blocks_off_loop(path, chunk_range)
 
             # Filter blocks to requested pages if non-contiguous inside chunk
             if pages and chunk_pages:
@@ -277,8 +292,10 @@ class _PDFRenderStackMixin:
             else:
                 global_block_idx += len(blocks)
 
-            # Per-page profile kinds ride into block provenance (render routing)
-            page_kinds = await loop.run_in_executor(None, self._annotate_page_kinds, path, blocks)
+            # Per-page profile kinds ride into block provenance (render routing).
+            # to_thread, not run_in_executor — same contextvars rule as the
+            # extraction hop (see _extract_blocks_off_loop).
+            page_kinds = await asyncio.to_thread(self._annotate_page_kinds, path, blocks)
 
             metadata: dict[str, Any] = {}
             if page_kinds:
