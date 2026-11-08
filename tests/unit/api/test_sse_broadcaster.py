@@ -108,3 +108,34 @@ async def test_unsubscribing_the_last_subscriber_stops_the_poller(tmp_path: Path
     finally:
         await broadcaster.close()
         q.close()
+
+
+async def test_a_job_row_deleted_mid_stream_ends_the_stream(tmp_path: Path) -> None:
+    """A deleted row can never produce another snapshot: send the sentinel.
+
+    The poller used to ``continue`` on a missing row, hanging the subscriber —
+    and its global stream slot — until the client disconnected by itself.
+    """
+    q = _queue(tmp_path)
+    q.enqueue("job1", {"input_path": "x"}, now=1.0)
+    broadcaster = QueueSseBroadcaster(q, poll_interval=0.01)
+    try:
+        sub = await broadcaster.subscribe("job1")
+        assert sub is not None
+        initial_row = q.get("job1")
+        assert initial_row is not None
+        frames = subscriber_frames(sub, initial=initial_row)
+        assert q.delete("job1")
+
+        # The first frame is the replayed initial snapshot, not the sentinel.
+        first_frame = await asyncio.wait_for(anext(frames), timeout=2.0)
+        assert first_frame is not _TERMINAL
+        item = await asyncio.wait_for(anext(frames), timeout=2.0)
+        assert item is _TERMINAL
+
+        # The dead subscription is dropped, so nothing keeps polling the row.
+        async with broadcaster._lock:
+            assert all(s.job_id != "job1" for s in broadcaster._subscribers)
+    finally:
+        await broadcaster.close()
+        q.close()

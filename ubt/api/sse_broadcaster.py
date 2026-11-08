@@ -109,10 +109,26 @@ class QueueSseBroadcaster:
                     logger.warning("SSE broadcast poll failed: %s", exc)
                     await asyncio.sleep(self._poll_interval)
                     continue
+                # ``job_ids`` above is the snapshot this poll actually asked
+                # about: a subscriber registered between that snapshot and this
+                # lock is absent from ``jobs`` too, and must simply wait for
+                # the next tick rather than be treated as a deleted row.
+                polled = set(job_ids)
                 async with self._lock:
                     for sub in list(self._subscribers):
+                        if sub.job_id not in polled:
+                            continue
                         job = jobs.get(sub.job_id)
                         if job is None:
+                            # The row vanished mid-stream (deleted or pruned —
+                            # ``subscribe`` verified it at attach, and a read
+                            # failure takes the ``except`` above, so absence
+                            # here is final). No later tick can produce a
+                            # frame: send the terminal sentinel instead of
+                            # hanging the subscriber until it disconnects,
+                            # holding a global slot the whole time.
+                            _offer(sub.queue, _TERMINAL)
+                            self._subscribers.pop(sub, None)
                             continue
                         _offer(sub.queue, job)
                         if job.status in TERMINAL_JOB_STATUSES:
