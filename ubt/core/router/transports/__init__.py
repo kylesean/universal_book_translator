@@ -6,6 +6,7 @@ from ubt.core.router.transports.base import (
     attach_usage_sink,
     new_usage_totals,
     record_external_usage,
+    reset_usage_sink,
     sanitize_thought_output,
 )
 from ubt.core.router.transports.gemini import GeminiTransport
@@ -21,5 +22,6 @@ __all__ = [
     "new_usage_totals",
     "attach_usage_sink",
     "record_external_usage",
+    "reset_usage_sink",
     "sanitize_thought_output",
 ]

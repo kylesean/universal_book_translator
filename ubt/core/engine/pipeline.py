@@ -68,7 +68,7 @@ from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.qe.heuristic import HeuristicQERunner
 from ubt.core.router.pricing import price_is_known
-from ubt.core.router.provider import create_model_provider
+from ubt.core.router.provider import create_model_provider, reset_usage_sink
 from ubt.delivery import DeliveryDecision, DeliveryInfeasibleError, plan_for_document
 
 if TYPE_CHECKING:
@@ -1397,12 +1397,15 @@ class PipelineOrchestrator:
         # clamped header, and a job cancelled mid-wait or whose lease was reclaimed
         # must stop there rather than pin the worker to the rest of the pause.
         # The tokens ride ContextVars (per asyncio task), NOT router fields.
-        set_run_cancel_token(cancel_token, lease_lost=self._lease_lost_event)
         ledger: SQLiteJobLedger | None = None
         tm: TranslationMemory | None = None
         writer_lock: LedgerWriterLock | None = None
 
         try:
+            # Bound inside the try so the finally's unbind pairs with it
+            # syntactically: binding above the try left the set/reset pairing
+            # to discipline alone.
+            set_run_cancel_token(cancel_token, lease_lost=self._lease_lost_event)
             route_decision = self._decide_route(input_path, manifest)
             short_chain = route_decision.mode == "short"
             if short_chain:
@@ -1699,3 +1702,8 @@ class PipelineOrchestrator:
         # Nothing reads the session after the run ends (one orchestrator per
         # job), so the pop is pure teardown.
         self._billing_sessions.pop(actual_job_id, None)
+        # Detach the task's usage sink (attached at prepare time via
+        # begin_usage_sink): without this, a reused worker task kept
+        # attributing calls into the finished run's dict until its next
+        # attach overwrote it.
+        reset_usage_sink()

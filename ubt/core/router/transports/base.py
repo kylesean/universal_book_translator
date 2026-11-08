@@ -182,6 +182,22 @@ def attach_usage_sink() -> dict[str, dict[str, int]]:
     return sink
 
 
+def reset_usage_sink() -> None:
+    """Detach the current task's usage sink.
+
+    ``attach_usage_sink`` is reached deep inside ``begin_usage_sink`` from run
+    preparation and used to have no counterpart: after a run ended, the task's
+    context still pointed at the finalized sink, and every later call on a
+    reused task (JobWorker runs job after job on one task) kept attributing
+    into a dead run's dict until the next attach overwrote it. The run
+    teardown calls this. Runs never nest in one task, so a plain ``set(None)``
+    is the correct detach — a ContextVar token reset would additionally
+    demand the same context at close time, which an abandoned generator's GC
+    cannot promise.
+    """
+    _usage_sink.set(None)
+
+
 def record_external_usage(
     model: str,
     *,

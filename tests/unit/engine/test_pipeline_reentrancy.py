@@ -119,3 +119,29 @@ def test_terminal_billing_flush_tolerates_a_missing_session(tmp_path: Path) -> N
             assert ledger.get_job_usage("job-nosession") == {}
     finally:
         lock.release()
+
+
+def test_teardown_detaches_the_usage_sink() -> None:
+    """A finished run must not leave its sink bound to the worker task.
+
+    The sink is attached deep inside ``begin_usage_sink`` and nothing reset
+    it: after a run, the task's context still pointed at the finalized sink
+    and every later call on a reused task kept attributing into a dead run's
+    dict until the next attach overwrote it.
+    """
+    import asyncio
+
+    from ubt.core.router.transports.base import _usage_sink, attach_usage_sink
+
+    config = UBTConfig(draft_model="mock-draft")
+    orchestrator = PipelineOrchestrator(config=config, router=MagicMock())
+
+    async def scenario() -> object | None:
+        attach_usage_sink()
+        assert _usage_sink.get() is not None
+        await orchestrator._teardown_run_resources(
+            ledger=None, tm=None, adapter=None, writer_lock=None, actual_job_id="job-sink"
+        )
+        return _usage_sink.get()
+
+    assert asyncio.run(scenario()) is None

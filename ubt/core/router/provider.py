@@ -23,6 +23,7 @@ from ubt.core.router.transports.base import (
     build_timeout,
     new_usage_totals,
     record_external_usage,
+    reset_usage_sink,
     sanitize_thought_output,
 )
 from ubt.core.router.transports.gemini import GeminiTransport
@@ -38,6 +39,7 @@ __all__ = [
     "OpenAICompatibleProvider",
     "create_model_provider",
     "attach_usage_sink",
+    "reset_usage_sink",
     "new_usage_totals",
     "record_external_usage",
     "sanitize_thought_output",
