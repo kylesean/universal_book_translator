@@ -1199,11 +1199,19 @@ export function MissionControl() {
           stopForMissingJob()
           return
         }
-        // Only the success branch used to arm the poller, so a single transient
-        // network/5xx error on the very first request left the panel frozen on
-        // "running" for good — no interval, no stream, no message. Retry.
+        // The retry must forget its own handle before it fires: `timer`
+        // otherwise keeps holding the dead timeout, which kept BOTH the
+        // success branch (arm interval + stream) and this branch (arm the
+        // next retry) permanently disabled — one transient error froze the
+        // panel on its initial status until the operator switched jobs. The
+        // terminal branch deliberately does NOT null the handle: an in-flight
+        // poll resolving after it must see a set handle, or it would re-arm
+        // polling past completion.
         if (timer === undefined) {
-          timer = setTimeout(() => void fetchStatus(), 3000)
+          timer = setTimeout(() => {
+            timer = undefined
+            void fetchStatus()
+          }, 3000)
         }
       }
     }
