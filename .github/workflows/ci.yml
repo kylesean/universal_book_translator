@@ -78,7 +78,11 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
           archive="typst-x86_64-unknown-linux-musl.tar.xz"
+          # --retry covers transient HTTP 5xx from the release CDN (observed
+          # 504s took down two CI runs while the status page stayed green);
+          # the archive is checksum-pinned below, so a bad fetch cannot land.
           curl --proto '=https' --tlsv1.2 -fsSL \
+            --retry 5 --retry-delay 15 \
             "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/${archive}" \
             -o "/tmp/${archive}"
           echo "${TYPST_SHA256}  /tmp/${archive}" | sha256sum -c -
@@ -198,7 +202,11 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
           archive="typst-x86_64-unknown-linux-musl.tar.xz"
+          # --retry covers transient HTTP 5xx from the release CDN (observed
+          # 504s took down two CI runs while the status page stayed green);
+          # the archive is checksum-pinned below, so a bad fetch cannot land.
           curl --proto '=https' --tlsv1.2 -fsSL \
+            --retry 5 --retry-delay 15 \
             "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/${archive}" \
             -o "/tmp/${archive}"
           echo "${TYPST_SHA256}  /tmp/${archive}" | sha256sum -c -
