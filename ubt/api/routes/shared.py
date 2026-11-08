@@ -192,15 +192,17 @@ def output_path_claimant(
     job_queue: Any,
     submit_id: str,
     resolved_out: Path,
+    db_dir: Path | None = None,
 ) -> str | None:
     """The live job id that already owns ``resolved_out``, or ``None``.
 
-    Covers both homes of a live job: the in-memory map (embedded mode, and the
-    job this process is running in queue mode) and the durable queue rows. The
-    latter matters because ``manager.jobs`` only knows jobs *this* process
-    started -- a job still waiting in the queue was invisible, so two
-    submissions naming one output path both passed and the two workers wrote
-    one deliverable, last writer winning.
+    Covers all three homes of a live job: the in-memory map (embedded mode, and
+    the job this process is running in queue mode), the durable queue rows, and
+    — since the MCP server and a CLI run share ``db_dir`` with this process but
+    not its memory — the per-job ledgers. The queue scan alone missed a job
+    still waiting in the queue, so two submissions naming one output path both
+    passed and the two workers wrote one deliverable, last writer winning; the
+    ledger scan closes the cross-process gap the same way.
     """
     target = Path(resolved_out).resolve()
 
@@ -226,6 +228,68 @@ def output_path_claimant(
                 continue
             if _claims((queued.payload or {}).get("output_path")):
                 return str(queued.job_id)
+    if db_dir is not None:
+        return ledger_output_path_claimant(db_dir, submit_id, target)
+    return None
+
+
+def ledger_output_path_claimant(
+    db_dir: Path,
+    exclude_job_id: str | None,
+    resolved_out: Path,
+) -> str | None:
+    """The job whose live ledger run already owns ``resolved_out``, or ``None``.
+
+    The in-memory claimant cannot see another process's embedded jobs: the MCP
+    server and the REST server each hold their own manager over the same
+    ``db_dir``, and a CLI ``ubt translate`` writes ledgers there too, so a run
+    another process started was invisible and both pipelines wrote (and billed)
+    one deliverable. The per-job ledger is the durable record every writer
+    shares. A non-terminal row counts as a claimant only while something is
+    actually writing it — a live writer lease, or an agent session parked
+    between tool calls (agent jobs are intentionally lock-free) — so a process
+    that died mid-run does not block the path forever.
+    """
+    from ubt.api.job_catalog import is_job_ledger_stem, summarize_job
+    from ubt.core.engine.ledger import SQLiteJobLedger
+    from ubt.core.engine.writer_lock import LedgerWriterLock
+
+    if not db_dir.is_dir():
+        return None
+    for db_path in sorted(db_dir.glob("*.sqlite")):
+        if not is_job_ledger_stem(db_path.stem):
+            continue
+        job_id = db_path.stem
+        if exclude_job_id and job_id == exclude_job_id:
+            continue
+        summary = summarize_job(db_path)
+        if summary is None:
+            continue
+        if str(summary.get("status", "")) in TERMINAL_JOB_STATUSES:
+            continue
+        try:
+            live = LedgerWriterLock.lease_holder(db_path, job_id) is not None
+        except Exception:  # noqa: BLE001 - a probe must not fail the scan
+            live = False
+        if not live:
+            with SQLiteJobLedger(db_path, read_only=True) as ledger:
+                agent_session = ledger.get_job_metadata_value(job_id, "agent_session")
+            parked = isinstance(agent_session, dict) and agent_session.get("state") in (
+                "awaiting_agent",
+                "needs_attention",
+            )
+            if not parked:
+                continue
+        with SQLiteJobLedger(db_path, read_only=True) as ledger:
+            request = ledger.get_job_metadata_value(job_id, "submitted_request")
+        claimed = (request or {}).get("output_path") if isinstance(request, dict) else None
+        if not claimed:
+            continue
+        try:
+            if Path(str(claimed)).resolve() == Path(resolved_out).resolve():
+                return job_id
+        except (OSError, ValueError):
+            continue
     return None
 
 

@@ -73,6 +73,7 @@ from ubt import __version__
 from ubt.adapters import get_adapter_for_path
 from ubt.api.manager import JobManager
 from ubt.api.models import JobSubmitRequest
+from ubt.api.routes.shared import ledger_output_path_claimant, output_path_claimant
 from ubt.core.config import UBTConfig, credential_required, has_real_credential
 from ubt.core.config import parse_page_ranges as parse_page_ranges
 from ubt.core.engine.agent_translation import (
@@ -93,6 +94,7 @@ from ubt.core.engine.agent_translation import (
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.progress import ProgressSnapshot
+from ubt.core.engine.status_projection import project_ledger_status
 from ubt.core.engine.writer_lock import LedgerWriterLock
 from ubt.core.exceptions import LedgerWriterLockConflictError, UBTError
 from ubt.core.fs_perms import (
@@ -772,6 +774,24 @@ async def ubt_translate_book(
     # apply the value (REST 422s upfront, so this restores parity).
     validate_request_enums(payload)
     request = JobSubmitRequest.model_validate(payload)
+    # The claim protocol REST enforces, from the other side of the same
+    # ``db_dir``: this process's manager cannot see a run the REST server (or a
+    # CLI translate) already started, so two pipelines would write — and bill —
+    # one deliverable. The in-memory scan covers this process's own window
+    # before a job's ledger exists; the shared ledger scan is the durable
+    # record every writer observes.
+    in_process = await asyncio.to_thread(
+        output_path_claimant, _MANAGER, None, jid, Path(output_path)
+    )
+    cross_process = await asyncio.to_thread(
+        ledger_output_path_claimant,
+        Path(base_config.db_dir),
+        jid,
+        Path(output_path),
+    )
+    claimant = in_process or cross_process
+    if claimant is not None:
+        raise ToolError(f"output_path already claimed by live job {claimant}")
     # One bucket per process, not per job: ``rate_limit_rpm`` is a
     # per-credential budget, so a per-job bucket multiplied it by the number of
     # concurrent MCP translations against the same key. ``JobManager`` passes
@@ -864,7 +884,6 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
         # FAILED before the restart must not read as "running" forever to a
         # polling agent.
         persisted = await asyncio.to_thread(ledger.get_job_status, jid)
-        interrupted = False
         total_b = progress.total_blocks
         done_b = (
             progress.completed_blocks
@@ -877,32 +896,25 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
             if isinstance(agent_session, dict) and agent_session.get("state")
             else None
         )
-        status: str
-        if persisted == "failed":
-            status = JobStatus.FAILED.value
-        elif persisted == "cancelled":
-            # The pipeline records a cancel as terminal; reading it as "running"
-            # would leave a polling agent waiting on a job that already stopped.
-            status = JobStatus.CANCELLED.value
-        elif persisted == "completed" or (total_b > 0 and done_b >= total_b):
-            status = JobStatus.COMPLETED.value
-        elif agent_state in ("awaiting_agent", "needs_attention"):
-            # Agent jobs are intentionally lock-free between MCP calls. Neither
-            # an absent writer lease nor a quiet ledger means the job crashed.
-            status = agent_state
-        else:
-            # Check the writer lock lease first. In SQLite WAL mode with an open
-            # connection, the main .sqlite file's mtime is never touched, so an
-            # mtime-only check misclassifies active runs as FAILED after 5 minutes.
-            # A live lease holder confirms the process is actively translating.
-            holder = await asyncio.to_thread(LedgerWriterLock.lease_holder, db_path, jid)
-            if holder is not None:
-                status = JobStatus.RUNNING.value
-            elif _ledger_is_stale(db_path):
-                status = JobStatus.FAILED.value
-                interrupted = True
-            else:
-                status = JobStatus.RUNNING.value
+        # One shared decision tree with the REST /status fallback and /jobs
+        # (ubt.core.engine.status_projection). In SQLite WAL mode with an open
+        # connection the main .sqlite file's mtime is never touched, so an
+        # mtime-only check misclassifies active runs as FAILED; the lease is
+        # asked first, and this surface's quiet-grace window (a ledger written
+        # within the staleness window is a live run in another process, not a
+        # crash) is the knob the tree exposes.
+        holder = await asyncio.to_thread(LedgerWriterLock.lease_holder, db_path, jid)
+        quiet_grace = holder is not None or not await asyncio.to_thread(_ledger_is_stale, db_path)
+        projected = project_ledger_status(
+            stored=str(persisted or ""),
+            total=total_b,
+            done=done_b,
+            agent_state=agent_state,
+            has_live_writer=holder is not None,
+            assume_running_when_unwritten=quiet_grace,
+        )
+        status = projected.status
+        interrupted = projected.interrupted
         disk: dict[str, Any] = {
             "job_id": jid,
             "status": status,

@@ -422,7 +422,9 @@ def test_concurrent_resumes_spawn_exactly_one_pipeline(
         captured.append(record.job_id)
         record.status = JobStatus.RUNNING
 
-    def _slow_claimant(manager: JobManager, queue: Any, job_id: str, claimed: Path) -> None:
+    def _slow_claimant(
+        manager: JobManager, queue: Any, job_id: str, claimed: Path, db_dir: Path | None = None
+    ) -> None:
         # Hold the await window open long enough that the second request is
         # already inside the handler when the first one reaches the flip.
         time.sleep(0.05)
@@ -1064,7 +1066,9 @@ def test_concurrent_submits_of_one_output_path_spawn_one_pipeline(
     # the assertion. The original comes from its defining module; the patch
     # targets the job module's namespace, which is what the handler resolves.
 
-    def _slow_claimant(manager: JobManager, queue: Any, job_id: str, claimed: Path) -> Any:
+    def _slow_claimant(
+        manager: JobManager, queue: Any, job_id: str, claimed: Path, db_dir: Path | None = None
+    ) -> Any:
         # Hold the scan window open so the second request is already waiting
         # on the claim gate when the first one commits.
         time.sleep(0.05)

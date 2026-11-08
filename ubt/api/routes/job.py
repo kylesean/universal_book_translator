@@ -60,6 +60,7 @@ from ubt.core.config import credential_required, has_real_credential
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.progress import ProgressSnapshot
+from ubt.core.engine.status_projection import project_ledger_status
 from ubt.core.engine.writer_lock import LedgerWriterLock
 from ubt.core.exceptions import (
     BudgetExceededError,
@@ -760,7 +761,12 @@ def register_job_routes(
                 # queue rows synchronously; on the event loop that stalls every other
                 # request (SSE, other submits) for the duration.
                 claimant = await asyncio.to_thread(
-                    output_path_claimant, manager, job_queue, submit_id, resolved_out
+                    output_path_claimant,
+                    manager,
+                    job_queue,
+                    submit_id,
+                    resolved_out,
+                    app_config.db_dir,
                 )
                 if claimant is not None:
                     raise HTTPException(
@@ -1132,7 +1138,12 @@ def register_job_routes(
             if record.request.output_path:
                 claimed = Path(record.request.output_path).resolve()
                 claimant = await asyncio.to_thread(
-                    output_path_claimant, manager, job_queue, valid_id, claimed
+                    output_path_claimant,
+                    manager,
+                    job_queue,
+                    valid_id,
+                    claimed,
+                    app_config.db_dir,
                 )
                 if claimant is not None:
                     raise HTTPException(
@@ -1461,30 +1472,15 @@ def register_job_routes(
                         if job_queue is None and status_value not in TERMINAL_JOB_STATUSES:
                             # Embedded mode has no durable worker and no startup
                             # reconcile, so a row a crash left mid-run will never
-                            # move again. Reporting "initialized" forever keeps
-                            # every polling client waiting on a job that no
-                            # longer exists.
-                            #
-                            # But a non-terminal row is NOT evidence of a crash:
-                            # the CLI and the API share ``.ubt/ledgers``, so a
-                            # ``ubt translate`` running in another terminal is a
-                            # perfectly live writer of exactly this ledger.
-                            # Declaring it FAILED ("the server restarted") told the
-                            # operator to re-run a job that was working, and
-                            # following that advice collides with the writer lock
-                            # or pays the provider twice. Ask the lease instead:
-                            # a live holder means running, an expired or missing
-                            # one means the writer is gone.
-                            #
-                            # Every block terminal is completion, not a crash.
-                            # ``finalize_job("completed")`` is guarded on exactly
-                            # that condition, and the export stage finalizes
-                            # *before* it records the rendered digest, so a
-                            # process lost in that window leaves a fully
-                            # translated book behind a row that still says
-                            # ``initialized``. ``/jobs`` reads that as completed;
-                            # reporting it failed here made the two endpoints
-                            # disagree about one ledger.
+                            # move again. But a non-terminal row is NOT evidence
+                            # of a crash either: the CLI and the API share
+                            # ``.ubt/ledgers``, so a ``ubt translate`` running in
+                            # another terminal is a perfectly live writer. Which
+                            # non-terminal rows read as running, completed or
+                            # failed is one shared decision tree — see
+                            # ubt.core.engine.status_projection — so this
+                            # surface cannot drift from /jobs or the MCP
+                            # fallback again.
                             _total = int(snap.get("total", 0) or 0)
                             _done = sum(
                                 int(snap.get(key, 0) or 0)
@@ -1500,21 +1496,21 @@ def register_job_routes(
                                 if isinstance(agent_session, dict)
                                 else ""
                             )
-                            if _total > 0 and _done >= _total:
-                                status_value = JobStatus.COMPLETED
-                            elif agent_state in ("awaiting_agent", "needs_attention"):
-                                status_value = agent_state
-                            else:
-                                holder = LedgerWriterLock.lease_holder(db_path, valid_id)
-                                if holder is None:
-                                    status_value = JobStatus.FAILED
-                                    if error_note is None:
-                                        error_note = (
-                                            "Job was interrupted before it reached a terminal "
-                                            "state (the server restarted); re-run it to resume."
-                                        )
-                                else:
-                                    status_value = JobStatus.RUNNING
+                            projected = project_ledger_status(
+                                stored=status_value,
+                                total=_total,
+                                done=_done,
+                                agent_state=agent_state,
+                                has_live_writer=(
+                                    LedgerWriterLock.lease_holder(db_path, valid_id) is not None
+                                ),
+                            )
+                            status_value = projected.status
+                            if projected.interrupted and error_note is None:
+                                error_note = (
+                                    "Job was interrupted before it reached a terminal "
+                                    "state (the server restarted); re-run it to resume."
+                                )
                         return JobStatusResponse(
                             **public_progress(progress.model_dump()),
                             job_id=str(snap["job_id"]),
