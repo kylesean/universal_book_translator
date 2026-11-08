@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pikepdf
@@ -12,6 +13,19 @@ from ubt.cli.main import app
 pytestmark = pytest.mark.fast
 
 runner = CliRunner()
+
+
+def _plain(text: str) -> str:
+    """Strip ANSI escapes from captured CLI output.
+
+    Typer forces a styled console whenever ``GITHUB_ACTIONS`` is set
+    (``typer.rich_utils.FORCE_TERMINAL``), and rich's highlighter renders an
+    option token as ``-<reset><bold>-profile`` — the escape split falls exactly
+    between the two hyphens — so a raw-substring assertion on ``--profile``
+    passes locally and fails on CI for output that *looks* identical. Help
+    assertions read the de-styled text, which is what they mean to check.
+    """
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
 def _create_sample_pdf(tmp_path: Path) -> Path:
@@ -38,9 +52,10 @@ def _create_sample_pdf(tmp_path: Path) -> Path:
 def test_optimize_pdf_cli_help() -> None:
     res = runner.invoke(app, ["optimize-pdf", "--help"])
     assert res.exit_code == 0
-    assert "Miniaturize, deduplicate, and compress a PDF deliverable." in res.stdout
-    assert "--profile" in res.stdout
-    assert "--engine" in res.stdout
+    plain = _plain(res.stdout)
+    assert "Miniaturize, deduplicate, and compress a PDF deliverable." in plain
+    assert "--profile" in plain
+    assert "--engine" in plain
 
 
 def test_optimize_pdf_cli_success(tmp_path: Path) -> None:

@@ -156,13 +156,27 @@ async def test_bible_stage_character_mining_gated_in_paper_mode(tmp_path: Path) 
 
 
 def test_cli_translate_help_includes_mode() -> None:
+    """The translate help names the --mode flag and both route modes.
+
+    Asserted on de-styled output: typer forces a styled console under
+    ``GITHUB_ACTIONS`` and rich's highlighter splits ``--mode`` across an
+    ANSI reset exactly at the hyphen pair, so a raw-substring assertion is
+    environment-dependent (passes locally, fails on CI) — see the same
+    helper in tests/unit/cli/test_optimize_pdf_command.py.
+    """
+    import re
+
     from typer.testing import CliRunner
 
     from ubt.cli.main import app
 
+    def _plain(text: str) -> str:
+        return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
     runner = CliRunner()
     result = runner.invoke(app, ["translate", "--help"])
     assert result.exit_code == 0
-    assert "--mode" in result.output
-    assert "paper" in result.output
-    assert "book" in result.output
+    plain = _plain(result.output)
+    assert "--mode" in plain
+    assert "paper" in plain
+    assert "book" in plain
