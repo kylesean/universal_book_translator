@@ -5,11 +5,11 @@
 [![Python: 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Typst: 0.15.1](https://img.shields.io/badge/typst-0.15.1-239dad.svg)](https://typst.app/)
 
-> ⚠️ **开发状态提示**：本项目目前处于 **Pre-1.0 积极迭代开发阶段**。核心流水线与排版引擎已具备出版级质量，但在多格式分章灵活性、依赖轻量化与极端版面自适应上仍有已知缺陷与限制（详见后文[已知局限与问题](#已知局限与缺陷)）。欢迎试用、提出 Issue 或提交 PR 参与建设！
+> **开发状态提示**：本项目目前处于 **Pre-1.0 积极迭代开发阶段**。核心流水线与排版引擎已具备出版级质量，但在多格式分章灵活性、依赖轻量化与极端版面自适应上仍有已知缺陷与限制（详见后文[已知局限与问题](#已知局限与缺陷-known-limitations)）。欢迎试用、提出 Issue 或提交 PR 参与建设！
 
 ---
 
-## 📖 项目简介
+## 项目简介
 
 **Universal Book Translator (UBT)** 是一个自托管、编译器架构的工业级图书与学术文档翻译重排引擎。
 
@@ -20,23 +20,23 @@
 
 ---
 
-## ✨ 核心优势与特性
+## 核心优势与特性
 
-- 🎨 **印刷级排版重构**：基于 Typst 编译重排，支持 LaTeX 原生数学公式转换（无需光栅化截图）与自适应表格重建，支持双语并排（`dual`）与纯译文（`mono`）。
-- 💾 **ACID 级状态账本与零损耗断点续跑**：底层基于 SQLite WAL 账本维护逐块（Block-level）状态机。任务中途若遭遇断网或中断，直接凭借 `--job-id` 即可恢复，**已翻译分块绝不重复扣费**。
-- 🧠 **分层上下文记忆体系**：
+-  **印刷级排版重构**：基于 Typst 编译重排，支持 LaTeX 原生数学公式转换（无需光栅化截图）与自适应表格重建，支持双语并排（`dual`）与纯译文（`mono`）。
+-  **ACID 级状态账本与零损耗断点续跑**：底层基于 SQLite WAL 账本维护逐块（Block-level）状态机。任务中途若遭遇断网或中断，直接凭借 `--job-id` 即可恢复，**已翻译分块绝不重复扣费**。
+-  **分层上下文记忆体系**：
   - **L1 局部滑动窗口**：感知紧邻语义流，避免脚注干扰正文；
   - **L2 跨章节滚动宏观摘要**：保持长文主线剧情与学术推导一致性；
   - **L3 宏观 Epoch 摘要**：结合 System Prompt 前缀缓存，兼顾长书记忆与 Token 成本。
-- 🛡️ **术语挖掘与质量门禁**：内置 Bible 挖掘阶段自提取全书专有名词；集成 FastPass 启发式初筛与 MQM 严重度分级门禁，自动识别漏译、幻觉并进入二次修复循环。
-- 🖥️ **现代化开箱即用 Web 控制台**：前端基于 React 19 + TypeScript + Radix UI 构建，**已预编译打包并随 Python wheel 内嵌分发**。用户无需安装 Node.js/pnpm，一条命令即可启动可视化向导与审校工作台。
-- 🤖 **创新的 Agent 协同范式 (MCP)**：
+-  **术语挖掘与质量门禁**：内置 Bible 挖掘阶段自提取全书专有名词；集成 FastPass 启发式初筛与 MQM 严重度分级门禁，自动识别漏译、幻觉并进入二次修复循环。
+-  **现代化开箱即用 Web 控制台**：前端基于 React 19 + TypeScript + Radix UI 构建，**已预编译打包并随 Python wheel 内嵌分发**。用户无需安装 Node.js/pnpm，一条命令即可启动可视化向导与审校工作台。
+-  **创新的 Agent 协同范式 (MCP)**：
   - **自主流水线模式**：通过标准 MCP 工具调度 UBT 执行长任务；
   - **Agent-Hosted 模式**：外部大模型（如 Claude / GPT-4）**自身充当翻译大脑**，UBT 专职负责文档 AST 解析、样式占位符保护、上下文分包认领与 Typst 排版编译。
 
 ---
 
-## 🛠️ 安装指南
+## 安装指南
 
 当前项目尚未正式推送至公共 PyPI（预发版），推荐通过源码检出或 Docker 容器运行：
 
@@ -59,7 +59,7 @@ pip install '.[ocr]'                           # 安装图片扫描件 OCR 依�
 pip install '.[all]'                           # 全功能完整安装
 ```
 
-> 📌 **外部排版编译器 Typst**：PDF 渲染需要系统 `PATH` 中具备 `typst`（推荐 v0.15.1）。
+> **外部排版编译器 Typst**：PDF 渲染需要系统 `PATH` 中具备 `typst`（推荐 v0.15.1）。
 > - Linux: 可通过 GitHub Releases 下载预编译可执行文件放入 `/usr/local/bin`，并安装 CJK 字体：`sudo apt-get install fonts-noto-cjk`；
 > - macOS: `brew install typst`；
 > - 运行 `ubt doctor` 可自动检查环境中的 Typst 与中文字体就绪情况。
@@ -90,7 +90,7 @@ docker run -d \
   universal-book-translator:latest
 ```
 
-> ⚠️ 只有在你确认网络环境可信、且愿意承担风险时，才把 `-p 127.0.0.1:8000:8000` 改为 `-p 8000:8000` 暴露到局域网；如需无鉴权的本地实例，显式设置 `UBT_ALLOW_NO_AUTH=1`（务必保留回环绑定）。
+> 只有在你确认网络环境可信、且愿意承担风险时，才把 `-p 127.0.0.1:8000:8000` 改为 `-p 8000:8000` 暴露到局域网；如需无鉴权的本地实例，显式设置 `UBT_ALLOW_NO_AUTH=1`（务必保留回环绑定）。
 
 服务就绪后，直接在浏览器中访问 `http://localhost:8000` 即可使用 Web 控制台。
 更多容器化启动与持久化挂载说明参见 [`deploy/docker/README.md`](deploy/docker/README.md)。
@@ -101,15 +101,15 @@ docker run -d \
 
 | 姿势 | 进入方式 | 网页填写 LLM Key | 网页编辑 Provider | 启动 / 访问门槛 |
 |------|----------|------------------|-------------------|------------------|
-| **本机**（个人默认） | `ubt console`，绑定 `127.0.0.1` | ✅ 可直接填写 | ✅ 完全可编辑（含已存钥匙的块） | 免鉴权：`ubt console` 自动带上 `UBT_ALLOW_NO_AUTH`，无需任何令牌 |
-| **局域网 / 暴露** | 绑定 `0.0.0.0`、Docker 映射宿主端口 | ❌ 拒绝，请写入 `ubt.toml` 或 `UBT_LLM_API_KEY` | ✅ 可新建/编辑**无钥匙**的 provider 块；❌ 已存钥匙的块不可跨机改写端点 | 必须配好 `UBT_API_KEY` 与 `UBT_ALLOWED_DIRS`（缺任一，非回环请求一律 403），并用 `UBT_TRUSTED_HOSTS` 登记对外主机名 |
-| **严格** | `UBT_STRICT_AUTH=1` 或 `UBT_ENV=production` | ❌ 即使本机也拒绝 | 同暴露模式 | 覆盖 `UBT_ALLOW_NO_AUTH`，必须设置 `UBT_API_KEY`；开启鉴权后 `/docs` 与 `/openapi.json` 一并关闭 |
+| **本机**（个人默认） | `ubt console`，绑定 `127.0.0.1` |  可直接填写 |  完全可编辑（含已存钥匙的块） | 免鉴权：`ubt console` 自动带上 `UBT_ALLOW_NO_AUTH`，无需任何令牌 |
+| **局域网 / 暴露** | 绑定 `0.0.0.0`、Docker 映射宿主端口 |  拒绝，请写入 `ubt.toml` 或 `UBT_LLM_API_KEY` |  可新建/编辑**无钥匙**的 provider 块； 已存钥匙的块不可跨机改写端点 | 必须配好 `UBT_API_KEY` 与 `UBT_ALLOWED_DIRS`（缺任一，非回环请求一律 403），并用 `UBT_TRUSTED_HOSTS` 登记对外主机名 |
+| **严格** | `UBT_STRICT_AUTH=1` 或 `UBT_ENV=production` |  即使本机也拒绝 | 同暴露模式 | 覆盖 `UBT_ALLOW_NO_AUTH`，必须设置 `UBT_API_KEY`；开启鉴权后 `/docs` 与 `/openapi.json` 一并关闭 |
 
 **信任模型**：持有 `UBT_API_KEY` 的人等同于**对 LLM 花费完全信任的操作员**——他能提交消耗真实 token 的长任务，也能新建指向任意端点的 provider 块（环境变量中的 `UBT_LLM_API_KEY` 会流向他所指定的端点）。控制台门禁防的是家庭网络里的**意外**：访客设备、其他机器上的恶意软件、误暴露的端口；它不防有门禁卡的预谋内部攻击。若需把控制台交给不完全信任的人，请让改动走服务器上的配置文件，而不是发放门禁卡。
 
 ---
 
-## 🚀 快速上手
+## 快速上手
 
 ### 1. 配置模型凭证
 
@@ -122,15 +122,15 @@ export UBT_DRAFT_MODEL="gpt-4o-mini"            # 一级初翻模型
 export UBT_REPAIR_MODEL="gpt-4o"                # 二级审校修复模型（可选）
 ```
 
-> 💡 **提示**：UBT 内建 4 种底层线缆协议（`openai-chat`, `openai-responses`, `anthropic-messages`, `gemini-native`）。如需使用自建端点（如 vLLM、Ollama 或中转服务），可参考 [`ubt.toml.example`](ubt.toml.example) 在当前目录或 `~/.config/ubt/config.toml` 中声明 `[providers.<name>]` 配置块。
+> **提示**：UBT 内建 4 种底层线缆协议（`openai-chat`, `openai-responses`, `anthropic-messages`, `gemini-native`）。如需使用自建端点（如 vLLM、Ollama 或中转服务），可参考 [`ubt.toml.example`](ubt.toml.example) 在当前目录或 `~/.config/ubt/config.toml` 中声明 `[providers.<name>]` 配置块。
 
-> 🎛️ **质量与成本默认值**：`consistency_enforce=report`（零 token 报告全书术语漂移，不自动重译）；`c_text_enabled=true`（翻译公式内 `\text{}`，可用 `UBT_C_TEXT_ENABLED=false` 关闭）；`memory_sliding_window=false`（L3 保留最早 epoch 作为长程锚点，近期上下文由 L2 负责）；TM 精确命中按文档隔离，设置 `UBT_TM_CROSS_BOOK=true` 才会跨书复用机器命中。语义 judge 仍为显式 opt-in（`UBT_QE_JUDGE_ENABLED=true`）；报告会明确区分“未测量”和“已测量”。
+> **质量与成本默认值**：`consistency_enforce=report`（零 token 报告全书术语漂移，不自动重译）；`c_text_enabled=true`（翻译公式内 `\text{}`，可用 `UBT_C_TEXT_ENABLED=false` 关闭）；`memory_sliding_window=false`（L3 保留最早 epoch 作为长程锚点，近期上下文由 L2 负责）；TM 精确命中按文档隔离，设置 `UBT_TM_CROSS_BOOK=true` 才会跨书复用机器命中。语义 judge 仍为显式 opt-in（`UBT_QE_JUDGE_ENABLED=true`）；报告会明确区分“未测量”和“已测量”。
 
 ---
 
 ### 2. CLI 命令行使用
 
-#### ① 翻译书籍
+#### 翻译书籍
 ```bash
 # 将书籍翻译为中文（-l 目标语言，-s 源语言，默认源语言为 en）
 ubt translate sample.pdf -l zh
@@ -148,7 +148,7 @@ Job ID: job_da4c06edac50_zh (resume with: ubt translate sample.pdf --job-id job_
 ```
 若任务因故中断，再次运行上述带 `--job-id` 的命令即可**原地秒级继续断点翻译**；若想推倒重来，追加 `--fresh` 参数即可。
 
-#### ② 实用工具命令
+#### 实用工具命令
 ```bash
 # 零 Token 计费全书预检（预估所需 Token 费用、耗时、公式密度与版面风险）
 ubt assess book.pdf
@@ -196,7 +196,7 @@ ubt-mcp
 
 ---
 
-## 🎨 排版与交付模式说明
+## 排版与交付模式说明
 
 输出文档由任务的交付模式（Delivery Contract）驱动：
 - **`readable`（流式重排，默认推荐）**：依据语义 IR 由 Typst 重新编排版面，具有统一优美的正文字号（10.5pt）、自适应表格及原生数学公式，阅读体验最佳；
@@ -209,7 +209,7 @@ ubt-mcp
 
 ---
 
-## ⚠️ 已知局限与缺陷 (Known Limitations)
+## 已知局限与缺陷 (Known Limitations)
 
 为了秉持开源求实精神，以下为当前实现中客观存在的局限与已知边界，请在实际使用中留意：
 
@@ -229,7 +229,7 @@ ubt-mcp
 
 ---
 
-## 🤝 参与贡献
+## 参与贡献
 
 项目文档以根目录的 [`GLOSSARY.md`](GLOSSARY.md) 为准。
 欢迎查阅：
@@ -247,6 +247,6 @@ uv run pytest -m fast -q
 
 ---
 
-## 📄 开源许可证
+## 开源许可证
 
 本项目采用 [MIT 许可证](LICENSE) 开源发布。
