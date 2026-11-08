@@ -226,6 +226,14 @@ class JobSubmitRequest(BaseModel):
     # Rehearsal: run the full pipeline against the deterministic echo provider
     # (zero token spend). Explicit dry_run=True required for mock translation.
     dry_run: bool = Field(default=False, description="Zero-token rehearsal run (echo provider)")
+    # Set by the intake when IT forced dry_run (no usable credential), never by
+    # the client. Marks the dry_run as an auto-decision: a resume after the
+    # operator fixed the key then runs for real, exactly as the queue worker
+    # reads the same marker. A client-requested dry_run stays a rehearsal.
+    rehearsal_auto: bool = Field(
+        default=False,
+        description="True when the server (not the client) forced dry_run; resume then runs for real",
+    )
     # Resume controls (UBTConfig fields, forwarded by overrides_from_request).
     # ``None`` (not ``False``) so a client that omits the field leaves the
     # operator's UBT_FRESH in force: overrides_from_request only applies non-None

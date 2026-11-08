@@ -781,6 +781,10 @@ def register_job_routes(
                     "input_path": str(resolved_in),
                     "output_path": str(resolved_out) if resolved_out is not None else None,
                     "glossary": resolved_glossary,
+                    # The marker records an intake decision, not a client wish:
+                    # a client-sent ``rehearsal_auto=true`` would let resume
+                    # clear a dry_run the client itself requested.
+                    "rehearsal_auto": False,
                 }
             )
             # No usable credential and no injected router → a hosted endpoint can
@@ -791,7 +795,6 @@ def register_job_routes(
             # A loopback endpoint is exempt. It needs no credential, so requiring one
             # turned a correctly configured local model into a rehearsal the operator
             # never asked for — the same defect the worker had.
-            auto_rehearsal = False
             # Live config, not the startup snapshot: a provider saved from the console
             # must be usable by the very next submit, which is the whole point of
             # writing it to a file the engine re-reads.
@@ -802,8 +805,11 @@ def register_job_routes(
                 and credential_required(live)
                 and not has_real_credential(live)
             ):
-                safe_req = safe_req.model_copy(update={"dry_run": True})
-                auto_rehearsal = True
+                # The request model carries the marker, so every downstream
+                # surface (submit response, status, queue payload, worker,
+                # resume) can tell an intake-forced rehearsal from a user
+                # request without a queue-only side key.
+                safe_req = safe_req.model_copy(update={"dry_run": True, "rehearsal_auto": True})
                 logger.warning(
                     "No API key configured for a remote endpoint: auto-setting dry_run "
                     "rehearsal for input %s",
@@ -811,12 +817,11 @@ def register_job_routes(
                 )
             if job_queue is not None:
                 queued_id = submit_id
+                # ``rehearsal_auto`` rides ``model_dump`` since the request
+                # model grew the field: the worker reads the same key it always
+                # did, and the marker says the dry_run was our auto-decision,
+                # not a user request, so a keyed worker runs for real.
                 queued_payload = safe_req.model_dump()
-                if auto_rehearsal:
-                    # The worker recomputes rehearsal from its OWN key; this
-                    # marker says the dry_run was our auto-decision, not a user
-                    # request, so a keyed worker runs for real.
-                    queued_payload["rehearsal_auto"] = True
                 try:
                     # ``enqueue`` runs ``BEGIN IMMEDIATE`` with a 30s busy_timeout;
                     # calling it inline on the event loop stalls every other request
@@ -1136,8 +1141,15 @@ def register_job_routes(
                     )
 
             # Never re-fresh (that would discard the checkpoints) and clear the
-            # previous failure so the record restarts clean.
-            record.request = record.request.model_copy(update={"fresh": False})
+            # previous failure so the record restarts clean. A dry_run the
+            # intake itself forced (no credential at submit time) is not the
+            # operator's wish: resuming after fixing the key must run for real
+            # — the same rule the queue worker applies to ``rehearsal_auto``.
+            updates: dict[str, Any] = {"fresh": False}
+            if record.request.dry_run and record.request.rehearsal_auto:
+                updates["dry_run"] = False
+                updates["rehearsal_auto"] = False
+            record.request = record.request.model_copy(update=updates)
             record.error = None
             record.progress = ProgressSnapshot()
             record.status = JobStatus.SUBMITTED

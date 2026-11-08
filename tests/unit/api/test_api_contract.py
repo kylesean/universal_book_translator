@@ -1108,3 +1108,78 @@ def test_concurrent_submits_of_one_output_path_spawn_one_pipeline(
 
     assert sorted(codes) == [202, 409], f"expected one accept and one 409, got {codes}"
     assert spawned == ["clashjob01"]
+
+
+def test_resume_clears_an_intake_forced_rehearsal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dry_run the intake itself forced is not the operator's wish.
+
+    The queue worker reads ``rehearsal_auto`` for exactly this reason (a keyed
+    worker runs for real); embedded resume kept the forced dry_run, so an
+    operator who fixed the key and resumed got another echo delivery instead
+    of the billed run they asked for.
+    """
+    from ubt.core.engine.ledger import SQLiteJobLedger
+
+    resumed_requests: list[JobSubmitRequest] = []
+
+    async def _capture(self: JobManager, record: JobRecord, config: Any) -> None:
+        resumed_requests.append(record.request)
+        record.status = JobStatus.RUNNING
+
+    doc = _write_doc(tmp_path)
+    out = tmp_path / "rehearsal_resume_out.md"
+    job_id = "rehearse01"
+    config = _config(tmp_path)
+    with TestClient(create_app(config=config)) as client:
+        submitted = client.post(
+            "/jobs/submit",
+            json={
+                "input_path": str(doc),
+                "output_path": str(out),
+                "job_id": job_id,
+                "dry_run": True,
+            },
+            headers=_AUTH,
+        )
+        assert submitted.status_code == 202, submitted.text
+        # A client cannot mint the marker itself: submit normalizes it to
+        # False, so a user-requested rehearsal stays a rehearsal on resume.
+        forged = client.post(
+            "/jobs/submit",
+            json={
+                "input_path": str(doc),
+                "output_path": str(tmp_path / "forged_out.md"),
+                "job_id": "forgemark01",
+                "dry_run": True,
+                "rehearsal_auto": True,
+            },
+            headers=_AUTH,
+        )
+        assert forged.status_code == 202, forged.text
+
+    with SQLiteJobLedger(config.db_dir / f"{job_id}.sqlite") as ledger:
+        stored = ledger.get_job_metadata_value(job_id, "submitted_request")
+    assert isinstance(stored, dict)
+    assert stored["dry_run"] is True
+
+    # Simulate the state only the server writes when it forces a rehearsal.
+    with SQLiteJobLedger(config.db_dir / f"{job_id}.sqlite") as ledger:
+        ledger.set_job_metadata_value(
+            job_id, "submitted_request", {**stored, "rehearsal_auto": True}
+        )
+        ledger.finalize_job(job_id, status=JobStatus.FAILED)
+
+    with SQLiteJobLedger(config.db_dir / "forgemark01.sqlite") as ledger:
+        forged_stored = ledger.get_job_metadata_value("forgemark01", "submitted_request")
+    assert isinstance(forged_stored, dict)
+    assert forged_stored["rehearsal_auto"] is False
+
+    monkeypatch.setattr(JobManager, "execute_job", _capture)
+    with TestClient(create_app(config=_config(tmp_path))) as client:
+        resumed = client.post(f"/jobs/{job_id}/resume", headers=_AUTH)
+
+    assert resumed.status_code == 200, resumed.text
+    assert resumed_requests[-1].dry_run is False
+    assert resumed_requests[-1].rehearsal_auto is False

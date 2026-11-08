@@ -1404,7 +1404,7 @@ def test_submit_and_assess_read_the_live_config() -> None:
     assess = source[source.index("async def assess_job") :][:900]
     assert "cfg = scope.config" in assess, "assess must price against the live config"
 
-    submit = source[source.index("auto_rehearsal = False") :][:600]
+    submit = source[source.index("# Live config, not the startup snapshot") :][:700]
     assert "scope.config" in submit, "the rehearsal decision must read the live config"
 
     assert source.count("execute_job(record, scope.config)") == 3
