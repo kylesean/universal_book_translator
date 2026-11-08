@@ -1,32 +1,31 @@
+# =============================================================================
 # UBT Sample Book Translation Configuration
-# Use this configuration file as a template for your own projects.
-# Usage:
-#   ubt translate examples/sample_book/deep_learning_primer.md --config examples/sample_book/ubt_sample_config.toml
+#
+# Copy this file to `ubt.toml` in your working directory (auto-discovered, and
+# git-ignored so your key stays local), set DEEPSEEK_API_KEY, then run:
+#
+#   cp examples/sample_book/ubt_sample_config.toml ubt.toml
+#   export DEEPSEEK_API_KEY="sk-..."
+#   ubt translate examples/sample_book/deep_learning_primer.md -l zh
+#
+# The document schema is exactly two kinds of section: [providers.<name>]
+# blocks and [defaults]. Unknown tables are rejected loudly, not ignored —
+# see ubt.toml.example for the full field reference.
+# =============================================================================
 
-[project]
-name = "deep-learning-primer"
-target_lang = "zh"
-source_lang = "en"
+[providers.deepseek]
+base_url = "https://api.deepseek.com/v1"
+api_mode = "openai-chat"
+api_key = "${DEEPSEEK_API_KEY}"
+draft_model = "deepseek-chat"
+repair_model = "deepseek-reasoner"
 
-[model]
-# LLM Provider selection: openai | anthropic | gemini | deepseek | ollama
+# Uncomment for the offline Ollama quick start in examples/README.md:
+# [providers.ollama]
+# base_url = "http://127.0.0.1:11434/v1"
+# api_mode = "openai-chat"
+# draft_model = "qwen2.5:14b"
+# is_free = true
+
+[defaults]
 provider = "deepseek"
-model = "deepseek-chat"
-temperature = 0.2
-timeout_sec = 60
-
-[render]
-# Delivery mode: reflow | facsimile | page_locked
-delivery_mode = "reflow"
-# Enable layout auto-healing passes (P2-12)
-enable_layout_auto_heal = true
-layout_auto_heal_max_passes = 2
-# Typst page margins (pt)
-margin_top_pt = 36.0
-margin_bottom_pt = 36.0
-margin_left_pt = 36.0
-margin_right_pt = 36.0
-
-[glossary]
-# Predefined technical terminology constraints
-terms = { "Gradient Descent" = "梯度下降", "Backpropagation" = "反向传播", "Generalization Gap" = "泛化差距", "Layer Norm" = "层归一化", "Residual" = "残差" }
