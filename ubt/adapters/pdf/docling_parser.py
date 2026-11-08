@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 from collections.abc import Callable, Sequence
+from concurrent.futures.process import BrokenProcessPool
 from contextlib import suppress
 from pathlib import Path
 from types import SimpleNamespace
@@ -1356,6 +1357,14 @@ def extract_with_docling(
             # down with it; falling back on a timeout loaded the multi-GB model
             # into the API process and made every later crash fatal to all jobs.
             # A timed-out slice fails this chunk, and ``--job-id`` resumes it.
+            raise DocumentParseError(str(exc)) from exc
+        except BrokenProcessPool as exc:
+            # Same rule as the timeout above, and for the same reason: a
+            # ``BrokenProcessPool`` means the worker died natively (segfault or
+            # OOM — exactly the failure isolation exists for), so falling back
+            # here would load the multi-GB model into the API process and make
+            # every later crash fatal to all jobs. The pool closed itself on
+            # re-raise; the next conversion starts a fresh worker.
             raise DocumentParseError(str(exc)) from exc
         except Exception as exc:
             logger.warning(

@@ -208,3 +208,34 @@ def test_in_process_converter_cleanup() -> None:
         mock_cleanup.assert_called_once_with(mock_conv)
         assert dp._WARM_IN_PROCESS_CONVERTER is None
         assert dp._WARM_IN_PROCESS_KEY is None
+
+
+def test_a_worker_death_never_falls_back_to_in_process_conversion(tmp_path: Path) -> None:
+    """``BrokenProcessPool`` is a native segfault/OOM — reject it like a timeout.
+
+    A plain ``RuntimeError`` from the worker task still falls back (an
+    application-level failure may genuinely succeed in-process — the fallback
+    test above pins that). A ``BrokenProcessPool`` is exactly the failure the
+    isolation exists for: falling back here loaded the multi-GB model into the
+    API process and made every later crash fatal to all jobs.
+    """
+    from ubt.core.exceptions import DocumentParseError
+
+    pdf = tmp_path / "test.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+
+    mock_pool = MagicMock()
+    mock_pool.convert.side_effect = BrokenProcessPool("Process died with SIGSEGV")
+
+    with (
+        patch("ubt.adapters.pdf.docling_worker.get_docling_worker_pool", return_value=mock_pool),
+        patch("ubt.adapters.pdf.docling_parser.convert_docling_document") as mock_in_process,
+        pytest.raises(DocumentParseError),
+    ):
+        extract_with_docling(
+            path=pdf,
+            page_range=None,
+            enrich=False,
+            isolate_process=True,
+        )
+    mock_in_process.assert_not_called()
