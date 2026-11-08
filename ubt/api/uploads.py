@@ -15,6 +15,7 @@ import logging
 import time
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobQueue, JobStatus
 
@@ -70,6 +71,29 @@ def staged_uploads_in_use(job_queue: JobQueue | None) -> set[str]:
         if job.status in TERMINAL_JOB_STATUSES:
             continue
         resolved = _resolved((job.payload or {}).get("input_path"))
+        if resolved:
+            in_use.add(resolved)
+    return in_use
+
+
+def live_embedded_inputs(manager: Any) -> set[str]:
+    """Resolved input paths of embedded-mode jobs whose task is still live.
+
+    ``staged_uploads_in_use`` only sees queue rows, and embedded mode has no
+    queue: without this set, a retention window shorter than a long book's
+    runtime deleted the staged source out from under a running embedded job,
+    and the run failed on an unrelated-looking read error. The manager's
+    in-memory records are the only place those live inputs are visible.
+    """
+    in_use: set[str] = set()
+    try:
+        records = list(manager.jobs.values())
+    except Exception:  # concurrent dict mutation; the next sweep tick retries
+        return in_use
+    for record in records:
+        if record.status in TERMINAL_JOB_STATUSES:
+            continue
+        resolved = _resolved(getattr(record.request, "input_path", None))
         if resolved:
             in_use.add(resolved)
     return in_use
@@ -165,12 +189,20 @@ def reap_stale_uploads(
     max_age_days: float,
     job_queue: JobQueue | None = None,
     db_dir: Path | None = None,
+    manager: Any = None,
     now: float | None = None,
 ) -> int:
-    """Prune the staging area, sparing every upload a live queue job still reads."""
+    """Prune the staging area, sparing every upload a live job still reads.
+
+    Queue-mode rows are covered by ``job_queue``, embedded-mode ledgers by
+    ``db_dir``, and a live embedded run's input — visible nowhere else — by
+    ``manager``.
+    """
     keep = staged_uploads_in_use(job_queue)
     if db_dir is not None:
         keep |= resumable_uploads(db_dir)
+    if manager is not None:
+        keep |= live_embedded_inputs(manager)
     return prune_stale_uploads(
         uploads_dir,
         max_age_days=max_age_days,

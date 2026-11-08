@@ -322,3 +322,63 @@ async def test_a_failed_periodic_sweep_is_logged_and_the_timer_survives(
     assert len(delays) == 2, "a failed sweep must not kill the timer"
     assert "periodic upload sweep failed" in caplog.text
     assert "read-only" in caplog.text
+
+
+def test_a_live_embedded_run_spares_its_staged_source(tmp_path: Path) -> None:
+    """Queue rows cannot see an embedded run; the manager's records must.
+
+    A retention window shorter than a long book's runtime deleted the staged
+    source mid-run; the failure surfaced as an unrelated read error blocks
+    later, with nothing pointing at the sweep.
+    """
+    staged = _stage(tmp_path / "uploads", "long_book.pdf", age_days=_WINDOW_DAYS + 1)
+    records = types.SimpleNamespace(
+        jobs={
+            "job-live": types.SimpleNamespace(
+                status=JobStatus.RUNNING,
+                request=types.SimpleNamespace(input_path=str(staged)),
+            ),
+            "job-done": types.SimpleNamespace(
+                status=JobStatus.COMPLETED,
+                request=types.SimpleNamespace(input_path=str(staged)),
+            ),
+        }
+    )
+    removed = reap_stale_uploads(
+        tmp_path / "uploads",
+        max_age_days=_WINDOW_DAYS,
+        manager=records,
+        now=time.time(),
+    )
+    assert removed == 0
+    assert staged.exists()
+
+    # Without a manager the sweep behaves exactly as before (queue rows plus
+    # the failed/cancelled ledger set).
+    removed = reap_stale_uploads(
+        tmp_path / "uploads",
+        max_age_days=_WINDOW_DAYS,
+        now=time.time(),
+    )
+    assert removed == 1
+
+
+def test_live_embedded_inputs_resolves_paths_and_skips_terminal(tmp_path: Path) -> None:
+    staged = tmp_path / "uploads" / "book.pdf"
+    staged.parent.mkdir(parents=True)
+    staged.write_bytes(b"%PDF-1.4")
+    records = types.SimpleNamespace(
+        jobs={
+            "live": types.SimpleNamespace(
+                status=JobStatus.RUNNING,
+                request=types.SimpleNamespace(input_path=str(staged)),
+            ),
+            "settling": types.SimpleNamespace(
+                status=JobStatus.CANCELLED,
+                request=types.SimpleNamespace(input_path=str(staged)),
+            ),
+        }
+    )
+    from ubt.api.uploads import live_embedded_inputs
+
+    assert live_embedded_inputs(records) == {str(staged.resolve())}

@@ -270,6 +270,7 @@ async def _reap_uploads_periodically(
     max_age_days: float,
     job_queue: JobQueue | None,
     db_dir: Path | None,
+    manager: Any = None,
 ) -> None:
     """Sweep the staging area on a timer for the life of the server.
 
@@ -285,6 +286,7 @@ async def _reap_uploads_periodically(
                 max_age_days=max_age_days,
                 job_queue=job_queue,
                 db_dir=db_dir,
+                manager=manager,
             )
         except Exception as exc:  # never let the timer die
             logger.warning("periodic upload sweep failed: %s", exc)
@@ -387,6 +389,7 @@ def create_app(
             max_age_days=app_config.upload_retention_days,
             job_queue=job_queue,
             db_dir=app_config.db_dir,
+            manager=manager,
         )
         if removed:
             logger.info(
@@ -403,6 +406,7 @@ def create_app(
                 max_age_days=app_config.upload_retention_days,
                 job_queue=job_queue,
                 db_dir=app_config.db_dir,
+                manager=manager,
             )
         )
         try:
