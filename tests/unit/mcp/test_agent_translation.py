@@ -713,4 +713,5 @@ async def test_set_agent_session_state_rejects_values_outside_the_machine(
 
         ledger.set_agent_session_state("agent-typo", AgentSessionState.FINISHING, now=3.0)
         session = ledger.get_job_metadata_value("agent-typo", AGENT_SESSION_KEY)
+        assert isinstance(session, dict)
         assert session["state"] == "finishing"

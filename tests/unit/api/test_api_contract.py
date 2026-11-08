@@ -1051,6 +1051,7 @@ def test_concurrent_submits_of_one_output_path_spawn_one_pipeline(
     "unclaimed" and both spawn a pipeline onto the same deliverable.
     """
     import ubt.api.routes.job as job_routes
+    from ubt.api.routes.shared import output_path_claimant as real_claimant
 
     spawned: list[str] = []
 
@@ -1060,8 +1061,8 @@ def test_concurrent_submits_of_one_output_path_spawn_one_pipeline(
 
     # Delay, then delegate to the REAL scan: the rejection under test comes
     # from the claimant scan itself, so stubbing it to None would stub away
-    # the assertion.
-    real_claimant = job_routes.output_path_claimant
+    # the assertion. The original comes from its defining module; the patch
+    # targets the job module's namespace, which is what the handler resolves.
 
     def _slow_claimant(manager: JobManager, queue: Any, job_id: str, claimed: Path) -> Any:
         # Hold the scan window open so the second request is already waiting
