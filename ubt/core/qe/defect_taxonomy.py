@@ -37,6 +37,7 @@ classified or exempt).
 
 import re
 from collections.abc import Iterable
+from enum import StrEnum
 
 # --- The "not translated" (echo) class --------------------------------------
 # FastPass rejects an untranslated passage with one of three phrasings: the
@@ -463,6 +464,47 @@ TRANSIENT_FAILURE_PREFIXES: tuple[str, ...] = (
     REPAIR_ERROR_PREFIX,
     UNTRANSLATED_PREFIX,
 )
+
+
+class ErrorFlagKind(StrEnum):
+    """The routing verdict a lifecycle flag carries on resume.
+
+    The prefix table above stays the classifier of record (see the module
+    docstring: the structured form cannot absorb the lifecycle families yet).
+    This enum names the verdict each family encodes, so a reader routes on the
+    kind instead of repeating ``startswith`` archaeology — the same drift the
+    ``flag_upgrade`` migration exists because of. ``QUALITY`` covers every
+    non-lifecycle flag: structured defect markers, quality notes, anything a
+    resume must not touch.
+    """
+
+    DRAFTING_TRANSIENT = "drafting_transient"
+    REPAIR_TRANSIENT = "repair_transient"
+    RETRYABLE_CONFIG = "retryable_config"
+    NON_RETRYABLE = "non_retryable"
+    UNTRANSLATED = "untranslated"
+    TRIAGE_VERDICT = "triage_verdict"
+    QUALITY = "quality"
+
+
+def classify_error_flag(flag: str) -> ErrorFlagKind:
+    """The one prefix-to-verdict mapping. Order is load-bearing: ``NON_RETRYABLE``
+    is worded so it cannot shadow ``DRAFTING_TRANSIENT`` (see the prefix
+    comments), and a triage verdict wins over everything."""
+    if flag in TRIAGE_VERDICT_FLAGS:
+        return ErrorFlagKind.TRIAGE_VERDICT
+    if flag.startswith(DRAFTING_ERROR_PREFIX):
+        return ErrorFlagKind.DRAFTING_TRANSIENT
+    if flag.startswith(NON_RETRYABLE_DRAFT_PREFIX):
+        return ErrorFlagKind.NON_RETRYABLE
+    if flag.startswith(RETRYABLE_CONFIG_DRAFT_PREFIX):
+        return ErrorFlagKind.RETRYABLE_CONFIG
+    if flag.startswith(REPAIR_ERROR_PREFIX):
+        return ErrorFlagKind.REPAIR_TRANSIENT
+    if flag.startswith(UNTRANSLATED_PREFIX):
+        return ErrorFlagKind.UNTRANSLATED
+    return ErrorFlagKind.QUALITY
+
 
 FLAG_NEEDS_HUMAN_REVIEW = "needs_human_review"
 FLAG_MQM_CRITICAL_BLOCKED = "mqm_critical_blocked"

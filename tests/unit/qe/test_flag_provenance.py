@@ -466,3 +466,31 @@ def test_a_needs_human_non_prose_block_is_not_marked_as_a_render_skip() -> None:
     ).read_text(encoding="utf-8")
     assert '"render_skip:non_prose"' not in source
     assert '"non_prose_degraded: structural block kept in the draft"' in source
+
+
+def test_classify_error_flag_names_the_routing_verdict() -> None:
+    """Every lifecycle family maps to the verdict the resume path routes on.
+
+    The prefix tables stay the classifier of record (see the taxonomy module
+    docstring); ``classify_error_flag`` names the verdict each family encodes so
+    a reader routes on the kind instead of repeating ``startswith`` archaeology.
+    """
+    from ubt.core.qe.defect_taxonomy import ErrorFlagKind, classify_error_flag
+
+    assert (
+        classify_error_flag("Drafting error: provider timeout") is ErrorFlagKind.DRAFTING_TRANSIENT
+    )
+    assert (
+        classify_error_flag("Drafting unrecoverable: malformed source")
+        is ErrorFlagKind.NON_RETRYABLE
+    )
+    assert (
+        classify_error_flag("Drafting config error: missing route/model")
+        is ErrorFlagKind.RETRYABLE_CONFIG
+    )
+    assert classify_error_flag("Repair error: repair stage died") is ErrorFlagKind.REPAIR_TRANSIENT
+    assert classify_error_flag("untranslated: stage crash") is ErrorFlagKind.UNTRANSLATED
+    assert classify_error_flag("needs_human_review") is ErrorFlagKind.TRIAGE_VERDICT
+    assert classify_error_flag("mqm_critical_blocked") is ErrorFlagKind.TRIAGE_VERDICT
+    assert classify_error_flag("numeric_mismatch:2:high") is ErrorFlagKind.QUALITY
+    assert classify_error_flag("terminology_consistency:1:low") is ErrorFlagKind.QUALITY

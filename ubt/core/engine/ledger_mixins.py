@@ -34,10 +34,10 @@ from ubt.core.ir.models import (
     IRBlock,
 )
 from ubt.core.qe.defect_taxonomy import (
-    DRAFTING_ERROR_PREFIX,
-    NON_RETRYABLE_DRAFT_PREFIX,
     RETRYABLE_CONFIG_DRAFT_PREFIX,
     TRANSIENT_FAILURE_PREFIXES,
+    ErrorFlagKind,
+    classify_error_flag,
     has_triage_verdict,
     is_repair_only_transient_failure,
     is_transient_failure,
@@ -2343,7 +2343,7 @@ class LedgerBlocksMixin(_LedgerHost):
                     (
                         flag
                         for flag in flags
-                        if flag.startswith(NON_RETRYABLE_DRAFT_PREFIX)
+                        if classify_error_flag(flag) is ErrorFlagKind.NON_RETRYABLE
                         and _is_recoverable_config_failure(flag)
                     ),
                     None,
@@ -2365,7 +2365,8 @@ class LedgerBlocksMixin(_LedgerHost):
                     # draft itself; the full routing rules
                     # live on the SELECT comment above.
                     drafting_failed = any(
-                        str(flag).startswith(DRAFTING_ERROR_PREFIX) for flag in flags
+                        classify_error_flag(str(flag)) is ErrorFlagKind.DRAFTING_TRANSIENT
+                        for flag in flags
                     )
                     if is_repair_only_transient_failure(flags) or (
                         row["has_text"] and not drafting_failed
