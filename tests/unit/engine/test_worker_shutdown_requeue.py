@@ -29,9 +29,16 @@ def _worker(tmp_path: Path) -> JobWorker:
     )
 
 
-async def _run_interrupted(worker: JobWorker, *, shutting_down: bool) -> list[str]:
+async def _run_interrupted(
+    worker: JobWorker, *, shutting_down: bool, cancel_requested: bool = False
+) -> list[str]:
+    # ``cancel_requested`` must only apply AFTER ``task.cancel()``: the event
+    # loop checks the same flag on every event (job_worker's cancel-between-
+    # events path), and arming it early takes the JobInterruptedError route
+    # instead of the shutdown-race route this test exercises.
     calls: list[str] = []
     worker._shutting_down = shutting_down
+    armed = {"v": False}
 
     async def fake_q(fn: Any, *args: Any, **kwargs: Any) -> Any:
         name = getattr(fn, "__name__", "")
@@ -44,7 +51,7 @@ async def _run_interrupted(worker: JobWorker, *, shutting_down: bool) -> list[st
         if name == "update_progress":
             return True
         if name == "is_cancel_requested":
-            return False
+            return cancel_requested and armed["v"]
         return None
 
     async def fake_source(*args: Any, **kwargs: Any) -> Any:
@@ -58,6 +65,7 @@ async def _run_interrupted(worker: JobWorker, *, shutting_down: bool) -> list[st
     task = asyncio.create_task(worker.execute(_Job(), "w-test"))  # type: ignore[arg-type]
     await asyncio.sleep(0.05)
     task.cancel()
+    armed["v"] = True
     with pytest.raises(asyncio.CancelledError):
         await task
     return calls
@@ -162,3 +170,15 @@ async def test_worker_writer_lock_conflict_backs_off_using_lease_expiry(tmp_path
 
     assert result is False
     assert any(40.0 <= s <= 46.0 for s in slept)
+
+
+@pytest.mark.asyncio
+async def test_a_user_cancel_that_raced_the_shutdown_still_wins(tmp_path: Path) -> None:
+    """``stop()`` must not resurrect a job the cancel API already answered.
+
+    Both events arrive as a task cancellation; the queue row's
+    ``cancel_requested`` flag is the one durable distinction, so the shutdown
+    requeue defers to it instead of re-arming a job the operator just killed.
+    """
+    calls = await _run_interrupted(_worker(tmp_path), shutting_down=True, cancel_requested=True)
+    assert calls == ["complete:cancelled"], calls

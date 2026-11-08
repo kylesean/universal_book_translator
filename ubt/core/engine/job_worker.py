@@ -184,6 +184,18 @@ class JobWorker:
         """
         return await asyncio.to_thread(fn, *args, **kwargs)
 
+    async def _user_requested_cancel(self, job_id: str, owner: str) -> bool:
+        """Whether the operator cancelled THIS job, as opposed to the process
+        shutting down. Reads the queue row's ``cancel_requested`` flag, which the
+        cancel API sets before it cancels the slot task — the one durable
+        distinction between the two events that both arrive as a task
+        cancellation. A probe failure reads as "not requested" so a shutdown
+        keeps its safe requeue default."""
+        try:
+            return await self._q(self.queue.is_cancel_requested, job_id, owner)
+        except Exception:  # noqa: BLE001 - the safe default is the shutdown path
+            return False
+
     async def _write_abort_ledger(
         self,
         job: QueuedJob,
@@ -429,7 +441,13 @@ class JobWorker:
             # multi-hour job: it had to be resubmitted from scratch. On a
             # shutdown, hand the job back to QUEUED instead and let the next
             # worker resume it from its ledger checkpoints.
-            if self._shutting_down:
+            if self._shutting_down and not await self._user_requested_cancel(job.job_id, owner):
+                # A user cancel that raced the shutdown still owns the CANCELLED
+                # outcome: the cancel API answered the operator, and requeueing
+                # here would resurrect a job the user just killed. The probe is
+                # the queue's own ``cancel_requested`` flag, so a probe failure
+                # falls back to the shutdown behavior below (requeue), which is
+                # the safe default for a process that is going away anyway.
                 with suppress(Exception):
                     await asyncio.shield(
                         self._q(
