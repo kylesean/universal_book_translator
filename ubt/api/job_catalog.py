@@ -16,8 +16,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.progress import live_progress_percent
+from ubt.core.engine.status_projection import project_ledger_status
 from ubt.core.job_options import JOB_ID_MAX_LEN, JOB_ID_RE
 
 logger = logging.getLogger(__name__)
@@ -56,7 +58,7 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
         stored_status = str(snapshot["status"])
         last_error = (
             ledger.get_job_metadata_value(job_id, "last_error")
-            if stored_status in _TERMINAL_LEDGER_STATUSES
+            if stored_status in TERMINAL_JOB_STATUSES
             else None
         )
     except Exception as exc:  # no job_meta table -> not a job ledger
@@ -86,7 +88,7 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
             str(snapshot["status"]),
             has_live_writer=_has_live_writer(db_path, job_id),
             total=total,
-            completed=completed,
+            done=completed + failed + needs_human + blocked_human,
             agent_state=(
                 str(agent_session.get("state"))
                 if isinstance(agent_session, dict) and agent_session.get("state")
@@ -115,16 +117,12 @@ def summarize_job(db_path: Path) -> dict[str, Any] | None:
     }
 
 
-#: ``job_meta.status`` values that end a job's life.
-_TERMINAL_LEDGER_STATUSES = frozenset({"completed", "failed", "cancelled"})
-
-
 def _reportable_status(
     stored: str,
     *,
     has_live_writer: bool,
     total: int,
-    completed: int,
+    done: int,
     agent_state: str | None = None,
 ) -> str:
     """The status a listing may show, normalizing a ledger row left mid-run.
@@ -136,34 +134,25 @@ def _reportable_status(
     live run) for a job that had crashed hours earlier, while ``/status`` for the
     same id — which does normalize — reported it failed.
 
-    A terminal row is passed through. A row whose blocks are all accounted for is
-    completed — that is exactly the condition ``finalize_job("completed")`` is
-    guarded on, and the export stage finalizes *before* it records the rendered
-    digest, so a process lost in that window leaves a fully translated book
-    behind a row that still says ``initialized``. Agent states are reported only
-    after that completion check, so a finished book cannot be mislabeled merely
-    because its session row was not updated. Any other row is ``running`` while
-    a live writer holds the lease and ``failed`` once nothing does — the same
-    test ``/status`` applies
-    (:meth:`ubt.core.engine.writer_lock.LedgerWriterLock.lease_holder`).
-
-    The lease, not the file's mtime, is what makes this safe. A run spends
-    minutes inside one model call without writing a checkpoint, so a "quiet for
-    N minutes" rule calls a *working* job dead — measured: with a live lease held
-    and the ledger untouched for 1000s, an mtime rule reported ``failed`` where
-    ``/status`` correctly reported ``running``. Asking the lease covers the
-    reverse case for free: an expired lease is exactly what a crashed process
-    leaves behind.
+    The decision tree lives in
+    :func:`ubt.core.engine.status_projection.project_ledger_status` — the same
+    one ``/status`` and the MCP fallback apply, so the surfaces cannot disagree
+    about one ledger. ``done`` counts every terminal block (completed, failed,
+    needs_human, blocked_human): a process lost before finalize leaves a fully
+    accounted row behind, and every surface must read it the same way. The
+    lease, not the file's mtime, is what makes the no-writer branch safe: a run
+    spends minutes inside one model call without writing a checkpoint, so a
+    "quiet for N minutes" rule calls a *working* job dead — measured: with a
+    live lease held and the ledger untouched for 1000s, an mtime rule reported
+    ``failed`` where ``/status`` correctly reported ``running``.
     """
-    if stored in _TERMINAL_LEDGER_STATUSES:
-        return stored
-    if total > 0 and completed >= total:
-        return "completed"
-    # An Agent job is intentionally lock-free between tool calls. No writer
-    # lease is therefore the normal steady state, not evidence of a crash.
-    if agent_state in ("awaiting_agent", "needs_attention"):
-        return agent_state
-    return "running" if has_live_writer else "failed"
+    return project_ledger_status(
+        stored=stored,
+        total=total,
+        done=done,
+        agent_state=agent_state,
+        has_live_writer=has_live_writer,
+    ).status
 
 
 def _has_live_writer(db_path: Path, job_id: str) -> bool:

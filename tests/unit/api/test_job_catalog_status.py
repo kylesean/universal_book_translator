@@ -100,7 +100,7 @@ def test_a_fully_processed_row_reads_completed_even_before_finalize(tmp_path: Pa
 
 
 @pytest.mark.parametrize(
-    ("stored", "live", "total", "completed", "expected"),
+    ("stored", "live", "total", "done", "expected"),
     [
         ("completed", False, 0, 0, "completed"),
         ("failed", True, 5, 1, "failed"),
@@ -113,10 +113,7 @@ def test_a_fully_processed_row_reads_completed_even_before_finalize(tmp_path: Pa
         ("initialized", True, 0, 0, "running"),
     ],
 )
-def test_the_status_rule(
-    stored: str, live: bool, total: int, completed: int, expected: str
-) -> None:
-    assert (
-        _reportable_status(stored, has_live_writer=live, total=total, completed=completed)
-        == expected
-    )
+def test_the_status_rule(stored: str, live: bool, total: int, done: int, expected: str) -> None:
+    # ``done`` counts every terminal block (completed + failed + needs_human +
+    # blocked_human) — the same accounting /status and the MCP fallback apply.
+    assert _reportable_status(stored, has_live_writer=live, total=total, done=done) == expected
