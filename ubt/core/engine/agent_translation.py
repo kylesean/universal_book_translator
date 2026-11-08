@@ -482,7 +482,6 @@ class AgentTranslationService:
             model="agent-host",
             prompt_version="agent-v1",
         )
-        self._lease_lost: asyncio.Event | None = None
 
     # ------------------------------------------------------------------
     # prepare
@@ -1362,7 +1361,6 @@ class AgentTranslationService:
                         "Submit them before finishing; expired leases were released."
                     ),
                 )
-            self._lease_lost = lease_lost
             manifest = await asyncio.to_thread(manifest_from_ledger, ledger, request.job_id)
             config = await asyncio.to_thread(self._config_from_agent_metadata, manifest)
             blocks = await asyncio.to_thread(ledger.get_all_blocks, request.job_id)
@@ -1380,7 +1378,9 @@ class AgentTranslationService:
             # and triage can hand work back to the host (REPAIR_PENDING). That
             # is what makes the gate below the single place that decides
             # between repair_required and export.
-            stage = await self._build_render_stage(ledger, request.job_id, manifest, config)
+            stage = await self._build_render_stage(
+                ledger, request.job_id, manifest, config, lease_lost=lease_lost
+            )
             await self._quality_closeout(stage)
             blocks = await asyncio.to_thread(ledger.get_all_blocks, request.job_id)
             non_terminal = [b for b in blocks if b.status not in TERMINAL_STATUSES]
@@ -1430,7 +1430,6 @@ class AgentTranslationService:
                 session_state,
                 now=_now(),
             )
-            self._lease_lost = None
             return AgentFinishResult(
                 job_id=request.job_id,
                 status="completed",
@@ -1459,7 +1458,6 @@ class AgentTranslationService:
                         request.job_id,
                         session_state,
                     )
-            self._lease_lost = None
             renew_task.cancel()
             with suppress(asyncio.CancelledError):
                 await renew_task
@@ -1532,6 +1530,8 @@ class AgentTranslationService:
         job_id: str,
         manifest: BookManifest,
         config: UBTConfig,
+        *,
+        lease_lost: asyncio.Event | None = None,
     ) -> _RenderStage:
         """Build everything the closeout and the export share, once.
 
@@ -1539,7 +1539,10 @@ class AgentTranslationService:
         must run *before* ``finish`` decides whether the job can render: the
         context, services and render plan are the same objects either way, and
         building them twice would run the terminology load and the route
-        decision twice.
+        decision twice. ``lease_lost`` is the owning finish call's event,
+        passed explicitly rather than parked on the instance: two finishes
+        racing on one service instance must never wire one call's lease event
+        into the other call's render stage.
         """
         render_config = config.model_copy(
             update={"visual_judge_enabled": False, "ocr_mode": "off", "allow_page_upload": False}
@@ -1614,7 +1617,7 @@ class AgentTranslationService:
                 )
             ),
             create_event=ledger_event_factory(ledger, job_id),
-            lease_lost=self._lease_lost,
+            lease_lost=lease_lost,
         )
         return _RenderStage(
             ctx=ctx, services=services, terminology=terminology, render_plan=render_plan
