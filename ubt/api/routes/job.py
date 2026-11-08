@@ -749,126 +749,131 @@ def register_job_routes(
         # Reject when another live job already claimed this output path. The
         # filesystem exists() check above cannot see an un-written target, so
         # the job maps are the only guard against two concurrent pipelines
-        # last-writer-wins-ing the same deliverable.
-        if resolved_out is not None:
-            # Off-loop: the durable-queue half of the claim scan reads up to 1000
-            # queue rows synchronously; on the event loop that stalls every other
-            # request (SSE, other submits) for the duration.
-            claimant = await asyncio.to_thread(
-                output_path_claimant, manager, job_queue, submit_id, resolved_out
-            )
-            if claimant is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"output_path already claimed by live job {claimant}",
+        # last-writer-wins-ing the same deliverable. The check and the commit
+        # (enqueue or create_job) run under one claim gate: the claimant scan
+        # is a to_thread snapshot, so without the gate two concurrent submits
+        # — or a submit racing a resume — could both observe "unclaimed" and
+        # both spawn onto one deliverable.
+        async with manager.claim_gate:
+            if resolved_out is not None:
+                # Off-loop: the durable-queue half of the claim scan reads up to 1000
+                # queue rows synchronously; on the event loop that stalls every other
+                # request (SSE, other submits) for the duration.
+                claimant = await asyncio.to_thread(
+                    output_path_claimant, manager, job_queue, submit_id, resolved_out
+                )
+                if claimant is not None:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"output_path already claimed by live job {claimant}",
+                    )
+
+            resolved_glossary: str | None = None
+            if req.glossary:
+                # Same sandbox as input_path: a glossary is a filesystem path, so it
+                # must clear resolve_secure_path before the job may read it.
+                resolved_glossary = str(
+                    resolve_secure_path(req.glossary, must_exist=True, config=app_config)
                 )
 
-        resolved_glossary: str | None = None
-        if req.glossary:
-            # Same sandbox as input_path: a glossary is a filesystem path, so it
-            # must clear resolve_secure_path before the job may read it.
-            resolved_glossary = str(
-                resolve_secure_path(req.glossary, must_exist=True, config=app_config)
+            safe_req = req.model_copy(
+                update={
+                    "input_path": str(resolved_in),
+                    "output_path": str(resolved_out) if resolved_out is not None else None,
+                    "glossary": resolved_glossary,
+                }
             )
-
-        safe_req = req.model_copy(
-            update={
-                "input_path": str(resolved_in),
-                "output_path": str(resolved_out) if resolved_out is not None else None,
-                "glossary": resolved_glossary,
-            }
-        )
-        # No usable credential and no injected router → a hosted endpoint can
-        # only be a mock: auto-set rehearsal so every downstream surface (submit
-        # response, status, queue payload, worker) labels it instead of silently
-        # reporting a mock delivery as a real one.
-        #
-        # A loopback endpoint is exempt. It needs no credential, so requiring one
-        # turned a correctly configured local model into a rehearsal the operator
-        # never asked for — the same defect the worker had.
-        auto_rehearsal = False
-        # Live config, not the startup snapshot: a provider saved from the console
-        # must be usable by the very next submit, which is the whole point of
-        # writing it to a file the engine re-reads.
-        live = scope.config
-        if (
-            not safe_req.dry_run
-            and router is None
-            and credential_required(live)
-            and not has_real_credential(live)
-        ):
-            safe_req = safe_req.model_copy(update={"dry_run": True})
-            auto_rehearsal = True
-            logger.warning(
-                "No API key configured for a remote endpoint: auto-setting dry_run "
-                "rehearsal for input %s",
-                safe_req.input_path,
-            )
-        if job_queue is not None:
-            queued_id = submit_id
-            queued_payload = safe_req.model_dump()
-            if auto_rehearsal:
-                # The worker recomputes rehearsal from its OWN key; this
-                # marker says the dry_run was our auto-decision, not a user
-                # request, so a keyed worker runs for real.
-                queued_payload["rehearsal_auto"] = True
+            # No usable credential and no injected router → a hosted endpoint can
+            # only be a mock: auto-set rehearsal so every downstream surface (submit
+            # response, status, queue payload, worker) labels it instead of silently
+            # reporting a mock delivery as a real one.
+            #
+            # A loopback endpoint is exempt. It needs no credential, so requiring one
+            # turned a correctly configured local model into a rehearsal the operator
+            # never asked for — the same defect the worker had.
+            auto_rehearsal = False
+            # Live config, not the startup snapshot: a provider saved from the console
+            # must be usable by the very next submit, which is the whole point of
+            # writing it to a file the engine re-reads.
+            live = scope.config
+            if (
+                not safe_req.dry_run
+                and router is None
+                and credential_required(live)
+                and not has_real_credential(live)
+            ):
+                safe_req = safe_req.model_copy(update={"dry_run": True})
+                auto_rehearsal = True
+                logger.warning(
+                    "No API key configured for a remote endpoint: auto-setting dry_run "
+                    "rehearsal for input %s",
+                    safe_req.input_path,
+                )
+            if job_queue is not None:
+                queued_id = submit_id
+                queued_payload = safe_req.model_dump()
+                if auto_rehearsal:
+                    # The worker recomputes rehearsal from its OWN key; this
+                    # marker says the dry_run was our auto-decision, not a user
+                    # request, so a keyed worker runs for real.
+                    queued_payload["rehearsal_auto"] = True
+                try:
+                    # ``enqueue`` runs ``BEGIN IMMEDIATE`` with a 30s busy_timeout;
+                    # calling it inline on the event loop stalls every other request
+                    # under write contention.
+                    job = await asyncio.to_thread(
+                        job_queue.enqueue,
+                        queued_id,
+                        queued_payload,
+                        tenant_id=scope.tenant_from_header(x_ubt_tenant),
+                        priority=int(req.priority),
+                    )
+                except QueueDepthExceededError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail=str(exc),
+                    ) from exc
+                except UBTError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=str(exc),
+                    ) from exc
+                if default_out_dir is not None:
+                    ensure_private_dir(default_out_dir)
+                return JobSubmitResponse(
+                    job_id=job.job_id,
+                    status=job.status.value,
+                    stream_url=f"/jobs/{job.job_id}/stream",
+                    status_url=f"/jobs/{job.job_id}/status",
+                    rehearsal=safe_req.dry_run,
+                )
             try:
-                # ``enqueue`` runs ``BEGIN IMMEDIATE`` with a 30s busy_timeout;
-                # calling it inline on the event loop stalls every other request
-                # under write contention.
-                job = await asyncio.to_thread(
-                    job_queue.enqueue,
-                    queued_id,
-                    queued_payload,
-                    tenant_id=scope.tenant_from_header(x_ubt_tenant),
-                    priority=int(req.priority),
-                )
-            except QueueDepthExceededError as exc:
+                record = manager.create_job(safe_req, job_id=submit_id)
+            except (ServerCapacityError, QueueDepthExceededError) as exc:
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail=str(exc),
                 ) from exc
-            except UBTError as exc:
+            except UnsupportedDocumentFormatError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    detail=str(exc),
+                ) from exc
+            except DocumentParseError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=str(exc),
                 ) from exc
-            if default_out_dir is not None:
-                ensure_private_dir(default_out_dir)
-            return JobSubmitResponse(
-                job_id=job.job_id,
-                status=job.status.value,
-                stream_url=f"/jobs/{job.job_id}/stream",
-                status_url=f"/jobs/{job.job_id}/status",
-                rehearsal=safe_req.dry_run,
-            )
-        try:
-            record = manager.create_job(safe_req, job_id=submit_id)
-        except (ServerCapacityError, QueueDepthExceededError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=str(exc),
-            ) from exc
-        except UnsupportedDocumentFormatError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail=str(exc),
-            ) from exc
-        except DocumentParseError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
-        except BudgetExceededError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=str(exc),
-            ) from exc
-        except (RuntimeError, UBTError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
+            except BudgetExceededError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail=str(exc),
+                ) from exc
+            except (RuntimeError, UBTError) as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
         if default_out_dir is not None:
             ensure_private_dir(default_out_dir)
 
@@ -1077,7 +1082,8 @@ def register_job_routes(
                 ),
             )
         # Everything from the FAILED/CANCELLED check to the spawn runs under
-        # one gate: the claimant re-check below is an ``await`` between the
+        # the shared claim gate (submit uses the same one for its scan→commit
+        # window): the claimant re-check below is an ``await`` between the
         # check and the status flip, so two concurrent resumes of this job
         # would otherwise both pass the check, both flip the shared record to
         # SUBMITTED, and both spawn a pipeline on it. The loser dies on the
@@ -1085,7 +1091,7 @@ def register_job_routes(
         # FAILED while the winner is still running — a state the cancel route
         # then refuses to touch. Record restore is awaited too, so it stays
         # inside the gate.
-        async with manager.resume_gate:
+        async with manager.claim_gate:
             record = manager.get_job(valid_id)
             if record is None:
                 default_out_dir = ensure_private_dir(_managed_dir("outputs") / valid_id)

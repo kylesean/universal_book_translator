@@ -1039,3 +1039,71 @@ def test_reparse_refuses_a_job_that_is_still_running(authed: TestClient, tmp_pat
 def test_reparse_refuses_an_unknown_job(authed: TestClient) -> None:
     res = authed.post("/jobs/unknownjob99/reparse", headers=_AUTH)
     assert res.status_code == 404
+
+
+def test_concurrent_submits_of_one_output_path_spawn_one_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two submits racing the claimant await must yield one accepted job.
+
+    The claimant scan is a to_thread snapshot; without the submit side of the
+    claim gate, two concurrent submits of one output_path could both observe
+    "unclaimed" and both spawn a pipeline onto the same deliverable.
+    """
+    import ubt.api.routes.job as job_routes
+
+    spawned: list[str] = []
+
+    async def _capture(self: JobManager, record: JobRecord, config: Any) -> None:
+        spawned.append(record.job_id)
+        record.status = JobStatus.RUNNING
+
+    # Delay, then delegate to the REAL scan: the rejection under test comes
+    # from the claimant scan itself, so stubbing it to None would stub away
+    # the assertion.
+    real_claimant = job_routes.output_path_claimant
+
+    def _slow_claimant(manager: JobManager, queue: Any, job_id: str, claimed: Path) -> Any:
+        # Hold the scan window open so the second request is already waiting
+        # on the claim gate when the first one commits.
+        time.sleep(0.05)
+        return real_claimant(manager, queue, job_id, claimed)
+
+    monkeypatch.setattr(JobManager, "execute_job", _capture)
+    monkeypatch.setattr(job_routes, "output_path_claimant", _slow_claimant)
+
+    doc = _write_doc(tmp_path)
+    app = create_app(config=_config(tmp_path))
+
+    async def _double_submit() -> list[int]:
+        # A loopback Host: the trusted-host middleware rejects arbitrary names.
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+            responses = await asyncio.gather(
+                client.post(
+                    "/jobs/submit",
+                    json={
+                        "input_path": str(doc),
+                        "output_path": str(tmp_path / "clash.md"),
+                        "job_id": "clashjob01",
+                        "dry_run": True,
+                    },
+                    headers=_AUTH,
+                ),
+                client.post(
+                    "/jobs/submit",
+                    json={
+                        "input_path": str(doc),
+                        "output_path": str(tmp_path / "clash.md"),
+                        "job_id": "clashjob02",
+                        "dry_run": True,
+                    },
+                    headers=_AUTH,
+                ),
+            )
+        return [r.status_code for r in responses]
+
+    codes = asyncio.run(_double_submit())
+
+    assert sorted(codes) == [202, 409], f"expected one accept and one 409, got {codes}"
+    assert spawned == ["clashjob01"]

@@ -75,15 +75,17 @@ class JobManager:
         # budget, so a per-job bucket would let N concurrent jobs multiply the
         # request rate (and the bill) against the same API key.
         self.rate_limiter = rate_limiter
-        # Serializes POST /jobs/{id}/resume's check→flip→spawn section. The
-        # status check and the claimant re-check sit either side of an ``await``,
-        # so two concurrent resumes of one failed job both pass the check, both
-        # spawn a pipeline on the same record, and the loser dies on the writer
-        # lock while flipping the *shared* record to FAILED — a state the cancel
-        # route then refuses to touch, leaving the winner uncancellable. Resumes
-        # are operator-rare, so one gate per manager costs nothing and cannot
-        # grow with the job count.
-        self.resume_gate = asyncio.Lock()
+        # Serializes each output-path claim's check→commit section across BOTH
+        # surfaces: submit's claimant scan→enqueue/create_job, and resume's
+        # status check→flip→spawn. Every check is a to_thread snapshot, so
+        # without one shared gate two concurrent submits of one path — or a
+        # submit racing a resume — could all observe "unclaimed" and spawn
+        # onto one deliverable; and two concurrent resumes of one failed job
+        # would both flip the shared record, the loser dying on the writer
+        # lock while flipping it to FAILED, a state the cancel route refuses
+        # to touch. Submits and resumes are operator-rare, so one gate per
+        # manager costs nothing and cannot grow with the job count.
+        self.claim_gate = asyncio.Lock()
 
     @staticmethod
     def _occupies_slot(record: JobRecord) -> bool:
