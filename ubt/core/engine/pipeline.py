@@ -852,6 +852,27 @@ class PipelineOrchestrator:
         session = self._get_billing_session(job_id)
         return await self._bill_session(session, job_id, ledger, raise_on_budget=raise_on_budget)
 
+    async def _bill_run_terminal(self, ledger: SQLiteJobLedger | None, job_id: str) -> None:
+        """Flush spend accrued since the last progress event when the run aborts.
+
+        The GeneratorExit / cancel / failure branches below write the terminal
+        job row but no progress event follows them, so tokens burned by calls
+        still in flight after the last event would never reach the ledger —
+        the resumed job's budget floor would under-count exactly the runs
+        that died mid-flight. Skipped on lease loss (the caller knows why):
+        the ledger now belongs to another process, and writing through the
+        dead lease is what ``LedgerWriterLeaseLostError`` exists to prevent.
+        ``raise_on_budget=False`` so the flush cannot raise
+        ``BudgetExceededError`` and mask the abort that triggered it, and a
+        failed write is logged rather than raised for the same reason.
+        """
+        if ledger is None or job_id not in self._billing_sessions:
+            return
+        try:
+            await self._bill_run(job_id, ledger, raise_on_budget=False)
+        except Exception:
+            logger.warning("Terminal billing flush failed for job %s", job_id, exc_info=True)
+
     async def _create_progress_event(
         self,
         event_type: EventType,
@@ -1441,6 +1462,7 @@ class PipelineOrchestrator:
             # cancelled — a lease loss lands here too — so mark failed, not
             # cancelled; the worker rewrites it with the real reason.
             logger.warning("Pipeline generator closed early for job %s", actual_job_id)
+            await asyncio.shield(self._bill_run_terminal(ledger, actual_job_id))
             await asyncio.shield(
                 _mark_failed_unless_completed(ledger, actual_job_id, status="failed")
             )
@@ -1467,6 +1489,7 @@ class PipelineOrchestrator:
             # forever and JobManager keeps counting it against max_running_jobs.
             # Shielded so a second cancel cannot abandon it (job_worker pattern).
             logger.warning("Pipeline aborted for job %s (%s)", actual_job_id, type(exc).__name__)
+            await asyncio.shield(self._bill_run_terminal(ledger, actual_job_id))
             await asyncio.shield(
                 _mark_failed_unless_completed(ledger, actual_job_id, status="cancelled")
             )
@@ -1481,6 +1504,7 @@ class PipelineOrchestrator:
             # cancellation arriving while this terminal write is in flight must
             # not abandon it, or the job reads as "running" forever and keeps
             # counting against max_running_jobs.
+            await asyncio.shield(self._bill_run_terminal(ledger, actual_job_id))
             await asyncio.shield(
                 _mark_failed_unless_completed(
                     ledger,
