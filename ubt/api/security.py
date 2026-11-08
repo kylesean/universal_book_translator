@@ -1,4 +1,9 @@
-"""Security guards, API-key verification, and path isolation for the UBT REST API."""
+"""Security guards, API-key verification, and path isolation for the UBT REST API.
+
+The three deployment postures these guards implement (local / shared / strict)
+are documented in the README's "部署姿势与信任模型" table; every behaviour
+below is enforced there, not advisory.
+"""
 
 import hashlib
 import hmac

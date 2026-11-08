@@ -345,6 +345,14 @@ def credential_write_allowed(*, is_loopback: bool, is_strict: bool) -> bool:
     Both are passed in rather than read from the environment here: the caller owns
     the request's actual bind and the boot-time auth posture, and a helper that
     sniffed globals would answer for the wrong deployment in a test.
+
+    What this gate does *not* defend against: a holder of the console's own
+    ``UBT_API_KEY`` creating a *new* keyless block that points anywhere — on a
+    shared deployment that person is a trusted operator for LLM spend (they can
+    already submit billable jobs), so the gate protects the stored/file
+    credential, not the deployment key. The postures this participates in and
+    that trust statement are documented in the README's
+    "部署姿势与信任模型" table.
     """
     return bool(is_loopback) and not bool(is_strict)
 
@@ -402,16 +410,26 @@ def validate_edit(
         and not _url_names_loopback(str(changes["base_url"]))
         and _block_holds_credential(name)
     ):
-        # The credential gate above is defeated by the back door: rewriting
-        # only the endpoint sends the stored key to whatever host the request
-        # names — ``https://attacker.example/v1`` passes the plaintext check
-        # below untouched. On the loopback deployments where credential writes
-        # are allowed this is the operator's own decision; on the shared ones
-        # it is exactly the bearer-token-mints-a-bearer-token move the gate
-        # exists to refuse. Loopback targets are exempt (a local model server
-        # has no wire to expose, the same premise the plaintext guard below
-        # uses), and keyless blocks stay re-pointable: creating a provider
-        # from the console is the documented remote flow.
+        # Three conditions, each load-bearing — removing any one breaks the
+        # gate in a different direction:
+        #
+        # * "block holds a credential" — a keyless block has nothing to steal,
+        #   so refusing its edits would only kill the documented remote
+        #   provider-creation flow;
+        # * "off-machine endpoint" — a loopback target cannot forward the
+        #   stored key anywhere (the same premise the plaintext guard below
+        #   uses for exempting local model servers);
+        # * "credential writes refused" — where ``allow_credential`` is true
+        #   the request came from an operator who may hold the key itself, so
+        #   re-pointing is their own decision.
+        #
+        # Together they close the back door around the api_key gate above:
+        # rewriting only the endpoint sends the stored key to whatever host
+        # the request names, and ``https://attacker.example/v1`` passes the
+        # plaintext check below untouched. What this gate deliberately does
+        # NOT cover — a console-key holder creating a *new* keyless block
+        # pointing anywhere — is operator trust, documented in the README's
+        # "部署姿势与信任模型" table and in :func:`credential_write_allowed`.
         raise ProviderEditError(
             "this block holds a credential, and the endpoint URL decides where "
             "that credential is sent — so base_url cannot be re-pointed off "
