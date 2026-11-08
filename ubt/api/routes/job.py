@@ -1076,59 +1076,69 @@ def register_job_routes(
                     "the job to have a worker drain its pending blocks."
                 ),
             )
-        record = manager.get_job(valid_id)
-        if record is None:
-            default_out_dir = ensure_private_dir(_managed_dir("outputs") / valid_id)
-            record = await _restore_resumable_record(
-                valid_id,
-                db_path=_job_db_path(valid_id),
-                manager=manager,
-                config=scope.config,
-                default_output_dir=default_out_dir,
-            )
-        if record.status not in (JobStatus.FAILED, JobStatus.CANCELLED):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Job is {record.status}; only a failed or cancelled job can resume.",
-            )
-        # The resume path obeys the same concurrency cap as a fresh submit: a
-        # batch of failed jobs restarted together would otherwise open N
-        # pipelines on a server configured for one. Checked before the record
-        # flips to SUBMITTED, so a refusal leaves it resumable.
-        try:
-            manager.ensure_capacity()
-        except ServerCapacityError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=str(exc),
-            ) from exc
-
-        # Re-check the output-path claim that submit enforces: while this job
-        # sat FAILED/CANCELLED its path is up for grabs, so a job submitted in
-        # the meantime may already own it. Resuming anyway would run two
-        # pipelines into one deliverable and the last writer wins. Reject
-        # before the flip, like the capacity check above.
-        if record.request.output_path:
-            claimed = Path(record.request.output_path).resolve()
-            claimant = await asyncio.to_thread(
-                output_path_claimant, manager, job_queue, valid_id, claimed
-            )
-            if claimant is not None:
+        # Everything from the FAILED/CANCELLED check to the spawn runs under
+        # one gate: the claimant re-check below is an ``await`` between the
+        # check and the status flip, so two concurrent resumes of this job
+        # would otherwise both pass the check, both flip the shared record to
+        # SUBMITTED, and both spawn a pipeline on it. The loser dies on the
+        # writer lock and its failure handler flips the shared record to
+        # FAILED while the winner is still running — a state the cancel route
+        # then refuses to touch. Record restore is awaited too, so it stays
+        # inside the gate.
+        async with manager.resume_gate:
+            record = manager.get_job(valid_id)
+            if record is None:
+                default_out_dir = ensure_private_dir(_managed_dir("outputs") / valid_id)
+                record = await _restore_resumable_record(
+                    valid_id,
+                    db_path=_job_db_path(valid_id),
+                    manager=manager,
+                    config=scope.config,
+                    default_output_dir=default_out_dir,
+                )
+            if record.status not in (JobStatus.FAILED, JobStatus.CANCELLED):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail=f"output_path already claimed by live job {claimant}",
+                    detail=f"Job is {record.status}; only a failed or cancelled job can resume.",
                 )
+            # The resume path obeys the same concurrency cap as a fresh submit: a
+            # batch of failed jobs restarted together would otherwise open N
+            # pipelines on a server configured for one. Checked before the record
+            # flips to SUBMITTED, so a refusal leaves it resumable.
+            try:
+                manager.ensure_capacity()
+            except ServerCapacityError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=str(exc),
+                ) from exc
 
-        # Never re-fresh (that would discard the checkpoints) and clear the
-        # previous failure so the record restarts clean.
-        record.request = record.request.model_copy(update={"fresh": False})
-        record.error = None
-        record.progress = ProgressSnapshot()
-        record.status = JobStatus.SUBMITTED
-        # ``scope.config``, not the boot snapshot: the worker must translate with
-        # the provider the operator just saved, not the one that existed when
-        # the server started.
-        record.task = asyncio.create_task(manager.execute_job(record, scope.config))
+            # Re-check the output-path claim that submit enforces: while this job
+            # sat FAILED/CANCELLED its path is up for grabs, so a job submitted in
+            # the meantime may already own it. Resuming anyway would run two
+            # pipelines into one deliverable and the last writer wins. Reject
+            # before the flip, like the capacity check above.
+            if record.request.output_path:
+                claimed = Path(record.request.output_path).resolve()
+                claimant = await asyncio.to_thread(
+                    output_path_claimant, manager, job_queue, valid_id, claimed
+                )
+                if claimant is not None:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"output_path already claimed by live job {claimant}",
+                    )
+
+            # Never re-fresh (that would discard the checkpoints) and clear the
+            # previous failure so the record restarts clean.
+            record.request = record.request.model_copy(update={"fresh": False})
+            record.error = None
+            record.progress = ProgressSnapshot()
+            record.status = JobStatus.SUBMITTED
+            # ``scope.config``, not the boot snapshot: the worker must translate with
+            # the provider the operator just saved, not the one that existed when
+            # the server started.
+            record.task = asyncio.create_task(manager.execute_job(record, scope.config))
         return JSONResponse(
             {
                 "job_id": valid_id,

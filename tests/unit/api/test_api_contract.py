@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import AsyncGenerator, Iterator
 from pathlib import Path
@@ -9,6 +10,7 @@ from unittest.mock import patch
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
 
 from ubt.api.app import create_app
@@ -398,6 +400,64 @@ def test_resume_after_restart_restores_the_request_from_the_ledger(
     assert resumed_requests[-1].fresh is False
     assert resumed_requests[-1].output_path == str(out.resolve())
     assert resumed_requests[-1].draft_model == "draft-after-restart"
+
+
+def test_concurrent_resumes_spawn_exactly_one_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two resumes racing through the claimant await must yield one pipeline.
+
+    The output-path claimant re-check is an ``await`` sitting between the
+    FAILED/CANCELLED check and the status flip. Without the resume gate both
+    requests pass the check, both flip the shared record, and both spawn a
+    pipeline; the loser then dies on the writer lock and its handler flips the
+    shared record to FAILED while the winner still runs — a state the cancel
+    route refuses to touch, so the winner burns its budget uncancellable.
+    """
+    import ubt.api.routes.job as job_routes
+
+    captured: list[str] = []
+
+    async def _capture(self: JobManager, record: JobRecord, config: Any) -> None:
+        captured.append(record.job_id)
+        record.status = JobStatus.RUNNING
+
+    def _slow_claimant(manager: JobManager, queue: Any, job_id: str, claimed: Path) -> None:
+        # Hold the await window open long enough that the second request is
+        # already inside the handler when the first one reaches the flip.
+        time.sleep(0.05)
+        return None
+
+    monkeypatch.setattr(JobManager, "execute_job", _capture)
+    monkeypatch.setattr(job_routes, "output_path_claimant", _slow_claimant)
+
+    doc = _write_doc(tmp_path)
+    app = create_app(config=_config(tmp_path))
+    manager: JobManager = app.state.job_manager  # type: ignore[attr-defined]
+    record = manager.create_job(
+        JobSubmitRequest(
+            input_path=str(doc),
+            output_path=str(tmp_path / "race_out.md"),
+            dry_run=True,
+        ),
+        job_id="racejob01",
+    )
+    record.status = JobStatus.FAILED
+
+    async def _double_resume() -> list[int]:
+        # A loopback Host: the trusted-host middleware rejects arbitrary names.
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+            responses = await asyncio.gather(
+                client.post("/jobs/racejob01/resume", headers=_AUTH),
+                client.post("/jobs/racejob01/resume", headers=_AUTH),
+            )
+        return [response.status_code for response in responses]
+
+    codes = asyncio.run(_double_resume())
+
+    assert sorted(codes) == [200, 409], f"expected one win and one 409, got {codes}"
+    assert captured == ["racejob01"]
 
 
 def test_resume_reconstructs_an_old_ledger_without_a_request_snapshot(
