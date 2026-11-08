@@ -141,3 +141,34 @@ async def test_a_repeated_submit_with_changed_arguments_is_refused(
 
     with pytest.raises(ToolError, match="different arguments: target_lang"):
         await _call(input_path=str(source), job_id="mcp-idem-2", target_lang="ja")
+
+
+def test_cancel_reports_cancel_pending_when_the_writer_lock_is_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``status=running`` alone reads as "cancel ignored"; the flag says scheduled.
+
+    When the writer lock stays held past the wait budget the MCP tool returns
+    RUNNING: the cancel is scheduled and the running pipeline owns the terminal
+    write. An agent must be able to tell that from an untouched job.
+    """
+    from ubt.core.engine.writer_lock import LedgerWriterLock
+    from ubt.mcp import server as mcp_server
+
+    db_dir = tmp_path / "db"
+    db_dir.mkdir()
+    jid = "cancellock01"
+    db_path = db_dir / f"{jid}.sqlite"
+    db_path.touch()
+    monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
+    monkeypatch.setattr(mcp_server, "CANCEL_LOCK_WAIT_SECONDS", 0.05)
+
+    lock = LedgerWriterLock(db_path, jid)
+    lock.acquire()
+    try:
+        result = asyncio.run(mcp_server.ubt_cancel_job(jid, db_dir=str(db_dir)))
+    finally:
+        lock.release()
+
+    assert result["status"] is JobStatus.RUNNING
+    assert result["cancel_pending"] is True

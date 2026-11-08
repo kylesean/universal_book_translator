@@ -760,6 +760,12 @@ async def ubt_translate_book(
         **requested,
         "output_path": output_path,
         "dry_run": rehearsal,
+        # Mark an intake-forced rehearsal like the REST intake does: if this
+        # keyless run later fails and the operator resumes the ledger from the
+        # console with a configured key, resume runs for real instead of
+        # echoing another mock delivery. A client-requested dry_run stays
+        # rehearsal on resume.
+        "rehearsal_auto": bool(rehearsal and not dry_run),
     }
     # Reject an out-of-vocabulary enum here, synchronously: otherwise the tool
     # returned a job_id and the job only failed once the background task tried to
@@ -948,7 +954,12 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
 )
 @_mcp_error_boundary
 async def ubt_cancel_job(job_id: str, db_dir: str | None = None) -> dict[str, Any]:
-    """Cancel an in-flight translation job. Idempotent: terminal jobs return their status as-is."""
+    """Cancel an in-flight translation job. Idempotent: terminal jobs return their status as-is.
+
+    When the writer lock stays held past the wait budget, the response is
+    ``status=running`` with ``cancel_pending=true``: the cancel is scheduled and
+    the running pipeline owns the terminal write.
+    """
     jid = _check_job_id(job_id)
     rec = _MANAGER.get_job(jid)
     base = _safe_output_path(str(db_dir)) if db_dir else UBTConfig.from_env().db_dir
@@ -973,7 +984,10 @@ async def ubt_cancel_job(job_id: str, db_dir: str | None = None) -> dict[str, An
                         "pipeline will finalize it.",
                         jid,
                     )
-                    return {"job_id": jid, "status": JobStatus.RUNNING}
+                    # ``RUNNING`` alone would read as "cancel ignored"; the
+                    # flag distinguishes "cancel is scheduled, the running
+                    # pipeline owns the terminal write" from an untouched job.
+                    return {"job_id": jid, "status": JobStatus.RUNNING, "cancel_pending": True}
                 time.sleep(0.1)
         try:
             ledger = SQLiteJobLedger(db_path)
