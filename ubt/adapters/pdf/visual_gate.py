@@ -2895,6 +2895,12 @@ async def run_visual_gate(
         # page-global ``canvas_worst_ratio`` cannot see a localized collision
         # (that blind spot is why the region measurement exists), so this is the
         # number a warn-to-fail promotion decision must read beside it.
+        # How much of the book the artifact-geometry tier actually looked at.
+        # ``geometry_sampled`` (a finding) says it in prose; these keep the
+        # counts machine-readable so a long book's report cannot read as a
+        # full-document geometry check.
+        "geometry_pages_checked": len(geometry_pages),
+        "geometry_pages_total": total,
         # Font coverage: how many pages the check could actually inspect. A
         # high ``skipped`` count means the artifact's fonts are flavours this
         # build cannot read cmaps from (bare CFF/Type1 subsets), so the tier is

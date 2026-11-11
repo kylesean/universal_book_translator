@@ -128,7 +128,54 @@ def _body_size_from_reported(lines: Sequence[object]) -> float | None:
     return None
 
 
-def source_body_size(lines: Sequence[object], default: float = 9.0) -> float:
+#: Bounds for a document-measured ink/em ratio. Outside this band the sample is
+#: not body prose (display faces, maths), and the constant fallback is safer.
+MIN_MEASURED_INK_TO_EM: float = 0.85
+MAX_MEASURED_INK_TO_EM: float = 1.25
+
+
+def measure_ink_to_em_ratio(
+    pages_lines: Sequence[Sequence[object]], min_samples: int = 20
+) -> float | None:
+    """The document's own ink-box / nominal-size ratio, measured from its lines.
+
+    ``INK_TO_EM_RATIO`` is one reference book's constant (9.0pt nominal over an
+    8.9pt ink box). Applying it to a document whose body face inks a different
+    fraction of its em scales *every* facsimile page's delivered size by that
+    error. Any page where the producer reports usable sizes alongside the ink
+    heights they drew gives the ratio for the pages where it does not, so
+    measure it once over the document and pass it down.
+
+    Returns ``None`` when the sample is too small or the value is implausible —
+    the caller then keeps the documented constant.
+    """
+    sizes: list[float] = []
+    inks: list[float] = []
+    for lines in pages_lines:
+        for line in lines:
+            size = float(getattr(line, "font_size", 0.0))
+            height = float(line.rect[3] - line.rect[1])  # type: ignore[attr-defined]
+            if size < MIN_PLAUSIBLE_SIZE_PT or height <= 0.0:
+                continue
+            if MIN_INK_TO_SIZE_RATIO <= height / size <= MAX_INK_TO_SIZE_RATIO:
+                sizes.append(size)
+                inks.append(height)
+    if len(sizes) < min_samples:
+        return None
+    try:
+        ratio = statistics.median(inks) / statistics.median(sizes)
+    except statistics.StatisticsError:  # pragma: no cover - median does not raise here
+        return None
+    if MIN_MEASURED_INK_TO_EM <= ratio <= MAX_MEASURED_INK_TO_EM:
+        return round(ratio, 4)
+    return None
+
+
+def source_body_size(
+    lines: Sequence[object],
+    default: float = 9.0,
+    ink_to_em_ratio: float | None = None,
+) -> float:
     """The page's body size in points.
 
     ``lines`` should already be filtered by :func:`body_lines`; passing the
@@ -137,7 +184,9 @@ def source_body_size(lines: Sequence[object], default: float = 9.0) -> float:
     Prefers the size the producer reported -- but only over lines whose ink box
     agrees with it (see :func:`_body_size_from_reported`), so a math-heavy page
     cannot measure its body at its equations' nominal size; falls back to the
-    mode of the ink heights scaled by :data:`INK_TO_EM_RATIO` when the producer
+    mode of the ink heights scaled by ``ink_to_em_ratio`` — the document's own
+    measurement from :func:`measure_ink_to_em_ratio`, or
+    :data:`INK_TO_EM_RATIO` when the caller has none — when the producer
     reported nothing usable.
     """
     reported = _body_size_from_reported(lines)
@@ -155,7 +204,8 @@ def source_body_size(lines: Sequence[object], default: float = 9.0) -> float:
         ink = float(statistics.mode(heights))
     except statistics.StatisticsError:  # pragma: no cover - tie between modes
         ink = float(statistics.median(heights))
-    return round(max(MIN_BODY_SIZE_PT, min(MAX_BODY_SIZE_PT, ink * INK_TO_EM_RATIO)), 2)
+    ratio = ink_to_em_ratio if ink_to_em_ratio is not None else INK_TO_EM_RATIO
+    return round(max(MIN_BODY_SIZE_PT, min(MAX_BODY_SIZE_PT, ink * ratio)), 2)
 
 
 def source_leading(lines: Sequence[object], source_size: float) -> float:
@@ -188,6 +238,7 @@ __all__ = [
     "INK_TO_EM_RATIO",
     "MIN_PLAUSIBLE_SIZE_PT",
     "body_lines",
+    "measure_ink_to_em_ratio",
     "source_body_size",
     "source_leading",
 ]

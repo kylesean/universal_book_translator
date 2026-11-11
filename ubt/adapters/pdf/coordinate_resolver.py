@@ -79,6 +79,7 @@ class PageBBoxResolver:
         bbox: Sequence[float] | None,
         origin: str = "auto",
         coord_system: str = "auto",
+        notes: list[str] | None = None,
     ) -> Rect | None:
         """Resolve arbitrary raw bbox to canonical PDF bottom-left points (x0, y0, x1, y1).
 
@@ -166,11 +167,23 @@ class PageBBoxResolver:
             ry0 = y0
             ry1 = y1
 
-        # Bounds clamp
+        # Bounds clamp. Recorded, never silent: an OCR/geometry box that
+        # genuinely sits off-page is evidence about the *source*, and pulling it
+        # inside used to hide that from every consumer of this resolver. The
+        # clamp still happens (a box must be usable), but the note carries the
+        # original numbers so a caller can report "the extractor produced an
+        # off-page box" instead of silently trusting a fabricated rectangle.
+        pre_clamp = (rx0, ry0, rx1, ry1)
         rx0 = max(0.0, min(pw, rx0))
         rx1 = max(0.0, min(pw, rx1))
         ry0 = max(0.0, min(ph, ry0))
         ry1 = max(0.0, min(ph, ry1))
+        if (rx0, ry0, rx1, ry1) != pre_clamp and notes is not None:
+            ox0, oy0, ox1, oy1 = pre_clamp
+            notes.append(
+                f"geometry clamped to the page: ({ox0:.1f},{oy0:.1f})-({ox1:.1f},{oy1:.1f}) "
+                f"became ({rx0:.1f},{ry0:.1f})-({rx1:.1f},{ry1:.1f}) on {pw:.0f}x{ph:.0f}pt"
+            )
 
         if rx1 <= rx0 or ry1 <= ry0:
             return None

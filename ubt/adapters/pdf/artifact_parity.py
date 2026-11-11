@@ -24,6 +24,7 @@ engine-independent.
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import subprocess
 from collections.abc import Sequence
@@ -48,6 +49,233 @@ class ParityFinding:
     severity: str  # "info" | "major" | "critical"
     code: str
     message: str
+
+
+#: Function words per Latin-script language. Script ranges cannot separate
+#: Latin-script targets from each other or from an untranslated source, but the
+#: *function words* can: prose in any language is built from its own small set
+#: ("the/of/and" vs "der/die/und" vs "de/la/que"). Lists stay small on purpose —
+#: they are a presence probe, not a language identifier.
+_LATIN_STOPWORDS: dict[str, frozenset[str]] = {
+    "en": frozenset(
+        [
+            "the",
+            "of",
+            "and",
+            "to",
+            "in",
+            "is",
+            "that",
+            "for",
+            "it",
+            "as",
+            "with",
+            "was",
+            "on",
+            "be",
+            "by",
+            "this",
+            "are",
+            "or",
+            "from",
+            "at",
+            "not",
+            "but",
+            "have",
+            "an",
+            "they",
+            "you",
+            "were",
+            "his",
+            "her",
+            "their",
+            "its",
+        ]
+    ),
+    "fr": frozenset(
+        [
+            "le",
+            "la",
+            "les",
+            "de",
+            "des",
+            "du",
+            "et",
+            "un",
+            "une",
+            "en",
+            "est",
+            "que",
+            "qui",
+            "dans",
+            "pour",
+            "pas",
+            "sur",
+            "au",
+            "ce",
+            "il",
+            "elle",
+            "nous",
+            "vous",
+            "ils",
+            "elles",
+            "sont",
+            "avec",
+            "plus",
+        ]
+    ),
+    "de": frozenset(
+        [
+            "der",
+            "die",
+            "das",
+            "und",
+            "in",
+            "den",
+            "von",
+            "zu",
+            "mit",
+            "ist",
+            "das",
+            "ein",
+            "eine",
+            "auf",
+            "für",
+            "nicht",
+            "sich",
+            "dem",
+            "des",
+            "im",
+            "auch",
+            "es",
+            "an",
+            "werden",
+            "aus",
+            "er",
+            "sie",
+        ]
+    ),
+    "es": frozenset(
+        [
+            "el",
+            "la",
+            "los",
+            "las",
+            "de",
+            "del",
+            "y",
+            "que",
+            "en",
+            "un",
+            "una",
+            "es",
+            "por",
+            "con",
+            "para",
+            "no",
+            "se",
+            "su",
+            "al",
+            "lo",
+            "como",
+            "más",
+            "pero",
+            "sus",
+            "le",
+        ]
+    ),
+    "it": frozenset(
+        [
+            "il",
+            "lo",
+            "la",
+            "i",
+            "gli",
+            "le",
+            "di",
+            "del",
+            "della",
+            "e",
+            "che",
+            "in",
+            "un",
+            "una",
+            "è",
+            "per",
+            "con",
+            "non",
+            "si",
+            "da",
+            "al",
+            "come",
+            "più",
+            "anche",
+            "suo",
+        ]
+    ),
+    "pt": frozenset(
+        [
+            "o",
+            "a",
+            "os",
+            "as",
+            "de",
+            "do",
+            "da",
+            "dos",
+            "das",
+            "e",
+            "que",
+            "em",
+            "um",
+            "uma",
+            "é",
+            "para",
+            "com",
+            "não",
+            "se",
+            "por",
+            "no",
+            "na",
+            "como",
+            "mais",
+            "mas",
+            "seu",
+        ]
+    ),
+    "nl": frozenset(
+        [
+            "de",
+            "het",
+            "een",
+            "en",
+            "van",
+            "in",
+            "is",
+            "dat",
+            "op",
+            "te",
+            "zijn",
+            "met",
+            "voor",
+            "niet",
+            "aan",
+            "er",
+            "ook",
+            "als",
+            "dan",
+            "maar",
+            "bij",
+            "uit",
+        ]
+    ),
+}
+
+#: Share of tokens that must be the target language's function words before a
+#: Latin-script artifact counts as carrying prose in the commissioned language.
+#: Prose sits far above this (function words are ~30-45 % of running text);
+#: a translated artifact below it is either not translated or not prose.
+_LATIN_STOPWORD_FLOOR = 0.06
 
 
 def _script_ranges(target_lang: str) -> tuple[range, ...]:
@@ -125,11 +353,29 @@ def _page_text(pdf_path: Path, pages: Sequence[int] | None = None) -> str | None
     return "\n".join(chunks) if chunks else None
 
 
+def latin_stopword_share(text: str, lang: str) -> tuple[float, int]:
+    """Share of word tokens that belong to ``lang``'s function-word set.
+
+    Returns ``(share, token_count)``; ``(0.0, 0)`` when the language has no list
+    or the text has no word tokens.
+    """
+    base = (lang or "").strip().lower().replace("_", "-").split("-")[0]
+    words = _LATIN_STOPWORDS.get(base)
+    if not words:
+        return 0.0, 0
+    tokens = re.findall(r"[^\W\d_]+", text.lower(), flags=re.UNICODE)
+    if not tokens:
+        return 0.0, 0
+    hits = sum(1 for token in tokens if token in words)
+    return hits / len(tokens), len(tokens)
+
+
 def check_artifact_parity(
     *,
     artifact_pdf: Path,
     target_lang: str,
     selected_pages: Sequence[int] | None = None,
+    source_lang: str | None = None,
 ) -> list[ParityFinding]:
     """Physical-evidence diff between the delivered PDF and its source.
 
@@ -148,6 +394,32 @@ def check_artifact_parity(
         ]
 
     hits, total = target_script_counts(artifact_text, target_lang)
+    if not _script_ranges(target_lang) and source_lang is not None:
+        # Latin-script target: script ranges cannot distinguish it from the
+        # source, so measure the target language's function words instead. This
+        # is the case where the old code emitted only an info note, letting an
+        # untranslated Latin->Latin artifact pass fail-closed review.
+        target_base = target_lang.strip().lower().split("-")[0]
+        source_base = source_lang.strip().lower().split("-")[0]
+        target_share, token_count = latin_stopword_share(artifact_text, target_lang)
+        source_share, _ = latin_stopword_share(artifact_text, source_lang)
+        if (
+            target_base != source_base
+            and token_count > 200
+            and _LATIN_STOPWORDS.get(target_base)
+            and target_share < _LATIN_STOPWORD_FLOOR
+            and source_share > target_share * 2
+        ):
+            findings.append(
+                ParityFinding(
+                    "critical",
+                    "target_language_absent",
+                    f"Delivered PDF reads as {source_lang!r}: only "
+                    f"{target_share:.1%} of its {token_count} word tokens are "
+                    f"{target_lang!r} function words, while {source_share:.1%} are "
+                    f"{source_lang!r} ones — untranslated content is shipping",
+                )
+            )
     if not _script_ranges(target_lang):
         # Latin-script targets have no measurable range here. Saying so is the
         # honest form of the gate: silently skipping would let an artifact that

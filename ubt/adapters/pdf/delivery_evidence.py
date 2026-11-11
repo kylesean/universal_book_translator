@@ -44,7 +44,6 @@ logger = logging.getLogger(__name__)
 
 #: A text box must hold at least this many characters to be worth a geometry
 #: claim. A single punctuation mark's box is ink, not layout.
-_MIN_BOX_CHARS = 2
 
 
 def _normalise_text(text: str) -> str:
@@ -314,11 +313,18 @@ def _text_boxes_for_page(page_no: int, textpage: object) -> list[ContractTextBox
     for index in range(rect_count):
         x0, y0, x1, y1 = textpage.get_rect(index)  # type: ignore[attr-defined]
         text = (textpage.get_text_bounded(x0, y0, x1, y1) or "").strip()  # type: ignore[attr-defined]
-        if len(_normalise_text(text)) < _MIN_BOX_CHARS:
+        # A one-character box is a measurement, not noise: a lone glyph is
+        # exactly what a clipped line or a table cell reduces to. Only boxes
+        # with no text at all are skipped.
+        if not _normalise_text(text):
             continue
         line_count = max(1, sum(1 for ln in text.splitlines() if ln.strip()))
         line_height_pt = (float(y1) - float(y0)) / line_count
-        font_size = round(line_height_pt, 2) if line_height_pt >= 4.0 else None
+        # Report the measured height even when it is tiny. The old ``>= 4.0``
+        # gate turned every small-type box into ``font_size_pt=None``, which
+        # exempted precisely the collapsed text the contract's style and
+        # overlap claims need to see.
+        font_size = round(line_height_pt, 2) if line_height_pt > 0.0 else None
         boxes.append(
             ContractTextBox(
                 page=page_no,

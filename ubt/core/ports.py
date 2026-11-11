@@ -266,6 +266,7 @@ def artifact_parity_findings(
     artifact_pdf: Path,
     target_lang: str,
     selected_pages: Sequence[int] | None = None,
+    source_lang: str | None = None,
 ) -> list[Any]:
     """T0.5 physical-evidence diff between delivered PDF and source.
 
@@ -279,6 +280,7 @@ def artifact_parity_findings(
             artifact_pdf=artifact_pdf,
             target_lang=target_lang,
             selected_pages=selected_pages,
+            source_lang=source_lang,
         )
     )
 

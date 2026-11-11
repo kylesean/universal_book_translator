@@ -309,7 +309,39 @@ class _PageMetrics:
     leading_pt: float
 
 
-def _page_metrics(source_path: Path, page_no: int) -> _PageMetrics | None:
+def _measure_document_ink_ratio(source_path: Path, total_pages: int) -> float | None:
+    """The document's own ink/em ratio, from an even sample of its pages.
+
+    ``source_metrics.INK_TO_EM_RATIO`` is one reference book's constant; a
+    document whose body face inks a different fraction of its em would have
+    every page's delivered size scaled by that error. Sampling up to a dozen
+    pages keeps the cost flat while still measuring this document rather than
+    assuming another one's number.
+    """
+    try:
+        from ubt.adapters.pdf.source_metrics import measure_ink_to_em_ratio
+        from ubt.adapters.pdf.textgeom import extract_lines
+
+        if total_pages <= 0:
+            return None
+        step = max(1, total_pages // 12)
+        sampled = sorted(set(range(1, total_pages + 1, step)))[:12]
+        pages_lines = []
+        for page_no in sampled:
+            try:
+                lines, _page_size = extract_lines(source_path, page_no)
+            except Exception:  # noqa: BLE001 - one unreadable page lowers the sample
+                continue
+            pages_lines.append(lines)
+        return measure_ink_to_em_ratio(pages_lines)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not measure the document's ink/em ratio: %s", exc)
+        return None
+
+
+def _page_metrics(
+    source_path: Path, page_no: int, ink_to_em_ratio: float | None = None
+) -> _PageMetrics | None:
     """Measure the source page's body size and leading, or ``None`` if unreadable.
 
     Measured from the page's own lines rather than assumed: the corpus spans
@@ -330,7 +362,7 @@ def _page_metrics(source_path: Path, page_no: int) -> _PageMetrics | None:
         body = body_lines(lines, page_h)
         if not body:
             return None
-        size = source_body_size(body)
+        size = source_body_size(body, ink_to_em_ratio=ink_to_em_ratio)
         return _PageMetrics(size_pt=size, leading_pt=source_leading(body, size))
     except Exception as exc:
         logger.debug("Could not measure source metrics for page %d: %s", page_no, exc)
@@ -1006,8 +1038,10 @@ class DoclingRenderStrategy:
         # The plan is computed from page-level fit models; the per-page verdicts
         # inside the loop are the authority and replace any prediction that
         # disagrees (``replacing_exceptions``).
+        ink_ratio = _measure_document_ink_ratio(source_path, total_pages)
         measured_by_page: dict[int, Any] = {
-            page_no: _page_metrics(source_path, page_no) for page_no in range(1, total_pages + 1)
+            page_no: _page_metrics(source_path, page_no, ink_ratio)
+            for page_no in range(1, total_pages + 1)
         }
         body_metrics: dict[int, tuple[float, float]] = {}
         for page_no, measured in measured_by_page.items():

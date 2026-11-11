@@ -414,6 +414,10 @@ class VisualVerifyLoop:
                     artifact_pdf=rendered_path,
                     target_lang=self.target_lang,
                     selected_pages=sel_pages,
+                    # Latin->Latin targets have no script range to measure; the
+                    # parity check compares function words instead, which needs
+                    # to know which language the source was written in.
+                    source_lang=getattr(self.manifest, "source_lang", None),
                 )
             except Exception as exc:
                 # The probe must not break export, but a crashed probe is not a
