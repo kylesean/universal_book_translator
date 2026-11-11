@@ -64,9 +64,14 @@ def evaluate_faithful_eligibility(signals: DeliverySignals) -> FaithfulEligibili
     """Apply the ``faithful`` eligibility formula.
 
     A page-lock promise requires a trustworthy native text layer, no source
-    overlap, and a measured feasible page-lock solution at the body floor.
+    overlap, and a feasible page-lock solution at the body floor.
     Layout complexity and expansion risk do *not* disqualify a document: CELS
-    exists to handle those, and ``page_lock_feasible`` is the measured veto.
+    exists to handle those, and ``page_lock_feasible`` is the veto.
+
+    Whether that veto is a *measurement* depends on ``page_lock_measured``:
+    the page-lock probe supplies it for a readable PDF, and a document the
+    probe could not examine falls back to the structure census and is labelled
+    provisional by :func:`ubt.delivery.planning._mark_faithful_provisional`.
     """
     reasons: list[str] = []
     if signals.text_trust < MIN_FAITHFUL_TEXT_TRUST:
