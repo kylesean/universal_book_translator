@@ -37,11 +37,15 @@ export interface paths {
          *     The console's ``EventSource`` stream, page-preview ``<img>`` elements
          *     and download links cannot attach an ``X-API-Key`` header, so on a keyed
          *     server the UI would 401 on every one of them even though its fetches
-         *     pass. The cookie carries a keyed *digest* of the service key (never the
-         *     key itself), is HttpOnly + SameSite=Lax so it rides only same-origin
-         *     browser requests, and is re-minted on every login. An open (keyless)
-         *     server has nothing to exchange and returns ``authenticated: true``
-         *     without setting a cookie.
+         *     pass. The cookie carries a digest keyed over the per-install session
+         *     secret (never the key itself — see
+         *     :func:`ubt.api.security.session_cookie_value`), is HttpOnly +
+         *     SameSite=Lax so it rides only same-origin browser requests, carries a
+         *     one-week ``Max-Age`` so a signed-in browser stops authenticating after
+         *     a week, and is ``Secure`` whenever the request arrived over https (or
+         *     the deployment says production). Re-minted on every login. An open
+         *     (keyless) server has nothing to exchange and returns
+         *     ``authenticated: true`` without setting a cookie.
          */
         post: operations["create_session_system_session_post"];
         /**
@@ -1677,6 +1681,11 @@ export interface components {
              * @description Provider block for the repair tier (defaults to the primary provider). A name, validated like `provider`: the named block supplies the repair endpoint and credential.
              */
             repair_provider?: string | null;
+            /**
+             * Export Allow Needs Human
+             * @description Allow export to ship NEEDS_HUMAN blocks unverified (default: refuse)
+             */
+            export_allow_needs_human?: boolean | null;
             /**
              * Draft Model
              * @description Override draft model tier

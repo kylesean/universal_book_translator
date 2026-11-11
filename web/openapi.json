@@ -81,7 +81,7 @@
           "System"
         ],
         "summary": "Create Session",
-        "description": "Exchange the API key for a same-origin session cookie.\n\nThe console's ``EventSource`` stream, page-preview ``<img>`` elements\nand download links cannot attach an ``X-API-Key`` header, so on a keyed\nserver the UI would 401 on every one of them even though its fetches\npass. The cookie carries a keyed *digest* of the service key (never the\nkey itself), is HttpOnly + SameSite=Lax so it rides only same-origin\nbrowser requests, and is re-minted on every login. An open (keyless)\nserver has nothing to exchange and returns ``authenticated: true``\nwithout setting a cookie.",
+        "description": "Exchange the API key for a same-origin session cookie.\n\nThe console's ``EventSource`` stream, page-preview ``<img>`` elements\nand download links cannot attach an ``X-API-Key`` header, so on a keyed\nserver the UI would 401 on every one of them even though its fetches\npass. The cookie carries a digest keyed over the per-install session\nsecret (never the key itself \u2014 see\n:func:`ubt.api.security.session_cookie_value`), is HttpOnly +\nSameSite=Lax so it rides only same-origin browser requests, carries a\none-week ``Max-Age`` so a signed-in browser stops authenticating after\na week, and is ``Secure`` whenever the request arrived over https (or\nthe deployment says production). Re-minted on every login. An open\n(keyless) server has nothing to exchange and returns\n``authenticated: true`` without setting a cookie.",
         "operationId": "create_session_system_session_post",
         "parameters": [
           {
@@ -5728,6 +5728,18 @@
             ],
             "title": "Repair Provider",
             "description": "Provider block for the repair tier (defaults to the primary provider). A name, validated like `provider`: the named block supplies the repair endpoint and credential."
+          },
+          "export_allow_needs_human": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Export Allow Needs Human",
+            "description": "Allow export to ship NEEDS_HUMAN blocks unverified (default: refuse)"
           },
           "draft_model": {
             "anyOf": [
