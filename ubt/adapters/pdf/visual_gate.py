@@ -1258,6 +1258,19 @@ def font_coverage_findings(
     return findings
 
 
+def vlm_page_budget(total_pages: int, configured_cap: int) -> int:
+    """How many pages the judge inspects: 10 % of the artifact, bounded.
+
+    A handful of pages cannot speak for a long book, and the cap keeps the
+    token cost bounded. At least one page is judged whenever the tier is on and
+    the book has pages, so "enabled" never silently means "skipped"; ``0``
+    disables the tier entirely.
+    """
+    if total_pages <= 0 or configured_cap <= 0:
+        return 0
+    return min(configured_cap, max(1, -(-total_pages // 10)))
+
+
 def adaptive_sample_budget(total_pages: int, configured: int) -> int:
     """Size-aware zero-token sampling budget.
 
@@ -2793,11 +2806,7 @@ async def run_visual_gate(
                         "canvas pages were sampled but none carried new ink on its "
                         "background; canvas ink-collision check measured no page"
                     )
-        # Judge 10 % of the artifact's pages, capped by the operator's ceiling:
-        # a handful of pages cannot speak for a long book, and the cap keeps
-        # the token cost bounded. At least one page is always judged when the
-        # tier is on, so "enabled" never silently means "skipped".
-        vlm_budget = min(max_vlm_pages, max(1, -(-total // 10))) if max_vlm_pages > 0 else 0
+        vlm_budget = vlm_page_budget(total, max_vlm_pages)
         if vlm_judge is not None and pngs and vlm_budget > 0:
             flagged_set = set(flagged)
             chart_set = chart_pages_from_blocks(blocks)
