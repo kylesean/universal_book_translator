@@ -35,7 +35,6 @@ __all__ = [
     "count_ops",
     "open_pdf",
     "page_box",
-    "page_boxes",
     "page_count",
     "page_rotation",
     "page_rotations",
@@ -77,10 +76,30 @@ def page_box(page: Page) -> tuple[float, float, float, float]:
     return x0, y0, x1, y1
 
 
-def page_boxes(path: Path | str) -> dict[int, tuple[float, float, float, float]]:
-    """1-indexed ``{page_no: (x0, y0, x1, y1)}`` MediaBoxes for every page."""
+def page_crop_box(page: Page) -> tuple[float, float, float, float]:
+    """(x0, y0, x1, y1) CropBox of one page, falling back to its MediaBox.
+
+    The CropBox is what viewers and rasterisers actually show; text outside it
+    is clipped on screen even though it sits inside the MediaBox. A bounds
+    check against the MediaBox therefore accepts exactly the text a reader
+    cannot see.
+    """
+    crop = page.get("/CropBox")
+    if crop is None:
+        return page_box(page)
+    try:
+        x0, y0, x1, y1 = (float(v) for v in crop)
+    except (TypeError, ValueError):
+        return page_box(page)
+    if x1 <= x0 or y1 <= y0:
+        return page_box(page)
+    return x0, y0, x1, y1
+
+
+def page_crop_boxes(path: Path | str) -> dict[int, tuple[float, float, float, float]]:
+    """1-indexed ``{page_no: CropBox-or-MediaBox}`` for every page."""
     with pikepdf.open(str(path)) as pdf:
-        return {idx: page_box(page) for idx, page in enumerate(pdf.pages, start=1)}
+        return {idx: page_crop_box(page) for idx, page in enumerate(pdf.pages, start=1)}
 
 
 def page_rotation(page: Page) -> int:

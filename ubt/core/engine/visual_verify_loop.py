@@ -95,6 +95,9 @@ class VisualVerifyLoop:
         visual_judge_enabled: bool = False,
         visual_judge_model: str | None = None,
         cancel_token: asyncio.Event | None = None,
+        expected_page_count: int | None = None,
+        faithful_pages: bool = False,
+        thresholds: Any | None = None,
     ) -> None:
         self.adapter = adapter
         self.manifest = manifest
@@ -110,6 +113,15 @@ class VisualVerifyLoop:
         self.visual_judge_enabled = visual_judge_enabled
         self.visual_judge_model = visual_judge_model
         self.cancel_token = cancel_token
+        # The contract the artifact was rendered under: a faithful delivery
+        # promises the source's page count, so the gate can report a spill
+        # instead of leaving it to the reader to notice.
+        self.expected_page_count = expected_page_count
+        self.faithful_pages = faithful_pages
+        # ``[gate]`` threshold overrides (raw mapping) or an already-resolved
+        # ``GateThresholds``. Resolution and validation happen inside the gate's
+        # own module; see ``run_visual_gate``.
+        self.thresholds = thresholds
 
     def _build_vlm_judge(self) -> Any | None:
         if not self.visual_judge_enabled:
@@ -245,6 +257,9 @@ class VisualVerifyLoop:
             max_vlm_pages=self.max_vlm_pages,
             vlm_judge=vlm_judge,
             canvas_background_pdf=self._canvas_background_path(),
+            expected_page_count=self.expected_page_count,
+            faithful_pages=self.faithful_pages,
+            thresholds=self.thresholds,
         )
 
     def _canvas_background_path(self) -> Path | None:

@@ -412,6 +412,25 @@ def load_defaults_config(custom_path: Path | str | None = None) -> DefaultsConfi
         raise ProviderConfigError(f"[defaults] configuration error: {exc}") from exc
 
 
+def load_gate_section(custom_path: Path | str | None = None) -> dict[str, float]:
+    """The ``[gate]`` visual-gate threshold overrides, as plain floats.
+
+    Deliberately a section of its own rather than more keys under
+    ``[defaults]``: these numbers are QA policy, not provider settings, and the
+    gate's own module (``ubt.adapters.pdf.gate_config``) documents each one
+    with the corpus it was calibrated on.
+    """
+    gate = _read_toml(custom_path).get("gate", {})
+    if not isinstance(gate, dict) or not gate:
+        return {}
+    values: dict[str, float] = {}
+    for key, raw in gate.items():
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            raise ProviderConfigError(f"[gate] {key} must be a number, got {type(raw).__name__}")
+        values[str(key)] = float(raw)
+    return values
+
+
 def load_layer(provider_name: str | None, custom_path: Path | str | None = None) -> dict[str, Any]:
     """The ``[defaults]`` baseline with ``[providers.<name>]`` layered over it.
 

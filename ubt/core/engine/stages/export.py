@@ -655,6 +655,44 @@ async def _apply_render_skip_ledger_pass(
         await asyncio.to_thread(ledger.save_checkpoints_batch, list(batch.values()))
 
 
+def _gate_threshold_overrides(ctx: StageContext) -> dict[str, float] | None:
+    """The configured ``[gate]`` overrides, or None when none are set.
+
+    The mapping is passed through unvalidated on purpose: validation (and the
+    rejection of an unknown key) belongs to the gate's own module
+    (``ubt.adapters.pdf.gate_config``), and ``ubt.core`` may not import
+    ``ubt.adapters`` at module scope or through a lazy bridge. A typo must fail
+    where the thresholds are actually resolved, not be silently dropped here.
+    """
+    overrides = getattr(ctx.config, "gate_thresholds", None)
+    return dict(overrides) if overrides else None
+
+
+def _is_faithful_delivery(ctx: StageContext) -> bool:
+    """Whether this run's effective delivery mode is the page-locked contract."""
+    mode = str((getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_mode", "") or "")
+    return mode in ("facsimile", "page_locked")
+
+
+def _faithful_expected_pages(ctx: StageContext) -> int | None:
+    """Source page count a faithful delivery promised, or None when unknown.
+
+    Only read for faithful runs. A page-count probe failure returns None, which
+    the gate treats as "no contract stated" rather than comparing against a
+    guess.
+    """
+    if not _is_faithful_delivery(ctx):
+        return None
+    try:
+        from ubt.core.ports import pdf_page_count
+
+        count = pdf_page_count(ctx.input_path)
+    except Exception as exc:  # noqa: BLE001 - an unmeasured contract is stated as unmeasured
+        logger.debug("Visual gate: source page count unavailable for %s: %s", ctx.input_path, exc)
+        return None
+    return count if count > 0 else None
+
+
 async def _run_visual_gate(
     ctx: StageContext,
     adapter: DocumentAdapter,
@@ -689,6 +727,9 @@ async def _run_visual_gate(
             visual_judge_enabled=ctx.config.visual_judge_enabled,
             visual_judge_model=ctx.config.visual_judge_model,
             cancel_token=ctx.cancel_token,
+            expected_page_count=_faithful_expected_pages(ctx),
+            faithful_pages=_is_faithful_delivery(ctx),
+            thresholds=_gate_threshold_overrides(ctx),
         )
         rendered_path, visual_report_path, gate = await verify_loop.run(
             rendered_path=rendered_path,

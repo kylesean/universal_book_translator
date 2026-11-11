@@ -66,6 +66,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from ubt.adapters.pdf import oxide_render, pdf_struct
+from ubt.adapters.pdf.gate_config import DEFAULT_GATE_THRESHOLDS, GateThresholds
 from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
 from ubt.core.policy.layout_policy import (
     PDF_PATH_OPS,
@@ -124,9 +125,12 @@ _ALWAYS_FAIL_CLOSED_MAJORS = frozenset(
 #: legitimately small table, and warning is the honest posture.
 _ALWAYS_FAIL_CLOSED_TYPE_CODES = frozenset({"type_illegible"})
 BLANK_TEXT_THRESHOLD_CHARS = 20
-OVERLAP_IOU_THRESHOLD = 0.6
-MIN_OVERLAP_AREA_PT2 = 500.0
-OUT_OF_BOUNDS_TOLERANCE_PT = 5.0
+# Thresholds live in one typed, documented place (gate_config); the module
+# names below are aliases so every existing call site and test keeps reading
+# the same value, and a reader has one destination to inspect.
+GATE = DEFAULT_GATE_THRESHOLDS
+MIN_OVERLAP_AREA_PT2 = GATE.min_overlap_area_pt2
+MAX_OVERLAP_RECTS_PER_PAGE = GATE.max_overlap_rects_per_page
 DEFAULT_DPI = 110
 
 # -- type-size audit -------------------------------------------------------
@@ -158,16 +162,16 @@ DEFAULT_DPI = 110
 #
 # No legible convention sets body text below 5pt (footnote minima are ~6-7pt),
 # so 4pt is a floor with no legitimate use beneath it.
-TYPE_ILLEGIBLE_PT = 4.0
+TYPE_ILLEGIBLE_PT = GATE.type_illegible_pt
 #: Share of a page's content glyphs under ``TYPE_ILLEGIBLE_PT`` that makes the
 #: page collapsed. Highest healthy reading in the corpus is 17%, the broken file
 #: reads 98%; 50% sits in the middle of that gap.
-TYPE_COLLAPSED_FRACTION = 0.5
+TYPE_COLLAPSED_FRACTION = GATE.type_collapsed_fraction
 #: Below this many content *characters* a page has too little text to judge (a
 #: figure page with one caption word). Counted in characters, not rects: tiny
 #: type merges hundreds of characters into a couple of rects, so a rect-count
 #: floor skipped exactly the pages this audit exists for.
-TYPE_AUDIT_MIN_GLYPHS = 20
+TYPE_AUDIT_MIN_GLYPHS = GATE.type_audit_min_glyphs
 
 # Pillow pixel heuristics (white-paper academic PDFs only).
 #
@@ -185,21 +189,25 @@ TYPE_AUDIT_MIN_GLYPHS = 20
 # heuristic can only *nominate* a page; ``blank_page`` additionally requires
 # the page to carry nothing at all (see :func:`page_has_no_content`). That is
 # what makes the code safe to fail closed on.
-BLANK_MEAN_THRESHOLD = 250.0
-BLANK_STD_THRESHOLD = 6.0
-BLACK_PIXEL_VALUE = 12
-BLACK_FRACTION_THRESHOLD = 0.05
+BLANK_MEAN_THRESHOLD = GATE.blank_mean_threshold
+BLANK_STD_THRESHOLD = GATE.blank_std_threshold
+BLACK_PIXEL_VALUE = GATE.black_pixel_value
+BLACK_FRACTION_THRESHOLD = GATE.black_fraction_threshold
 # Adaptive zero-token sampling ceiling. VLM spend is capped separately
 # by max_vlm_pages (default 3) and never scales with book size.
-ADAPTIVE_SAMPLE_CAP = 12
+ADAPTIVE_SAMPLE_CAP = GATE.adaptive_sample_cap
 
 VLM_PROMPT = """You are a print QA inspector. Look at this rendered PDF page image.
 Reply in exactly two lines:
 verdict: PASS or FAIL
 issues: <short comma-separated list, or 'none'>
 FAIL only for: clipped/truncated text, overlapping text blocks, solid black \
-squares replacing glyphs, broken tables, unreadable text, or a fully blank page \
-where content is expected. Ignore language and translation quality."""
+squares or hollow boxes replacing glyphs, broken tables, unreadable text, a \
+fully blank page where content is expected, body text running into the \
+header/footer margin, text whose colour is too close to its background to \
+read, superscripts or subscripts sitting off their baseline, inline formulas \
+misaligned with the surrounding line, or table cell content spilling past its \
+cell borders. Ignore language and translation quality."""
 
 # Type of the injected vision judge: (images_b64_png, prompt) -> raw text verdict.
 VlmJudgeFn = Callable[[list[str], str], Awaitable[str]]
@@ -407,14 +415,20 @@ def pdf_page_count(pdf_path: Path) -> int:
 
 
 def page_bounds(pdf_path: Path) -> dict[int, tuple[float, float, float, float]]:
-    """Return 1-indexed {page_no: (x0, y0, x1, y1)} MediaBoxes via pikepdf.
+    """Return 1-indexed {page_no: (x0, y0, x1, y1)} CropBoxes (else MediaBoxes).
 
-    The origin is kept, not just the size: a page whose MediaBox is
+    The *visible* box is the CropBox: viewers and the pipeline's own rasteriser
+    clip to it, so text that overruns the CropBox but stays inside the MediaBox
+    is invisible to the reader while a MediaBox comparison calls it fine. The
+    MediaBox is the fallback for the overwhelming majority of pages that carry
+    no CropBox.
+
+    The origin is kept, not just the size: a page whose CropBox is
     ``[10 10 610 810]`` is 600x800 like ``[0 0 600 800]``, but its right edge is
     at x=610 -- comparing text boxes against the size alone flags visible text.
     """
     try:
-        return pdf_struct.page_boxes(pdf_path)
+        return pdf_struct.page_crop_boxes(pdf_path)
     except Exception as exc:
         logger.debug("Visual gate: cannot read dimensions of %s: %s", pdf_path, exc)
         return {}
@@ -811,11 +825,24 @@ def _attribute_artifact_overlaps(
     return attributed
 
 
-def block_overlap_findings(blocks: Sequence[object]) -> list[VisualFinding]:
+def block_overlap_findings(
+    blocks: Sequence[object],
+    *,
+    truncated_pages: list[int] | None = None,
+    thresholds: GateThresholds | None = None,
+) -> list[VisualFinding]:
     """T1: flag heavily overlapping text blocks on the same page.
 
     Accepts IRBlock-like objects (duck-typed ``bbox``) to avoid importing IR
     models here; anything without a usable bbox is skipped.
+
+    Two signatures are checked, because they are different accidents: an
+    (almost) coincident pair is a duplicated block, while two same-size lines
+    offset by 15-65 % of their height are overprinted text — the common real
+    defect, and one the IoU threshold alone cannot see (4pt on a 14pt line is
+    IoU 0.556). ``truncated_pages`` receives the pages whose rect count hit
+    :data:`MAX_OVERLAP_RECTS_PER_PAGE`, so a partial check is reported as
+    partial.
     """
     from ubt.adapters.pdf.textgeom import box_area, box_iou
 
@@ -835,10 +862,15 @@ def block_overlap_findings(blocks: Sequence[object]) -> list[VisualFinding]:
         block_id = str(getattr(block, "id", "?"))
         by_page.setdefault(page, []).append((block_id, rect))
     for page, items in by_page.items():
-        capped = items[:200]  # bound O(n^2) on pathological pages
+        t = thresholds or GATE
+        capped = items[: t.max_overlap_rects_per_page]  # bound O(n^2) on pathological pages
+        if len(items) > t.max_overlap_rects_per_page and truncated_pages is not None:
+            truncated_pages.append(page)
         for i in range(len(capped)):
             for j in range(i + 1, len(capped)):
-                if box_iou(capped[i][1], capped[j][1]) >= OVERLAP_IOU_THRESHOLD:
+                if box_iou(capped[i][1], capped[j][1]) >= t.overlap_iou or (
+                    _offset_overlap(capped[i][1], capped[j][1], thresholds=t)
+                ):
                     # Name the two blocks. Without an id the consumer can only
                     # quarantine the whole page (``visual_verify_loop`` keeps a
                     # finding block-scoped only when its id is an IR id), which
@@ -849,14 +881,16 @@ def block_overlap_findings(blocks: Sequence[object]) -> list[VisualFinding]:
                     # does. Both ids are reported, comma-separated, so either the
                     # first or the full pair resolves.
                     overlapping = [capped[i][0], capped[j][0]]
+                    kind = (
+                        "overlap heavily (IoU>=0.6)"
+                        if box_iou(capped[i][1], capped[j][1]) >= t.overlap_iou
+                        else "are offset-overprinted on each other"
+                    )
                     findings.append(
                         VisualFinding(
                             severity="major",
                             code="block_overlap",
-                            message=(
-                                f"Blocks {overlapping[0]} and {overlapping[1]} "
-                                f"overlap heavily (IoU>=0.6)"
-                            ),
+                            message=(f"Blocks {overlapping[0]} and {overlapping[1]} {kind}"),
                             page=page,
                             block_id=",".join(overlapping),
                         )
@@ -864,8 +898,47 @@ def block_overlap_findings(blocks: Sequence[object]) -> list[VisualFinding]:
     return findings
 
 
+def _offset_overlap(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+    *,
+    thresholds: GateThresholds | None = None,
+) -> bool:
+    """True when two rects look like overprinted lines rather than a duplicate.
+
+    The IoU test is mathematically blind to the common shape: two lines of the
+    same size offset vertically by 15-65 % of their height score
+    ``(h-d)/(h+d)``, which is 0.556 for a 4pt shift on a 14pt line — well under
+    the 0.6 threshold. The signature here is a near-identical horizontal span
+    with a vertical offset in that band and real intersection area, i.e. one
+    line of text printed over another. Adjacent lines in a column do not
+    intersect at all, so they cannot match; side-by-side boxes fail the
+    horizontal-span test.
+    """
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    a_w, b_w = ax1 - ax0, bx1 - bx0
+    a_h, b_h = ay1 - ay0, by1 - by0
+    if a_w <= 0 or b_w <= 0 or a_h <= 0 or b_h <= 0:
+        return False
+    x_inter = min(ax1, bx1) - max(ax0, bx0)
+    y_inter = min(ay1, by1) - max(ay0, by0)
+    if x_inter <= 0 or y_inter <= 0:
+        return False
+    if x_inter < 0.8 * min(a_w, b_w):
+        return False
+    if x_inter * y_inter < (thresholds or GATE).min_overlap_area_pt2:
+        return False
+    offset = abs(ay0 - by0)
+    tallest = max(a_h, b_h)
+    return 0.15 * tallest <= offset <= 0.65 * tallest
+
+
 def blocks_out_of_bounds_findings(
-    blocks: Sequence[object], boxes: Mapping[int, tuple[float, float, float, float]]
+    blocks: Sequence[object],
+    boxes: Mapping[int, tuple[float, float, float, float]],
+    *,
+    thresholds: GateThresholds | None = None,
 ) -> list[VisualFinding]:
     """T1: flag blocks placed outside the page mediabox (clipped text).
 
@@ -892,7 +965,7 @@ def blocks_out_of_bounds_findings(
         if box is None:
             continue
         bx0, by0, bx1, by1 = box
-        tol = OUT_OF_BOUNDS_TOLERANCE_PT
+        tol = (thresholds or GATE).out_of_bounds_tolerance_pt
         if x0 < bx0 - tol or y0 < by0 - tol or x1 > bx1 + tol or y1 > by1 + tol:
             findings.append(
                 VisualFinding(
@@ -909,6 +982,279 @@ def blocks_out_of_bounds_findings(
                     block_id=str(getattr(block, "id", "") or "") or None,
                 )
             )
+    return findings
+
+
+#: Share of the page height at the top and bottom that belongs to running
+#: heads, folios and rules rather than to body flow. The same bands
+#: ``source_metrics`` measures body size in; a body line wholly inside one is
+#: text that ran into the furniture.
+
+
+def furniture_collision_findings(
+    artifact_boxes: Sequence[object],
+    blocks: Sequence[object],
+    bounds: Mapping[int, tuple[float, float, float, float]],
+    *,
+    thresholds: GateThresholds | None = None,
+) -> list[VisualFinding]:
+    """Flag body text that ran wholly into a page's header/footer band.
+
+    A running head or folio legitimately lives in the outer 8 % of the page,
+    so "text near the edge" is not a defect. The check is narrower on purpose:
+    an artifact line must sit *entirely* inside a furniture band, and the
+    source must have had no block intersecting that same band on that page. A
+    translation that grew into the margin from a block ending just below it
+    only grazes the band, so it does not match.
+
+    Requires both the artifact's own rects and the source blocks; without the
+    blocks the check cannot tell furniture from translated body text and is
+    skipped.
+    """
+    if not artifact_boxes or not blocks:
+        return []
+    occupied: set[tuple[int, str]] = set()
+    for block in blocks:
+        bbox = getattr(block, "bbox", None)
+        if bbox is None:
+            continue
+        try:
+            page = int(bbox.page)
+            x0, y0, x1, y1 = (
+                float(bbox.x0),
+                float(bbox.y0),
+                float(bbox.x1),
+                float(bbox.y1),
+            )
+        except (AttributeError, TypeError, ValueError):
+            continue
+        box = bounds.get(page)
+        if box is None:
+            continue
+        band = _furniture_band_hit(page, (x0, y0, x1, y1), box, thresholds=thresholds)
+        if band is not None:
+            occupied.add((page, band))
+
+    findings: list[VisualFinding] = []
+    for artifact in artifact_boxes:
+        bbox = getattr(artifact, "bbox", None)
+        if bbox is None:
+            continue
+        try:
+            page = int(bbox.page)
+            rect = (float(bbox.x0), float(bbox.y0), float(bbox.x1), float(bbox.y1))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        box = bounds.get(page)
+        if box is None:
+            continue
+        band = _furniture_band_hit(page, rect, box, thresholds=thresholds)
+        if band is None or (page, band) in occupied:
+            continue
+        findings.append(
+            VisualFinding(
+                severity="major",
+                code="furniture_collision",
+                message=(
+                    f"Page {page}: text {getattr(artifact, 'id', '?')} sits inside the "
+                    f"{band} furniture band, where the source carried no text"
+                ),
+                page=page,
+                block_id=str(getattr(artifact, "id", "") or "") or None,
+            )
+        )
+    return findings
+
+
+def _furniture_band_hit(
+    page: int,
+    rect: tuple[float, float, float, float],
+    page_box: tuple[float, float, float, float],
+    *,
+    thresholds: GateThresholds | None = None,
+) -> str | None:
+    """``"header"`` / ``"footer"`` when ``rect`` lies wholly inside that band."""
+    x0, y0, x1, y1 = rect
+    bx0, by0, bx1, by1 = page_box
+    height = by1 - by0
+    if height <= 0.0 or x1 <= x0 or y1 <= y0:
+        return None
+    band_pt = height * (thresholds or GATE).furniture_band_share
+    if y0 >= by1 - band_pt and y1 <= by1:
+        return "header"
+    if y1 <= by0 + band_pt and y0 >= by0:
+        return "footer"
+    return None
+
+
+_FONT_COVERAGE_CACHE: dict[str, frozenset[int]] = {}
+
+
+def _font_file_bytes(font_dict: Any) -> bytes | None:
+    """The embedded font program behind a PDF font dictionary, if any."""
+    try:
+        descriptor = font_dict.get("/FontDescriptor")
+        if descriptor is None:
+            # Type0: the program lives on the descendant CIDFont.
+            descendants = font_dict.get("/DescendantFonts")
+            if descendants is None:
+                return None
+            descriptor = descendants[0].get("/FontDescriptor")
+            if descriptor is None:
+                return None
+        for key in ("/FontFile2", "/FontFile3", "/FontFile"):
+            stream = descriptor.get(key)
+            if stream is not None:
+                return bytes(stream.read_bytes())
+    except Exception:  # noqa: BLE001 - a malformed font is "unknown", not fatal
+        return None
+    return None
+
+
+def _font_codepoints(font_bytes: bytes) -> frozenset[int] | None:
+    """Unicode codepoints the embedded font program can draw, or None.
+
+    Read from the font's own ``cmap``. A subset font's cmap lists exactly the
+    glyphs the subset carried, which is what makes this a coverage test: a
+    codepoint that appears in the text layer but in no font's cmap renders as
+    ``.notdef`` — the hollow or solid box a reader sees as a broken glyph.
+    """
+    key = str(hash(font_bytes))
+    cached = _FONT_COVERAGE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    try:
+        import io
+
+        from fontTools.ttLib import TTFont
+
+        with TTFont(io.BytesIO(font_bytes), lazy=True, fontNumber=0) as font:
+            cmap = font.getBestCmap() or {}
+            covered = frozenset(int(code) for code in cmap)
+    except Exception as exc:  # noqa: BLE001 - unparseable font format
+        logger.debug("Visual gate: font program not inspectable (%s)", exc)
+        return None
+    _FONT_COVERAGE_CACHE[key] = covered
+    return covered
+
+
+def _page_covered_codepoints(pdf: Any, page_index: int) -> frozenset[int] | None:
+    """Union of the page's embedded-font cmaps, or None when not fully known.
+
+    Every font on the page must be inspectable for the union to mean anything:
+    a page whose text is drawn partly by a font this build cannot parse (a bare
+    CFF without an sfnt cmap, a Type3 glyph font, a non-embedded base-14 face)
+    has an *unknown* coverage, and treating the parsable subset as the whole
+    would report perfectly good text as missing glyphs. Measured on the
+    reference facsimile artifact: exactly that false positive, on a page whose
+    Latin text renders fine.
+    """
+    try:
+        page = pdf.pages[page_index]
+        fonts = page.get("/Resources", {}).get("/Font", {})
+        covered: set[int] = set()
+        inspected = 0
+        for _name, font_dict in fonts.items():
+            data = _font_file_bytes(font_dict)
+            if data is None:
+                return None
+            codepoints = _font_codepoints(data)
+            if codepoints is None:
+                return None
+            inspected += 1
+            covered |= codepoints
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Visual gate: page %d fonts unreadable (%s)", page_index + 1, exc)
+        return None
+    return frozenset(covered) if inspected else None
+
+
+def _is_content_codepoint(code: int) -> bool:
+    """Letters, digits and ideographs — the glyphs a reader must recognise.
+
+    Punctuation and symbols are excluded: a symbol font may legitimately draw
+    them through a private-use mapping its cmap does not describe, and a
+    missing apostrophe is not the defect this check exists for.
+    """
+    import unicodedata
+
+    if code in (0x20, 0x09, 0x0A, 0x0D, 0xA0):
+        return False
+    category = unicodedata.category(chr(code))
+    return category[0] in ("L", "N")
+
+
+def font_coverage_findings(
+    pdf_path: Path,
+    pages: Sequence[int],
+    *,
+    coverage_stats: dict[str, int] | None = None,
+) -> list[VisualFinding]:
+    """Flag text-layer codepoints no embedded font on their page can draw.
+
+    This is the deterministic form of the "tofu" defect: the text layer keeps
+    the correct Unicode (so extraction-based parity checks pass) while the
+    rendered glyph is ``.notdef``. A page whose fonts cannot be inspected is
+    skipped — unmeasured, not approved.
+    """
+    try:
+        import pikepdf
+        import pypdfium2 as pdfium
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Visual gate: font coverage unavailable (%s)", exc)
+        return []
+
+    findings: list[VisualFinding] = []
+    try:
+        pdf = pdfium.PdfDocument(str(pdf_path))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Visual gate: font coverage cannot open %s (%s)", pdf_path, exc)
+        return []
+    try:
+        with pikepdf.open(str(pdf_path)) as structure:
+            for page_no in pages:
+                if not 1 <= page_no <= len(pdf):
+                    continue
+                try:
+                    text = pdf[page_no - 1].get_textpage().get_text_range()
+                except Exception:  # noqa: BLE001
+                    continue
+                codepoints = {
+                    ord(ch) for ch in text if ch.strip() and _is_content_codepoint(ord(ch))
+                }
+                if not codepoints:
+                    continue
+                covered = _page_covered_codepoints(structure, page_no - 1)
+                if covered is None:
+                    if coverage_stats is not None:
+                        coverage_stats["font_coverage_pages_skipped"] = (
+                            coverage_stats.get("font_coverage_pages_skipped", 0) + 1
+                        )
+                    continue
+                if coverage_stats is not None:
+                    coverage_stats["font_coverage_pages_measured"] = (
+                        coverage_stats.get("font_coverage_pages_measured", 0) + 1
+                    )
+                missing = sorted(codepoints - covered)
+                if not missing:
+                    continue
+                sample = "".join(chr(code) for code in missing[:12])
+                findings.append(
+                    VisualFinding(
+                        severity="major",
+                        code="font_coverage_gap",
+                        message=(
+                            f"Page {page_no}: {len(missing)} codepoint(s) in the text "
+                            f"layer are in no embedded font's cmap (sample: {sample!r}); "
+                            "they render as missing-glyph boxes"
+                        ),
+                        page=page_no,
+                    )
+                )
+    finally:
+        close = getattr(pdf, "close", None)
+        if callable(close):
+            close()
     return findings
 
 
@@ -1059,19 +1405,21 @@ def pixel_findings(png_path: Path, page: int) -> list[VisualFinding]:
     return findings
 
 
-def parse_vlm_verdict(raw_text: str) -> tuple[bool, str]:
-    """Parse the documented ``verdict: PASS|FAIL`` line; unparseable counts as pass+note.
+def parse_vlm_verdict(raw_text: str) -> tuple[bool | None, str]:
+    """Parse the documented ``verdict: PASS|FAIL`` line.
 
-    Only the documented prefix commits a verdict: free-form prose mentioning
-    "pass" must not be silently read as an explicit PASS (it is reported as an
-    unparseable note so the operator can see the judge misbehaved).
+    Returns ``None`` for anything unparseable. That third state is the point:
+    the old contract read an unparseable answer as PASS, so a judge that
+    returned prose, an empty string, or a refusal silently approved the page.
+    Only the documented prefix commits a verdict — free-form prose mentioning
+    "pass" is not an explicit PASS either.
     """
     lowered = (raw_text or "").lower()
     if "verdict: fail" in lowered:
         return False, raw_text.strip()[:300]
     if "verdict: pass" in lowered:
         return True, ""
-    return True, f"unparseable verdict: {raw_text.strip()[:200]}"
+    return None, raw_text.strip()[:200]
 
 
 async def judge_pages_with_vlm(
@@ -1083,17 +1431,34 @@ async def judge_pages_with_vlm(
         try:
             raw = await judge_fn([images_b64[page]], VLM_PROMPT)
         except Exception as exc:
+            # A judge that crashed inspected nothing. Reporting that as info
+            # left ``passed=True`` for a page nobody looked at, which is the
+            # fail-open this tier exists to avoid.
             findings.append(
                 VisualFinding(
-                    severity="info",
+                    severity="major",
                     code="vlm_judge_error",
-                    message=f"Page {page} VLM judge failed (non-fatal): {exc}",
+                    message=f"Page {page} VLM judge failed: {exc}",
                     page=page,
                 )
             )
             continue
         passed, detail = parse_vlm_verdict(raw)
-        if not passed:
+        if passed is None:
+            # An answer that does not carry the documented verdict line is not
+            # an approval: the judge may have refused, rambled, or truncated.
+            findings.append(
+                VisualFinding(
+                    severity="major",
+                    code="vlm_verdict_unparseable",
+                    message=(
+                        f"Page {page} VLM judge returned no parseable verdict "
+                        f"(first 200 chars: {detail!r})"
+                    ),
+                    page=page,
+                )
+            )
+        elif not passed:
             findings.append(
                 VisualFinding(
                     severity="major",
@@ -2094,8 +2459,19 @@ async def run_visual_gate(
     vlm_judge: VlmJudgeFn | None = None,
     dpi: int = DEFAULT_DPI,
     canvas_background_pdf: Path | None = None,
+    *,
+    expected_page_count: int | None = None,
+    faithful_pages: bool = False,
+    thresholds: GateThresholds | Mapping[str, float] | None = None,
 ) -> VisualGateResult:
     """Run T0+T1 always, pixel+T2 only when tools/judge are available.
+
+    ``expected_page_count`` / ``faithful_pages`` state the contract the
+    artifact was rendered under. A faithful delivery promises the source's
+    page count; when the renderer had to spill a page (the body floor outranks
+    the count) that is a contract finding, not silence. ``expected_page_count``
+    is only read when ``faithful_pages`` is true, and both default to "no
+    contract stated" so every existing caller keeps its behaviour.
 
     ``canvas_background_pdf`` turns on the canvas strategy of the ``faithful``
     contract: the stripped background the canvas renderer drew under the
@@ -2106,6 +2482,12 @@ async def run_visual_gate(
     it is the only way to measure the canvas strategy's own failure mode, and
     "no background was supplied" must not read as "measured clean".
     """
+    # ``[gate]`` overrides arrive as a raw mapping; resolve (and validate) them
+    # here, where the schema lives, so an unknown key fails loudly instead of
+    # leaving the default in force while the operator believes otherwise.
+    if isinstance(thresholds, Mapping):
+        thresholds = DEFAULT_GATE_THRESHOLDS.merged(thresholds)
+
     if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
         return VisualGateResult(passed=True, skipped_reason="not a rendered pdf")
     total = pdf_page_count(pdf_path)
@@ -2127,16 +2509,30 @@ async def run_visual_gate(
     findings: list[VisualFinding] = []
     if typ_text is not None:
         findings.extend(scan_typ_source(typ_text))
+    if faithful_pages and expected_page_count is not None and total != expected_page_count:
+        findings.append(
+            VisualFinding(
+                severity="major",
+                code="page_count_changed_faithful",
+                message=(
+                    f"Faithful delivery has {total} page(s) but the source has "
+                    f"{expected_page_count}: content spilled past the promised "
+                    "1:1 page lock"
+                ),
+            )
+        )
     # A blank page is a defect: the publication renderer emits every block it
-    # is given, so an empty page means content was dropped, not padded.
-    exempt_blank_pages: set[int] = set()
+    # is given, so an empty page means content was dropped, not padded. There
+    # used to be an ``exempt_blank_pages`` set here that was subtracted from
+    # both blank tiers and never populated by anything — dead control flow that
+    # read like a supported exemption. A real exemption has to come from the
+    # source document's structure (a divider page that carried no content in
+    # the source either), which is a check on the source, not a local set.
     # blank_page_candidates extracts every page's text in-process — CPU
     # bound; keep it off the loop so concurrent SSE streams and lease
     # renewals are never frozen.
     blank_cand_pages = set(await asyncio.to_thread(blank_page_candidates, pdf_path))
     for page in sorted(blank_cand_pages):
-        if page in exempt_blank_pages:
-            continue
         findings.append(
             VisualFinding(
                 severity="info",
@@ -2156,8 +2552,28 @@ async def run_visual_gate(
     # Type size is checked on every page, not a sample: unlike raster/VLM tiers it
     # costs one pdfium char walk per page (no rendering, no tokens), and the
     # failure it catches is silent in every other tier.
+    t = thresholds or GATE
     findings.extend(
-        await asyncio.to_thread(type_size_findings, pdf_path, list(range(1, total + 1)))
+        await asyncio.to_thread(
+            type_size_findings,
+            pdf_path,
+            list(range(1, total + 1)),
+            illegible_pt=t.type_illegible_pt,
+            collapsed_fraction=t.type_collapsed_fraction,
+        )
+    )
+    # Font coverage is the deterministic form of the missing-glyph defect: the
+    # pixel tier only nominates a page above 5 % near-black area, so a handful
+    # of tofu squares per page never reached it. Cheap per page (one text walk
+    # plus cached font cmaps), so it runs on every page like the type audit.
+    coverage_stats: dict[str, int] = {}
+    findings.extend(
+        await asyncio.to_thread(
+            font_coverage_findings,
+            pdf_path,
+            list(range(1, total + 1)),
+            coverage_stats=coverage_stats,
+        )
     )
     if artifact_boxes:
         # Overlap is attributed to IR blocks when the run has them. The artifact
@@ -2173,12 +2589,17 @@ async def run_visual_gate(
         # frame, while an IR ``bbox`` comes from the extractor and may use a
         # different origin (Docling reports BOTTOMLEFT). Comparing an IR bbox
         # against the MediaBox flagged a perfectly placed block as clipped.
-        raw_artifact_overlaps = block_overlap_findings(artifact_boxes)
+        overlap_truncated: list[int] = []
+        raw_artifact_overlaps = block_overlap_findings(
+            artifact_boxes, truncated_pages=overlap_truncated, thresholds=thresholds
+        )
         attributed_overlaps = _attribute_artifact_overlaps(
             raw_artifact_overlaps, artifact_boxes, blocks
         )
         if blocks:
-            ir_overlaps = block_overlap_findings(blocks)
+            ir_overlaps = block_overlap_findings(
+                blocks, truncated_pages=overlap_truncated, thresholds=thresholds
+            )
             seen_keys = {(f.page, f.block_id) for f in ir_overlaps}
             findings.extend(ir_overlaps)
             for af in attributed_overlaps:
@@ -2187,7 +2608,25 @@ async def run_visual_gate(
                     seen_keys.add((af.page, af.block_id))
         else:
             findings.extend(attributed_overlaps)
-        findings.extend(blocks_out_of_bounds_findings(artifact_boxes, bounds))
+        if overlap_truncated:
+            unique_truncated = sorted(set(overlap_truncated))
+            findings.append(
+                VisualFinding(
+                    severity="info",
+                    code="overlap_truncation",
+                    message=(
+                        f"Overlap detection examined only the first "
+                        f"{MAX_OVERLAP_RECTS_PER_PAGE} rects on page(s) "
+                        f"{', '.join(map(str, unique_truncated[:10]))}"
+                    ),
+                )
+            )
+        findings.extend(
+            blocks_out_of_bounds_findings(artifact_boxes, bounds, thresholds=thresholds)
+        )
+        findings.extend(
+            furniture_collision_findings(artifact_boxes, blocks, bounds, thresholds=thresholds)
+        )
         if len(geometry_pages) < total:
             findings.append(
                 VisualFinding(
@@ -2201,8 +2640,8 @@ async def run_visual_gate(
             )
     else:
         if blocks:
-            findings.extend(block_overlap_findings(blocks))
-            findings.extend(blocks_out_of_bounds_findings(blocks, bounds))
+            findings.extend(block_overlap_findings(blocks, thresholds=thresholds))
+            findings.extend(blocks_out_of_bounds_findings(blocks, bounds, thresholds=thresholds))
         findings.append(
             VisualFinding(
                 severity="info",
@@ -2245,7 +2684,6 @@ async def run_visual_gate(
             # The probe runs only on the pages the raster tier nominated, so it
             # costs a pikepdf page walk, not a second rasterisation.
             nominated = {page for page in pngs if page in blank_cand_pages}
-            nominated -= exempt_blank_pages
             contentless = await asyncio.to_thread(page_has_no_content, pdf_path, sorted(nominated))
             for page, png in sorted(pngs.items()):
                 # pixel_findings decodes the PNG with PIL (CPU-bound) — keep it off the loop too.
@@ -2355,7 +2793,12 @@ async def run_visual_gate(
                         "canvas pages were sampled but none carried new ink on its "
                         "background; canvas ink-collision check measured no page"
                     )
-        if vlm_judge is not None and pngs and max_vlm_pages > 0:
+        # Judge 10 % of the artifact's pages, capped by the operator's ceiling:
+        # a handful of pages cannot speak for a long book, and the cap keeps
+        # the token cost bounded. At least one page is always judged when the
+        # tier is on, so "enabled" never silently means "skipped".
+        vlm_budget = min(max_vlm_pages, max(1, -(-total // 10))) if max_vlm_pages > 0 else 0
+        if vlm_judge is not None and pngs and vlm_budget > 0:
             flagged_set = set(flagged)
             chart_set = chart_pages_from_blocks(blocks)
 
@@ -2369,7 +2812,7 @@ async def run_visual_gate(
                 return (3, page)
 
             ordered = sorted(pngs, key=_vlm_rank)
-            vlm_pages = ordered[:max_vlm_pages]
+            vlm_pages = ordered[:vlm_budget]
             images_b64: dict[int, str] = {}
             for page in vlm_pages:
                 encoded = _encode_png_b64(pngs[page])
@@ -2452,6 +2895,12 @@ async def run_visual_gate(
         # page-global ``canvas_worst_ratio`` cannot see a localized collision
         # (that blind spot is why the region measurement exists), so this is the
         # number a warn-to-fail promotion decision must read beside it.
+        # Font coverage: how many pages the check could actually inspect. A
+        # high ``skipped`` count means the artifact's fonts are flavours this
+        # build cannot read cmaps from (bare CFF/Type1 subsets), so the tier is
+        # *unmeasured*, not clean — the distinction the pixel and VLM tiers
+        # already make explicit.
+        **coverage_stats,
         "canvas_worst_region_ratio": (
             round(max((page.worst_region_ratio for page in canvas_pages), default=0.0), 4)
         ),
