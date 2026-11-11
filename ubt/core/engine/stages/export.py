@@ -668,6 +668,21 @@ def _gate_threshold_overrides(ctx: StageContext) -> dict[str, float] | None:
     return dict(overrides) if overrides else None
 
 
+def _source_pdf_for_gate(ctx: StageContext) -> Any | None:
+    """The source PDF, when the run's input was a PDF.
+
+    Only a PDF input gives the gate the same-extractor source geometry its
+    furniture check needs; anything else (EPUB/DOCX/Markdown) leaves the check
+    skipped rather than guessed.
+    """
+    try:
+        if ctx.input_path.suffix.lower() != ".pdf":
+            return None
+        return ctx.input_path if ctx.input_path.exists() else None
+    except Exception:  # noqa: BLE001 - an unreadable input is the ingest stage's error
+        return None
+
+
 def _is_faithful_delivery(ctx: StageContext) -> bool:
     """Whether this run's effective delivery mode is the page-locked contract."""
     mode = str((getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_mode", "") or "")
@@ -730,6 +745,7 @@ async def _run_visual_gate(
             expected_page_count=_faithful_expected_pages(ctx),
             faithful_pages=_is_faithful_delivery(ctx),
             thresholds=_gate_threshold_overrides(ctx),
+            source_pdf=_source_pdf_for_gate(ctx),
         )
         rendered_path, visual_report_path, gate = await verify_loop.run(
             rendered_path=rendered_path,

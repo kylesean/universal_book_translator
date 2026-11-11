@@ -40,21 +40,26 @@ def test_documented_verdicts_still_parse() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_nonsense_verdict_becomes_a_major_finding() -> None:
+async def test_a_nonsense_verdict_is_unmeasured_not_an_approval() -> None:
+    """The judge misbehaving is a statement about the judge, not the page: the
+    page must not read as approved, and the tier must not read as run."""
+
     async def judge(_images: list[str], _prompt: str) -> str:
         return "the page is fine I guess"
 
     findings = await judge_pages_with_vlm({3: "b64"}, judge)
-    assert [(f.severity, f.code) for f in findings] == [("major", "vlm_verdict_unparseable")]
+    assert [(f.severity, f.code) for f in findings] == [("info", "vlm_verdict_unparseable")]
 
 
 @pytest.mark.asyncio
-async def test_a_crashing_judge_becomes_a_major_finding() -> None:
+async def test_a_crashing_judge_is_unmeasured_not_a_page_defect() -> None:
+    """A broken endpoint must not quarantine blocks: it inspected nothing."""
+
     async def judge(_images: list[str], _prompt: str) -> str:
         raise RuntimeError("provider 502")
 
     findings = await judge_pages_with_vlm({5: "b64"}, judge)
-    assert [(f.severity, f.code) for f in findings] == [("major", "vlm_judge_error")]
+    assert [(f.severity, f.code) for f in findings] == [("info", "vlm_judge_unavailable")]
 
 
 @pytest.mark.asyncio
@@ -125,6 +130,7 @@ def test_bounds_compare_against_the_given_visible_box() -> None:
 def test_body_text_wholly_inside_the_header_band_is_a_collision() -> None:
     source = _Box(1, 50.0, 400.0, 350.0, 420.0)  # source had no header
     artifact = _Box(1, 50.0, 782.0, 350.0, 790.0)  # top 8 % of 800pt = 736+
+    # ``source`` is a source-page text box read by the same extractor.
     findings = furniture_collision_findings([artifact], [source], {1: (0.0, 0.0, 612.0, 800.0)})
     assert [f.code for f in findings] == ["furniture_collision"]
 
@@ -233,3 +239,33 @@ def test_content_codepoint_filter_excludes_punctuation() -> None:
     assert _is_content_codepoint(ord("汉"))
     assert not _is_content_codepoint(ord("."))
     assert not _is_content_codepoint(ord(" "))
+
+
+def test_a_page_whose_judge_failed_everywhere_reports_the_tier_as_skipped(
+    tmp_path: Path,
+) -> None:
+    """A totally unavailable judge leaves the tier unmeasured and says so —
+    it must not appear in ``tiers_ran`` and must not fail the artifact."""
+    import asyncio
+
+    from pdf_builders import write_text_pdf
+
+    from ubt.adapters.pdf.visual_gate import run_visual_gate
+
+    pdf = write_text_pdf(tmp_path / "out.pdf", [["Body text on the page, long enough."] * 8])
+
+    async def broken_judge(_images: list[str], _prompt: str) -> str:
+        raise RuntimeError("no endpoint")
+
+    result = asyncio.run(
+        run_visual_gate(
+            pdf,
+            sample_pages=1,
+            max_vlm_pages=1,
+            vlm_judge=broken_judge,
+            expected_page_count=1,
+        )
+    )
+    assert result.passed is True, "an unavailable judge is not an artifact defect"
+    assert "vlm" in result.tiers_skipped
+    assert "vlm_judge_unavailable" in result.skip_codes

@@ -98,6 +98,7 @@ class VisualVerifyLoop:
         expected_page_count: int | None = None,
         faithful_pages: bool = False,
         thresholds: Any | None = None,
+        source_pdf: Path | None = None,
     ) -> None:
         self.adapter = adapter
         self.manifest = manifest
@@ -122,6 +123,9 @@ class VisualVerifyLoop:
         # ``GateThresholds``. Resolution and validation happen inside the gate's
         # own module; see ``run_visual_gate``.
         self.thresholds = thresholds
+        # The source document, for checks that must compare artifact geometry
+        # against source geometry in one coordinate frame (furniture collision).
+        self.source_pdf = source_pdf
 
     def _build_vlm_judge(self) -> Any | None:
         if not self.visual_judge_enabled:
@@ -260,6 +264,7 @@ class VisualVerifyLoop:
             expected_page_count=self.expected_page_count,
             faithful_pages=self.faithful_pages,
             thresholds=self.thresholds,
+            source_pdf=self.source_pdf,
         )
 
     def _canvas_background_path(self) -> Path | None:

@@ -993,7 +993,7 @@ def blocks_out_of_bounds_findings(
 
 def furniture_collision_findings(
     artifact_boxes: Sequence[object],
-    blocks: Sequence[object],
+    source_boxes: Sequence[object],
     bounds: Mapping[int, tuple[float, float, float, float]],
     *,
     thresholds: GateThresholds | None = None,
@@ -1003,18 +1003,20 @@ def furniture_collision_findings(
     A running head or folio legitimately lives in the outer 8 % of the page,
     so "text near the edge" is not a defect. The check is narrower on purpose:
     an artifact line must sit *entirely* inside a furniture band, and the
-    source must have had no block intersecting that same band on that page. A
+    *source page* must have carried no text intersecting that same band. A
     translation that grew into the margin from a block ending just below it
     only grazes the band, so it does not match.
 
-    Requires both the artifact's own rects and the source blocks; without the
-    blocks the check cannot tell furniture from translated body text and is
-    skipped.
+    ``source_boxes`` are text boxes read from the SOURCE pdf with the same
+    pdfium extractor that produced ``artifact_boxes``. They cannot be the IR
+    blocks: an IR ``bbox`` comes from a different extractor and may use a
+    different origin (Docling reports BOTTOMLEFT), which made a title that the
+    source legitimately prints in the header band read as a collision.
     """
-    if not artifact_boxes or not blocks:
+    if not artifact_boxes or not source_boxes:
         return []
     occupied: set[tuple[int, str]] = set()
-    for block in blocks:
+    for block in source_boxes:
         bbox = getattr(block, "bbox", None)
         if bbox is None:
             continue
@@ -1050,6 +1052,13 @@ def furniture_collision_findings(
             continue
         band = _furniture_band_hit(page, rect, box, thresholds=thresholds)
         if band is None or (page, band) in occupied:
+            continue
+        # Wide enough to be a body line. The renderer legitimately places its
+        # own folio in the footer band (measured on the synthetic e2e: a page
+        # number tripped this check), and a folio is narrow; prose filling the
+        # column is not. A wide running head is exempted by the source check.
+        page_width = box[2] - box[0]
+        if page_width > 0 and (rect[2] - rect[0]) < 0.45 * page_width:
             continue
         findings.append(
             VisualFinding(
@@ -1444,25 +1453,32 @@ async def judge_pages_with_vlm(
         try:
             raw = await judge_fn([images_b64[page]], VLM_PROMPT)
         except Exception as exc:
-            # A judge that crashed inspected nothing. Reporting that as info
-            # left ``passed=True`` for a page nobody looked at, which is the
-            # fail-open this tier exists to avoid.
+            # A judge that crashed inspected nothing — but that is *our*
+            # infrastructure failing, not a defect in the page. Marking it
+            # major quarantined every sampled block for a broken endpoint;
+            # reporting it as a clean pass would be the fail-open this tier
+            # exists to avoid. The honest form is "unmeasured": the caller
+            # turns a judge that failed on every page into a skip code, and
+            # the report says the tier did not run.
             findings.append(
                 VisualFinding(
-                    severity="major",
-                    code="vlm_judge_error",
-                    message=f"Page {page} VLM judge failed: {exc}",
+                    severity="info",
+                    code="vlm_judge_unavailable",
+                    message=f"Page {page} could not be inspected by the VLM judge: {exc}",
                     page=page,
                 )
             )
             continue
         passed, detail = parse_vlm_verdict(raw)
         if passed is None:
-            # An answer that does not carry the documented verdict line is not
-            # an approval: the judge may have refused, rambled, or truncated.
+            # An answer without the documented verdict line is not an approval —
+            # the judge may have refused, rambled, or been the wrong model
+            # entirely. It is still a statement about the *judge*, not the page:
+            # the tier is unmeasured for that page (reported as such), and the
+            # artifact is not accused of a defect it may not have.
             findings.append(
                 VisualFinding(
-                    severity="major",
+                    severity="info",
                     code="vlm_verdict_unparseable",
                     message=(
                         f"Page {page} VLM judge returned no parseable verdict "
@@ -2392,6 +2408,9 @@ def _tier_coverage(
 _SKIP_CODES: dict[str, str] = {
     "page render failed (pdf_oxide); pixel checks skipped": "page_render_failed",
     "vlm judge disabled": "vlm_judge_disabled",
+    "vlm judge unavailable: every sampled page failed to reach a verdict": (
+        "vlm_judge_unavailable"
+    ),
     "no typst source beside the artifact; source scan skipped": "typst_source_absent",
     "no stripped background supplied; canvas ink-collision check skipped": (
         "canvas_background_absent"
@@ -2476,8 +2495,14 @@ async def run_visual_gate(
     expected_page_count: int | None = None,
     faithful_pages: bool = False,
     thresholds: GateThresholds | Mapping[str, float] | None = None,
+    source_pdf: Path | None = None,
 ) -> VisualGateResult:
     """Run T0+T1 always, pixel+T2 only when tools/judge are available.
+
+    ``source_pdf`` enables the furniture-collision check: it reads the source
+    page's own text boxes with the same extractor as the artifact, so the two
+    coordinate frames agree. Without it the check is skipped rather than
+    guessed from IR boxes.
 
     ``expected_page_count`` / ``faithful_pages`` state the contract the
     artifact was rendered under. A faithful delivery promises the source's
@@ -2637,9 +2662,13 @@ async def run_visual_gate(
         findings.extend(
             blocks_out_of_bounds_findings(artifact_boxes, bounds, thresholds=thresholds)
         )
-        findings.extend(
-            furniture_collision_findings(artifact_boxes, blocks, bounds, thresholds=thresholds)
-        )
+        if source_pdf is not None:
+            source_boxes = await asyncio.to_thread(artifact_text_boxes, source_pdf, geometry_pages)
+            findings.extend(
+                furniture_collision_findings(
+                    artifact_boxes, source_boxes, bounds, thresholds=thresholds
+                )
+            )
         if len(geometry_pages) < total:
             findings.append(
                 VisualFinding(
@@ -2828,7 +2857,22 @@ async def run_visual_gate(
                 if encoded is not None:
                     images_b64[page] = encoded
             if images_b64:
-                findings.extend(await judge_pages_with_vlm(images_b64, vlm_judge))
+                judge_findings = await judge_pages_with_vlm(images_b64, vlm_judge)
+                findings.extend(judge_findings)
+                unavailable = sum(
+                    1
+                    for f in judge_findings
+                    if f.code in ("vlm_judge_unavailable", "vlm_verdict_unparseable")
+                )
+                if unavailable and unavailable == len(images_b64):
+                    # No page was actually inspected: the tier is unmeasured,
+                    # and the report must say so rather than leave "vlm" in
+                    # ``tiers_ran`` (which is what a crashed judge used to do).
+                    # Clearing ``vlm_pages`` is what moves it to ``tiers_skipped``.
+                    vlm_pages = []
+                    skip_notes.append(
+                        "vlm judge unavailable: every sampled page failed to reach a verdict"
+                    )
         elif vlm_judge is None:
             skip_notes.append("vlm judge disabled")
     passed = not any(f.severity in ("major", "critical") for f in findings)

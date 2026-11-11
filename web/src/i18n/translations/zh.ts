@@ -647,6 +647,7 @@ export const zh: TranslationDictionary = {
       vlm: '视觉语义判定',
     },
     visualSkipCodes: {
+      vlm_judge_unavailable: '视觉判定不可用，该层未运行',
       vlm_judge_disabled: '视觉判定未开启',
       page_render_failed: '页面渲染失败',
       typst_source_absent: '排版源文件未保留，源码扫描已跳过',

@@ -675,6 +675,7 @@ export const en: TranslationDictionary = {
       vlm: 'semantic visual check',
     },
     visualSkipCodes: {
+      vlm_judge_unavailable: 'visual judge unreachable; the tier did not run',
       vlm_judge_disabled: 'visual judge not enabled',
       page_render_failed: 'page render failed',
       typst_source_absent: 'typesetting source not kept; source scan skipped',

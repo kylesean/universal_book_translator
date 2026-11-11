@@ -2035,7 +2035,15 @@ class TypstDocumentRenderer:
         base_preamble = "\n".join(
             [
                 self._page_setup(),
-                f"#set text(font: ({body}), size: 10.5pt{typst_lang_arguments(lang)})" + rtl,
+                # ``ligatures: false`` is a text-layer decision, not a cosmetic
+                # one — the same rule the facsimile renderer documents: a
+                # ligature glyph needs its own character mapping, and Typst's
+                # "fi"/"ffi" ligature extracted as a wrong codepoint once the
+                # font was subset, so the delivered text lost the word. Verified
+                # here on the synthetic e2e, which reported "five"/"first" as
+                # "ve"/"rst" and failed the paragraph-presence contract.
+                f"#set text(font: ({body}), size: 10.5pt{typst_lang_arguments(lang)}, "
+                "ligatures: false)" + rtl,
                 # Leading comes from the same convention owner, not a literal
                 # here: this line and ``Theme.leading_em`` disagreed (0.78 vs
                 # 0.85), so a maintainer tuning the theme tuned nothing.
