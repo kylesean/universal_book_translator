@@ -89,14 +89,19 @@ def build_delivery_signals(
     multicolumn_page_share: float = 0.0,
     structural_page_share: float = 0.0,
     formula_heavy: bool = False,
+    page_lock_feasible: bool | None = None,
+    source_overlap: bool | None = None,
+    expansion_risk: str | None = None,
 ) -> DeliverySignals:
     """Derive the router's inputs from the Phase 0 structure census.
 
-    The census is a *prefilter*, not a page-lock feasibility proof. A clean
-    native PDF is marked ``page_lock_feasible=True`` provisionally, and stays
-    provisional because no artifact-level page-lock solve exists yet.
-    A scanned or font-damaged PDF is vetoed here, because no later stage can
-    make its text layer trustworthy without OCR/VLM.
+    The census is a *prefilter*; the artifact-level probe
+    (:func:`ubt.adapters.pdf.page_lock_measure.measure_page_lock`) supplies the
+    measured facts through ``page_lock_feasible`` / ``source_overlap`` /
+    ``expansion_risk``. When those are absent the clean-native defaults stand
+    and ``page_lock_measured`` stays False, so the plan is honestly labelled
+    provisional. A scanned or font-damaged PDF is vetoed here, because no
+    later stage can make its text layer trustworthy without OCR/VLM.
     """
     document_class = document_class_from_mode(document_mode)
     if not is_pdf:
@@ -121,6 +126,8 @@ def build_delivery_signals(
 
     high_complexity = formula_heavy or structural_page_share >= 0.5 or multicolumn_page_share >= 0.5
     medium_complexity = formula_heavy or structural_page_share > 0.0 or multicolumn_page_share > 0.0
+    measured = page_lock_feasible is not None
+    clean_native = not has_scan and font_damage_pages == 0
     return DeliverySignals(
         text_trust=text_trust,
         page_kind=PageKind.SCANNED if has_scan else PageKind.NATIVE,
@@ -129,11 +136,17 @@ def build_delivery_signals(
             if high_complexity
             else (LayoutComplexity.MEDIUM if medium_complexity else LayoutComplexity.LOW)
         ),
-        source_overlap=False,
-        expansion_risk=ExpansionRisk.LOW,
-        # No per-page solve in Phase 0. A clean native page is provisionally
-        # feasible; a scan/font-damaged page is vetoed outright.
-        page_lock_feasible=not has_scan and font_damage_pages == 0,
+        source_overlap=bool(source_overlap) if measured else False,
+        expansion_risk=(
+            ExpansionRisk(expansion_risk) if measured and expansion_risk else ExpansionRisk.LOW
+        ),
+        # A measurement replaces the prefilter's default; a scan/font-damaged
+        # page is still vetoed outright, because the probe cannot make its text
+        # layer trustworthy.
+        page_lock_feasible=(bool(page_lock_feasible) and clean_native)
+        if measured
+        else clean_native,
+        page_lock_measured=measured,
         document_class=document_class,
     )
 
@@ -150,6 +163,9 @@ def plan_for_document(
     structural_page_share: float = 0.0,
     formula_heavy: bool = False,
     allow_degrade: bool = False,
+    page_lock_feasible: bool | None = None,
+    source_overlap: bool | None = None,
+    expansion_risk: str | None = None,
 ) -> DeliveryDecision:
     """Resolve the requested mode into a plan and an effective renderer mode.
 
@@ -172,6 +188,9 @@ def plan_for_document(
         multicolumn_page_share=multicolumn_page_share,
         structural_page_share=structural_page_share,
         formula_heavy=formula_heavy,
+        page_lock_feasible=page_lock_feasible,
+        source_overlap=source_overlap,
+        expansion_risk=expansion_risk,
     )
     policy = DegradePolicy.ALLOW_DEGRADE if allow_degrade else DegradePolicy.FAIL
 
@@ -185,7 +204,7 @@ def plan_for_document(
         return DeliveryDecision(plan=plan, effective_mode=None)
     if plan.contract is DeliveryContract.FAITHFUL:
         return DeliveryDecision(
-            plan=_mark_faithful_provisional(plan),
+            plan=_mark_faithful_provisional(plan) if not plan.signals.page_lock_measured else plan,
             effective_mode="facsimile",
         )
     return DeliveryDecision(plan=plan, effective_mode="reflow")
@@ -204,13 +223,20 @@ def _warn_legacy_mode(mode: str) -> None:
 
 
 def _mark_faithful_provisional(plan: DeliveryPlan) -> DeliveryPlan:
-    """Record that Phase 0's feasibility signal is a census, not a solve."""
+    """Record that the feasibility signal is a census, not an artifact probe.
+
+    Applied only when the page-lock probe did not run (or could not measure):
+    ``page_lock_measured`` is the difference between "we looked at the pages
+    and they solve at the floor" and "the structure census found nothing
+    wrong", and the plan must not blur the two.
+    """
     return plan.model_copy(
         update={
             "eligibility": plan.eligibility.model_copy(update={"provisional": True}),
             "reasons": (
                 *plan.reasons,
-                "page_lock_feasible is provisional (structure census only)",
+                "page_lock_feasible is provisional (structure census only; "
+                "no artifact-level page-lock probe measured this document)",
             ),
         }
     )

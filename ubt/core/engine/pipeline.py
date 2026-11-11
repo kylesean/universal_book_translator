@@ -72,6 +72,7 @@ from ubt.core.router.provider import create_model_provider, reset_usage_sink
 from ubt.delivery import DeliveryDecision, DeliveryInfeasibleError, plan_for_document
 
 if TYPE_CHECKING:
+    from ubt.adapters.pdf.page_lock_measure import PageLockMeasurement
     from ubt.core.qe.llm_judge import JudgeFn
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket
 from ubt.core.router.registry import registry_from_config
@@ -158,11 +159,15 @@ _ENGINE_SIGNATURE_FIELDS: tuple[tuple[str, str], ...] = (
 
 
 def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryDecision:
-    """Resolve the requested delivery mode from the Phase 0 structure census.
+    """Resolve the requested delivery mode from the census plus a page-lock probe.
 
-    This is intentionally a preflight, not a page-lock proof: a clean native
-    PDF is provisionally feasible and a scan/font-damaged page is vetoed. The
-    signal stays provisional because no artifact-level solve exists yet.
+    The structure census supplies layout complexity and text trust; the
+    page-lock probe (:func:`ubt.adapters.pdf.page_lock_measure.measure_page_lock`)
+    supplies the measured feasibility signals — source-box overlap and
+    geometric headroom — by running the renderer's own solver on sampled
+    pages. A document the probe could not measure falls back to the census
+    defaults and is labelled provisional, so "feasibility we measured" never
+    reads the same as "we did not look".
     """
     is_pdf = input_path.suffix.lower() == ".pdf"
     requested = str(getattr(config, "delivery_mode", "auto") or "auto")
@@ -182,6 +187,26 @@ def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryD
                 page_count = probe_pdf_pages(input_path)[0]
             except Exception as exc:  # noqa: BLE001 - unmeasured page count becomes text_trust=0
                 logger.debug("Delivery plan: page count unavailable for %s: %s", input_path, exc)
+
+    # The artifact-level probe is what turns "no census objection" into a
+    # measurement. It only runs for PDFs whose census is clean — a scan or a
+    # font-damaged file has no trustworthy text layer for the solver to read,
+    # and is vetoed by the census path anyway.
+    measured: PageLockMeasurement | None = None
+    if needs_census and facts is not None and not facts.has_scan:
+        try:
+            from ubt.core.ports import measure_page_lock_for_plan
+
+            measured = measure_page_lock_for_plan(input_path)
+        except Exception as exc:  # noqa: BLE001 - a probe failure lowers, not kills, the run
+            logger.debug("Delivery plan: page-lock probe unavailable for %s: %s", input_path, exc)
+        if measured is not None and not measured.measured:
+            logger.info(
+                "Delivery plan: page lock unmeasured for %s (%s); eligibility stays provisional",
+                input_path,
+                "; ".join(measured.reasons) or "no reason reported",
+            )
+            measured = None
     raw_doc_mode = str(getattr(config, "document_mode", "auto") or "auto")
     doc_mode = raw_doc_mode
     if doc_mode == "auto" and is_pdf:
@@ -211,6 +236,9 @@ def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryD
         structural_page_share=(float(facts.structural_page_share) if facts is not None else 0.0),
         formula_heavy=bool(facts.formula_heavy) if facts is not None else False,
         allow_degrade=bool(getattr(config, "allow_degrade", False)),
+        page_lock_feasible=measured.feasible if measured is not None else None,
+        source_overlap=measured.source_overlap if measured is not None else None,
+        expansion_risk=measured.expansion_risk if measured is not None else None,
     )
 
 

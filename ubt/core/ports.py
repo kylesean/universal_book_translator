@@ -435,6 +435,18 @@ def probe_pdf_pages(input_path: Path) -> tuple[int, int]:
     return _probe(input_path)
 
 
+def measure_page_lock_for_plan(input_path: Path) -> Any:
+    """Run the artifact-level page-lock probe through the adapter bridge.
+
+    ``ubt.core.engine`` may not import ``ubt.adapters`` at module scope (the
+    layering invariant in ``scripts/dump_compiler_edges.py``); this function
+    is the sanctioned seam, mirroring ``classify_pdf_structure``.
+    """
+    from ubt.adapters.pdf.page_lock_measure import measure_page_lock
+
+    return measure_page_lock(input_path)
+
+
 def pdf_page_count(input_path: Path) -> int:
     """Return the source PDF's page count through the adapter bridge."""
     from ubt.adapters.pdf import pdf_struct

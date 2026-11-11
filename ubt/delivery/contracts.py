@@ -100,6 +100,11 @@ class DeliverySignals(BaseModel):
     source_overlap: bool = False
     expansion_risk: ExpansionRisk = ExpansionRisk.LOW
     page_lock_feasible: bool = True
+    #: True when ``page_lock_feasible`` / ``source_overlap`` / ``expansion_risk``
+    #: came from the artifact-level probe (``page_lock_measure``) rather than
+    #: from the structure-census prefilter. The plan's eligibility is marked
+    #: ``provisional`` only when this is False.
+    page_lock_measured: bool = False
     document_class: DocumentClass = DocumentClass.OTHER
 
 
