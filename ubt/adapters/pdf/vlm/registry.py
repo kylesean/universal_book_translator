@@ -47,8 +47,12 @@ def assert_page_egress_allowed(endpoint: str | None, *, allow_page_upload: bool,
     raise ValueError(
         f"ocr_mode='{mode}' targets the non-local endpoint {endpoint!r} and "
         "ships rendered book pages there, but allow_page_upload=false "
-        "(UBT_ALLOW_PAGE_UPLOAD) forbids page-image egress. Point UBT_OCR_ENDPOINT "
-        "at localhost or re-enable uploads."
+        "(UBT_ALLOW_PAGE_UPLOAD) forbids page-image egress. Point "
+        "UBT_OCR_ENDPOINT at localhost/127.0.0.1, or — if the endpoint really "
+        "is on this machine (a container-host alias such as "
+        "host.docker.internal resolves to the host, which is another machine "
+        "from inside the container) — add the hostname to UBT_LOCAL_HOSTNAMES "
+        "to acknowledge it, or re-enable uploads."
     )
 
 

@@ -909,3 +909,67 @@ def test_fresh_resets_a_legacy_ledger_instead_of_refusing(tmp_path: Path) -> Non
         assert ledger.get_job_status("nope") is None
     finally:
         ledger.close()
+
+
+def test_reset_blocks_to_pending_increments_the_cumulative_redraft_count(
+    ledger: SQLiteJobLedger,
+) -> None:
+    """Each full reset re-bills the block, so the count must be lifetime and
+    survive resumes — unlike ``repair_rounds``, which the reset zeroes."""
+    _init(ledger)
+    ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1")]))
+    ledger.save_checkpoints_batch(
+        [{"block_id": "ch1#1", "status": BlockStatus.FAILED, "error_flags": ["e"]}],
+        job_id="job",
+    )
+
+    for expected_count in (1, 2, 3):
+        assert ledger.reset_blocks_to_pending(["ch1#1"], job_id="job") == 1
+        block = ledger.get_block("ch1#1", job_id="job")
+        assert block is not None
+        assert block.status is BlockStatus.PENDING
+        assert block.redraft_count == expected_count
+        assert block.repair_rounds == 0
+        # Simulate the next transient failure before the following resume.
+        ledger.save_checkpoints_batch(
+            [{"block_id": "ch1#1", "status": BlockStatus.FAILED, "error_flags": ["e"]}],
+            job_id="job",
+        )
+
+
+def test_reset_blocks_to_pending_holds_a_block_at_the_cumulative_redraft_cap(
+    ledger: SQLiteJobLedger,
+) -> None:
+    """At the cap the block stops being re-billed: it is held at NEEDS_HUMAN
+    with whatever text survived, instead of NULLing and re-drafting again."""
+    from ubt.core.engine.ledger_mixins import MAX_CUMULATIVE_REDRAFTS
+
+    _init(ledger)
+    ledger.append_chapter("job", _chapter("ch1", [_block("ch1#1")]))
+    # Drive the lifetime counter to the cap through real reset cycles.
+    ledger.save_checkpoints_batch(
+        [{"block_id": "ch1#1", "status": BlockStatus.FAILED, "error_flags": ["e"]}],
+        job_id="job",
+    )
+    for _ in range(MAX_CUMULATIVE_REDRAFTS):
+        assert ledger.reset_blocks_to_pending(["ch1#1"], job_id="job") == 1
+        ledger.save_checkpoints_batch(
+            [
+                {
+                    "block_id": "ch1#1",
+                    "status": BlockStatus.FAILED,
+                    "target_text": "幸存文本",
+                    "error_flags": ["e"],
+                }
+            ],
+            job_id="job",
+        )
+
+    # The next resume's reset must hold the block, not re-bill it.
+    assert ledger.reset_blocks_to_pending(["ch1#1"], job_id="job") == 0
+    block = ledger.get_block("ch1#1", job_id="job")
+    assert block is not None
+    assert block.status is BlockStatus.NEEDS_HUMAN
+    assert block.target_text == "幸存文本", "held text is kept for human post-editing"
+    assert any(f.startswith("redraft_cap_reached") for f in block.error_flags)
+    assert block.redraft_count == MAX_CUMULATIVE_REDRAFTS

@@ -108,6 +108,11 @@ def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None 
         "placeholder_retention": report.placeholder.retention_rate,
         "pass_rate": report.summary.pass_rate,
         "avg_qe": report.score_metrics.avg_qe,
+        # The scored population's share of the book. Under the default
+        # heuristic engine most blocks are never scored (pass-sample audit
+        # only), so ``avg_qe`` describes a sample — this denominator makes
+        # that explicit next to it instead of implying full coverage.
+        "qe_scored_coverage": report.score_metrics.scored_coverage,
         "repair_rate": _div(report.summary.repaired_blocks, total_blocks),
         "needs_human_rate": _div(report.summary.needs_human_blocks, total_blocks),
         "blocked_human_rate": _div(report.summary.blocked_human_blocks, total_blocks),
@@ -138,6 +143,7 @@ def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None 
         "visual_pages": visual_pages,
         "visual_findings": severities,
         "needs_human_blocks": report.summary.needs_human_blocks,
+        "needs_human_block_ids": list(report.summary.needs_human_block_ids),
         "blocked_human_blocks": report.summary.blocked_human_blocks,
         "chars": chars,
         "estimated_cost_usd": report.summary.estimated_cost_usd,

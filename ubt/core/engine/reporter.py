@@ -71,6 +71,11 @@ class ReportSummary(BaseModel):
     # quarantined Critical findings that must never ship as machine output.
     needs_human_blocks: int = 0
     blocked_human_blocks: int = 0
+    #: Bounded id sample of the ``needs_human`` population (first 20 by spine).
+    #: Export refuses to ship these by default (``export_allow_needs_human``);
+    #: when a delivery is allowed through anyway, this list is the audit trail
+    #: naming exactly which passages shipped unverified.
+    needs_human_block_ids: tuple[str, ...] = ()
 
 
 class ReportScoreMetrics(BaseModel):
@@ -107,6 +112,12 @@ class ReportScoreMetrics(BaseModel):
     #: ``avg_qe`` cannot tell "unmeasured" from "measured 0.0". This flag makes
     #: the difference explicit so a report is never misread as a failing score.
     qe_measured: bool = False
+    #: Share of ALL blocks the scored population covers (``scored_blocks`` /
+    #: ``total_blocks``). Under the default heuristic engine most blocks are
+    #: never scored — the pass-sample audit scores a fraction of clean passes —
+    #: so ``avg_qe`` describes a sample, not the book. A consumer that quotes
+    #: ``avg_qe`` must be able to see this denominator.
+    scored_coverage: float = 0.0
 
 
 class ReportPlaceholderMetrics(BaseModel):
@@ -613,6 +624,9 @@ def build_quality_report(
             cache_hit_rate=round(cache_hit_rate, 4) if cache_hit_rate is not None else 0.0,
             needs_human_blocks=needs_human,
             blocked_human_blocks=blocked_human,
+            needs_human_block_ids=tuple(
+                b.id for b in all_blocks if b.status == BlockStatus.NEEDS_HUMAN
+            )[:20],
         ),
         score_metrics=ReportScoreMetrics(
             avg_qe=avg_qe,
@@ -624,6 +638,7 @@ def build_quality_report(
             bottom_15_avg_qe=bottom_15_avg,
             scored_blocks=scored_blocks,
             qe_measured=bool(scored),
+            scored_coverage=round(scored_blocks / total, 4) if total > 0 else 0.0,
         ),
         terminology=terminology_metrics or ReportTerminologyMetrics(),
         terminology_conflicts=terminology_conflicts,

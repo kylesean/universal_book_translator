@@ -54,6 +54,7 @@ from ubt.core.ir.models import (
     IRBlock,
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
+from ubt.core.xml_safety import strip_doctype_declarations
 from ubt.core.zip_safety import ZipReadBudget, read_member
 from ubt.model.ast import TextElement
 
@@ -154,12 +155,19 @@ def _parse_xhtml(raw_html: str) -> BeautifulSoup:
     """Parse EPUB chapter markup as XML first, HTML as fallback.
 
     EPUB chapters are XHTML: the ``xml`` parser preserves self-closing tags,
-    namespace prefixes (``epub:type``), DOCTYPE, and CDATA — ``html.parser``
-    mangles all of them. Real-world books still ship sloppy chapters
-    (undefined entities like ``&nbsp;``, unclosed tags), so any XML parse
-    failure degrades to the HTML parser instead of failing the book.
+    namespace prefixes (``epub:type``) and CDATA — ``html.parser`` mangles all
+    of them. Real-world books still ship sloppy chapters (undefined entities
+    like ``&nbsp;``, unclosed tags), so any XML parse failure degrades to the
+    HTML parser instead of failing the book.
+
+    The DOCTYPE — and any xml-stylesheet PI — is stripped *before* either
+    parser runs (:func:`ubt.core.xml_safety.strip_doctype_declarations`): the
+    lxml backend is not defusedxml, and a chapter carrying an internal or
+    external entity declaration would be expanded per the interpreter build's
+    defaults. XHTML needs no DOCTYPE to parse, so dropping the declaration
+    neutralizes billion-laughs and XXE payloads instead of trusting defaults.
     """
-    cleaned = _resolve_named_entities(raw_html)
+    cleaned = _resolve_named_entities(strip_doctype_declarations(raw_html))
     try:
         return BeautifulSoup(cleaned, "xml")
     except Exception:
@@ -383,7 +391,11 @@ class EPUBAdapter(BaseDocumentAdapter):
                         f"Invalid EPUB: OPF package manifest {opf_path!r} could not be read "
                         "(missing or oversized member)."
                     )
-                opf_soup = BeautifulSoup(decode_markup(opf_bytes), "xml")
+                # Same guard as the chapters: the OPF is untrusted, and the
+                # lxml-based parse must never see a DOCTYPE it could expand.
+                opf_soup = BeautifulSoup(
+                    strip_doctype_declarations(decode_markup(opf_bytes)), "xml"
+                )
 
                 title_tag = opf_soup.find("dc:title") or opf_soup.find("title")
                 title = title_tag.get_text().strip() if title_tag else input_path.stem
@@ -571,7 +583,9 @@ class EPUBAdapter(BaseDocumentAdapter):
                     else None
                 )
                 if opf_bytes is not None:
-                    opf_soup = BeautifulSoup(decode_markup(opf_bytes), "xml")
+                    opf_soup = BeautifulSoup(
+                        strip_doctype_declarations(decode_markup(opf_bytes)), "xml"
+                    )
                     for item in opf_soup.find_all("item"):
                         href = str(item.get("href") or "")
                         if not href:
@@ -800,7 +814,7 @@ class EPUBAdapter(BaseDocumentAdapter):
 
     def _update_opf(self, raw_opf: bytes, target_lang: str) -> bytes:
         """Point the package at the bilingual output: dc:language + CSS item."""
-        soup = BeautifulSoup(decode_markup(raw_opf), "xml")
+        soup = BeautifulSoup(strip_doctype_declarations(decode_markup(raw_opf)), "xml")
         lang = soup.find("dc:language") or soup.find("language")
         if lang is not None:
             lang.string = target_lang
@@ -861,7 +875,10 @@ class EPUBAdapter(BaseDocumentAdapter):
         bilingual_mode: str | None = None,
     ) -> bytes:
         """Append bilingual labels (or monolingual translated labels) to NCX navPoints."""
-        soup = BeautifulSoup(decode_markup(raw_ncx), "xml")
+        # EPUB2 NCX files legitimately carry a DOCTYPE (the NISO DTD reference);
+        # it declares no entities UBT needs, so it is stripped like every other
+        # untrusted package document before the lxml-based parse.
+        soup = BeautifulSoup(strip_doctype_declarations(decode_markup(raw_ncx)), "xml")
         is_monolingual = bilingual_mode in ("target", "monolingual")
         for nav_point in soup.find_all("navPoint"):
             content = nav_point.find("content")

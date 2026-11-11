@@ -131,6 +131,14 @@ KPI_DEFINITIONS: tuple[KpiDefinition, ...] = (
         0.02,
     ),
     KpiDefinition(
+        "qe_scored_coverage",
+        "ratio",
+        Direction.HIGHER_IS_BETTER,
+        "scored blocks / total blocks — the sample share avg_qe was computed over",
+        "quality_report.score_metrics.scored_blocks / summary.total_blocks",
+        0.02,
+    ),
+    KpiDefinition(
         "repair_rate",
         "ratio",
         Direction.LOWER_IS_BETTER,

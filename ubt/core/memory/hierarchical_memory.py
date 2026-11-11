@@ -14,12 +14,15 @@ enters the prefix.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import math
+import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from ubt.core.ir.models import IRBlock
+from ubt.core.ir.models import BlockType, IRBlock, make_element
 from ubt.core.memory.neighbor_window import DEFAULT_NEIGHBOR_CHARS, NeighborContextBuilder
 from ubt.core.memory.rolling_summary import (
     collect_chapter_text,
@@ -38,6 +41,100 @@ _MAX_L3_CHARS = 1200
 # A chapter transition forces a macro snapshot only once the buffer holds real
 # content; below this the transition folds into the next regular snapshot.
 _SNAPSHOT_MIN_BUFFER_CHARS = 300
+#: Upper bound on how many window snapshots the post-repair chapter refresh
+#: may emit. A chapter much longer than this many ``step_chars`` windows gets
+#: proportionally wider windows instead of unbounded LLM calls.
+_MAX_REFRESH_SNAPSHOTS = 12
+
+#: Residual placeholder tokens must never reach a summary: a draft that kept
+#: its ``⟦FAM_MASK_0001-abc⟧`` wrappers is corrupt, and feeding the token into
+#: the recap would teach later prompts the token is content. QE owns the
+#: authoritative version (``fast_pass._RESIDUAL_MASK_TOKEN_RE``); this is the
+#: cheap pre-summary screen, kept local so the memory layer does not import
+#: the QE module graph.
+_MEMORY_MASK_TOKEN_RE = re.compile(r"[⟦\[【]?[A-Z]+_MASK_\d{4}-[0-9a-z]{1,3}[⟧\]】]?")
+
+#: Per-job serialization for the persisted ``memory_state`` read-modify-write.
+#: Under chapter streaming the draft worker (chapter N+1) and the repair
+#: worker's post-repair ``refresh_chapter_memory`` (chapter N) run concurrently
+#: in one process; without this lock the repair refresh's read→replace→write
+#: interleaves with the draft worker's absolute persist and last-writer-wins
+#: discards one side's snapshots. Cross-process interference is already
+#: excluded by the writer lease (one writer process per job).
+_MEMORY_STATE_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def memory_state_lock(job_id: str) -> asyncio.Lock:
+    """The per-job lock guarding ``memory_state`` read-modify-write sequences."""
+    lock = _MEMORY_STATE_LOCKS.get(job_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _MEMORY_STATE_LOCKS[job_id] = lock
+    return lock
+
+
+def _summary_safe_text(block: IRBlock) -> IRBlock:
+    """Return a buffer copy whose text is trustworthy for summarization.
+
+    A draft that still carries residual mask tokens, or that is a verbatim
+    echo of its source, is corrupt as *translation* — and the buffer feeds the
+    L2/L3 recap that conditions every later prompt. Summarizing the corruption
+    would propagate it (the finding that motivated this screen); dropping the
+    block would punch a narrative hole in the recap. Falling back to the block's
+    source text keeps the storyline intact while feeding only trustworthy text.
+    The ledger block itself is untouched — QE gates the real draft.
+    """
+    text = block.target_text or block.draft_text or ""
+    if not text:
+        return block
+    suspicious = bool(_MEMORY_MASK_TOKEN_RE.search(text)) or (
+        block.source_text.strip() != "" and text.strip() == block.source_text.strip()
+    )
+    if not suspicious:
+        return block
+    safe = block.model_copy(deep=True)
+    safe.target_text = None
+    safe.draft_text = None
+    return safe
+
+
+def _buffer_block_to_dict(block: IRBlock) -> dict[str, Any]:
+    """Compact serialization of one buffered block (see :meth:`export_state`)."""
+    return {
+        "id": block.id,
+        "spine_index": block.spine_index,
+        "block_type": block.block_type.value if block.block_type else None,
+        "source_text": block.source_text,
+        "draft_text": block.draft_text,
+        "target_text": block.target_text,
+    }
+
+
+def _buffer_block_from_dict(data: Any) -> IRBlock | None:
+    """Rebuild one buffered block from :meth:`export_state` output.
+
+    Only the fields the summary path reads are reconstructed — the stand-in is
+    never rendered or checkpointed, it exists solely so the interrupted step's
+    drafted text reaches the next snapshot.
+    """
+    if not isinstance(data, dict):
+        return None
+    try:
+        block_type = (
+            BlockType(str(data["block_type"])) if data.get("block_type") else BlockType.NARRATIVE
+        )
+        element = make_element(
+            id=str(data["id"]),
+            spine_index=int(data["spine_index"]),
+            block_type=block_type,
+            source_text=str(data.get("source_text") or ""),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+    block = IRBlock(element=element)
+    block.draft_text = data.get("draft_text") or None
+    block.target_text = data.get("target_text") or None
+    return block
 
 
 @dataclass(slots=True)
@@ -129,12 +226,32 @@ class HierarchicalMemoryManager:
         )
 
     def record_drafted_block(self, block: IRBlock) -> None:
-        """Buffer a newly drafted or finalized block for macro snapshot tracking."""
+        """Buffer a newly drafted or finalized block for macro snapshot tracking.
+
+        Deduplicated by block id: a resumed run restores the interrupted step's
+        buffer from persisted state (so already-drafted blocks are present) and
+        a re-draft of the same block must update the entry, not duplicate it.
+        The text is screened before entering the buffer — corrupt translations
+        summarize into corruption that conditions every later prompt.
+        """
         if not self.enabled:
             return
-        self._unsummarized_blocks.append(block)
-        text = block.target_text or block.draft_text or block.source_text or ""
+        safe = _summary_safe_text(block)
+        for i, existing in enumerate(self._unsummarized_blocks):
+            if existing.id == safe.id:
+                self._unsummarized_blocks[i] = safe
+                self._recount_buffer_chars()
+                return
+        self._unsummarized_blocks.append(safe)
+        text = safe.target_text or safe.draft_text or safe.source_text or ""
         self._current_buffer_chars += len(text)
+
+    def _recount_buffer_chars(self) -> None:
+        """Recompute the buffer's char counter from its entries."""
+        self._current_buffer_chars = sum(
+            len(b.target_text or b.draft_text or b.source_text or "")
+            for b in self._unsummarized_blocks
+        )
 
     def discard_pending_blocks(self) -> None:
         """Drop buffered blocks without summarizing (shutdown/teardown path).
@@ -379,6 +496,66 @@ class HierarchicalMemoryManager:
         self._snapshots.sort(key=lambda s: (s.start_spine, s.end_spine, s.step_index))
         self.rebuild_epochs()
 
+    def replace_chapter_snapshots(
+        self,
+        chapter_id: str,
+        windows: Sequence[tuple[int, int, str, int]],
+    ) -> None:
+        """Replace every L2 snapshot for one chapter with post-repair window recaps.
+
+        Each window is ``(start_spine, end_spine, summary_text, char_count)``.
+        The old single-recap variant collapsed a long chapter's N incremental
+        snapshots into one tail-biased summary capped at ``step_chars * 2``, so
+        everything earlier in a long chapter silently left L2/L3 after any
+        repair. Window recaps preserve the chapter at ~``step_chars``
+        granularity — the same shape the incremental path would have produced —
+        and ``rebuild_epochs`` recomputes L3 from the restored history.
+        """
+        self._snapshots = [s for s in self._snapshots if s.chapter_id != chapter_id]
+        for start_spine, end_spine, summary_text, char_count in windows:
+            self._snapshots.append(
+                StepSnapshot(
+                    step_index=self._step_counter,
+                    start_spine=start_spine,
+                    end_spine=end_spine,
+                    chapter_id=chapter_id,
+                    summary_text=summary_text,
+                    char_count=char_count,
+                )
+            )
+            self._step_counter += 1
+        self._snapshots.sort(key=lambda s: (s.start_spine, s.end_spine, s.step_index))
+        self.rebuild_epochs()
+
+    def merge_external_state(self, state: dict[str, Any]) -> None:
+        """Import another writer's snapshots for chapters this manager is not drafting.
+
+        Called under :func:`memory_state_lock` right before an absolute persist.
+        Under chapter streaming the repair worker's post-repair refresh rewrites
+        chapter N's snapshots while this manager (chapter N+1) holds its own
+        copy of the persisted state; persisting blindly would discard the
+        refresh. The persisted state is authoritative for every chapter the
+        buffer is not currently drafting; this manager is authoritative for its
+        buffer's chapters (it may hold unsaved work the external state lacks).
+        In whole-book mode the stages are sequential, so the external state is
+        this manager's own earlier persist and the merge is a content no-op.
+        """
+        external = [StepSnapshot(**s) for s in state.get("snapshots", []) if isinstance(s, dict)]
+        if not external:
+            return
+        protected = {extract_chapter_id(b.id) for b in self._unsummarized_blocks}
+        external_chapters = {s.chapter_id for s in external} - protected
+        if not external_chapters:
+            return
+        kept = [s for s in self._snapshots if s.chapter_id not in external_chapters]
+        imported = [s for s in external if s.chapter_id in external_chapters]
+        self._snapshots = sorted(
+            [*kept, *imported], key=lambda s: (s.start_spine, s.end_spine, s.step_index)
+        )
+        with contextlib.suppress(TypeError, ValueError):
+            self._step_counter = max(self._step_counter, int(state.get("step_counter", 0)))
+        self.rebuild_epochs()
+
     def get_latest_macro_summary(self) -> str:
         if not self._snapshots:
             return ""
@@ -387,13 +564,19 @@ class HierarchicalMemoryManager:
     def export_state(self) -> dict[str, Any]:
         """Serialize the L2/L3 snapshot history for resume persistence.
 
-        The within-step buffer is intentionally excluded: it only spans the
-        current step and is rebuilt from the blocks a resumed run drafts.
+        The within-step buffer is serialized too. The old contract excluded it
+        on the assumption that "a resumed run re-drafts those blocks" — false:
+        ``fetch_pending_blocks`` selects ``pending`` only, so blocks already
+        DRAFTED before a crash are never re-drafted and never re-entered the
+        buffer, leaving a permanent hole in the rolling context exactly at
+        resume boundaries. The buffer spans at most one step (~``step_chars``),
+        so the payload is a few blocks.
         """
         return {
             "snapshots": [asdict(s) for s in self._snapshots],
             "epochs": [asdict(e) for e in self._epochs],
             "step_counter": self._step_counter,
+            "buffer": [_buffer_block_to_dict(b) for b in self._unsummarized_blocks],
         }
 
     def restore_state(self, state: dict[str, Any]) -> None:
@@ -401,7 +584,9 @@ class HierarchicalMemoryManager:
 
         Keeps continued runs prompt-compatible with the interrupted one: the
         same macro/epoch summaries feed the same prompt slots, so translation
-        context (and tm-adjacent prompt topology) survives a restart.
+        context (and tm-adjacent prompt topology) survives a restart. The
+        restored buffer carries the interrupted step's drafted blocks, so the
+        next snapshot includes them.
         """
         snapshots = [StepSnapshot(**s) for s in state.get("snapshots", []) if isinstance(s, dict)]
         epochs = [EpochSnapshot(**e) for e in state.get("epochs", []) if isinstance(e, dict)]
@@ -412,6 +597,12 @@ class HierarchicalMemoryManager:
         # book's opening exactly when ``max_epochs`` was first exceeded
         # across the restart.
         self._trim_epochs()
+        self._unsummarized_blocks = [
+            b
+            for b in (_buffer_block_from_dict(d) for d in state.get("buffer", []))
+            if b is not None
+        ]
+        self._recount_buffer_chars()
         try:
             self._step_counter = int(state.get("step_counter", len(snapshots)))
         except (TypeError, ValueError):
@@ -461,6 +652,53 @@ class HierarchicalMemoryManager:
         )
 
 
+def _refresh_windows(
+    chapter_blocks: list[IRBlock], step_chars: int
+) -> list[tuple[IRBlock, IRBlock, str]]:
+    """Slice a chapter into ~``step_chars`` windows for the post-repair recap.
+
+    The old refresh summarized the whole chapter through one tail-biased
+    ``collect_chapter_text`` call capped at ``step_chars * 2``, so a chapter
+    longer than that lost its earlier content from L2/L3 the moment any repair
+    rewrote it. Window recaps keep the chapter's coverage at roughly the same
+    granularity the incremental draft path would have produced. A chapter
+    longer than ``_MAX_REFRESH_SNAPSHOTS`` windows gets proportionally wider
+    windows (the per-window LLM input grows with them, still bounded), trading
+    a little per-window detail for a hard call-count ceiling.
+    """
+    if not chapter_blocks:
+        return []
+    per_block: list[int] = []
+    total = 0
+    for b in chapter_blocks:
+        text = b.target_text or b.draft_text or b.source_text or ""
+        n = len(text.strip())
+        per_block.append(n)
+        total += n
+    if total == 0:
+        return []
+    window_count = max(1, min(_MAX_REFRESH_SNAPSHOTS, math.ceil(total / max(1, step_chars))))
+    target = max(1, math.ceil(total / window_count))
+
+    groups: list[list[IRBlock]] = []
+    chunk: list[IRBlock] = []
+    chunk_chars = 0
+    for block, n in zip(chapter_blocks, per_block, strict=True):
+        chunk.append(block)
+        chunk_chars += n
+        if chunk_chars >= target and len(groups) < window_count - 1:
+            groups.append(chunk)
+            chunk = []
+            chunk_chars = 0
+    if chunk:
+        groups.append(chunk)
+
+    return [
+        (blocks[0], blocks[-1], collect_chapter_text(blocks, max_chars=max(target, step_chars)))
+        for blocks in groups
+    ]
+
+
 async def refresh_chapter_memory(
     ledger: Any,
     job_id: str,
@@ -473,12 +711,19 @@ async def refresh_chapter_memory(
     max_epochs: int | None = DEFAULT_MAX_EPOCHS,
     sliding_window: bool = False,
 ) -> bool:
-    """Rebuild one chapter's L2 recap from the *post-repair* target text.
+    """Rebuild one chapter's L2 recaps from the *post-repair* target text.
 
     The draft stage summarizes the draft it just produced. Repair can rewrite
     that text afterwards, and the old summary then keeps feeding the superseded
     rendering to every later prompt. This replaces the chapter's snapshots with
-    one recap of the final text and recomputes L3 deterministically.
+    per-window recaps of the final text and recomputes L3 deterministically.
+
+    The persisted-state read→replace→write runs under :func:`memory_state_lock`:
+    under chapter streaming the draft worker (chapter N+1) persists its own copy
+    of ``memory_state`` concurrently, and an unlocked last-writer-wins here
+    would silently discard whichever side committed second. The LLM summary
+    calls run *before* the lock is taken — they take seconds and never touch
+    the persisted state.
     """
     if not chapter_id:
         return False
@@ -488,37 +733,38 @@ async def refresh_chapter_memory(
     )
     if not chapter_blocks:
         return False
-    content = collect_chapter_text(chapter_blocks, max_chars=step_chars * 2)
-    if not content.strip():
-        return False
-    summary = await llm_summary(
-        content,
-        complete_fn,
-        target_lang,
-        context="Post-repair chapter memory refresh failed",
-    ) or deterministic_summary(content)
-    if not summary.strip():
+
+    windows = _refresh_windows(chapter_blocks, step_chars)
+    built: list[tuple[int, int, str, int]] = []
+    for start_block, end_block, content in windows:
+        if not content.strip():
+            continue
+        summary = await llm_summary(
+            content,
+            complete_fn,
+            target_lang,
+            context="Post-repair chapter memory refresh failed",
+        ) or deterministic_summary(content)
+        if not summary.strip():
+            continue
+        built.append((start_block.spine_index, end_block.spine_index, summary, len(content)))
+    if not built:
         return False
 
-    manager = HierarchicalMemoryManager(
-        step_chars=step_chars,
-        enabled=True,
-        max_epochs=max_epochs,
-        sliding_window=sliding_window,
-    )
-    state = await asyncio.to_thread(ledger.get_job_metadata_value, job_id, "memory_state")
-    if isinstance(state, dict):
-        manager.restore_state(state)
-    manager.replace_chapter_snapshot(
-        chapter_id,
-        start_spine=chapter_blocks[0].spine_index,
-        end_spine=chapter_blocks[-1].spine_index,
-        summary_text=summary,
-        char_count=len(content),
-    )
-    await asyncio.to_thread(
-        ledger.set_job_metadata_value, job_id, "memory_state", manager.export_state()
-    )
+    async with memory_state_lock(job_id):
+        manager = HierarchicalMemoryManager(
+            step_chars=step_chars,
+            enabled=True,
+            max_epochs=max_epochs,
+            sliding_window=sliding_window,
+        )
+        state = await asyncio.to_thread(ledger.get_job_metadata_value, job_id, "memory_state")
+        if isinstance(state, dict):
+            manager.restore_state(state)
+        manager.replace_chapter_snapshots(chapter_id, built)
+        await asyncio.to_thread(
+            ledger.set_job_metadata_value, job_id, "memory_state", manager.export_state()
+        )
     return True
 
 
@@ -529,5 +775,6 @@ __all__ = [
     "EpochSnapshot",
     "HierarchicalMemoryManager",
     "StepSnapshot",
+    "memory_state_lock",
     "refresh_chapter_memory",
 ]

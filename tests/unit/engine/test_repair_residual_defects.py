@@ -269,3 +269,53 @@ def test_the_export_stage_does_not_mint_its_own_glossary_string() -> None:
         "export must emit the canonical marker via glossary_violation_flag"
     )
     assert "glossary_violation_flag" in code
+
+
+class _FixedScoreRunner(BaseQERunner):
+    """Scores every pair with one fixed value, whatever the text is."""
+
+    def __init__(self, score: float) -> None:
+        self._score = score
+
+    async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
+        return [self._score for _ in pairs]
+
+    def is_calibrated(self) -> bool:
+        return False
+
+
+@pytest.mark.asyncio
+async def test_clean_candidate_below_shippable_bar_does_not_ship_as_repaired() -> None:
+    """SEMANTIC_JUDGE.md §2b: a structurally clean repair the judge still puts
+    below the shippable bar is judge-only doubt — it must not ship as REPAIRED
+    and must not loop as REPAIR_PENDING (a judge verdict never triggers an
+    automatic rewrite). FAILED is the repair-path terminal triage consumes, so
+    the block lands in NEEDS_HUMAN with the repaired draft preserved."""
+    block = _block(source=_SOURCE, draft=_DRAFT, flags=_FLAGS)
+    loop = RepairLoop(
+        router=cast(ModelRouter, _FakeRouter('<correction id="1">42</correction>')),
+        qe_runner=_FixedScoreRunner(0.60),
+    )
+
+    result = await loop.repair_single_block(block)
+
+    assert result.status is BlockStatus.FAILED, (
+        "a judge-lowered clean candidate must route through triage, not ship as finished"
+    )
+    assert result.error_flags == [], "the candidate itself is structurally clean"
+    assert "42" in (result.target_text or ""), "the repaired draft is preserved for human PE"
+
+
+@pytest.mark.asyncio
+async def test_clean_candidate_at_the_shippable_bar_ships_as_repaired() -> None:
+    """The bar itself is passable: the two repair exits agree with the circuit
+    breaker that score >= floor AND no flags means REPAIRED."""
+    block = _block(source=_SOURCE, draft=_DRAFT, flags=_FLAGS)
+    loop = RepairLoop(
+        router=cast(ModelRouter, _FakeRouter('<correction id="1">42</correction>')),
+        qe_runner=_FixedScoreRunner(0.75),
+    )
+
+    result = await loop.repair_single_block(block)
+
+    assert result.status is BlockStatus.REPAIRED

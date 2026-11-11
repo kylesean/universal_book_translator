@@ -7,6 +7,7 @@ from ubt.core.memory.rolling_summary import (
     collect_chapter_text,
     deterministic_summary,
     extract_chapter_id,
+    llm_summary,
 )
 
 pytestmark = pytest.mark.fast
@@ -97,3 +98,36 @@ def test_build_summary_prompt_embeds_language_and_content() -> None:
     assert "Output ONLY the summary text." in system_prompt
     assert "content here" in user_prompt
     assert "zh" in user_prompt
+
+
+async def test_llm_summary_rejects_a_mask_token_echo() -> None:
+    """A summary carrying residual placeholder tokens would pin the corruption
+    into L2/epoch 0 for the whole book; the deterministic fallback must take
+    over instead."""
+    content = "第1段的内容。" * 50
+
+    async def complete(_system: str, _user: str) -> str:
+        return "摘要⟦FAM_MASK_0001-abc⟧残留。"
+
+    assert await llm_summary(content, complete, "zh", context="test") is None
+
+
+async def test_llm_summary_rejects_a_copy_of_its_input() -> None:
+    """A model echoing its input instead of summarizing it must not enter the
+    recap that conditions every later prompt."""
+    content = "第一章讲了主角的起源，并在结尾埋下了伏笔，为后续章节的发展做了铺垫。" * 3
+
+    async def complete(_system: str, _user: str) -> str:
+        return content[:60]
+
+    assert await llm_summary(content, complete, "zh", context="test") is None
+
+
+async def test_llm_summary_accepts_a_real_summary() -> None:
+    content = "第1段的内容。" * 50
+
+    async def complete(_system: str, _user: str) -> str:
+        return "本章介绍了主角的起源与核心冲突，并确立了主要术语的译法。"
+
+    result = await llm_summary(content, complete, "zh", context="test")
+    assert result is not None and result.startswith("本章介绍了主角的起源")

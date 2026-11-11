@@ -859,9 +859,10 @@ class PipelineOrchestrator:
         job row but no progress event follows them, so tokens burned by calls
         still in flight after the last event would never reach the ledger —
         the resumed job's budget floor would under-count exactly the runs
-        that died mid-flight. Skipped on lease loss (the caller knows why):
-        the ledger now belongs to another process, and writing through the
-        dead lease is what ``LedgerWriterLeaseLostError`` exists to prevent.
+        that died mid-flight. The lease-loss branch calls this too: the flush
+        goes through ``atomic_increment_job_usage``, whose additive merge is
+        safe from a stale writer (it can only add real spend, never overwrite
+        the successor's figures) even though every state write stays refused.
         ``raise_on_budget=False`` so the flush cannot raise
         ``BudgetExceededError`` and mask the abort that triggered it, and a
         failed write is logged rather than raised for the same reason.
@@ -1546,10 +1547,19 @@ class PipelineOrchestrator:
             # surface report a failure for work that is actively progressing. The
             # write would also happen through a connection whose lease is gone.
             #
-            # The work this process paid for is already durable in the ledger, so
-            # the new owner resumes from it. Only the queue row needs a decision,
-            # and the worker's own ``LeaseLostError`` branch makes it.
+            # The checkpointed work this process paid for is already durable in
+            # the ledger, so the new owner resumes from it — but the in-flight
+            # tail since the last progress event is not, and it is real spend
+            # the provider charged. Flush it through the additive accounting
+            # path (``atomic_increment_job_usage`` is deliberately not
+            # lease-guarded: a stale writer can only add, never overwrite the
+            # successor's figures). Skipping this would make the resumed job's
+            # budget floor under-count exactly the runs that died mid-flight
+            # while the provider was paid twice for the same text. Only the
+            # queue row needs a decision, and the worker's own
+            # ``LeaseLostError`` branch makes it.
             logger.warning("Pipeline stopped for job %s: %s", actual_job_id, exc)
+            await asyncio.shield(self._bill_run_terminal(ledger, actual_job_id))
             raise
         except (
             asyncio.CancelledError,

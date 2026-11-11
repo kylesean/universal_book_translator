@@ -593,6 +593,7 @@ class QualityConfig(BaseModel):
     visual_vlm_blocking_enabled: bool = False
     deterministic_glossary_long_route: bool = False
     export_min_completion_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
+    export_allow_needs_human: bool = False
 
 
 class EngineConfig(BaseModel):
@@ -1227,6 +1228,14 @@ class UBTConfig(BaseSettings):
     # book — the renderer falls back to ``source_text`` on an empty target —
     # and the job finalized as "completed". Set to 0 to disable the gate.
     export_min_completion_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
+    # -- export needs-human gate (fail-closed) ------------------------------
+    # NEEDS_HUMAN blocks ship their translation but are triaged "queued for
+    # human post-editing": the text is unverified. Shipping it with nothing
+    # marking it presented machine output as finished. Export refuses by
+    # default; set true (``UBT_EXPORT_ALLOW_NEEDS_HUMAN=1``, CLI
+    # ``--allow-needs-human``) to ship knowingly — the quality report then
+    # lists every unverified block id under ``summary.needs_human_block_ids``.
+    export_allow_needs_human: bool = False
 
     # -- Concurrency / pagination ----------------------------------------------
     max_concurrency: int = Field(default=10, gt=0)

@@ -8,6 +8,7 @@ same ``macro_ctx`` slot through its own LLM call and was merged away.
 """
 
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -21,6 +22,10 @@ _DETERMINISTIC_CHARS = 400
 # than a sentence: the longest common abbreviation with a trailing period
 # ("Fig.", "e.g.", "etc.", "Ref.") is four characters.
 _MIN_BOUNDARY_CHARS = 5
+#: Residual placeholder tokens in a summary mean the summarizer saw (and
+#: echoed) corruption. Kept in sync with the QE module's canonical pattern;
+#: the memory layer deliberately does not import the QE graph.
+_RESIDUAL_MASK_TOKEN_RE = re.compile(r"[⟦\[【]?[A-Z]+_MASK_\d{4}-[0-9a-z]{1,3}[⟧\]】]?")
 
 
 def extract_chapter_id(block_id: str) -> str:
@@ -143,14 +148,28 @@ async def llm_summary(
     already paid for). Returns ``None`` when there is nothing usable — call
     failure, empty echo, or a sub-minimum fragment — so each caller applies its
     own :func:`deterministic_summary` fallback policy.
+
+    The acceptance check is more than a length floor, because the summary
+    conditions every later prompt and one contaminated summary used to be
+    pinned into epoch 0 for the whole book: a summary carrying residual
+    placeholder tokens, or one that is just a copy of its input (the model
+    echoing content instead of summarizing it), is rejected so the caller's
+    deterministic fallback takes over.
     """
     try:
         system_prompt, user_prompt = _build_summary_prompt(content, target_lang)
         raw = await complete(system_prompt, user_prompt)
         cleaned = (raw or "").strip().strip('"“”').strip()
         normalized = " ".join(cleaned.split())
-        if len(normalized) >= _MIN_SUMMARY_CHARS:
-            return deterministic_summary(normalized, _MAX_SUMMARY_CHARS)
+        if len(normalized) < _MIN_SUMMARY_CHARS:
+            return None
+        if _RESIDUAL_MASK_TOKEN_RE.search(normalized):
+            logger.warning("%s: summary carries residual mask tokens; rejected", context)
+            return None
+        if normalized in content:
+            logger.warning("%s: summary is a copy of its input; rejected", context)
+            return None
+        return deterministic_summary(normalized, _MAX_SUMMARY_CHARS)
     except Exception as exc:
         logger.warning("%s: %s", context, exc)
     return None

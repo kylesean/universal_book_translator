@@ -21,6 +21,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from ubt import __version__
 from ubt.api.config_source import ConfigSource
@@ -56,6 +57,7 @@ from ubt.api.security import (
     resolve_secure_path,
     validate_job_id,
     verify_api_key,
+    warn_broad_sandbox,
 )
 from ubt.api.sse_broadcaster import QueueSseBroadcaster
 from ubt.api.uploads import UPLOAD_MAX_BYTES, UPLOAD_PATH_SUFFIX, reap_stale_uploads
@@ -264,6 +266,160 @@ def _insecure_bind_allowed() -> bool:
 _UPLOAD_SWEEP_INTERVAL_S = 3600.0
 
 
+#: File extensions the console mount may serve. The mount sits *outside* the
+#: API-key dependency by construction (FastAPI dependencies do not apply to
+#: ``app.mount``), so anything dropped into ``ubt/api/static`` would be served
+#: unauthenticated unless the mount itself enumerates what is public. The
+#: allowlist is the shipped console bundle's surface: the shell, hashed Vite
+#: bundles, fonts, icons and the metadata/robots text files.
+SPA_PUBLIC_SUFFIXES = frozenset(
+    {
+        ".html",
+        ".js",
+        ".css",
+        ".map",
+        ".svg",
+        ".png",
+        ".ico",
+        ".woff",
+        ".woff2",
+        ".webmanifest",
+        ".txt",
+    }
+)
+
+
+def _path_has_dot_component(path: str) -> bool:
+    """True when any URL path component names a dotfile or dot directory.
+
+    ``StaticFiles`` hands the root request down as ``"."`` (its ``join("",
+    "")`` normalizes to the current directory), and a bare ``".."`` remains
+    after decoding. Neither is a dotfile: ``"."`` is the root itself, and
+    ``".."`` is traversal, which ``StaticFiles`` refuses on its own. Treating
+    ``"."`` as a dotfile made ``GET /`` — the console's entry point — 404.
+    """
+    return any(
+        part.startswith(".") and part not in (".", "..") for part in path.split("/") if part != ""
+    )
+
+
+def _path_suffix_is_public(path: str) -> bool:
+    """Whether ``path``'s extension is on the public allowlist.
+
+    Directory requests (``""``, ``.../``) and extension-less paths (SPA client
+    routes such as ``/wizard``) carry no extension and return ``True``: the
+    former is served as ``index.html`` by ``html=True``, the latter must reach
+    the SPA fallback. Callers that must refuse an existing *extension-less*
+    file make that decision after the lookup (see
+    ``_SPAStaticFiles.get_response``).
+    """
+    name = path.rstrip("/").rsplit("/", 1)[-1]
+    if not name or "." not in name:
+        return True
+    return name.rsplit(".", 1)[-1].lower() in {suffix.lstrip(".") for suffix in SPA_PUBLIC_SUFFIXES}
+
+
+class _SPAStaticFiles(StaticFiles):
+    """The console mount: public-asset allowlist, SPA fallback, cache policy.
+
+    API routes are registered before this mount, so they still win. The mount
+    is deliberately hardened beyond ``StaticFiles`` because FastAPI
+    dependencies (the ``X-API-Key`` gate) do not apply to mounts: anything
+    later dropped into ``ubt/api/static`` would be served unauthenticated.
+    Three refusals close that:
+
+    * **dotfiles and dot directories** are refused outright (``.env``,
+      ``.git/config``, ``.secrets/secret.txt``) — never served, never rescued
+      by the SPA fallback;
+    * **extensions** must be on :data:`SPA_PUBLIC_SUFFIXES` before the file is
+      looked up, so a planted ``config.yaml`` or ``db.sqlite`` 404s even
+      though the bytes sit inside the static root;
+    * **extension-less files that actually exist** on disk are refused after
+      the lookup: an SPA client route (``/wizard``) is extension-less but is
+      *not a file*, so the only thing an existing extension-less file can be
+      is planted content.
+
+    Traversal (``..``) is refused by ``StaticFiles`` itself; the dot-component
+    check above also refuses it, being a ``.``-prefixed component.
+
+    **The SPA fallback.** The console is a single-page app with real URLs
+    (``/wizard``, ``/jobs/:id/quality``); a browser refresh or a pasted link
+    must land on ``index.html`` and let the client router resolve the path,
+    not a 404. The fallback is gated on ``Accept: text/html``: an API client
+    probing a closed surface (``/docs`` on a keyed server, a typo'd endpoint)
+    must still get a JSON 404 rather than the SPA shell.
+
+    **The shell is never cached; the bundles always are.** With no explicit
+    ``Cache-Control``, a browser falls back to heuristic caching and may not
+    revalidate ``index.html`` for hours. That is the one file whose staleness
+    hides every other change: a rebuilt bundle has a fresh hash in its name
+    and no client keeps a stale copy of it, but the shell that *points at*
+    the bundle never asks again, so a frontend rebuild appeared to do nothing
+    — "restarted, hard-refreshed, still the old UI" — until the cache expired.
+    The shell therefore carries ``no-cache`` (revalidate on every load; the
+    response still has an ETag, so the normal answer is a cheap 304), and the
+    content-hashed files under ``assets/`` carry ``immutable``, which is safe
+    precisely because their names change with their contents.
+    """
+
+    async def get_response(self, path: str, scope: Any) -> Response:
+        from starlette.exceptions import HTTPException as StarletteHTTPException
+
+        # The root request reaches this mount as "." (``StaticFiles`` joins an
+        # empty prefix to an empty path). Normalize it back to the directory
+        # request it is, so neither refusal below mistakes it for a dotfile
+        # (``.`` fails the suffix allowlist and names a dot component).
+        if path == ".":
+            path = ""
+
+        # Refusals run before the lookup and before the fallback: a planted
+        # non-public file must neither serve nor be "helped" into serving by
+        # the index.html fallback a browser navigation would trigger.
+        if _path_has_dot_component(path):
+            raise StarletteHTTPException(status.HTTP_404_NOT_FOUND)
+        if not _path_suffix_is_public(path):
+            raise StarletteHTTPException(status.HTTP_404_NOT_FOUND)
+
+        served_name = path
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            accepts_html = any(
+                key == b"accept" and b"text/html" in value.lower()
+                for key, value in scope.get("headers", [])
+            )
+            if exc.status_code != 404 or not accepts_html:
+                raise
+            response = await super().get_response("index.html", scope)
+            # The SPA fallback served the shell for a client route; it
+            # must not be cached under that route's URL.
+            served_name = "index.html"
+        else:
+            # The lookup *succeeded* for an extension-less path: that can only
+            # be a file planted without an extension (client routes miss on
+            # purpose so the fallback can catch them). Directory requests
+            # (""/trailing slash, served as index.html by html=True) keep the
+            # historical behaviour.
+            if path and not path.endswith("/") and "." not in path.rsplit("/", 1)[-1]:
+                raise StarletteHTTPException(status.HTTP_404_NOT_FOUND)
+
+        self._apply_cache_policy(served_name, response)
+        return response
+
+    @staticmethod
+    def _apply_cache_policy(path: str, response: Response) -> None:
+        """The policy this class documents; one place, so it cannot drift."""
+        if path.startswith("assets/"):
+            # Vite names bundles `<name>-<hash>.<ext>`, so a changed file
+            # is a changed URL and the old one is never served again for
+            # this build.
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            # index.html, the favicon, and the SPA fallback: revalidate
+            # every load, and let the ETag make it a 304 when unchanged.
+            response.headers["Cache-Control"] = "no-cache"
+
+
 async def _reap_uploads_periodically(
     uploads_dir: Path,
     *,
@@ -379,6 +535,10 @@ def create_app(
     async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         _require_api_key_gate(app_config)
         _log_startup_auth_warning(app_config)
+        # A sandbox the width of the home directory (or of a system prefix)
+        # looks configured while defeating the deny lists; name the exposure
+        # and the knob at the one moment the operator is watching the boot log.
+        warn_broad_sandbox(app_config)
         # Startup is the one moment the staging area can be swept without
         # racing the uploads of this process: no request has been served yet.
         # (A file a still-unfinished queue job lists as its input survives --
@@ -508,67 +668,6 @@ def create_app(
     register_asset_routes(api_app, scope)
     static_dir = Path(__file__).resolve().parent / "static"
     if static_dir.exists() and (static_dir / "index.html").exists():
-        from fastapi.staticfiles import StaticFiles
-
-        class _SPAStaticFiles(StaticFiles):
-            """StaticFiles that falls back to index.html for browser navigations.
-
-            The console is a single-page app with real URLs (``/wizard``,
-            ``/jobs/:id/quality``); a browser refresh or a pasted link must land
-            on ``index.html`` and let the client router resolve the path, not a
-            404. API routes are registered before this mount, so they still win.
-
-            The fallback is gated on ``Accept: text/html``: an API client probing
-            a closed surface (``/docs`` on a keyed server, a typo'd endpoint)
-            must still get a JSON 404 rather than the SPA shell.
-
-            **The shell is never cached; the bundles always are.** With no
-            explicit ``Cache-Control``, a browser falls back to heuristic caching
-            and may not revalidate ``index.html`` for hours. That is the one file
-            whose staleness hides every other change: a rebuilt bundle has a
-            fresh hash in its name and no client keeps a stale copy of it, but
-            the shell that *points at* the bundle never asks again, so a
-            frontend rebuild appeared to do nothing — "restarted, hard-refreshed,
-            still the old UI" — until the cache expired. The shell therefore
-            carries ``no-cache`` (revalidate on every load; the response still
-            has an ETag, so the normal answer is a cheap 304), and the
-            content-hashed files under ``assets/`` carry ``immutable``, which is
-            safe precisely because their names change with their contents.
-            """
-
-            async def get_response(self, path: str, scope: Any) -> Response:
-                from starlette.exceptions import HTTPException as StarletteHTTPException
-
-                try:
-                    response = await super().get_response(path, scope)
-                except StarletteHTTPException as exc:
-                    accepts_html = any(
-                        key == b"accept" and b"text/html" in value.lower()
-                        for key, value in scope.get("headers", [])
-                    )
-                    if exc.status_code != 404 or not accepts_html:
-                        raise
-                    response = await super().get_response("index.html", scope)
-                    # The SPA fallback served the shell for a client route; it
-                    # must not be cached under that route's URL.
-                    path = "index.html"
-
-                self._apply_cache_policy(path, response)
-                return response
-
-            @staticmethod
-            def _apply_cache_policy(path: str, response: Response) -> None:
-                """The policy this class documents; one place, so it cannot drift."""
-                if path.startswith("assets/"):
-                    # Vite names bundles `<name>-<hash>.<ext>`, so a changed file
-                    # is a changed URL and the old one is never served again for
-                    # this build.
-                    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-                else:
-                    # index.html, the favicon, and the SPA fallback: revalidate
-                    # every load, and let the ETag make it a 304 when unchanged.
-                    response.headers["Cache-Control"] = "no-cache"
-
         api_app.mount("/", _SPAStaticFiles(directory=str(static_dir), html=True), name="console")
 
     return api_app

@@ -388,6 +388,12 @@ class IRBlock(BaseModel):
     #: measurement for backward compatibility).
     mtqe_score_source: str | None = None
     repair_rounds: int = 0  # Completed targeted repair iterations (max 2)
+    #: Lifetime count of full re-drafts (text-NULLing PENDING resets). Unlike
+    #: ``repair_rounds`` this survives resumes on purpose: without a cumulative
+    #: counter, a block whose failures are always transient is re-drafted and
+    # re-repaired from round 0 on every resume — per-run bounded, but
+    #: unbounded spend across the job's lifetime.
+    redraft_count: int = 0
     error_flags: list[str] = Field(default_factory=list)  # e.g., ["math_token_corrupt"]
 
     # MQM severity triage

@@ -113,6 +113,51 @@ def _guard_package_size(path: Path) -> None:
         return
 
 
+#: Suffixes of OOXML package parts the DTD scanner inspects. The XML parts and
+#: the relationship parts cover every member python-docx unmarshals into its
+#: object tree; binary members (media, fonts) carry no XML prolog to scan.
+_DOCX_XML_PART_SUFFIXES = (".xml", ".rels")
+
+
+def _reject_dtd_parts(path: Path) -> None:
+    """Refuse a DOCX whose XML parts declare a DOCTYPE or xml-stylesheet PI.
+
+    ``python-docx`` parses package parts with plain lxml, which resolves
+    internal entities and honours whatever the interpreter build allows — a
+    default the project refuses to depend on (see ``ubt.core.xml_safety``).
+    OOXML legitimately has no DTD in any part, so there is no harmless subset
+    to negotiate: any part carrying a DOCTYPE (billion-laughs internal
+    entities, ``SYSTEM "file:///..."`` external entities) or a stylesheet PI
+    fails closed *before* ``Document(...)`` is called, with the offending
+    member named in the error.
+
+    The scan reads members through the zip budget, so a bomb-scale part is
+    refused as unreadable rather than decompressed for scanning.
+    """
+    import zipfile
+
+    from ubt.core.xml_safety import UnsafeXMLError, assert_no_doctype
+    from ubt.core.zip_safety import ZipReadBudget, read_member
+
+    try:
+        with zipfile.ZipFile(path) as zf:
+            budget = ZipReadBudget()
+            for name in zf.namelist():
+                if not name.lower().endswith(_DOCX_XML_PART_SUFFIXES):
+                    continue
+                raw = read_member(zf, name, budget)
+                if raw is None:
+                    continue
+                try:
+                    assert_no_doctype(raw, context=f"{path.name}:{name}")
+                except UnsafeXMLError as err:
+                    raise DocumentParseError(str(err)) from err
+    except zipfile.BadZipFile:
+        # Not a zip: python-docx reports its own (file-naming) error below, so
+        # the guard stays quiet rather than replacing that message.
+        return
+
+
 def _core_title(path: Path) -> str:
     """The document's core title, or ``""`` when absent/unreadable.
 
@@ -191,6 +236,7 @@ class DOCXAdapter(BaseDocumentAdapter):
     def _parse_blocks_sync(self, path: Path, chapter: ChapterMeta) -> list[IRBlock]:
         """Build the typed blocks from the DOCX document structure."""
         _guard_package_size(path)
+        _reject_dtd_parts(path)
         doc = Document(str(path))
         pairs = walk_docx_elements(doc)
         elements = [p[0] for p in pairs]
@@ -409,6 +455,7 @@ class DOCXAdapter(BaseDocumentAdapter):
         """Perform the actual document edit + atomic save."""
         source_path = Path(manifest.source_path)
         _guard_package_size(source_path)
+        _reject_dtd_parts(source_path)
         doc = Document(str(source_path))
         pairs = walk_docx_elements(doc)
         elements = [p[0] for p in pairs]

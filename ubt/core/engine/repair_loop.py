@@ -716,9 +716,20 @@ class RepairLoop:
                     merged.append(flag)
             block.error_flags = merged
 
-        if not block.error_flags:
+        # The two exits below share the circuit breaker's criteria (:398): a
+        # shippable REPAIRED verdict requires BOTH no residual error_flags and
+        # a fresh measurement at or above the shippable bar. ``mtqe_score`` was
+        # just re-measured for the accepted candidate text (tier 1 / tier 2
+        # branches), so a structurally clean rewrite the judge still puts below
+        # the bar must not ship as REPAIRED — and it must not loop as
+        # REPAIR_PENDING either, because that would trigger the very automatic
+        # rewrite a judge verdict can never justify (SEMANTIC_JUDGE.md §2b).
+        # FAILED is the repair-path terminal triage consumes; with no critical
+        # markers it routes the block to NEEDS_HUMAN with the draft preserved.
+        score_ok = (block.mtqe_score or 0.0) >= self.terminal_pass_floor
+        if not block.error_flags and score_ok:
             block.status = BlockStatus.REPAIRED
-        elif block.repair_rounds >= rounds_cap:
+        elif block.repair_rounds >= rounds_cap or not block.error_flags:
             block.status = BlockStatus.FAILED
         else:
             block.status = BlockStatus.REPAIR_PENDING

@@ -136,6 +136,14 @@ AGENT_REQUEST_FINGERPRINT_KEY = "agent_request_fingerprint"
 #: scalar for the replay report; claimed and expired packages are untouched.
 _SUBMITTED_PACKAGE_DROP_FIELDS = ("block_ids", "expected_statuses")
 
+#: Lifetime ceiling on full re-drafts (text-NULLing PENDING resets) per block.
+#: ``repair_rounds`` bounds spend within one run; this bounds it across every
+#: resume of the job. A block whose failures are always transient used to be
+#: re-drafted from round 0 on each resume — per-run bounded, unbounded
+#: cumulative spend. At the cap the block is held at ``NEEDS_HUMAN`` with any
+#: surviving text kept.
+MAX_CUMULATIVE_REDRAFTS = 3
+
 
 def _compact_submitted_packages(packages: dict[str, Any]) -> dict[str, Any]:
     """Drop the spent payload from every submitted package, in place."""
@@ -264,6 +272,9 @@ class LedgerJobsMixin(_LedgerHost):
         self._job_scope = job_id
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             row = conn.execute(
                 "SELECT metadata_json FROM job_meta WHERE job_id = ?", (job_id,)
             ).fetchone()
@@ -319,6 +330,9 @@ class LedgerJobsMixin(_LedgerHost):
         self._job_scope = job_id
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             cursor = conn.cursor()
             cursor.execute("SELECT metadata_json FROM job_meta WHERE job_id = ?", (job_id,))
             existing = cursor.fetchone()
@@ -555,13 +569,21 @@ class LedgerJobsMixin(_LedgerHost):
     def atomic_increment_job_usage(
         self, job_id: str, increment: dict[str, dict[str, int]]
     ) -> dict[str, dict[str, int]]:
-        """Atomically merge increment into job_meta.usage_totals within a single transaction."""
+        """Atomically merge increment into job_meta.usage_totals within a single transaction.
+
+        Deliberately NOT lease-guarded, unlike every other mutating write: the
+        merge is additive inside one ``BEGIN IMMEDIATE`` transaction, so a
+        stale writer can only *add* its real spend to whatever the successor
+        has already recorded — it can never overwrite or reset figures, which
+        is what the ownership SELECT exists to prevent for state writes.
+        Refusing this write after a lease loss would under-count exactly the
+        runs that died mid-flight: the provider was paid for the in-flight
+        tail, the resumed job's budget floor would not know, and the lost
+        spend would repeat on every reclaim.
+        """
         with self._get_conn() as conn:
             actual_id = self._resolve_actual_job_id(conn, job_id)
             conn.execute("BEGIN IMMEDIATE;")
-            # Billing is one of the late writes (export bills after the visual
-            # gate); the ownership SELECT shares this transaction with it.
-            self.assert_writer_owner(conn)
             row = conn.execute(
                 "SELECT metadata_json FROM job_meta WHERE job_id = ?", (actual_id,)
             ).fetchone()
@@ -696,6 +718,9 @@ class LedgerJobsMixin(_LedgerHost):
                 logger.warning("clear_job_blocks(%r): job_id resolution failed: %s", job_id, exc)
                 return 0
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             cursor = conn.execute("DELETE FROM blocks WHERE job_id = ?", (actual_id,))
             removed = cursor.rowcount or 0
             conn.execute(
@@ -1197,6 +1222,9 @@ class LedgerBlocksMixin(_LedgerHost):
             raise LedgerError("Agent claim limit must be positive")
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             actual_id = self._resolve_actual_job_id(conn, job_id)
             row = conn.execute(
                 "SELECT metadata_json FROM job_meta WHERE job_id = ?", (actual_id,)
@@ -1334,6 +1362,9 @@ class LedgerBlocksMixin(_LedgerHost):
         """
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             actual_id = self._resolve_actual_job_id(conn, job_id)
             row = conn.execute(
                 "SELECT metadata_json FROM job_meta WHERE job_id = ?", (actual_id,)
@@ -1502,6 +1533,9 @@ class LedgerBlocksMixin(_LedgerHost):
         expired: list[str] = []
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             actual_id = self._resolve_actual_job_id(conn, job_id)
             row = conn.execute(
                 "SELECT metadata_json FROM job_meta WHERE job_id = ?", (actual_id,)
@@ -1575,6 +1609,9 @@ class LedgerBlocksMixin(_LedgerHost):
         active: list[str] = []
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             actual_id = self._resolve_actual_job_id(conn, job_id)
             row = conn.execute(
                 "SELECT metadata_json FROM job_meta WHERE job_id = ?", (actual_id,)
@@ -1657,6 +1694,9 @@ class LedgerBlocksMixin(_LedgerHost):
             ) from exc
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             actual_id = self._resolve_actual_job_id(conn, job_id)
             row = conn.execute(
                 "SELECT metadata_json FROM job_meta WHERE job_id = ?", (actual_id,)
@@ -1692,6 +1732,9 @@ class LedgerBlocksMixin(_LedgerHost):
 
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             cursor = conn.cursor()
             actual_id = self._resolve_actual_job_id(conn, job_id)
 
@@ -1777,6 +1820,9 @@ class LedgerBlocksMixin(_LedgerHost):
         placeholders = ",".join("?" * len(NON_TERMINAL_STATUSES))
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             actual_id = self._resolve_actual_job_id(conn, job_id)
             cursor = conn.execute(
                 f"""
@@ -2103,6 +2149,9 @@ class LedgerBlocksMixin(_LedgerHost):
         """
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             scope = self._block_scope(conn, job_id)
             scope_clause = " AND job_id = ?" if scope is not None else ""
             cursor = conn.execute(
@@ -2162,14 +2211,71 @@ class LedgerBlocksMixin(_LedgerHost):
         draft as a memory hit even though the poisoned entry is gone. The MQM
         triage columns are cleared too, or a re-queued block would keep the
         stale severity/spans of the defective draft that is being discarded.
+
+        A full reset NULLs paid text and zeroes ``repair_rounds``, which makes
+        it the one path whose cost is unbounded across resumes: per-run limits
+        reset on every resume, but ``redraft_count`` is lifetime. A block that
+        has already been re-drafted ``MAX_CUMULATIVE_REDRAFTS`` times is held
+        at ``NEEDS_HUMAN`` with its surviving text kept, instead of being
+        re-billed again — the human queue is the correct terminal for a block
+        that transient failures keep destroying.
         """
         if not block_ids:
             return 0
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             scope = self._block_scope(conn, job_id)
-            placeholders = ",".join("?" * len(block_ids))
             scope_clause = " AND job_id = ?" if scope is not None else ""
+            scope_params = [scope] if scope is not None else []
+            placeholders = ",".join("?" * len(block_ids))
+            counts = conn.execute(
+                f"""
+                SELECT block_id, redraft_count FROM blocks
+                 WHERE block_id IN ({placeholders}){scope_clause}
+                """,
+                [*block_ids, *scope_params],
+            ).fetchall()
+            count_by_id = {str(r["block_id"]): int(r["redraft_count"] or 0) for r in counts}
+            eligible = [
+                bid for bid in block_ids if count_by_id.get(bid, 0) < MAX_CUMULATIVE_REDRAFTS
+            ]
+            held = [bid for bid in block_ids if bid not in set(eligible)]
+            if held:
+                held_placeholders = ",".join("?" * len(held))
+                held_flag = json.dumps(
+                    [
+                        f"redraft_cap_reached: {MAX_CUMULATIVE_REDRAFTS} cumulative re-drafts; "
+                        "held for human post-editing instead of re-billing"
+                    ],
+                    ensure_ascii=False,
+                )
+                conn.execute(
+                    f"""
+                    UPDATE blocks
+                       SET status = ?, error_flags_json = ?, updated_at = CURRENT_TIMESTAMP
+                     WHERE block_id IN ({held_placeholders}){scope_clause}
+                    """,
+                    [
+                        BlockStatus.NEEDS_HUMAN.value,
+                        held_flag,
+                        *held,
+                        *scope_params,
+                    ],
+                )
+                logger.warning(
+                    "reset_blocks_to_pending: %d block(s) hit the cumulative redraft cap "
+                    "(%d) and were held at NEEDS_HUMAN instead of re-billing: %s",
+                    len(held),
+                    MAX_CUMULATIVE_REDRAFTS,
+                    ", ".join(held[:10]),
+                )
+            if not eligible:
+                conn.execute("COMMIT;")
+                self._mark_blocks_changed()
+                return 0
             cursor = conn.execute(
                 f"""
                 UPDATE blocks
@@ -2177,10 +2283,15 @@ class LedgerBlocksMixin(_LedgerHost):
                        tm_hit = 0, mtqe_score = NULL, mtqe_score_source = NULL,
                        error_flags_json = NULL,
                        mqm_severity = NULL, mqm_spans_json = NULL,
-                       repair_rounds = 0, updated_at = CURRENT_TIMESTAMP
-                 WHERE block_id IN ({placeholders}){scope_clause}
+                       repair_rounds = 0, redraft_count = redraft_count + 1,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE block_id IN ({",".join("?" * len(eligible))}){scope_clause}
                 """,
-                [BlockStatus.PENDING.value, *block_ids, *([scope] if scope is not None else [])],
+                [
+                    BlockStatus.PENDING.value,
+                    *eligible,
+                    *scope_params,
+                ],
             )
             conn.execute("COMMIT;")
             self._mark_blocks_changed()
@@ -2204,6 +2315,9 @@ class LedgerBlocksMixin(_LedgerHost):
             return []
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             scope = self._block_scope(conn, job_id)
             placeholders = ",".join("?" * len(block_ids))
             scope_clause = " AND job_id = ?" if scope is not None else ""
@@ -2375,6 +2489,9 @@ class LedgerBlocksMixin(_LedgerHost):
         if config_failure_ids:
             with self._get_conn() as conn:
                 conn.execute("BEGIN IMMEDIATE;")
+                # Inside the same transaction as the write: a lease reclaimed
+                # between a pre-check and this commit cannot slip through.
+                self.assert_writer_owner(conn)
                 for block_id in config_failure_ids:
                     conn.execute(
                         """
@@ -2402,15 +2519,19 @@ class LedgerBlocksMixin(_LedgerHost):
             )
             requeued_set = set(requeued)
             pending_ids = [block_id for block_id in reset_ids if block_id not in requeued_set]
+            redrafted = 0
             if pending_ids:
-                self.reset_blocks_to_pending(pending_ids, job_id)
+                redrafted = self.reset_blocks_to_pending(pending_ids, job_id)
             logger.info(
                 "Resume recovery for %s: re-queued %d block(s) stranded by transient "
-                "errors (%d for repair keeping their draft, %d for re-draft)",
+                "errors (%d for repair keeping their draft, %d for re-draft%s)",
                 job_id,
                 len(reset_ids),
                 len(requeued),
-                len(pending_ids),
+                redrafted,
+                f", {len(pending_ids) - redrafted} held at the cumulative redraft cap"
+                if redrafted < len(pending_ids)
+                else "",
             )
         return reset_ids
 
@@ -2662,6 +2783,9 @@ class LedgerBatchMixin(_LedgerHost):
         """Record a Batch API status transition (terminal or intermediate)."""
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             conn.execute(
                 """
                 UPDATE batch_jobs
@@ -2721,6 +2845,9 @@ class LedgerBatchMixin(_LedgerHost):
         live_placeholders = ",".join("?" * len(self.RESUMABLE_BATCH_STATUSES))
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             try:
                 live = conn.execute(
                     f"""
@@ -2797,6 +2924,9 @@ class LedgerBatchMixin(_LedgerHost):
         sentinel = f"creating:{idempotency_key}"
         with self._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE;")
+            # Inside the same transaction as the write: a lease reclaimed
+            # between a pre-check and this commit cannot slip through.
+            self.assert_writer_owner(conn)
             try:
                 promoted = conn.execute(
                     """

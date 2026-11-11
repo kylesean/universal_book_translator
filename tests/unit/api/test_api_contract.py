@@ -164,8 +164,11 @@ def test_boot_strict_mode_wins_over_the_no_auth_override(
 
 
 def test_the_session_cookie_is_a_digest_never_the_key(tmp_path: Path) -> None:
+    from ubt.api.security import load_or_create_session_secret
+
     key = "the-service-key"
-    value = session_cookie_value(key)
+    secret = load_or_create_session_secret(_config(tmp_path))
+    value = session_cookie_value(key, session_secret=secret)
     assert value != key and key not in value
     assert len(value) == 64
 

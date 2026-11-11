@@ -89,6 +89,7 @@ _SCHEMA_SQL = """
         mtqe_score REAL,
         mtqe_score_source TEXT DEFAULT NULL,
         repair_rounds INTEGER DEFAULT 0,
+        redraft_count INTEGER DEFAULT 0,
         error_flags_json TEXT,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         tm_hit INTEGER DEFAULT 0,
@@ -751,6 +752,8 @@ class LedgerBase:
         }
         if "mtqe_score_source" not in columns:
             conn.execute("ALTER TABLE blocks ADD COLUMN mtqe_score_source TEXT DEFAULT NULL")
+        if "redraft_count" not in columns:
+            conn.execute("ALTER TABLE blocks ADD COLUMN redraft_count INTEGER DEFAULT 0")
 
     def _ensure_page_geometry_table(self, conn: sqlite3.Connection) -> None:
         """Create ``page_geometry`` if absent, and verify its shape.
@@ -935,6 +938,7 @@ class LedgerBase:
             mtqe_score=row["mtqe_score"],
             mtqe_score_source=row["mtqe_score_source"],
             repair_rounds=row["repair_rounds"],
+            redraft_count=int(row["redraft_count"] or 0),
             error_flags=error_flags,
             mqm_severity=row["mqm_severity"],
             mqm_spans=mqm_spans,

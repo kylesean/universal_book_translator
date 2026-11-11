@@ -521,6 +521,36 @@ def _check_completion_ratio(
         )
 
 
+def _check_needs_human_gate(
+    actual_job_id: str, final_blocks: list[IRBlock], *, allow: bool
+) -> None:
+    """Refuse to ship NEEDS_HUMAN blocks as finished output by default.
+
+    A ``NEEDS_HUMAN`` block ships its *translation* — it cleared the draft gate
+    but triage queued it for human post-editing, so the text in the book is
+    unverified. Shipping it with nothing marking it presented machine output as
+    finished: the review workbench could see the queue, the delivered PDF could
+    not. Blocking here keeps the ledger intact (review, resume and re-export
+    still work); an operator who accepts the risk sets
+    ``UBT_EXPORT_ALLOW_NEEDS_HUMAN=1`` (CLI ``--allow-needs-human``) and the
+    quality report's ``summary.needs_human_block_ids`` then names exactly what
+    shipped unverified.
+    """
+    if allow:
+        return
+    held = [fb.id for fb in final_blocks if fb.status == BlockStatus.NEEDS_HUMAN]
+    if not held:
+        return
+    raise IntegrityViolationError(
+        f"Export blocked for job {actual_job_id}: {len(held)} block(s) are queued "
+        f"for human post-editing (NEEDS_HUMAN) and would ship unverified, e.g. "
+        f"{', '.join(held[:10])}. Review them in the workbench, then re-export; "
+        "or ship knowingly with --allow-needs-human "
+        "(UBT_EXPORT_ALLOW_NEEDS_HUMAN=1) — the quality report then lists every "
+        "unverified block id."
+    )
+
+
 def _partition_render_skip_counts(
     skip_checkpoints: list[dict[str, Any]],
 ) -> tuple[int, int]:
@@ -1987,6 +2017,7 @@ async def run_export_stage(
         ledger, actual_job_id, claims_finality=claims_finality
     )
     _check_completion_ratio(actual_job_id, final_blocks, min_completion_ratio)
+    _check_needs_human_gate(actual_job_id, final_blocks, allow=ctx.config.export_allow_needs_human)
 
     # A re-export's whole contract is "re-typeset what the ledger already holds".
     # Every pass below can rewrite a block's delivered text or its status:
@@ -2115,6 +2146,7 @@ async def run_export_stage(
     # memory only.
     await _apply_render_skip_ledger_pass(ctx, adapter, final_blocks, persist=owning_run)
     _check_completion_ratio(actual_job_id, final_blocks, min_completion_ratio)
+    _check_needs_human_gate(actual_job_id, final_blocks, allow=ctx.config.export_allow_needs_human)
 
     # The renderer is allowed to change a block's disposition (a preserved
     # table's caption/legend is kept source-visible, a caption label is

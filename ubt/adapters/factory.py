@@ -2,7 +2,7 @@
 
 import importlib.util
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from ubt.adapters.base import BaseDocumentAdapter, BasePDFEngineAdapter
@@ -14,7 +14,12 @@ from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
 from ubt.adapters.pdf.encryption import reject_encrypted_pdf
 from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile
 from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
-from ubt.core.exceptions import OptionalDependencyError, UnsupportedDocumentFormatError
+from ubt.core.exceptions import (
+    DocumentParseError,
+    OptionalDependencyError,
+    UnsupportedDocumentFormatError,
+)
+from ubt.core.fs_perms import VerifiedOpenError, open_verified
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +203,8 @@ def supported_suffixes() -> list[str]:
 def get_adapter_for_path(
     path: Path | str,
     pdf_engine: str = "auto",
+    *,
+    sandbox_roots: Sequence[Path] | None = None,
 ) -> BaseDocumentAdapter:
     """Factory helper to resolve the appropriate document adapter by file extension.
 
@@ -205,14 +212,47 @@ def get_adapter_for_path(
     resolves the same engine the pipeline would: ``auto`` is Docling,
     unconditionally; ``pdfium`` is an explicit operator opt-in that carries a
     loud multicolumn/scanned warning.
+
+    Before an adapter is handed out for an existing file, the file itself is
+    re-opened through :func:`ubt.core.fs_perms.open_verified` — the point where
+    the pipeline is about to open the submitted input document. The API and MCP
+    surfaces validate (and fully resolve) a submitted path at *submit* time and
+    the stored path is only opened here, so a local writer replacing the
+    validated file with a symlink in between would otherwise be followed at
+    open. The gate refuses that swap fail-closed with a
+    :class:`~ubt.core.exceptions.DocumentParseError`. ``sandbox_roots``, when a
+    caller knows the sandbox that validated the path, additionally pins the
+    final resolution inside it (see ``open_verified``); without it the
+    anti-symlink verification still applies.
     """
     file_path = Path(path)
     suffix = file_path.suffix.lower()
 
     factory = _ADAPTER_REGISTRY.get(suffix)
     if factory is not None:
+        _verify_input_open(file_path, sandbox_roots)
         return factory(pdf_engine, file_path)
 
     raise UnsupportedDocumentFormatError(
         f"No adapter registered for document extension '{suffix}' ({file_path.name})"
     )
+
+
+def _verify_input_open(file_path: Path, sandbox_roots: Sequence[Path] | None) -> None:
+    """Re-open the input through the anti-swap gate before an adapter is built.
+
+    Missing files are left alone: every adapter already answers them with its
+    own "not found" error, and the swap this gate exists for requires a file a
+    validator once saw. A refusal names the swap, so an operator whose CLI
+    convenience symlink is refused gets an actionable message instead of a
+    bare ``ELOOP``.
+    """
+    if not file_path.exists():
+        return
+    try:
+        open_verified(file_path, sandbox_roots).close()
+    except VerifiedOpenError as exc:
+        raise DocumentParseError(
+            f"Refusing to open {file_path.name}: {exc}. Pass the real file path "
+            "(the path a validator resolved, not a symlink standing in for it)."
+        ) from exc

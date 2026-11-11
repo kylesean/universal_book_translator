@@ -101,6 +101,14 @@ class JobSubmitRequest(BaseModel):
             "endpoint and credential."
         ),
     )
+    #: Export-time fail-closed gate for NEEDS_HUMAN blocks (queued for human
+    #: post-editing). Default follows config / ``UBT_EXPORT_ALLOW_NEEDS_HUMAN``;
+    #: an explicit true ships them knowingly, with the block ids listed in the
+    #: quality report's ``summary.needs_human_block_ids``.
+    export_allow_needs_human: bool | None = Field(
+        default=None,
+        description="Allow export to ship NEEDS_HUMAN blocks unverified (default: refuse)",
+    )
     draft_model: str | None = Field(default=None, description="Override draft model tier")
     repair_model: str | None = Field(default=None, description="Override repair model tier")
     preset: Preset | None = Field(

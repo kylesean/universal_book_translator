@@ -412,7 +412,10 @@ async def test_export_restore_round_trip() -> None:
     manager = HierarchicalMemoryManager(l3_epoch_steps=1)
     await _snapshot(manager, [_block("ch1#b1", 0, target="a" * 40)], "Summary Alpha")
     state = manager.export_state()
-    assert set(state) == {"snapshots", "epochs", "step_counter"}
+    # The within-step buffer rides the persisted state now: a resumed run never
+    # re-drafts already-DRAFTED blocks, so excluding it used to leave a
+    # permanent hole in the rolling context at every resume boundary.
+    assert set(state) == {"snapshots", "epochs", "step_counter", "buffer"}
 
     restored = HierarchicalMemoryManager()
     restored.restore_state(state)
@@ -598,3 +601,134 @@ async def test_the_epoch_zero_anchor_survives_rebuild_and_restore() -> None:
     assert fresh.epochs[0].summary_text == anchor.summary_text
     assert fresh.epochs[0].start_spine == anchor.start_spine
     assert len(fresh.epochs) <= 2
+
+
+class _MetaLedger:
+    """Minimal ledger stub: job_meta dict in, dict out."""
+
+    def __init__(self) -> None:
+        self.meta: dict[str, Any] = {}
+
+    def get_job_metadata_value(self, _job: str, key: str) -> Any:
+        return self.meta.get(key)
+
+    def set_job_metadata_value(self, _job: str, key: str, value: Any) -> None:
+        self.meta[key] = value
+
+
+async def test_export_state_carries_the_within_step_buffer() -> None:
+    """The interrupted step's drafted blocks must survive a restart: a resumed
+    run never re-drafts them (fetch_pending_blocks selects pending only), so
+    dropping the buffer at export left a permanent L2 hole exactly at resume
+    boundaries."""
+    manager = HierarchicalMemoryManager()
+    manager.record_drafted_block(_block("ch1#b1", 0, target="缓冲中的段落"))
+    state = manager.export_state()
+    assert len(state["buffer"]) == 1
+    assert state["buffer"][0]["id"] == "ch1#b1"
+
+    restored = HierarchicalMemoryManager()
+    restored.restore_state(state)
+    assert restored.pending_block_count == 1
+    assert restored._unsummarized_blocks[0].target_text == "缓冲中的段落"
+
+
+async def test_record_drafted_block_dedupes_by_id_on_resume() -> None:
+    """A restored buffer plus a re-draft of the same block must update, not
+    duplicate — the block would otherwise be summarized twice."""
+    manager = HierarchicalMemoryManager()
+    manager.record_drafted_block(_block("ch1#b1", 0, target="第一版"))
+    manager.record_drafted_block(_block("ch1#b1", 0, target="修订版"))
+    assert manager.pending_block_count == 1
+    assert manager._unsummarized_blocks[0].target_text == "修订版"
+
+
+async def test_a_residual_mask_token_block_summarizes_from_source_not_corruption() -> None:
+    """A draft that kept its placeholder wrappers is corrupt; feeding it into
+    the recap would teach every later prompt the token is content. The buffer
+    falls back to the block's source text instead, keeping the storyline."""
+    block = _block("ch1#b1", 0, target="译文⟦FAM_MASK_0001-abc⟧残留", source="Source text")
+    manager = HierarchicalMemoryManager()
+    manager.record_drafted_block(block)
+    assert manager._unsummarized_blocks[0].target_text is None
+    assert manager._unsummarized_blocks[0].draft_text is None
+    assert manager._unsummarized_blocks[0].source_text == "Source text"
+
+
+async def test_refresh_chapter_memory_keeps_window_coverage_for_a_long_chapter() -> None:
+    """The post-repair refresh must not collapse a long chapter into one
+    tail-biased recap: every window of the chapter gets its own snapshot."""
+    ledger = _MetaLedger()
+    blocks = [_block(f"ch1#b{i}", i, target=f"第{i}段的内容" * 40) for i in range(1, 21)]
+
+    async def complete(_system: str, _user: str) -> str:
+        return "窗口摘要。"
+
+    assert await refresh_chapter_memory(ledger, "job", "ch1", blocks, complete, "zh") is True
+    snapshots = ledger.meta["memory_state"]["snapshots"]
+    assert len(snapshots) > 1, "a 20-block chapter must produce window recaps, not one"
+    # Windows cover the whole chapter in spine order, without gaps.
+    spines = [(s["start_spine"], s["end_spine"]) for s in snapshots]
+    assert spines[0][0] == 1 and spines[-1][1] == 20
+    for (_, prev_end), (next_start, _) in zip(spines[:-1], spines[1:], strict=True):
+        assert next_start == prev_end + 1
+
+
+async def test_refresh_chapter_memory_preserves_other_chapters_snapshots() -> None:
+    """The refresh replaces only its own chapter; neighbouring chapters'
+    snapshots survive the read-modify-write."""
+    ledger = _MetaLedger()
+
+    class _ManagerWithOther:
+        pass
+
+    blocks = [_block("ch1#b1", 1, target="第一章修复后")]
+    manager = HierarchicalMemoryManager()
+    manager._snapshots.append(
+        StepSnapshot(
+            step_index=0,
+            start_spine=10,
+            end_spine=10,
+            chapter_id="ch2",
+            summary_text="第二章草稿期摘要",
+            char_count=10,
+        )
+    )
+    ledger.meta["memory_state"] = manager.export_state()
+
+    async def complete(_system: str, _user: str) -> str:
+        return "第一章修复后摘要。"
+
+    assert await refresh_chapter_memory(ledger, "job", "ch1", blocks, complete, "zh") is True
+    snapshots = ledger.meta["memory_state"]["snapshots"]
+    chapters = {s["chapter_id"] for s in snapshots}
+    assert chapters == {"ch1", "ch2"}
+    ch2 = [s for s in snapshots if s["chapter_id"] == "ch2"]
+    assert ch2[0]["summary_text"] == "第二章草稿期摘要"
+
+
+async def test_merge_external_state_imports_a_concurrent_refresh() -> None:
+    """The draft worker's absolute persist must not discard a repair refresh
+    that landed while it was drafting: merge-on-persist imports the refreshed
+    chapter, and the chapters the buffer is drafting stay authoritative."""
+    manager = HierarchicalMemoryManager()
+    manager.record_drafted_block(_block("ch2#b1", 10, target="第二章正在翻译"))
+
+    refreshed = HierarchicalMemoryManager()
+    refreshed._snapshots.append(
+        StepSnapshot(
+            step_index=0,
+            start_spine=1,
+            end_spine=5,
+            chapter_id="ch1",
+            summary_text="第一章修复后摘要",
+            char_count=50,
+        )
+    )
+
+    manager.merge_external_state(refreshed.export_state())
+    chapters = {s.chapter_id for s in manager._snapshots}
+    assert chapters == {"ch1"}
+    assert manager._snapshots[0].summary_text == "第一章修复后摘要"
+    # The buffer's chapter work is untouched.
+    assert manager.pending_block_count == 1

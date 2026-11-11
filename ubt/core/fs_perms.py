@@ -22,9 +22,11 @@ from __future__ import annotations
 
 import logging
 import os
+import stat
 import sys
 from collections.abc import Iterable
 from pathlib import Path
+from typing import IO
 
 from ubt.core.policy.layout_policy import BOOK_TEXT_DIR_MODE, BOOK_TEXT_FILE_MODE
 
@@ -38,7 +40,9 @@ logger = logging.getLogger(__name__)
 SENSITIVE_FILENAME_PARTS = (
     ".ssh",
     ".aws",
+    ".azure",
     ".docker",
+    ".gcloud",
     ".kube",
     ".bashrc",
     ".bash_profile",
@@ -48,9 +52,16 @@ SENSITIVE_FILENAME_PARTS = (
     # Shell history files record command lines verbatim — API keys and
     # ``cat ~/.ssh/id_rsa`` included.
     ".bash_history",
+    # The whole ``.config`` tree is denied, which already covers the per-tool
+    # credential stores that live under it (``.config/gcloud``,
+    # ``.config/chromium``, ``.config/google-chrome``): they are listed here as
+    # a comment only, so nobody "fixes" their absence by re-adding a subset.
     ".config",
+    ".mozilla",
     ".git",
     ".git-credentials",
+    # GitHub's authenticated ``git https://...@github.com/...`` cookie jar.
+    ".gitcookies",
     # GnuPG keyrings and the pass password store: the secrets themselves.
     ".gnupg",
     ".password-store",
@@ -61,9 +72,30 @@ SENSITIVE_FILENAME_PARTS = (
     "credentials.json",
     ".secrets",
     ".netrc",
+    # Tool-specific credential stores: npm publish tokens, PyPI upload tokens,
+    # MySQL client logins, and the rc files wget/curl read for stored
+    # credentials or ``.netrc`` pointers. ``.htpasswd`` is a password file by
+    # construction.
+    ".npmrc",
+    ".pypirc",
+    ".my.cnf",
+    ".wgetrc",
+    ".curlrc",
+    ".htpasswd",
     "auth.json",
+    # SSH private keys (the individual files, for callers whose paths carry
+    # them outside a ``.ssh`` directory). The ``.pub`` siblings are not
+    # secrets, but they are listed so the whole key pair is treated uniformly:
+    # a caller that can read ``id_ed25519.pub`` has confirmed key material
+    # lives beside it, which is reconnaissance a denial should not hand over.
     "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
     "id_ed25519",
+    "id_rsa.pub",
+    "id_dsa.pub",
+    "id_ecdsa.pub",
+    "id_ed25519.pub",
 )
 
 #: Precomputed casefolded form of :data:`SENSITIVE_FILENAME_PARTS`, so the
@@ -79,6 +111,90 @@ def is_sensitive_path_part(part: str) -> bool:
     # Per-environment dotenv variants (``.env.production``) and ``.envrc`` hold
     # the same secrets as ``.env``; exact matching let them through.
     return folded == ".envrc" or folded.startswith(".env.")
+
+
+class VerifiedOpenError(OSError):
+    """A file could not be opened under the anti-swap contract of :func:`open_verified`.
+
+    Subclasses :class:`OSError` so callers that already handle filesystem
+    failures catch it unchanged; the message names what refused, because a
+    bare ``ELOOP`` from ``os.open`` would read as "file broken" instead of
+    "the validated path was replaced by a symlink".
+    """
+
+
+def open_verified(
+    path: Path | str,
+    allowed_roots: Iterable[Path] | None = None,
+) -> IO[bytes]:
+    """Open ``path`` for reading while refusing a symlink swapped in after validation.
+
+    The API resolves and sandboxes a submitted input path at *submit* time, but
+    the pipeline opens the stored path later. A local writer can replace the
+    validated file with a symlink in between, and the open would follow it to
+    any file on the host — the classic validation/use TOCTOU. This helper closes
+    that window at the moment of the open:
+
+    * the file is opened with ``O_NOFOLLOW`` (where the platform has it — on
+      Windows, where it does not, the ``lstat``/``fstat`` identity check below
+      carries the refusal), so a final-component symlink never opens;
+    * the opened descriptor must be a regular file, so a swap to a FIFO, a
+      device or a directory is refused instead of read (or hung on);
+    * the opened file's identity (``st_dev``/``st_ino`` from ``fstat``) must
+      match ``lstat`` of the path, so a swap between the two calls fails;
+    * when ``allowed_roots`` is given, the path's final resolution must still
+      land inside one of them, so a swapped directory component cannot steer
+      the read outside the sandbox.
+
+    Returns a binary file object (the caller owns closing it). Raises
+    :class:`VerifiedOpenError` — an :class:`OSError` — with a message that says
+    *why* the open was refused. Without ``allowed_roots`` the containment check
+    is skipped (callers that do not know a sandbox still get the anti-symlink
+    verification).
+    """
+    target = Path(path)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    # ``O_NONBLOCK`` so a swap to a FIFO (a regular-file-shaped denial of
+    # service whose ``os.open`` would block forever waiting for a writer)
+    # returns immediately and the regular-file check below refuses it. On
+    # regular files it is a no-op; on Windows the constant does not exist.
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    if sys.platform == "win32":
+        flags |= getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(target, flags)
+    except OSError as exc:
+        raise VerifiedOpenError(
+            f"refusing to open {target.name}: the validated file could not be "
+            f"opened directly ({exc.strerror or exc}); if it was replaced by a "
+            "symlink, this refusal is the sandbox working as intended"
+        ) from exc
+    try:
+        st_fd = os.fstat(fd)
+        if not stat.S_ISREG(st_fd.st_mode):
+            raise VerifiedOpenError(
+                f"refusing to open {target.name}: it is not a regular file "
+                "(it was replaced after validation?)"
+            )
+        st_path = os.lstat(target)
+        if (st_fd.st_dev, st_fd.st_ino) != (st_path.st_dev, st_path.st_ino):
+            raise VerifiedOpenError(
+                f"refusing to open {target.name}: the file on disk changed while "
+                "being opened (a symlink swapped in after validation?)"
+            )
+        if allowed_roots is not None:
+            roots = [root.resolve() for root in allowed_roots]
+            resolved = target.resolve()
+            if not any(resolved == root or root in resolved.parents for root in roots):
+                raise VerifiedOpenError(
+                    f"refusing to open {target.name}: it no longer resolves inside "
+                    "the sandbox that validated it"
+                )
+        return os.fdopen(fd, "rb")
+    except BaseException:
+        # Every refusal above must not leak the descriptor it is abandoning.
+        os.close(fd)
+        raise
 
 
 def system_disallowed_prefixes() -> tuple[Path, ...]:

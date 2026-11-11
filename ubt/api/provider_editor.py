@@ -21,6 +21,12 @@ The rule is therefore deployment-aware (:func:`credential_write_allowed`):
   shared service, the request may come from anywhere, and the operator's shell is
   the right place for a secret.
 
+Behind a reverse proxy the loopback premise needs help: a proxy bound to the
+same host makes every remote caller socket-local, so the loopback answer is
+proxy-aware (:func:`ubt.api.security.credential_route_is_local`) — forwarded
+headers mark a request non-local unless ``UBT_TRUST_PROXY`` declares the front
+proxy trusted.
+
 Cross-origin reach is already closed independently: this API sets no CORS
 headers, and a JSON ``PUT`` is not a CORS-simple request, so a browser will not
 send it cross-origin without a preflight the server never approves. The
@@ -337,7 +343,11 @@ def credential_write_allowed(*, is_loopback: bool, is_strict: bool) -> bool:
 
     * **loopback** — the request cannot have arrived from another machine. On a
       non-loopback bind the server is a shared service and a secret belongs in the
-      operator's shell, not in a request body.
+      operator's shell, not in a request body. The flag is computed by
+      :func:`ubt.api.security.credential_route_is_local`, which is proxy-aware:
+      behind a reverse proxy a loopback bind no longer proves a local caller, so
+      forwarded headers mark the request non-local unless ``UBT_TRUST_PROXY``
+      declares the front proxy trusted (and then the forwarded client IP decides).
     * **not strict** — ``UBT_STRICT_AUTH`` / ``UBT_ENV=production`` is a promise
       that this server authenticates. Writing a credential there would mean a
       bearer token is enough to mint another bearer token.
@@ -401,8 +411,8 @@ def validate_edit(
     if "api_key" in changes and not allow_credential:
         raise ProviderEditError(
             "a credential cannot be written from the console on this deployment: it is "
-            "reachable beyond loopback, or strict auth is on. Set it in ubt.toml or "
-            "export UBT_LLM_API_KEY instead."
+            "reachable beyond loopback (or through a proxy that is not trusted), or "
+            "strict auth is on. Set it in ubt.toml or export UBT_LLM_API_KEY instead."
         )
     if (
         "base_url" in changes
@@ -434,8 +444,8 @@ def validate_edit(
             "this block holds a credential, and the endpoint URL decides where "
             "that credential is sent — so base_url cannot be re-pointed off "
             "this machine from the console on this deployment (reachable "
-            "beyond loopback, or strict auth is on). Set base_url in ubt.toml "
-            "instead."
+            "beyond loopback or through a proxy that is not trusted, or strict "
+            "auth is on). Set base_url in ubt.toml instead."
         )
     unknown = sorted(set(changes) - set(WRITABLE_FIELDS))
     if unknown:

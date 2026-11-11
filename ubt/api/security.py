@@ -17,7 +17,7 @@ from fastapi import Cookie, Header, HTTPException, status
 from ubt.core.config import UBTConfig
 from ubt.core.fs_perms import SENSITIVE_FILENAME_PARTS as SENSITIVE_FILENAME_PARTS
 from ubt.core.fs_perms import SYSTEM_DISALLOWED_PREFIXES as SYSTEM_DISALLOWED_PREFIXES
-from ubt.core.fs_perms import is_sensitive_path_part
+from ubt.core.fs_perms import ensure_private_dir, is_sensitive_path_part, restrict_file_to_owner
 from ubt.core.job_options import JOB_ID_MAX_LEN, JOB_ID_RE, job_id_is_valid
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,158 @@ def _log_startup_auth_warning(config: UBTConfig | None = None) -> None:
 #: Explicit opt-out for a throwaway local server: a deliberate, named decision
 #: rather than a silent open-by-default.
 _NO_AUTH_OVERRIDE_ENV = "UBT_ALLOW_NO_AUTH"
+
+
+def warn_broad_sandbox(config: UBTConfig | None = None) -> None:
+    """Warn at startup when the path sandbox is wide enough to defeat the deny lists.
+
+    Two postures look configured but leave the host exposed, and both must be
+    named at boot rather than discovered after an incident:
+
+    * a sandbox base that *is* the user's home directory (or contains it) puts
+      every credential-bearing dotfile (``.ssh``, ``.aws``, ``.env``,
+      ``.netrc``, …) inside the reach of the submit / MCP read surfaces — the
+      sensitive-name deny list refuses the *known* names, but a home-wide
+      sandbox is exactly the "read anything I can read" scope the sandbox was
+      meant to shrink;
+    * an ``UBT_ALLOWED_DIRS`` entry that equals or spans a system prefix
+      (``/``, ``/etc``, ``/var``, …) switches off the system-directory deny
+      list for everything under it — :func:`resolve_secure_path` deliberately
+      lets an explicit allowlist win over that list, so a base that wide hands
+      the exemption to the whole tree.
+
+    The warning names the exposure and the knob; it never raises and never
+    refuses the boot: the operator may legitimately want a wide sandbox, and a
+    configuration that cannot start is a configuration that gets disabled.
+    """
+    cfg = config or UBTConfig()
+    try:
+        home = Path.home().resolve()
+    except (OSError, RuntimeError):
+        home = None
+
+    for base in effective_allowed_bases(cfg):
+        if home is not None and (base == home or home.is_relative_to(base)):
+            logger.warning(
+                "Path sandbox base %s contains the user home directory: the "
+                "submit/MCP file surfaces can read every credential-bearing "
+                "dotfile under it (.ssh, .aws, .env, .netrc, ...) that the "
+                "sensitive-name deny list does not name. Narrow UBT_ALLOWED_DIRS "
+                "to the directories that actually hold books.",
+                base,
+            )
+        if base == Path("/"):
+            logger.warning(
+                "Path sandbox base %s is the filesystem root: the system-directory "
+                "deny list is disabled for every path, so /etc, /var and every "
+                "other host directory readable by this process is reachable via "
+                "submit/MCP. Narrow UBT_ALLOWED_DIRS.",
+                base,
+            )
+        for disallowed in SYSTEM_DISALLOWED_PREFIXES:
+            if disallowed == base or disallowed.is_relative_to(base):
+                logger.warning(
+                    "Path sandbox base %s spans system directory %s: the "
+                    "allowlist exempts everything under it from the "
+                    "system-directory deny list, so it is readable via "
+                    "submit/MCP. Narrow UBT_ALLOWED_DIRS to exclude it.",
+                    base,
+                    disallowed,
+                )
+
+
+#: Forwarded-header trust for credential-sensitive routes. Mirrors
+#: ``UBT_TRUST_TENANT_HEADER``: proxy headers are client-forgeable, so they
+#: only ever widen a decision when the operator explicitly declares a trusted
+#: front proxy (``UBT_TRUST_PROXY``). Default OFF.
+_TRUST_PROXY_ENV = "UBT_TRUST_PROXY"
+
+
+def trust_proxy() -> bool:
+    """Whether the operator declares a trusted reverse proxy in front of this server.
+
+    The README's shared-hosting posture terminates TLS (and client identity) at
+    a proxy bound to the same host, so the socket-level loopback answer is
+    about the *proxy*, not the caller. When ``UBT_TRUST_PROXY`` is on,
+    forwarded headers decide where a request really came from; when it is off,
+    the mere presence of forwarded headers is treated as "arrived through a
+    proxy we do not trust" and credential-sensitive routes answer non-local.
+    """
+    return os.getenv(_TRUST_PROXY_ENV, "").strip().lower() in ("1", "true", "yes")
+
+
+def forwarded_client_ip(x_forwarded_for: str | None, x_real_ip: str | None) -> str | None:
+    """The client IP a trusted proxy chain vouches for, or ``None``.
+
+    ``X-Forwarded-For`` is a comma list the proxy appends to; the *leftmost*
+    entry is the original client as recorded by the first trusted hop — an
+    operator who trusts the chain to have sanitized the list trusts exactly
+    that entry. ``X-Real-IP`` is the single-value fallback nginx sets.
+    """
+    for raw in (x_forwarded_for, x_real_ip):
+        if not raw:
+            continue
+        first = raw.split(",")[0].strip()
+        if first:
+            return first
+    return None
+
+
+def _client_ip_is_loopback(ip: str) -> bool:
+    """Whether a forwarded client IP is a loopback address.
+
+    Fails closed: a forwarded value that is not a literal IP (a hostname, or
+    garbage from a misbehaving chain) is not provably local, and the decision
+    this feeds gates credential writes.
+    """
+    import ipaddress
+
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        return addr.ipv4_mapped.is_loopback
+    return addr.is_loopback
+
+
+def credential_route_is_local(
+    *,
+    server_bind: str | None,
+    x_forwarded_for: str | None = None,
+    x_real_ip: str | None = None,
+) -> bool:
+    """The loopback decision credential/base_url writes are gated on, proxy-aware.
+
+    ``server_bind`` is the socket address the server is bound to — behind the
+    README's reverse-proxy posture that is always loopback while the *callers*
+    are not, which is exactly the gap a reverse proxy opened in the old
+    bind-only answer. The rules, in order:
+
+    * forwarded headers present + ``UBT_TRUST_PROXY`` off → **not local**. A
+      request that claims a proxy chain arrived through a proxy; without the
+      trust declaration the claim is client-forgeable and must never widen the
+      decision (a spoofed ``X-Forwarded-For: 127.0.0.1`` included).
+    * forwarded headers present + trust on → judge the forwarded client IP
+      (leftmost trusted hop); a non-IP value fails closed to not-local.
+    * no forwarded headers → the historical bind answer, unchanged for direct
+      (unproxied) deployments.
+    """
+    has_forwarded = bool((x_forwarded_for or "").strip() or (x_real_ip or "").strip())
+    if has_forwarded:
+        if not trust_proxy():
+            return False
+        client_ip = forwarded_client_ip(x_forwarded_for, x_real_ip)
+        if client_ip is None:
+            return False
+        return _client_ip_is_loopback(client_ip)
+    if server_bind:
+        from ubt.api.routes.shared import is_nonloopback_bind
+
+        return not is_nonloopback_bind(server_bind)
+    # No bind address at all: the in-process test client, which never touches
+    # a network. Kept from the historical behaviour the console tests rely on.
+    return True
 
 
 def _no_auth_allowed() -> bool:
@@ -110,26 +262,129 @@ def _require_api_key_gate(config: UBTConfig | None = None) -> None:
 
 #: Cookie the console sets so same-origin browser requests that *cannot* carry
 #: the ``X-API-Key`` header — an ``EventSource`` stream, an ``<img>`` preview,
-#: a download link — still authenticate. The value is a keyed digest of the
-#: service key, never the key itself: a leaked cookie must not hand out the
-#: credential for other services (and the digest cannot be replayed as the
-#: ``X-API-Key`` header).
+#: a download link — still authenticate. The value is a digest keyed over a
+#: random *per-install* secret (never the service key, and never sent to the
+#: browser): a leaked cookie must not hand out the credential for other
+#: services, and the digest cannot be replayed as the ``X-API-Key`` header.
 SESSION_COOKIE_NAME = "ubt_session"
 
+#: Session lifetime. The cookie is re-minted on every console login, so a week
+#: bounds how long a browser that was left signed in keeps authenticating
+#: while never badgering an operator who uses the console weekly.
+SESSION_COOKIE_MAX_AGE_S = 7 * 24 * 3600
 
-def session_cookie_value(expected_key: str) -> str:
-    """The session cookie value for a non-empty service key."""
-    return hmac.new(expected_key.encode("utf-8"), b"ubt-session-v1", hashlib.sha256).hexdigest()
+#: Versioned domain string the cookie digest is computed over. Bumping it
+#: rotates every outstanding cookie at once (old values stop verifying), which
+#: is the second rotation lever beside regenerating the per-install secret.
+_SESSION_COOKIE_DIGEST_DOMAIN = b"ubt-session-v2"
+
+#: Minimum entropy (bytes) a persisted session secret must carry. A shorter or
+#: corrupt file is treated as absent, not as a key.
+_SESSION_SECRET_MIN_BYTES = 32
+
+#: Process-local fallback for hosts that refuse the state-dir write. Cached so
+#: cookies verify within the process; they simply do not survive a restart.
+_EPHEMERAL_SESSION_SECRET: bytes | None = None
 
 
-def _session_cookie_matches(cookie: str | None, expected: str) -> bool:
+def _session_secret_path(config: UBTConfig) -> Path:
+    """Where the per-install session secret lives (the ledger/state directory)."""
+    return config.db_dir / "session_secret.key"
+
+
+def load_or_create_session_secret(config: UBTConfig) -> bytes:
+    """The random per-install secret the session cookie is keyed over.
+
+    Created once, in the operator-owned state directory, at ``0600`` (via the
+    same perms helpers the ledger uses), and reused by every subsequent boot so
+    outstanding cookies survive a restart. Deleting the file is the documented
+    rotation: the next call mints a fresh secret and every old cookie value
+    stops verifying. All the failure modes degrade to a process-local secret
+    rather than breaking cookie auth: a read-only state dir, a race with
+    another worker, a corrupt short file — the cookie then dies with the
+    process instead of the server refusing to authenticate.
+    """
+    global _EPHEMERAL_SESSION_SECRET
+    path = _session_secret_path(config)
+    ensure_private_dir(path.parent)
+    for _attempt in range(2):
+        try:
+            data = path.read_bytes()
+            if len(data) >= _SESSION_SECRET_MIN_BYTES:
+                return data
+        except FileNotFoundError:
+            pass
+        except OSError:
+            break  # unreadable state dir: use the process-local fallback
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            # Another request or worker minted it between the read and the
+            # create; read that one instead of clobbering it (clobbering would
+            # silently invalidate cookies minted moments earlier).
+            continue
+        except OSError:
+            break
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(secrets.token_bytes(_SESSION_SECRET_MIN_BYTES))
+            restrict_file_to_owner(path)
+        except OSError:
+            break
+    if _EPHEMERAL_SESSION_SECRET is None:
+        _EPHEMERAL_SESSION_SECRET = secrets.token_bytes(_SESSION_SECRET_MIN_BYTES)
+        logger.warning(
+            "session secret unavailable at %s: using a process-local secret, "
+            "so session cookies will not survive a restart",
+            path,
+        )
+    return _EPHEMERAL_SESSION_SECRET
+
+
+def session_cookie_value(expected_key: str, *, session_secret: bytes) -> str:
+    """The session cookie value for a non-empty service key.
+
+    HMAC'd over the per-install secret with a versioned domain string *and*
+    the service key in the message, so rotating the secret file, changing the
+    API key, or bumping the domain version all invalidate every outstanding
+    cookie — an old value never verifies again.
+    """
+    return hmac.new(
+        session_secret,
+        _SESSION_COOKIE_DIGEST_DOMAIN + expected_key.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _session_cookie_matches(cookie: str | None, expected: str, *, session_secret: bytes) -> bool:
     if not cookie:
         return False
     # Constant-time over bytes, like the header comparison: a str compare_digest
     # raises TypeError on non-ASCII cookie bytes.
     return secrets.compare_digest(
-        cookie.encode("utf-8"), session_cookie_value(expected).encode("utf-8")
+        cookie.encode("utf-8"),
+        session_cookie_value(expected, session_secret=session_secret).encode("utf-8"),
     )
+
+
+def cookie_secure_for_request(scheme: str | None) -> bool:
+    """Whether the session cookie must carry the ``Secure`` flag for this request.
+
+    An https request is the direct signal. ``UBT_COOKIE_SECURE`` overrides both
+    ways — a proxy terminating TLS whose forwarded scheme the app cannot see
+    is exactly the case an explicit override exists for — and otherwise a
+    production environment defaults to on. Plain-http local consoles stay off:
+    a ``Secure`` cookie over ``http://`` is silently dropped by the browser and
+    the console would then never authenticate.
+    """
+    env = os.getenv("UBT_COOKIE_SECURE", "").strip().lower()
+    if env in ("1", "true", "yes"):
+        return True
+    if env in ("0", "false", "no"):
+        return False
+    if scheme and scheme.lower() == "https":
+        return True
+    return os.getenv("UBT_ENV", "").strip().lower() == "production"
 
 
 def verify_api_key(
@@ -171,13 +426,20 @@ def verify_api_key(
     # Compare over bytes — str.compare_digest raises TypeError on
     # non-ASCII (Latin-1 header bytes like "café"), turning a should-be 401
     # into an unhandled 500.
-    if not secrets.compare_digest((x_api_key or "").encode("utf-8"), expected.encode("utf-8")) and (
-        not _session_cookie_matches(ubt_session, expected)
+    if secrets.compare_digest((x_api_key or "").encode("utf-8"), expected.encode("utf-8")):
+        return
+    # The cookie path is checked only when a cookie was actually presented, so
+    # header-authenticated requests never touch the session-secret file.
+    if ubt_session and _session_cookie_matches(
+        ubt_session,
+        expected,
+        session_secret=load_or_create_session_secret(cfg),
     ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key",
-        )
+        return
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or missing API key",
+    )
 
 
 # The sensitive-name deny list itself lives in ``ubt.core.fs_perms`` and is

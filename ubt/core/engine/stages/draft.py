@@ -42,6 +42,7 @@ from ubt.core.memory.glossary_table import (
 from ubt.core.memory.hierarchical_memory import (
     DEFAULT_MAX_EPOCHS,
     HierarchicalMemoryManager,
+    memory_state_lock,
 )
 from ubt.core.memory.rolling_summary import extract_chapter_id
 from ubt.core.memory.tm import (
@@ -1525,15 +1526,32 @@ def _assert_no_stranded_pending(
         )
 
 
-def _persist_memory_state(
+async def _persist_memory_state(
     ledger: SQLiteJobLedger,
     actual_job_id: str,
     memory_mgr: HierarchicalMemoryManager,
 ) -> None:
-    """Persist hierarchical L2/L3 memory to job_meta so a resumed run keeps the context."""
-    state = memory_mgr.export_state()
+    """Persist hierarchical L2/L3 memory to job_meta so a resumed run keeps the context.
+
+    Serialized through the per-job ``memory_state`` lock and merging before the
+    write: under chapter streaming the repair worker's post-repair refresh may
+    rewrite chapter N's snapshots while this manager holds chapter N+1, and an
+    absolute persist of a stale in-memory copy would silently discard the
+    refresh. The merge imports the refresh (authoritative for chapters this
+    manager is not drafting) before the write; the lock keeps the two RMW
+    sequences from interleaving in-process.
+    """
     try:
-        ledger.set_job_metadata_value(actual_job_id, "memory_state", state)
+        async with memory_state_lock(actual_job_id):
+            raw = await asyncio.to_thread(
+                ledger.get_job_metadata_value, actual_job_id, "memory_state"
+            )
+            if isinstance(raw, dict):
+                memory_mgr.merge_external_state(raw)
+            state = memory_mgr.export_state()
+            await asyncio.to_thread(
+                ledger.set_job_metadata_value, actual_job_id, "memory_state", state
+            )
     except Exception as exc:
         logger.warning(
             "Failed to persist rolling memory state for %s: %s", actual_job_id, exc, exc_info=True
@@ -1875,9 +1893,7 @@ async def run_draft_stage(
                         "Hierarchical step snapshot generation failed: %s", exc, exc_info=True
                     )
                 if rolling_enabled:
-                    await asyncio.to_thread(
-                        _persist_memory_state, ledger, actual_job_id, memory_mgr
-                    )
+                    await _persist_memory_state(ledger, actual_job_id, memory_mgr)
 
             # No summarizer runs here: the hierarchical L2 manager snapshots on
             # step threshold and chapter transition itself, so the batch is
@@ -1908,9 +1924,7 @@ async def run_draft_stage(
                         "Hierarchical step snapshot generation failed: %s", exc, exc_info=True
                     )
                 if rolling_enabled:
-                    await asyncio.to_thread(
-                        _persist_memory_state, ledger, actual_job_id, memory_mgr
-                    )
+                    await _persist_memory_state(ledger, actual_job_id, memory_mgr)
 
             await flusher.flush_all()
             # The stranded-block invariant: every block the loop FETCHED must
@@ -1970,7 +1984,7 @@ async def run_draft_stage(
                         exc,
                         exc_info=True,
                     )
-            await asyncio.to_thread(_persist_memory_state, ledger, actual_job_id, memory_mgr)
+            await _persist_memory_state(ledger, actual_job_id, memory_mgr)
         memory_mgr.discard_pending_blocks()
         if counters["tm_exact_hits"]:
             logger.info(

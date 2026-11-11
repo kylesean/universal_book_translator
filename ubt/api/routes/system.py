@@ -35,8 +35,12 @@ from ubt.api.models import (
 from ubt.api.routes.shared import is_nonloopback_bind
 from ubt.api.scope import ApiScope
 from ubt.api.security import (
+    SESSION_COOKIE_MAX_AGE_S,
     SESSION_COOKIE_NAME,
+    cookie_secure_for_request,
+    credential_route_is_local,
     effective_allowed_bases,
+    load_or_create_session_secret,
     session_cookie_value,
     verify_api_key,
 )
@@ -87,19 +91,23 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
         """Current model configuration (re-reads the file when it changed)."""
         return scope.config
 
-    def _bind_is_loopback(request: Request) -> bool:
-        """Whether this server is bound to a loopback address.
+    def _credential_loopback(request: Request) -> bool:
+        """Whether a credential-sensitive write may treat this request as local.
 
-        Read from the socket's own server address, not from a header: a client can
-        forge ``Host`` and ``X-Forwarded-*``, and this answer decides whether a
-        credential may be written. ``testserver`` (the in-process test client) has
-        no server address; it is treated as loopback because it never touches a
-        network, which is what the console tests exercise.
+        Delegates to :func:`ubt.api.security.credential_route_is_local`: the
+        socket bind alone cannot answer this behind the README's reverse-proxy
+        posture (a proxy bound to the same host makes every remote caller look
+        loopback), so forwarded headers are honoured when present — denied
+        outright unless ``UBT_TRUST_PROXY`` declares the front proxy trusted,
+        and judged from the forwarded client IP (leftmost trusted hop) when it
+        does. A direct, unproxied deployment keeps the historical bind answer.
         """
         server = request.scope.get("server")
-        if not server:
-            return True
-        return not is_nonloopback_bind(str(server[0]))
+        return credential_route_is_local(
+            server_bind=str(server[0]) if server else None,
+            x_forwarded_for=request.headers.get("x-forwarded-for"),
+            x_real_ip=request.headers.get("x-real-ip"),
+        )
 
     @api_app.get("/health", tags=["System"])
     async def health() -> dict[str, str]:
@@ -112,6 +120,7 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
     @api_app.post("/system/session", tags=["System"])
     async def create_session(
         response: Response,
+        http_request: Request,
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, bool]:
         """Exchange the API key for a same-origin session cookie.
@@ -119,11 +128,15 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
         The console's ``EventSource`` stream, page-preview ``<img>`` elements
         and download links cannot attach an ``X-API-Key`` header, so on a keyed
         server the UI would 401 on every one of them even though its fetches
-        pass. The cookie carries a keyed *digest* of the service key (never the
-        key itself), is HttpOnly + SameSite=Lax so it rides only same-origin
-        browser requests, and is re-minted on every login. An open (keyless)
-        server has nothing to exchange and returns ``authenticated: true``
-        without setting a cookie.
+        pass. The cookie carries a digest keyed over the per-install session
+        secret (never the key itself — see
+        :func:`ubt.api.security.session_cookie_value`), is HttpOnly +
+        SameSite=Lax so it rides only same-origin browser requests, carries a
+        one-week ``Max-Age`` so a signed-in browser stops authenticating after
+        a week, and is ``Secure`` whenever the request arrived over https (or
+        the deployment says production). Re-minted on every login. An open
+        (keyless) server has nothing to exchange and returns
+        ``authenticated: true`` without setting a cookie.
         """
         verify_api_key(x_api_key, ubt_session=None, _config=app_config)
         expected = app_config.service_api_key.get_secret_value().strip()
@@ -131,10 +144,13 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
             return {"authenticated": True}
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
-            value=session_cookie_value(expected),
+            value=session_cookie_value(
+                expected, session_secret=load_or_create_session_secret(app_config)
+            ),
             httponly=True,
             samesite="lax",
-            secure=False,
+            max_age=SESSION_COOKIE_MAX_AGE_S,
+            secure=cookie_secure_for_request(http_request.url.scheme),
         )
         return {"authenticated": True}
 
@@ -167,7 +183,7 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
             **describe_runtime_config(
                 live,
                 can_write_credential=credential_write_allowed(
-                    is_loopback=_bind_is_loopback(http_request),
+                    is_loopback=_credential_loopback(http_request),
                     is_strict=app_config.is_strict_auth(),
                 ),
                 frozen_fields_changed=(
@@ -361,7 +377,7 @@ def register_system_routes(api_app: FastAPI, scope: ApiScope) -> None:
         # inherit a future relaxation of the middleware.
         verify_api_key(x_api_key, ubt_session, _config=app_config)
         allow_credential = credential_write_allowed(
-            is_loopback=_bind_is_loopback(http_request),
+            is_loopback=_credential_loopback(http_request),
             is_strict=app_config.is_strict_auth(),
         )
         # ``exclude_unset``, not ``exclude_none``: an omitted field means "leave

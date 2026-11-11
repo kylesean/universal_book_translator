@@ -719,6 +719,18 @@ def translate(
             show_default=False,
         ),
     ] = None,
+    allow_needs_human: Annotated[
+        bool | None,
+        typer.Option(
+            "--allow-needs-human/--no-allow-needs-human",
+            help=(
+                "Permit export when NEEDS_HUMAN blocks (queued for human "
+                "post-editing) would ship unverified. Default refuses; when "
+                "allowed, the quality report lists every unverified block id"
+            ),
+            show_default=False,
+        ),
+    ] = None,
     enable_cels: Annotated[
         bool | None,
         typer.Option(
@@ -875,6 +887,7 @@ def translate(
         ),
         "allow_degrade": allow_degrade,
         "allow_major": allow_major,
+        "export_allow_needs_human": allow_needs_human,
         "enable_cels": enable_cels,
         "enable_dynamic_routing": dynamic_routing,
         "flagship_model": flagship_model,
