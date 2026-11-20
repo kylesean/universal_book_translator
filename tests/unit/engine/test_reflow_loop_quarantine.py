@@ -265,14 +265,14 @@ def _finding_codes(gate: Any) -> list[str]:
 def test_a_crashed_parity_probe_is_recorded_not_swallowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import ubt.core.ports as ports
+    import ubt.core.engine.artifact_services as services
 
     ledger = _RecordingLedger()
 
     def _boom(**_kwargs: Any) -> list[Any]:
         raise RuntimeError("parity exploded")
 
-    monkeypatch.setattr(ports, "artifact_parity_findings", _boom)
+    monkeypatch.setattr(services, "artifact_parity_findings", _boom)
     loop = _loop(
         tmp_path,
         ledger,

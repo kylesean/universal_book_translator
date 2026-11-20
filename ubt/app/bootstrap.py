@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from ubt.app.artifact_services import AdapterArtifactServices
 from ubt.app.pdf_facts import AdapterPdfFacts
+from ubt.core.engine.artifact_services import configure_artifact_services
 from ubt.core.engine.pdf_facts import configure_pdf_facts
 
 _installed = False
@@ -18,6 +20,7 @@ def install_services() -> None:
     if _installed:
         return
     configure_pdf_facts(AdapterPdfFacts())
+    configure_artifact_services(AdapterArtifactServices())
     _installed = True
 
 

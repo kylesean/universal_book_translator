@@ -18,12 +18,12 @@ from pathlib import Path
 from typing import Any
 
 from ubt.core.atomic import atomic_write_text
+from ubt.core.engine.artifact_services import run_visual_gate
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.exceptions import JobInterruptedError
 from ubt.core.ir.models import BlockStatus, BookManifest, IRBlock
 from ubt.core.job_options import sidecar_path
 from ubt.core.log_aggregate import noise_report
-from ubt.core.ports import get_visual_gate_runner
 from ubt.core.qe.defect_taxonomy import format_defect_flag
 
 logger = logging.getLogger(__name__)
@@ -61,9 +61,8 @@ class VisualVerifyLoop:
         pdf_path: Path,
         blocks: Sequence[IRBlock],
     ) -> Any:
-        runner = get_visual_gate_runner()
         return await asyncio.to_thread(
-            runner,
+            run_visual_gate,
             pdf_path,
             expected_page_count=self.expected_page_count,
             faithful_pages=self.faithful_pages,
@@ -178,7 +177,10 @@ class VisualVerifyLoop:
         source_pdf = Path(source_str)
         if source_pdf.exists():
             try:
-                from ubt.core.ports import artifact_parity_findings, probe_unavailable_finding
+                from ubt.core.engine.artifact_services import (
+                    artifact_parity_findings,
+                    probe_unavailable_finding,
+                )
 
                 sel_pages = (
                     getattr(getattr(self.manifest, "run", None), "selected_pages", None) or None

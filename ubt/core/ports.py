@@ -27,7 +27,6 @@ call site). If nothing calls a piece of surface, it does not belong here.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -38,17 +37,12 @@ if TYPE_CHECKING:
     # Type-only edges: they keep the port's signature checked against the
     # stage contracts without entering the runtime import graph. The layering
     # invariant forbids *module-level* edges only; a TYPE_CHECKING edge is not one.
-    from ubt.adapters.pdf.artifact_gate import VisualGateResult
-    from ubt.adapters.pdf.artifact_text import ArtifactReport
     from ubt.adapters.pdf.extraction_witness import PageVerdict
     from ubt.adapters.pdf.font_probe import FontStack
     from ubt.adapters.pdf.page_profiler import PageKind
     from ubt.adapters.pdf.pdf_profiler import PDFDocumentProfile
     from ubt.segment.placeholders import MaskedSource, PlaceholderEngine
     from ubt.translate.engine import TranslationEngine
-
-
-VisualGateRunnerFn = Callable[..., Any]
 
 
 def resolve_adapter(input_path: Path, pdf_engine: str = "auto") -> DocumentAdapter:
@@ -74,66 +68,6 @@ def detect_figure_pages(input_path: Path, blocks: list[Any]) -> set[int]:
     return set(_detect(input_path, blocks))
 
 
-def get_visual_gate_runner() -> VisualGateRunnerFn:
-    """Return the post-render visual gate entry point."""
-    from ubt.adapters.pdf.artifact_gate import run_visual_gate
-
-    return cast(VisualGateRunnerFn, run_visual_gate)
-
-
-def crashed_visual_gate_result(message: str) -> VisualGateResult:
-    """Gate result reporting the gate itself as failed (visual state unknown).
-
-    The gate dataclasses live in the adapters layer, so core stages build the
-    crash record through this bridge; a crash must not degrade to "no gate",
-    which skips blocking enforcement and reads as a perfect KPI pass.
-    """
-    from ubt.adapters.pdf.artifact_gate import VisualFinding, VisualGateResult
-
-    return VisualGateResult(
-        passed=False,
-        findings=(VisualFinding(severity="critical", code="visual_gate_crashed", message=message),),
-        stats={"total_pages": 0},
-    )
-
-
-def artifact_parity_findings(
-    *,
-    artifact_pdf: Path,
-    target_lang: str,
-    selected_pages: Sequence[int] | None = None,
-    source_lang: str | None = None,
-) -> list[Any]:
-    """T0.5 physical-evidence diff between delivered PDF and source.
-
-    Duck-typed findings: (severity, code, message); see visual_gate for the
-    contract. Empty list when the probes cannot answer.
-    """
-    from ubt.adapters.pdf.artifact_parity import check_artifact_parity
-
-    return list(
-        check_artifact_parity(
-            artifact_pdf=artifact_pdf,
-            target_lang=target_lang,
-            selected_pages=selected_pages,
-            source_lang=source_lang,
-        )
-    )
-
-
-def probe_unavailable_finding(code: str, message: str) -> Any:
-    """An advisory finding recording that a measurement probe did not run.
-
-    A probe that raises is not evidence of a defect, so this is ``info`` and
-    never blocks delivery -- but it must reach the report. Recording nothing
-    made a crashed probe indistinguishable from a clean measurement, so the
-    quality report showed a perfect pass for a check that never ran.
-    """
-    from ubt.adapters.pdf.artifact_parity import ParityFinding
-
-    return ParityFinding("info", code, message)
-
-
 def inspect_font_encoding_damage(pdf_path: Path) -> list[PageVerdict]:
     """Run the extraction witness; returns per-page verdicts."""
     from ubt.adapters.pdf.extraction_witness import inspect_pdf
@@ -153,31 +87,6 @@ def flag_font_encoding_damage(blocks: list[Any], verdicts: Any) -> list[Any]:
     from ubt.adapters.pdf.extraction_witness import annotate_blocks
 
     return cast("list[Any]", annotate_blocks(blocks, verdicts))
-
-
-def blocking_gate_tripped(
-    findings: Any,
-    total_pages: int,
-    enabled: bool,
-    *,
-    vlm_blocking_enabled: bool = False,
-) -> list[Any]:
-    """Opt-in blocking gate.
-
-    Returns the CRITICAL findings that refuse export for short docs when
-    enabled, plus a sampled VLM FAIL only when the separate VLM opt-in is on.
-    Duck-typed over findings (severity/code/page).
-    """
-    from ubt.adapters.pdf.artifact_gate import blocking_gate_tripped as _tripped
-
-    return list(
-        _tripped(
-            findings,
-            total_pages,
-            enabled,
-            vlm_blocking_enabled=vlm_blocking_enabled,
-        )
-    )
 
 
 def is_fast_lane_eligible(input_path: Path) -> bool:
@@ -268,49 +177,6 @@ def resolve_font_for_render(
     return _resolve(target_lang, font_override=font_override)
 
 
-def read_delivery_evidence(
-    rendered_path: Path,
-    *,
-    contract: str,
-    blocks: Sequence[Any],
-    expected_page_count: int | None = None,
-    missing_assets: Sequence[str] = (),
-    overflow_records: Sequence[Any] = (),
-    style_samples: Sequence[Any] = (),
-    read_geometry: bool = True,
-    exhibit_texts: Sequence[str] = (),
-    declared_page_expansion: bool = False,
-) -> Any:
-    """Read a delivered PDF into the delivery contract's evidence shape."""
-    from ubt.adapters.pdf.delivery_evidence import read_artifact_evidence
-
-    return read_artifact_evidence(
-        rendered_path,
-        contract=contract,
-        blocks=blocks,
-        exhibit_texts=exhibit_texts,
-        expected_page_count=expected_page_count,
-        missing_assets=missing_assets,
-        overflow_records=overflow_records,
-        style_samples=style_samples,
-        read_geometry=read_geometry,
-        declared_page_expansion=declared_page_expansion,
-    )
-
-
-def check_artifact(
-    blocks: Sequence[IRBlock],
-    translations: Mapping[str, str],
-    rendered_path: Path,
-) -> ArtifactReport:
-    """Check whether the delivered PDF artifact carries each text block's realization."""
-    from ubt.adapters.pdf.artifact_text import check_artifact as _check
-
-    # No cast: ``check_artifact`` already declares ``-> ArtifactReport``.
-    return _check(blocks, translations, rendered_path)
-
-
-# --------------------------------------------------------------------------- #
 # Translation-unit layer bridges (``ubt.segment`` / ``ubt.translate``).
 # --------------------------------------------------------------------------- #
 

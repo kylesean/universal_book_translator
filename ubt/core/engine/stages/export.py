@@ -30,6 +30,12 @@ from ubt.core.engine.adapter_runtime import (
     get_last_render_reconstructions,
     get_last_render_skips,
 )
+from ubt.core.engine.artifact_services import (
+    blocking_gate_tripped,
+    check_artifact,
+    crashed_visual_gate_result,
+    read_delivery_evidence,
+)
 from ubt.core.engine.delivery_freshness import record_rendered_digest, rendered_digest_for
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import NON_TERMINAL_STATUSES, SQLiteJobLedger
@@ -60,8 +66,6 @@ from ubt.core.job_options import (
 from ubt.core.metrics.collect import collect_kpis, save_metrics_report
 from ubt.core.policy.bilingual_advisor import SECONDARY_SUFFIX
 from ubt.core.ports import (
-    blocking_gate_tripped,
-    crashed_visual_gate_result,
     optimize_pdf_deliverable,
     pdf_page_count,
 )
@@ -1360,7 +1364,6 @@ def _delivery_contract_evidence(
         OverflowRecord,
         StyleSample,
     )
-    from ubt.core.ports import read_delivery_evidence
     from ubt.render.delivered_text import delivered_text, dropped_page_furniture, is_toc_entry
 
     # A snapshot taken before the complementary render: that render replaces
@@ -1763,7 +1766,6 @@ def _write_artifact_check(
     t0 = time.perf_counter()
     try:
         from ubt.core.job_options import companion_path
-        from ubt.core.ports import check_artifact
 
         artifact = check_artifact(blocks, translations, rendered_path)
         payload: dict[str, Any] = {"artifact": _artifact_payload(artifact)}

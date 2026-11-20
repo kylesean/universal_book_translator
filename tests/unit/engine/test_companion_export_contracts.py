@@ -262,7 +262,7 @@ def test_write_artifact_check_contract(tmp_path: Path) -> None:
         passed=True,
         summary_line=lambda: "1/1 blocks attested",
     )
-    with patch("ubt.core.ports.check_artifact", return_value=mock_report):
+    with patch("ubt.core.engine.stages.export.check_artifact", return_value=mock_report):
         res_success = _write_artifact_check(ctx_enabled, out_pdf, translations, [block])
         assert res_success.status == "generated"
         assert res_success.path is not None
@@ -272,7 +272,10 @@ def test_write_artifact_check_contract(tmp_path: Path) -> None:
         assert data["artifact"]["total"] == 1
         assert data["artifact"]["summary"] == "1/1 blocks attested"
 
-    with patch("ubt.core.ports.check_artifact", side_effect=RuntimeError("PyMuPDF parser error")):
+    with patch(
+        "ubt.core.engine.stages.export.check_artifact",
+        side_effect=RuntimeError("PyMuPDF parser error"),
+    ):
         res_fail = _write_artifact_check(ctx_enabled, out_pdf, translations, [block])
         assert res_fail.status == "failed"
         assert res_fail.error == "PyMuPDF parser error"
