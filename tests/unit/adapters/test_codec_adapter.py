@@ -32,14 +32,19 @@ async def test_a_markdown_document_round_trips_through_the_codec_adapter(tmp_pat
     assert "译" in output.read_text(encoding="utf-8")
 
 
-def test_the_factory_only_uses_the_codec_when_asked(tmp_path: Path) -> None:
+def test_the_factory_defaults_to_the_codec_and_keeps_an_inspection_adapter(
+    tmp_path: Path,
+) -> None:
+    from ubt.adapters.factory import get_inspection_adapter
+    from ubt.adapters.markdown.adapter import MarkdownAdapter
+
     source = tmp_path / "book.md"
     source.write_text("# Title\n", encoding="utf-8")
 
-    legacy = get_adapter_for_path(source)
-    codec = get_adapter_for_path(source, prefer_codec=True)
-    assert not isinstance(legacy, DocumentCodecAdapter)
+    codec = get_adapter_for_path(source)
+    inspection = get_inspection_adapter(source)
     assert isinstance(codec, DocumentCodecAdapter)
+    assert isinstance(inspection, MarkdownAdapter)
 
 
 @pytest.mark.asyncio

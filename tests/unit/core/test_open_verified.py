@@ -121,10 +121,10 @@ def test_the_adapter_factory_refuses_a_swapped_input(tmp_path: Path) -> None:
 
 
 def test_the_adapter_factory_still_resolves_a_real_file(tmp_path: Path) -> None:
+    from ubt.adapters.codec_adapter import DocumentCodecAdapter
     from ubt.adapters.factory import get_adapter_for_path
-    from ubt.adapters.markdown.adapter import MarkdownAdapter
 
     doc = tmp_path / "book.md"
     doc.write_text("# Chapter 1\n\nHello.\n", encoding="utf-8")
     adapter = get_adapter_for_path(doc, pdf_engine="auto")
-    assert isinstance(adapter, MarkdownAdapter)
+    assert isinstance(adapter, DocumentCodecAdapter)

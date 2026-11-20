@@ -23,8 +23,10 @@ class DocumentServices(Protocol):
         self,
         input_path: Path,
         pdf_engine: str = "auto",
-        *,
-        prefer_codec: bool = False,
+    ) -> DocumentAdapter: ...
+
+    def resolve_inspection_adapter(
+        self, input_path: Path, pdf_engine: str = "auto"
     ) -> DocumentAdapter: ...
 
     def detect_figure_pages(self, input_path: Path, blocks: list[Any]) -> set[int]: ...
@@ -88,13 +90,14 @@ def _provider() -> DocumentServices:
     return provider
 
 
-def resolve_adapter(
-    input_path: Path,
-    pdf_engine: str = "auto",
-    *,
-    prefer_codec: bool = False,
-) -> DocumentAdapter:
-    return _provider().resolve_adapter(input_path, pdf_engine=pdf_engine, prefer_codec=prefer_codec)
+def resolve_adapter(input_path: Path, pdf_engine: str = "auto") -> DocumentAdapter:
+    """Resolve the translation adapter: the codec for every non-PDF format."""
+    return _provider().resolve_adapter(input_path, pdf_engine=pdf_engine)
+
+
+def resolve_inspection_adapter(input_path: Path, pdf_engine: str = "auto") -> DocumentAdapter:
+    """Resolve the typed-reader adapter for read-only CLI/audit surfaces."""
+    return _provider().resolve_inspection_adapter(input_path, pdf_engine=pdf_engine)
 
 
 def detect_figure_pages(input_path: Path, blocks: list[Any]) -> set[int]:
@@ -223,6 +226,7 @@ __all__ = [
     "placeholder_engine",
     "reject_encrypted_pdf",
     "resolve_adapter",
+    "resolve_inspection_adapter",
     "resolve_font_for_render",
     "summarize_font_encoding_damage",
     "supported_suffixes",

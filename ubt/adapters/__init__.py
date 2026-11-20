@@ -5,6 +5,7 @@ from ubt.adapters.docx.adapter import DOCXAdapter
 from ubt.adapters.epub.adapter import EPUBAdapter
 from ubt.adapters.factory import (
     get_adapter_for_path,
+    get_inspection_adapter,
     is_pdf_engine_registered,
     register_adapter,
     register_pdf_engine,
@@ -25,6 +26,7 @@ __all__ = [
     "MarkdownAdapter",
     "PDFiumAdapter",
     "get_adapter_for_path",
+    "get_inspection_adapter",
     "is_pdf_engine_registered",
     "register_adapter",
     "register_pdf_engine",

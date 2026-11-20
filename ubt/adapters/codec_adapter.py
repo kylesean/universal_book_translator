@@ -205,10 +205,18 @@ class DocumentCodecAdapter(BaseDocumentAdapter):
             for block in blocks
             if block.target_text and not block.skip_translate
         }
+        units = self._units
+        if not units:
+            # Agent finish / re-export replace an existing ledger without a
+            # fresh parse, so the codec has no units cached yet. Re-extract the
+            # source to recover the line/byte spans `apply` patches; the block
+            # ids are the same ones the original ingest wrote.
+            _, units = await asyncio.to_thread(self._codec.extract, self._source)
+            self._units = list(units)
         report = await asyncio.to_thread(
             self._codec.apply,
             self._source,
-            self._units,
+            units,
             translations,
             target_lang=target_lang,
             mode=_resolve_mode(bilingual_mode),

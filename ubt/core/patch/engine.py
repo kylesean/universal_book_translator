@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ubt.core.config import UBTConfig
-from ubt.core.engine.document_services import resolve_adapter
+from ubt.core.engine.document_services import resolve_inspection_adapter
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.ir.models import (
     TERMINAL_STATUSES,
@@ -70,7 +70,7 @@ async def load_document_blocks(
             f"Source '{source}' is neither an active ledger job ID nor an existing file."
         )
 
-    adapter = resolve_adapter(source_path)
+    adapter = resolve_inspection_adapter(source_path)
     manifest = await adapter.extract_manifest(source_path)
     chapters: list[ChapterIR] = []
     async for chapter in adapter.parse_stream(source_path):
@@ -145,7 +145,7 @@ class BookPatchEngine:
         base_src, base_blocks, _ = await load_document_blocks(base_source, self.ledger, self.db_dir)
 
         # Ingest revised file
-        adapter = resolve_adapter(revised_file)
+        adapter = resolve_inspection_adapter(revised_file)
         manifest = await adapter.extract_manifest(revised_file)
         revised_chapters: list[ChapterIR] = []
         async for chapter in adapter.parse_stream(revised_file):

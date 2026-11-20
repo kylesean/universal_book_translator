@@ -187,7 +187,8 @@ def get_adapter_for_path(
     pdf_engine: str = "auto",
     *,
     sandbox_roots: Sequence[Path] | None = None,
-    prefer_codec: bool = False,
+    prefer_codec: bool = True,
+    inspection: bool = False,
 ) -> BaseDocumentAdapter:
     """Factory helper to resolve the appropriate document adapter by file extension.
 
@@ -212,7 +213,7 @@ def get_adapter_for_path(
     file_path = Path(path)
     suffix = file_path.suffix.lower()
 
-    if prefer_codec and suffix != ".pdf" and suffix in _ADAPTER_REGISTRY:
+    if prefer_codec and not inspection and suffix != ".pdf" and suffix in _ADAPTER_REGISTRY:
         _verify_input_open(file_path, sandbox_roots)
         return DocumentCodecAdapter(file_path)
 
@@ -223,6 +224,28 @@ def get_adapter_for_path(
 
     raise UnsupportedDocumentFormatError(
         f"No adapter registered for document extension '{suffix}' ({file_path.name})"
+    )
+
+
+def get_inspection_adapter(
+    path: Path | str,
+    pdf_engine: str = "auto",
+    *,
+    sandbox_roots: Sequence[Path] | None = None,
+) -> BaseDocumentAdapter:
+    """Resolve the typed-reader adapter used by read-only inspection surfaces.
+
+    Translation always goes through :class:`DocumentCodecAdapter`; the CLI
+    audits (table/math/figure/styler/backmatter) need the reader's semantic
+    blocks (``Table``, ``Formula``, ``Figure``) that the translation codec does
+    not project. Keeping the inspection adapter explicit stops the legacy
+    render path from being reachable by accident.
+    """
+    return get_adapter_for_path(
+        path,
+        pdf_engine=pdf_engine,
+        sandbox_roots=sandbox_roots,
+        inspection=True,
     )
 
 

@@ -15,12 +15,17 @@ class AdapterDocumentServices:
         self,
         input_path: Path,
         pdf_engine: str = "auto",
-        *,
-        prefer_codec: bool = False,
     ) -> DocumentAdapter:
         from ubt.adapters.factory import get_adapter_for_path
 
-        return get_adapter_for_path(input_path, pdf_engine=pdf_engine, prefer_codec=prefer_codec)
+        return get_adapter_for_path(input_path, pdf_engine=pdf_engine)
+
+    def resolve_inspection_adapter(
+        self, input_path: Path, pdf_engine: str = "auto"
+    ) -> DocumentAdapter:
+        from ubt.adapters.factory import get_inspection_adapter
+
+        return get_inspection_adapter(input_path, pdf_engine=pdf_engine)
 
     def detect_figure_pages(self, input_path: Path, blocks: list[Any]) -> set[int]:
         from ubt.adapters.pdf.svg_diagram import detect_figure_pages
