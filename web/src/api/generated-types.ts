@@ -1710,7 +1710,7 @@ export interface components {
             dual_mode?: ("mono" | "dual" | "auto") | null;
             /**
              * Delivery Mode
-             * @description PDF delivery contract: auto, readable or faithful; legacy reflow/facsimile/page_locked are accepted for one release
+             * @description PDF delivery contract: auto, readable or faithful
              */
             delivery_mode?: ("auto" | "readable" | "faithful") | null;
             /**

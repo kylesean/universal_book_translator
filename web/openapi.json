@@ -5830,7 +5830,7 @@
               }
             ],
             "title": "Delivery Mode",
-            "description": "PDF delivery contract: auto, readable or faithful; legacy reflow/facsimile/page_locked are accepted for one release"
+            "description": "PDF delivery contract: auto, readable or faithful"
           },
           "allow_degrade": {
             "anyOf": [

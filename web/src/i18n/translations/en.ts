@@ -152,7 +152,7 @@ export const en: TranslationDictionary = {
     stepQuality: 'Quality Profile',
     stepBudget: 'Budget Control',
     deliveryBadgeAuto: 'Smart Auto',
-    deliveryBadgeFaithful: '1:1 Facsimile',
+    deliveryBadgeFaithful: '1:1 Faithful',
     deliveryBadgeReadable: 'Reflow',
     deliveryDescAuto: 'Auto-selected by document geometry and formulas.',
     deliveryDescFaithful: 'Strict 1:1 geometry & page lock (papers, textbooks); needs a trustworthy text layer.',
@@ -244,11 +244,11 @@ export const en: TranslationDictionary = {
     domainFiction: 'Fiction',
     domainHumanities: 'Humanities',
     deliveryMode: 'Delivery Contract',
-    deliveryModeHelp: 'auto routes by document complexity; readable produces adaptive reflow; faithful produces a 1:1 publication facsimile (vector background, booktabs, formula slots). 1:1 needs a trustworthy source text layer: a scan or font-encoding damage degrades it to reflow, or refuses the run, depending on the switch below.',
+    deliveryModeHelp: 'auto routes by document complexity; readable produces adaptive reflow; faithful produces a 1:1 in-place publication (vector background, booktabs, formula slots). 1:1 needs a trustworthy source text layer: a scan or font-encoding damage degrades it to reflow, or refuses the run, depending on the switch below.',
     deliveryModeAuto: 'Auto Route',
     deliveryModeReadable: 'Adaptive Reflow',
-    deliveryModeFaithful: '1:1 Physical Facsimile',
-    faithfulShowcaseTitle: '1:1 Facsimile Options',
+    deliveryModeFaithful: '1:1 Physical Faithful',
+    faithfulShowcaseTitle: '1:1 Faithful Options',
     faithfulShowcaseDesc: 'Preserves original geometry and vector backgrounds with adaptive typography.',
     faithfulFeatureStretch: 'Variable Font Stretch',
     faithfulFeatureBooktabs: 'Academic Booktabs',
@@ -256,11 +256,11 @@ export const en: TranslationDictionary = {
     faithfulFeatureAnchor: 'Rigid Figure Anchoring',
     faithfulPresetRecommendation: 'Recommended with Publication-Grade preset for highest fidelity.',
     faithfulPresetSwitchAction: 'Switch to Publication-Grade',
-    faithfulInfeasibleTitle: 'This document cannot promise a 1:1 facsimile',
+    faithfulInfeasibleTitle: 'This document cannot promise a 1:1 faithful',
     faithfulInfeasibleFontDamage:
-      'Pre-flight confirmed font-encoding damage on {pages}/{total} pages; the text layer is untrustworthy, so page-locked 1:1 is infeasible.',
+      'Pre-flight confirmed font-encoding damage on {pages}/{total} pages; the text layer is untrustworthy, so faithful 1:1 is infeasible.',
     faithfulInfeasibleScanned:
-      'Pre-flight classifies the source as scan/image-dominant; the text layer is untrustworthy, so page-locked 1:1 is infeasible.',
+      'Pre-flight classifies the source as scan/image-dominant; the text layer is untrustworthy, so faithful 1:1 is infeasible.',
     faithfulInfeasibleDegrade:
       '“Fallback to Reflow if 1:1 Infeasible” is enabled, so this run will deliver an adaptive reflow copy.',
     faithfulInfeasibleRefuse:
@@ -269,7 +269,7 @@ export const en: TranslationDictionary = {
       'How to fix: re-export the original PDF, or repair the font encoding with OCR/manual proofing, then run again.',
     allowDegrade: 'Fallback to Reflow if 1:1 Infeasible',
     allowDegradeHelp:
-      'Enabled: Prioritizes 1:1 physical facsimile; if scanned pages or corrupt fonts prevent layout locking, automatically delivers a reflow edition to prevent job failure.\nDisabled: Strict 1:1 mode. Only runs when the source document fully supports 1:1 geometry locking; otherwise intercepts pre-flight.\n(Note: Per-page text collision avoidance and adaptive layout fitting are handled automatically by the engine.)',
+      'Enabled: Prioritizes 1:1 in-place delivery; if scanned pages or corrupt fonts prevent layout locking, automatically delivers a reflow edition to prevent job failure.\nDisabled: Strict 1:1 mode. Only runs when the source document fully supports 1:1 geometry locking; otherwise intercepts pre-flight.\n(Note: Per-page text collision avoidance and adaptive layout fitting are handled automatically by the engine.)',
     dualMode: 'Delivery Mode',
     dualModeHelp:
       'Smart Auto starts bilingual and lets the layout advisor step it down to target-only when the layout cannot pair cleanly.',
@@ -480,17 +480,17 @@ export const en: TranslationDictionary = {
     degradedModeFlow: 'Requested: {requested} · Delivered: {actual}',
     degradeReasonCodes: {
       text_trust_low:
-        'The source text layer is only {text_trust} trustworthy (below {threshold}); usually font-encoding damage, so page-locked 1:1 cannot be promised.',
+        'The source text layer is only {text_trust} trustworthy (below {threshold}); usually font-encoding damage, so faithful 1:1 cannot be promised.',
       scanned_source:
-        'The source is scan/image-dominant, so its text layer is untrustworthy and page-locked 1:1 cannot be promised.',
+        'The source is scan/image-dominant, so its text layer is untrustworthy and faithful 1:1 cannot be promised.',
       source_overlap:
-        'The source carries overlapping text layers, so page-locked 1:1 cannot be promised.',
-      page_lock_infeasible: 'No page-locked 1:1 layout could be solved for this source.',
+        'The source carries overlapping text layers, so faithful 1:1 cannot be promised.',
+      page_lock_infeasible: 'No faithful 1:1 layout could be solved for this source.',
       post_render_fallback:
         'The 1:1 layout failed its delivery contract at render time, so it fell back to reflow.',
-      faithful_ineligible: 'This document does not meet the 1:1 facsimile delivery conditions.',
+      faithful_ineligible: 'This document does not meet the 1:1 faithful delivery conditions.',
     },
-    deliveryModeBadgeFaithful: '1:1 Facsimile',
+    deliveryModeBadgeFaithful: '1:1 Faithful',
     deliveryModeBadgeReadable: 'Adaptive Reflow',
     companionArtifactsTitle: 'Companion artifacts & telemetry',
     companionGeneratedBadge: 'Generated',

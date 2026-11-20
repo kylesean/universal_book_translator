@@ -125,10 +125,7 @@ class JobSubmitRequest(BaseModel):
     )
     delivery_mode: DeliveryMode | None = Field(
         default=None,
-        description=(
-            "PDF delivery contract: auto, readable or faithful; legacy reflow/"
-            "facsimile/page_locked are accepted for one release"
-        ),
+        description=("PDF delivery contract: auto, readable or faithful"),
     )
     allow_degrade: bool | None = Field(
         default=None,
@@ -759,7 +756,7 @@ class DeliverableListResponse(BaseModel):
     delivery_verdict: str | None = None
     #: Companion artifact export audit summaries (e.g. status, size, reason).
     companion_artifacts: list[dict[str, Any]] | None = None
-    #: The mode the renderer actually produced (``reflow``/``facsimile``/...).
+    #: The contract the renderer actually produced (``readable``/``faithful``).
     #: For an explicit ``faithful`` request this is the *effective* mode, which
     #: may differ from the plan's contract when the planner degraded it.
     delivery_mode: str | None = None

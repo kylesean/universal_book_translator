@@ -206,8 +206,8 @@ const statusBadgeClass = (status: string): string =>
 const stageLabel = (t: ReturnType<typeof useI18n>['t'], stage: string): string =>
   t.mission.stageNames[stage] ?? t.mission.jobStatuses[stage] ?? stage.toUpperCase()
 
-/** Modes that satisfy a 1:1 promise; the planner maps faithful to facsimile. */
-const FAITHFUL_DELIVERY_MODES = new Set(['faithful', 'facsimile', 'page_locked'])
+/** The contract that satisfies a 1:1 promise. */
+const FAITHFUL_DELIVERY_MODES = new Set(['faithful'])
 
 const deliveryModeLabel = (
   t: ReturnType<typeof useI18n>['t'],

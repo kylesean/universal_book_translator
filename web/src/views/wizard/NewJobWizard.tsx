@@ -602,7 +602,7 @@ export function NewJobWizard() {
   /**
    * The engine's faithful gate is measured, not assumed: a source with
    * confirmed font-encoding damage (or a scan) has an untrustworthy text
-   * layer, so `text_trust` falls below 0.80 and page-locked 1:1 is vetoed
+   * layer, so `text_trust` falls below 0.80 and faithful 1:1 is vetoed
    * (`ubt/delivery/router.py`). The pre-flight already measures both signals
    * (`FONT_RESIDUE_RISK.params.confirmed_pages`, `scan_page_share`), so the
    * wizard can say the same thing the engine will say — before submission
