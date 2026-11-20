@@ -555,17 +555,7 @@ class QualityConfig(BaseModel):
     qe_judge_sentences: bool = True
     visual_gate_enabled: bool = True
     render_preflight_enabled: bool = True
-    visual_judge_enabled: bool = True
-    visual_judge_model: str | None = None
-    visual_sample_pages: int = Field(default=6, ge=0, le=50)
-    visual_max_vlm_pages: int = Field(default=20, ge=0, le=50)
     visual_blocking_gate_enabled: bool = False
-    #: VLM judge FAIL is advisory by default: the judge samples a handful of
-    #: pages, so a model false positive must not refuse a whole book. Set this
-    #: true to make a sampled VLM FAIL blocking for short documents (within
-    #: ``QA_FULL_GATE_MAX_PAGES``); long books keep the finding as needs-human
-    #: because the sample is not representative.
-    visual_vlm_blocking_enabled: bool = False
     deterministic_glossary_long_route: bool = False
     export_min_completion_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
     export_allow_needs_human: bool = True
@@ -1076,7 +1066,7 @@ class UBTConfig(BaseSettings):
         ),
     )
 
-    # -- Post-render visual gate (T0/T1 deterministic always safe; T2 VLM sampled) --
+    # -- Post-render deterministic artifact gate ---------------------------------
     visual_gate_enabled: bool = True
     # -- Spend-the-tokens gate (pre-flight render before Stage 3 bills) --
     # Compiles a source-text sample through the real PDF renderer so a broken
@@ -1086,8 +1076,6 @@ class UBTConfig(BaseSettings):
     # syntax defects that only appear once target text exists surface later, at
     # the export syntax-fallback gate.
     render_preflight_enabled: bool = True
-    visual_judge_enabled: bool = True
-    visual_judge_model: str | None = None
     # Hard USD cap for one job, measured across every resume: the ledger keeps the
     # job's lifetime token totals, so restarting a stopped job cannot start a
     # fresh budget. None = uncapped. Exceeding fails the job; blocks already
@@ -1165,19 +1153,12 @@ class UBTConfig(BaseSettings):
     # time and points at a vetted offline snapshot (HF_HOME) instead. Set
     # UBT_VLM_TRUST_REMOTE_CODE=true to opt in and keep the recipe working.
     vlm_trust_remote_code: bool = False
-    visual_sample_pages: int = Field(default=6, ge=0, le=50)
-    visual_max_vlm_pages: int = Field(default=20, ge=0, le=50)
-    # -- visual blocking gate (opt-in for long docs; short docs fail closed) ---
-    # Short docs (<= QA_FULL_GATE_MAX_PAGES) enforce visual blocking fail-closed
-    # by default. For longer docs, setting this to true refuses export when
-    # CRITICAL visual findings are detected; default false keeps the visual report
-    # + NEEDS_HUMAN quarantine without blocking long doc delivery.
+    # -- artifact blocking gate (opt-in for long docs; short docs fail closed) --
+    # Short docs (<= QA_FULL_GATE_MAX_PAGES) enforce critical artifact findings
+    # fail-closed by default. For longer docs, setting this to true refuses
+    # export when a critical finding is detected; default false keeps the report
+    # + NEEDS_HUMAN quarantine without blocking long-document delivery.
     visual_blocking_gate_enabled: bool = False
-    #: VLM FAIL is major and advisory by default. This opts into blocking a
-    #: short document (<= ``QA_FULL_GATE_MAX_PAGES``) when a sampled page fails
-    #: the VLM judge; long books keep it as needs-human because the sample is
-    #: not representative. Mirrored on the flat surface for CLI/REST/MCP.
-    visual_vlm_blocking_enabled: bool = False
     # -- deterministic glossary enforcement on the long route ----------------
     # The export-time literal term substitution (word-boundary + protected-span
     # + compound + jieba fail-closed guards, see glossary_enforcer.py) is

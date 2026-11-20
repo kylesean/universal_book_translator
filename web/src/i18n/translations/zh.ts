@@ -328,10 +328,6 @@ export const zh: TranslationDictionary = {
       '主产物是双语对照；开启后额外产出一份仅译文 PDF，时间与体积约翻倍。',
     emitBothHelpMono:
       '主产物是仅译文；开启后额外产出一份双语对照 PDF，时间与体积约翻倍。',
-    visualJudge: '渲染质检',
-    visualJudgeHelp:
-      '翻译排版完成后抽取至多 3 页，交给视觉模型检查版面破损与公式断裂，结果计入质检报告。会额外消耗 token，且需要开启页面外发。',
-    visualJudgeBlocked: '页面外发已关闭，视觉抽查将自动跳过。',
     concurrency: '并发请求数',
     concurrencyHelp: '同时进行的模型请求数。调高会更快完成，但更容易触发限流。',
     concurrencyAuto: '自动',

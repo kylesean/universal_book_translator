@@ -651,8 +651,6 @@ class PipelineOrchestrator:
             self.router.repair_model,
             *self.router.fallback_models,
         ]
-        if self.config.visual_judge_enabled:
-            models.append(self.config.visual_judge_model)
         # The OCR channel bills a model of its own through its own httpx client
         # (see cloud_driver). Leaving it out of this enumeration let a capped
         # run select an unpriced vision model, pass pre-flight, and then spend
@@ -1091,11 +1089,10 @@ class PipelineOrchestrator:
         # machine (visual repair / cloud OCR / VLM judge) — this must never
         # happen silently.
         logger.info(
-            "Page-image egress policy: allow_page_upload=%s (ocr_mode=%s, "
-            "visual_judge=%s). UBT_ALLOW_PAGE_UPLOAD=false keeps every page image local.",
+            "Page-image egress policy: allow_page_upload=%s (ocr_mode=%s). "
+            "UBT_ALLOW_PAGE_UPLOAD=false keeps every page image local.",
             self.config.allow_page_upload,
             self.config.ocr_mode,
-            self.config.visual_judge_enabled,
         )
         # The local half of the same disclosure: ledgers store the full source
         # and target text, and files created before UBT restricted its own

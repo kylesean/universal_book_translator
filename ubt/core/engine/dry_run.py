@@ -168,7 +168,6 @@ def create_dry_run_orchestrator(
         update={
             "ocr_mode": "off",
             "allow_page_upload": False,
-            "visual_judge_enabled": False,
             # One store per run kind. ``managed_dir``/``uploads_dir``/
             # ``outputs_dir`` all derive from ``db_dir``, so this one change
             # moves the rehearsal's ledger, its staged uploads and its

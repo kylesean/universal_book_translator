@@ -345,11 +345,11 @@ def assess_cmd(
     )
     cost_table.add_row(
         ui_msg(
-            f"Visual (VLM {cost.vlm_page_calls} + OCR {cost.ocr_page_calls} pages)",
-            f"视觉 (VLM {cost.vlm_page_calls} + OCR {cost.ocr_page_calls} 页)",
+            f"OCR ({cost.ocr_page_calls} pages)",
+            f"视觉 OCR（{cost.ocr_page_calls} 页）",
         ),
         ui_msg("not triggered", "不触发")
-        if not (cost.vlm_page_calls or cost.ocr_page_calls)
+        if not cost.ocr_page_calls
         else _assess_money(cost.vision_cost_usd),
     )
     cost_table.add_row(

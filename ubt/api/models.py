@@ -94,9 +94,6 @@ class JobAssessRequest(BaseModel):
     ocr_mode: OcrMode | None = Field(
         default=None, description="OCR engine the job will use (affects the vision line)"
     )
-    visual_judge_enabled: bool | None = Field(
-        default=None, description="Quote the VLM visual judge over rendered pages"
-    )
     max_concurrency: int | None = Field(
         default=None, gt=0, description="Concurrent LLM requests (drives the runtime estimate)"
     )
@@ -177,7 +174,6 @@ class AssessCost(BaseModel):
     repair_cost_usd: float | None = None
     qe_calls: int
     qe_cost_usd: float | None = None
-    vlm_page_calls: int
     ocr_page_calls: int
     vision_cost_usd: float | None = None
     rollup_calls: int

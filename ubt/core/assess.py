@@ -186,7 +186,6 @@ class CostQuote:
     repair_cost_usd: float | None
     qe_calls: int
     qe_cost_usd: float | None
-    vlm_page_calls: int
     ocr_page_calls: int
     vision_cost_usd: float | None
     rollup_calls: int
@@ -619,20 +618,7 @@ def _build_cost(
             base_url=config.base_url,
         )
 
-    # The visual judge ships rendered pages to a vision model; with the page
-    # egress gate closed (the default) every call fails before the request and
-    # is recorded as an info finding, so the quoted pages can never be billed.
-    vlm_page_calls = (
-        min(pages, config.visual_max_vlm_pages)
-        if (config.visual_judge_enabled and config.allow_page_upload)
-        else 0
-    )
     ocr_page_calls = scan_pages if (scan_pages and config.ocr_mode == "cloud") else 0
-    # The two channels bill different models: the visual judge runs on
-    # ``visual_judge_model`` while the OCR driver bills ``UBT_OCR_MODEL``. UBT
-    # ships no OCR model default, so an unset one leaves the vision figure
-    # unknown (warned below) rather than priced at a vendor's shipped model.
-    vlm_model = getattr(config, "visual_judge_model", None) or config.repair_model
     if ocr_page_calls and not config.ocr_model.strip():
         warnings.append(
             AssessmentWarning(
@@ -643,13 +629,10 @@ def _build_cost(
             )
         )
     # The OCR channel bills its own endpoint (empty map value = the OpenAI
-    # default, i.e. remote); the visual judge bills the router's ``base_url``.
+    # default, i.e. remote).
     ocr_endpoint = config.remote_billing_models().get(config.ocr_model, config.base_url)
     vision_cost: float | None = None
-    for calls, model, endpoint in (
-        (vlm_page_calls, vlm_model, config.base_url),
-        (ocr_page_calls, config.ocr_model, ocr_endpoint),
-    ):
+    for calls, model, endpoint in ((ocr_page_calls, config.ocr_model, ocr_endpoint),):
         if not calls:
             continue
         component = _price_component(
@@ -691,7 +674,6 @@ def _build_cost(
             (config.draft_model, billable_blocks > 0, config.base_url),
             (config.repair_model, repair_blocks > 0, config.base_url),
             (qe_model, qe_calls > 0, config.base_url),
-            (vlm_model, vlm_page_calls > 0, config.base_url),
             # OCR bills its own model (UBT_OCR_MODEL) through its own endpoint.
             (config.ocr_model, ocr_page_calls > 0, ocr_endpoint),
             (config.draft_model, rollup_calls > 0, config.base_url),
@@ -713,7 +695,7 @@ def _build_cost(
         draft.cost_usd_uncached if billable_blocks else 0.0,
         repair.cost_usd_uncached if repair_blocks else 0.0,
         qe_cost if qe_calls else 0.0,
-        vision_cost if (vlm_page_calls or ocr_page_calls) else 0.0,
+        vision_cost if ocr_page_calls else 0.0,
         rollup_cost if rollup_calls else 0.0,
     ]
     total: float | None = None
@@ -734,7 +716,6 @@ def _build_cost(
         repair_cost_usd=repair.cost_usd_uncached if repair_blocks else None,
         qe_calls=qe_calls,
         qe_cost_usd=qe_cost,
-        vlm_page_calls=vlm_page_calls,
         ocr_page_calls=ocr_page_calls,
         vision_cost_usd=vision_cost,
         rollup_calls=rollup_calls,
@@ -1103,12 +1084,7 @@ async def assess_document_async(
 
     draft_calls = cost.draft_calls
     total_calls = (
-        draft_calls
-        + cost.repair_calls
-        + cost.qe_calls
-        + cost.vlm_page_calls
-        + cost.ocr_page_calls
-        + cost.rollup_calls
+        draft_calls + cost.repair_calls + cost.qe_calls + cost.ocr_page_calls + cost.rollup_calls
     )
     total_tokens = cost.prompt_tokens + cost.completion_tokens
     runtime = _runtime_estimate(

@@ -37,7 +37,6 @@ def _config(tmp_path: Path) -> UBTConfig:
             "db_dir": tmp_path / "ledgers",
             "ocr_mode": "off",
             "allow_page_upload": False,
-            "visual_judge_enabled": False,
         }
     )
 

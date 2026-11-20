@@ -33,8 +33,6 @@ class ArtifactServices(Protocol):
         findings: Any,
         total_pages: int,
         enabled: bool,
-        *,
-        vlm_blocking_enabled: bool = False,
     ) -> list[Any]: ...
 
     def read_evidence(self, rendered_path: Path, **kwargs: Any) -> Any: ...
@@ -91,15 +89,8 @@ def blocking_gate_tripped(
     findings: Any,
     total_pages: int,
     enabled: bool,
-    *,
-    vlm_blocking_enabled: bool = False,
 ) -> list[Any]:
-    return _provider().blocking_gate(
-        findings,
-        total_pages,
-        enabled,
-        vlm_blocking_enabled=vlm_blocking_enabled,
-    )
+    return _provider().blocking_gate(findings, total_pages, enabled)
 
 
 def read_delivery_evidence(rendered_path: Path, **kwargs: Any) -> Any:

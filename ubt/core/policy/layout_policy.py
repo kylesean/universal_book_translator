@@ -296,8 +296,7 @@ QA_FULL_GATE_MAX_PAGES = 20
 # 20..BAND: stratified sampling (~20%, floor 6, cap QA_TIERED_BAND_SAMPLE).
 QA_TIERED_BAND_PAGES = 100
 QA_TIERED_BAND_SAMPLE = 10
-# > BAND: fixed anchor set (flagged + cover/TOC/tail). VLM cap is separate
-# (config.visual_max_vlm_pages) and never scales with book size.
+# > BAND: fixed anchor set (flagged + cover/TOC/tail).
 QA_LONG_BOOK_SAMPLE = 10
 
 # ---------------------------------------------------------------------------

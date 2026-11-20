@@ -40,4 +40,3 @@ def test_the_rehearsal_still_closes_every_egress_path(tmp_path: Path) -> None:
 
     assert config.ocr_mode == "off"
     assert config.allow_page_upload is False
-    assert config.visual_judge_enabled is False

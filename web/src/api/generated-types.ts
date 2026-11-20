@@ -1109,8 +1109,6 @@ export interface components {
             qe_calls: number;
             /** Qe Cost Usd */
             qe_cost_usd?: number | null;
-            /** Vlm Page Calls */
-            vlm_page_calls: number;
             /** Ocr Page Calls */
             ocr_page_calls: number;
             /** Vision Cost Usd */
@@ -1457,11 +1455,6 @@ export interface components {
              */
             ocr_mode?: ("off" | "auto" | "local" | "cloud") | null;
             /**
-             * Visual Judge Enabled
-             * @description Quote the VLM visual judge over rendered pages
-             */
-            visual_judge_enabled?: boolean | null;
-            /**
              * Max Concurrency
              * @description Concurrent LLM requests (drives the runtime estimate)
              */
@@ -1663,16 +1656,6 @@ export interface components {
              * @description Translate chapter-by-chapter as discovery lands
              */
             chapter_streaming_enabled?: boolean | null;
-            /**
-             * Visual Judge Enabled
-             * @description Enable the VLM visual judge over rendered pages
-             */
-            visual_judge_enabled?: boolean | null;
-            /**
-             * Visual Judge Model
-             * @description Model the visual judge runs on
-             */
-            visual_judge_model?: string | null;
             /**
              * Translate Chrome
              * @description Translate running heads, footers and page chrome

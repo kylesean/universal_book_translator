@@ -26,7 +26,6 @@ def test_a_rehearsal_builds_the_zero_spend_wiring() -> None:
     assert isinstance(orchestrator.qe_runner, MockQERunner)
     assert orchestrator.config.ocr_mode == "off"
     assert orchestrator.config.allow_page_upload is False
-    assert orchestrator.config.visual_judge_enabled is False
     assert config.ocr_mode != "off"
 
 

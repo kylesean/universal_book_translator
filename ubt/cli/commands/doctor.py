@@ -974,12 +974,10 @@ def collect_checks(
             )
         elif config.ocr_mode == "auto":
             routes.append("OCR auto: local first, then cloud")
-        if config.visual_judge_enabled:
-            routes.append(f"VLM page judge -> {config.visual_judge_model or config.repair_model}")
         routes.append("visual scalpel page crops -> repair model (when vision-capable)")
         record(
             "Page images",
-            "WARN" if config.ocr_mode in ("cloud", "auto") or config.visual_judge_enabled else "OK",
+            "WARN" if config.ocr_mode in ("cloud", "auto") else "OK",
             "allowed; active routes: " + "; ".join(routes),
             fix="set UBT_ALLOW_PAGE_UPLOAD=false to keep pages local",
             code="page_images",

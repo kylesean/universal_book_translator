@@ -53,7 +53,6 @@ def _config(
         "db_dir": tmp_path / "ledgers",
         "ocr_mode": "off",
         "allow_page_upload": False,
-        "visual_judge_enabled": False,
     }
     if pdf_engine is not None:
         updates["pdf_engine"] = pdf_engine

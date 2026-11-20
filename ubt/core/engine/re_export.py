@@ -10,14 +10,9 @@ the artifact the caller downloads.
 
 Only the export stage runs. Every block is already terminal (a human edit stamps
 ``REPAIRED``), so no drafting, QE or repair is invoked and no token is spent —
-the re-export is a pure re-render. That zero-spend contract is enforced, not
-assumed: the export stage's visual gate reads the config bound on the ctx, and
-an operator with ``visual_judge_enabled`` would otherwise make paid VLM calls a
-path that binds no usage sink never bills — so the re-export runs on a config
-copy with the judge closed, the same closure the rehearsal path applies. The
-deterministic T0/T1 visual checks still run. The render mode is read back from
-the ledger where the first export persisted it, so a bilingual book stays
-bilingual.
+the re-export is a pure re-render. The deterministic artifact checks still run.
+The render mode is read back from the ledger where the first export persisted
+it, so a bilingual book stays bilingual.
 
 This is deliberately *not* a second pipeline: the block set, the glossary, and
 the render mode all come from the ledger, so a re-export cannot diverge from what
@@ -386,7 +381,7 @@ async def re_export_job(
         # config bound on the ctx, and this path bills nothing (it binds no
         # usage sink), so a paid judge here would spend invisibly to every
         # budget surface.
-        export_config = config.model_copy(update={"visual_judge_enabled": False})
+        export_config = config
         if delivery_mode is not None:
             # The adapter's renderer reads ``config.typst.delivery_mode``; the
             # manifest metadata alone would leave it on the original mode.

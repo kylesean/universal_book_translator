@@ -348,11 +348,6 @@ export const en: TranslationDictionary = {
       'The primary deliverable is the bilingual PDF; when on, a mono-translation PDF is rendered alongside it (roughly double time and size).',
     emitBothHelpMono:
       'The primary deliverable is the mono-translation PDF; when on, a bilingual PDF is rendered alongside it (roughly double time and size).',
-    visualJudge: 'Render QC',
-    visualJudgeHelp:
-      'After rendering, up to 3 sampled pages go to a vision model to catch broken layout and split formulas; findings land in the quality report. Costs extra tokens and needs page egress enabled.',
-    visualJudgeBlocked:
-      'Page egress is off, so the visual check will skip every page. Enable page egress to use it.',
     concurrency: 'Parallel requests',
     concurrencyHelp:
       'How many model requests may be in flight at once. Higher finishes sooner but hits rate limits more often.',

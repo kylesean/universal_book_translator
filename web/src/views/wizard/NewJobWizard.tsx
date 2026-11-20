@@ -223,7 +223,6 @@ export function NewJobWizard() {
   // control reached. Only the ones a user can actually reason about are here;
   // ``draft_model``/``pdf_engine``/``batch_limit`` stay operator territory.
   const [emitBoth, setEmitBoth] = useState<'auto' | 'on' | 'off'>('auto')
-  const [visualJudge, setVisualJudge] = useState<'auto' | 'on' | 'off'>('auto')
   // Empty = follow the operator's UBTConfig.max_concurrency.
   const [concurrency, setConcurrency] = useState('')
   const [domainHint, setDomainHint] = useState('')
@@ -351,7 +350,6 @@ export function NewJobWizard() {
           provider: provider || null,
           repair_provider: repairProvider || null,
           ocr_mode: ocrMode === 'auto' ? null : ocrMode,
-          visual_judge_enabled: visualJudge === 'auto' ? null : visualJudge === 'on',
           // An invalid value prices as unset — the field-level guard stops the
           // submit; the quote must not 422 on the way.
           max_concurrency:
@@ -374,7 +372,6 @@ export function NewJobWizard() {
           provider,
           repairProvider,
           ocrMode,
-          visualJudge,
           concurrency.trim(),
         ].join('\u0000')
 
@@ -434,8 +431,7 @@ export function NewJobWizard() {
             provider,
             repairProvider,
             ocrMode,
-            visualJudge,
-            concurrency.trim(),
+              concurrency.trim(),
           ].join('\u0000')
         }
       } finally {
@@ -454,7 +450,7 @@ export function NewJobWizard() {
         }
       }
     },
-    [preset, pageRange, targetLang, sourceLang, provider, repairProvider, ocrMode, visualJudge, concurrency]
+    [preset, pageRange, targetLang, sourceLang, provider, repairProvider, ocrMode, concurrency]
   )
 
   // The live fingerprint and the latest callback, read at completion time.
@@ -467,7 +463,6 @@ export function NewJobWizard() {
     provider,
     repairProvider,
     ocrMode,
-    visualJudge,
     concurrency.trim(),
   ].join('\u0000')
   const runAssessRef = useRef(runAssess)
@@ -722,9 +717,6 @@ export function NewJobWizard() {
     // null = follow UBT_OCR_MODE / config default.
     ocr_mode: ocrMode === 'auto' ? null : ocrMode,
     emit_both: emitBoth === 'auto' ? null : emitBoth === 'on',
-    // A judge with egress closed never runs, so do not claim it will.
-    visual_judge_enabled:
-      visualJudge === 'auto' || pageEgressClosed ? null : visualJudge === 'on',
     // Empty = operator default; the engine rejects anything below 1.
     max_concurrency: concurrency.trim() ? Number(concurrency) : null,
     domain: domainHint.trim() ? domainHint.trim() : null,
@@ -1831,39 +1823,6 @@ export function NewJobWizard() {
                         />
                         {concurrencyInvalid && (
                           <p className="text-xs text-destructive">{t.wizard.fieldMinOne}</p>
-                        )}
-                      </div>
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel htmlFor="wizard-visual-judge">{t.wizard.visualJudge}</FieldLabel>
-                          <InfoTip label={t.wizard.visualJudge}>{t.wizard.visualJudgeHelp}</InfoTip>
-                        </div>
-                        <ChoiceSelect
-                          id="wizard-visual-judge"
-                          value={visualJudge}
-                          onValueChange={(value) => setVisualJudge(value as typeof visualJudge)}
-                          disabled={pageEgressClosed}
-                          options={[
-                            { value: 'auto', label: t.wizard.toggleAuto },
-                            { value: 'on', label: t.wizard.toggleOn },
-                            { value: 'off', label: t.wizard.toggleOff },
-                          ]}
-                        />
-                        {pageEgressClosed && (
-                          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
-                            <span className="text-muted-foreground">
-                              {t.wizard.visualJudgeBlocked}
-                            </span>
-                            <Button
-                              type="button"
-                              variant="link"
-                              size="sm"
-                              onClick={openEgressConfirm}
-                              className="h-auto shrink-0 text-xs"
-                            >
-                              {t.wizard.egressEnableBtn}
-                            </Button>
-                          </div>
                         )}
                       </div>
                     </div>

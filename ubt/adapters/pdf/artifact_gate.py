@@ -297,14 +297,8 @@ def blocking_gate_tripped(
     findings: Sequence[VisualFinding],
     total_pages: int,
     enabled: bool,
-    *,
-    vlm_blocking_enabled: bool = False,
 ) -> list[VisualFinding]:
-    """Critical findings that refuse export, plus the always-fail-closed ones.
-
-    ``vlm_blocking_enabled`` is accepted for callers whose configuration still
-    names it; the VLM tier no longer exists, so it changes nothing.
-    """
+    """Critical findings that refuse export, plus the always-fail-closed ones."""
     if total_pages < 0:
         return [finding for finding in findings if finding.severity == "critical"]
     always_fail = [

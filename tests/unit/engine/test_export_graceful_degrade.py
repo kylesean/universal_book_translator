@@ -35,9 +35,7 @@ async def test_export_degrade_to_reflow_on_faithful_failure(tmp_path: Path) -> N
     ctx = SimpleNamespace(
         job_id="job_test_123",
         manifest=manifest,
-        config=SimpleNamespace(
-            allow_major=False, allow_degrade=True, visual_vlm_blocking_enabled=False
-        ),
+        config=SimpleNamespace(allow_major=False, allow_degrade=True),
         is_mock_run=False,
         target_lang="zh",
         ledger=MagicMock(),

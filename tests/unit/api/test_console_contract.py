@@ -549,7 +549,7 @@ def test_the_wizard_quotes_the_provider_it_will_submit() -> None:
     assert match, "NewJobWizard.tsx has no assessJob({...}) call"
 
     body = match.group(1)
-    for key in ("provider", "ocr_mode", "visual_judge_enabled", "max_concurrency"):
+    for key in ("provider", "ocr_mode", "max_concurrency"):
         assert f"{key}:" in body, (
             f"assessJob() does not send {key}; the quote then prices a different "
             "configuration than the submit will run"

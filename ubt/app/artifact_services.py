@@ -46,19 +46,10 @@ class AdapterArtifactServices:
         findings: Any,
         total_pages: int,
         enabled: bool,
-        *,
-        vlm_blocking_enabled: bool = False,
     ) -> list[Any]:
         from ubt.adapters.pdf.artifact_gate import blocking_gate_tripped
 
-        return list(
-            blocking_gate_tripped(
-                findings,
-                total_pages,
-                enabled,
-                vlm_blocking_enabled=vlm_blocking_enabled,
-            )
-        )
+        return list(blocking_gate_tripped(findings, total_pages, enabled))
 
     def read_evidence(self, rendered_path: Path, **kwargs: Any) -> Any:
         from ubt.adapters.pdf.delivery_evidence import read_artifact_evidence

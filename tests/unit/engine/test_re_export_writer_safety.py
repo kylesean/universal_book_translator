@@ -110,35 +110,6 @@ async def test_re_export_refuses_contradicting_output_suffix(
         await re_export_job(db_path=db_path, job_id=_JOB, config=config)
 
 
-async def test_re_export_closes_the_paid_visual_judge(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import ubt.core.engine.re_export as re_export_module
-
-    blocks = [_block(1, "Done sentence.", "已完成。", BlockStatus.MTQE_PASSED)]
-    config, db_path = _seed(tmp_path, blocks, job_status="failed")
-    config.visual_judge_enabled = True
-    with SQLiteJobLedger(db_path) as ledger:
-        ledger.set_job_metadata_value(_JOB, "output_file", str(tmp_path / "out.md"))
-    monkeypatch.setattr(
-        re_export_module,
-        "_default_collaborators",
-        lambda config, router, qe: (object(), object()),
-    )
-
-    seen: dict[str, object] = {}
-
-    async def _capture_ctx(ctx: object, *args: object, **kwargs: object) -> object:
-        seen["visual_judge_enabled"] = ctx.config.visual_judge_enabled  # type: ignore[attr-defined]
-        return
-        yield  # pragma: no cover - never iterated
-
-    monkeypatch.setattr(re_export_module, "run_export_stage", _capture_ctx)
-    with pytest.raises(ReExportError, match="produced no artifact"):
-        await re_export_job(db_path=db_path, job_id=_JOB, config=config)
-    assert seen["visual_judge_enabled"] is False
-
-
 async def test_re_export_holds_the_writer_lock_against_a_live_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

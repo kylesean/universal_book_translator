@@ -180,7 +180,6 @@ def test_a_rehearsal_config_is_still_a_rehearsal_after_the_cache_move(tmp_path: 
 
     assert rehearsal.ocr_mode == "off"
     assert rehearsal.allow_page_upload is False
-    assert rehearsal.visual_judge_enabled is False
 
 
 def test_a_rehearsal_run_builds_a_rehearsal_namespaced_engine() -> None:

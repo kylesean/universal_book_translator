@@ -819,15 +819,12 @@ def _enforce_blocking_gate(
     visual_report_path: Path | None,
     blocking_enabled: bool,
     *,
-    vlm_blocking_enabled: bool = False,
     rehearsal: bool = False,
 ) -> None:
     """Refuse export on blocking visual findings, after persistence.
 
     Deterministic critical findings follow the existing opt-in/short-doc
-    policy. ``vlm_blocking_enabled`` is a separate opt-in: a sampled VLM
-    ``vlm_visual_fail`` blocks a short document, while long books keep it as
-    needs-human because the sample is not representative.
+    policy. There is no sampled VLM tier any more.
 
     Runs after the quality report is written so a refusal still leaves the
     ``*_quality_report.json`` / ``*_metrics.json`` audit trail beside the
@@ -855,7 +852,6 @@ def _enforce_blocking_gate(
         getattr(gate, "findings", []),
         total_pages,
         blocking_enabled,
-        vlm_blocking_enabled=vlm_blocking_enabled,
     )
     if not tripped:
         return
@@ -2567,7 +2563,6 @@ async def run_export_stage(
         gate,
         visual_report_path,
         visual_blocking_gate_enabled,
-        vlm_blocking_enabled=ctx.config.visual_vlm_blocking_enabled,
         rehearsal=ctx.is_mock_run,
     )
 

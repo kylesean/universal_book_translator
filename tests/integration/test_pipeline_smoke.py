@@ -44,7 +44,6 @@ def _config(tmp_path: Path, *, dual_mode: str = "dual") -> UBTConfig:
             "cache_dir": tmp_path / "cache",
             "ocr_mode": "off",
             "allow_page_upload": False,
-            "visual_judge_enabled": False,
             "dual_mode": dual_mode,
         }
     )

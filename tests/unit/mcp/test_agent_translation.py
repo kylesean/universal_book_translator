@@ -27,7 +27,6 @@ def _config(tmp_path: Path) -> UBTConfig:
     return UBTConfig(
         db_dir=tmp_path / "db",
         allowed_dirs=str(tmp_path),
-        visual_judge_enabled=False,
         ocr_mode="off",
         allow_page_upload=False,
         service_api_key=SecretStr("test-key"),

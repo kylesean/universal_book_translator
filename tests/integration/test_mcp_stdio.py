@@ -19,7 +19,6 @@ async def test_official_stdio_client_lists_and_calls_agent_tools(tmp_path: Path)
         **os.environ,
         "UBT_DB_DIR": str(tmp_path / "db"),
         "UBT_ALLOWED_DIRS": str(tmp_path),
-        "UBT_VISUAL_JUDGE_ENABLED": "false",
         "UBT_OCR_MODE": "off",
     }
     params = StdioServerParameters(

@@ -189,12 +189,6 @@ class JobSpec(BaseModel):
         default=None, description="Translate chapter-by-chapter as discovery lands"
     )
     # Quality gates.
-    visual_judge_enabled: bool | None = Field(
-        default=None, description="Enable the VLM visual judge over rendered pages"
-    )
-    visual_judge_model: str | None = Field(
-        default=None, description="Model the visual judge runs on"
-    )
     # Output shape.
     translate_chrome: bool | None = Field(
         default=None, description="Translate running heads, footers and page chrome"

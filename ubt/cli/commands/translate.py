@@ -488,24 +488,6 @@ def translate(
             help="Secondary provider name for repair tier (defaults to primary provider)",
         ),
     ] = None,
-    visual_judge: Annotated[
-        bool | None,
-        typer.Option(
-            "--visual-judge/--no-visual-judge",
-            help="Send sampled rendered pages to a vision LLM judge (T2) for "
-            "layout/overlap/blank verdicts; off by default (spends tokens). "
-            "Delivery-blocking parity majors fire regardless.",
-            show_default=False,
-        ),
-    ] = None,
-    visual_judge_model: Annotated[
-        str | None,
-        typer.Option(
-            "--visual-judge-model",
-            help="Vision model for the judge (default: provider's vision-capable tier)",
-            show_default=False,
-        ),
-    ] = None,
     draft_model: Annotated[
         str | None,
         typer.Option(
@@ -841,8 +823,6 @@ def translate(
         "api_mode": api_mode,
         "provider": provider,
         "repair_provider": repair_provider,
-        "visual_judge_enabled": visual_judge,
-        "visual_judge_model": visual_judge_model,
     }
 
     from ubt.core.job_options import lang_pair_validation_error

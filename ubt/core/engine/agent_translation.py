@@ -605,7 +605,6 @@ class AgentTranslationService:
         overrides: dict[str, Any] = {
             "pages": request.pages,
             "domain": request.domain,
-            "visual_judge_enabled": False,
             "ocr_mode": "off",
             "allow_page_upload": False,
             "fresh": request.fresh,
@@ -1544,9 +1543,7 @@ class AgentTranslationService:
         racing on one service instance must never wire one call's lease event
         into the other call's render stage.
         """
-        render_config = config.model_copy(
-            update={"visual_judge_enabled": False, "ocr_mode": "off", "allow_page_upload": False}
-        )
+        render_config = config.model_copy(update={"ocr_mode": "off", "allow_page_upload": False})
         router = _agent_router()
         fast_pass = FastPassFilter(
             source_lang=manifest.source_lang, target_lang=manifest.target_lang

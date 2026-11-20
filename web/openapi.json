@@ -4494,10 +4494,6 @@
             ],
             "title": "Qe Cost Usd"
           },
-          "vlm_page_calls": {
-            "type": "integer",
-            "title": "Vlm Page Calls"
-          },
           "ocr_page_calls": {
             "type": "integer",
             "title": "Ocr Page Calls"
@@ -4539,7 +4535,6 @@
           "completion_tokens",
           "repair_blocks",
           "qe_calls",
-          "vlm_page_calls",
           "ocr_page_calls",
           "rollup_calls"
         ],
@@ -5283,18 +5278,6 @@
             "title": "Ocr Mode",
             "description": "OCR engine the job will use (affects the vision line)"
           },
-          "visual_judge_enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Visual Judge Enabled",
-            "description": "Quote the VLM visual judge over rendered pages"
-          },
           "max_concurrency": {
             "anyOf": [
               {
@@ -5728,30 +5711,6 @@
             ],
             "title": "Chapter Streaming Enabled",
             "description": "Translate chapter-by-chapter as discovery lands"
-          },
-          "visual_judge_enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Visual Judge Enabled",
-            "description": "Enable the VLM visual judge over rendered pages"
-          },
-          "visual_judge_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Visual Judge Model",
-            "description": "Model the visual judge runs on"
           },
           "translate_chrome": {
             "anyOf": [

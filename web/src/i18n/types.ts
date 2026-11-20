@@ -294,10 +294,6 @@ export interface TranslationDictionary {
     emitBothHelpAuto: string
     emitBothHelpDual: string
     emitBothHelpMono: string
-    /** The page-egress gate: the visual judge cannot run while it is closed. */
-    visualJudge: string
-    visualJudgeHelp: string
-    visualJudgeBlocked: string
     concurrency: string
     concurrencyHelp: string
     concurrencyAuto: string
