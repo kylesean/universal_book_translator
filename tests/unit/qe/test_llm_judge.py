@@ -93,3 +93,33 @@ async def test_tiered_qe_runner_gray_zone_routing() -> None:
     judged_scores = await tiered_mocked.score_pairs([{"src": "text", "mt": "text"}])
     assert tiered_mocked.judge_calls == 1
     assert judged_scores == [QE_SCORE_STRUCTURAL_OTHER]
+
+
+@pytest.mark.asyncio
+async def test_two_tiers_sharing_a_judge_do_not_share_the_call_counter() -> None:
+    """A tier must count only its own batch, even when both use one judge.
+
+    The old implementation installed ``judge._on_call = self._count_judge_call``
+    in the constructor, so the second tier overwrote the first's callback and
+    both reported the other's paid calls. Reading ``calls_made`` as a delta
+    leaves the shared judge untouched.
+    """
+    calls: list[int] = []
+
+    async def _judge(**_: object) -> str:
+        calls.append(1)
+        return '{"score": 0.6}'
+
+    judge = LLMJudgeQERunner(judge_fn=_judge)
+    first = TieredQERunner(heuristic=HeuristicQERunner(), judge=judge, pass_sample=1.0)
+    second = TieredQERunner(heuristic=HeuristicQERunner(), judge=judge, pass_sample=1.0)
+
+    await first.score_pairs([{"src": "Alpha one.", "mt": "阿尔法一。"}])
+    assert first.judge_calls == 1
+    assert second.judge_calls == 0
+    assert calls == [1]
+
+    await second.score_pairs([{"src": "Beta two.", "mt": "贝塔二。"}])
+    assert first.judge_calls == 1
+    assert second.judge_calls == 1
+    assert calls == [1, 1]

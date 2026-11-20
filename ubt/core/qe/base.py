@@ -15,6 +15,12 @@ from abc import ABC, abstractmethod
 class BaseQERunner(ABC):
     """Abstract interface for MTQE evaluation engines (in-process or remote)."""
 
+    #: Paid/remote calls this runner has actually made. The tier wrapper reads
+    #: the delta around a judge batch instead of installing a callback on the
+    #: judge: a shared judge is used by several concurrent tiers, and a
+    #: per-instance counter cannot be overwritten by a sibling tier.
+    calls_made: int = 0
+
     @abstractmethod
     async def score_pairs(self, pairs: list[dict[str, str]]) -> list[float]:
         """Score a list of ``{'src': ..., 'mt': ...}`` pairs → floats (0.0~1.0).

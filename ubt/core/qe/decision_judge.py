@@ -124,6 +124,7 @@ class DecisionQERunner(BaseQERunner):
         self._max_concurrency = max(1, max_concurrency)
         self._post_fn = post_fn
         self._on_call = on_call
+        self.calls_made = 0
         self._sem = asyncio.Semaphore(self._max_concurrency)
         self._client: httpx.AsyncClient | None = None
 
@@ -212,6 +213,7 @@ class DecisionQERunner(BaseQERunner):
 
     async def _score_batch(self, batch: list[dict[str, str]]) -> list[float]:
         async with self._sem:
+            self.calls_made += 1
             if self._on_call is not None:
                 self._on_call()
             url, headers, payload = self._build_request(batch)

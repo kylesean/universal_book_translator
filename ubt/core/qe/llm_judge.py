@@ -231,6 +231,7 @@ class LLMJudgeQERunner(BaseQERunner):
         #: ``judge_calls += len(subset)`` under-reported both the quoted price
         #: and the ROI reading by the sentence count.
         self._on_call = on_call
+        self.calls_made = 0
         self._model = model
         self._target_lang = target_lang
         self._source_lang = source_lang
@@ -317,6 +318,7 @@ class LLMJudgeQERunner(BaseQERunner):
 
     async def _score_whole(self, src: str, mt: str) -> float:
         system, user = build_judge_prompts(src, mt, self._target_lang, self._source_lang)
+        self.calls_made += 1
         if self._on_call is not None:
             self._on_call()
         try:
@@ -390,14 +392,10 @@ class TieredQERunner(BaseQERunner):
         #: heuristic bands of the entries the judge never answered as if they
         #: were measurements.
         self._judged_indices: frozenset[int] = frozenset()
-        # Count every paid model call, not every block. Attached to the judge so
-        # a sentence-level block contributes its real number of calls.
-        if self.judge is not None and hasattr(self.judge, "_on_call"):
-            self.judge._on_call = self._count_judge_call
-
-    def _count_judge_call(self) -> None:
-        """One paid judge call finished (or was attempted)."""
-        self.judge_calls += 1
+        # ``judge_calls`` counts every paid model call, not every block. The
+        # counter is read as a delta around each batch (see ``score_pairs``);
+        # installing a callback on the judge would let two tiers that share one
+        # judge overwrite each other's counter.
 
     def _needs_judge(self, score: float, src: str) -> bool:
         """Whether this pair is worth a paid second opinion.
@@ -626,9 +624,12 @@ class TieredQERunner(BaseQERunner):
         if not ambiguous_idx:
             return base
         subset = [pairs[i] for i in ambiguous_idx]
+        calls_before = int(getattr(self.judge, "calls_made", 0))
         judged = await self.judge.score_pairs(subset)
-        # ``judge_calls`` is incremented by the judge itself, once per paid
-        # model call (see ``LLMJudgeQERunner._on_call``): a block is not a call.
+        self.judge_calls += max(0, int(getattr(self.judge, "calls_made", 0)) - calls_before)
+        # A block is not a call: the judge increments ``calls_made`` at the one
+        # place it actually issues a request (sentence-level judging can be
+        # several calls for one block).
         #
         # ``_judged_any`` means "the judge returned at least one usable opinion",
         # not "a judge was asked". Setting it before inspecting the results made
