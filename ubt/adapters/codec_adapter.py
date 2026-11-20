@@ -9,6 +9,7 @@ No format-specific logic lives here.
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,28 @@ from ubt.core.ir.serializer import compute_file_sha256_cached
 from ubt.model.ast import Heading, ListItem, Paragraph
 from ubt.model.span import Span
 
+_RIGID_ANCHOR_RE = re.compile(r"<([a-z]+\d+)/>")
+
+
+def _legacy_inline_text(unit: TranslationUnit) -> str:
+    """Render rigid codec anchors as their source markup for the legacy masker.
+
+    The old segment/XLIFF path masks ``code``/``$math$``/URLs, while the codec
+    contract keeps them as ``<xN/>`` tokens. Replacing a rigid anchor with its
+    payload raw text lets the masker protect the same span and lets the XLIFF
+    companion publish the code/math placeholder a reader expects. Pair anchors
+    (links) keep their tag form; the codec restores those.
+    """
+    token_by_id = {token.tag_id: token for token in unit.tokens}
+
+    def _replace(match: re.Match[str]) -> str:
+        token = token_by_id.get(match.group(1))
+        if token is None or token.kind != "rigid":
+            return match.group(0)
+        return str(token.payload.get("raw", match.group(0)))
+
+    return _RIGID_ANCHOR_RE.sub(_replace, unit.source_marked)
+
 
 def _unit_to_block(unit: TranslationUnit, spine_index: int) -> IRBlock:
     bbox_list = unit.codec_meta.get("bbox")
@@ -53,7 +76,7 @@ def _unit_to_block(unit: TranslationUnit, spine_index: int) -> IRBlock:
             span=span,
             skip_translate=not unit.translate,
             font_size=font_size,
-            text=unit.source_marked,
+            text=_legacy_inline_text(unit),
             level=2,
         )
     elif unit.role == UnitRole.LIST_ITEM:
@@ -63,7 +86,7 @@ def _unit_to_block(unit: TranslationUnit, spine_index: int) -> IRBlock:
             span=span,
             skip_translate=not unit.translate,
             font_size=font_size,
-            text=unit.source_marked,
+            text=_legacy_inline_text(unit),
         )
     else:
         element = Paragraph(
@@ -72,7 +95,7 @@ def _unit_to_block(unit: TranslationUnit, spine_index: int) -> IRBlock:
             span=span,
             skip_translate=not unit.translate,
             font_size=font_size,
-            text=unit.source_marked,
+            text=_legacy_inline_text(unit),
         )
     return IRBlock.from_element(
         element,
