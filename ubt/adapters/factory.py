@@ -16,6 +16,7 @@ from ubt.adapters.pdf.encryption import reject_encrypted_pdf
 from ubt.adapters.pdf.native_adapter import NativePDFAdapter
 from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile
 from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
+from ubt.codecs.registry import CODEC_SUFFIXES
 from ubt.core.exceptions import (
     DocumentParseError,
     OptionalDependencyError,
@@ -178,7 +179,7 @@ def supported_suffixes() -> list[str]:
     Surfaces print this instead of restating the list: ``ubt version`` claimed
     three formats while the registry had eight.
     """
-    return sorted(_ADAPTER_REGISTRY)
+    return sorted(set(_ADAPTER_REGISTRY) | CODEC_SUFFIXES)
 
 
 def get_adapter_for_path(

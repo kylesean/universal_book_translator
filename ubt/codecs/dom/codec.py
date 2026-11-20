@@ -29,6 +29,7 @@ from ubt.codecs.protocol import (
     UnitRole,
 )
 from ubt.core.exceptions import DocumentParseError
+from ubt.core.xml_safety import strip_doctype_declarations
 from ubt.core.zip_safety import ZipReadBudget, read_member
 
 
@@ -258,7 +259,7 @@ def _patch_html_document(
     mode: DeliveryMode,
     parser: str = "html.parser",
 ) -> tuple[str, int, int]:
-    soup = BeautifulSoup(raw_html, parser)
+    soup = BeautifulSoup(strip_doctype_declarations(raw_html), parser)
     leaves = [tag for tag in soup.find_all(list(_BLOCK_TAGS)) if _is_leaf_block(tag)]
     total = 0
     patched = 0
@@ -303,7 +304,7 @@ def _epub_spine_members(zf: zipfile.ZipFile) -> list[str]:
         cxml = _read_zip_bytes(zf, "META-INF/container.xml", budget).decode(
             "utf-8", errors="ignore"
         )
-        csoup = BeautifulSoup(cxml, "xml")
+        csoup = BeautifulSoup(strip_doctype_declarations(cxml), "xml")
         rf = csoup.find("rootfile")
         if isinstance(rf, Tag) and rf.get("full-path"):
             cand = str(rf["full-path"])
@@ -316,7 +317,7 @@ def _epub_spine_members(zf: zipfile.ZipFile) -> list[str]:
     if opf_path is not None:
         opf_dir = posixpath.dirname(opf_path)
         opf_xml = _read_zip_bytes(zf, opf_path, budget).decode("utf-8", errors="ignore")
-        osoup = BeautifulSoup(opf_xml, "xml")
+        osoup = BeautifulSoup(strip_doctype_declarations(opf_xml), "xml")
         id_to_href: dict[str, str] = {}
         for item in osoup.find_all("item"):
             if not isinstance(item, Tag):
@@ -363,7 +364,9 @@ class DOMCodec:
                     txt = _read_zip_bytes(zf, m, budget).decode("utf-8", errors="replace")
                     if "<math" in txt:
                         has_math = True
-                    chars += len(BeautifulSoup(txt, "html.parser").get_text())
+                    chars += len(
+                        BeautifulSoup(strip_doctype_declarations(txt), "html.parser").get_text()
+                    )
                 est = int(chars / max(1, min(5, len(members))) * len(members)) if members else 0
             return DocumentProfile(
                 format_name="epub",
@@ -378,7 +381,9 @@ class DOMCodec:
         return DocumentProfile(
             format_name="html",
             page_count=1,
-            estimated_chars=len(BeautifulSoup(raw, "html.parser").get_text()),
+            estimated_chars=len(
+                BeautifulSoup(strip_doctype_declarations(raw), "html.parser").get_text()
+            ),
             has_math="<math" in raw,
             recommended_mode=DeliveryMode.MONO,
         )
@@ -386,7 +391,7 @@ class DOMCodec:
     def _extract_html_units(
         self, raw_html: str, chapter_id: str, member_name: str | None = None
     ) -> list[TranslationUnit]:
-        soup = BeautifulSoup(raw_html, "html.parser")
+        soup = BeautifulSoup(strip_doctype_declarations(raw_html), "html.parser")
         leaves = [tag for tag in soup.find_all(list(_BLOCK_TAGS)) if _is_leaf_block(tag)]
         units: list[TranslationUnit] = []
         for idx, leaf in enumerate(leaves, start=1):

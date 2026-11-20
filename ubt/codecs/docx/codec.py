@@ -31,6 +31,7 @@ from ubt.codecs.protocol import (
     UnitRole,
 )
 from ubt.core.exceptions import DocumentParseError
+from ubt.core.xml_safety import assert_no_doctype
 from ubt.core.zip_safety import ZipReadBudget, read_member
 
 
@@ -91,6 +92,7 @@ _XML_ILLEGAL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
 def _parse_xml_safe(raw: bytes) -> etree._Element:
+    assert_no_doctype(raw, context="DOCX part")
     parser = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)
     return etree.fromstring(raw, parser=parser)
 

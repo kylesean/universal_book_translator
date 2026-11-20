@@ -177,3 +177,46 @@ def test_markdown_codec_preserves_frontmatter_code_and_math(tmp_path: Path) -> N
     assert "配合 $x_i$ 使用 `uv run`，详见[文档](https://example.org)。" in rendered
     assert "print('untouched')" in rendered
     assert "\\sum_{i=1}^n x_i" in rendered
+
+
+@pytest.mark.fast
+def test_epub_xhtml_doctype_is_stripped_before_parsing(tmp_path: Path) -> None:
+    src = _make_sample_epub(tmp_path / "doctype.epub")
+    bomb = (
+        '<?xml version="1.0"?>\n<!DOCTYPE html [\n'
+        '<!ENTITY e0 "lol9chars!">\n'
+        + "".join(f'<!ENTITY e{i} "' + f"&e{i - 1};" * 10 + '">\n' for i in range(1, 8))
+        + "]>\n"
+    )
+    with zipfile.ZipFile(src) as zf:
+        members = {name: zf.read(name) for name in zf.namelist()}
+    members["OEBPS/ch1.xhtml"] = (
+        bomb + "<html><body><h1>Safe</h1><p>Hello &e7;</p></body></html>"
+    ).encode()
+    with zipfile.ZipFile(src, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+
+    prof, units = DOMCodec().extract(src)
+    assert prof.format_name == "epub"
+    assert any("Safe" in unit.source_plain for unit in units)
+    assert all("lol9chars" not in unit.source_plain for unit in units)
+
+
+@pytest.mark.fast
+def test_docx_part_with_a_doctype_is_refused(tmp_path: Path) -> None:
+    from ubt.core.xml_safety import UnsafeXMLError
+
+    src = _make_sample_docx(tmp_path / "doctype.docx")
+    with zipfile.ZipFile(src) as zf:
+        members = {name: zf.read(name) for name in zf.namelist()}
+    members["word/document.xml"] = (
+        b'<?xml version="1.0"?><!DOCTYPE w:document><w:document>'
+        b"<w:body><w:p><w:r><w:t>x</w:t></w:r></w:p></w:body></w:document>"
+    )
+    with zipfile.ZipFile(src, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+
+    with pytest.raises(UnsafeXMLError, match="DOCTYPE"):
+        DOCXCodec().extract(src)

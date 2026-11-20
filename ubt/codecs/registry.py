@@ -11,6 +11,13 @@ from ubt.codecs.pdf.codec import NativePDFCodec
 from ubt.codecs.protocol import DocumentCodec
 from ubt.core.exceptions import UnsupportedDocumentFormatError
 
+#: Every suffix a v2 ``DocumentCodec`` owns. Kept next to ``resolve_codec`` so a
+#: format added here is also visible to the CLI/API suffix surface without a
+#: second hardcoded list drifting.
+CODEC_SUFFIXES: frozenset[str] = frozenset(
+    {".pdf", ".epub", ".html", ".htm", ".xhtml", ".docx", ".md", ".markdown", ".txt"}
+)
+
 
 def resolve_codec(source_path: Path) -> DocumentCodec:
     """Instantiate the native surgical :class:`DocumentCodec` for ``source_path``."""
