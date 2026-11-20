@@ -48,6 +48,7 @@ from ubt.adapters.pdf.docling_worker import (
 )
 from ubt.adapters.pdf.font_metrics import sanitize_font_family
 from ubt.adapters.pdf.page_chunking import compute_pdf_page_chunks, get_pdf_page_chunk_size
+from ubt.core.exceptions import OptionalDependencyError
 from ubt.core.ir.models import BookManifest, ChapterIR, ChapterMeta, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
 
@@ -480,28 +481,14 @@ class ScanPDFToTypstCodec(_PDFRenderStackMixin, BasePDFEngineAdapter):
                 compute=lambda: self._extract_with_docling(path, page_range),
             )
 
-        # Fast geometric extraction fallback via pypdfium2 (MIT/Apache-2.0, Zero-PyTorch)
-        try:
-            from ubt.adapters.pdf.pdfium_adapter import (
-                _block_page_in_range,
-                extract_blocks_with_pdfium,
-            )
-
-            logger.info(
-                "Docling not installed; using lightweight geometric extraction (pypdfium2) for '%s'.",
-                path.name,
-            )
-            blocks = extract_blocks_with_pdfium(path, page_range)
-            if page_range is not None:
-                first, last = page_range
-                blocks = [b for b in blocks if _block_page_in_range(b, first, last)]
-            return blocks
-        except Exception as exc:
-            logger.warning(
-                "Geometric pypdfium2 extraction failed (%s); falling back to plain-text pdf_oxide",
-                exc,
-            )
-            return self._extract_with_oxide(path)
+        # A scan has no text layer to read geometrically. Falling back to the
+        # pdfium/pdf_oxide reader here silently turned OCR into a born-digital
+        # extraction and shipped untranslated image text; refuse instead.
+        raise OptionalDependencyError(
+            "ScanPDFToTypstCodec needs the 'docling' package for OCR/VLM ingest; "
+            "the geometric reader cannot read a text-less page. Install the pdf "
+            "extra or use a born-digital PDF with the native codec."
+        )
 
     @classmethod
     def _vlm_fallback_missing_pages(
