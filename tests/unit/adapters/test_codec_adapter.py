@@ -40,3 +40,16 @@ def test_the_factory_only_uses_the_codec_when_asked(tmp_path: Path) -> None:
     codec = get_adapter_for_path(source, prefer_codec=True)
     assert not isinstance(legacy, DocumentCodecAdapter)
     assert isinstance(codec, DocumentCodecAdapter)
+
+
+@pytest.mark.asyncio
+async def test_markdown_heading_levels_survive_the_codec_bridge(tmp_path: Path) -> None:
+    source = tmp_path / "book.md"
+    source.write_text("# Top\n\n### Deep\n", encoding="utf-8")
+
+    adapter = DocumentCodecAdapter(source)
+    blocks = []
+    async for chapter in adapter.parse_stream(source):
+        blocks.extend(chapter.blocks)
+
+    assert [getattr(block.element, "level", 0) for block in blocks] == [1, 3]

@@ -394,14 +394,24 @@ class DOMCodec:
             if not plain.strip():
                 continue
             uid = f"{chapter_id}_b{idx:04d}"
-            meta: dict[str, Any] = {"tag": leaf.name, "leaf_index": idx}
+            tag_name = (leaf.name or "p").lower()
+            heading_level = (
+                int(tag_name[1])
+                if len(tag_name) == 2 and tag_name[0] == "h" and tag_name[1].isdigit()
+                else 0
+            )
+            meta: dict[str, Any] = {
+                "tag": leaf.name,
+                "leaf_index": idx,
+                "heading_level": heading_level,
+            }
             if member_name is not None:
                 meta["member"] = member_name
             units.append(
                 TranslationUnit(
                     unit_id=uid,
                     chapter_id=chapter_id,
-                    role=_role_for_tag(leaf.name or "p"),
+                    role=_role_for_tag(tag_name),
                     source_marked=marked.strip(),
                     source_plain=plain.strip(),
                     tokens=tuple(tokens),

@@ -70,6 +70,7 @@ def _unit_to_block(unit: TranslationUnit, spine_index: int) -> IRBlock:
     span = Span(page=unit.page_no or 1, bbox=rect)
     font_size = float(unit.box_hint.get("font_size_pt", 0.0)) if unit.box_hint else 0.0
     if unit.role == UnitRole.HEADING:
+        level = int(unit.codec_meta.get("heading_level") or 2)
         element: Heading | ListItem | Paragraph = Heading(
             id=unit.unit_id,
             spine_index=spine_index,
@@ -77,7 +78,7 @@ def _unit_to_block(unit: TranslationUnit, spine_index: int) -> IRBlock:
             skip_translate=not unit.translate,
             font_size=font_size,
             text=_legacy_inline_text(unit),
-            level=2,
+            level=min(6, max(1, level)),
         )
     elif unit.role == UnitRole.LIST_ITEM:
         element = ListItem(

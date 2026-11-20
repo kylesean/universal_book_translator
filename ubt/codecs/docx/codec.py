@@ -398,6 +398,7 @@ class DOCXCodec:
                                 "part": part_name,
                                 "p_index": p_idx,
                                 "dom_rpr": dom_rpr.decode("utf-8"),
+                                "heading_level": level if is_h else 0,
                             },
                         )
                     )

@@ -196,6 +196,11 @@ class MarkdownCodec:
                         "end_line": end,
                         "fm_lines": fm_lines,
                         "prefix": prefix,
+                        "heading_level": (
+                            min(6, len(prefix) - len(prefix.lstrip("#")))
+                            if role == UnitRole.HEADING
+                            else 0
+                        ),
                     },
                 )
             )
