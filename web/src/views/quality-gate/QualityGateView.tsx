@@ -212,17 +212,10 @@ export function QualityGateView() {
   const coverage = report?.render_coverage ?? {}
   const repair = report?.repair_breakdown ?? {}
   const config = report?.config_snapshot ?? {}
-  const visualSkipped: string | null =
+  const artifactSkipped: string | null =
     typeof visual?.skipped_reason === 'string' && visual.skipped_reason
       ? visual.skipped_reason
       : null
-  const tiersRan: string[] = Array.isArray(visual?.tiers_ran) ? visual.tiers_ran : []
-  const tiersSkipped: string[] = Array.isArray(visual?.tiers_skipped) ? visual.tiers_skipped : []
-  const skipCodes: string[] = Array.isArray(visual?.skip_codes) ? visual.skip_codes : []
-  const tierLabel = (tier: string): string =>
-    (t.quality.visualTierNames as Record<string, string>)[tier] ?? tier
-  const skipLabel = (code: string): string =>
-    (t.quality.visualSkipCodes as Record<string, string>)[code] ?? code
 
   const failedBlocks = summary.failed_blocks ?? 0
   const verdict: string | null = report?.delivery_verdict ?? null
@@ -255,18 +248,16 @@ export function QualityGateView() {
     ? visual.sampled_pages.filter((p: unknown): p is number => typeof p === 'number')
     : []
 
-  const visualSummary = visualMissing
+  const artifactSummary = visualMissing
     ? t.quality.visualNoReport
-    : visualSkipped
-      ? tiersRan.length > 0
-        ? t.quality.visualPartialRan
-            .replace('{ran}', String(tiersRan.length))
-            .replace('{skipped}', tiersSkipped.map(tierLabel).join(language === 'zh' ? '、' : ', '))
-        : t.quality.visualGateSkipped
-      : `${flaggedPages.length} ${t.quality.flaggedPages}`
+    : artifactSkipped
+      ? t.quality.visualGateSkipped
+      : flaggedPages.length > 0
+        ? `${flaggedPages.length} ${t.quality.flaggedPages}`
+        : t.quality.noVisualFindings
 
-  const visualStatus: CheckStatus =
-    visualMissing || visualSkipped
+  const artifactStatus: CheckStatus =
+    visualMissing || artifactSkipped
       ? 'warn'
       : flaggedPages.length > 0 || visual?.passed === false
         ? 'fail'
@@ -493,31 +484,12 @@ export function QualityGateView() {
     },
     {
       title: t.quality.chipLayout,
-      summary: visualSummary,
-      status: visualStatus,
-      value: visualMissing || visualSkipped ? 0 : visualStatus === 'pass' ? 1 : 0,
+      summary: artifactSummary,
+      status: artifactStatus,
+      value: visualMissing || artifactSkipped ? 0 : artifactStatus === 'pass' ? 1 : 0,
       detail: (
         <div className="space-y-3">
           {visualMissing && <p className="text-sm text-muted-foreground">{t.quality.visualNoReportDesc}</p>}
-          {(tiersRan.length > 0 || tiersSkipped.length > 0) && (
-            <div className="grid gap-2 sm:grid-cols-2">
-              {tiersRan.length > 0 && (
-                <div>
-                  <div className="text-xs font-medium text-muted-foreground">{t.quality.visualTiersRan}</div>
-                  <div className="mt-1 text-sm text-foreground">{tiersRan.map(tierLabel).join(' · ')}</div>
-                </div>
-              )}
-              {tiersSkipped.length > 0 && (
-                <div>
-                  <div className="text-xs font-medium text-muted-foreground">{t.quality.visualTiersSkipped}</div>
-                  <div className="mt-1 text-sm text-amber-700 dark:text-amber-400">
-                    {tiersSkipped.map(tierLabel).join(' · ')}
-                    {skipCodes.length > 0 && ` (${skipCodes.map(skipLabel).join('、')})`}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
           {visualFindings.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t.quality.noVisualFindings}</p>
           ) : (

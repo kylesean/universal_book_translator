@@ -124,15 +124,15 @@ def test_the_gate_never_attests_a_report_it_did_not_load() -> None:
     assert "t.quality.noVerdictTitle" in view
 
 
-def test_pillar_three_reads_the_live_visual_verdict_not_a_deleted_field() -> None:
+def test_pillar_three_reads_the_live_artifact_verdict() -> None:
     view = _source(_VIEWS / "quality-gate" / "QualityGateView.tsx")
     reporter = _source(_REPO_ROOT / "ubt" / "core" / "engine" / "reporter.py")
 
     assert "fidelity" not in reporter, "the report schema grew fidelity back — recheck the view"
     assert "report?.fidelity" not in view
+    assert "artifactSkipped" in view
     assert "visual?.passed" in view and "visual?.skipped_reason" in view
-    assert "visualMissing || visualSkipped" in view
-    assert "visualMissing || visualSkipped ? 0" in view
+    assert "visualMissing || artifactSkipped" in view
 
 
 def test_an_unconfigured_glossary_is_not_reported_as_clean() -> None:
@@ -175,41 +175,13 @@ def test_a_restarted_run_resubscribes_its_stream() -> None:
     assert view.count("setStreamGeneration((n) => n + 1)") == 2
 
 
-def test_the_visual_gate_tiers_are_named_in_both_locales() -> None:
-    tiers = {"geometry", "type", "pixel", "canvas", "vlm"}
-    codes = {
-        "vlm_judge_disabled",
-        "page_render_failed",
-        "canvas_background_absent",
-        "canvas_background_render_failed",
-        "unknown",
-    }
+def test_the_quality_gate_does_not_render_retired_visual_tiers() -> None:
+    view = _source(_VIEWS / "quality-gate" / "QualityGateView.tsx")
 
-    for locale in ("en", "zh"):
-        text = _source(_REPO_ROOT / "web" / "src" / "i18n" / "translations" / f"{locale}.ts")
-        tier_block = re.search(r"visualTierNames:\s*\{(.*?)\}", text, re.DOTALL)
-        code_block = re.search(r"visualSkipCodes:\s*\{(.*?)\}", text, re.DOTALL)
-        assert tier_block, f"{locale}.ts has no visualTierNames block"
-        assert code_block, f"{locale}.ts has no visualSkipCodes block"
-
-        missing_tiers = sorted(
-            t for t in tiers if re.search(rf"\b{t}:", tier_block.group(1)) is None
-        )
-        missing_codes = sorted(
-            c for c in codes if re.search(rf"\b{c}:", code_block.group(1)) is None
-        )
-        assert not missing_tiers, f"{locale}.ts is missing visualTierNames for {missing_tiers}"
-        assert not missing_codes, f"{locale}.ts is missing visualSkipCodes for {missing_codes}"
-
-
-def test_the_quality_gate_does_not_render_the_raw_skipped_reason() -> None:
-    source = _source(_VIEWS / "quality-gate" / "QualityGateView.tsx")
-    assert "${t.quality.visualGateSkipped}: ${visualSkipped}" not in source, (
-        "the quality gate is rendering the raw English skipped_reason again"
-    )
-    assert "skipCodes.map(skipLabel)" in source, (
-        "the metric must render translated skip codes, not the raw sentence"
-    )
+    assert "visualTierNames" not in view
+    assert "visualSkipCodes" not in view
+    assert "skipCodes.map(skipLabel)" not in view
+    assert "${t.quality.visualGateSkipped}: ${artifactSkipped}" not in view
 
 
 def test_the_provider_editor_does_not_offer_output_extraction_as_a_choice() -> None:

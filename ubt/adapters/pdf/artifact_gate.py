@@ -70,24 +70,16 @@ class ArtifactGateResult:
     passed: bool
     findings: tuple[ArtifactFinding, ...] = ()
     sampled_pages: tuple[int, ...] = ()
-    vlm_pages: tuple[int, ...] = ()
     skipped_reason: str | None = None
     stats: dict[str, str | int | float] = field(default_factory=dict)
-    tiers_ran: tuple[str, ...] = ()
-    tiers_skipped: tuple[str, ...] = ()
-    skip_codes: tuple[str, ...] = ()
 
     def report_payload(self) -> dict[str, object]:
         """Gate-owned half of the ``artifact_report.json`` schema."""
         return {
             "passed": self.passed,
             "skipped_reason": self.skipped_reason,
-            "tiers_ran": list(self.tiers_ran),
-            "tiers_skipped": list(self.tiers_skipped),
-            "skip_codes": list(self.skip_codes),
             "stats": dict(self.stats),
             "sampled_pages": list(self.sampled_pages),
-            "vlm_pages": list(self.vlm_pages),
             "findings": [
                 {
                     "severity": getattr(finding, "severity", ""),
@@ -187,8 +179,6 @@ def run_artifact_gate(
                 ),
             ),
             stats={"total_pages": -1},
-            tiers_ran=("open",),
-            tiers_skipped=("searchability", "blank_pages"),
         )
 
     findings: list[ArtifactFinding] = []
@@ -217,8 +207,6 @@ def run_artifact_gate(
                 ),
             ),
             stats={"total_pages": total},
-            tiers_ran=("open",),
-            tiers_skipped=("blank_pages",),
         )
 
     blank_pages = [
@@ -287,9 +275,6 @@ def run_artifact_gate(
             "blank_pages": len(blank_pages),
             "fonts_without_tounicode": missing_tounicode,
         },
-        tiers_ran=("open", "searchability", "blank_pages"),
-        tiers_skipped=("geometry", "pixel", "vlm"),
-        skip_codes=("tiers_retired_with_typst",),
     )
 
 

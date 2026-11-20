@@ -576,13 +576,6 @@ export interface TranslationDictionary {
     visualGateSkipped: string
     visualNoReport: string
     visualNoReportDesc: string
-    /** Tier names the visual gate reports in ``tiers_ran`` / ``tiers_skipped``. */
-    visualTierNames: Record<string, string>
-    /** Stable ``skip_codes`` from the visual report, rendered in this language. */
-    visualSkipCodes: Record<string, string>
-    visualTiersRan: string
-    visualTiersSkipped: string
-    visualFullyRan: string
     noVerdictTitle: string
     noVerdictBody: string
     downloadFailed: string
@@ -654,8 +647,6 @@ export interface TranslationDictionary {
     mathSummary: string
     termSummary: string
     coverageSummary: string
-    //: Honest summary when some visual tiers ran and others did not.
-    visualPartialRan: string
     primaryProductMissing: string
     viewAllFiles: string
     deliverySummaryDesc: string
