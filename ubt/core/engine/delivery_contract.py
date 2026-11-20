@@ -315,6 +315,13 @@ def _normalize(text: str) -> str:
     cleaned = _HYPHEN_LIKE_RE.sub("-", cleaned)
     cleaned = _QUOTE_LIKE_RE.sub("'", cleaned)
     cleaned = _DQUOTE_LIKE_RE.sub('"', cleaned)
+    # A justified reflow hyphenates at a line break and the extraction drops the
+    # hyphen: ``non-built-in`` reads back as ``nonbuiltin``. Drop a hyphen that
+    # joins two letters on both sides so the presence check is not defeated by
+    # ordinary typography. Numeric ranges (``1-2``) keep their hyphen.
+    cleaned = re.sub(r"(?<=[A-Za-z])-(?=[A-Za-z])", "", cleaned)
+    # The container repair turns ``...`` into the single ellipsis glyph.
+    cleaned = cleaned.replace("…", "...")
     return "".join(cleaned.split())
 
 
@@ -431,6 +438,22 @@ def _nested_aggregate_text(bigger: ContractTextBox, smaller: ContractTextBox) ->
         and small_w > 0
         and x_overlap / small_w >= 0.75
         and y_overlap > 0
+    ):
+        return True
+
+    # A formula variable is often its own show operator at the start or end of
+    # the prose line that mentions it, so its box juts a glyph-width outside the
+    # line's box (``P`` at x1=185.2 beside a line starting at x0=184.1). That is
+    # one line, not an overprint: the text is already proven to be a subset and
+    # only a one/two-character glyph cluster can take this exemption.
+    if (
+        small_h <= 18.0
+        and big_h <= 24.0
+        and y_overlap > 0
+        and len(_normalize(smaller.text)) <= 2
+        and (
+            abs(smaller.x1 - bigger.x0) <= big_h * 0.6 or abs(smaller.x0 - bigger.x1) <= big_h * 0.6
+        )
     ):
         return True
 

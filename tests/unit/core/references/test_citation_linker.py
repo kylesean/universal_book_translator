@@ -236,6 +236,23 @@ def test_inject_hyperlinks_typst() -> None:
     assert "#link(<tbl-4>)[表 4]" in zh_linked
 
 
+def test_typst_link_keeps_the_punctuation_that_follows_it() -> None:
+    """Typst consumes ``;`` after a ``#link(...)`` call unless it is an explicit run."""
+    blocks = [
+        _make_block(
+            "h_bib",
+            Heading(id="h_bib", spine_index=0, span=Span(page=5), level=1, text="References"),
+        ),
+        _make_block("b1", Paragraph(id="b1", spine_index=1, span=Span(page=5), text="[1] Ref 1")),
+    ]
+    topology = build_citation_topology(blocks)
+
+    linked = inject_hyperlinks("shown in [1]; next clause.", topology, target_format="typst")
+
+    assert '#link(<bib-1>)[[1]]#text(";")' in linked
+    assert "[[1]]; next" not in linked
+
+
 def test_inject_hyperlinks_protects_code_and_math() -> None:
     blocks = [
         _make_block(

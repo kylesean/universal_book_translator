@@ -219,6 +219,29 @@ def test_formula_subfragment_outside_aggregate_is_not_an_overlap() -> None:
     assert "text_overlap" not in _codes(report)
 
 
+def test_a_formula_glyph_at_the_line_edge_is_not_an_overlap() -> None:
+    """A leading ``P`` rendered as its own op is the line, not an overprint."""
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(),
+            page_texts=("P denotes the set of valid upper-triangular",),
+            boxes=(
+                _box(1, 177.7, 714.0, 185.2, 721.3, text="P", font_size_pt=7.28),
+                _box(
+                    1,
+                    184.1,
+                    711.3,
+                    529.8,
+                    722.7,
+                    text="P denotes the set of valid upper-triangular",
+                    font_size_pt=11.45,
+                ),
+            ),
+        )
+    )
+    assert "text_overlap" not in _codes(report)
+
+
 def test_single_line_formula_with_larger_subtoken_is_not_an_overlap() -> None:
     # A single-line formula where an inner token has a larger font size
     # and extends vertically beyond the aggregate line box.
@@ -517,6 +540,14 @@ def test_style_drift_is_major_for_faithful() -> None:
     assert report.passed, "style drift is major, not critical"
     assert not report.deliverable
     assert "style_drift" in _codes(report)
+
+
+def test_normalize_tolerates_hyphenation_and_ellipsis() -> None:
+    from ubt.core.engine.delivery_contract import _normalize
+
+    assert _normalize("non-built-in") == _normalize("nonbuiltin")
+    assert _normalize("getExtension(...)") == _normalize("getExtension(…)")
+    assert _normalize("1-2") != _normalize("12")
 
 
 def test_readable_does_not_promise_a_style_group() -> None:

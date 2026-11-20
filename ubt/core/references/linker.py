@@ -49,6 +49,76 @@ _PROTECTED_SPAN_RE = re.compile(
 )
 
 
+#: Punctuation Typst swallows when it directly follows a ``#link(...)[...]``
+#: call in markup: ``#link(<bib-1>)[[1]];`` renders ``[1]`` and silently drops
+#: the semicolon, which the delivery contract then reports as a clipped block.
+_TYPST_LINK_PUNCTUATION = frozenset(",.;:!?，。；：！？")
+
+
+def _after_balanced(text: str, start: int, opening: str, closing: str) -> int | None:
+    """Index just past a balanced ``opening``/``closing`` pair, or ``None``."""
+    depth = 1
+    index = start
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+    return None
+
+
+def _keep_punctuation_after_typst_links(text: str) -> str:
+    """Move punctuation that follows a Typst link into an explicit text run.
+
+    Typst parses ``#link(<a>)[label];`` as a call expression and consumes the
+    trailing ``;`` as syntax, so the character never reaches the page. Citing
+    prose puts a semicolon/comma right after the citation often enough that the
+    delivered text layer loses it (measured on the 2608.25512 replay: five
+    blocks flagged as clipped at the first ``[15];``). Wrapping the punctuation
+    in ``#text("...")`` keeps it visible without changing the link target.
+    """
+    out: list[str] = []
+    index = 0
+    while index < len(text):
+        link_at = text.find("#link(", index)
+        if link_at < 0:
+            out.append(text[index:])
+            break
+        out.append(text[index:link_at])
+        after_args = _after_balanced(text, link_at + len("#link("), "(", ")")
+        if after_args is None:
+            out.append(text[link_at:])
+            break
+        end = after_args
+        cursor = end
+        while cursor < len(text) and text[cursor].isspace():
+            cursor += 1
+        if cursor < len(text) and text[cursor] == "[":
+            after_body = _after_balanced(text, cursor + 1, "[", "]")
+            if after_body is not None:
+                end = after_body
+        cursor = end
+        while cursor < len(text) and text[cursor].isspace():
+            cursor += 1
+        if text.startswith("#context", cursor):
+            after_context = _after_balanced(text, cursor + len("#context"), "{", "}")
+            if after_context is not None:
+                end = after_context
+        out.append(text[link_at:end])
+        index = end
+        if index < len(text) and text[index] in _TYPST_LINK_PUNCTUATION:
+            out.append(f'#text("{text[index]}")')
+            index += 1
+    return "".join(out)
+
+
 def build_citation_topology(blocks: Sequence[IRBlock]) -> CitationTopology:
     """Build complete cross-chapter citation topology from document blocks."""
     topology = extract_document_anchors(blocks)
@@ -347,6 +417,8 @@ def _inject_prose_links(
     res = _PROSE_PAGE_REF_RE.sub(_replace_page, res)
     res = _PROSE_LISTING_REF_RE.sub(_replace_listing, res)
     res = _PROSE_ALGORITHM_REF_RE.sub(_replace_algorithm, res)
+    if target_format == "typst":
+        res = _keep_punctuation_after_typst_links(res)
     return res
 
 
