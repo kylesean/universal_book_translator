@@ -11,7 +11,7 @@ from lxml import etree
 from ubt.codecs.docx import DOCXCodec
 from ubt.codecs.dom import BILINGUAL_TARGET_CLASS, DOMCodec
 from ubt.codecs.markdown import MarkdownCodec
-from ubt.codecs.protocol import DeliveryMode
+from ubt.codecs.protocol import DeliveryMode, UnitRole
 from ubt.codecs.registry import resolve_codec
 
 
@@ -220,3 +220,42 @@ def test_docx_part_with_a_doctype_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(UnsafeXMLError, match="DOCTYPE"):
         DOCXCodec().extract(src)
+
+
+@pytest.mark.fast
+def test_markdown_table_cells_translate_without_touching_the_table(tmp_path: Path) -> None:
+    src = tmp_path / "table.md"
+    src.write_text(
+        "# Results\n\n| Model | Score |\n| :--- | ---: |\n| ResNet | 69.8% |\n",
+        encoding="utf-8",
+    )
+    codec = MarkdownCodec()
+    _, units = codec.extract(src)
+    cells = [unit for unit in units if unit.role is UnitRole.TABLE_CELL]
+    assert [unit.source_plain for unit in cells] == ["Model", "Score", "ResNet", "69.8%"]
+
+    translations = {unit.unit_id: f"译{unit.source_plain}" for unit in units}
+    out = tmp_path / "table_out.md"
+    codec.apply(
+        src,
+        units,
+        translations,
+        target_lang="zh",
+        mode=DeliveryMode.MONO,
+        output_path=out,
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "| 译Model | 译Score |" in text
+    assert "| 译ResNet | 译69.8% |" in text
+    assert "| :--- | ---: |" in text
+
+
+@pytest.mark.fast
+def test_markdown_table_detection_ignores_fenced_code(tmp_path: Path) -> None:
+    src = tmp_path / "fence.md"
+    src.write_text(
+        "# T\n\n```\n| a | b |\n| --- | --- |\n```\n\n| c | d |\n| --- | --- |\n",
+        encoding="utf-8",
+    )
+    _, units = MarkdownCodec().extract(src)
+    assert [unit.source_plain for unit in units if unit.role is UnitRole.TABLE_CELL] == ["c", "d"]

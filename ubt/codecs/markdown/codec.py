@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from markdown_it import MarkdownIt
 
@@ -30,6 +31,7 @@ _INLINE_RIGID_RE = re.compile(
 _INLINE_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _TAG_RESTORE_RE = re.compile(r"<(/?)([a-z]\d+)(\s*/)?\s*>")
 _PREFIX_RE = re.compile(r"^(\s*(?:>\s*)*(?:#{1,6}\s+|[-*+]\s+|\d+\.\s+)?)")
+_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{1,}:?\s*(?:\|\s*:?-{1,}:?\s*)+\|?\s*$")
 
 
 def _encode_markdown_inline(text: str) -> tuple[str, str, list[InlineToken]]:
@@ -94,12 +96,112 @@ def _split_frontmatter(raw: str) -> tuple[str, str, int]:
     return fm, raw[m.end() :], fm.count("\n")
 
 
-def _extract_spans(body: str) -> list[tuple[int, int, UnitRole, str]]:
-    """Return ``(start_line, end_line_exclusive, role, prefix)`` for translatable blocks."""
+def _table_cell_ranges(line: str) -> list[tuple[int, int, str]]:
+    r"""Return ``(start, end, text)`` for each non-empty cell in a table row.
+
+    The row is split on unescaped pipes outside inline code, so a cell may carry
+    ``\|`` or `` `a|b` `` without breaking the column count. ``start``/``end``
+    are character offsets into ``line`` (leading/trailing padding excluded), which
+    is what :meth:`MarkdownCodec.apply` edits.
+    """
+    boundaries: list[int] = []
+    i = 0
+    n = len(line)
+    while i < n:
+        ch = line[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "`":
+            run = 1
+            while i + run < n and line[i + run] == "`":
+                run += 1
+            i += run
+            while i < n:
+                if line[i] == "`":
+                    close = 1
+                    while i + close < n and line[i + close] == "`":
+                        close += 1
+                    if close == run:
+                        i += close
+                        break
+                    i += close
+                else:
+                    i += 1
+            continue
+        if ch == "|":
+            boundaries.append(i)
+        i += 1
+
+    if not boundaries:
+        return []
+    segments: list[tuple[int, int]] = []
+    if line[: boundaries[0]].strip():
+        segments.append((0, boundaries[0]))
+    for left, right in zip(boundaries, boundaries[1:], strict=False):
+        segments.append((left + 1, right))
+    if line[boundaries[-1] + 1 :].strip():
+        segments.append((boundaries[-1] + 1, n))
+
+    cells: list[tuple[int, int, str]] = []
+    for left, right in segments:
+        text = line[left:right]
+        stripped = text.strip()
+        if not stripped:
+            continue
+        offset = left + (len(text) - len(text.lstrip()))
+        cells.append((offset, offset + len(stripped), stripped))
+    return cells
+
+
+def _table_spans(
+    lines: list[str], first_line: int
+) -> list[tuple[int, int, UnitRole, str, dict[str, Any]]]:
+    """One span per translatable table cell, with its row/character offsets."""
+    out: list[tuple[int, int, UnitRole, str, dict[str, Any]]] = []
+    i = 0
+    n = len(lines)
+    fence: str | None = None
+    while i + 1 < n:
+        stripped = lines[i].lstrip()
+        if stripped.startswith(("```", "~~~")):
+            marker = stripped[:3]
+            fence = None if fence == marker else marker if fence is None else fence
+            i += 1
+            continue
+        if fence is not None:
+            i += 1
+            continue
+        line = lines[i]
+        if "|" not in line or not _TABLE_SEPARATOR_RE.match(lines[i + 1]):
+            i += 1
+            continue
+        row = i
+        while row < n and "|" in lines[row] and lines[row].strip():
+            if row != i + 1:  # separator row is not content
+                for start, end, _ in _table_cell_ranges(lines[row]):
+                    out.append(
+                        (
+                            first_line + row,
+                            first_line + row + 1,
+                            UnitRole.TABLE_CELL,
+                            "",
+                            {"table_cell": {"start": start, "end": end}},
+                        )
+                    )
+            row += 1
+        i = row
+    return out
+
+
+def _extract_spans(
+    body: str,
+) -> list[tuple[int, int, UnitRole, str, dict[str, Any]]]:
+    """Return ``(start_line, end_line_exclusive, role, prefix, meta)`` spans."""
     md = MarkdownIt("commonmark").enable("table")
     lines = body.splitlines()
     tokens = md.parse(body)
-    spans: list[tuple[int, int, UnitRole, str]] = []
+    spans: list[tuple[int, int, UnitRole, str, dict[str, Any]]] = _table_spans(lines, 0)
 
     i = 0
     n = len(tokens)
@@ -125,14 +227,20 @@ def _extract_spans(body: str) -> list[tuple[int, int, UnitRole, str]]:
             pref_m = _PREFIX_RE.match(first_line)
             prefix = pref_m.group(1) if pref_m else ""
             if role != UnitRole.TABLE_CELL:
-                spans.append((start, end, role, prefix))
+                spans.append((start, end, role, prefix, {}))
         i += 1
 
     # Deduplicate overlapping maps (e.g. tight list items) preserving order.
-    dedup: list[tuple[int, int, UnitRole, str]] = []
-    seen_ranges: set[tuple[int, int]] = set()
+    dedup: list[tuple[int, int, UnitRole, str, dict[str, Any]]] = []
+    seen_ranges: set[tuple[int, int, str, int]] = set()
     for sp in spans:
-        key = (sp[0], sp[1])
+        cell = sp[4].get("table_cell")
+        key = (
+            sp[0],
+            sp[1],
+            "cell" if cell else "block",
+            int(cell["start"]) if isinstance(cell, dict) else 0,
+        )
         if key not in seen_ranges:
             seen_ranges.add(key)
             dedup.append(sp)
@@ -171,8 +279,15 @@ class MarkdownCodec:
 
         units: list[TranslationUnit] = []
         chap_idx = 1
-        for idx, (start, end, role, prefix) in enumerate(spans, start=1):
-            raw_chunk = "\n".join(lines[start:end])
+        for idx, (start, end, role, prefix, span_meta) in enumerate(spans, start=1):
+            cell = span_meta.get("table_cell")
+            if isinstance(cell, dict):
+                # A table unit is the cell's own text, not the row: apply patches
+                # the character range inside the row it came from.
+                raw_chunk = lines[start][int(cell["start"]) : int(cell["end"])]
+                prefix = ""
+            else:
+                raw_chunk = "\n".join(lines[start:end])
             # Strip leading markdown syntax prefix from first line before translation.
             stripped = (
                 raw_chunk[len(prefix) :] if prefix and raw_chunk.startswith(prefix) else raw_chunk
@@ -196,6 +311,7 @@ class MarkdownCodec:
                         "end_line": end,
                         "fm_lines": fm_lines,
                         "prefix": prefix,
+                        **span_meta,
                         "heading_level": (
                             min(6, len(prefix) - len(prefix.lstrip("#")))
                             if role == UnitRole.HEADING
@@ -225,6 +341,7 @@ class MarkdownCodec:
 
         # Apply replacements bottom-to-top so line indices never shift.
         replacements: list[tuple[int, int, str]] = []
+        inline_cells: dict[int, list[tuple[int, int, str]]] = {}
         patched = 0
         for unit in units:
             translated = translations.get(unit.unit_id)
@@ -234,6 +351,13 @@ class MarkdownCodec:
             end = int(unit.codec_meta["end_line"])
             prefix = str(unit.codec_meta.get("prefix", ""))
             restored = _decode_markdown_inline(translated.strip(), unit.tokens)
+            cell = unit.codec_meta.get("table_cell")
+            if isinstance(cell, dict):
+                inline_cells.setdefault(start, []).append(
+                    (int(cell["start"]), int(cell["end"]), restored)
+                )
+                patched += 1
+                continue
             rendered_line = (
                 f"{prefix}{restored}"
                 if prefix and not restored.startswith(prefix.strip())
@@ -246,6 +370,10 @@ class MarkdownCodec:
             else:
                 replacements.append((start, end, rendered_line))
             patched += 1
+
+        for row, edits in inline_cells.items():
+            for cell_start, cell_end, new_text in sorted(edits, reverse=True):
+                lines[row] = lines[row][:cell_start] + new_text + lines[row][cell_end:]
 
         for start, end, new_text in sorted(replacements, key=lambda r: r[0], reverse=True):
             lines[start:end] = new_text.splitlines()
