@@ -22,10 +22,10 @@ from contextlib import aclosing, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ubt.app.job_service import JobService
 from ubt.core.config import UBTConfig, credential_required, has_real_credential
 from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_queue import JobQueue, JobStatus, QueuedJob
-from ubt.core.engine.job_runner import build_job_orchestrator
 from ubt.core.engine.progress import ProgressSnapshot, persist_progress_metadata
 from ubt.core.exceptions import (
     JobInterruptedError,
@@ -155,14 +155,13 @@ class JobWorker:
             persist_progress_metadata(event, ledger, job.job_id)
 
         # Rehearsal is decided from THIS process's key (see the helper).
-        orchestrator = build_job_orchestrator(
-            job_config,
+        orchestrator = JobService(
+            config=job_config,
             router=self.router,
             qe_runner=self.qe_runner,
             rate_limiter=self.rate_limiter,
             finalize_job=_persist_metadata,
-            rehearse=_should_rehearse(payload, job_config),
-        )
+        ).orchestrator(rehearse=_should_rehearse(payload, job_config))
 
         async for event in orchestrator.run(
             input_path=input_path,

@@ -9,10 +9,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from ubt.app.job_worker import JobWorker
 from ubt.core.config import UBTConfig
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.job_queue import JobQueue, JobStatus, QueuedJob
-from ubt.core.engine.job_worker import JobWorker
 from ubt.core.exceptions import LedgerError
 
 pytestmark = pytest.mark.fast

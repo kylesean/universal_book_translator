@@ -14,7 +14,7 @@ from rich.console import Console
 from ubt.cli.commands import resolve_db_dir
 
 if TYPE_CHECKING:
-    from ubt.core.engine.job_worker import JobWorker
+    from ubt.app.job_worker import JobWorker
 
 console = Console()
 
@@ -76,9 +76,9 @@ def worker_command(
     Enqueue with the REST API (or an SDK/MCP client); a worker survives restarts
     and reclaims jobs whose lease expired. ``--once`` drains and exits.
     """
+    from ubt.app.job_worker import JobWorker
     from ubt.core.config import UBTConfig
     from ubt.core.engine.job_queue import JobQueue
-    from ubt.core.engine.job_worker import JobWorker
     from ubt.core.job_options import apply_config_overrides
     from ubt.core.log_config import setup_logging
     from ubt.core.router.rate_limiter import build_rate_limiter

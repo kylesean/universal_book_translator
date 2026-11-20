@@ -977,7 +977,7 @@ async def test_job_manager_safe_error_formatting(tmp_path: Path) -> None:
         service_api_key=SecretStr(_API_KEY),
     )
 
-    with patch("ubt.core.engine.job_runner.PipelineOrchestrator") as mock_orch_cls:
+    with patch("ubt.app.job_service.PipelineOrchestrator") as mock_orch_cls:
 
         async def mock_run_budget(*args: object, **kwargs: object) -> AsyncGenerator[Any, None]:
             raise BudgetExceededError("Budget cap of $5.00 exceeded")
@@ -990,7 +990,7 @@ async def test_job_manager_safe_error_formatting(tmp_path: Path) -> None:
     assert record.status == "failed"
     assert record.error == "BudgetExceededError: Budget cap of $5.00 exceeded"
 
-    with patch("ubt.core.engine.job_runner.PipelineOrchestrator") as mock_orch_cls:
+    with patch("ubt.app.job_service.PipelineOrchestrator") as mock_orch_cls:
 
         async def mock_run_secret(*args: object, **kwargs: object) -> AsyncGenerator[Any, None]:
             raise RuntimeError("Internal DB host 10.0.0.5 connection refused password=secret")

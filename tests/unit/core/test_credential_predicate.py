@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import SecretStr
 
+from ubt.app.job_worker import _should_rehearse
 from ubt.core.config import (
     MOCK_API_KEY,
     UBTConfig,
@@ -10,7 +11,6 @@ from ubt.core.config import (
     credential_required,
     has_real_credential,
 )
-from ubt.core.engine.job_worker import _should_rehearse
 
 pytestmark = pytest.mark.fast
 

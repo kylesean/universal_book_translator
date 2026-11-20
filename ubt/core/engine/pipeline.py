@@ -495,7 +495,7 @@ class PipelineOrchestrator:
             self.router = router
 
         # Contract documented at the hook's definition: the writer-lock
-        # single-writer rationale is stated once, in job_runner.py.
+        # single-writer rationale is stated once, in ubt/app/job_service.py.
         self.finalize_job = finalize_job
 
         #: Set by the lease-renewal task when another process reclaimed this

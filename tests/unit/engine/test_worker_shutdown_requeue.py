@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
+from ubt.app.job_worker import JobWorker
 from ubt.core.config import UBTConfig
 from ubt.core.engine.job_queue import JobQueue, JobStatus
-from ubt.core.engine.job_worker import JobWorker
 
 pytestmark = pytest.mark.fast
 

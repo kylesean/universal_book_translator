@@ -56,9 +56,7 @@ from ubt.core.config import (
     credential_required,
     has_real_credential,
 )
-from ubt.core.engine.dry_run import create_dry_run_orchestrator
 from ubt.core.engine.events import EventType, TranslationProgressEvent
-from ubt.core.engine.pipeline import PipelineOrchestrator
 from ubt.core.engine.progress import ProgressSnapshot, persist_progress_metadata
 from ubt.core.exceptions import UBTError
 from ubt.core.job_options import (
@@ -199,7 +197,7 @@ async def _run_translation(
     # "not ready" for ``/report``, ``/deliverables`` and the download. All 26
     # real ledgers in this checkout carried no ``output_file`` for that reason.
     # The API manager and the queue worker always wired this hook (through
-    # ``build_job_orchestrator``); the CLI constructed the orchestrator by hand
+    # ``JobService``); the CLI constructed the orchestrator by hand
     # and simply never passed it.
     #
     # The hook runs *inside* the orchestrator's writer-lock block, so this write
@@ -209,10 +207,11 @@ async def _run_translation(
     def _persist_artifact_pointer(event: TranslationProgressEvent, ledger: Any) -> None:
         persist_progress_metadata(event, ledger, event.job_id)
 
-    if dry_run:
-        orchestrator = create_dry_run_orchestrator(config, finalize_job=_persist_artifact_pointer)
-    else:
-        orchestrator = PipelineOrchestrator(config=config, finalize_job=_persist_artifact_pointer)
+    from ubt.app.job_service import JobService
+
+    orchestrator = JobService(config=config, finalize_job=_persist_artifact_pointer).orchestrator(
+        rehearse=dry_run
+    )
 
     if interactive:
         from ubt.cli.workbench.controller import WorkbenchController

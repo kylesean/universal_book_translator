@@ -9,10 +9,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ubt.api.models import JobSubmitRequest
+from ubt.app.job_service import JobService
 from ubt.core.config import UBTConfig
 from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
-from ubt.core.engine.job_runner import build_job_orchestrator
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.progress import ProgressSnapshot, persist_progress_metadata
 from ubt.core.engine.writer_lock import LedgerWriterLock
@@ -200,8 +200,8 @@ class JobManager:
                 # finalize_job still runs inside the orchestrator's writer-lock
                 # block so the artifact triple persists exactly as in a real run.
                 logger.info("Job %s running as a zero-token rehearsal", record.job_id)
-            orchestrator = build_job_orchestrator(
-                job_config,
+            orchestrator = JobService(
+                config=job_config,
                 router=self.router,
                 qe_runner=self.qe_runner,
                 rate_limiter=self.rate_limiter,
@@ -209,8 +209,7 @@ class JobManager:
                 # orchestrator's writer-lock block instead of re-opening the
                 # ledger here after run() released the lock.
                 finalize_job=self._persist_final_metadata(job_config, record),
-                rehearse=record.request.dry_run,
-            )
+            ).orchestrator(rehearse=record.request.dry_run)
             async for event in orchestrator.run(
                 input_path=input_file,
                 output_path=output_file,
