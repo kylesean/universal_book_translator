@@ -161,9 +161,9 @@ jobs:
           --deselect tests/integration/test_publish_corpus_sweep.py
 
   # The `gate` job installs `--extra dev`, which does NOT include the `pdf`
-  # extra (docling). Every PDF-path test there therefore ran on the pdfium
-  # engine only, and the default engine -- `auto`, which routes to docling
-  # unconditionally -- was never exercised by CI at all. The crash/resume e2e
+  # extra (docling). A clean born-digital PDF still takes the native codec, but
+  # the scan/readable route -- `auto` on a text-less PDF, or an explicit
+  # `docling` request -- was never exercised by CI there. The crash/resume e2e
   # was red on the docling path while this pipeline stayed green.
   #
   # Separate job: docling pulls torch and a model download, which would double

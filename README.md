@@ -225,7 +225,7 @@ ubt-mcp
 ### 交付门禁（fail-closed）
 
 - `NEEDS_HUMAN`（已分诊、带提示标记、建议人工复核）的块**默认随文交付**，但质量报告的 `summary.needs_human_block_ids` 会逐一列出它们，审校工作台也会高亮。要求严格阻断时用 `--no-allow-needs-human`（`UBT_EXPORT_ALLOW_NEEDS_HUMAN=0`）；不可修复的 critical 缺陷仍以 `BLOCKED_HUMAN` 隔离，不会因这个默认值放行。
-- `--min-completion-ratio`（默认 0.5）与视觉门禁的致命项（空白页、目标语言缺失、不可读字号）同样会在导出前拒绝。
+- `--min-completion-ratio`（默认 0.5）与产物门禁的致命项（不可读 PDF、空白页、文本不可搜索、目标语言缺失）同样会在导出前拒绝。
 - 质量报告的 `score_metrics.scored_coverage` 是 `avg_qe` 的计算样本占比：默认启发式引擎只对通过块抽样打分，看到 0.14 就意味着那个均值只代表 14% 的块。
 
 ### 产物门禁（确定性）
