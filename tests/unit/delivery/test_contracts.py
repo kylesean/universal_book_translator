@@ -32,5 +32,5 @@ def test_plan_serializes_with_stable_schema_version() -> None:
     )
     payload = plan.to_manifest()
     assert payload["schema_version"] == 1
-    assert payload["contract"] == "readable"
+    assert payload["contract"] == "faithful"
     assert plan.signals.document_class is DocumentClass.ACADEMIC

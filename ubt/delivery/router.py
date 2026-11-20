@@ -22,7 +22,6 @@ from ubt.delivery.contracts import (
     DeliverySignals,
     DocumentClass,
     FaithfulEligibility,
-    LayoutComplexity,
     PageKind,
     PageStrategy,
 )
@@ -30,16 +29,6 @@ from ubt.delivery.contracts import (
 #: Text trust below this value forbids ``faithful``; the page must be OCR/VLM
 #: repaired and re-flowed instead.
 MIN_FAITHFUL_TEXT_TRUST = 0.80
-
-#: Document classes that can automatically upgrade from AUTO to FAITHFUL
-#: when pristine native layout signals (multi-column, math formulas, tables)
-#: are detected, retaining an automatic resilient fallback (allow_degrade) to reflow.
-_STRUCTURED_UPGRADE_CLASSES: frozenset[DocumentClass] = frozenset(
-    {
-        DocumentClass.ACADEMIC,
-        DocumentClass.TECHNICAL,
-    }
-)
 
 #: Document classes whose reading value unconditionally beats page identity.
 _READABLE_FIRST_CLASSES: frozenset[DocumentClass] = frozenset(
@@ -78,8 +67,6 @@ def evaluate_faithful_eligibility(signals: DeliverySignals) -> FaithfulEligibili
         reasons.append(f"text_trust={signals.text_trust:.2f} < {MIN_FAITHFUL_TEXT_TRUST:.2f}")
     if signals.page_kind is not PageKind.NATIVE:
         reasons.append(f"page_kind={signals.page_kind.value!r} is not native")
-    if signals.source_overlap:
-        reasons.append("source_overlap=true")
     if not signals.page_lock_feasible:
         reasons.append("page_lock_feasible=false")
     return FaithfulEligibility(eligible=not reasons, reasons=tuple(reasons))
@@ -93,16 +80,14 @@ def route_delivery(
 ) -> DeliveryPlan:
     """Choose the honest contract for ``signals``.
 
-    ``AUTO`` is deliberately conservative:
+    ``AUTO`` keeps a clean born-digital PDF in place:
 
-    - native academic / technical documents at MEDIUM or HIGH layout
-      complexity upgrade to ``faithful`` when eligible, carrying
+    - any PDF with a trustworthy native text layer -> ``faithful``, carrying
       ``ALLOW_DEGRADE`` so a contract failure falls back to readable;
-    - long books and mobile stay ``readable``;
+    - scans / font-damaged sources -> ``readable`` (OCR/VLM reflow);
     - contract / form / design -> ``faithful`` only if eligible, otherwise
       infeasible unless ``allow_degrade`` is set;
-    - unknown class -> ``readable`` (the safe default, never an accidental
-      page-lock promise).
+    - non-PDF / unknown -> ``readable``.
 
     An explicit request still wins when it is feasible. An explicit
     ``faithful`` request that is not eligible produces ``feasible=False``
@@ -130,38 +115,17 @@ def route_delivery(
         )
 
     # requested is AUTO.
-    if signals.document_class in _STRUCTURED_UPGRADE_CLASSES:
-        # Native born-digital academic & technical documents with structural complexity
-        # (multi-column, formulas, exhibits) gain immense value from 1:1 topological
-        # facsimile. When pristine and eligible, auto upgrades to faithful with an
-        # automatic fallback (DegradePolicy.ALLOW_DEGRADE) to readable reflow.
-        # Simple plain-narrative papers (LOW complexity) or scanned/damaged papers
-        # default to readable reflow.
-        if eligibility.eligible and signals.layout_complexity in (
-            LayoutComplexity.HIGH,
-            LayoutComplexity.MEDIUM,
-        ):
-            return _faithful_plan(
-                signals,
-                eligibility,
-                requested,
-                DegradePolicy.ALLOW_DEGRADE,
-                reasons=(
-                    f"document_class={signals.document_class.value!r} is native structured (complexity={signals.layout_complexity.value}) "
-                    "and faithful-eligible; auto-upgraded to faithful with resilient degrade fallback",
-                ),
-            )
-        return _readable_plan(
+    if eligibility.eligible:
+        # Every clean born-digital PDF is a native in-place candidate. Page
+        # identity is the default promise; allow_degrade lets a document whose
+        # translation cannot fit fall back to readable instead of refusing.
+        return _faithful_plan(
             signals,
             eligibility,
             requested,
-            policy,
-            reasons=(
-                f"document_class={signals.document_class.value!r} defaults to readable "
-                f"(eligible={eligibility.eligible}, complexity={signals.layout_complexity.value})",
-            ),
+            DegradePolicy.ALLOW_DEGRADE,
+            reasons=("clean born-digital PDF; auto keeps the source page geometry in place",),
         )
-
     if signals.document_class in _READABLE_FIRST_CLASSES:
         return _readable_plan(
             signals,

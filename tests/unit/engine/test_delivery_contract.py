@@ -75,6 +75,7 @@ def _evidence(
     font_issues: tuple[str, ...] = (),
     overflow_records: tuple[OverflowRecord, ...] = (),
     style_samples: tuple[StyleSample, ...] = (),
+    style_preserves_source: bool = False,
     declared_page_expansion: bool = False,
     exhibit_texts: tuple[str, ...] = (),
 ) -> ContractEvidence:
@@ -91,6 +92,7 @@ def _evidence(
         font_issues=font_issues,
         overflow_records=overflow_records,
         style_samples=style_samples,
+        style_preserves_source=style_preserves_source,
         declared_page_expansion=declared_page_expansion,
         exhibit_texts=exhibit_texts,
     )
@@ -552,6 +554,30 @@ def test_normalize_tolerates_hyphenation_and_ellipsis() -> None:
     assert _normalize("1-2") != _normalize("12")
 
 
+def test_native_faithful_does_not_audit_a_document_size_group() -> None:
+    """The native codec keeps each block's source size.
+
+    A source with a genuinely smaller section (chapter-3 pages 24–26) would
+    otherwise read as a 0.99pt group drift even though every page preserved its
+    own source size.
+    """
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b1", "text"),),
+            page_texts=("text",),
+            contract="faithful",
+            expected_page_count=1,
+            style_samples=(
+                StyleSample(page=1, size_pt=9.96),
+                StyleSample(page=2, size_pt=8.97),
+            ),
+            page_count=2,
+            style_preserves_source=True,
+        )
+    )
+    assert "style_drift" not in _codes(report)
+
+
 def test_readable_does_not_promise_a_style_group() -> None:
     """A reference/caption page may be set smaller; readable never promised uniformity."""
     report = evaluate_delivery_contract(
@@ -933,6 +959,34 @@ def test_native_formula_object_verifies_the_prose_around_it() -> None:
     )
     assert report.passed
     assert "clipped_overflow" not in _codes(report)
+
+
+def test_a_wrapped_table_cell_is_verified_by_its_words() -> None:
+    """Row-major extraction interleaves a wrapped cell with its neighbours.
+
+    The cell's translation is on the page, but its ``[模拟翻译]`` prefix and
+    ``Components`` body land on different extracted lines; a contiguous check
+    reported the delivered cell as missing.
+    """
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("cell", "[模拟翻译] Components"),),
+            page_texts=("[模拟翻译] Real5-OmniDocBench Components",),
+            contract="readable",
+        )
+    )
+    assert "clipped_overflow" not in _codes(report)
+
+
+def test_a_short_block_with_a_missing_word_is_still_clipped() -> None:
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("cell", "[模拟翻译] Components"),),
+            page_texts=("[模拟翻译] Real5-OmniDocBench",),
+            contract="readable",
+        )
+    )
+    assert {"text_missing", "clipped_overflow"} & _codes(report)
 
 
 def test_a_missing_prose_segment_around_a_formula_is_still_clipped() -> None:

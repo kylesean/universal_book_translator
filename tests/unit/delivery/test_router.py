@@ -39,7 +39,7 @@ def _signals(
     )
 
 
-def test_academic_defaults_to_readable() -> None:
+def test_academic_native_defaults_to_faithful() -> None:
     plan = route_delivery(
         _signals(
             document_class=DocumentClass.ACADEMIC,
@@ -47,9 +47,9 @@ def test_academic_defaults_to_readable() -> None:
         )
     )
     assert plan.feasible
-    assert plan.contract is DeliveryContract.READABLE
-    assert plan.default_page_strategy is PageStrategy.DOCUMENT_REFLOW
-    assert plan.degrade_policy is DegradePolicy.FAIL
+    assert plan.contract is DeliveryContract.FAITHFUL
+    assert plan.default_page_strategy is PageStrategy.CANVAS
+    assert plan.degrade_policy is DegradePolicy.ALLOW_DEGRADE
 
 
 def test_academic_structured_upgrades_to_faithful() -> None:
@@ -63,7 +63,7 @@ def test_academic_structured_upgrades_to_faithful() -> None:
     assert plan.contract is DeliveryContract.FAITHFUL
     assert plan.default_page_strategy is PageStrategy.CANVAS
     assert plan.degrade_policy is DegradePolicy.ALLOW_DEGRADE
-    assert any("auto-upgraded to faithful" in reason for reason in plan.reasons)
+    assert any("source page geometry" in reason for reason in plan.reasons)
 
 
 def test_academic_damaged_defaults_to_readable() -> None:
@@ -79,13 +79,13 @@ def test_academic_damaged_defaults_to_readable() -> None:
     assert plan.default_page_strategy is PageStrategy.DOCUMENT_REFLOW
 
 
-def test_technical_long_book_and_mobile_default_to_readable() -> None:
+def test_clean_long_book_and_mobile_also_stay_native() -> None:
     for document_class in (
         DocumentClass.LONG_BOOK,
         DocumentClass.MOBILE,
     ):
         plan = route_delivery(_signals(document_class=document_class))
-        assert plan.contract is DeliveryContract.READABLE
+        assert plan.contract is DeliveryContract.FAITHFUL
 
     tech_plan = route_delivery(
         _signals(
@@ -93,7 +93,7 @@ def test_technical_long_book_and_mobile_default_to_readable() -> None:
             layout_complexity=LayoutComplexity.LOW,
         )
     )
-    assert tech_plan.contract is DeliveryContract.READABLE
+    assert tech_plan.contract is DeliveryContract.FAITHFUL
 
 
 def test_contract_document_defaults_to_faithful_when_eligible() -> None:
@@ -104,9 +104,9 @@ def test_contract_document_defaults_to_faithful_when_eligible() -> None:
     assert plan.eligibility.eligible
 
 
-def test_unknown_document_defaults_to_readable() -> None:
+def test_unknown_clean_native_document_is_still_faithful() -> None:
     plan = route_delivery(_signals(document_class=DocumentClass.OTHER))
-    assert plan.contract is DeliveryContract.READABLE
+    assert plan.contract is DeliveryContract.FAITHFUL
 
 
 def test_scanned_academic_uses_ocr_reflow() -> None:
@@ -133,12 +133,11 @@ def test_scanned_page_disqualifies_faithful() -> None:
     assert any("page_kind" in reason for reason in eligibility.reasons)
 
 
-def test_source_overlap_disqualifies_faithful() -> None:
+def test_source_overlap_does_not_disqualify_the_native_patcher() -> None:
     eligibility = evaluate_faithful_eligibility(
         _signals(document_class=DocumentClass.CONTRACT, source_overlap=True)
     )
-    assert not eligibility.eligible
-    assert any("source_overlap" in reason for reason in eligibility.reasons)
+    assert eligibility.eligible
 
 
 def test_infeasible_page_lock_disqualifies_faithful() -> None:
@@ -209,8 +208,10 @@ def test_explicit_faithful_degrades_to_readable_with_allow_degrade() -> None:
     assert any("degraded to readable" in reason for reason in plan.reasons)
 
 
-def test_auto_contract_infeasible_still_fails_closed() -> None:
-    plan = route_delivery(_signals(document_class=DocumentClass.CONTRACT, source_overlap=True))
+def test_auto_contract_scan_still_fails_closed() -> None:
+    plan = route_delivery(
+        _signals(document_class=DocumentClass.CONTRACT, page_kind=PageKind.SCANNED)
+    )
     assert not plan.feasible
     assert plan.contract is None
 

@@ -413,7 +413,12 @@ def measure_native_feasibility(
             )
 
         reasons: list[str] = []
-        feasible = True
+        # The probe no longer vetoes on source overlap or floor fit. The native
+        # typesetter now splits dense table rows and reports its own overflow;
+        # the delivery contract is the authority on whether the artifact is
+        # shippable. ``feasible`` here means "a measured native text layer
+        # exists", which is the only thing this preflight can know before a
+        # translation exists.
         if ignored_fragments:
             # Named so a reader can tell a veto from probe housekeeping: these
             # are punctuation splits, superscripts, table cells and axis
@@ -423,19 +428,17 @@ def measure_native_feasibility(
                 "that pdfium reports as separate lines"
             )
         if overlapping:
-            feasible = False
             reasons.append(
                 f"source body boxes overlap on page(s) {', '.join(map(str, overlapping[:5]))}"
             )
         if failing:
-            feasible = False
             reasons.append(
                 f"page(s) {', '.join(map(str, failing[:5]))} do not fit their own text at "
                 f"the {floor_pt:g}pt body floor"
             )
 
         capacity = min(capacities) if capacities else 0.0
-        if not feasible or capacity < _HIGH_CAPACITY:
+        if capacity < _HIGH_CAPACITY:
             risk = "high"
         elif capacity < _MEDIUM_CAPACITY:
             risk = "medium"
@@ -447,7 +450,7 @@ def measure_native_feasibility(
             measured=True,
             sampled_pages=tuple(sampled),
             source_overlap=bool(overlapping),
-            feasible=feasible,
+            feasible=True,
             expansion_capacity=round(capacity, 4),
             expansion_risk=risk,
             reasons=tuple(reasons),

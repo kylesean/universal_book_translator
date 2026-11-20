@@ -228,28 +228,46 @@ def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryD
             logger.debug(
                 "Delivery plan: document mode resolution fallback for %s: %s", input_path, exc
             )
-    return plan_for_document(
-        requested,
-        document_mode=doc_mode,
-        is_pdf=is_pdf,
-        has_scan=bool(facts.has_scan) if facts is not None else False,
+    plan_kwargs: dict[str, Any] = {
+        "document_mode": doc_mode,
+        "is_pdf": is_pdf,
+        "has_scan": bool(facts.has_scan) if facts is not None else False,
         # A PDF whose census could not run is not a clean native source. Treat
-        # it as damaged (text_trust -> 0, page_lock_feasible -> false) so a new
-        # ``faithful`` request fails closed; legacy modes stay grandfathered.
-        font_damage_pages=(
+        # it as damaged (text_trust -> 0, page_lock_feasible -> false) so a
+        # ``faithful`` request fails closed.
+        "font_damage_pages": (
             int(facts.confirmed_font_damage_pages)
             if facts is not None
             else (1 if requested == "faithful" and is_pdf else 0)
         ),
-        page_count=page_count,
-        multicolumn_page_share=(float(facts.multicolumn_page_share) if facts is not None else 0.0),
-        structural_page_share=(float(facts.structural_page_share) if facts is not None else 0.0),
-        formula_heavy=bool(facts.formula_heavy) if facts is not None else False,
-        allow_degrade=bool(getattr(config, "allow_degrade", False)),
-        page_lock_feasible=measured.feasible if measured is not None else None,
-        source_overlap=measured.source_overlap if measured is not None else None,
-        expansion_risk=measured.expansion_risk if measured is not None else None,
-    )
+        "page_count": page_count,
+        "multicolumn_page_share": (
+            float(facts.multicolumn_page_share) if facts is not None else 0.0
+        ),
+        "structural_page_share": (float(facts.structural_page_share) if facts is not None else 0.0),
+        "formula_heavy": bool(facts.formula_heavy) if facts is not None else False,
+        "allow_degrade": bool(getattr(config, "allow_degrade", False)),
+        "page_lock_feasible": measured.feasible if measured is not None else None,
+        "source_overlap": measured.source_overlap if measured is not None else None,
+        "expansion_risk": measured.expansion_risk if measured is not None else None,
+    }
+    decision = plan_for_document(requested, **plan_kwargs)
+    if (
+        requested == "auto"
+        and is_pdf
+        and decision.plan.contract is not None
+        and decision.plan.contract.value == "faithful"
+    ):
+        configured_engine = str(getattr(config, "pdf_engine", "auto") or "auto")
+        engine = resolve_pdf_engine(configured_engine, is_pdf=True, contract=decision.plan.contract)
+        if not engine_supports_contract(engine, decision.plan.contract):
+            # An explicit engine that only reflows must not be handed a faithful
+            # plan and refused. ``auto`` honours the user's engine choice by
+            # routing to the readable contract that engine can keep.
+            readable = plan_for_document("readable", **plan_kwargs)
+            if readable.plan.contract is not None:
+                return readable
+    return decision
 
 
 def degraded_pdf_engine(config: Any, manifest_metadata: dict[str, Any] | None) -> str | None:

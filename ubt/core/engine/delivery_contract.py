@@ -67,6 +67,13 @@ _OUT_OF_BOUNDS_TOLERANCE_PT = 1.0
 #: editing one file.
 _STYLE_DRIFT_PT = 0.5
 
+#: A short block (a table cell, a caption label) can be split across lines by
+#: the artifact's text extractor: a wrapped cell's words are interleaved with
+#: the neighbouring cells on the same row. Below this length, require every
+#: word on the page instead of one contiguous run. Longer prose still needs the
+#: contiguous substring, so a dropped clause cannot hide in a bag of words.
+_SHORT_BLOCK_MAX_CHARS = 48
+
 #: One entry per leak *site*, not per character: ``⟦SOUP_MASK_0001-f2d⟧`` would
 #: otherwise count as three findings and overstate the work left. The paired
 #: alternative comes first so a bracketed token is consumed as a unit; the
@@ -215,6 +222,10 @@ class ContractEvidence:
     font_issues: tuple[str, ...] = ()
     overflow_records: tuple[OverflowRecord, ...] = ()
     style_samples: tuple[StyleSample, ...] = ()
+    #: The native codec preserves each block's source font size instead of
+    #: declaring one document body group. A p5-p95 group check would report the
+    #: source's own section sizes as drift, so it does not run here.
+    style_preserves_source: bool = False
     #: The renderer declared, before drawing, that a squeezed page holds the
     #: body group's size and flows onto continuation pages (the middle
     #: contract). A faithful artifact may then carry MORE pages than the
@@ -480,6 +491,12 @@ def _style_findings(evidence: ContractEvidence) -> list[ContractFinding]:
         # them as one group blocked real deliveries. Type legibility is the
         # visual gate's job; the style group belongs to ``faithful``.
         return []
+    if evidence.style_preserves_source:
+        # Native faithful keeps each block's source size. The source may
+        # legitimately set a chapter or footnote section at a different size;
+        # a document-wide group is a Typst contract, not this one. Text loss and
+        # overflow are already checked block by block.
+        return []
     body = [
         sample for sample in evidence.style_samples if sample.role == "body" and sample.size_pt > 0
     ]
@@ -596,6 +613,36 @@ def _out_of_bounds_findings(evidence: ContractEvidence) -> list[ContractFinding]
     return findings
 
 
+def _prose_key(text: str) -> str:
+    """The letters, digits and ideographs of ``text``, whitespace-free.
+
+    Prose segments are checked for *words*, not punctuation or display symbols.
+    A proof-ending box (``□``) and a symbol the native codec keeps as a source
+    glyph are not part of the translatable prose; the old full-segment
+    comparison reported every proof as clipped when its QED box had no text
+    layer.
+    """
+    return "".join(char for char in _normalize(text) if char.isalnum())
+
+
+def _short_block_tokens_present(text: str, body_joined: str) -> bool:
+    """Whether a short block's words all appear on the page, in any order.
+
+    Table cells are extracted row-major, so a wrapped cell's second line lands
+    between the next cell's header and its body. Requiring the whole cell as one
+    contiguous string reported a delivered cell as missing (``Components`` after
+    its ``[模拟翻译]`` prefix was separated by the neighbouring header). Every
+    token still has to be present, and this fallback only applies to short
+    blocks; prose keeps the contiguous check.
+    """
+    normalized = _normalize(text)
+    if len(normalized) > _SHORT_BLOCK_MAX_CHARS:
+        return False
+    tokens = [token for token in text.split() if token]
+    body_normalized = _normalize(body_joined)
+    return len(tokens) >= 2 and all(_normalize(token) in body_normalized for token in tokens)
+
+
 def _text_findings(
     evidence: ContractEvidence,
     page_texts: list[str],
@@ -619,11 +666,13 @@ def _text_findings(
         if not expected:
             continue
         if block.segments:
-            missing = [
-                segment
-                for segment in block.segments
-                if _normalize(segment) and _normalize(segment) not in body_joined
-            ]
+            # A QED box, a lone dash, or a punctuation run is not prose: the
+            # native codec may keep it as a source glyph (or drop it as
+            # furniture), and demanding its text layer would report a delivered
+            # proof as clipped. Only segments with a letter or digit are claims.
+            segments = tuple(segment for segment in block.segments if _prose_key(segment))
+            prose_joined = _prose_key(body_joined)
+            missing = [segment for segment in segments if _prose_key(segment) not in prose_joined]
             if missing:
                 findings.append(
                     ContractFinding(
@@ -631,7 +680,7 @@ def _text_findings(
                         code="clipped_overflow",
                         message=(
                             f"Block {block.block_id} is missing "
-                            f"{len(missing)}/{len(block.segments)} prose segment(s) "
+                            f"{len(missing)}/{len(segments)} prose segment(s) "
                             "around its inline objects; first "
                             f"{missing[0][:60]!r}"
                         ),
@@ -639,6 +688,12 @@ def _text_findings(
                         block_id=block.block_id,
                     )
                 )
+            continue
+        if (
+            expected not in joined
+            and expected not in body_joined
+            and _short_block_tokens_present(block.text, body_joined)
+        ):
             continue
         occurrences = max(joined.count(expected), body_joined.count(expected))
         pages = [

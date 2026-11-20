@@ -99,11 +99,11 @@ def test_new_faithful_degrades_to_readable_with_allow_degrade() -> None:
     assert decision.plan.degrade_policy is DegradePolicy.ALLOW_DEGRADE
 
 
-def test_auto_paper_routes_to_readable() -> None:
+def test_auto_paper_routes_to_native_faithful() -> None:
     decision = _plan("auto", document_mode="paper")
-    assert decision.effective_mode == "readable"
-    assert decision.plan.contract is DeliveryContract.READABLE
-    assert decision.plan.default_page_strategy is PageStrategy.DOCUMENT_REFLOW
+    assert decision.effective_mode == "faithful"
+    assert decision.plan.contract is DeliveryContract.FAITHFUL
+    assert decision.plan.default_page_strategy is PageStrategy.CANVAS
 
 
 def test_auto_structured_paper_upgrades_to_faithful() -> None:
@@ -119,10 +119,10 @@ def test_auto_structured_paper_upgrades_to_faithful() -> None:
     assert decision.plan.default_page_strategy is PageStrategy.CANVAS
 
 
-def test_auto_book_routes_to_readable() -> None:
+def test_auto_book_routes_to_native_faithful() -> None:
     decision = _plan("auto", document_mode="book")
-    assert decision.effective_mode == "readable"
-    assert decision.plan.contract is DeliveryContract.READABLE
+    assert decision.effective_mode == "faithful"
+    assert decision.plan.contract is DeliveryContract.FAITHFUL
 
 
 def test_auto_non_pdf_routes_to_readable() -> None:

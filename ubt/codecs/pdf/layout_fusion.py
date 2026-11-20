@@ -227,7 +227,6 @@ def _group_ops_into_lines(ops: list[StreamTextOp]) -> list[list[StreamTextOp]]:
 def _split_table_into_cells(
     ops: list[StreamTextOp],
     region_bbox: tuple[float, float, float, float],
-    rules: list[VectorRule],
 ) -> list[tuple[tuple[float, float, float, float], list[StreamTextOp]]]:
     """Partition table ops into per-cell boxes using row lines + column gutters."""
     if not ops:
@@ -236,20 +235,7 @@ def _split_table_into_cells(
     if not lines:
         return []
 
-    # Find horizontal separators inside the table.
-    rx0, ry0, rx1, ry1 = region_bbox
-    h_rules = sorted(
-        {
-            round(0.5 * (r.bbox[1] + r.bbox[3]), 1)
-            for r in rules
-            if r.is_horizontal
-            and r.bbox[0] < rx1
-            and r.bbox[2] > rx0
-            and ry0 <= 0.5 * (r.bbox[1] + r.bbox[3]) <= ry1
-            and (r.bbox[2] - r.bbox[0]) >= (rx1 - rx0) * 0.35
-        },
-        reverse=True,
-    )
+    rx1 = region_bbox[2]
 
     # Split each visual line into horizontal cell clusters separated by wide gaps.
     cells: list[tuple[tuple[float, float, float, float], list[StreamTextOp]]] = []
@@ -273,41 +259,14 @@ def _split_table_into_cells(
             # Extend cell width slightly toward right neighbor gap (never past table right)
             cells.append(((cx0, cy0, min(rx1, cx1 + 4.0), cy1), cl))
 
-    # Merge vertically stacked lines within the same column & row band (between h_rules).
-    def _row_band(cy: float) -> int:
-        band = 0
-        for hy in h_rules:
-            if cy < hy:
-                band += 1
-        return band
-
-    merged: list[tuple[tuple[float, float, float, float], list[StreamTextOp]]] = []
-    for box, cl in cells:
-        placed = False
-        b_band = _row_band(0.5 * (box[1] + box[3]))
-        for idx, (mbox, mops) in enumerate(merged):
-            m_band = _row_band(0.5 * (mbox[1] + mbox[3]))
-            if b_band != m_band:
-                continue
-            # Same horizontal column overlap and vertically adjacent (<= 1.4x line height)
-            h_ov = min(box[2], mbox[2]) - max(box[0], mbox[0])
-            min_w = max(1.0, min(box[2] - box[0], mbox[2] - mbox[0]))
-            v_gap = mbox[1] - box[3]
-            fs = max(o.font_size_pt for o in mops)
-            if h_ov / min_w >= 0.45 and -3.0 <= v_gap <= fs * 0.85:
-                new_box = (
-                    min(mbox[0], box[0]),
-                    min(mbox[1], box[1]),
-                    max(mbox[2], box[2]),
-                    max(mbox[3], box[3]),
-                )
-                merged[idx] = (new_box, mops + cl)
-                placed = True
-                break
-        if not placed:
-            merged.append((box, cl))
-
-    return merged
+    # Each visual line cluster is its own cell. The previous vertical merge
+    # tried to rebuild a wrapped cell by joining lines in the same row band, but
+    # a dense table without per-row rules has every row in one band; adjacent
+    # rows then merge into a cell whose box covers the rows below, while the
+    # individual cells are emitted too. The result was two translations on top
+    # of each other (and a missing one). A line is the smallest box the source
+    # geometry actually guarantees; keep it.
+    return cells
 
 
 def _is_math_op(
@@ -805,7 +764,7 @@ def fuse_page(
         if not ops:
             continue
         if region.kind == RegionKind.TABLE:
-            cells = _split_table_into_cells(ops, region.bbox, analysis.vector_rules)
+            cells = _split_table_into_cells(ops, region.bbox)
             for cell_box, cell_ops in cells:
                 unit_seq += 1
                 block = _build_fused_block(

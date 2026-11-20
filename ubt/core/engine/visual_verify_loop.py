@@ -62,7 +62,8 @@ class VisualVerifyLoop:
         blocks: Sequence[IRBlock],
     ) -> Any:
         runner = get_visual_gate_runner()
-        return await runner(
+        return await asyncio.to_thread(
+            runner,
             pdf_path,
             expected_page_count=self.expected_page_count,
             faithful_pages=self.faithful_pages,

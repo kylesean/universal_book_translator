@@ -1487,7 +1487,22 @@ def _delivery_contract_evidence(
                 # declared flow expansion shifted later content onto
                 # continuation pages.
                 allow_cross_page=(
-                    (contract == "readable") or has_multi_page_boxes or declared_page_expansion
+                    (contract == "readable")
+                    or has_multi_page_boxes
+                    or declared_page_expansion
+                    # A repeated table header is a cell whose source page is the
+                    # table's first page, while the header itself is drawn on
+                    # every continuation page. Its text legitimately appears on
+                    # another page.
+                    or (
+                        is_native
+                        and getattr(
+                            getattr(native_unit_by_id.get(block.id), "role", None),
+                            "value",
+                            None,
+                        )
+                        == "table_cell"
+                    )
                 ),
                 segments=segments,
             )
@@ -1619,6 +1634,7 @@ def _delivery_contract_evidence(
             evidence,
             text_boxes=tuple(native_boxes),
             style_samples=tuple(style_samples or native_samples),
+            style_preserves_source=True,
         )
 
     # The renderer declares the document body group before it draws; the reader
