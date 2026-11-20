@@ -37,7 +37,6 @@ __all__ = [
     "page_box",
     "page_count",
     "page_rotation",
-    "page_rotations",
     "page_size",
     "resource_font_count",
     "resource_image_count",
@@ -114,12 +113,6 @@ def page_rotation(page: Page) -> int:
                 return 0
         cur = cur.get("/Parent")
     return 0
-
-
-def page_rotations(path: Path | str) -> dict[int, int]:
-    """1-indexed ``{page_no: rotation_deg}`` for every page."""
-    with pikepdf.open(str(path)) as pdf:
-        return {idx: page_rotation(page) for idx, page in enumerate(pdf.pages, start=1)}
 
 
 def count_ops(page: Page, opnames: Iterable[str]) -> int:

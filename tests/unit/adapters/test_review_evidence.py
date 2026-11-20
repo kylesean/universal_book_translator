@@ -1,8 +1,8 @@
 """Direct evidence for the review fixes that had only indirect coverage.
 
 Each test here exists because a claim in the fix list is otherwise verified
-only through a caller: the 10 % VLM budget, the CropBox read, the contract's
-small-box bookkeeping, the QE sample-coverage figure, and the [gate] section.
+only through a caller: the CropBox read, the contract's
+small-box bookkeeping and the QE sample-coverage figure.
 """
 
 from __future__ import annotations
@@ -12,19 +12,6 @@ from pathlib import Path
 import pytest
 
 pytestmark = pytest.mark.fast
-
-
-# -- VLM sampling budget ---------------------------------------------------
-
-
-def test_vlm_budget_is_ten_percent_capped_and_never_zero_when_enabled() -> None:
-    from ubt.adapters.pdf.visual_gate import vlm_page_budget
-
-    assert vlm_page_budget(0, 20) == 0
-    assert vlm_page_budget(100, 20) == 10
-    assert vlm_page_budget(5, 20) == 1, "a short artifact still gets one judged page"
-    assert vlm_page_budget(400, 20) == 20, "the operator's cap holds"
-    assert vlm_page_budget(400, 0) == 0, "0 disables the tier"
 
 
 # -- CropBox ---------------------------------------------------------------

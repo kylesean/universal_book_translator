@@ -586,11 +586,6 @@ class QualityConfig(BaseModel):
     visual_sample_pages: int = Field(default=6, ge=0, le=50)
     visual_max_vlm_pages: int = Field(default=20, ge=0, le=50)
     visual_blocking_gate_enabled: bool = False
-    #: ``[gate]`` overrides for the visual gate's measured thresholds. Each key
-    #: is documented (with its calibration corpus) in
-    #: ``ubt.adapters.pdf.gate_config``; an unknown key is rejected there rather
-    #: than silently ignored.
-    gate_thresholds: dict[str, float] = Field(default_factory=dict)
     #: VLM judge FAIL is advisory by default: the judge samples a handful of
     #: pages, so a model false positive must not refuse a whole book. Set this
     #: true to make a sampled VLM FAIL blocking for short documents (within
@@ -1207,7 +1202,6 @@ class UBTConfig(BaseSettings):
     vlm_trust_remote_code: bool = False
     visual_sample_pages: int = Field(default=6, ge=0, le=50)
     visual_max_vlm_pages: int = Field(default=20, ge=0, le=50)
-    gate_thresholds: dict[str, float] = Field(default_factory=dict)
     # -- visual blocking gate (opt-in for long docs; short docs fail closed) ---
     # Short docs (<= QA_FULL_GATE_MAX_PAGES) enforce visual blocking fail-closed
     # by default. For longer docs, setting this to true refuses export when
@@ -1916,7 +1910,6 @@ class UBTConfig(BaseSettings):
         """
         from ubt.core.providers import (
             load_defaults_config,
-            load_gate_section,
             load_layer_config,
             merge_provider_under,
         )
@@ -1932,12 +1925,6 @@ class UBTConfig(BaseSettings):
             declared = load_defaults_config(custom_path).provider
             provider_name = str(declared) if declared else None
         layer_cfg = load_layer_config(str(provider_name) if provider_name else None, custom_path)
-        # ``[gate]`` is QA policy, not provider settings, so it does not ride the
-        # provider layer; it merges under the same precedence as a file value.
-        if "gate_thresholds" not in clean:
-            gate_values = load_gate_section(custom_path)
-            if gate_values:
-                clean["gate_thresholds"] = gate_values
         # ``load_layer`` already carries ``provider`` when it came from
         # ``[defaults]``, so the selection survives the merge without a separate
         # assignment here — one owner for the key, not two that can disagree.

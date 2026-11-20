@@ -38,12 +38,12 @@ if TYPE_CHECKING:
     # Type-only edges: they keep the port's signature checked against the
     # stage contracts without entering the runtime import graph. The layering
     # invariant forbids *module-level* edges only; a TYPE_CHECKING edge is not one.
+    from ubt.adapters.pdf.artifact_gate import VisualGateResult
     from ubt.adapters.pdf.artifact_text import ArtifactReport
     from ubt.adapters.pdf.extraction_witness import PageVerdict
     from ubt.adapters.pdf.font_probe import FontStack
     from ubt.adapters.pdf.page_profiler import PageKind
     from ubt.adapters.pdf.pdf_profiler import PDFDocumentProfile
-    from ubt.adapters.pdf.visual_gate import VisualGateResult
     from ubt.segment.placeholders import MaskedSource, PlaceholderEngine
     from ubt.translate.engine import TranslationEngine
 
@@ -224,21 +224,9 @@ def detect_figure_pages(input_path: Path, blocks: list[Any]) -> set[int]:
 
 def get_visual_gate_runner() -> VisualGateRunnerFn:
     """Return the post-render visual gate entry point."""
-    from ubt.adapters.pdf.visual_gate import run_visual_gate
+    from ubt.adapters.pdf.artifact_gate import run_visual_gate
 
     return cast(VisualGateRunnerFn, run_visual_gate)
-
-
-def vision_ocr_driver(endpoint: str, api_key: str | None, model: str) -> Any:
-    """Build an OpenAI-compatible vision OCR driver (the engine's one vision endpoint).
-
-    The visual judge's local fallback shares the OCR channel's endpoint, so the
-    loop reaches the driver class through this bridge like every other
-    core→adapters crossing.
-    """
-    from ubt.adapters.pdf.vlm.drivers.cloud_driver import VisionEndpointDriver
-
-    return VisionEndpointDriver(endpoint=endpoint, api_key=api_key, model=model)
 
 
 def crashed_visual_gate_result(message: str) -> VisualGateResult:
@@ -248,7 +236,7 @@ def crashed_visual_gate_result(message: str) -> VisualGateResult:
     crash record through this bridge; a crash must not degrade to "no gate",
     which skips blocking enforcement and reads as a perfect KPI pass.
     """
-    from ubt.adapters.pdf.visual_gate import VisualFinding, VisualGateResult
+    from ubt.adapters.pdf.artifact_gate import VisualFinding, VisualGateResult
 
     return VisualGateResult(
         passed=False,
@@ -328,7 +316,7 @@ def blocking_gate_tripped(
     enabled, plus a sampled VLM FAIL only when the separate VLM opt-in is on.
     Duck-typed over findings (severity/code/page).
     """
-    from ubt.adapters.pdf.visual_gate import blocking_gate_tripped as _tripped
+    from ubt.adapters.pdf.artifact_gate import blocking_gate_tripped as _tripped
 
     return list(
         _tripped(

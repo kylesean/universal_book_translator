@@ -1,12 +1,9 @@
-"""Visual gate control loop and quarantine orchestration.
+"""Artifact-gate control loop and quarantine orchestration.
 
-Coordinates post-render visual verification (T0/T0.5/T1/T2):
-1. Runs post-render Visual Gate;
-2. If major/critical layout defects are found, marks the affected page blocks
-   as NEEDS_HUMAN with visual_gate_failed flags;
-3. Persists visual_report.json to disk and SQLite ledger.
-
-The publication renderer has no typography-retune self-healing pass: a
+Runs the deterministic artifact gate (searchability, blank pages, faithful page
+count), merges artifact-parity findings, and marks the blocks a major/critical
+finding is about as NEEDS_HUMAN. Persists ``visual_report.json`` to disk and the
+SQLite ledger. There is no pixel/VLM tier and no typography-retune pass: a
 defect is quarantined directly rather than re-rendered at a different scale.
 """
 
@@ -16,9 +13,7 @@ import asyncio
 import dataclasses
 import json
 import logging
-import os
 from collections.abc import Sequence
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -26,56 +21,12 @@ from ubt.core.atomic import atomic_write_text
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.exceptions import JobInterruptedError
 from ubt.core.ir.models import BlockStatus, BookManifest, IRBlock
-from ubt.core.ir.render_plan import RenderPlan
 from ubt.core.job_options import sidecar_path
 from ubt.core.log_aggregate import noise_report
-from ubt.core.ports import DocumentAdapter, get_visual_gate_runner
+from ubt.core.ports import get_visual_gate_runner
 from ubt.core.qe.defect_taxonomy import format_defect_flag
 
 logger = logging.getLogger(__name__)
-
-
-def _typst_source_path(pdf_path: Path) -> Path | None:
-    """The Typst source the renderer wrote for ``pdf_path``, or ``None``.
-
-    The publication renderer writes ``<output dir>/.<stem>_typst/main.typ``
-    (``docling_render._render_publish_sync``), not a ``.typ`` sibling of the
-    PDF. Looking for ``pdf.with_suffix(".typ")`` therefore never found
-    anything: the source tier silently never ran, and nothing in the report
-    said so. Both spellings are accepted so a caller holding a PDF from some
-    other build dir still gets scanned.
-
-    The facsimile renderer writes ``<output dir>/.build_<stem>_facsimile/
-    facsimile.typ`` instead, and it was missing from this list for exactly as
-    long as the canvas tier failed to run: the gate reads the canvas page map
-    out of that file (``visual_gate.canvas_page_pairs``), so without it every
-    facsimile delivery reported "no canvas pages recorded" and the ink-collision
-    check never measured a single page.
-
-    When several exist the **newest** wins. Order in the tuple is only a
-    deterministic tie-break: a resumed job that changed delivery mode leaves the
-    previous renderer's build directory behind, and the older source describes a
-    document that was never delivered.
-    """
-    candidates = (
-        pdf_path.parent / f".build_{pdf_path.stem}_facsimile" / "facsimile.typ",
-        pdf_path.parent / f".{pdf_path.stem}_typst" / "main.typ",
-        pdf_path.with_suffix(".typ"),
-    )
-    # Newest wins when more than one exists. A resumed job that changed delivery
-    # mode leaves the previous renderer's build directory behind, and the older
-    # source describes a document that was never delivered — reading it would
-    # make the gate look for a canvas page map in markup for a different
-    # artifact. Order is therefore a tie-break only, not the rule.
-    found = [candidate for candidate in candidates if candidate.is_file()]
-    if not found:
-        return None
-    if len(found) == 1:
-        return found[0]
-    try:
-        return max(found, key=lambda candidate: candidate.stat().st_mtime)
-    except OSError:
-        return found[0]
 
 
 class VisualVerifyLoop:
@@ -83,155 +34,27 @@ class VisualVerifyLoop:
 
     def __init__(
         self,
-        adapter: DocumentAdapter,
         manifest: BookManifest,
         ledger: SQLiteJobLedger,
         job_id: str,
         target_lang: str,
-        router: Any | None = None,
-        render_plan: RenderPlan | None = None,
-        sample_pages: int = 6,
-        max_vlm_pages: int = 3,
-        visual_judge_enabled: bool = False,
-        visual_judge_model: str | None = None,
         cancel_token: asyncio.Event | None = None,
         expected_page_count: int | None = None,
         faithful_pages: bool = False,
-        thresholds: Any | None = None,
-        source_pdf: Path | None = None,
         claims_finality: bool = True,
     ) -> None:
-        self.adapter = adapter
         self.manifest = manifest
         self.ledger = ledger
         self.job_id = job_id
         self.target_lang = target_lang
-        self.router = router
-        # The render decision, so the retune re-render uses the same mode/engine
-        # and the gate reads the same facing/mode.
-        self.render_plan = render_plan
-        self.sample_pages = max(0, sample_pages)
-        self.max_vlm_pages = max(0, max_vlm_pages)
-        self.visual_judge_enabled = visual_judge_enabled
-        self.visual_judge_model = visual_judge_model
         self.cancel_token = cancel_token
         # The contract the artifact was rendered under: a faithful delivery
         # promises the source's page count, so the gate can report a spill
         # instead of leaving it to the reader to notice.
         self.expected_page_count = expected_page_count
         self.faithful_pages = faithful_pages
-        # ``[gate]`` threshold overrides (raw mapping) or an already-resolved
-        # ``GateThresholds``. Resolution and validation happen inside the gate's
-        # own module; see ``run_visual_gate``.
-        self.thresholds = thresholds
-        # The source document, for checks that must compare artifact geometry
-        # against source geometry in one coordinate frame (furniture collision).
-        self.source_pdf = source_pdf
         # Re-export passes claims_finality=False and must never mutate block statuses.
         self.claims_finality = claims_finality
-
-    def _build_vlm_judge(self) -> Any | None:
-        if not self.visual_judge_enabled:
-            return None
-        router = self.router
-        model = self.visual_judge_model
-        if router is not None:
-            # A named judge model (or the repair model) on the router: the
-            # strongest critic. When only the model name is unset the judge
-            # falls through to the OCR vision endpoint below rather than
-            # silently skipping the tier.
-            async def _judge(images: list[str], prompt: str) -> str:
-                res: str = await router.complete_with_images(prompt, images, model=model)
-                return res
-
-            return _judge
-
-        # No router model for the judge: reuse the OCR channel's vision
-        # endpoint (the same local server that transcribes scans — one vision
-        # endpoint serves the whole pipeline). A doc-parsing specialist is a
-        # weaker *layout* critic than a general VLM, but it catches the
-        # text-level failures (missing/garbled delivered text) locally at
-        # zero cost and zero egress; aesthetic judgement still wants a named
-        # ``visual_judge_model`` on the router.
-        endpoint = getattr(self.adapter, "ocr_endpoint", None) or os.environ.get(
-            "UBT_OCR_ENDPOINT", ""
-        )
-        model_name = getattr(self.adapter, "ocr_model", None) or os.environ.get("UBT_OCR_MODEL", "")
-        if not endpoint or not model_name:
-            return None
-        # Same choke point as the OCR drivers: without the opt-in, only a
-        # local endpoint may receive page images — including from the judge.
-        from ubt.core.endpoint_locality import endpoint_on_this_machine
-
-        allow_upload = bool(getattr(self.adapter, "allow_page_upload", False))
-        if not allow_upload and not endpoint_on_this_machine(endpoint):
-            return None
-        api_key = getattr(self.adapter, "ocr_api_key", None) or os.environ.get("UBT_OCR_API_KEY")
-        from ubt.core.ports import vision_ocr_driver
-
-        driver = vision_ocr_driver(endpoint, api_key, model_name)
-
-        def _post_judge(images: list[str], prompt: str) -> str:
-            """One bounded call per image; returns raw text for verdict parsing."""
-            import httpx
-
-            contents = []
-            for img in images:
-                # Images arrive as base64 data URLs or raw base64; pass through.
-                if img.startswith("data:"):
-                    contents.append({"type": "image_url", "image_url": {"url": img}})
-                else:
-                    contents.append(
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{img}"},
-                        }
-                    )
-            payload = {
-                "model": driver.model,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [{"type": "text", "text": prompt}, *contents],
-                    }
-                ],
-                "temperature": 0.0,
-            }
-            headers = {"Content-Type": "application/json"}
-            if driver.api_key:
-                headers["Authorization"] = f"Bearer {driver.api_key}"
-            url = (
-                driver.endpoint
-                if driver.endpoint.endswith("/chat/completions")
-                else f"{driver.endpoint}/chat/completions"
-            )
-            with httpx.Client(timeout=driver.timeout) as client:
-                resp = client.post(url, json=payload, headers=headers)
-                resp.raise_for_status()
-            data = resp.json()
-            # Core-internal usage sink: the judge's tokens must land in the
-            # same ledger the OCR channel's do (unmeasured books as unknown,
-            # never fake $0.00).
-            from ubt.core.router.provider import _extract_cached_tokens, record_external_usage
-
-            usage = data.get("usage")
-            if isinstance(usage, dict) and usage:
-                record_external_usage(
-                    driver.model,
-                    prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
-                    completion_tokens=int(usage.get("completion_tokens", 0) or 0),
-                    cached_tokens=_extract_cached_tokens(usage),
-                )
-            else:
-                record_external_usage(driver.model, measured=False)
-            return data["choices"][0]["message"]["content"] or ""
-
-        async def _local_judge(images: list[str], prompt: str) -> str:
-            # The gate awaits its judge; the blocking HTTP call goes to a
-            # thread so the export event loop keeps pumping.
-            return await asyncio.to_thread(_post_judge, images, prompt)
-
-        return _local_judge
 
     async def _evaluate_gate(
         self,
@@ -239,66 +62,12 @@ class VisualVerifyLoop:
         blocks: Sequence[IRBlock],
     ) -> Any:
         runner = get_visual_gate_runner()
-        typ_text: str | None = None
-        typ_sidecar = _typst_source_path(pdf_path)
-        if typ_sidecar is not None:
-            with suppress(Exception):
-                typ_text = (
-                    await asyncio.to_thread(
-                        typ_sidecar.read_text, encoding="utf-8", errors="replace"
-                    )
-                )[:200_000]
-
-        # T1 (out of bounds) and the overlap check read the artifact's own text
-        # boxes, not the IR's source bboxes: the renderer changes where
-        # text lands, so the source rectangle says nothing about the delivered
-        # page. ``run_visual_gate`` falls back to the IR and says so when pdfium
-        # cannot read the artifact.
-        gate_blocks = blocks
-        vlm_judge = self._build_vlm_judge()
         return await runner(
             pdf_path,
-            blocks=gate_blocks,
-            typ_text=typ_text,
-            sample_pages=self.sample_pages,
-            max_vlm_pages=self.max_vlm_pages,
-            vlm_judge=vlm_judge,
-            canvas_background_pdf=self._canvas_background_path(),
             expected_page_count=self.expected_page_count,
             faithful_pages=self.faithful_pages,
-            thresholds=self.thresholds,
-            source_pdf=self.source_pdf,
+            target_lang=self.target_lang,
         )
-
-    def _canvas_background_path(self) -> Path | None:
-        """The stripped background the facsimile renderer drew under the text.
-
-        Only the facsimile path produces one, and it records the path on the
-        manifest (``_render_facsimile``) because this loop runs a stage later and
-        holds no reference to the render call. ``None`` is the ordinary answer —
-        reflow and page_locked deliveries have no background — and the gate turns
-        it into a printed "the canvas tier did not run" note rather than a
-        silent omission.
-
-        A recorded path that no longer exists is also ``None``: the gate must not
-        crash on a stale metadata entry left by an earlier run of the same job,
-        and reporting "measured clean" for a file it could not open would be
-        worse than reporting nothing.
-        """
-        metadata = getattr(self.manifest, "metadata", None)
-        if not isinstance(metadata, dict):
-            return None
-        recorded = metadata.get("background_pdf")
-        if not recorded:
-            return None
-        candidate = Path(str(recorded))
-        if candidate.is_file():
-            return candidate
-        logger.debug(
-            "Visual gate: recorded background %s is gone; canvas tier will be skipped",
-            candidate,
-        )
-        return None
 
     async def run(
         self,

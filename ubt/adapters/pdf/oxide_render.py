@@ -63,20 +63,6 @@ def render_page_png(pdf_path: Path, page: int, dpi: int) -> bytes | None:
         return None
 
 
-def write_page_png(pdf_path: Path, page: int, dpi: int, out_dir: Path) -> Path | None:
-    """Render and write ``out_dir/p<page>.png``; ``None`` on any failure."""
-    data = render_page_png(pdf_path, page, dpi)
-    if data is None:
-        return None
-    target = out_dir / f"p{page}.png"
-    try:
-        target.write_bytes(data)
-    except OSError as exc:
-        logger.debug("oxide render: cannot write %s: %s", target, exc)
-        return None
-    return target
-
-
 def extract_page_texts(pdf_path: Path) -> list[str]:
     """Per-page text (1-based order) via one document open; empty list on failure.
 

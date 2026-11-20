@@ -66,8 +66,8 @@ from ubt.core.ports import (
 from ubt.delivery import legacy_delivery_contract
 
 if TYPE_CHECKING:
+    from ubt.adapters.pdf.artifact_gate import VisualGateResult
     from ubt.adapters.pdf.artifact_text import ArtifactReport
-    from ubt.adapters.pdf.visual_gate import VisualGateResult
     from ubt.core.content.contract import ReconciliationReport
     from ubt.core.job_options import DeliveredArtifact
 from ubt.core.engine.facts import RenderPlan, Terminology
@@ -658,34 +658,6 @@ async def _apply_render_skip_ledger_pass(
         await asyncio.to_thread(ledger.save_checkpoints_batch, list(batch.values()))
 
 
-def _gate_threshold_overrides(ctx: StageContext) -> dict[str, float] | None:
-    """The configured ``[gate]`` overrides, or None when none are set.
-
-    The mapping is passed through unvalidated on purpose: validation (and the
-    rejection of an unknown key) belongs to the gate's own module
-    (``ubt.adapters.pdf.gate_config``), and ``ubt.core`` may not import
-    ``ubt.adapters`` at module scope or through a lazy bridge. A typo must fail
-    where the thresholds are actually resolved, not be silently dropped here.
-    """
-    overrides = getattr(ctx.config, "gate_thresholds", None)
-    return dict(overrides) if overrides else None
-
-
-def _source_pdf_for_gate(ctx: StageContext) -> Any | None:
-    """The source PDF, when the run's input was a PDF.
-
-    Only a PDF input gives the gate the same-extractor source geometry its
-    furniture check needs; anything else (EPUB/DOCX/Markdown) leaves the check
-    skipped rather than guessed.
-    """
-    try:
-        if ctx.input_path.suffix.lower() != ".pdf":
-            return None
-        return ctx.input_path if ctx.input_path.exists() else None
-    except Exception:  # noqa: BLE001 - an unreadable input is the ingest stage's error
-        return None
-
-
 def _is_faithful_delivery(ctx: StageContext) -> bool:
     """Whether this run's effective delivery mode is the page-locked contract."""
     mode = str((getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_mode", "") or "")
@@ -753,22 +725,13 @@ async def _run_visual_gate(
         from ubt.core.engine.visual_verify_loop import VisualVerifyLoop
 
         verify_loop = VisualVerifyLoop(
-            adapter=adapter,
             manifest=ctx.manifest,
             ledger=ctx.ledger,
             job_id=ctx.job_id,
             target_lang=ctx.target_lang,
-            router=ctx.router,
-            render_plan=render,
-            sample_pages=max(0, ctx.config.visual_sample_pages),
-            max_vlm_pages=max(0, ctx.config.visual_max_vlm_pages),
-            visual_judge_enabled=ctx.config.visual_judge_enabled,
-            visual_judge_model=ctx.config.visual_judge_model,
             cancel_token=ctx.cancel_token,
             expected_page_count=_faithful_expected_pages(ctx, rendered_path),
             faithful_pages=_is_faithful_delivery(ctx),
-            thresholds=_gate_threshold_overrides(ctx),
-            source_pdf=_source_pdf_for_gate(ctx),
             claims_finality=claims_finality,
         )
         rendered_path, visual_report_path, gate = await verify_loop.run(

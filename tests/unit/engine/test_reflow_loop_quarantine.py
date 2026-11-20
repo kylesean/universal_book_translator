@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from ubt.adapters.pdf.visual_gate import VisualFinding, VisualGateResult
+from ubt.adapters.pdf.artifact_gate import VisualFinding, VisualGateResult
 from ubt.core.engine.visual_verify_loop import VisualVerifyLoop
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock, make_element
 
@@ -82,7 +82,6 @@ def _loop(
     manifest: BookManifest | None = None,
 ) -> VisualVerifyLoop:
     loop = VisualVerifyLoop(
-        adapter=Any,  # type: ignore[arg-type]
         manifest=manifest or _manifest(tmp_path),
         ledger=ledger,  # type: ignore[arg-type]
         job_id="job-1",
