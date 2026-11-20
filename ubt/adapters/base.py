@@ -17,15 +17,10 @@ if TYPE_CHECKING:
     from ubt.core.engine.adapter_runtime import AdapterRuntimeConfig
 
 __all__ = [
-    "BILINGUAL_TARGET_CLASS",
     "BaseDocumentAdapter",
     "decode_markup",
     "parse_pipe_table_cells",
 ]
-
-#: CSS class every adapter puts on an injected bilingual target node. One name
-#: for HTML and EPUB so a stylesheet (and any consumer) can target both.
-BILINGUAL_TARGET_CLASS = "ubt-bilingual-target"
 
 
 def parse_pipe_table_cells(markup: str) -> list[list[str]]:
