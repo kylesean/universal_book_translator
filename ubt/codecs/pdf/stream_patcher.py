@@ -15,6 +15,8 @@ Core invariants:
 from __future__ import annotations
 
 import io
+import logging
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +29,8 @@ from ubt.codecs.pdf.layout_fusion import FusedBlock
 from ubt.codecs.pdf.paragraph_typesetter import TypesetParagraph, typeset_paragraph
 from ubt.codecs.pdf.stream_analyzer import IDENTITY_MATRIX, Matrix, PageStreamAnalysis
 from ubt.codecs.protocol import ApplyReport, DeliveryMode, OverflowItem
+
+logger = logging.getLogger(__name__)
 
 _PAINT_PATH_OPS: frozenset[str] = frozenset({"S", "s", "f", "F", "f*", "B", "B*", "b", "b*"})
 
@@ -395,7 +399,13 @@ def apply_pdf_patches(
                 )
 
         # Subset & embed all used target fonts ONCE per document.
+        font_started = time.perf_counter()
         embedded_fonts = font_engine.embed_all_used(work_pdf)
+        logger.debug(
+            "native font subsetting: %d slot(s) in %.0fms",
+            len(embedded_fonts),
+            (time.perf_counter() - font_started) * 1000,
+        )
 
         # Apply surgical content-stream patches to each modified page.
         for plan in patch_plans:

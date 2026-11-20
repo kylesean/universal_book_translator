@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -44,7 +45,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pdf", nargs="+", type=Path)
     parser.add_argument("--json", action="store_true", help="emit machine-readable rows")
+    parser.add_argument(
+        "--timing",
+        action="store_true",
+        help="log per-page analyze/render/detect/fuse breakdown",
+    )
     args = parser.parse_args()
+    if args.timing:
+        logging.basicConfig(level=logging.DEBUG, format="%(message)s")
 
     rows = [_measure(path) for path in args.pdf if path.is_file()]
     if args.json:

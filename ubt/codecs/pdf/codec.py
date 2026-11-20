@@ -11,6 +11,8 @@ Implements :class:`ubt.codecs.protocol.DocumentCodec` using:
 
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,6 +33,8 @@ from ubt.codecs.protocol import (
     DocumentProfile,
     TranslationUnit,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -140,23 +144,55 @@ class NativePDFCodec:
         missing_pages = [pno for pno in target_pages if (resolved_key, pno) not in self._page_cache]
 
         if missing_pages:
+            extract_started = time.perf_counter()
+            analyze_s = render_s = detect_s = fuse_s = 0.0
             with pikepdf.open(source_path) as pdf:
                 for pno in missing_pages:
+                    started = time.perf_counter()
                     analysis = analyze_page_stream(
                         pdf.pages[pno - 1],
                         page_no=pno,
                         pdfium_fallback_path=source_path,
                     )
+                    page_analyze = time.perf_counter() - started
+                    started = time.perf_counter()
                     img = (
                         _render_page_for_layout(source_path, pno, dpi=self._layout_dpi)
                         if needs_image
                         else None
                     )
+                    page_render = time.perf_counter() - started
+                    started = time.perf_counter()
                     regions = self._detector.detect_page(img, analysis)
                     if not regions and analysis.text_ops:
                         regions = HeuristicLayoutDetector().detect_page(None, analysis)
+                    page_detect = time.perf_counter() - started
+                    started = time.perf_counter()
                     fused = fuse_page(analysis, regions)
+                    page_fuse = time.perf_counter() - started
+                    analyze_s += page_analyze
+                    render_s += page_render
+                    detect_s += page_detect
+                    fuse_s += page_fuse
                     self._page_cache[(resolved_key, pno)] = (analysis, fused)
+                    logger.debug(
+                        "native page %d: %.1fms (analyze %.1f, render %.1f, detect %.1f, fuse %.1f)",
+                        pno,
+                        (page_analyze + page_render + page_detect + page_fuse) * 1000,
+                        page_analyze * 1000,
+                        page_render * 1000,
+                        page_detect * 1000,
+                        page_fuse * 1000,
+                    )
+            logger.debug(
+                "native extract %d page(s) in %.0fms: analyze %.0f, render %.0f, detect %.0f, fuse %.0f",
+                len(missing_pages),
+                (time.perf_counter() - extract_started) * 1000,
+                analyze_s * 1000,
+                render_s * 1000,
+                detect_s * 1000,
+                fuse_s * 1000,
+            )
 
         for pno in target_pages:
             analysis, fused = self._page_cache[(resolved_key, pno)]

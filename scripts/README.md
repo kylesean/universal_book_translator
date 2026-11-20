@@ -40,8 +40,9 @@ It takes `--corpus corpus` (default) and exits 0 on pass.
 ## Performance
 
 - `benchmark_native_pdf.py` — inspect/extract timing for the native PDF codec
-  (pages, units, seconds/page). Run before changing the layout detector or its
-  raster DPI; JSON output is available with `--json`.
+  (pages, units, seconds/page). `--timing` prints the per-page
+  analyze/render/detect/fuse breakdown; `--json` emits machine-readable rows.
+  Run it before changing the layout detector or its raster DPI.
 
 ## Utilities
 
