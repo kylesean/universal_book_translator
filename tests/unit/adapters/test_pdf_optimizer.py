@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pikepdf
 import pytest
+from pdf_builders import write_text_pdf
 from PIL import Image
 
 from ubt.adapters.pdf.pdf_optimizer import (
@@ -207,3 +208,25 @@ def test_optimize_pdf_custom_output_path(tmp_path: Path) -> None:
     assert dst.exists()
     assert res.path == str(dst)
     assert src.exists()
+
+
+def test_verify_pdf_fidelity_rejects_ligature_corruption(tmp_path: Path) -> None:
+    """A ghostscript font pass that turns ``ffi`` into ``f + Ï`` is not accepted.
+
+    The document-wide character ratio stays above the 0.98 floor for this
+    corruption, so the word-level check is what keeps the text layer searchable.
+    """
+    filler = ["The quick brown fox jumps over the lazy dog." for _ in range(40)]
+    original = write_text_pdf(
+        tmp_path / "original.pdf",
+        [(*filler, "Efficient office traffic", "Token efficiency and traffic.")],
+    )
+    candidate = write_text_pdf(
+        tmp_path / "candidate.pdf",
+        [(*filler, "EfÏcient office trafÏc", "Token efÏciency and trafÏc.")],
+    )
+
+    valid, reason = verify_pdf_fidelity(original, candidate)
+    assert not valid
+    assert "distinct word" in reason
+    assert "Efficient" in reason or "efficiency" in reason or "traffic" in reason

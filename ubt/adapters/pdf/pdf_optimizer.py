@@ -11,10 +11,12 @@ same searchable text — never as a hash match, and ``ebook``/``screen`` trade
 more away by re-encoding oversized images as bounded JPEG.
 
 :func:`verify_pdf_fidelity` gates the candidate before it replaces the input.
-Its hard invariants are parseability and page count; the character-similarity
-check on the extracted text layer is best-effort — it sits inside
-``except ImportError: pass`` and swallows its own failures, so it can step
-aside without rejecting anything.
+Its hard invariants are parseability and page count plus a text-layer diff:
+the character similarity catches broad damage, and a distinct-word recall floor
+catches a font subsetter that rewrites ligature ``/ToUnicode`` maps (``Efficient``
+extracting as ``EfÏcient`` while the character ratio still rounds to 0.997).
+If the comparison cannot run, the candidate is rejected rather than accepted
+on structure alone.
 """
 
 from __future__ import annotations
@@ -22,10 +24,12 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+import re
 import shutil
 import subprocess
 import tempfile
 import time
+import unicodedata
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal
@@ -311,11 +315,14 @@ def verify_pdf_fidelity(
     """Verify structural validity and text fidelity between original and candidate PDFs.
 
     The hard invariants are parseability by pikepdf and an identical page count;
-    either failing rejects the candidate outright. The character-level text
-    comparison is best-effort only in what it can inspect: when extraction or
-    the similarity diff raises (or pypdfium2/rapidfuzz is unavailable), the
-    candidate is rejected as unverified rather than accepted on structure
-    alone. Accepting it would let a broken text layer replace the source.
+    either failing rejects the candidate outright. The text comparison has two
+    parts: document-wide character similarity, plus recall of every distinct
+    word of four or more letters. The second is what catches a font subsetter
+    that rewrites a ligature ``/ToUnicode`` entry (``Efficient`` -> ``EfÏcient``)
+    without moving the character ratio below its floor. When extraction or the
+    similarity diff raises (or pypdfium2/rapidfuzz is unavailable), the
+    candidate is rejected as unverified rather than accepted on structure alone.
+    Accepting it would let a broken text layer replace the source.
     """
     try:
         with pikepdf.open(original_path) as orig_pdf, pikepdf.open(candidate_path) as cand_pdf:
@@ -354,6 +361,28 @@ def verify_pdf_fidelity(
                 return False, (
                     f"Text fidelity dropped to {ratio:.3f} (required >= {min_text_similarity:.3f})"
                 )
+
+            # Character similarity is too blunt to catch ligature corruption:
+            # Ghostscript's font subsetting rewrites a Typst /ToUnicode CMap so
+            # ``Efficient`` extracts as ``EfÏcient`` (f + U+00CF), while the
+            # document-wide ratio stays ~0.997. The text layer is the product
+            # here, so compare the distinct words too. ``NFKC`` expands a real
+            # ``ﬁ``/``ﬃ`` in either file to the same letters before the diff.
+            def _words(text: str) -> set[str]:
+                return set(re.findall(r"[A-Za-z]{4,}", unicodedata.normalize("NFKC", text)))
+
+            orig_words = _words(orig_text)
+            if orig_words:
+                missing = orig_words - _words(cand_text)
+                # One damaged word in a few thousand is the tolerance; a
+                # systematic ligature rewrite (4/187 on the measured paper) is
+                # rejected so the pikepdf-only pass ships instead.
+                if missing and len(missing) / len(orig_words) > 0.0005:
+                    sample = ", ".join(sorted(missing)[:5])
+                    return False, (
+                        f"Text fidelity lost {len(missing)}/{len(orig_words)} distinct "
+                        f"word(s) (required <= 0.05%): {sample}"
+                    )
     except ImportError as exc:
         return False, f"Text fidelity check unavailable: {exc}"
     except Exception as exc:

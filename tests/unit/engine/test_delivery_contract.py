@@ -502,11 +502,12 @@ def test_readable_block_may_move_pages() -> None:
     assert report.passed, report.summary_line()
 
 
-def test_style_drift_is_major() -> None:
+def test_style_drift_is_major_for_faithful() -> None:
     report = evaluate_delivery_contract(
         _evidence(
             blocks=(_block("b1", "完整译文。"),),
             page_texts=("完整译文。",),
+            contract="faithful",
             style_samples=(
                 StyleSample(page=1, size_pt=7.5),
                 StyleSample(page=2, size_pt=11.5),
@@ -516,6 +517,23 @@ def test_style_drift_is_major() -> None:
     assert report.passed, "style drift is major, not critical"
     assert not report.deliverable
     assert "style_drift" in _codes(report)
+
+
+def test_readable_does_not_promise_a_style_group() -> None:
+    """A reference/caption page may be set smaller; readable never promised uniformity."""
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b1", "完整译文。"),),
+            page_texts=("完整译文。",),
+            contract="readable",
+            style_samples=(
+                StyleSample(page=1, size_pt=7.5),
+                StyleSample(page=2, size_pt=11.5),
+            ),
+        )
+    )
+    assert report.deliverable
+    assert "style_drift" not in _codes(report)
 
 
 def test_unmeasured_style_is_not_clean() -> None:

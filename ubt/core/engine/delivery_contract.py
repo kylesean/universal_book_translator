@@ -455,22 +455,24 @@ def _intersection(a: ContractTextBox, b: ContractTextBox) -> float:
 
 
 def _style_findings(evidence: ContractEvidence) -> list[ContractFinding]:
+    if evidence.contract != "faithful":
+        # ``readable`` reflows the document and promises delivered text, not a
+        # cloned body group. Its pages legitimately differ (a reference list or
+        # a caption-only figure page is not a body-size defect), and auditing
+        # them as one group blocked real deliveries. Type legibility is the
+        # visual gate's job; the style group belongs to ``faithful``.
+        return []
     body = [
         sample for sample in evidence.style_samples if sample.role == "body" and sample.size_pt > 0
     ]
     if not body:
-        # ``readable`` reflows and has no page-level body size to audit; only
-        # ``faithful`` promises a cloned style group, so only it is required to
-        # report the measurement.
-        if evidence.contract == "faithful":
-            return [
-                ContractFinding(
-                    severity="major",
-                    code="style_unmeasured",
-                    message="No body-style samples; style drift is unverified",
-                )
-            ]
-        return []
+        return [
+            ContractFinding(
+                severity="major",
+                code="style_unmeasured",
+                message="No body-style samples; style drift is unverified",
+            )
+        ]
 
     plan = evidence.style_group
     if plan is not None:
