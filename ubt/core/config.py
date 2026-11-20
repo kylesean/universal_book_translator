@@ -878,27 +878,18 @@ class UBTConfig(BaseSettings):
     repair_reasoning_effort: str = "high"
 
     # -- PDF engine selection ------------------------------------------------
-    # ``auto`` — the default — takes the lossless **docling** engine
-    # unconditionally. It does NOT route clean single-column PDFs to pypdfium2:
-    # that promise was retired after measurement showed every document in the
-    # reference corpus carried structure the pdfium reader cannot represent, and
-    # the cheap probe signals read zero exactly on vector-drawn figures. The
-    # engine choice is a fixed policy; the probe's output is *evidence about the
-    # document* (the assess report shows it), not a vote.
+    # ``auto`` — the default — keeps a text-layer-clean PDF in the **native**
+    # in-place codec, which patches the source content stream and preserves
+    # vector art, table rules, formulas and page geometry byte-for-byte. A
+    # scanned/text-less PDF has no source text to patch, so it routes to
+    # ``docling`` for OCR/VLM ingest + Typst reflow; an explicit ``readable``
+    # request does the same. The cheap structure probe supplies *evidence*
+    # (the assess report shows it), not a vote on the clean-PDF route.
     #
-    # Measured on arXiv 2610.02185: pdfium splits the paper into 1801 fragments
-    # (0 tables, title shattered into 15 pieces) where docling yields 350
-    # structured blocks (19 tables, title intact), and the fragment storm then
-    # trips the numeric/structural validators into quarantining ~14% of the
-    # book. ``high_fidelity``/``standard`` presets also select ``auto``;
-    # ``preview``/``fast`` pin ``pdfium`` (a real opt-in for prose-only input),
-    # and ``--pdf-engine`` always wins. A scanned (text-less) PDF is a capability
-    # boundary, not a preference: pdfium extracts 0 blocks from one.
-    #
-    # ``auto`` therefore *tries* docling first and, when the ``pdf`` extra is
-    # absent, degrades to the geometric pdfium reader with a warning that names
-    # what is lost (``factory._resolve_pdf_adapter``); only an explicit
-    # ``--pdf-engine docling`` is refused.
+    # ``pdfium`` remains an explicit opt-in for prose-only input: it cannot
+    # represent tables, figures or formulas, so it is never chosen by ``auto``.
+    # A scanned PDF is a capability boundary, not a preference: pdfium extracts
+    # 0 blocks from one. ``--pdf-engine`` always wins.
     pdf_engine: PdfEngine = "auto"
 
     # -- Docling accelerator device -------------------------------------------

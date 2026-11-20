@@ -192,9 +192,10 @@ def get_adapter_for_path(
     """Factory helper to resolve the appropriate document adapter by file extension.
 
     The default matches the config's ``pdf_engine`` default so a direct call
-    resolves the same engine the pipeline would: ``auto`` is Docling,
-    unconditionally; ``pdfium`` is an explicit operator opt-in that carries a
-    loud multicolumn/scanned warning.
+    resolves the same engine the pipeline would: ``auto`` is the native
+    in-place codec for a text-layer-clean PDF and Docling for a scan; ``pdfium``
+    is an explicit operator opt-in that carries a loud multicolumn/scanned
+    warning.
 
     Before an adapter is handed out for an existing file, the file itself is
     re-opened through :func:`ubt.core.fs_perms.open_verified` — the point where
