@@ -535,14 +535,12 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
     def _extract_with_docling(
         self, path: Path, page_range: tuple[int, int] | None = None
     ) -> list[IRBlock]:
-        """Extract structured blocks with Docling, then cross-check against pdfium."""
-        from ubt.adapters.pdf.docling_crosscheck import (
-            cross_check_blocks_with_pdfium,
-            repair_heading_numbers_with_lines,
-            repair_inline_math_with_lines,
-            repair_math_symbols_with_lines,
-            repair_missing_spaces_with_lines,
-        )
+        """Extract structured blocks for a scanned/reflow source.
+
+        The scan path has no trustworthy pdfium text layer, so the old
+        line-level cross-check/repair pass was a no-op on the only documents
+        that reach it. Born-digital PDFs are handled by the native codec.
+        """
         from ubt.core.ir.continuation import fuse_continuation_blocks
 
         blocks = extract_with_docling(
@@ -554,19 +552,4 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
             formula_crop_margin=self.formula_crop_margin,
             isolate_process=self.docling_isolate_process,
         )
-        # Docling glues a heading's section number to the wrong end
-        # ("3.1 Guidance Space" -> "Guidance Space 3.1"); the page's own pdfium
-        # lines restore the correct order before the heading is translated.
-        blocks = repair_heading_numbers_with_lines(blocks, path)
-        # Docling strips inline math out of a sentence and piles it at the
-        # paragraph end ("let be the initial state ... : h 0 h k k f R h R"); the
-        # page's own pdfium lines put each token back in place before translation.
-        blocks = repair_inline_math_with_lines(blocks, path)
-        # Docling mis-maps TeX math symbols (e.g. '=' -> '∅', '+' -> '⊕', '−' -> 'ϒ');
-        # the page's own pdfium lines restore ground-truth math glyphs first.
-        blocks = repair_math_symbols_with_lines(blocks, path)
-        # Docling's line join drops inter-word spaces ("A Sandbox" -> "ASandbox");
-        # the page's own pdfium lines restore them before anything is translated.
-        blocks = repair_missing_spaces_with_lines(blocks, path)
-        blocks = cross_check_blocks_with_pdfium(blocks, path)
         return fuse_continuation_blocks(blocks)

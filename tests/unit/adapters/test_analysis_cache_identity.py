@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ubt.adapters.pdf import docling_crosscheck, textgeom
+from ubt.adapters.pdf import textgeom
 from ubt.adapters.pdf.analysis_cache import docling_identity
 from ubt.core.cleaners import lnds_pruner
 
@@ -19,7 +19,6 @@ def _file_identity(module: object) -> str:
 
 def test_docling_identity_covers_the_style_probe_modules() -> None:
     identity = docling_identity()
-    assert _file_identity(docling_crosscheck) in identity
     assert _file_identity(textgeom) in identity
 
 

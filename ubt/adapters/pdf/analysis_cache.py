@@ -86,7 +86,6 @@ def docling_identity() -> str:
     return _module_identity(
         "ubt.adapters.pdf.docling_parser",
         "ubt.adapters.pdf.docling_blocks",
-        "ubt.adapters.pdf.docling_crosscheck",
         "ubt.adapters.pdf.docling_outline",
         "ubt.adapters.pdf.textgeom",
         "ubt.core.ir.models",

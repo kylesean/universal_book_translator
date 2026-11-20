@@ -1670,7 +1670,7 @@ def _block_text(block: IRBlock, *, sanitize_sentinels: bool = True) -> str:
     on a page must never carry internal machinery.
 
     Named ``_block_text`` for the module's internal callers and for the
-    cross-references in ``content.adapt`` / ``docling_crosscheck``; new code
+    cross-references in ``content.adapt``; new code
     outside this module should call ``delivered_text`` directly.
     """
     return delivered_text(block, sanitize_sentinels=sanitize_sentinels)

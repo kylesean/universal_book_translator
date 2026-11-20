@@ -43,22 +43,6 @@ class LineBox:
     italic: bool = False
 
 
-def box_area(x0: float, y0: float, x1: float, y1: float) -> float:
-    """Area of an axis-aligned box, clamped to zero for an inverted span."""
-    return max(0.0, x1 - x0) * max(0.0, y1 - y0)
-
-
-def box_iou(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
-    """Intersection-over-union of two boxes, 0.0 when they do not overlap."""
-    ix0, iy0 = max(a[0], b[0]), max(a[1], b[1])
-    ix1, iy1 = min(a[2], b[2]), min(a[3], b[3])
-    inter = box_area(ix0, iy0, ix1, iy1)
-    if inter <= 0:
-        return 0.0
-    union = box_area(*a) + box_area(*b) - inter
-    return inter / union if union > 0 else 0.0
-
-
 def _aggregate_line_styles(items: Sequence[LineBox]) -> tuple[float, bool, bool]:
     """Compute character-weighted ground-truth font_size, bold, and italic across fragments."""
     valid = [
@@ -209,7 +193,7 @@ def extract_char_styles(pdf_path: Path, page_no: int) -> list[CharStyle]:
 
     Serialized like every other pdfium entry point: ``pdfium_gate`` documents
     that concurrent libpdfium access corrupts the native heap, and this one is
-    called per block from ``docling_crosscheck`` — i.e. exactly the parallel
+    called per block from the scan-path text witness — i.e. exactly the parallel
     path that made the lock necessary.
     """
     import ctypes
@@ -1192,8 +1176,6 @@ def _order_region(work: list[LineBox], *, depth: int, page_span: float) -> list[
 
 __all__ = [
     "LineBox",
-    "box_area",
-    "box_iou",
     "column_order",
     "dehyph",
     "extract_lines",
