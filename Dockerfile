@@ -54,7 +54,7 @@ RUN uv venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Copy package specifications
-COPY pyproject.toml uv.lock README.md /build/
+COPY pyproject.toml uv.lock README.md hatch_build.py /build/
 COPY ubt /build/ubt
 
 # Build and install package (including [mcp] entrypoint) into virtualenv

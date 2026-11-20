@@ -163,14 +163,12 @@ jobs:
   # The `gate` job installs `--extra dev`, which does NOT include the `pdf`
   # extra (docling). A clean born-digital PDF still takes the native codec, but
   # the scan/readable route -- `auto` on a text-less PDF, or an explicit
-  # `docling` request -- was never exercised by CI there. The crash/resume e2e
-  # was red on the docling path while this pipeline stayed green.
-  #
-  # Separate job: docling pulls torch and a model download, which would double
-  # the fast tier's install for no benefit to it.
+  # `docling` request -- is not exercised there. This job installs docling and
+  # runs only the suites that actually reach it; the fast tier already runs in
+  # `gate`, so repeating it here only doubled install and runtime.
   docling-engine:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
@@ -250,17 +248,14 @@ jobs:
           print("docling models cached and conversion verified")
           PY
 
-      - name: Default-engine PDF tier (docling)
-        # `-m fast` here selected the unit tests only: the two suites that run
-        # a real document through the docling engine are `slow`-marked, so the
-        # job passed without ever exercising the engine it is named for. The
-        # slow-marked PDF suites are named explicitly and `-m` is cleared.
+      - name: Scan/readable PDF tier (docling)
+        # Name the suites that actually run a document through Docling. The
+        # old command repeated the whole fast tier and then cited the retired
+        # `test_pdf_engine_differential.py`, which the pdfium removal deleted.
         env:
           PYTHONIOENCODING: "utf-8"
           HF_HUB_OFFLINE: "1"
         run: |
-          uv run pytest -m fast -q -n auto --dist=loadscope \
-            tests/unit/adapters/ tests/integration/
           uv run pytest -q -o addopts="" \
             tests/integration/test_crash_resume_e2e.py \
-            tests/integration/test_pdf_engine_differential.py
+            tests/integration/test_synthetic_render_e2e.py

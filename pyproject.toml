@@ -17,11 +17,10 @@ build-backend = "hatchling.build"
 packages = ["ubt"]
 
 # The fetched, digest-pinned font set is a build input, not committed source.
-# When present it is mapped into the package so `pip install` carries the same
-# reproducible typefaces the release smoke test used; without it the renderer
-# falls back to system fonts. `scripts/fetch_fonts.py` prepares it in CI.
-[tool.hatch.build.targets.wheel.force-include]
-"fonts" = "ubt/fonts"
+# `hatch_build.py` maps it into `ubt/fonts` when present, so a clean checkout
+# still builds; `scripts/fetch_fonts.py` prepares it in release CI.
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
 
 # The sdist has no install use beyond source builds, so keep it to what a
 # distributor actually needs. Without this it bundled every ``tests/`` entry --
@@ -36,6 +35,8 @@ packages = ["ubt"]
 # ``pypdf`` builders in ``tests/pdf_builders.py``) and are covered by the
 # ``tests/`` exclude below, so none can reach the archive.
 [tool.hatch.build.targets.sdist]
+# The custom wheel hook is a build input; a wheel built from the sdist needs it.
+include = ["hatch_build.py"]
 exclude = [
     "tests/",
     "docs/",
