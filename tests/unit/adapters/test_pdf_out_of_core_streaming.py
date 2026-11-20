@@ -10,7 +10,6 @@ from ubt.adapters.pdf.page_chunking import (
     compute_pdf_page_chunks,
     get_pdf_page_chunk_size,
 )
-from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
 from ubt.core.ir.models import (
     BlockType,
     BookManifest,
@@ -63,81 +62,6 @@ def test_get_pdf_page_chunk_size_env_override(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.asyncio
-async def test_pdfium_adapter_out_of_core_streaming(tmp_path: Path) -> None:
-    dummy_pdf = tmp_path / "large_book.pdf"
-    dummy_pdf.write_bytes(b"%PDF-dummy")
-
-    adapter = PDFiumAdapter()
-
-    manifest = BookManifest(
-        doc_id="test_doc_123",
-        title="large_book",
-        source_path=str(dummy_pdf),
-        chapters=[
-            ChapterMeta(
-                chapter_id="c0001", title="Pages 1-50", spine_index=1, source_file=dummy_pdf.name
-            ),
-            ChapterMeta(
-                chapter_id="c0002", title="Pages 51-100", spine_index=2, source_file=dummy_pdf.name
-            ),
-        ],
-        metadata={"pdf_parser_engine": "pdfium", "page_count": 100},
-    )
-
-    def fake_extract_blocks(path: Path, page_range: tuple[int, int] | None) -> list[IRBlock]:
-        assert page_range is not None
-        p_start, p_end = page_range
-        b1 = IRBlock(
-            element=make_element(
-                id="raw_1",
-                spine_index=1,
-                block_type=BlockType.NARRATIVE,
-                source_text=f"Text on page {p_start}",
-            )
-        )
-        b2 = IRBlock(
-            element=make_element(
-                id="raw_2",
-                spine_index=2,
-                block_type=BlockType.NARRATIVE,
-                source_text=f"Text on page {p_end}",
-            )
-        )
-        return [b1, b2]
-
-    with (
-        patch.object(adapter, "extract_manifest", return_value=manifest),
-        patch.object(adapter, "_extract_blocks_sync", side_effect=fake_extract_blocks),
-        patch("ubt.adapters.pdf.docling_adapter.get_pdf_page_chunk_size", return_value=50),
-        patch("gc.collect") as mock_gc,
-    ):
-        yielded_chapters = []
-        async for chapter in adapter.parse_stream(dummy_pdf):
-            yielded_chapters.append(chapter)
-
-        assert len(yielded_chapters) == 2
-        assert yielded_chapters[0].chapter_id == "c0001"
-        assert yielded_chapters[1].chapter_id == "c0002"
-
-        ch1_blocks = yielded_chapters[0].blocks
-        ch2_blocks = yielded_chapters[1].blocks
-
-        assert len(ch1_blocks) == 2
-        assert len(ch2_blocks) == 2
-
-        assert ch1_blocks[0].id == "pdf_main#b0001"
-        assert ch1_blocks[0].spine_index == 1
-        assert ch1_blocks[1].id == "pdf_main#b0002"
-        assert ch1_blocks[1].spine_index == 2
-
-        assert ch2_blocks[0].id == "pdf_main#b0003"
-        assert ch2_blocks[0].spine_index == 3
-        assert ch2_blocks[1].id == "pdf_main#b0004"
-        assert ch2_blocks[1].spine_index == 4
-
-        assert mock_gc.call_count == 2
-
-
 @pytest.mark.asyncio
 async def test_docling_adapter_out_of_core_streaming(tmp_path: Path) -> None:
     dummy_pdf = tmp_path / "long_manual.pdf"

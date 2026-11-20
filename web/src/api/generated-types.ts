@@ -1581,7 +1581,7 @@ export interface components {
             preset?: components["schemas"]["Preset"] | null;
             /**
              * Pdf Engine
-             * @description PDF extraction/parser engine (docling, pdfium, auto)
+             * @description PDF extraction/parser engine (native, docling, auto)
              */
             pdf_engine?: string | null;
             /**

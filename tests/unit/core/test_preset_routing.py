@@ -30,12 +30,12 @@ def test_quality_presets_route_by_probe(preset: Preset) -> None:
 
 @pytest.mark.parametrize("preset", [Preset.PREVIEW, Preset.FAST])
 def test_fast_presets_pin_the_fast_path(preset: Preset) -> None:
-    assert _resolve(preset)["pdf_engine"] == "pdfium"
+    assert _resolve(preset)["pdf_engine"] == "native"
 
 
 def test_explicit_engine_beats_the_preset() -> None:
     assert _resolve(Preset.FAST, pdf_engine="docling")["pdf_engine"] == "docling"
-    assert _resolve(Preset.HIGH_FIDELITY, pdf_engine="pdfium")["pdf_engine"] == "pdfium"
+    assert _resolve(Preset.HIGH_FIDELITY, pdf_engine="docling")["pdf_engine"] == "docling"
 
 
 def test_no_preset_leaves_the_engine_to_the_config_default() -> None:
@@ -44,7 +44,7 @@ def test_no_preset_leaves_the_engine_to_the_config_default() -> None:
 
 def test_every_preset_declares_an_engine() -> None:
     for preset, policy in PRESETS.items():
-        assert policy.pdf_engine in ("auto", "pdfium", "docling"), preset
+        assert policy.pdf_engine in ("auto", "native", "docling"), preset
 
 
 def test_every_preset_key_matches_its_enum_member() -> None:

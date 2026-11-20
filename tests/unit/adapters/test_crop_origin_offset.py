@@ -126,20 +126,3 @@ def test_resolver_and_scalpel_roundtrip_with_shifted_cropbox(tmp_path: Path) -> 
         assert probe == (255, 0, 0), probe
     finally:
         visual_scalpel._PAGE_CACHE = None
-
-
-def test_extract_blocks_with_pdfium_normalizes_cropbox_origin(tmp_path: Path) -> None:
-    from ubt.adapters.pdf.pdfium_adapter import extract_blocks_with_pdfium
-
-    pdf_path = tmp_path / "crop_normalize.pdf"
-    write_text_pdf(pdf_path, [("Hello Rust",)], width=400.0, height=400.0)
-    _page_with_cropbox(pdf_path, (50.0, 60.0, 350.0, 360.0))
-
-    blocks = extract_blocks_with_pdfium(pdf_path)
-    assert len(blocks) == 1
-    bbox = blocks[0].bbox
-    assert bbox is not None
-    assert bbox.x0 < 300.0
-    assert bbox.y0 < 300.0
-    assert bbox.x1 <= 300.0 + 1e-2
-    assert bbox.y1 <= 300.0 + 1e-2

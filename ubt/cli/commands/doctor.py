@@ -124,7 +124,6 @@ CHECK_CODES: dict[str, tuple[str, ...]] = {
         "qe.heuristic",
         "pdf_engine.docling_ok",
         "pdf_engine.docling_missing",
-        "pdf_engine.pdfium",
         "pdf_engine.auto_native",
         "pdf_engine.auto_missing",
         "pdf_engine.registered",
@@ -1051,15 +1050,6 @@ def collect_checks(
                 detail_code="pdf_engine.docling_missing",
                 fix_code="pdf_engine.docling_missing",
             )
-    elif config.pdf_engine == "pdfium":
-        record(
-            "PDF engine",
-            "OK",
-            "pypdfium2 fast path (bundled dependency); a scanned document "
-            "still routes to docling automatically",
-            code="pdf_engine",
-            detail_code="pdf_engine.pdfium",
-        )
     elif config.pdf_engine == "auto":
         record(
             "PDF engine",

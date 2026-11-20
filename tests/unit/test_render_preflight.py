@@ -55,10 +55,12 @@ class _FakeTypst:
 
 
 def _setup(tmp_path: Path) -> tuple[Any, BookManifest, list[IRBlock]]:
+    if importlib.util.find_spec("docling") is None:
+        pytest.skip("the docling extra is not installed; the reflow renderer cannot run")
     source = write_text_pdf(
         tmp_path / "src.pdf", [("Title", "The machine relies on attention and runs a pass.")]
     )
-    adapter = get_adapter_for_path(source, pdf_engine="pdfium")
+    adapter = get_adapter_for_path(source, pdf_engine="docling")
     manifest = BookManifest(doc_id="d", title="t", source_path=str(source))
     element = make_element(
         id="b1",
@@ -294,9 +296,7 @@ def test_preflight_survives_a_book_of_empty_formula_placeholders(
     fake = _FakeTypst(ok=True)
     _patch(monkeypatch, tmp_path, fake)
     source = write_text_pdf(tmp_path / "src.pdf", [("Title", "The body of the page.")])
-    if importlib.util.find_spec("docling") is None:
-        pytest.skip("docling is not installed; the refusal path is pinned separately")
-    adapter = get_adapter_for_path(source, pdf_engine="pdfium")
+    adapter = get_adapter_for_path(source, pdf_engine="docling")
     manifest = BookManifest(doc_id="d", title="t", source_path=str(source))
     blocks = [
         IRBlock(

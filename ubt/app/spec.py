@@ -114,7 +114,7 @@ class JobSpec(BaseModel):
     )
     pdf_engine: PdfEngine | None = Field(
         default=None,
-        description="PDF extraction/parser engine (docling, pdfium, auto)",
+        description="PDF extraction/parser engine (native, docling, auto)",
     )
     dual_mode: DualMode | None = Field(
         default=None,

@@ -34,7 +34,6 @@ from ubt.adapters.pdf.docling_parser import (
     cleanup_in_process_docling_converter,
     default_docling_symbols,
     extract_with_docling,
-    extract_with_oxide,
     resolve_formula_enrichment,
     vlm_fallback_missing_pages,
 )
@@ -180,12 +179,6 @@ class _PDFRenderStackMixin:
         # with what actually shipped.
         self.last_page_geometry = list(getattr(self._renderer, "last_page_geometry", []))
         return out_path
-
-    def _extract_with_oxide(self, path: Path) -> list[IRBlock]:
-        from ubt.core.ir.continuation import fuse_continuation_blocks
-
-        blocks = extract_with_oxide(path)
-        return fuse_continuation_blocks(blocks)
 
     async def _post_extract_blocks(
         self,

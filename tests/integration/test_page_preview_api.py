@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from pdf_builders import write_text_pdf
 from pydantic import SecretStr
 
-from ubt.adapters.pdf.pdfium_adapter import extract_blocks_with_pdfium
 from ubt.api.app import create_app
 from ubt.core.config import UBTConfig
 from ubt.core.engine.ledger import SQLiteJobLedger
@@ -35,7 +35,17 @@ def test_page_preview_returns_png(tmp_path: Path) -> None:
             ["Second page text here."],
         ],
     )
-    blocks = extract_blocks_with_pdfium(source, None)
+    import asyncio
+
+    from ubt.adapters.pdf.native_adapter import NativePDFAdapter
+
+    async def _blocks() -> list[Any]:
+        out = []
+        async for chapter in NativePDFAdapter().parse_stream(source):
+            out.extend(chapter.blocks)
+        return out
+
+    blocks = asyncio.run(_blocks())
     for block in blocks:
         if block.bbox is not None and block.bbox.page == 1 and block.source_text.strip():
             block.target_text = "ATENCION " + block.source_text[:20]

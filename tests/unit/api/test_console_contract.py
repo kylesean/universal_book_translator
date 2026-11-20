@@ -652,7 +652,7 @@ def test_preset_badges_do_not_claim_a_quality_gate() -> None:
     badge_block = re.search(r"presetBadge\w+:\s*'([^']*)'", en)
     assert badge_block, "en.ts has no presetBadge key"
     for preset in PRESETS.values():
-        assert preset.pdf_engine in ("auto", "pdfium", "docling")
+        assert preset.pdf_engine in ("auto", "native", "docling")
         assert preset.prompt_strategy in ("auto", "minimal", "hybrid", "rich")
 
 

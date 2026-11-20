@@ -5536,7 +5536,7 @@
               }
             ],
             "title": "Pdf Engine",
-            "description": "PDF extraction/parser engine (docling, pdfium, auto)"
+            "description": "PDF extraction/parser engine (native, docling, auto)"
           },
           "dual_mode": {
             "anyOf": [

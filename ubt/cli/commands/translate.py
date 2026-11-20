@@ -582,7 +582,7 @@ def translate(
         PdfEngine | None,
         typer.Option(
             "--pdf-engine",
-            help="PDF 解析引擎：'auto'（默认，按交付契约选择：faithful 走 native 1:1 原位内容流，readable/扫描件走 docling Typst 重排）、'native'（强制 1:1 原位内容流）、'docling'（Typst 重排）、或 'pdfium'（轻量纯文本快速路径）",
+            help="PDF 解析引擎：'auto'（默认，按交付契约选择：faithful 走 native 1:1 原位内容流，readable/扫描件走 docling Typst 重排）、'native'（强制 1:1 原位内容流）或 'docling'（Typst 重排）",
             show_default=False,
         ),
     ] = None,

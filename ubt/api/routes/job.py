@@ -503,7 +503,7 @@ def register_job_routes(
                 ) from exc
 
         # Every assess — deep or not — runs under the same slots. A "shallow"
-        # assess is not a cheap manifest read: a PDF still runs the full pdfium
+        # assess is not a cheap manifest read: a PDF still runs the full profile
         # page census + font-encoding witness (assess._pdf_facts), and every
         # other format opens its container and probes its archetype
         # (analyze_archetype → zip member reads for EPUB/DOCX) before

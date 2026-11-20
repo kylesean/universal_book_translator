@@ -14,7 +14,6 @@ from ubt.adapters.factory import (
 from ubt.adapters.html.adapter import HTMLAdapter
 from ubt.adapters.markdown.adapter import MarkdownAdapter
 from ubt.adapters.pdf.docling_adapter import ScanPDFToTypstCodec
-from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
 
 __all__ = [
     "BaseDocumentAdapter",
@@ -24,7 +23,6 @@ __all__ = [
     "EPUBAdapter",
     "HTMLAdapter",
     "MarkdownAdapter",
-    "PDFiumAdapter",
     "get_adapter_for_path",
     "get_inspection_adapter",
     "is_pdf_engine_registered",

@@ -15,7 +15,6 @@ from ubt.adapters.pdf.docling_adapter import ScanPDFToTypstCodec
 from ubt.adapters.pdf.encryption import reject_encrypted_pdf
 from ubt.adapters.pdf.native_adapter import NativePDFAdapter
 from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile
-from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
 from ubt.codecs.registry import CODEC_SUFFIXES
 from ubt.core.exceptions import (
     DocumentParseError,
@@ -93,9 +92,9 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
             "BabelDOC engine is deprecated and removed due to licensing constraints "
             "and upstream CLI contract incompatibility. Please use pdf_engine='native' or 'docling'."
         )
-    if engine_key in ("auto", "pdfium"):
+    if engine_key == "auto":
         if path is None:
-            engine_key = "native" if engine_key == "auto" else "pdfium"
+            engine_key = "native"
         else:
             plan = inspect_pdf_profile(path)
             if plan.has_scan:
@@ -104,20 +103,8 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
                     path.name,
                 )
                 engine_key = "docling"
-            elif engine_key == "auto":
-                engine_key = "native"
             else:
-                logger.warning(
-                    "pdfium requested for '%s': its reader cannot represent tables, "
-                    "figures or formulas, so any the document contains are omitted "
-                    "from the rebuilt PDF (probe signals — multicolumn=%s, "
-                    "formulas=%s, vector-heavy=%s — are only a lower bound). "
-                    "Use --pdf-engine native (default) for 1:1 in-place surgical delivery.",
-                    path.name,
-                    plan.has_multicolumn,
-                    plan.has_formulas,
-                    plan.has_vector_diagrams,
-                )
+                engine_key = "native"
     factory_fn = _PDF_ENGINE_REGISTRY.get(engine_key)
     if factory_fn is None:
         # Read the registry rather than a hardcoded list: this is the one place
@@ -127,35 +114,30 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
             f"Unsupported or unregistered PDF engine: '{pdf_engine}'. Available: {available}."
         )
     if engine_key == "docling" and importlib.util.find_spec("docling") is None:
-        # docling IS the engine every PDF route resolves to (``auto`` included,
-        # and a scanned page escapes to it even under an explicit ``pdfium``),
-        # so a missing package cannot run the product's primary scenario.
-        # Falling back to the geometric pdfium reader would deliver a book with
-        # every table, figure and formula dropped, under a job id that later
-        # runs resume into — a degraded run must be refused before ingest, not
-        # warned about in server logs the web console never shows. (docling now
-        # ships in the base dependency set; reaching this branch means the
-        # environment is broken, and the message says how to repair it.)
+        # A scanned/text-less PDF has no source text for the native codec, so
+        # Docling is the only path that can read it. A missing package cannot
+        # run that scenario; refuse before ingest rather than degrading to a
+        # geometric reader that cannot see the page text at all. (docling ships
+        # in the base dependency set; reaching this branch means the environment
+        # is broken, and the message says how to repair it.)
         raise OptionalDependencyError(
             "PDF ingest needs the 'docling' package, which is not installed "
             f"(pdf_engine={pdf_engine.lower()!r} resolves to the docling semantic "
-            "engine for every PDF). Repair the environment with `uv sync --all-extras` "
-            "(or `pip install 'universal-book-translator[pdf]'`), or pass "
-            "--pdf-engine pdfium to accept the geometric fast path, which cannot "
-            "represent tables, figures or formulas."
+            "engine for scans and explicit readable requests. Repair the environment "
+            "with `uv sync --all-extras` (or `pip install "
+            "'universal-book-translator[pdf]'`)."
         )
     return factory_fn()
 
 
 # Standard built-in engine & adapter bindings. Only the canonical names live
-# here: ``docling`` (the Typst-reflow mainline) and ``pdfium`` (the born-digital
-# fast path), plus the ``auto`` probe handled above. Each engine has exactly one
-# name; pass ``docling`` (or ``auto``) rather than an alias.
+# here: ``native`` (the in-place codec) and ``docling`` (OCR + Typst reflow for
+# scans/readable), plus the ``auto`` probe handled above. Each engine has
+# exactly one name; pass ``docling`` (or ``auto``) rather than an alias.
 _PDF_ENGINE_REGISTRY.update(
     {
         "docling": ScanPDFToTypstCodec,
         "native": NativePDFAdapter,
-        "pdfium": PDFiumAdapter,
     }
 )
 
@@ -194,9 +176,7 @@ def get_adapter_for_path(
 
     The default matches the config's ``pdf_engine`` default so a direct call
     resolves the same engine the pipeline would: ``auto`` is the native
-    in-place codec for a text-layer-clean PDF and Docling for a scan; ``pdfium``
-    is an explicit operator opt-in that carries a loud multicolumn/scanned
-    warning.
+    in-place codec for a text-layer-clean PDF and Docling for a scan.
 
     Before an adapter is handed out for an existing file, the file itself is
     re-opened through :func:`ubt.core.fs_perms.open_verified` — the point where

@@ -249,7 +249,7 @@ PDF 交付不再有像素/VLM/阈值门禁。导出前只做确定性检查：
 1. **输入格式支持度差异**：
    - **Word (DOCX)**：当前版本中整篇 DOCX 文档被视为单一逻辑章节处理，超长 Word 书籍暂无法享受多章节并行流式并发；
    - **Markdown / TXT**：章节划分严格依赖一级标题（`# `），若文档全部采用二级标题（`## `）起头，会被整体作为单章节处理；
-   - **PDF 引擎边界**：`auto` 对文本层可信的 PDF 默认走原位 1:1，扫描件/损坏文本层走 docling 重排；显式指定 `pdfium` 或 `docling` 时，`auto` 会改走该引擎能兑现的 readable 契约。强制使用纯轻量的 `pdfium` 引擎仍会跳过复杂表格、插图与数学公式；
+   - **PDF 引擎边界**：`auto` 对文本层可信的 PDF 默认走原位 1:1，扫描件/损坏文本层走 docling 重排；显式指定 `docling` 时走 reflow 契约。轻量几何 reader 已删除，PDF 只有 native 与 scan 两条路径；
    - **格式转换单向性**：输入何种格式即输出何种格式（PDF 额外附带 HTML/EPUB 伴生格式），暂不支持将 Markdown 或 DOCX 直接转换为 Typst PDF。
 2. **依赖体积与外部环境**：
    - 默认安装同时带有 Docling 版面引擎、PP-DocLayoutV2 ONNX 版面检测（`rapid-layout` + `onnxruntime`）与 HarfBuzz 字形度量，初次安装体积较大；

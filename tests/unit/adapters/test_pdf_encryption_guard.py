@@ -10,7 +10,6 @@ from typer.testing import CliRunner
 
 from ubt.adapters.base import BasePDFEngineAdapter
 from ubt.adapters.pdf.docling_adapter import ScanPDFToTypstCodec
-from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
 from ubt.cli.main import app
 from ubt.core.exceptions import DocumentParseError
 
@@ -35,7 +34,7 @@ def _encrypted_pdf(tmp_path: Path) -> Path:
     return encrypted
 
 
-@pytest.mark.parametrize("adapter_cls", [PDFiumAdapter, ScanPDFToTypstCodec])
+@pytest.mark.parametrize("adapter_cls", [ScanPDFToTypstCodec])
 def test_manifest_rejects_an_encrypted_pdf(
     tmp_path: Path, adapter_cls: type[BasePDFEngineAdapter]
 ) -> None:
@@ -50,7 +49,7 @@ def test_manifest_rejects_an_encrypted_pdf(
     assert str(pdf) in message
 
 
-@pytest.mark.parametrize("adapter_cls", [PDFiumAdapter, ScanPDFToTypstCodec])
+@pytest.mark.parametrize("adapter_cls", [ScanPDFToTypstCodec])
 def test_parse_stream_rejects_an_encrypted_pdf_before_engine_dispatch(
     tmp_path: Path, adapter_cls: type[BasePDFEngineAdapter]
 ) -> None:

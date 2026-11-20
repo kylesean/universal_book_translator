@@ -64,7 +64,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from ubt.adapters.pdf.textgeom import LineBox
-    from ubt.core.ir.models import IRBlock
 
 #: Extra leading (as a fraction of the font size) that starts a new paragraph.
 PARAGRAPH_GAP_FACTOR = 0.55
@@ -532,20 +531,4 @@ def read_pdf(
     return Document(source=source, regions=tuple(regions))
 
 
-def read_pdf_blocks(
-    path: str | Path,
-    *,
-    pages: Iterable[int] | None = None,
-    doc_id: str = "",
-) -> list[IRBlock]:
-    """Project the native reader's ``Document`` back into pipeline ``IRBlock``s.
-
-    The reader owns typing and reading order; this does not re-classify.
-    """
-    from ubt.core.ir.models import IRBlock
-
-    doc = read_pdf(path, pages=pages, doc_id=doc_id)
-    return [IRBlock(element=element) for region in doc.regions for element in region.elements]
-
-
-__all__ = ["read_pdf", "read_pdf_blocks"]
+__all__ = ["read_pdf"]

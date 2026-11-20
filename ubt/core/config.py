@@ -876,10 +876,9 @@ class UBTConfig(BaseSettings):
     # request does the same. The cheap structure probe supplies *evidence*
     # (the assess report shows it), not a vote on the clean-PDF route.
     #
-    # ``pdfium`` remains an explicit opt-in for prose-only input: it cannot
-    # represent tables, figures or formulas, so it is never chosen by ``auto``.
-    # A scanned PDF is a capability boundary, not a preference: pdfium extracts
-    # 0 blocks from one. ``--pdf-engine`` always wins.
+    # A scanned PDF is a capability boundary, not a preference: there is no
+    # text layer to patch, so it takes the Docling reflow path. ``--pdf-engine``
+    # always wins.
     pdf_engine: PdfEngine = "auto"
 
     # -- Docling accelerator device -------------------------------------------

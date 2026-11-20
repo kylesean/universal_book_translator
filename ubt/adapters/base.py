@@ -184,7 +184,7 @@ class BasePDFEngineAdapter(BaseDocumentAdapter):
     """Specialized SPI abstraction for the adapters bound to a PDF engine key.
 
     The keys live in the factory's ``_PDF_ENGINE_REGISTRY`` — ``docling`` and
-    ``pdfium`` today, plus anything added in-process through
+    ``native``/``docling`` today, plus anything added in-process through
     :func:`ubt.adapters.factory.register_pdf_engine`. ``auto`` is not a key of
     its own: it always resolves to ``docling``, whose semantic ingest is the
     only lossless route (see ``ubt/adapters/factory.py``).
@@ -196,7 +196,7 @@ class BasePDFEngineAdapter(BaseDocumentAdapter):
     @property
     @abstractmethod
     def engine_name(self) -> str:
-        """The PDF-engine registry key this adapter is bound to (``docling``, ``pdfium``)."""
+        """The PDF-engine registry key this adapter is bound to (``native``, ``docling``)."""
         pass
 
     async def render_blocks(

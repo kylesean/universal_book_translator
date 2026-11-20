@@ -213,7 +213,6 @@ def _mark_faithful_provisional(plan: DeliveryPlan) -> DeliveryPlan:
 _ENGINE_CONTRACTS: dict[str, frozenset[DeliveryContract]] = {
     "native": frozenset({DeliveryContract.READABLE, DeliveryContract.FAITHFUL}),
     "docling": frozenset({DeliveryContract.READABLE}),
-    "pdfium": frozenset({DeliveryContract.READABLE}),
 }
 
 
