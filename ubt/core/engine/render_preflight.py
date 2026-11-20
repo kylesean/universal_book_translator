@@ -21,10 +21,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from ubt.core.engine.adapter_runtime import DocumentAdapter
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import BlockType, IRBlock
 from ubt.core.ir.render_plan import RenderPlan
-from ubt.core.ports import DocumentAdapter
 
 logger = logging.getLogger(__name__)
 

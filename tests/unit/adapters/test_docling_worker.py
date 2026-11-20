@@ -19,8 +19,8 @@ from ubt.adapters.pdf.docling_worker import (
     get_docling_worker_pool,
     is_docling_process_isolation_enabled,
 )
+from ubt.core.engine.adapter_runtime import AdapterRuntimeConfig
 from ubt.core.ir.models import IRBlock
-from ubt.core.ports import AdapterRuntimeConfig
 from ubt.model.ast import Paragraph
 from ubt.model.span import Span
 

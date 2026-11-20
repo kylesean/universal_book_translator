@@ -145,8 +145,8 @@ def sample_document(path: Path, ext: str) -> tuple[int, bool, str]:
     if ext == "pdf":
         # Reached only through the ports bridge, so this module names neither
         # an adapter module nor a heavy PDF dependency directly (pdfium gate +
-        # pypdf fallback live in ubt.core.ports.sample_pdf_pages).
-        from ubt.core.ports import sample_pdf_pages
+        # pypdf fallback live in ubt.core.engine.pdf_facts.sample_pdf_pages).
+        from ubt.core.engine.pdf_facts import sample_pdf_pages
 
         return sample_pdf_pages(path)
     elif ext in ("md", "markdown", "txt"):

@@ -47,7 +47,7 @@ def test_a_requested_enrichment_is_not_served_from_the_block_cache(tmp_path: Pat
     from unittest.mock import patch
 
     from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
-    from ubt.core.ports import AdapterRuntimeConfig
+    from ubt.core.engine.adapter_runtime import AdapterRuntimeConfig
 
     adapter = DoclingPDFAdapter()
     adapter.apply_config(

@@ -8,6 +8,13 @@ import pytest
 _UBT_ENV_PREFIX = "UBT_"
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _app_services() -> None:
+    from ubt.app.bootstrap import install_services
+
+    install_services()
+
+
 @pytest.fixture(autouse=True)
 def _block_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     if request.node.get_closest_marker("network") is not None:

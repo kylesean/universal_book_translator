@@ -8,8 +8,8 @@ import pytest
 from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
 from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
 from ubt.core.content.nodes import ReconstructionRecord
+from ubt.core.engine.adapter_runtime import get_last_render_reconstructions
 from ubt.core.ir.models import BookManifest
-from ubt.core.ports import get_last_render_reconstructions
 
 pytestmark = pytest.mark.fast
 

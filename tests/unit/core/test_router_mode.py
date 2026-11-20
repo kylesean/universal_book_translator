@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from ubt.core import router_mode
-from ubt.core.ports import PdfStructureFacts
+from ubt.core.engine.pdf_facts import PdfStructureFacts
 
 pytestmark = pytest.mark.fast
 

@@ -50,7 +50,7 @@ from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
 
 if TYPE_CHECKING:
     from ubt.cache.store import CacheStore
-    from ubt.core.ports import AdapterRuntimeConfig
+    from ubt.core.engine.adapter_runtime import AdapterRuntimeConfig
 
 logger = logging.getLogger(__name__)
 

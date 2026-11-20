@@ -1391,6 +1391,9 @@ async def ubt_doctor(deep: bool = False) -> dict[str, Any]:
 
 
 def main() -> None:
+    from ubt.app.bootstrap import install_services
+
+    install_services()
     """Stdio entry point (``ubt-mcp`` script + ``python -m ubt.mcp``)."""
     mcp.run(transport="stdio")
 

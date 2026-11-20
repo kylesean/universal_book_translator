@@ -103,7 +103,7 @@ def test_no_crop_options_when_enrichment_is_off(tmp_path: Path) -> None:
 
 def test_crop_margin_reaches_the_adapter() -> None:
     from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
-    from ubt.core.ports import AdapterRuntimeConfig
+    from ubt.core.engine.adapter_runtime import AdapterRuntimeConfig
 
     adapter = DoclingPDFAdapter()
     adapter.apply_config(

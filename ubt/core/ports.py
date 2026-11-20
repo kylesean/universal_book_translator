@@ -27,12 +27,12 @@ call site). If nothing calls a piece of surface, it does not belong here.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, cast
 
-from ubt.core.ir.models import BookManifest, ChapterIR, IRBlock
+from ubt.core.engine.adapter_runtime import DocumentAdapter
+from ubt.core.ir.models import IRBlock
 
 if TYPE_CHECKING:
     # Type-only edges: they keep the port's signature checked against the
@@ -46,146 +46,6 @@ if TYPE_CHECKING:
     from ubt.adapters.pdf.pdf_profiler import PDFDocumentProfile
     from ubt.segment.placeholders import MaskedSource, PlaceholderEngine
     from ubt.translate.engine import TranslationEngine
-
-
-@dataclass(frozen=True)
-class AdapterRuntimeConfig:
-    """Engine-level knobs the pipeline hands to an adapter at run start.
-
-    Decouples the pipeline from per-field ``hasattr(adapter, ...)`` probing: the
-    adapter owns which of these it consumes. ``ocr_api_key`` is the already
-    unwrapped secret string, never a ``SecretStr``.
-    """
-
-    ocr_mode: str
-    ocr_endpoint: str | None
-    ocr_api_key: str
-    #: Vision model the OCR/VLM channel bills. Owned by ``UBTConfig.ocr_model``
-    #: and carried here for the same reason ``ocr_endpoint`` is: the assessor
-    #: and the spend pre-flight price *this* model, so the driver must bill it
-    #: too. Reading it from ``os.environ`` at the driver instead would let an
-    #: environment-only setting quote one model and pay for another.
-    ocr_model: str
-    formula_enrichment: str
-    #: Crop margin (fraction of the formula bbox) Docling expands on each side
-    #: before the formula VLM reads it. Carried here so the adapter reads the
-    #: resolved config value instead of hardcoding the parser's default: one knob,
-    #: one source. Only consulted when ``formula_enrichment`` resolves to on.
-    formula_crop_margin: float
-    #: ``auto`` | ``on`` | ``off`` for placing a recovered table of contents.
-    #: Carried here so the render strategy reads the resolved config value; the
-    #: default (``auto``) places none for a paper and one for a book that has one.
-    toc_mode: str
-    #: Accelerator device Docling uses (``auto`` / ``cpu`` / ``cuda``). Carried
-    #: here so the adapter reads the resolved config value instead of the
-    #: parser re-deriving it: one knob, one source.
-    docling_device: str
-    font_family: str | None
-    #: Whether page images may leave this machine (visual repair / cloud OCR /
-    #: VLM judge). Carried here so the adapter reads the resolved config value
-    #: instead of re-deriving it from the environment — one gate, one source.
-    allow_page_upload: bool
-    #: How eagerly the VLM fallback reads pages on top of the text layer
-    #: (``off`` / ``missing`` / ``weak`` / ``all``). Owned by
-    #: ``UBTConfig.ocr_fallback`` and carried here for the same one-knob-one-
-    #: source reason as the other OCR fields: the adapter passes the resolved
-    #: value down to the parser instead of the parser re-reading an env var.
-    #: Declared after ``allow_page_upload`` because a defaulted field may not
-    #: precede a required one; the value and its default are unchanged.
-    ocr_fallback: str = "off"
-    #: Content-addressed step cache root (content-addressed cache layer). Empty disables it;
-    #: the adapter builds a store from it for the render path's pixel witnesses.
-    cache_dir: str = ""
-    #: Whether Docling conversions run in an isolated worker process.
-    docling_isolate_process: bool = True
-    #: Enable adaptive layout auto-healing pass during Typst publication render.
-    enable_layout_auto_heal: bool = True
-    layout_auto_heal_max_passes: int = 2
-    #: Enable PDF size miniaturization and lossless stream compression.
-    enable_pdf_optimization: bool = True
-    pdf_optimize_profile: str = "lossless"
-    #: Whether wide tables in single-column pages may flip to dedicated landscape pages.
-    allow_landscape_tables: bool | None = None
-
-
-def adapter_runtime_config(config: Any) -> AdapterRuntimeConfig:
-    """Build the adapter runtime config from the engine config.
-
-    One factory because there are two callers that must agree: the live pipeline
-    at run start and the re-export that re-renders from a ledger.
-    """
-    return AdapterRuntimeConfig(
-        ocr_mode=config.ocr_mode,
-        ocr_endpoint=config.ocr_endpoint,
-        ocr_api_key=config.ocr_api_key.get_secret_value(),
-        ocr_model=config.ocr_model,
-        ocr_fallback=getattr(config, "ocr_fallback", "off"),
-        formula_enrichment=config.formula_enrichment,
-        docling_device=config.docling_device,
-        formula_crop_margin=config.formula_crop_margin,
-        toc_mode=config.toc_mode,
-        font_family=config.font_family,
-        allow_page_upload=config.allow_page_upload,
-        cache_dir=str(config.cache_dir) if config.cache_enabled else "",
-        docling_isolate_process=config.docling_isolate_process,
-        enable_layout_auto_heal=config.enable_layout_auto_heal,
-        layout_auto_heal_max_passes=config.layout_auto_heal_max_passes,
-        enable_pdf_optimization=config.enable_pdf_optimization,
-        pdf_optimize_profile=config.pdf_optimize_profile,
-        allow_landscape_tables=getattr(config, "allow_landscape_tables", None),
-    )
-
-
-def apply_runtime_config(adapter: Any, runtime_config: AdapterRuntimeConfig) -> None:
-    """Push :class:`AdapterRuntimeConfig` into an adapter through its SPI hook.
-
-    Replaces the pipeline's seven-field ``hasattr(adapter, field)`` chain with a
-    single capability probe on one stable method name. Adapters that own these
-    fields (the Docling PDF family) implement ``apply_config`` and translate the
-    subset they support; adapters without the hook are left untouched.
-    """
-    apply = getattr(adapter, "apply_config", None)
-    if callable(apply):
-        apply(runtime_config)
-
-
-@runtime_checkable
-class DocumentAdapter(Protocol):
-    """Protocol for document format adapters accessed through the ports bridge.
-
-    Signatures mirror the real SPI (:class:`ubt.adapters.base.BaseDocumentAdapter`),
-    including adapter-specific ``**kwargs``, so a call site
-    typed against this protocol can name the engine knobs without a ``cast(Any)``.
-    ``engine_name`` is the PDF-engine capability: a non-``None`` name marks a
-    ``BasePDFEngineAdapter``.
-    """
-
-    @property
-    def engine_name(self) -> str | None: ...
-
-    async def extract_manifest(self, input_path: Path) -> BookManifest: ...
-
-    def parse_stream(
-        self, input_path: Path, pages: set[int] | None = None
-    ) -> AsyncIterator[ChapterIR]: ...
-
-    async def render_blocks(
-        self,
-        manifest: BookManifest,
-        blocks: list[IRBlock],
-        target_lang: str,
-        output_path: Path,
-        bilingual_mode: str | None = None,
-        **kwargs: Any,
-    ) -> Path: ...
-
-    def apply_config(self, runtime_config: AdapterRuntimeConfig) -> None: ...
-    @property
-    def last_render_skips(self) -> list[tuple[str, str]]: ...
-    @property
-    def last_render_flags(self) -> list[tuple[str, str]]: ...
-    @property
-    def last_render_reconstructions(self) -> list[Any]: ...
 
 
 VisualGateRunnerFn = Callable[..., Any]
@@ -345,159 +205,11 @@ def is_visual_scalpel_applicable(
     return _check(block, source_pdf_path=source_pdf_path, vision_threshold=vision_threshold)
 
 
-def get_last_render_skips(adapter: Any) -> list[tuple[str, str]]:
-    """Return the adapter's last-render per-block skip ledger.
-
-    Adapters declare ``last_render_skips`` as part of :class:`DocumentAdapter`.
-    This helper provides safe access, dropping malformed entries so an
-    inspection issue cannot disrupt the render pipeline.
-    """
-    raw = getattr(adapter, "last_render_skips", None)
-    if not isinstance(raw, list):
-        return []
-    skips: list[tuple[str, str]] = []
-    for entry in raw:
-        if (
-            isinstance(entry, tuple)
-            and len(entry) == 2
-            and isinstance(entry[0], str)
-            and isinstance(entry[1], str)
-        ):
-            skips.append((entry[0], entry[1]))
-    return skips
-
-
-def get_last_render_flags(adapter: Any) -> list[tuple[str, str]]:
-    """Return the adapter's last-render per-block *quality* flag ledger.
-
-    Adapters declare ``last_render_flags`` as part of :class:`DocumentAdapter`.
-    This helper provides safe access, dropping malformed entries so an
-    inspection issue cannot disrupt the render pipeline.
-    """
-    raw = getattr(adapter, "last_render_flags", None)
-    if not isinstance(raw, list):
-        return []
-    flags: list[tuple[str, str]] = []
-    for entry in raw:
-        if (
-            isinstance(entry, tuple)
-            and len(entry) == 2
-            and isinstance(entry[0], str)
-            and isinstance(entry[1], str)
-        ):
-            flags.append((entry[0], entry[1]))
-    return flags
-
-
-def get_last_render_reconstructions(adapter: Any) -> list[Any]:
-    """Return the adapter's last-render per-asset reconstruction verdicts.
-
-    Adapters declare ``last_render_reconstructions`` as part of
-    :class:`DocumentAdapter`. This helper provides safe access, dropping
-    malformed entries (anything that is not a
-    :class:`ubt.core.content.nodes.ReconstructionRecord`) so an inspection
-    issue cannot disrupt the render pipeline.
-    """
-    from ubt.core.content.nodes import ReconstructionRecord
-
-    raw = getattr(adapter, "last_render_reconstructions", None)
-    if not isinstance(raw, list):
-        return []
-    return [entry for entry in raw if isinstance(entry, ReconstructionRecord)]
-
-
-def probe_pdf_pages(input_path: Path) -> tuple[int, int]:
-    """Return (page_count, char_count) via short_doc probe."""
-    from ubt.adapters.pdf.short_doc import probe_pdf_pages as _probe
-
-    return _probe(input_path)
-
-
-def probe_pdf_feasibility(input_path: Path) -> Any:
-    """Run the native in-place feasibility preflight through the adapter bridge.
-
-    ``ubt.core.engine`` may not import ``ubt.adapters`` at module scope (the
-    layering invariant in ``scripts/dump_compiler_edges.py``); this function
-    is the sanctioned seam, mirroring ``classify_pdf_structure``.
-    """
-    from ubt.adapters.pdf.native_preflight import measure_native_feasibility
-
-    return measure_native_feasibility(input_path)
-
-
 def pdf_page_count(input_path: Path) -> int:
     """Return the source PDF's page count through the adapter bridge."""
     from ubt.adapters.pdf import pdf_struct
 
     return pdf_struct.page_count(input_path)
-
-
-@dataclass(frozen=True)
-class PdfStructureFacts:
-    """Page-level structure census feeding render-engine routing.
-
-    All ratios are over *all* pages (not a sample) and are page-level, so the
-    signal does not drift when the parser re-chunks text into more IR blocks.
-    ``has_scan`` / ``formula_heavy`` keep their historical majority semantics.
-    """
-
-    has_scan: bool
-    formula_heavy: bool
-    multicolumn_page_share: float
-    structural_page_share: float
-    confirmed_font_damage_pages: int = 0
-
-
-def classify_pdf_structure(input_path: Path) -> PdfStructureFacts:
-    """Census the document's pages once and return the routing signals.
-
-    Reads the CACHED per-page profile (:func:`profile_pdf`, keyed on profiler
-    version + path + size + mtime) instead of re-running an uncached census —
-    the old path re-read the whole document here AND again inside the parser's
-    ``annotate_page_kinds`` (measured: three full reads per job, ~1.7s each on
-    a 15-page/6MB paper). One shared cache means ingest and routing pay once.
-
-    Degrades to "no signal" (all-False / 0.0) when the census fails: a broken
-    probe must lower the routing to the lossless default, not kill the run.
-    """
-    import logging
-
-    from ubt.adapters.pdf.page_profiler import (
-        majority_flags,
-        profile_pdf,
-        structural_page_shares,
-    )
-    from ubt.adapters.pdf.pdf_profiler import PROFILE_CACHE_DIR
-
-    try:
-        profiles = profile_pdf(input_path, cache_dir=PROFILE_CACHE_DIR)
-        if not profiles:
-            return PdfStructureFacts(False, False, 0.0, 0.0, 0)
-        has_scan, formula_heavy = majority_flags([p.kind for p in profiles])
-        multicolumn_share, structural_share = structural_page_shares([p.facts for p in profiles])
-
-        damage_pages = 0
-        try:
-            from ubt.adapters.pdf.extraction_witness import inspect_pdf, summarize
-
-            damage_pages = summarize(inspect_pdf(input_path)).get("confirmed_pages", 0)
-        except Exception as exc:
-            logging.getLogger(__name__).debug("Font witness in structure classify: %s", exc)
-
-        return PdfStructureFacts(
-            has_scan=has_scan,
-            formula_heavy=formula_heavy,
-            multicolumn_page_share=multicolumn_share,
-            structural_page_share=structural_share,
-            confirmed_font_damage_pages=damage_pages,
-        )
-    except Exception as exc:
-        logging.getLogger(__name__).warning(
-            "PDF content classification failed for %s (routing probe degraded): %s",
-            input_path,
-            exc,
-        )
-        return PdfStructureFacts(False, False, 0.0, 0.0, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -534,13 +246,6 @@ def supported_suffixes() -> set[str]:
     from ubt.adapters.factory import supported_suffixes as _suffixes
 
     return set(_suffixes())
-
-
-def sample_pdf_pages(input_path: Path) -> tuple[int, bool, str]:
-    """Sample a PDF into ``(page_count, is_scanned, text_preview)``."""
-    from ubt.adapters.pdf.plain_text_extractor import sample_pdf_pages as _sample
-
-    return _sample(input_path)
 
 
 def reject_encrypted_pdf(path: Path) -> None:

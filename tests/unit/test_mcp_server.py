@@ -5,6 +5,11 @@ from pathlib import Path
 import pytest
 
 from ubt.adapters.base import BaseDocumentAdapter
+from ubt.core.engine.adapter_runtime import (
+    DocumentAdapter,
+    get_last_render_flags,
+    get_last_render_skips,
+)
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.ir.models import (
     BlockStatus,
@@ -14,7 +19,6 @@ from ubt.core.ir.models import (
     IRBlock,
     make_element,
 )
-from ubt.core.ports import DocumentAdapter, get_last_render_flags, get_last_render_skips
 
 pytestmark = pytest.mark.fast
 

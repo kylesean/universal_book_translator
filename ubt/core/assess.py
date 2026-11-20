@@ -34,12 +34,12 @@ from ubt.core.engine.cost_estimate import (
     estimate_draft_cost_from_totals,
     measure_prefix_tokens,
 )
+from ubt.core.engine.pdf_facts import probe_pdf_pages
 from ubt.core.policy.layout_policy import PROBE_MIN_CHARS
 from ubt.core.ports import (
     inspect_font_encoding_damage,
     inspect_pdf_profile,
     page_kind_enum,
-    probe_pdf_pages,
     profile_pdf_pages,
     resolve_adapter,
     summarize_font_encoding_damage,

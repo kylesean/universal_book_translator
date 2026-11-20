@@ -7,8 +7,8 @@ import pytest
 
 from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
 from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
+from ubt.core.engine.adapter_runtime import AdapterRuntimeConfig
 from ubt.core.ir.models import BlockType, BookManifest, IRBlock, make_element
-from ubt.core.ports import AdapterRuntimeConfig
 
 pytestmark = pytest.mark.fast
 

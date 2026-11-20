@@ -38,13 +38,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ubt.core.config import UBTConfig
+from ubt.core.engine.adapter_runtime import DocumentAdapter
 from ubt.core.engine.events import (
     TranslationProgressEvent,
 )
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.exceptions import JobInterruptedError, LedgerWriterLeaseLostError
 from ubt.core.ir.models import BookManifest
-from ubt.core.ports import DocumentAdapter
 from ubt.core.router.router import ModelRouter
 
 

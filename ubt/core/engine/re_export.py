@@ -32,6 +32,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ubt.core.engine.adapter_runtime import adapter_runtime_config, apply_runtime_config
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.ledger_reading import (
@@ -46,7 +47,7 @@ from ubt.core.engine.writer_lock import LedgerWriterLock, keep_lease_fresh
 from ubt.core.exceptions import LedgerWriterLeaseLostError
 from ubt.core.ir.models import BookManifest
 from ubt.core.ir.render_plan import RenderPlan
-from ubt.core.ports import adapter_runtime_config, apply_runtime_config, resolve_adapter
+from ubt.core.ports import resolve_adapter
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.delivery import engine_supports_contract, resolve_pdf_engine
 from ubt.delivery.contracts import DeliveryContract
@@ -193,7 +194,7 @@ def _apply_delivery_override(
     """
     if requested is None:
         return None
-    from ubt.core.ports import classify_pdf_structure, probe_pdf_pages
+    from ubt.core.engine.pdf_facts import classify_pdf_structure, probe_pdf_pages
     from ubt.delivery.planning import plan_for_document
 
     metadata = dict(manifest.metadata or {})

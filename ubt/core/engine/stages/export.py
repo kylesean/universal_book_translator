@@ -24,6 +24,12 @@ from typing import TYPE_CHECKING, Any, cast
 from ubt.core.atomic import atomic_write_text
 from ubt.core.cleaners.cjk_spacing import normalize_publishing_cjk
 from ubt.core.config import DualMode
+from ubt.core.engine.adapter_runtime import (
+    DocumentAdapter,
+    get_last_render_flags,
+    get_last_render_reconstructions,
+    get_last_render_skips,
+)
 from ubt.core.engine.delivery_freshness import record_rendered_digest, rendered_digest_for
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import NON_TERMINAL_STATUSES, SQLiteJobLedger
@@ -54,12 +60,8 @@ from ubt.core.job_options import (
 from ubt.core.metrics.collect import collect_kpis, save_metrics_report
 from ubt.core.policy.bilingual_advisor import SECONDARY_SUFFIX
 from ubt.core.ports import (
-    DocumentAdapter,
     blocking_gate_tripped,
     crashed_visual_gate_result,
-    get_last_render_flags,
-    get_last_render_reconstructions,
-    get_last_render_skips,
     optimize_pdf_deliverable,
     pdf_page_count,
 )

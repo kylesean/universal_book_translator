@@ -14,7 +14,7 @@ from ubt.core.ir.models import BookManifest, ChapterIR, IRBlock
 from ubt.core.text_decode import decode_markup
 
 if TYPE_CHECKING:
-    from ubt.core.ports import AdapterRuntimeConfig
+    from ubt.core.engine.adapter_runtime import AdapterRuntimeConfig
 
 __all__ = [
     "BILINGUAL_TARGET_CLASS",

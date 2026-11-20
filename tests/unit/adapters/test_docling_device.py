@@ -9,7 +9,7 @@ import pytest
 
 from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
 from ubt.core.config import UBTConfig
-from ubt.core.ports import AdapterRuntimeConfig
+from ubt.core.engine.adapter_runtime import AdapterRuntimeConfig
 
 pytestmark = pytest.mark.fast
 

@@ -37,6 +37,11 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from ubt.core.config import UBTConfig
+from ubt.core.engine.adapter_runtime import (
+    AdapterRuntimeConfig,
+    DocumentAdapter,
+    apply_runtime_config,
+)
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import Scoring, Terminology
 from ubt.core.engine.ledger import SQLiteJobLedger
@@ -82,12 +87,7 @@ from ubt.core.memory.glossary_table import (
 )
 from ubt.core.memory.neighbor_window import NeighborContextBuilder
 from ubt.core.policy.adaptive_policy import AdaptivePolicy
-from ubt.core.ports import (
-    AdapterRuntimeConfig,
-    DocumentAdapter,
-    apply_runtime_config,
-    resolve_adapter,
-)
+from ubt.core.ports import resolve_adapter
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.qe.heuristic import HeuristicQERunner
 from ubt.core.router.prompts import build_rich_draft_prompt, build_rich_repair_prompt

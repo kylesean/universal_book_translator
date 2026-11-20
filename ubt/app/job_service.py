@@ -44,6 +44,9 @@ class JobService:
     finalize_job: FinalizeJobHook | None = None
 
     def orchestrator(self, *, rehearse: bool) -> PipelineOrchestrator:
+        from ubt.app.bootstrap import install_services
+
+        install_services()
         if rehearse:
             return create_dry_run_orchestrator(self.config, finalize_job=self.finalize_job)
         return PipelineOrchestrator(

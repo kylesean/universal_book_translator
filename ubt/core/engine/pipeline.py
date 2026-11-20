@@ -23,10 +23,21 @@ from typing import TYPE_CHECKING, Any
 
 from ubt.cache.dirs import cache_root
 from ubt.core.config import UBTConfig
+from ubt.core.engine.adapter_runtime import (
+    DocumentAdapter,
+    adapter_runtime_config,
+    apply_runtime_config,
+)
 from ubt.core.engine.blocks import BlockReader
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import RunFacts
 from ubt.core.engine.ledger import SQLiteJobLedger
+from ubt.core.engine.pdf_facts import (
+    PdfStructureFacts,
+    classify_pdf_structure,
+    probe_pdf_feasibility,
+    probe_pdf_pages,
+)
 from ubt.core.engine.plan import RunGates, run_stages
 from ubt.core.engine.repair_loop import RepairLoop
 from ubt.core.engine.services import RunServices
@@ -55,15 +66,7 @@ from ubt.core.memory.tm import (
 from ubt.core.policy.adaptive_policy import (
     resolve_adaptive_policy,
 )
-from ubt.core.ports import (
-    DocumentAdapter,
-    PdfStructureFacts,
-    adapter_runtime_config,
-    apply_runtime_config,
-    classify_pdf_structure,
-    probe_pdf_pages,
-    resolve_adapter,
-)
+from ubt.core.ports import resolve_adapter
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.qe.heuristic import HeuristicQERunner
@@ -202,8 +205,6 @@ def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryD
     measured: NativePreflight | None = None
     if needs_census and facts is not None and not facts.has_scan:
         try:
-            from ubt.core.ports import probe_pdf_feasibility
-
             measured = probe_pdf_feasibility(input_path)
         except Exception as exc:  # noqa: BLE001 - a probe failure lowers, not kills, the run
             logger.debug(

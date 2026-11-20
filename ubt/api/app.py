@@ -464,6 +464,9 @@ def create_app(
     queue: JobQueue | None = None,
     config_overrides: dict[str, Any] | None = None,
 ) -> FastAPI:
+    from ubt.app.bootstrap import install_services
+
+    install_services()
     """Factory creating FastAPI application instance.
 
     ``queue`` (or ``config.job_mode='queue'``) switches the Jobs endpoints to

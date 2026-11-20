@@ -23,7 +23,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Literal
 
-from ubt.core.ports import classify_pdf_structure, probe_pdf_pages, sample_pdf_pages
+from ubt.core.engine.pdf_facts import classify_pdf_structure, probe_pdf_pages, sample_pdf_pages
 from ubt.core.xml_safety import parse_xml
 from ubt.core.zip_safety import ZipReadBudget, read_member
 

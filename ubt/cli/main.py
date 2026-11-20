@@ -104,6 +104,9 @@ def main_callback(
         ),
     ] = False,
 ) -> None:
+    from ubt.app.bootstrap import install_services
+
+    install_services()
     # Diagnostics go to stderr by default, so stdout stays clean for the
     # machine-readable `--json` output of every subcommand. Commands that draw a
     # Rich Live progress bar (translate) re-route records onto the shared stdout
