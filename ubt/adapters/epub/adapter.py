@@ -1,10 +1,8 @@
-"""EPUB bilingual output: ZIP and package-document handling over the shared DOM injection.
+"""EPUB inspection adapter: ZIP/OPF/spine parsing for read-only audits.
 
-Per-node injection is not here: :func:`ubt.adapters.dom_inject.inject_translated_block`
-is the one engine HTML and EPUB deliver through, so the escaping and the
-bilingual-target class tagging cannot drift between the two formats. What is
-EPUB-specific is the container — reading and repacking the ZIP, the OPF package
-document, the NCX/nav TOC, and the per-member read budget.
+Translation and delivery are owned by :class:`ubt.codecs.dom.DOMCodec`. This
+adapter keeps the typed-reader projection the table/math/figure audits need;
+it does not inject or repack a deliverable.
 """
 
 import asyncio
@@ -13,24 +11,18 @@ import html
 import logging
 import posixpath
 import re
-import shutil
-import tempfile
 import zipfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote
 
 from bs4 import BeautifulSoup, Tag
 from bs4.element import NavigableString
 
 from ubt.adapters.base import (
-    BILINGUAL_TARGET_CLASS,
     BaseDocumentAdapter,
     decode_markup,
 )
-from ubt.adapters.dom_inject import inject_translated_block
-from ubt.adapters.unresolved import failure_note, is_unresolved
 from ubt.analyze.assemble import number
 from ubt.analyze.reader_epub import spine_chapters
 from ubt.analyze.reader_html import walk_markup_elements
@@ -38,16 +30,9 @@ from ubt.core.cleaners.dynamic_boilerplate import (
     BoilerplateFingerprint,
     DynamicBoilerplateHarvester,
 )
-from ubt.core.cleaners.html_sanitizer import (
-    sanitize_html_fragment,
-    scrub_css_text,
-    scrub_source_document,
-    strip_html_mark_tags,
-)
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import (
     BlockProvenance,
-    BlockType,
     BookManifest,
     ChapterIR,
     ChapterMeta,
@@ -59,24 +44,6 @@ from ubt.core.zip_safety import ZipReadBudget, read_member
 from ubt.model.ast import TextElement
 
 logger = logging.getLogger(__name__)
-
-
-def _is_safe_epub_member_name(name: str) -> bool:
-    """False for an archive member name that escapes the package.
-
-    ``render_output`` preserves each source member's ``ZipInfo`` verbatim, so a
-    name like ``../evil.xhtml`` or ``/etc/passwd`` would propagate into the
-    delivered ``.epub`` and could escape a downstream naive extractor.
-    """
-    if name in ("", ".", "..") or "\\" in name:
-        return False
-    normalized = posixpath.normpath(name)
-    if normalized in ("", ".", "..") or normalized.startswith("../"):
-        return False
-    if normalized.startswith("/"):
-        return False
-    # A drive/URN-looking first segment ("C:") is absolute on Windows.
-    return ":" not in normalized.split("/", 1)[0]
 
 
 def _natural_sort_key(name: str) -> list[object]:
@@ -101,31 +68,6 @@ def _read_epub_member(
     archive total (a book made of many just-under-cap members).
     """
     return read_member(zf, name, budget)
-
-
-_XML_DECL_ENCODING_RE = re.compile(
-    r"""(<\?xml[^>]*?\bencoding\s*=\s*["'])([A-Za-z0-9._-]+)(["'])""", re.IGNORECASE
-)
-_META_CHARSET_RE = re.compile(
-    r"""(<meta[^>]*?\bcharset\s*=\s*["']?)([A-Za-z0-9._-]+)""", re.IGNORECASE
-)
-_META_CONTENT_TYPE_RE = re.compile(
-    r"""(<meta[^>]*?\bcontent\s*=\s*["'][^"']*?charset=)([A-Za-z0-9._-]+)""", re.IGNORECASE
-)
-
-
-def _force_utf8_declaration(text: str) -> str:
-    """Rewrite legacy encoding declarations to ``utf-8`` after a re-encode.
-
-    A member decoded with its declared encoding is written back as UTF-8; the
-    XML declaration must say utf-8, and so must a legacy ``<meta charset>`` /
-    ``http-equiv Content-Type``: an EPUB2 chapter parsed with the XML builder
-    keeps its meta verbatim, and a reader honoring the stale ``gbk`` declaration
-    would render the re-encoded bytes as mojibake.
-    """
-    text = _XML_DECL_ENCODING_RE.sub(r"\1utf-8\3", text, count=1)
-    text = _META_CHARSET_RE.sub(r"\1utf-8", text)
-    return _META_CONTENT_TYPE_RE.sub(r"\1utf-8", text)
 
 
 _NAMED_HTML_ENTITY_RE = re.compile(r"&([a-zA-Z][a-zA-Z0-9]*);")
@@ -196,19 +138,6 @@ BLOCK_TAGS = [
     "h6",
 ]
 
-BILINGUAL_CSS_NAME = "ubt-bilingual.css"
-
-BILINGUAL_CSS = """
-/* Universal Book Translator bilingual styling */
-.ubt-bilingual-target {
-    color: #4a5568;
-    margin-top: 0.35em !important;
-    margin-bottom: 0.6em !important;
-    font-size: 0.96em;
-    line-height: 1.55;
-}
-"""
-
 
 def wrap_nested_direct_blocks(soup: BeautifulSoup) -> None:
     """Wrap direct inline runs in container elements that also have block children into <p> tags.
@@ -260,34 +189,6 @@ def wrap_nested_direct_blocks(soup: BeautifulSoup) -> None:
             tag.append(p)
             for node in current_run:
                 p.append(node.extract())
-
-
-def _toc_label_text(text: str) -> str:
-    """Visible text of a translated heading, safe to place in a TOC label.
-
-    TOC labels are text nodes: embedding raw markup in one serializes as
-    literal escaped tags, and the reader sees the *source* of the quarantine
-    placeholder — E2E found ``<mark class="ubt-blocked-human" ...>【待人工
-    审校…】</mark>`` spelled out inside toc.xhtml, which is exactly the
-    "grammar tag leakage" the README forbids.
-
-    Order matters: strip the real ``<mark>`` wrappers first, parse away any
-    other real markup, and only then decode entities — that way the source
-    quote the placeholder carries (stored as ``&lt;…&gt;``) re-emerges as
-    *visible text* instead of being parsed as tags and swallowed. The
-    entity-escaped spelling of the placeholder (the double-escaped form seen
-    downstream) is stripped after decoding.
-    """
-    if not text:
-        return text
-    cleaned = strip_html_mark_tags(text)
-    if "<" in cleaned:
-        # Any other markup (e.g. the ubt-failed-draft wrapper): keep the text.
-        cleaned = BeautifulSoup(cleaned, "html.parser").get_text(" ", strip=True)
-    decoded = html.unescape(cleaned)
-    if "<mark" in decoded:
-        decoded = strip_html_mark_tags(decoded)
-    return decoded.strip()
 
 
 def _parse_chapter_blocks(
@@ -361,12 +262,7 @@ def _parse_chapter_blocks(
 
 
 class EPUBAdapter(BaseDocumentAdapter):
-    """EPUB adapter: injects the target node into the chapter's own DOM.
-
-    The chapters are not rebuilt from the IR — each source XHTML member is
-    parsed, :func:`ubt.adapters.dom_inject.inject_translated_block` adds the
-    translated node next to the original, and the archive is repacked.
-    """
+    """EPUB inspection adapter: reads spine members into typed IR blocks."""
 
     output_suffixes = frozenset({".epub"})
 
@@ -524,192 +420,6 @@ class EPUBAdapter(BaseDocumentAdapter):
                         blocks=chapter_blocks,
                     )
 
-    def _render_blocks_sync(
-        self,
-        manifest: BookManifest,
-        blocks: list[IRBlock],
-        target_lang: str,
-        output_path: Path,
-        bilingual_mode: str | None = None,
-        **kwargs: Any,
-    ) -> Path:
-        """Inject bilingual translation nodes into original DOM (ledger-free)."""
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        input_path = Path(manifest.source_path)
-        block_names = set(BLOCK_TAGS)
-
-        # ``all_blocks`` is the unfiltered render input: body blocks, chapter
-        # titles and skip_translate blocks alike. Each map below is one view of
-        # it, filtered for what that step injects.
-        all_blocks = blocks
-        # A skip_translate block's target_text equals its source_text (ingest.py
-        # stamps them so the ledger holds the verbatim text). Injecting them
-        # again would duplicate every <pre>/<code>/kept block in the shipped
-        # EPUB as a ubt-bilingual-target node; the other three adapters filter
-        # the same way.
-        translation_map = {
-            b.id: b.target_text for b in all_blocks if b.target_text and not b.skip_translate
-        }
-        # Blocks whose draft never passed the quality gates stay labelled on the
-        # page (ubt.adapters.unresolved), so a bare machine draft is never
-        # injected indistinguishably from an approved translation.
-        unresolved_notes = {
-            b.id: failure_note(b.status)
-            for b in all_blocks
-            if is_unresolved(b.status) and b.target_text and not b.skip_translate
-        }
-        source_map = {b.id: b.source_text for b in all_blocks if b.source_text}
-
-        total_injected = 0
-        with tempfile.TemporaryDirectory(prefix="ubt_epub_render_") as tmpdir:
-            temp_epub = Path(tmpdir) / "output.epub"
-
-            with (
-                zipfile.ZipFile(input_path) as zin,
-                zipfile.ZipFile(temp_epub, "w") as zout,
-            ):
-                # One read budget for the repack: the source was already
-                # accepted, so this only stops a crafted archive from expanding
-                # past the work cap while being copied.
-                budget = ZipReadBudget()
-                # Resolve the package file and its TOC documents so
-                # they can be rewritten (language, CSS item, bilingual labels).
-                opf_path = str(manifest.metadata.get("opf_path") or "")
-                opf_dir = posixpath.dirname(opf_path)
-                toc_paths: set[str] = set()
-                opf_bytes = (
-                    _read_epub_member(zin, opf_path, budget)
-                    if opf_path and opf_path in zin.namelist()
-                    else None
-                )
-                if opf_bytes is not None:
-                    opf_soup = BeautifulSoup(
-                        strip_doctype_declarations(decode_markup(opf_bytes)), "xml"
-                    )
-                    for item in opf_soup.find_all("item"):
-                        href = str(item.get("href") or "")
-                        if not href:
-                            continue
-                        media_type = str(item.get("media-type") or "")
-                        properties = str(item.get("properties") or "").split()
-                        if media_type == "application/x-dtbncx+xml" or "nav" in properties:
-                            full = posixpath.join(opf_dir, href) if opf_dir else href
-                            toc_paths.add(posixpath.normpath(full))
-                title_map = self._translated_titles(manifest, all_blocks)
-                css_entry = posixpath.join(opf_dir, BILINGUAL_CSS_NAME) if opf_path else ""
-
-                # EPUB requirement: 'mimetype' must be the first file and ZIP_STORED (uncompressed)
-                for info in zin.infolist():
-                    if not _is_safe_epub_member_name(info.filename):
-                        # A traversal-shaped or absolute name is copied verbatim
-                        # into the deliverable by ``writestr``; a downstream
-                        # naive extract could then escape its target directory.
-                        logger.warning("EPUB: dropping member with unsafe name %r", info.filename)
-                        continue
-                    if css_entry and info.filename == css_entry:
-                        # Existing bilingual stylesheet will be re-written once at the end
-                        continue
-
-                    data = _read_epub_member(zin, info.filename, budget)
-                    if data is None:
-                        # Missing or zip-bomb-sized member: skip it rather than
-                        # materialise it.
-                        continue
-
-                    if info.filename == "mimetype":
-                        zout.writestr(
-                            zipfile.ZipInfo("mimetype"),
-                            data,
-                            compress_type=zipfile.ZIP_STORED,
-                        )
-                        continue
-
-                    # Package + TOC documents get bilingual updates.
-                    if opf_path and info.filename == opf_path:
-                        data = self._update_opf(data, target_lang)
-                    elif info.filename in toc_paths:
-                        doc_dir = posixpath.dirname(info.filename)
-                        if info.filename.lower().endswith(".ncx"):
-                            data = self._update_ncx(
-                                data, doc_dir, title_map, bilingual_mode=bilingual_mode
-                            )
-                        else:
-                            data = self._update_nav_xhtml(
-                                data, doc_dir, title_map, bilingual_mode=bilingual_mode
-                            )
-
-                    matching_chapter = next(
-                        (c for c in manifest.chapters if c.source_file == info.filename),
-                        None,
-                    )
-
-                    if matching_chapter and info.filename.lower().endswith(
-                        (".xhtml", ".html", ".htm", ".xml")
-                    ):
-                        # <link> the package-wide stylesheet instead
-                        # of duplicating inline CSS into every chapter.
-                        stylesheet_href: str | None = None
-                        if opf_path:
-                            css_path = posixpath.join(opf_dir, BILINGUAL_CSS_NAME)
-                            stylesheet_href = posixpath.relpath(
-                                css_path, posixpath.dirname(info.filename) or "."
-                            )
-                        data, chapter_injected = self._inject_bilingual_dom(
-                            raw_html=data,
-                            chapter_id=matching_chapter.chapter_id,
-                            translation_map=translation_map,
-                            block_names=block_names,
-                            source_map=source_map,
-                            unresolved_notes=unresolved_notes,
-                            stylesheet_href=stylesheet_href,
-                            bilingual_mode=bilingual_mode,
-                        )
-                        total_injected += chapter_injected
-
-                    # Source markup is copied into the deliverable, so a
-                    # malicious source could ship <script>/onload=/javascript:
-                    # to the reader. Both the rewritten chapter and the members
-                    # passed through untouched go through the same scrub; the
-                    # PDF/OPF/NCX members below are not markup a reader executes.
-                    if info.filename.lower().endswith((".xhtml", ".html", ".htm", ".xml", ".svg")):
-                        data = _force_utf8_declaration(
-                            scrub_source_document(decode_markup(data))
-                        ).encode("utf-8")
-                    elif info.filename.lower().endswith(".css"):
-                        # An external stylesheet ships inside the deliverable, so
-                        # a malicious source could smuggle a remote @import or a
-                        # remote url() past the chapter scrub (tracking, and CSS
-                        # attribute-selector exfiltration). Gate it exactly like
-                        # an inline <style> body.
-                        data = scrub_css_text(decode_markup(data)).encode("utf-8")
-
-                    # Pass the original ZipInfo object so date_time,
-                    # external_attr (unix permissions), and compress metadata
-                    # survive the rewrite (writestr overrides only the size /
-                    # CRC / compress_type it recomputes).
-                    zout.writestr(info, data, compress_type=zipfile.ZIP_DEFLATED)
-
-                # Ship the bilingual stylesheet as a real package item.
-                if opf_path and opf_path in zin.namelist():
-                    css_entry = posixpath.join(opf_dir, BILINGUAL_CSS_NAME)
-                    zout.writestr(css_entry, BILINGUAL_CSS, compress_type=zipfile.ZIP_DEFLATED)
-
-            # Loud failure instead of a silent untranslated book: if there were
-            # translations to inject but none landed, the block ids did not
-            # match the extracted chapters and the deliverable would ship in
-            # the source language while the run reports success.
-            if translation_map and total_injected == 0:
-                raise DocumentParseError(
-                    f"EPUB render injected 0 of {len(translation_map)} translations; "
-                    "block ids did not match the extracted chapters, so the book "
-                    "would ship untranslated. Refusing to emit a false success."
-                )
-
-            # Move temp epub to output_path using shutil.move (supports cross-device mounts)
-            shutil.move(temp_epub, output_path)
-
-        return output_path
-
     def _locate_opf(self, zf: zipfile.ZipFile, budget: ZipReadBudget | None = None) -> str:
         """Locate the root OPF file path via META-INF/container.xml."""
         container_bytes = _read_epub_member(zf, "META-INF/container.xml", budget)
@@ -725,242 +435,3 @@ class EPUBAdapter(BaseDocumentAdapter):
                 return name
 
         raise DocumentParseError("Invalid EPUB: OPF package manifest could not be located.")
-
-    def _inject_bilingual_dom(
-        self,
-        raw_html: bytes,
-        chapter_id: str,
-        translation_map: dict[str, str],
-        block_names: set[str],
-        source_map: dict[str, str] | None = None,
-        unresolved_notes: dict[str, str] | None = None,
-        stylesheet_href: str | None = None,
-        bilingual_mode: str | None = None,
-    ) -> tuple[bytes, int]:
-        """Inject target translation tags as siblings directly after original source tags (or replace in monolingual mode).
-
-        Returns the rewritten XHTML and the number of target nodes injected, so
-        the caller can detect a whole chapter that silently stayed untranslated
-        (block-id mismatch) instead of shipping a source-language book and
-        reporting success.
-        """
-        soup = _parse_xhtml(decode_markup(raw_html))
-        wrap_nested_direct_blocks(soup)
-        body = soup.body or soup
-        pairs = walk_markup_elements(body)
-        is_monolingual = bilingual_mode in ("target", "monolingual")
-
-        injected_count = 0
-        for idx, (elem, dom_node) in enumerate(pairs):
-            block_id = f"{chapter_id}#{idx:05d}"
-            target_text = translation_map.get(block_id)
-            if (
-                source_map
-                and target_text
-                and block_id in source_map
-                and source_map[block_id]
-                and isinstance(dom_node, Tag)
-                and source_map[block_id] != dom_node.get_text(" ", strip=True)
-                and not dom_node.find_all(True)
-            ):
-                dom_node.string = source_map[block_id]
-            if not target_text:
-                continue
-
-            # Labelled unresolved draft, never mistaken for an approved translation
-            note = (unresolved_notes or {}).get(block_id)
-            if note:
-                target_text = f"{note}\n\n{target_text}"
-
-            # The shared injection engine (HTML's twin loop lived here until the
-            # two drifted apart in sanitization and counting). The target text
-            # carries an unresolved note already; sanitize once here, the way
-            # the HTML adapter does, so both formats escape identically.
-            injected_count += inject_translated_block(
-                soup,
-                elem,
-                dom_node,
-                sanitize_html_fragment(target_text),
-                is_monolingual=is_monolingual,
-                target_css_class=BILINGUAL_TARGET_CLASS,
-            )
-
-        if injected_count > 0:
-            # Inject styling into <head>. The stylesheet ships once
-            # as an OPF manifest item and is <link>ed (EPUB best practice,
-            # no duplicated inline CSS per chapter); callers that don't
-            # provide a package-wide href fall back to the inline <style>.
-            head = soup.head
-            if head is None and soup.html:
-                head = soup.new_tag("head")
-                soup.html.insert(0, head)
-            if head is not None:
-                if stylesheet_href:
-                    link_tag = soup.new_tag("link")
-                    link_tag["rel"] = "stylesheet"
-                    link_tag["type"] = "text/css"
-                    link_tag["href"] = stylesheet_href
-                    head.append(link_tag)
-                else:
-                    style_tag = soup.new_tag("style")
-                    style_tag.string = BILINGUAL_CSS
-                    head.append(style_tag)
-
-        return str(soup).encode("utf-8"), injected_count
-
-    # ------------------------------------------------------------------
-    # OPF / NCX / nav package updates
-    # ------------------------------------------------------------------
-
-    def _update_opf(self, raw_opf: bytes, target_lang: str) -> bytes:
-        """Point the package at the bilingual output: dc:language + CSS item."""
-        soup = BeautifulSoup(strip_doctype_declarations(decode_markup(raw_opf)), "xml")
-        lang = soup.find("dc:language") or soup.find("language")
-        if lang is not None:
-            lang.string = target_lang
-        manifest_tag = soup.find("manifest")
-        if manifest_tag is not None and not manifest_tag.find(
-            "item", attrs={"href": BILINGUAL_CSS_NAME}
-        ):
-            css_item = soup.new_tag("item")
-            css_item["id"] = "ubt-bilingual-css"
-            css_item["href"] = BILINGUAL_CSS_NAME
-            css_item["media-type"] = "text/css"
-            manifest_tag.append(css_item)
-        return str(soup).encode("utf-8")
-
-    def _translated_titles(
-        self, manifest: BookManifest, all_blocks: list[IRBlock]
-    ) -> dict[str, str]:
-        """Map chapter source_file (and source_file#anchor) -> translated heading text.
-
-        The earliest heading translation per chapter (by spine order) stands
-        in for the chapter title. Subheadings with anchor IDs or matching source
-        text are also mapped so nested TOC navPoints resolve accurately.
-        """
-        chapter_by_id = {c.chapter_id: c for c in manifest.chapters}
-        candidates: dict[str, list[tuple[int, str]]] = {}
-        result: dict[str, str] = {}
-
-        for b in all_blocks:
-            if not b.target_text or b.skip_translate or b.block_type != BlockType.HEADING:
-                continue
-            cleaned = _toc_label_text(b.target_text)
-            if not cleaned:
-                continue
-            if b.source_text:
-                result[f"__text__:{b.source_text.strip()}"] = cleaned
-
-            chapter_id = b.id.split("#", 1)[0]
-            chapter = chapter_by_id.get(chapter_id)
-            if chapter is None or not chapter.source_file:
-                continue
-
-            candidates.setdefault(chapter.source_file, []).append((b.spine_index, cleaned))
-
-            html_id = b.provenance.html_id
-            if html_id:
-                result[f"{chapter.source_file}#{html_id}"] = cleaned
-
-        for source_file, pairs in candidates.items():
-            result[source_file] = min(pairs)[1]
-
-        return result
-
-    def _update_ncx(
-        self,
-        raw_ncx: bytes,
-        ncx_dir: str,
-        title_map: dict[str, str],
-        bilingual_mode: str | None = None,
-    ) -> bytes:
-        """Append bilingual labels (or monolingual translated labels) to NCX navPoints."""
-        # EPUB2 NCX files legitimately carry a DOCTYPE (the NISO DTD reference);
-        # it declares no entities UBT needs, so it is stripped like every other
-        # untrusted package document before the lxml-based parse.
-        soup = BeautifulSoup(strip_doctype_declarations(decode_markup(raw_ncx)), "xml")
-        is_monolingual = bilingual_mode in ("target", "monolingual")
-        for nav_point in soup.find_all("navPoint"):
-            content = nav_point.find("content")
-            label = nav_point.find("navLabel")
-            if content is None or label is None:
-                continue
-            src_raw = str(content.get("src") or "")
-            if not src_raw:
-                continue
-            src_raw = unquote(src_raw)
-            if "#" in src_raw:
-                src_file, anchor_id = src_raw.split("#", 1)
-            else:
-                src_file, anchor_id = src_raw, ""
-
-            full_file = (
-                posixpath.normpath(posixpath.join(ncx_dir, src_file)) if ncx_dir else src_file
-            )
-            full_with_anchor = f"{full_file}#{anchor_id}" if anchor_id else full_file
-
-            text_tag = label.find("text") or label
-            original = text_tag.get_text(strip=True)
-
-            translated = None
-            if anchor_id:
-                translated = title_map.get(full_with_anchor)
-            if not translated and original:
-                translated = title_map.get(f"__text__:{original}")
-            if not translated and not anchor_id:
-                translated = title_map.get(full_file)
-
-            if not translated:
-                continue
-            if translated in original:
-                continue
-            if is_monolingual:
-                text_tag.string = translated
-            else:
-                text_tag.string = f"{original} / {translated}" if original else translated
-        return str(soup).encode("utf-8")
-
-    def _update_nav_xhtml(
-        self,
-        raw_nav: bytes,
-        nav_dir: str,
-        title_map: dict[str, str],
-        bilingual_mode: str | None = None,
-    ) -> bytes:
-        """Append bilingual labels (or monolingual translated labels) to EPUB3 nav document links."""
-        soup = _parse_xhtml(decode_markup(raw_nav))
-        is_monolingual = bilingual_mode in ("target", "monolingual")
-        for anchor in soup.find_all("a"):
-            href_raw = str(anchor.get("href") or "")
-            if not href_raw:
-                continue
-            href_raw = unquote(href_raw)
-            if "#" in href_raw:
-                href_file, anchor_id = href_raw.split("#", 1)
-            else:
-                href_file, anchor_id = href_raw, ""
-
-            full_file = (
-                posixpath.normpath(posixpath.join(nav_dir, href_file)) if nav_dir else href_file
-            )
-            full_with_anchor = f"{full_file}#{anchor_id}" if anchor_id else full_file
-
-            original = anchor.get_text(strip=True)
-
-            translated = None
-            if anchor_id:
-                translated = title_map.get(full_with_anchor)
-            if not translated and original:
-                translated = title_map.get(f"__text__:{original}")
-            if not translated and not anchor_id:
-                translated = title_map.get(full_file)
-
-            if not translated:
-                continue
-            if translated in original:
-                continue
-            if is_monolingual:
-                anchor.string = translated
-            else:
-                anchor.string = f"{original} / {translated}" if original else translated
-        return str(soup).encode("utf-8")

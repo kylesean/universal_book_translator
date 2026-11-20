@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from ubt.adapters.base import BaseDocumentAdapter
+from ubt.adapters.unresolved import failure_note, is_unresolved
 from ubt.codecs.protocol import (
     DeliveryMode,
     DocumentCodec,
@@ -200,11 +201,18 @@ class DocumentCodecAdapter(BaseDocumentAdapter):
         **kwargs: Any,
     ) -> Path:
         del manifest, kwargs
-        translations = {
-            block.id: (block.target_text or "")
-            for block in blocks
-            if block.target_text and not block.skip_translate
-        }
+        translations: dict[str, str] = {}
+        for block in blocks:
+            if block.skip_translate or not block.target_text:
+                continue
+            text = block.target_text
+            if is_unresolved(block.status):
+                # A codec replaces the block's own text; the old adapters
+                # rendered this note as a sibling. Keeping it in the replacement
+                # is the format-agnostic equivalent, and every deliverable still
+                # says a human has not approved the draft.
+                text = f"{text}\n\n{failure_note(block.status)}"
+            translations[block.id] = text
         units = self._units
         if not units:
             # Agent finish / re-export replace an existing ledger without a

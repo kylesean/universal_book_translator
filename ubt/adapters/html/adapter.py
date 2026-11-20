@@ -1,32 +1,22 @@
-"""HTML document adapter: leaf-block extraction with bilingual DOM injection.
+"""HTML inspection adapter: leaf-block extraction for read-only audits.
 
 Parses standalone .html/.htm with the same shared markup walker EPUB uses
 (:func:`ubt.analyze.reader_html.walk_markup_elements`), so an HTML file gets
-exactly the same block semantics as EPUB spine items.
-
-Rendering is style-preserving by construction: the original document is
-re-parsed and translations injected as siblings, so source markup,
-stylesheets and scripts are untouched.
+exactly the same block semantics as EPUB spine items. Translation and delivery
+are owned by :class:`ubt.codecs.dom.DOMCodec`; this adapter is only reached by
+the explicit inspection path.
 """
 
 import asyncio
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
 
 from bs4 import BeautifulSoup
 
-from ubt.adapters.base import (
-    BILINGUAL_TARGET_CLASS,
-    BaseDocumentAdapter,
-    decode_markup,
-)
-from ubt.adapters.dom_inject import inject_translated_block
-from ubt.adapters.unresolved import failure_note, is_unresolved
+from ubt.adapters.base import BaseDocumentAdapter, decode_markup
 from ubt.analyze.assemble import number
 from ubt.analyze.reader_html import walk_markup_elements
-from ubt.core.cleaners.html_sanitizer import sanitize_html_fragment, scrub_source_document
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import (
     BookManifest,
@@ -37,9 +27,6 @@ from ubt.core.ir.models import (
 from ubt.core.ir.serializer import compute_file_sha256_cached
 
 logger = logging.getLogger(__name__)
-
-# Marker class added to injected bilingual target nodes.
-_TARGET_CSS_CLASS = BILINGUAL_TARGET_CLASS
 
 #: Largest HTML file this adapter will read into memory. DOCX and EPUB already
 #: have package-size guards; a bare .html file had none, so a multi-hundred-MB
@@ -118,67 +105,3 @@ class HTMLAdapter(BaseDocumentAdapter):
         elements = [p[0] for p in pairs]
         numbered = number(elements, chapter.chapter_id)
         return [IRBlock(element=elem) for elem in numbered]
-
-    def _render_blocks_sync(
-        self,
-        manifest: BookManifest,
-        blocks: list[IRBlock],
-        target_lang: str,
-        output_path: Path,
-        bilingual_mode: str | None = None,
-        **kwargs: Any,
-    ) -> Path:
-        """Re-parse the source document and inject bilingual target siblings."""
-        soup = self._load_soup(Path(manifest.source_path))
-        pairs = walk_markup_elements(soup.body or soup)
-        by_id = {b.id: b for b in blocks}
-
-        is_monolingual = bilingual_mode in ("target", "monolingual")
-        chapter_id = manifest.chapters[0].chapter_id
-
-        injected = 0
-        for idx, (elem, dom_node) in enumerate(pairs):
-            block_id = f"{chapter_id}#{idx:05d}"
-            block = by_id.get(block_id)
-            if block is None or block.skip_translate or not block.target_text:
-                continue
-
-            target_text = sanitize_html_fragment(str(block.target_text))
-            if not target_text:
-                continue
-            if is_unresolved(block.status):
-                target_text = sanitize_html_fragment(
-                    f"{failure_note(block.status)}\n\n{block.target_text}"
-                )
-                if not target_text:
-                    continue
-
-            # The shared injection engine (EPUB's twin loop lived here until the
-            # two drifted apart in sanitization and counting).
-            injected += inject_translated_block(
-                soup,
-                elem,
-                dom_node,
-                target_text,
-                is_monolingual=is_monolingual,
-                target_css_class=_TARGET_CSS_CLASS,
-            )
-
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
-        # The source document is copied into the deliverable largely verbatim,
-        # so it goes through the same source scrub the EPUB members get: target
-        # text is already sanitized, but a dirty *source* would otherwise ship
-        # <script>, onload= handlers and javascript: links to the reader.
-        try:
-            tmp_path.write_text(scrub_source_document(str(soup)), encoding="utf-8")
-            tmp_path.replace(output_path)
-        except Exception:
-            tmp_path.unlink(missing_ok=True)
-            raise
-
-        if injected == 0:
-            logger.warning(
-                "HTML render injected 0 translations (empty blocks?)",
-            )
-        return output_path

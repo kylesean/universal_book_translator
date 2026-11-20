@@ -33,9 +33,3 @@ def failure_note(status: BlockStatus) -> str:
     """Plain-text (single-line) unresolved note for structured formats."""
     note = FAILURE_NOTES.get(status, "Translation unresolved — manual review required:")
     return f"[UBT] {note}"
-
-
-def failure_note_markdown(status: BlockStatus) -> str:
-    """Markdown-formatted unresolved note."""
-    note = FAILURE_NOTES.get(status, "Translation unresolved — manual review required:")
-    return f"> ⚠️ **[UBT] {note}**"

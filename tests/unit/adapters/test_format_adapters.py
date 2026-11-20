@@ -8,9 +8,7 @@ import pytest
 from ubt.adapters.docx.adapter import DOCXAdapter
 from ubt.adapters.epub.adapter import EPUBAdapter
 from ubt.adapters.html.adapter import HTMLAdapter
-from ubt.adapters.markdown.adapter import _format_markdown_block
 from ubt.core.ir.models import BlockType, IRBlock
-from ubt.model.ast import Heading, ListItem, Span
 
 pytestmark = pytest.mark.fast
 
@@ -107,45 +105,22 @@ async def _collect(adapter: object, book: Path) -> list[IRBlock]:
     return blocks
 
 
-async def test_html_adapter_parses_and_renders(tmp_path: Path, html_book: Path) -> None:
+async def test_html_inspection_adapter_reads_the_typed_blocks(html_book: Path) -> None:
     adapter = HTMLAdapter()
     manifest = await adapter.extract_manifest(html_book)
+    assert manifest.chapters[0].chapter_id == "html_main"
     blocks = await _collect(adapter, html_book)
     assert len(blocks) == 8, "the html fixture has exactly 8 blocks"
-    for block in blocks:
-        if not block.skip_translate:
-            block.target_text = f"tr:{block.source_text}"
-
-    mono = tmp_path / "mono.html"
-    await adapter.render_blocks(manifest, blocks, "zh", mono, bilingual_mode="monolingual")
-    assert mono.exists()
-    assert "tr:Chapter One" in mono.read_text(encoding="utf-8")
-
-    bilingual = tmp_path / "bi.html"
-    await adapter.render_blocks(manifest, blocks, "zh", bilingual, bilingual_mode="bilingual")
-    assert bilingual.exists()
-    bilingual_text = bilingual.read_text(encoding="utf-8")
-    assert "ubt-bilingual-target" in bilingual_text
-    assert "Hello" in bilingual_text
 
 
-async def test_epub_adapter_parses_and_renders(tmp_path: Path, epub_book: Path) -> None:
+async def test_epub_inspection_adapter_reads_spine_blocks_and_figures(epub_book: Path) -> None:
     adapter = EPUBAdapter()
     manifest = await adapter.extract_manifest(epub_book)
+    assert len(manifest.chapters) == 2
     blocks = await _collect(adapter, epub_book)
     assert len(blocks) == 7, "the epub fixture has exactly 7 blocks"
     figure_ids = [b.source_text for b in blocks if b.block_type is BlockType.IMAGE]
     assert [Path(a).name for a in figure_ids] == ["fig.png"], figure_ids
-    for block in blocks:
-        if not block.skip_translate:
-            block.target_text = f"tr:{block.source_text}"
-
-    for name, mode in (("mono.epub", "monolingual"), ("bi.epub", "bilingual")):
-        out = tmp_path / name
-        await adapter.render_blocks(manifest, blocks, "zh", out, bilingual_mode=mode)
-        assert out.exists(), mode
-        with zipfile.ZipFile(out) as zf:
-            assert not zf.testzip(), f"{mode} output is not a valid zip"
 
 
 async def test_docx_manifest_reads_the_title_without_loading_the_body(
@@ -162,73 +137,7 @@ async def test_docx_manifest_reads_the_title_without_loading_the_body(
     assert manifest.chapters[0].source_file == docx_book.name
 
 
-async def test_docx_adapter_parses_and_renders(tmp_path: Path, docx_book: Path) -> None:
-    from docx import Document as OpenDocx
-
-    adapter = DOCXAdapter()
-    manifest = await adapter.extract_manifest(docx_book)
-    blocks = await _collect(adapter, docx_book)
+async def test_docx_inspection_adapter_reads_body_blocks(docx_book: Path) -> None:
+    blocks = await _collect(DOCXAdapter(), docx_book)
     assert len(blocks) == 6, "the docx fixture has exactly 6 blocks"
-    for block in blocks:
-        if block.skip_translate:
-            continue
-        block.target_text = (
-            "| tr:A | tr:B |\n| --- | --- |\n| tr:1 | tr:2 |"
-            if block.block_type.value == "table"
-            else f"tr:{block.source_text}"
-        )
-
-    mono = tmp_path / "mono.docx"
-    await adapter.render_blocks(manifest, blocks, "zh", mono, bilingual_mode="monolingual")
-    assert mono.exists()
-    mono_doc = OpenDocx(str(mono))
-    mono_text = " ".join(p.text for p in mono_doc.paragraphs)
-    assert "tr:Chapter One" in mono_text
-    mono_table = " ".join(cell.text for row in mono_doc.tables[0].rows for cell in row.cells)
-    assert "tr:A" in mono_table
-
-    bilingual = tmp_path / "bi.docx"
-    await adapter.render_blocks(manifest, blocks, "zh", bilingual, bilingual_mode="bilingual")
-    assert bilingual.exists()
-    bi_doc = OpenDocx(str(bilingual))
-    bi_text = " ".join(p.text for p in bi_doc.paragraphs)
-    assert "Chapter One" in bi_text
-    assert "tr:Chapter One" in bi_text
-
-
-def test_epub_natural_sort_orders_embedded_numbers_numerically() -> None:
-    from ubt.adapters.epub.adapter import _natural_sort_key
-
-    names = ["ch10.xhtml", "ch2.xhtml", "ch1.xhtml"]
-    assert sorted(names, key=_natural_sort_key) == ["ch1.xhtml", "ch2.xhtml", "ch10.xhtml"]
-    assert sorted(names) != sorted(names, key=_natural_sort_key)
-
-
-def test_markdown_adapter_heading_level_preservation() -> None:
-    h = Heading(id="h1", spine_index=0, span=Span(), text="Chapter Three", level=3)
-    block = IRBlock.from_element(h)
-    block.target_text = "第三章"
-    formatted = _format_markdown_block(block, "第三章")
-    assert formatted == "### 第三章"
-
-
-def test_markdown_adapter_list_item_preservation() -> None:
-    li_unordered = ListItem(
-        id="li1",
-        spine_index=0,
-        span=Span(),
-        text="First point",
-        marker="- ",
-    )
-    block_u = IRBlock.from_element(li_unordered)
-    assert _format_markdown_block(block_u, "第一点") == "- 第一点"
-
-    li_ordered = ListItem(
-        id="li2",
-        spine_index=0,
-        span=Span(),
-        text="Second point",
-        marker="2. ",
-    )
-    block_o = IRBlock.from_element(li_ordered)
-    assert _format_markdown_block(block_o, "第二点") == "2. 第二点"
+    assert any(block.block_type is BlockType.TABLE for block in blocks)

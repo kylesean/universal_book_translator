@@ -1,29 +1,22 @@
 """Markdown and flat text document adapter.
 
 The parse is the native Markdown reader's (``ubt.analyze.reader_md``); this
-adapter only partitions its elements into chapters (at level-1 headings) and
-renders the bilingual/monolingual output. Classification lives in exactly one
+adapter only partitions its elements into chapters (at level-1 headings) for
+the read-only audit surfaces. Translation and delivery are owned by
+:class:`ubt.codecs.markdown.MarkdownCodec`. Classification lives in exactly one
 place, so a line cannot be a heading to the reader and prose to the adapter.
 """
 
 import asyncio
 import dataclasses
-import os
-import re
-import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
 
 from ubt.adapters.base import BaseDocumentAdapter
-from ubt.adapters.unresolved import UNRESOLVED_STATUSES, failure_note_markdown
 from ubt.analyze.assemble import element_text
 from ubt.analyze.reader_md import read_md
-from ubt.core.cleaners.html_sanitizer import sanitize_inline_html, strip_html_mark_tags
 from ubt.core.exceptions import DocumentParseError
 from ubt.core.ir.models import (
-    BlockStatus,
-    BlockType,
     BookManifest,
     ChapterIR,
     ChapterMeta,
@@ -31,76 +24,6 @@ from ubt.core.ir.models import (
 )
 from ubt.core.ir.serializer import compute_file_sha256_cached
 from ubt.model.ast import ElementT, Heading
-
-# Blocks that left the pipeline without an approved translation must stay
-# visible in the rendered document (the <mark> wrapper is what flags them).
-# The status set and notes are shared with every other adapter via
-# ``ubt.adapters.unresolved`` so the formats cannot drift apart.
-_UNRESOLVED_STATUSES = UNRESOLVED_STATUSES
-
-
-def _with_heading_marker(block: IRBlock, target: str) -> str:
-    """Put the heading's ``#`` run back in target-only output.
-
-    The marker lives in the source line, so the monolingual branch handed back
-    bare text for every heading: a chapter book exported as Markdown with zero
-    structure — no outline, no TOC, every section a paragraph. Other adapters
-    keep the paragraph *type* (a ``<h2>`` stays an ``<h2>``), so this only
-    restores what the format itself stores inline.
-    """
-    if block.block_type is not BlockType.HEADING or target.lstrip().startswith("#"):
-        return target
-    level = getattr(block.element, "level", None)
-    if isinstance(level, int) and 1 <= level <= 6:
-        return f"{'#' * level} {target}"
-    marker = re.match(r"(#{1,6})\s+", block.source_text or "")
-    return f"{marker.group(1)} {target}" if marker else f"# {target}"
-
-
-def _with_list_marker(block: IRBlock, target: str) -> str:
-    """Prepend list marker (e.g. '-' or '1.') to list item if missing."""
-    if block.block_type is not BlockType.LIST_ITEM:
-        return target
-    marker = getattr(block.element, "marker", "")
-    if not marker:
-        src_match = re.match(r"^(\s*[-*+]\s+|\s*\d+\.\s+)", block.source_text or "")
-        if src_match:
-            marker = src_match.group(1).rstrip()
-    if marker:
-        clean_marker = marker.rstrip()
-        stripped_target = target.lstrip()
-        if not re.match(r"^([-*+]\s+|\d+\.\s+)", stripped_target):
-            return f"{clean_marker} {stripped_target}"
-    return target
-
-
-def _format_markdown_block(block: IRBlock, target: str) -> str:
-    """Format heading or list item markers onto translated markdown block."""
-    if block.block_type is BlockType.HEADING:
-        return _with_heading_marker(block, target)
-    if block.block_type is BlockType.LIST_ITEM:
-        return _with_list_marker(block, target)
-    return target
-
-
-def _format_failure_note(status: BlockStatus) -> str:
-    return failure_note_markdown(status)
-
-
-def _format_blockquoted(text: str) -> str:
-    return "\n".join(f"> {line}" if line.strip() else ">" for line in text.splitlines())
-
-
-def _sanitize_markdown_content(text: str) -> str:
-    """Sanitize inline HTML tags without escaping Markdown or ``$…$`` LaTeX.
-
-    Deliberately NOT :func:`sanitize_html_fragment`: that allowlist escapes every
-    ``<``/``&`` in the text, mangling Markdown and LaTeX (``List<T>`` becomes
-    ``List&lt;T&gt;``). :func:`sanitize_inline_html` applies the same allowlist to
-    the *tags* only: a surviving tag keeps only its allowlisted attributes (with
-    URL-scheme gating) while the surrounding text is byte-for-byte unchanged.
-    """
-    return sanitize_inline_html(strip_html_mark_tags(text))
 
 
 def _split_chapters(
@@ -224,72 +147,3 @@ class MarkdownAdapter(BaseDocumentAdapter):
                     spine_index=chapter.spine_index,
                     blocks=blocks,
                 )
-
-    def _render_blocks_sync(
-        self,
-        manifest: BookManifest,
-        blocks: list[IRBlock],
-        target_lang: str,
-        output_path: Path,
-        bilingual_mode: str | None = None,
-        **kwargs: Any,
-    ) -> Path:
-        """Render bilingual Markdown document interleaving source and translated paragraphs."""
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        rendered_sections: list[str] = []
-        is_monolingual = bilingual_mode in ("target", "monolingual")
-
-        for b in blocks:
-            # If block skipped translation (e.g. code/formula), preserve directly
-            if b.skip_translate:
-                rendered_sections.append(b.source_text)
-                continue
-            unresolved = b.status in _UNRESOLVED_STATUSES
-            if unresolved and not b.target_text:
-                # No draft at all (crash before draft, or blocked): keep the
-                # source and say why instead of silently shipping raw source.
-                rendered_sections.append(f"{b.source_text}\n\n{_format_failure_note(b.status)}")
-                continue
-            if not b.target_text:
-                rendered_sections.append(b.source_text)
-                continue
-            clean_target = _sanitize_markdown_content(b.target_text)
-            if unresolved:
-                note = _format_failure_note(b.status)
-                draft_block = _format_blockquoted(clean_target)
-                if is_monolingual:
-                    rendered_sections.append(f"{note}\n\n{draft_block}")
-                else:
-                    rendered_sections.append(f"{b.source_text}\n\n{note}\n\n{draft_block}")
-            elif is_monolingual:
-                rendered_sections.append(_format_markdown_block(b, clean_target))
-            else:
-                # Interleave source and target bilingual paragraphs (default: alternating)
-                # (LLM output is untrusted — strip dangerous HTML and error marks).
-                target_formatted = _format_markdown_block(b, clean_target)
-                rendered_sections.append(f"{b.source_text}\n\n{target_formatted}")
-
-        full_content = "\n\n".join(rendered_sections) + "\n"
-
-        # Atomic POSIX write
-        temp_name = ""
-        try:
-            with tempfile.NamedTemporaryFile(
-                "w",
-                dir=output_path.parent,
-                delete=False,
-                encoding="utf-8",
-            ) as tf:
-                temp_name = tf.name
-                tf.write(full_content)
-                tf.flush()
-                os.fsync(tf.fileno())
-            Path(temp_name).replace(output_path)
-        except Exception:
-            # A failed write/fsync/replace must not leave an orphan temp file in
-            # the output directory.
-            if temp_name:
-                Path(temp_name).unlink(missing_ok=True)
-            raise
-        return output_path
