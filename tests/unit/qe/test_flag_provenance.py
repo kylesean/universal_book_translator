@@ -348,7 +348,7 @@ LEGACY_WRITERS: frozenset[str] = frozenset(
         "ubt/core/engine/stages/consistency.py",
         "ubt/core/engine/stages/triage.py",
         "ubt/core/engine/repair_loop.py",
-        "ubt/core/engine/visual_verify_loop.py",
+        "ubt/core/engine/artifact_verify_loop.py",
         "ubt/core/validators/math_guard.py",
         "ubt/adapters/pdf/extraction_witness.py",
         "ubt/core/engine/stages/draft.py",

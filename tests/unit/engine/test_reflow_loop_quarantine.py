@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from ubt.adapters.pdf.artifact_gate import VisualFinding, VisualGateResult
-from ubt.core.engine.visual_verify_loop import VisualVerifyLoop
+from ubt.adapters.pdf.artifact_gate import ArtifactFinding, ArtifactGateResult
+from ubt.core.engine.artifact_verify_loop import ArtifactVerifyLoop
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock, make_element
 
 pytestmark = pytest.mark.fast
@@ -76,19 +76,19 @@ def _manifest_with_source(tmp_path: Path) -> BookManifest:
 def _loop(
     tmp_path: Path,
     ledger: _RecordingLedger,
-    gate: VisualGateResult | BaseException,
+    gate: ArtifactGateResult | BaseException,
     *,
     blocks: list[IRBlock] | None = None,
     manifest: BookManifest | None = None,
-) -> VisualVerifyLoop:
-    loop = VisualVerifyLoop(
+) -> ArtifactVerifyLoop:
+    loop = ArtifactVerifyLoop(
         manifest=manifest or _manifest(tmp_path),
         ledger=ledger,  # type: ignore[arg-type]
         job_id="job-1",
         target_lang="zh",
     )
 
-    async def _fake_gate(*_args: Any, **_kwargs: Any) -> VisualGateResult:
+    async def _fake_gate(*_args: Any, **_kwargs: Any) -> ArtifactGateResult:
         if isinstance(gate, BaseException):
             raise gate
         return gate
@@ -97,7 +97,7 @@ def _loop(
     return loop
 
 
-def _run(loop: VisualVerifyLoop, tmp_path: Path, blocks: list[IRBlock]) -> Any:
+def _run(loop: ArtifactVerifyLoop, tmp_path: Path, blocks: list[IRBlock]) -> Any:
     import asyncio
 
     return asyncio.run(loop.run(tmp_path / "artifact.pdf", blocks))
@@ -107,9 +107,9 @@ def test_a_major_finding_quarantines_only_its_page(tmp_path: Path) -> None:
     ledger = _RecordingLedger()
     on_bad = _block("bad", page=3)
     on_good = _block("good", page=4)
-    gate = VisualGateResult(
+    gate = ArtifactGateResult(
         passed=False,
-        findings=(VisualFinding(severity="major", code="text_overflow", message="x", page=3),),
+        findings=(ArtifactFinding(severity="major", code="text_overflow", message="x", page=3),),
     )
     _run(_loop(tmp_path, ledger, gate), tmp_path, [on_bad, on_good])
 
@@ -131,12 +131,12 @@ def test_a_major_finding_quarantines_only_its_page(tmp_path: Path) -> None:
 def test_every_finding_code_on_a_page_lands_in_the_flag(tmp_path: Path) -> None:
     ledger = _RecordingLedger()
     block = _block("b", page=2)
-    gate = VisualGateResult(
+    gate = ArtifactGateResult(
         passed=False,
         findings=(
-            VisualFinding(severity="critical", code="blank_page", message="x", page=2),
-            VisualFinding(severity="major", code="text_overflow", message="y", page=2),
-            VisualFinding(severity="info", code="ignored", message="z", page=2),
+            ArtifactFinding(severity="critical", code="blank_page", message="x", page=2),
+            ArtifactFinding(severity="major", code="text_overflow", message="y", page=2),
+            ArtifactFinding(severity="info", code="ignored", message="z", page=2),
         ),
     )
     _run(_loop(tmp_path, ledger, gate), tmp_path, [block])
@@ -147,10 +147,10 @@ def test_every_finding_code_on_a_page_lands_in_the_flag(tmp_path: Path) -> None:
 def test_a_finding_without_a_page_quarantines_nothing(tmp_path: Path) -> None:
     ledger = _RecordingLedger()
     block = _block("b", page=1)
-    gate = VisualGateResult(
+    gate = ArtifactGateResult(
         passed=False,
         findings=(
-            VisualFinding(severity="critical", code="global_defect", message="x", page=None),
+            ArtifactFinding(severity="critical", code="global_defect", message="x", page=None),
         ),
     )
     _run(_loop(tmp_path, ledger, gate), tmp_path, [block])
@@ -166,7 +166,7 @@ def test_a_clean_gate_quarantines_nothing(tmp_path: Path) -> None:
         _loop(
             tmp_path,
             ledger,
-            VisualGateResult(passed=True),
+            ArtifactGateResult(passed=True),
         ),
         tmp_path,
         [block],
@@ -182,9 +182,9 @@ def test_terminal_and_skipped_blocks_keep_their_status(tmp_path: Path) -> None:
     blocked = _block("blocked", page=1, status=BlockStatus.BLOCKED_HUMAN)
     kept = _block("kept", page=1, skip_translate=True)
     translated = _block("translated", page=1)
-    gate = VisualGateResult(
+    gate = ArtifactGateResult(
         passed=False,
-        findings=(VisualFinding(severity="major", code="text_overflow", message="x", page=1),),
+        findings=(ArtifactFinding(severity="major", code="text_overflow", message="x", page=1),),
     )
     _run(_loop(tmp_path, ledger, gate), tmp_path, [failed, blocked, kept, translated])
 
@@ -198,9 +198,9 @@ def test_terminal_and_skipped_blocks_keep_their_status(tmp_path: Path) -> None:
 def test_a_block_without_geometry_is_never_quarantined(tmp_path: Path) -> None:
     ledger = _RecordingLedger()
     no_box = _block("no-box", page=None)
-    gate = VisualGateResult(
+    gate = ArtifactGateResult(
         passed=False,
-        findings=(VisualFinding(severity="major", code="text_overflow", message="x", page=1),),
+        findings=(ArtifactFinding(severity="major", code="text_overflow", message="x", page=1),),
     )
     _run(_loop(tmp_path, ledger, gate), tmp_path, [no_box])
 
@@ -211,9 +211,9 @@ def test_a_block_without_geometry_is_never_quarantined(tmp_path: Path) -> None:
 def test_quarantine_is_idempotent_across_runs(tmp_path: Path) -> None:
     ledger = _RecordingLedger()
     block = _block("b", page=1)
-    gate = VisualGateResult(
+    gate = ArtifactGateResult(
         passed=False,
-        findings=(VisualFinding(severity="major", code="text_overflow", message="x", page=1),),
+        findings=(ArtifactFinding(severity="major", code="text_overflow", message="x", page=1),),
     )
     loop = _loop(tmp_path, ledger, gate)
     _run(loop, tmp_path, [block])
@@ -224,7 +224,7 @@ def test_quarantine_is_idempotent_across_runs(tmp_path: Path) -> None:
 
 def test_the_report_sidecar_and_ledger_record_are_always_written(tmp_path: Path) -> None:
     ledger = _RecordingLedger()
-    _run(_loop(tmp_path, ledger, VisualGateResult(passed=True)), tmp_path, [])
+    _run(_loop(tmp_path, ledger, ArtifactGateResult(passed=True)), tmp_path, [])
 
     from ubt.core.job_options import sidecar_path
 
@@ -243,7 +243,7 @@ def test_cancellation_before_the_gate_raises_and_touches_nothing(tmp_path: Path)
     ledger = _RecordingLedger()
     token = asyncio.Event()
     token.set()
-    loop = _loop(tmp_path, ledger, VisualGateResult(passed=True))
+    loop = _loop(tmp_path, ledger, ArtifactGateResult(passed=True))
     loop.cancel_token = token
 
     with pytest.raises(JobInterruptedError):
@@ -276,7 +276,7 @@ def test_a_crashed_parity_probe_is_recorded_not_swallowed(
     loop = _loop(
         tmp_path,
         ledger,
-        VisualGateResult(passed=True),
+        ArtifactGateResult(passed=True),
         manifest=_manifest_with_source(tmp_path),
     )
     _, _, gate = _run(loop, tmp_path, [])
@@ -287,10 +287,10 @@ def test_a_crashed_parity_probe_is_recorded_not_swallowed(
 
 def test_a_block_scoped_finding_quarantines_only_that_block(tmp_path: Path) -> None:
     blocks = [_block("b1", 3), _block("b2", 3), _block("b3", 3)]
-    gate = VisualGateResult(
+    gate = ArtifactGateResult(
         passed=False,
         findings=(
-            VisualFinding(
+            ArtifactFinding(
                 severity="major",
                 code="block_out_of_bounds",
                 message="Block b2 exceeds page 3 mediabox",
@@ -305,10 +305,10 @@ def test_a_block_scoped_finding_quarantines_only_that_block(tmp_path: Path) -> N
 
 def test_an_artifact_rect_id_falls_back_to_page_scope(tmp_path: Path) -> None:
     blocks = [_block("b1", 3), _block("b2", 3)]
-    gate = VisualGateResult(
+    gate = ArtifactGateResult(
         passed=False,
         findings=(
-            VisualFinding(
+            ArtifactFinding(
                 severity="major",
                 code="block_out_of_bounds",
                 message="Block p3:rect327 exceeds page 3 mediabox",
@@ -323,10 +323,10 @@ def test_an_artifact_rect_id_falls_back_to_page_scope(tmp_path: Path) -> None:
 
 def test_a_page_scoped_finding_still_quarantines_the_page(tmp_path: Path) -> None:
     blocks = [_block("b1", 5), _block("b2", 5), _block("b3", 6)]
-    gate = VisualGateResult(
+    gate = ArtifactGateResult(
         passed=False,
         findings=(
-            VisualFinding(
+            ArtifactFinding(
                 severity="critical", code="blank_page", message="Page 5 renders blank", page=5
             ),
         ),

@@ -555,7 +555,7 @@ class QualityConfig(BaseModel):
     qe_judge_sentences: bool = True
     visual_gate_enabled: bool = True
     render_preflight_enabled: bool = True
-    visual_blocking_gate_enabled: bool = False
+    artifact_blocking_gate_enabled: bool = False
     deterministic_glossary_long_route: bool = False
     export_min_completion_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
     export_allow_needs_human: bool = True
@@ -1158,7 +1158,7 @@ class UBTConfig(BaseSettings):
     # fail-closed by default. For longer docs, setting this to true refuses
     # export when a critical finding is detected; default false keeps the report
     # + NEEDS_HUMAN quarantine without blocking long-document delivery.
-    visual_blocking_gate_enabled: bool = False
+    artifact_blocking_gate_enabled: bool = False
     # -- deterministic glossary enforcement on the long route ----------------
     # The export-time literal term substitution (word-boundary + protected-span
     # + compound + jieba fail-closed guards, see glossary_enforcer.py) is

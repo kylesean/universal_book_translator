@@ -21,7 +21,7 @@ class AdaptivePolicy:
     """The short/long flags stages read, plus the human-readable reason."""
 
     fast_lane_bible: bool
-    visual_blocking: bool
+    artifact_blocking: bool
     deterministic_glossary: bool
     reason: str
 
@@ -36,7 +36,7 @@ class AdaptivePolicy:
 
         A re-export must reproduce the policy the original run resolved, not
         re-derive it from today's config: the route decision that produced it
-        is gone, and a short document's ``visual_blocking`` /
+        is gone, and a short document's ``artifact_blocking`` /
         ``deterministic_glossary`` are both true there while the config
         defaults are false. Missing or malformed fields fall back to the
         caller's config-derived value, so old manifests keep working.
@@ -55,7 +55,7 @@ class AdaptivePolicy:
         reason = payload.get("reason")
         return cls(
             fast_lane_bible=flag("fast_lane_bible", fallback.fast_lane_bible),
-            visual_blocking=flag("visual_blocking", fallback.visual_blocking),
+            artifact_blocking=flag("artifact_blocking", fallback.artifact_blocking),
             deterministic_glossary=flag("deterministic_glossary", fallback.deterministic_glossary),
             reason=reason.strip()
             if isinstance(reason, str) and reason.strip()
@@ -68,7 +68,7 @@ class AdaptivePolicy:
         return {
             "granularity": "micro",
             "fast_lane_bible": self.fast_lane_bible,
-            "visual_blocking": self.visual_blocking,
+            "artifact_blocking": self.artifact_blocking,
             "deterministic_glossary": self.deterministic_glossary,
             "reason": self.reason,
         }
@@ -98,7 +98,7 @@ def resolve_adaptive_policy(
     # your own corpus).
     return AdaptivePolicy(
         fast_lane_bible=is_short,
-        visual_blocking=is_short or config.visual_blocking_gate_enabled,
+        artifact_blocking=is_short or config.artifact_blocking_gate_enabled,
         deterministic_glossary=is_short or config.deterministic_glossary_long_route,
         reason=(
             f"Canonical frozen-math publication pipeline ({route_decision.pages}pp"

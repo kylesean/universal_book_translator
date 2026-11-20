@@ -107,7 +107,7 @@ async def test_a_failed_complementary_render_is_recorded_and_the_job_completes(
         repair_loop=cast(RepairLoop, object()),
         adaptive_policy=AdaptivePolicy(
             fast_lane_bible=False,
-            visual_blocking=False,
+            artifact_blocking=False,
             deterministic_glossary=False,
             reason="test",
         ),
@@ -152,7 +152,7 @@ async def test_a_failed_complementary_render_is_recorded_and_the_job_completes(
     async def _boom(*_args: Any, **_kwargs: Any) -> tuple[None, str]:
         return None, "boom"
 
-    monkeypatch.setattr(export_module, "_run_visual_gate", _fake_gate)
+    monkeypatch.setattr(export_module, "_run_artifact_gate", _fake_gate)
     monkeypatch.setattr(export_module, "_deliver_contract", _ok_contract)
     monkeypatch.setattr(export_module, "_evaluate_delivery", _no_delivery)
     monkeypatch.setattr(export_module, "_build_reports", _fake_reports)

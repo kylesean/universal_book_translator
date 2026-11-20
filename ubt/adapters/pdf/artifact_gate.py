@@ -53,7 +53,7 @@ BLANK_TEXT_THRESHOLD_CHARS = 20
 
 
 @dataclass(frozen=True)
-class VisualFinding:
+class ArtifactFinding:
     """One artifact observation, scoped to a page or a block when known."""
 
     severity: Severity
@@ -64,11 +64,11 @@ class VisualFinding:
 
 
 @dataclass(frozen=True)
-class VisualGateResult:
+class ArtifactGateResult:
     """Outcome of one artifact-gate run over a rendered PDF."""
 
     passed: bool
-    findings: tuple[VisualFinding, ...] = ()
+    findings: tuple[ArtifactFinding, ...] = ()
     sampled_pages: tuple[int, ...] = ()
     vlm_pages: tuple[int, ...] = ()
     skipped_reason: str | None = None
@@ -164,23 +164,23 @@ def _fonts_without_tounicode(pdf_path: Path) -> int:
     return missing
 
 
-def run_visual_gate(
+def run_artifact_gate(
     pdf_path: Path,
     *,
     expected_page_count: int | None = None,
     faithful_pages: bool = False,
     target_lang: str | None = None,
-) -> VisualGateResult:
+) -> ArtifactGateResult:
     """Run the deterministic artifact checks on ``pdf_path``."""
     if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
-        return VisualGateResult(passed=True, skipped_reason="not a rendered pdf")
+        return ArtifactGateResult(passed=True, skipped_reason="not a rendered pdf")
 
     total = _count_pages(pdf_path)
     if total <= 0:
-        return VisualGateResult(
+        return ArtifactGateResult(
             passed=False,
             findings=(
-                VisualFinding(
+                ArtifactFinding(
                     severity="critical",
                     code="unreadable_pdf",
                     message=f"Cannot read rendered PDF: {pdf_path.name}",
@@ -191,10 +191,10 @@ def run_visual_gate(
             tiers_skipped=("searchability", "blank_pages"),
         )
 
-    findings: list[VisualFinding] = []
+    findings: list[ArtifactFinding] = []
     if faithful_pages and expected_page_count is not None and total != expected_page_count:
         findings.append(
-            VisualFinding(
+            ArtifactFinding(
                 severity="major",
                 code="page_count_changed_faithful",
                 message=(
@@ -207,10 +207,10 @@ def run_visual_gate(
     try:
         page_texts = _page_texts(pdf_path)
     except Exception as exc:  # noqa: BLE001
-        return VisualGateResult(
+        return ArtifactGateResult(
             passed=False,
             findings=(
-                VisualFinding(
+                ArtifactFinding(
                     severity="critical",
                     code="text_not_searchable",
                     message=f"PDF text layer could not be extracted: {type(exc).__name__}: {exc}",
@@ -228,7 +228,7 @@ def run_visual_gate(
     ]
     for page_no in blank_pages:
         findings.append(
-            VisualFinding(
+            ArtifactFinding(
                 severity="critical",
                 code="blank_page",
                 message=f"Page {page_no} has no extractable text",
@@ -239,7 +239,7 @@ def run_visual_gate(
     joined = "".join(page_texts)
     if not joined.strip():
         findings.append(
-            VisualFinding(
+            ArtifactFinding(
                 severity="critical",
                 code="text_not_searchable",
                 message="The artifact carries no extractable text on any page",
@@ -249,7 +249,7 @@ def run_visual_gate(
         replacement = joined.count("\ufffd")
         if replacement:
             findings.append(
-                VisualFinding(
+                ArtifactFinding(
                     severity="major",
                     code="replacement_character",
                     message=f"The text layer contains {replacement} U+FFFD replacement character(s)",
@@ -259,7 +259,7 @@ def run_visual_gate(
             cjk = sum(1 for char in joined if "\u4e00" <= char <= "\u9fff")
             if cjk == 0:
                 findings.append(
-                    VisualFinding(
+                    ArtifactFinding(
                         severity="major",
                         code="target_language_absent",
                         message="The artifact's text layer carries no CJK characters",
@@ -269,7 +269,7 @@ def run_visual_gate(
     missing_tounicode = _fonts_without_tounicode(pdf_path)
     if missing_tounicode and not joined.strip():
         findings.append(
-            VisualFinding(
+            ArtifactFinding(
                 severity="major",
                 code="font_missing_tounicode",
                 message=f"{missing_tounicode} font(s) lack /ToUnicode and no text is extractable",
@@ -277,7 +277,7 @@ def run_visual_gate(
         )
 
     passed = not any(finding.severity in ("major", "critical") for finding in findings)
-    return VisualGateResult(
+    return ArtifactGateResult(
         passed=passed,
         findings=tuple(findings),
         sampled_pages=tuple(range(1, total + 1)),
@@ -294,10 +294,10 @@ def run_visual_gate(
 
 
 def blocking_gate_tripped(
-    findings: Sequence[VisualFinding],
+    findings: Sequence[ArtifactFinding],
     total_pages: int,
     enabled: bool,
-) -> list[VisualFinding]:
+) -> list[ArtifactFinding]:
     """Critical findings that refuse export, plus the always-fail-closed ones."""
     if total_pages < 0:
         return [finding for finding in findings if finding.severity == "critical"]
@@ -315,8 +315,8 @@ def blocking_gate_tripped(
 
 __all__ = [
     "BLANK_TEXT_THRESHOLD_CHARS",
-    "VisualFinding",
-    "VisualGateResult",
+    "ArtifactFinding",
+    "ArtifactGateResult",
     "blocking_gate_tripped",
-    "run_visual_gate",
+    "run_artifact_gate",
 ]

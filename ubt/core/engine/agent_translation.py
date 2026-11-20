@@ -913,7 +913,7 @@ class AgentTranslationService:
         manifest.run.route_mode = route.mode
         policy = AdaptivePolicy(
             fast_lane_bible=False,
-            visual_blocking=config.visual_blocking_gate_enabled,
+            artifact_blocking=config.artifact_blocking_gate_enabled,
             deterministic_glossary=config.deterministic_glossary_long_route,
             reason="agent translation (deterministic render policy)",
         )
@@ -1574,7 +1574,7 @@ class AgentTranslationService:
             ),
             adaptive_policy=AdaptivePolicy(
                 fast_lane_bible=False,
-                visual_blocking=render_config.visual_blocking_gate_enabled,
+                artifact_blocking=render_config.artifact_blocking_gate_enabled,
                 deterministic_glossary=render_config.deterministic_glossary_long_route,
                 reason="agent finish (render-only)",
             ),

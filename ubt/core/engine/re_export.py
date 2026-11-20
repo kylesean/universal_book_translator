@@ -108,7 +108,7 @@ def _build_services(
 
     The policy is read back from ``manifest.run.adaptive_policy`` when the
     manifest carries it — the original route decision is not available to a
-    re-export, and a short document's export reads ``visual_blocking`` and
+    re-export, and a short document's export reads ``artifact_blocking`` and
     ``deterministic_glossary`` (both true on that route). Rebuilding from
     today's config silently turned both off. The config-derived values are the
     fallback for manifests written before the run stored the policy.
@@ -119,7 +119,7 @@ def _build_services(
 
     fallback_policy = AdaptivePolicy(
         fast_lane_bible=False,
-        visual_blocking=config.visual_blocking_gate_enabled,
+        artifact_blocking=config.artifact_blocking_gate_enabled,
         # Same source of truth as the original run's export: when the config
         # opts the long route into deterministic glossary enforcement, a
         # re-export must enforce it too — the old hard False produced a

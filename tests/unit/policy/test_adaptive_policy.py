@@ -42,7 +42,7 @@ def test_config_has_no_render_engine_knob() -> None:
 def test_adaptive_policy_has_no_render_engine_field() -> None:
     policy = AdaptivePolicy(
         fast_lane_bible=True,
-        visual_blocking=False,
+        artifact_blocking=False,
         deterministic_glossary=True,
         reason="because",
     )
@@ -52,14 +52,14 @@ def test_adaptive_policy_has_no_render_engine_field() -> None:
 def test_to_dict_round_trips_every_field() -> None:
     policy = AdaptivePolicy(
         fast_lane_bible=True,
-        visual_blocking=False,
+        artifact_blocking=False,
         deterministic_glossary=True,
         reason="because",
     )
     assert policy.to_dict() == {
         "granularity": "micro",
         "fast_lane_bible": True,
-        "visual_blocking": False,
+        "artifact_blocking": False,
         "deterministic_glossary": True,
         "reason": "because",
     }
@@ -68,7 +68,7 @@ def test_to_dict_round_trips_every_field() -> None:
 def test_short_document_keeps_fast_lane_and_glossary() -> None:
     policy = resolve_adaptive_policy(_manifest(), _route("short", 5), UBTConfig())
     assert policy.fast_lane_bible is True
-    assert policy.visual_blocking is True
+    assert policy.artifact_blocking is True
     assert policy.deterministic_glossary is True
     assert policy.reason == (
         "Canonical frozen-math publication pipeline (5pp, fast-lane seed bible)"
@@ -78,15 +78,15 @@ def test_short_document_keeps_fast_lane_and_glossary() -> None:
 def test_long_document_drops_fast_lane_and_glossary() -> None:
     policy = resolve_adaptive_policy(_manifest(), _route("long", 300), UBTConfig())
     assert policy.fast_lane_bible is False
-    assert policy.visual_blocking is False
+    assert policy.artifact_blocking is False
     assert policy.deterministic_glossary is False
     assert policy.reason == "Canonical frozen-math publication pipeline (300pp)"
 
 
-def test_long_document_honours_visual_blocking_gate_flag() -> None:
-    config = UBTConfig(visual_blocking_gate_enabled=True)
+def test_long_document_honours_artifact_blocking_gate_flag() -> None:
+    config = UBTConfig(artifact_blocking_gate_enabled=True)
     policy = resolve_adaptive_policy(_manifest(), _route("long", 300), config)
-    assert policy.visual_blocking is True
+    assert policy.artifact_blocking is True
 
 
 def test_long_route_glossary_is_config_opt_in() -> None:
@@ -104,7 +104,7 @@ def test_from_dict_restores_the_policy_the_run_persisted() -> None:
         {
             "granularity": "micro",
             "fast_lane_bible": True,
-            "visual_blocking": True,
+            "artifact_blocking": True,
             "deterministic_glossary": True,
             "reason": "Canonical frozen-math publication pipeline (5pp, fast-lane seed bible)",
         },
@@ -113,7 +113,7 @@ def test_from_dict_restores_the_policy_the_run_persisted() -> None:
 
     assert restored == AdaptivePolicy(
         fast_lane_bible=True,
-        visual_blocking=True,
+        artifact_blocking=True,
         deterministic_glossary=True,
         reason="Canonical frozen-math publication pipeline (5pp, fast-lane seed bible)",
     )
@@ -126,7 +126,7 @@ def test_from_dict_falls_back_per_field_for_old_manifests() -> None:
     restored = AdaptivePolicy.from_dict({"fast_lane_bible": True}, fallback=fallback)
     assert restored == AdaptivePolicy(
         fast_lane_bible=True,
-        visual_blocking=True,
+        artifact_blocking=True,
         deterministic_glossary=False,
         reason="re-export",
     )
@@ -134,7 +134,7 @@ def test_from_dict_falls_back_per_field_for_old_manifests() -> None:
     # A string "false" and a numeric 0 are not booleans; trusting Python
     # truthiness would turn the first into True.
     malformed = AdaptivePolicy.from_dict(
-        {"fast_lane_bible": "false", "visual_blocking": 0, "reason": "   "},
+        {"fast_lane_bible": "false", "artifact_blocking": 0, "reason": "   "},
         fallback=fallback,
     )
     assert malformed == fallback
@@ -148,7 +148,7 @@ def test_re_export_reads_the_policy_the_run_persisted(tmp_path: Path) -> None:
             adaptive_policy={
                 "granularity": "micro",
                 "fast_lane_bible": True,
-                "visual_blocking": True,
+                "artifact_blocking": True,
                 "deterministic_glossary": True,
                 "reason": "short route",
             }
@@ -163,7 +163,7 @@ def test_re_export_reads_the_policy_the_run_persisted(tmp_path: Path) -> None:
 
     # The config defaults are both False; a re-export of a short run must not
     # silently strip the gates the original export used.
-    assert services.adaptive_policy.visual_blocking is True
+    assert services.adaptive_policy.artifact_blocking is True
     assert services.adaptive_policy.deterministic_glossary is True
 
 

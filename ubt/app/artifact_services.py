@@ -17,9 +17,9 @@ class AdapterArtifactServices:
         faithful_pages: bool = False,
         target_lang: str | None = None,
     ) -> Any:
-        from ubt.adapters.pdf.artifact_gate import run_visual_gate
+        from ubt.adapters.pdf.artifact_gate import run_artifact_gate
 
-        return run_visual_gate(
+        return run_artifact_gate(
             pdf_path,
             expected_page_count=expected_page_count,
             faithful_pages=faithful_pages,
@@ -27,12 +27,12 @@ class AdapterArtifactServices:
         )
 
     def crashed_gate(self, message: str) -> Any:
-        from ubt.adapters.pdf.artifact_gate import VisualFinding, VisualGateResult
+        from ubt.adapters.pdf.artifact_gate import ArtifactFinding, ArtifactGateResult
 
-        return VisualGateResult(
+        return ArtifactGateResult(
             passed=False,
             findings=(
-                VisualFinding(
+                ArtifactFinding(
                     severity="critical",
                     code="visual_gate_crashed",
                     message=message,

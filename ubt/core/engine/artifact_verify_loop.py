@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from ubt.core.atomic import atomic_write_text
-from ubt.core.engine.artifact_services import run_visual_gate
+from ubt.core.engine.artifact_services import run_artifact_gate
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.exceptions import JobInterruptedError
 from ubt.core.ir.models import BlockStatus, BookManifest, IRBlock
@@ -29,7 +29,7 @@ from ubt.core.qe.defect_taxonomy import format_defect_flag
 logger = logging.getLogger(__name__)
 
 
-class VisualVerifyLoop:
+class ArtifactVerifyLoop:
     """Visual-verification control loop: verify the render, quarantine on defect."""
 
     def __init__(
@@ -62,7 +62,7 @@ class VisualVerifyLoop:
         blocks: Sequence[IRBlock],
     ) -> Any:
         return await asyncio.to_thread(
-            run_visual_gate,
+            run_artifact_gate,
             pdf_path,
             expected_page_count=self.expected_page_count,
             faithful_pages=self.faithful_pages,
@@ -158,7 +158,7 @@ class VisualVerifyLoop:
             if quarantined:
                 await asyncio.to_thread(self.ledger.save_checkpoints_batch, quarantined)
                 logger.warning(
-                    "VisualVerifyLoop: %d block(s) quarantined as NEEDS_HUMAN "
+                    "ArtifactVerifyLoop: %d block(s) quarantined as NEEDS_HUMAN "
                     "(%d block-scoped, pages %s page-scoped) for job %s",
                     len(quarantined),
                     len(named_ids),

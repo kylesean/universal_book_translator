@@ -66,7 +66,7 @@ def _provider() -> ArtifactServices:
     return provider
 
 
-def run_visual_gate(
+def run_artifact_gate(
     pdf_path: Path,
     *,
     expected_page_count: int | None = None,
@@ -81,7 +81,7 @@ def run_visual_gate(
     )
 
 
-def crashed_visual_gate_result(message: str) -> Any:
+def crashed_artifact_gate_result(message: str) -> Any:
     return _provider().crashed_gate(message)
 
 
@@ -126,8 +126,8 @@ __all__ = [
     "blocking_gate_tripped",
     "check_artifact",
     "configure_artifact_services",
-    "crashed_visual_gate_result",
+    "crashed_artifact_gate_result",
     "probe_unavailable_finding",
     "read_delivery_evidence",
-    "run_visual_gate",
+    "run_artifact_gate",
 ]

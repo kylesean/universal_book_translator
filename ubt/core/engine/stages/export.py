@@ -33,7 +33,7 @@ from ubt.core.engine.adapter_runtime import (
 from ubt.core.engine.artifact_services import (
     blocking_gate_tripped,
     check_artifact,
-    crashed_visual_gate_result,
+    crashed_artifact_gate_result,
     read_delivery_evidence,
 )
 from ubt.core.engine.delivery_freshness import record_rendered_digest, rendered_digest_for
@@ -71,7 +71,7 @@ from ubt.core.metrics.collect import collect_kpis, save_metrics_report
 from ubt.core.policy.bilingual_advisor import SECONDARY_SUFFIX
 
 if TYPE_CHECKING:
-    from ubt.adapters.pdf.artifact_gate import VisualGateResult
+    from ubt.adapters.pdf.artifact_gate import ArtifactGateResult
     from ubt.adapters.pdf.artifact_text import ArtifactReport
     from ubt.core.content.contract import ReconciliationReport
     from ubt.core.job_options import DeliveredArtifact
@@ -700,7 +700,7 @@ def _faithful_expected_pages(ctx: StageContext, rendered_path: Path | None = Non
     return count if count > 0 else None
 
 
-async def _run_visual_gate(
+async def _run_artifact_gate(
     ctx: StageContext,
     adapter: DocumentAdapter,
     final_blocks: list[IRBlock],
@@ -712,7 +712,7 @@ async def _run_visual_gate(
     """Post-render visual gate; never fatal except on cancel.
 
     T0/T1 deterministic checks + optional pixel confirmation + sampled T2
-    VLM + VisualVerifyLoop, all driven by the config bound on ``ctx``.
+    VLM + ArtifactVerifyLoop, all driven by the config bound on ``ctx``.
     Returns the (possibly re-rendered) artifact, its visual report path, and
     the gate object (None when the gate is off or not a PDF).
     """
@@ -721,9 +721,9 @@ async def _run_visual_gate(
     if not ctx.config.visual_gate_enabled or rendered_path.suffix.lower() != ".pdf":
         return rendered_path, visual_report_path, gate
     try:
-        from ubt.core.engine.visual_verify_loop import VisualVerifyLoop
+        from ubt.core.engine.artifact_verify_loop import ArtifactVerifyLoop
 
-        verify_loop = VisualVerifyLoop(
+        verify_loop = ArtifactVerifyLoop(
             manifest=ctx.manifest,
             ledger=ctx.ledger,
             job_id=ctx.job_id,
@@ -758,7 +758,7 @@ async def _run_visual_gate(
         # A crashed gate must read as failed, not absent: blocking enforcement
         # and the KPI collector both key off this object, and None silently
         # skipped every rejection layer while metrics recorded a perfect pass.
-        gate = crashed_visual_gate_result(
+        gate = crashed_artifact_gate_result(
             f"visual gate did not complete: {type(exc).__name__}: {exc}"[:300]
         )
         visual_report_path = await _persist_crashed_gate_report(ctx, rendered_path, gate)
@@ -768,7 +768,7 @@ async def _run_visual_gate(
 async def _persist_crashed_gate_report(
     ctx: StageContext,
     rendered_path: Path,
-    gate: VisualGateResult,
+    gate: ArtifactGateResult,
 ) -> Path | None:
     """Write the crash gate where a live run would have written its report.
 
@@ -2003,7 +2003,7 @@ async def run_export_stage(
     # also what manifest.run.adaptive_policy reports) instead of re-deriving
     # from ctx.short_chain here — a second derivation could silently drift from
     # the value the report already published.
-    visual_blocking_gate_enabled = services.adaptive_policy.visual_blocking
+    artifact_blocking_gate_enabled = services.adaptive_policy.artifact_blocking
     min_completion_ratio = ctx.config.export_min_completion_ratio
     deterministic_glossary_enforce = services.adaptive_policy.deterministic_glossary
     ctx.check_cancelled()
@@ -2275,7 +2275,7 @@ async def run_export_stage(
 
     # Enforcement is deferred until after _build_reports (below): a refusal
     # must still leave the quality/metrics reports on disk for audit.
-    rendered_path, visual_report_path, gate = await _run_visual_gate(
+    rendered_path, visual_report_path, gate = await _run_artifact_gate(
         ctx, adapter, final_blocks, rendered_path, render, claims_finality=owning_run
     )
 
@@ -2562,7 +2562,7 @@ async def run_export_stage(
         actual_job_id,
         gate,
         visual_report_path,
-        visual_blocking_gate_enabled,
+        artifact_blocking_gate_enabled,
         rehearsal=ctx.is_mock_run,
     )
 
