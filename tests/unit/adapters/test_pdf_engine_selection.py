@@ -76,3 +76,10 @@ def test_docling_without_package_is_refused_not_degraded(tmp_path: Path) -> None
     pdf = write_text_pdf(tmp_path / "prose.pdf", _prose_pages(6))
     with pytest.raises(OptionalDependencyError, match="uv sync --all-extras"):
         get_adapter_for_path(pdf, pdf_engine="docling")
+
+
+def test_the_scan_engine_implements_the_async_reflow_contract() -> None:
+    from ubt.adapters.pdf.docling_adapter import ScanPDFToTypstCodec
+    from ubt.codecs.protocol import ReflowCodec
+
+    assert isinstance(ScanPDFToTypstCodec(), ReflowCodec)

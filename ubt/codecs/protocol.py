@@ -1,10 +1,13 @@
 """Format-agnostic data contracts for UBT v2 surgical in-place document codecs.
 
-Every document format (native PDF, scanned PDF via Typst, EPUB/HTML DOM,
-DOCX OOXML, Markdown AST) implements :class:`DocumentCodec` and communicates
-with the translation core exclusively through :class:`TranslationUnit` and
-lightweight XML-like inline anchors (``<b1>...</b1>``, ``<i2>...</i2>``,
-``<a3>...</a3>``, ``<f1/>``, ``<n1/>``, ``<x1/>``).
+Surgical formats (native PDF, EPUB/HTML DOM, DOCX OOXML, Markdown AST) implement
+:class:`DocumentCodec`; the OCR/Typst scanner implements :class:`ReflowCodec`.
+Both communicate with the translation core exclusively through
+:class:`TranslationUnit` and lightweight XML-like inline anchors
+(``<b1>...</b1>``, ``<i2>...</i2>``, ``<a3>...</a3>``, ``<f1/>``, ``<n1/>``,
+``<x1/>``). The two contracts stay separate because a surgical patch is a
+synchronous container edit, while a scan rebuild is asynchronous OCR plus
+typesetting.
 
 Zero format-specific libraries may be imported here.
 """
@@ -149,3 +152,38 @@ class DocumentCodec(Protocol):
         target_lang: str,
         dpi: int = 144,
     ) -> bytes: ...
+
+
+@runtime_checkable
+class ReflowCodec(Protocol):
+    """Async OCR/typesetting codec for a source with no patchable text layer.
+
+    A reflow codec owns a whole-document rebuild, not an in-place patch:
+    ``extract`` runs the OMR/OCR ingest and ``apply`` typesets the translated
+    units. It is intentionally not a :class:`DocumentCodec` (whose methods are
+    synchronous and patch the original container), so callers cannot accidentally
+    route a scan through the surgical path.
+    """
+
+    supported_suffixes: frozenset[str]
+
+    def inspect(self, source_path: Path) -> DocumentProfile: ...
+
+    async def extract(
+        self,
+        source_path: Path,
+        *,
+        pages: set[int] | None = None,
+    ) -> tuple[DocumentProfile, list[TranslationUnit]]: ...
+
+    async def apply(
+        self,
+        source_path: Path,
+        units: list[TranslationUnit],
+        translations: dict[str, str],
+        *,
+        target_lang: str,
+        mode: DeliveryMode = DeliveryMode.MONO,
+        output_path: Path,
+        pages: set[int] | None = None,
+    ) -> ApplyReport: ...

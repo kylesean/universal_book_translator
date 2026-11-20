@@ -47,8 +47,15 @@ from ubt.adapters.pdf.docling_worker import (
 )
 from ubt.adapters.pdf.font_metrics import sanitize_font_family
 from ubt.adapters.pdf.page_chunking import compute_pdf_page_chunks, get_pdf_page_chunk_size
+from ubt.codecs.protocol import (
+    ApplyReport,
+    DeliveryMode,
+    DocumentProfile,
+    TranslationUnit,
+    UnitRole,
+)
 from ubt.core.exceptions import OptionalDependencyError
-from ubt.core.ir.models import BookManifest, ChapterIR, ChapterMeta, IRBlock
+from ubt.core.ir.models import BlockType, BookManifest, ChapterIR, ChapterMeta, IRBlock
 from ubt.core.ir.render_plan import RenderOutcome, RenderPlan
 
 if TYPE_CHECKING:
@@ -346,6 +353,13 @@ class ScanPDFToTypstCodec(_PDFRenderStackMixin, BasePDFEngineAdapter):
             if docling_isolate_process is None
             else docling_isolate_process
         )
+        #: Whole-document cache for the async ReflowCodec contract. The adapter
+        #: pipeline parses once and renders later; a direct codec caller does
+        #: extract() then apply(), and re-parsing would re-run Docling.
+        self._reflow_cache: dict[
+            tuple[str, frozenset[int] | None],
+            tuple[BookManifest, list[IRBlock], list[TranslationUnit]],
+        ] = {}
 
     def apply_config(self, runtime_config: AdapterRuntimeConfig) -> None:
         """Take the OCR / formula / render knobs the pipeline resolved for this run.
@@ -536,3 +550,118 @@ class ScanPDFToTypstCodec(_PDFRenderStackMixin, BasePDFEngineAdapter):
             isolate_process=self.docling_isolate_process,
         )
         return fuse_continuation_blocks(blocks)
+
+    # ------------------------------------------------------------------
+    # ReflowCodec contract (async OCR/typesetting, not a surgical patch)
+    # ------------------------------------------------------------------
+    supported_suffixes: frozenset[str] = frozenset({".pdf"})
+
+    def inspect(self, source_path: Path) -> DocumentProfile:
+        """Cheap scan profile: page count, extractable chars, scan verdict."""
+        from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile
+        from ubt.adapters.pdf.short_doc import probe_pdf_pages
+
+        try:
+            pages, chars = probe_pdf_pages(source_path)
+            probe = inspect_pdf_profile(source_path)
+        except Exception:
+            return DocumentProfile(format_name="pdf", recommended_mode=DeliveryMode.REFLOW)
+        is_scanned = probe.has_scan or (pages > 0 and chars / pages < 25.0)
+        return DocumentProfile(
+            format_name="pdf",
+            page_count=pages,
+            estimated_chars=chars,
+            is_scanned=is_scanned,
+            has_math=probe.has_formulas,
+            recommended_mode=DeliveryMode.REFLOW,
+        )
+
+    async def extract(
+        self,
+        source_path: Path,
+        *,
+        pages: set[int] | None = None,
+    ) -> tuple[DocumentProfile, list[TranslationUnit]]:
+        """Run OCR ingest once and expose the blocks as translation units."""
+        key = (str(source_path.resolve()), frozenset(pages) if pages else None)
+        cached = self._reflow_cache.get(key)
+        if cached is not None:
+            return self.inspect(source_path), cached[2]
+
+        manifest = await self.extract_manifest(source_path)
+        blocks: list[IRBlock] = []
+        units: list[TranslationUnit] = []
+        async for chapter in self.parse_stream(source_path, pages=pages):
+            for block in chapter.blocks:
+                blocks.append(block)
+                units.append(_block_to_reflow_unit(block, chapter.chapter_id))
+        self._reflow_cache[key] = (manifest, blocks, units)
+        return self.inspect(source_path), units
+
+    async def apply(
+        self,
+        source_path: Path,
+        units: list[TranslationUnit],
+        translations: dict[str, str],
+        *,
+        target_lang: str,
+        mode: DeliveryMode = DeliveryMode.MONO,
+        output_path: Path,
+        pages: set[int] | None = None,
+    ) -> ApplyReport:
+        """Apply translated units by rebuilding the document with Typst."""
+        key = (str(source_path.resolve()), frozenset(pages) if pages else None)
+        cached = self._reflow_cache.get(key)
+        if cached is None:
+            await self.extract(source_path, pages=pages)
+            cached = self._reflow_cache[key]
+        manifest, blocks, cached_units = cached
+        by_id = {unit.unit_id: unit for unit in cached_units}
+        patched = 0
+        for block in blocks:
+            if block.id not in by_id or block.skip_translate:
+                continue
+            translated = translations.get(block.id)
+            if translated is None or not translated.strip():
+                continue
+            block.target_text = translated
+            patched += 1
+        bilingual = mode in {
+            DeliveryMode.BILINGUAL,
+            DeliveryMode.INTERLEAVED,
+            DeliveryMode.SIDE_BY_SIDE,
+        }
+        output = await self.render_blocks(
+            manifest,
+            blocks,
+            target_lang,
+            output_path,
+            bilingual_mode="bilingual" if bilingual else "monolingual",
+        )
+        return ApplyReport(
+            output_path=Path(output),
+            mode=mode,
+            total_units=len(units),
+            patched_units=patched,
+            page_count_source=manifest.metadata.get("page_count"),
+        )
+
+
+def _block_to_reflow_unit(block: IRBlock, chapter_id: str) -> TranslationUnit:
+    """Map one scanned block into the shared translation-unit contract."""
+    role = {
+        BlockType.HEADING: UnitRole.HEADING,
+        BlockType.LIST_ITEM: UnitRole.LIST_ITEM,
+        BlockType.TABLE: UnitRole.TABLE_CELL,
+    }.get(block.block_type, UnitRole.PARAGRAPH)
+    page = block.bbox.page if block.bbox is not None else None
+    return TranslationUnit(
+        unit_id=block.id,
+        chapter_id=chapter_id,
+        role=role,
+        source_marked=block.source_text,
+        source_plain=block.source_text,
+        translate=not block.skip_translate,
+        page_no=page,
+        codec_meta={"block_type": block.block_type.value},
+    )
