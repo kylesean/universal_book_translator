@@ -144,14 +144,6 @@ class CharStyle:
     color_hex: str | None
 
 
-def _hex_if_colored(red: int, green: int, blue: int) -> str | None:
-    """``#RRGGBB`` for a non-black fill, ``None`` for default black."""
-    if (red, green, blue) == (0, 0, 0):
-        return None
-    return f"#{red:02x}{green:02x}{blue:02x}"
-
-
-@pdfium_serialized
 def merge_utf16_surrogates(codes: Sequence[int]) -> list[tuple[int, int]]:
     """Merge UTF-16 code units into ``(source_index, code_point)`` pairs.
 
@@ -182,83 +174,6 @@ def merge_utf16_surrogates(codes: Sequence[int]) -> list[tuple[int, int]]:
         pending = None
         out.append((index, code))
     return out
-
-
-@pdfium_serialized
-def extract_char_styles(pdf_path: Path, page_no: int) -> list[CharStyle]:
-    """Per-character box/text/style for one page, straight from pdfium.
-
-    Characters arrive in content-stream order, which for a single block is
-    reading order. A character with no box (a synthetic space) is skipped.
-
-    Serialized like every other pdfium entry point: ``pdfium_gate`` documents
-    that concurrent libpdfium access corrupts the native heap, and this one is
-    called per block from the scan-path text witness — i.e. exactly the parallel
-    path that made the lock necessary.
-    """
-    import ctypes
-
-    import pypdfium2 as pdfium
-    import pypdfium2.raw as pdfium_c
-
-    pdf = pdfium.PdfDocument(str(pdf_path))
-    try:
-        if not 1 <= page_no <= len(pdf):
-            raise DocumentParseError(f"page {page_no} out of range in {pdf_path.name}")
-        page = pdf[page_no - 1]
-        try:
-            textpage = page.get_textpage()
-            try:
-                count = textpage.count_chars()
-                codes = [pdfium_c.FPDFText_GetUnicode(textpage, i) for i in range(count)]
-                out: list[CharStyle] = []
-                for index, code in merge_utf16_surrogates(codes):
-                    if code == 0 or code > 0x10FFFF:
-                        continue
-                    left = ctypes.c_double()
-                    right = ctypes.c_double()
-                    bottom = ctypes.c_double()
-                    top = ctypes.c_double()
-                    # pdfium's argument order is (left, right, bottom, top).
-                    if not pdfium_c.FPDFText_GetCharBox(
-                        textpage,
-                        index,
-                        ctypes.byref(left),
-                        ctypes.byref(right),
-                        ctypes.byref(bottom),
-                        ctypes.byref(top),
-                    ):
-                        continue
-                    size = float(pdfium_c.FPDFText_GetFontSize(textpage, index))
-                    weight = int(pdfium_c.FPDFText_GetFontWeight(textpage, index))
-                    red = ctypes.c_uint()
-                    green = ctypes.c_uint()
-                    blue = ctypes.c_uint()
-                    alpha = ctypes.c_uint()
-                    pdfium_c.FPDFText_GetFillColor(
-                        textpage,
-                        index,
-                        ctypes.byref(red),
-                        ctypes.byref(green),
-                        ctypes.byref(blue),
-                        ctypes.byref(alpha),
-                    )
-                    out.append(
-                        CharStyle(
-                            rect=(left.value, bottom.value, right.value, top.value),
-                            text=chr(code),
-                            font_size=size,
-                            bold=weight >= 600,
-                            color_hex=_hex_if_colored(red.value, green.value, blue.value),
-                        )
-                    )
-                return out
-            finally:
-                textpage.close()
-        finally:
-            page.close()
-    finally:
-        pdf.close()
 
 
 def _char_center_in_box(rect: tuple[float, float, float, float], box: BBox) -> bool:
