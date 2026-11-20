@@ -43,22 +43,37 @@ _PARAGRAPHS = (
 )
 
 
-def _config(tmp_path: Path) -> UBTConfig:
-    return UBTConfig().model_copy(
-        update={
-            "db_dir": tmp_path / "ledgers",
-            "ocr_mode": "off",
-            "allow_page_upload": False,
-            "visual_judge_enabled": False,
-        }
-    )
+def _config(
+    tmp_path: Path,
+    *,
+    pdf_engine: str | None = None,
+    delivery_mode: str | None = None,
+) -> UBTConfig:
+    updates: dict[str, object] = {
+        "db_dir": tmp_path / "ledgers",
+        "ocr_mode": "off",
+        "allow_page_upload": False,
+        "visual_judge_enabled": False,
+    }
+    if pdf_engine is not None:
+        updates["pdf_engine"] = pdf_engine
+    if delivery_mode is not None:
+        updates["delivery_mode"] = delivery_mode
+    return UBTConfig().model_copy(update=updates)
 
 
-async def _run(tmp_path: Path) -> tuple[list[TranslationProgressEvent], Path, str]:
+async def _run(
+    tmp_path: Path,
+    *,
+    pdf_engine: str | None = None,
+    delivery_mode: str | None = None,
+) -> tuple[list[TranslationProgressEvent], Path, str]:
     book = write_text_pdf(tmp_path / "book.pdf", [_PAGE_ONE, _PAGE_TWO])
     output = tmp_path / "book_es.pdf"
     job_id = "synthetic-render"
-    orchestrator = create_dry_run_orchestrator(_config(tmp_path))
+    orchestrator = create_dry_run_orchestrator(
+        _config(tmp_path, pdf_engine=pdf_engine, delivery_mode=delivery_mode)
+    )
     events = []
     async for event in orchestrator.run(book, output, target_lang="es", job_id=job_id):
         events.append(event)
@@ -87,8 +102,15 @@ async def test_the_delivered_pdf_carries_every_paragraph(tmp_path: Path) -> None
     _, output, _ = await _run(tmp_path)
 
     delivered = _flat("\n".join(oxide_render.extract_page_texts(output)))
+    # The rehearsal translation adds a CJK marker, so a title can wrap inside
+    # the source heading box. The pdf-oxide reader may then emit the wrapped
+    # lines in a different order; assert every content word survived instead of
+    # requiring the unwrapped phrase to be contiguous. The delivery contract
+    # (below) is the order-sensitive check.
     for title in ("The Attention Machine", "The Descendants"):
-        assert _flat(title) in delivered, f"title lost: {title}"
+        distinctive = [word for word in title.split() if len(word) > 3]
+        for word in distinctive:
+            assert word in delivered, f"title word lost: {title}: {word}"
     for paragraph in _PARAGRAPHS:
         assert _flat(paragraph) in delivered, f"paragraph lost: {paragraph}"
 
@@ -134,7 +156,10 @@ async def test_the_render_wires_the_run_target_language_into_the_typesetter(
         return original(self, blocks, build_dir, target_lang)  # type: ignore[arg-type]
 
     monkeypatch.setattr(dr.TypstDocumentRenderer, "build_source", _recording_build_source)
-    await _run(tmp_path)
+    # The default PDF engine is the native in-place codec, which does not build
+    # a Typst document. This test is specifically about the Typst reflow
+    # typesetter, so force the docling/readable path.
+    await _run(tmp_path, pdf_engine="docling", delivery_mode="readable")
     assert seen, "the render never built a Typst document"
     assert all(lang == "es" for lang in seen), seen
 

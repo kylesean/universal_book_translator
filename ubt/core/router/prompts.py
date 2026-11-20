@@ -427,7 +427,7 @@ def build_rich_draft_prompt(
         style_desc,
         "Rules:\n"
         "1. Strictly adhere to the terminology mappings in the Translation Bible if provided.\n"
-        "2. Preserve all XML/HTML markup tags and placeholder tokens (⟦CODE_MASK_...⟧, ⟦MATH_MASK_...⟧, ⟦CITE_MASK_...⟧) without omitting, modifying, or duplicating them. Their order may follow the target language's natural syntax.\n"
+        "2. Preserve all XML/HTML markup tags and placeholder tokens (⟦CODE_MASK_...⟧, ⟦MATH_MASK_...⟧, ⟦CITE_MASK_...⟧) without omitting, modifying, or duplicating them, and NEVER wrap placeholder tokens in $...$ or \\llbracket...\\rrbracket. Their order may follow the target language's natural syntax.\n"
         f"3. [Natural Register]:\n"
         f"   - Write fluent, idiomatic {tgt_name} in the register the source uses, without awkward literal translationese.\n"
         f"   - In CJK targets (Chinese/Japanese/Korean), prefer active, subjectless, or topic-prominent phrasing where it reads more naturally than a passive construction (e.g. 'Measurements were taken' -> '进行了测量').\n"
@@ -527,7 +527,7 @@ def build_macro_chunk_draft_prompt(
         style_desc,
         "Rules:\n"
         "1. Strictly adhere to the terminology mappings in the Translation Bible if provided.\n"
-        "2. Preserve all XML/HTML markup tags and placeholder tokens (⟦CODE_MASK_...⟧, ⟦MATH_MASK_...⟧, ⟦CITE_MASK_...⟧) without omitting, modifying, or duplicating them. Their order may follow the target language's natural syntax.\n"
+        "2. Preserve all XML/HTML markup tags and placeholder tokens (⟦CODE_MASK_...⟧, ⟦MATH_MASK_...⟧, ⟦CITE_MASK_...⟧) without omitting, modifying, or duplicating them, and NEVER wrap placeholder tokens in $...$ or \\llbracket...\\rrbracket. Their order may follow the target language's natural syntax.\n"
         f"3. [Natural Register]:\n"
         f"   - Write fluent, idiomatic {tgt_name} in the register the source uses, without awkward literal translationese.\n"
         f"   - In CJK targets (Chinese/Japanese/Korean), prefer active, subjectless, or topic-prominent phrasing where it reads more naturally than a passive construction (e.g. 'Measurements were taken' -> '进行了测量').\n"

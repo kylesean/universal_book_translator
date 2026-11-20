@@ -143,28 +143,3 @@ def test_extract_blocks_with_pdfium_normalizes_cropbox_origin(tmp_path: Path) ->
     assert bbox.y0 < 300.0
     assert bbox.x1 <= 300.0 + 1e-2
     assert bbox.y1 <= 300.0 + 1e-2
-
-
-def test_vertical_solver_clamps_boundary_jitter_without_exception() -> None:
-    from ubt.core.layout.solver import VerticalBlockInput, VerticalTrack, solve_vertical
-
-    track = VerticalTrack(y_min_pt=50.0, y_max_pt=650.0)
-    blocks = [
-        VerticalBlockInput(
-            index=0,
-            required_height_pt=30.0,
-            source_height_pt=30.0,
-            source_top_pt=655.0,
-        ),
-        VerticalBlockInput(
-            index=1,
-            required_height_pt=30.0,
-            source_height_pt=30.0,
-            source_top_pt=580.0,
-        ),
-    ]
-    specs = solve_vertical(blocks, track=track, min_gap_pt=2.0)
-    assert len(specs) == 2
-    assert specs[0].y_top_pt <= track.y_max_pt + 1e-4
-    assert specs[0].y_bottom_pt >= specs[1].y_top_pt + 2.0 - 1e-4
-    assert specs[1].y_bottom_pt >= track.y_min_pt - 1e-4

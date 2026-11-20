@@ -852,6 +852,16 @@ def block_overlap_findings(
         bbox = getattr(block, "bbox", None)
         if bbox is None:
             continue
+        if getattr(block, "skip_translate", False):
+            # A preserved exhibit (figure, table, formula) or a preserved label
+            # is not re-drawn by the renderer: its ink is the source's, and its
+            # bbox is the source's placement box, which routinely includes the
+            # caption band or surrounding whitespace. This tier compares text
+            # boxes; an exhibit's box overlapping a neighbouring paragraph is
+            # inherited page geometry, not an overprint this delivery
+            # introduced. Text drawn *over* an exhibit is the canvas tier's ink
+            # collision check, not this bbox comparison.
+            continue
         try:
             page = int(bbox.page)
             rect = (float(bbox.x0), float(bbox.y0), float(bbox.x1), float(bbox.y1))
@@ -1193,6 +1203,7 @@ def _is_content_codepoint(code: int) -> bool:
     return category[0] in ("L", "N")
 
 
+@pdfium_serialized
 def font_coverage_findings(
     pdf_path: Path,
     pages: Sequence[int],
@@ -1612,6 +1623,7 @@ def text_occlusion_findings(
     bounds: Mapping[int, tuple[float, float, float, float]],
     dpi: int = DEFAULT_DPI,
     rotations: Mapping[int, int] | None = None,
+    source_page_pngs: Mapping[int, Path] | None = None,
 ) -> list[VisualFinding]:
     """Text the text layer reports but the raster does not show.
 
@@ -1619,6 +1631,12 @@ def text_occlusion_findings(
     to the geometry checks — the boxes are still there — and to the blank-page
     heuristic, because the page is not blank overall. The signature is a text
     line box whose rendered crop carries almost no ink. One finding per page.
+
+    ``source_page_pngs`` separates a real occlusion from a box that never held
+    visible ink: whenever the artifact crop is empty, the same box is measured
+    on the source page raster. If the source is empty there too, the line was
+    invisible in the source (the delivered text faithfully reproduces it) and
+    is not a finding. Without source rasters the check keeps its old meaning.
     """
     try:
         from PIL import Image
@@ -1629,6 +1647,52 @@ def text_occlusion_findings(
         boxes_by_page.setdefault(box.bbox.page, []).append(box)
     findings: list[VisualFinding] = []
     scale = dpi / 72.0
+
+    def _crop(grey: Any, bbox: Any, media: Any, page_rot: int) -> tuple[int, int, int, int]:
+        width_px, height_px = grey.size
+        media_x0, media_y0, media_x1, media_y1 = media
+        if page_rot == 90:
+            left = max(0, int((bbox.y0 - media_y0) * scale))
+            right = min(width_px, int((bbox.y1 - media_y0) * scale))
+            top = max(0, int((bbox.x0 - media_x0) * scale))
+            bottom = min(height_px, int((bbox.x1 - media_x0) * scale))
+        elif page_rot == 180:
+            left = max(0, int((media_x1 - bbox.x1) * scale))
+            right = min(width_px, int((media_x1 - bbox.x0) * scale))
+            top = max(0, int((bbox.y0 - media_y0) * scale))
+            bottom = min(height_px, int((bbox.y1 - media_y0) * scale))
+        elif page_rot == 270:
+            left = max(0, int((media_y1 - bbox.y1) * scale))
+            right = min(width_px, int((media_y1 - bbox.y0) * scale))
+            top = max(0, int((media_x1 - bbox.x1) * scale))
+            bottom = min(height_px, int((media_x1 - bbox.x0) * scale))
+        else:
+            left = max(0, int((bbox.x0 - media_x0) * scale))
+            right = min(width_px, int((bbox.x1 - media_x0) * scale))
+            top = max(0, int((media_y1 - bbox.y1) * scale))
+            bottom = min(height_px, int((media_y1 - bbox.y0) * scale))
+        return left, top, right, bottom
+
+    def _inkless(grey: Any, bbox: Any, media: Any, page_rot: int) -> bool | None:
+        """``True``/``False`` for a measurable crop, ``None`` when too small."""
+        left, top, right, bottom = _crop(grey, bbox, media, page_rot)
+        w_px = right - left
+        h_px = bottom - top
+        if w_px < OCCLUSION_MIN_BOX_PX or h_px < 6 or w_px * h_px < 150:
+            return None
+        crop = grey.crop((left, top, right, bottom))
+        # ``grey`` is mode "L", so the values are plain ints, but Pillow's
+        # annotation for get_flattened_data admits float and per-pixel tuples.
+        # getdata is deprecated (removal in Pillow 14); the fallback is for
+        # older Pillows.
+        raw = crop.get_flattened_data() if hasattr(crop, "get_flattened_data") else crop.getdata()
+        pixels = cast("list[int]", list(raw))
+        if not pixels:
+            return None
+        ink = sum(1 for px in pixels if px < 245) / len(pixels)
+        dark_pixels = sum(1 for px in pixels if px < 200)
+        return ink < OCCLUSION_INK_FLOOR and dark_pixels < 10
+
     for page, png_path in sorted(page_pngs.items()):
         boxes = boxes_by_page.get(page)
         media = bounds.get(page)
@@ -1638,57 +1702,28 @@ def text_occlusion_findings(
         try:
             with Image.open(png_path) as img:
                 grey = img.convert("L")
-                width_px, height_px = grey.size
-                media_x0, media_y0, media_x1, media_y1 = media
                 occluded = 0
                 sample = ""
+                source_grey = None
+                if source_page_pngs is not None and page in source_page_pngs:
+                    with Image.open(source_page_pngs[page]) as source_img:
+                        source_grey = source_img.convert("L")
                 for box in boxes:
                     bbox = box.bbox
-                    if page_rot == 90:
-                        left = max(0, int((bbox.y0 - media_y0) * scale))
-                        right = min(width_px, int((bbox.y1 - media_y0) * scale))
-                        top = max(0, int((bbox.x0 - media_x0) * scale))
-                        bottom = min(height_px, int((bbox.x1 - media_x0) * scale))
-                    elif page_rot == 180:
-                        left = max(0, int((media_x1 - bbox.x1) * scale))
-                        right = min(width_px, int((media_x1 - bbox.x0) * scale))
-                        top = max(0, int((bbox.y0 - media_y0) * scale))
-                        bottom = min(height_px, int((bbox.y1 - media_y0) * scale))
-                    elif page_rot == 270:
-                        left = max(0, int((media_y1 - bbox.y1) * scale))
-                        right = min(width_px, int((media_y1 - bbox.y0) * scale))
-                        top = max(0, int((media_x1 - bbox.x1) * scale))
-                        bottom = min(height_px, int((media_x1 - bbox.x0) * scale))
-                    else:
-                        left = max(0, int((bbox.x0 - media_x0) * scale))
-                        right = min(width_px, int((bbox.x1 - media_x0) * scale))
-                        top = max(0, int((media_y1 - bbox.y1) * scale))
-                        bottom = min(height_px, int((media_y1 - bbox.y0) * scale))
-                    w_px = right - left
-                    h_px = bottom - top
-                    if w_px < OCCLUSION_MIN_BOX_PX or h_px < 6 or w_px * h_px < 150:
+                    if _inkless(grey, bbox, media, page_rot) is not True:
                         continue
-                    crop = grey.crop((left, top, right, bottom))
-                    # ``grey`` is mode "L", so the values are plain ints, but
-                    # Pillow's annotation for get_flattened_data admits float
-                    # and per-pixel tuples. getdata is deprecated (removal in
-                    # Pillow 14); the fallback is for older Pillows.
-                    raw = (
-                        crop.get_flattened_data()
-                        if hasattr(crop, "get_flattened_data")
-                        else crop.getdata()
-                    )
-                    pixels = cast("list[int]", list(raw))
-                    if not pixels:
+                    if (
+                        source_grey is not None
+                        and _inkless(source_grey, bbox, media, page_rot) is True
+                    ):
+                        # The source never printed this line: the empty crop is
+                        # faithful, not an occlusion.
                         continue
-                    ink = sum(1 for px in pixels if px < 245) / len(pixels)
-                    dark_pixels = sum(1 for px in pixels if px < 200)
-                    if ink < OCCLUSION_INK_FLOOR and dark_pixels < 10:
-                        occluded += 1
-                        if not sample:
-                            sample = (
-                                f"e.g. ({bbox.x0:.0f},{bbox.y0:.0f})-({bbox.x1:.0f},{bbox.y1:.0f})"
-                            )
+                    occluded += 1
+                    if not sample:
+                        sample = f"e.g. ({bbox.x0:.0f},{bbox.y0:.0f})-({bbox.x1:.0f},{bbox.y1:.0f})"
+                if source_grey is not None:
+                    source_grey.close()
         except Exception as exc:
             logger.debug("Visual gate: occlusion probe failed for page %d: %s", page, exc)
             continue
@@ -2319,48 +2354,6 @@ def _collision_findings(
     return findings
 
 
-def detect_colliding_l1_pages(
-    bg_pdf: Path,
-    final_pdf: Path,
-    l1_pages: Sequence[int],
-    *,
-    page_rois: Mapping[int, Sequence[tuple[float, float, float, float]]] | None = None,
-    dpi: int = DEFAULT_DPI,
-    ratio_threshold: float = CANVAS_COLLISION_RATIO,
-) -> dict[int, float]:
-    """Return ``{page_no: collision_ratio}`` for L1 pages whose ink collision exceeds ``ratio_threshold``.
-
-    Used during ``_render_facsimile`` so any L1 page whose translated text
-    collides with unstripped background rules, vector diagrams, or residual ink
-    is automatically rerouted to Tier L2 (Page-Locked Reflow) before the
-    artifact ships.
-    """
-    pages = sorted({int(p) for p in l1_pages if int(p) >= 1})
-    if not pages or not bg_pdf.exists() or not final_pdf.exists():
-        return {}
-    try:
-        with tempfile.TemporaryDirectory(prefix="ubt_l1_collision_") as tmp_dir:
-            root = Path(tmp_dir)
-            bg_pngs = render_pages_to_png(bg_pdf, pages, dpi=dpi, work_dir=root / "bg")
-            if not bg_pngs:
-                return {}
-            final_pngs = render_pages_to_png(final_pdf, pages, dpi=dpi, work_dir=root / "fg")
-            if not final_pngs:
-                return {}
-            pairs = {p: p for p in pages if p in bg_pngs and p in final_pngs}
-            if not pairs:
-                return {}
-            measured = canvas_ink_collision_pages(
-                bg_pngs, final_pngs, page_pairs=pairs, page_rois=page_rois, dpi=dpi
-            )
-            return {
-                item.page: round(item.ratio, 4) for item in measured if item.ratio > ratio_threshold
-            }
-    except Exception as exc:
-        logger.debug("L1 ink collision pre-check skipped: %s", exc)
-        return {}
-
-
 def _tier_coverage(
     vlm_pages: Sequence[int],
     *,
@@ -2710,6 +2703,21 @@ async def run_visual_gate(
         if sampled and not pngs:
             skip_notes.append("page render failed (pdf_oxide); pixel checks skipped")
         else:
+            # The occlusion probe needs the source raster to tell "the source
+            # never printed this line" from "the delivered text is hidden".
+            # Only the sampled pages are rendered, into their own directory so
+            # the artifact rasters are not overwritten.
+            source_pngs: Mapping[int, Path] | None = None
+            if source_pdf is not None:
+                source_pngs = await asyncio.to_thread(
+                    render_pages_to_png,
+                    source_pdf,
+                    sampled,
+                    dpi=dpi,
+                    work_dir=Path(tmp_dir) / "source",
+                )
+                if not source_pngs:
+                    source_pngs = None
             findings.extend(
                 await asyncio.to_thread(
                     text_occlusion_findings,
@@ -2718,6 +2726,7 @@ async def run_visual_gate(
                     bounds,
                     dpi,
                     rotations,
+                    source_pngs,
                 )
             )
             # ``blank_page`` is the one pixel finding that refuses export on its

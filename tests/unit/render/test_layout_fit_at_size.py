@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from ubt.core.ir.models import BlockType, BoundingBox, IRBlock, StyleMeta, make_element
 from ubt.render.layout_solver import (
     apply_width_borrow,
     estimate_needed_height,
     fit_at_size,
 )
-from ubt.render.typst.page_locked_renderer import PageGeometry, solve_page_lock
 
 pytestmark = pytest.mark.fast
 
@@ -84,48 +82,3 @@ def test_a_record_without_a_budget_is_left_alone() -> None:
     widened, used = apply_width_borrow([records], 4.0)
     assert widened[0][0]["w"] == pytest.approx(300.0)
     assert used == 0.0
-
-
-def _block(block_id: str, text: str) -> IRBlock:
-    bbox = BoundingBox(page=1, x0=50.0, y0=600.0, x1=500.0, y1=700.0)
-    element = make_element(
-        id=block_id,
-        spine_index=1,
-        block_type=BlockType.NARRATIVE,
-        source_text=text,
-        bbox=bbox,
-    )
-    return IRBlock(element=element, target_text=text, style=StyleMeta(color_hex="#000000"))
-
-
-def test_the_page_lock_never_exceeds_the_group_size() -> None:
-    geom = PageGeometry(
-        page_w=595.0,
-        page_h=842.0,
-        margin_top=50.0,
-        margin_bottom=50.0,
-        margin_left=50.0,
-        margin_right=50.0,
-        columns=1,
-    )
-    blocks = [_block("p1", "短句。")]
-    size, _leading, _spacing, _tracking = solve_page_lock(geom, blocks, preferred_pt=8.4)
-    assert size == pytest.approx(8.4)
-
-
-def test_the_page_lock_still_goes_below_the_group_when_it_must() -> None:
-    geom = PageGeometry(
-        page_w=200.0,
-        page_h=120.0,
-        margin_top=10.0,
-        margin_bottom=10.0,
-        margin_left=10.0,
-        margin_right=10.0,
-        columns=1,
-    )
-    blocks = [_block(f"p{index}", "很长的正文段落" * 6) for index in range(6)]
-    size, _leading, _spacing, _tracking = solve_page_lock(
-        geom, blocks, preferred_pt=9.0, floor_pt=7.5
-    )
-    assert size < 9.0
-    assert size >= 7.5

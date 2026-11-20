@@ -826,14 +826,6 @@ def re_export_cmd(
             show_default=False,
         ),
     ] = None,
-    enable_cels: Annotated[
-        bool | None,
-        typer.Option(
-            "--enable-cels/--no-enable-cels",
-            help="Enable CELS layout synthesis (pass --no-enable-cels to rollback to legacy 2D packing)",
-            show_default=False,
-        ),
-    ] = None,
 ) -> None:
     """Re-render a finished job's deliverable from its ledger (human-edit re-export)."""
     resolve_fn = resolve_db_dir()
@@ -857,8 +849,6 @@ def re_export_cmd(
         updates["allow_degrade"] = allow_degrade
     if allow_major is not None:
         updates["allow_major"] = allow_major
-    if enable_cels is not None:
-        updates["enable_cels"] = enable_cels
     if updates:
         config = config.model_copy(update=updates)
     try:

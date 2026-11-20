@@ -201,8 +201,7 @@ export function NewJobWizard() {
   const [domainProfile, setDomainProfile] = useState('auto')
   const [deliveryMode, setDeliveryMode] = useState<'auto' | 'readable' | 'faithful'>('auto')
   const [allowDegrade, setAllowDegrade] = useState(false)
-  const [enableCels, setEnableCels] = useState(true)
-  const [dualMode, setDualMode] = useState<'auto' | 'dual' | 'mono'>('auto')
+  const [dualMode, setDualMode] = useState<'auto' | 'dual' | 'mono'>('mono')
   // 'auto' submits as null, which lets the engine align the delivered layout to
   // the source. The engine accepts only 1 or 2, so the sentinel never reaches it.
   const [layoutColumns, setLayoutColumns] = useState<'auto' | '1' | '2'>('auto')
@@ -713,7 +712,6 @@ export function NewJobWizard() {
     preset: preset,
     delivery_mode: deliveryMode,
     allow_degrade: deliveryMode === 'faithful' ? allowDegrade : null,
-    enable_cels: deliveryMode === 'faithful' ? enableCels : null,
     dual_mode: dualMode === 'auto' ? null : dualMode,
     // null = "align to the source layout"; the engine rejects anything but 1/2.
     layout_columns: layoutColumns === 'auto' ? null : Number(layoutColumns),
@@ -1272,24 +1270,6 @@ export function NewJobWizard() {
                       <InfoTip label={t.wizard.allowDegrade}>
                         {t.wizard.allowDegradeHelp}
                       </InfoTip>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 rounded-lg border border-border/70 bg-card/60 p-2.5 transition-colors hover:border-border hover:bg-card/90">
-                    <Switch
-                      id="inline-enable-cels"
-                      checked={enableCels}
-                      onCheckedChange={setEnableCels}
-                      className="shrink-0"
-                    />
-                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                      <Label
-                        htmlFor="inline-enable-cels"
-                        className="cursor-pointer text-xs font-medium text-foreground truncate select-none"
-                      >
-                        {t.wizard.enableCels}
-                      </Label>
-                      <InfoTip label={t.wizard.enableCels}>{t.wizard.enableCelsHelp}</InfoTip>
                     </div>
                   </div>
                 </div>

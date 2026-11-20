@@ -570,8 +570,8 @@ def test_typst_document_renderer_with_xref_enabled(tmp_path: Path) -> None:
     renderer = TypstDocumentRenderer(enable_xref=True, xref_config=cfg)
     source, stats = renderer.build_source(blocks, tmp_path)
 
-    assert '[#metadata("page-start") <page-1>]' in source
-    assert '[#metadata("page-start") <page-2>]' in source
+    assert '#metadata("page-start") <page-1>' in source
+    assert '#metadata("page-start") <page-2>' in source
 
     assert "<eq-1>" in source
 

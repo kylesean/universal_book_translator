@@ -20,11 +20,7 @@ _DYNAMIC_ENTRY_POINTS: frozenset[str] = frozenset(
     }
 )
 
-_PRODUCTION_ORPHAN_ALLOWLIST: frozenset[str] = frozenset(
-    {
-        "ubt.adapters.pdf.cels_formula",
-    }
-)
+_PRODUCTION_ORPHAN_ALLOWLIST: frozenset[str] = frozenset()
 
 _ENTRY_MODULE_SUFFIXES = ("__init__", "__main__")
 

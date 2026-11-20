@@ -309,6 +309,13 @@ SPECIAL_LATEX_COMMANDS: frozenset[str] = frozenset(
         "mathbb",
         "mathfrak",
         "mathcal",
+        # bold/italic styles -> bold()/italic(). ``math_transpiler._FONT_FN``
+        # converts these, but the gate's vocabulary had drifted and flagged a
+        # faithful ``\mathbf{z}_R`` as "hallucinated and unrenderable".
+        "mathbf",
+        "boldsymbol",
+        "bm",
+        "mathit",
         # upright strings
         "text",
         "mathrm",

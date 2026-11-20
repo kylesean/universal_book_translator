@@ -281,16 +281,6 @@ export function QualityGateView() {
   const contractFindings: Array<Record<string, any>> = Array.isArray(deliveryContract?.findings)
     ? deliveryContract.findings
     : []
-  const celsDistortions: Array<{
-    page: number
-    score: number
-    verdict: string
-    deficit_pt?: number
-    track_count?: number
-    is_multicolumn?: boolean
-  }> = Array.isArray(deliveryContract?.cels_distortions)
-    ? deliveryContract.cels_distortions
-    : []
 
   const contractStatus: CheckStatus = !deliveryContract
     ? 'warn'
@@ -299,11 +289,6 @@ export function QualityGateView() {
       : contractMajor > 0
         ? 'warn'
         : 'pass'
-
-  const avgDistortion =
-    celsDistortions.length > 0
-      ? celsDistortions.reduce((acc, cur) => acc + (cur.score || 0), 0) / celsDistortions.length
-      : null
 
   const getContractCheckLabel = (name: string): string => {
     switch (name) {
@@ -370,10 +355,6 @@ export function QualityGateView() {
               ],
               [language === 'zh' ? 'Critical 违规' : 'Critical Violations', contractCritical],
               [language === 'zh' ? 'Major 违规' : 'Major Violations', contractMajor],
-              [
-                language === 'zh' ? '平均版面畸变分' : 'Avg Distortion Score',
-                avgDistortion !== null ? avgDistortion.toFixed(4) : '—',
-              ],
             ].map(([label, value]) => (
               <div key={String(label)} className="flex items-baseline justify-between gap-4 border-b border-border/60 pb-1.5">
                 <dt className="text-muted-foreground">{label}</dt>
@@ -409,47 +390,6 @@ export function QualityGateView() {
                     </div>
                   )
                 })}
-              </div>
-            </div>
-          )}
-
-          {celsDistortions.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-xs font-medium text-muted-foreground">{t.quality.celsDistortionTitle}</div>
-              <div className="max-h-40 overflow-y-auto rounded border border-border/60">
-                <table className="w-full text-left text-xs">
-                  <thead className="border-b border-border/60 bg-muted/40 font-medium text-muted-foreground">
-                    <tr>
-                      <th className="px-3 py-1.5">Page</th>
-                      <th className="px-3 py-1.5">{t.quality.celsDistortionScore}</th>
-                      <th className="px-3 py-1.5">Verdict</th>
-                      <th className="px-3 py-1.5">{t.quality.celsTracks}</th>
-                      <th className="px-3 py-1.5">{t.quality.celsDeficit}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/40 font-mono">
-                    {celsDistortions.map((d) => (
-                      <tr key={d.page} className="hover:bg-muted/30">
-                        <td className="px-3 py-1">P{d.page}</td>
-                        <td
-                          className={cn(
-                            'px-3 py-1 font-semibold tabular-nums',
-                            d.score < 0.08
-                              ? 'text-emerald-700 dark:text-emerald-400'
-                              : d.score <= 0.15
-                                ? 'text-amber-700 dark:text-amber-400'
-                                : 'text-destructive'
-                          )}
-                        >
-                          {d.score.toFixed(4)}
-                        </td>
-                        <td className="px-3 py-1 text-xs uppercase">{d.verdict}</td>
-                        <td className="px-3 py-1 tabular-nums">{d.track_count ?? 1}</td>
-                        <td className="px-3 py-1 tabular-nums">{d.deficit_pt != null ? `${d.deficit_pt}pt` : '0pt'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               </div>
             </div>
           )}

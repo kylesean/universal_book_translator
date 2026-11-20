@@ -267,10 +267,26 @@ def normalize_cjk_punctuation(text: str, target_lang: str = "zh") -> str:
     return "".join(parts)
 
 
+def _unescape_prose_latex(text: str) -> str:
+    """Drop LaTeX escapes a draft leaks into prose (``lm\\_head`` -> ``lm_head``).
+
+    A draft typesetting an identifier sometimes escapes its underscore as if it
+    were math. Outside math the escape is markup, not text, and the delivered
+    page showed a literal backslash (2610.02185 p.4). Math and code spans are
+    protected, so only prose is rewritten.
+    """
+    parts = _split_protected(text)
+    for i in range(0, len(parts), 2):
+        parts[i] = parts[i].replace("\\_", "_")
+    return "".join(parts)
+
+
 def normalize_publishing_cjk(text: str, target_lang: str = "zh") -> str:
     """Apply CJK spacing, Pangu spacing (CJK-Latin/num/math), and publishing punctuation standards."""
     if not text:
         return text
+    if "\\_" in text:
+        text = _unescape_prose_latex(text)
     cleaned = normalize_cjk_spacing(text, target_lang=target_lang)
     spaced = apply_pangu_spacing(cleaned, target_lang=target_lang)
     return normalize_cjk_punctuation(spaced, target_lang=target_lang)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 from collections import Counter
 from pathlib import Path
 
@@ -9,7 +8,6 @@ import pytest
 from pdf_builders import write_text_pdf, write_two_column_pdf
 
 from ubt.adapters.factory import get_adapter_for_path
-from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
 from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
 from ubt.analyze.bridge import blocks_from_document, document_from_blocks
 from ubt.core.ir.models import IRBlock
@@ -47,11 +45,11 @@ def _blocks(path: Path, *, pdf_engine: str) -> list[IRBlock]:
     return asyncio.run(collect())
 
 
-def test_auto_routes_to_docling_even_for_single_column_prose(tmp_path: Path) -> None:
-    if importlib.util.find_spec("docling") is None:
-        pytest.skip("docling is not installed; the refusal path is pinned separately")
+def test_auto_routes_born_digital_prose_to_native(tmp_path: Path) -> None:
+    from ubt.adapters.pdf.native_adapter import NativePDFAdapter
+
     pdf = write_text_pdf(tmp_path / "single.pdf", [_PAGE_ONE])
-    assert isinstance(get_adapter_for_path(pdf, pdf_engine="auto"), DoclingPDFAdapter)
+    assert isinstance(get_adapter_for_path(pdf, pdf_engine="auto"), NativePDFAdapter)
     assert isinstance(get_adapter_for_path(pdf, pdf_engine="pdfium"), PDFiumAdapter)
 
 

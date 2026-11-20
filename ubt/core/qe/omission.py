@@ -299,6 +299,14 @@ def _match_term_surfaces(term: str, target: str, source: str = "") -> list[str] 
     if re.search(rf"{_STRICT_LB}{esc}{_STRICT_RB}", target):
         return [term]
 
+    # A draft that typesets an identifier in LaTeX math escapes its underscore
+    # (``lm\_head``, also inside ``\text{lm\_head}``). The identifier did not
+    # change; only its markup did, so accept the escaped surface.
+    if "_" in term:
+        latex_escaped = esc.replace("_", r"\\_")
+        if re.search(rf"{_STRICT_LB}{latex_escaped}{_STRICT_RB}", target):
+            return [term]
+
     # Universal cross-domain acronyms & translatable terms (e.g. NLP -> 自然语言处理, CPU -> 处理器).
     # Match with strict token boundaries: a bare substring test lets a singular
     # entry ("FinFET") verify against the plural in the target ("FinFETs") and
@@ -743,7 +751,8 @@ class OmissionGate:
         # normalizing: the zh normalizer would otherwise read '百万' as '100万'
         # first and lose the magnitude.
         target_view = normalize_for_numeric_matching(
-            _RANGE_FOLD_RE.sub("-", magnitude_rewritten(tgt)), lang=self.target_lang
+            _RANGE_FOLD_RE.sub("-", magnitude_rewritten(tgt)).replace(r"\_", "_"),
+            lang=self.target_lang,
         )
         tgt_grams = _char_ngrams(target_view, self.ngram_sizes)
         overlap = sum(min(cnt, tgt_grams[gram]) for gram, cnt in src_grams.items())

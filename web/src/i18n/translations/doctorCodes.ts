@@ -109,7 +109,7 @@ export const doctorCodesZh: DoctorCodeTables = {
     'pdf_engine.docling_missing':
       '未安装高精度版面解析组件；需要该模式的任务会直接报错，而不是静默丢失表格、图与公式',
     'pdf_engine.pdfium': '快速解析可用；扫描版文档会自动改用高精度解析',
-    'pdf_engine.auto_docling': '自动使用高精度版面解析',
+    'pdf_engine.auto_native': '自动使用原位流修补解析（扫描件回退至高精度解析）',
     'pdf_engine.auto_missing':
       '自动模式需要高精度版面解析组件，但当前未安装；PDF 会退回基础解析，表格、图与公式可能丢失',
     'pdf_engine.registered': '解析方式：{engine}',

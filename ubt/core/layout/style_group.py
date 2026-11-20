@@ -244,24 +244,6 @@ class StyleGroupPlan:
     def exception_pages(self) -> tuple[int, ...]:
         return tuple(sorted(exception.page for exception in self.exceptions))
 
-    def replacing_exceptions(self, exceptions: Sequence[StyleGroupException]) -> StyleGroupPlan:
-        """Swap the *predicted* exceptions for the ones the renderer actually hit.
-
-        The planner works from a fast approximation of each page's text records;
-        the renderer works from the real ones (multi-region flow, obstacles,
-        heading boxes). When those disagree the renderer wins, because it is the
-        side that placed the glyphs — but the decision itself (size, rung) stands,
-        and the difference stays visible in ``rounds``.
-        """
-        return StyleGroupPlan(
-            group=self.group,
-            exceptions=tuple(sorted(exceptions, key=lambda exception: exception.page)),
-            rounds=self.rounds,
-            page_source_sizes=dict(self.page_source_sizes),
-            deferred_pages=self.deferred_pages,
-            policy=self.policy,
-        )
-
     def to_metadata_dict(self) -> dict[str, Any]:
         """Serialize for ``manifest.metadata["document_style_group"]``."""
         return {

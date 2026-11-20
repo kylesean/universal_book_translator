@@ -138,7 +138,11 @@ def test_source_command_set_expands_unicode_accents() -> None:
         ("", r"\left\llbracket x \right\rrbracket", []),
         ("", r"\left\lfloor x \right\rfloor", []),
         ("", r"\leftrightarrow", []),
-        ("v", r"\mathbf{v}", ["mathbf"]),
+        # ``\mathbf`` compiles (math_transpiler._FONT_FN maps it to bold()), so a
+        # faithful bold symbol is not a fabricated command.
+        ("v", r"\mathbf{v}", []),
+        ("v", r"\boldsymbol{v}", []),
+        ("v", r"\mathit{v}", []),
     ],
 )
 def test_novel_unsupported_latex_commands(source: str, target: str, expected: list[str]) -> None:
@@ -153,7 +157,9 @@ def test_blackboard_letter_identity_is_compared() -> None:
 def test_renderable_command_set_contains_the_documented_members() -> None:
     assert {"text", "mathrm", "frac", "in", "alpha"} <= RENDERABLE_LATEX_COMMANDS
     assert {"hat", "tilde", "vec", "bar", "overline", "dot", "ddot"} <= (RENDERABLE_LATEX_COMMANDS)
-    assert {"mathbb", "mathfrak", "mathcal"} <= RENDERABLE_LATEX_COMMANDS
+    assert {"mathbb", "mathfrak", "mathcal", "mathbf", "boldsymbol", "mathit"} <= (
+        RENDERABLE_LATEX_COMMANDS
+    )
 
 
 def test_renderable_commands_are_the_render_table_not_a_hand_mirror() -> None:

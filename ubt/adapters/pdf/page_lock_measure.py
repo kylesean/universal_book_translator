@@ -11,8 +11,11 @@ floor.
 Two of the three resulting signals are translation-independent, so they are
 real measurements rather than estimates:
 
-* **source overlap** — source boxes that collide cannot be reproduced 1:1 at
-  any size, whatever the translation says;
+* **source overlap** — body-text boxes that collide cannot be reproduced 1:1,
+  whatever the translation says. The check runs on body lines only, and per
+  column: pdfium reports punctuation, superscripts and table cells as their
+  own "lines", and a flat per-page list would compare a left-column line with
+  a right-column one. Both were false vetoes before they were filtered;
 * **geometric headroom** — the largest uniform size at which the page's *own*
   text still fits. That bounds how much expansion a translation can absorb
   before the page must spill, which is what ``expansion_risk`` reports.
@@ -28,10 +31,12 @@ from __future__ import annotations
 
 import logging
 import statistics
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK
 from ubt.render.layout_solver import FLOOR_PT, check_source_overlap, fits_all, solve_page_2d
 
 logger = logging.getLogger(__name__)
@@ -51,6 +56,106 @@ _HIGH_CAPACITY = 1.10
 #: A page whose text covers less than this share of the page is front matter,
 #: a plate, or a mostly-empty page; its headroom says nothing about body flow.
 _MIN_TEXT_AREA_SHARE = 0.005
+
+#: A body line must be at least this wide and this tall. pdfium splits a stray
+#: comma, a superscript or a table cell into its own "line": a 1.3pt-wide
+#: fragment is ink, not a paragraph, and must not veto the page.
+_MIN_BODY_LINE_WIDTH_PT = 20.0
+_MIN_BODY_LINE_HEIGHT_PT = 4.0
+_MAX_BODY_LINE_HEIGHT_PT = 22.0
+
+#: Lines set well below the page's own median size are captions, figure axis
+#: labels or table cells. They are placed as exhibits, never re-flowed as body
+#: text, so they must not vote in the body-floor check either.
+_MIN_BODY_SIZE_RATIO = 0.80
+
+#: Body prose shares a left margin; figures, charts and centred headings do
+#: not. When one margin carries at least this share of the page's glyphs it is
+#: the body column and everything else on the page (axis labels, chart keys,
+#: table cells) is an exhibit, not a paragraph.
+_MIN_MARGIN_SHARE = 0.50
+_MARGIN_TOLERANCE_PT = 8.0
+
+#: Records whose left edge starts this far across the page belong to the right
+#: column. Two-column pages must be checked per column; a flat list compares a
+#: left-column line against a right-column one and calls them stacked.
+_COLUMN_SPLIT_SHARE = 0.50
+
+
+def _body_lines(lines: list[Any]) -> list[Any]:
+    """The lines that can carry a body-text claim.
+
+    ``_line_records`` used to convert every pdfium line, so a 1.3pt comma
+    fragment sitting inside a body line's box read as a paragraph that
+    overlapped it, and the router vetoed the whole document. Keep the lines
+    that are wide enough and tall enough to be prose, then drop the ones set
+    far below the page's own median size (table cells, axis labels, footnote
+    marks). Mirrors ``probe_facsimile._body_lines`` and the ``0.8 × main`` rule
+    already used by :mod:`ubt.adapters.pdf.textgeom`.
+    """
+    candidates: list[tuple[Any, float]] = []
+    for line in lines:
+        text = (line.text or "").strip()
+        if not text:
+            continue
+        x0, y0, x1, y1 = (float(v) for v in line.rect)
+        width = x1 - x0
+        height = y1 - y0
+        if width <= _MIN_BODY_LINE_WIDTH_PT:
+            continue
+        if not (_MIN_BODY_LINE_HEIGHT_PT < height < _MAX_BODY_LINE_HEIGHT_PT):
+            continue
+        size = float(getattr(line, "font_size", 0.0) or 0.0)
+        if size <= 0.0:
+            size = height * 0.78
+        candidates.append((line, size))
+    if not candidates:
+        return []
+    median = statistics.median(size for _, size in candidates)
+    cutoff = median * _MIN_BODY_SIZE_RATIO
+    kept = [(line, size) for line, size in candidates if size >= cutoff]
+    if not kept:
+        return []
+
+    # A figure's labels are the same size as body text, so size alone cannot
+    # separate them. They do not share the body's left margin, though: keep the
+    # modal margin when it carries most of the page, and leave the records
+    # untouched when no margin dominates (a genuine two-column page).
+    margins: Counter[int] = Counter()
+    for line, _ in kept:
+        margins[round(float(line.rect[0]) / 4.0) * 4] += len((line.text or "").strip())
+    total = sum(margins.values())
+    ranked = margins.most_common(2)
+    modal, weight = ranked[0]
+    runner_up = ranked[1][1] / total if len(ranked) > 1 and total else 0.0
+    # Two comparable margins are two columns, not one body and a figure; leave
+    # them for ``_column_groups`` to split.
+    if total and weight / total >= _MIN_MARGIN_SHARE and runner_up < _MIN_MARGIN_SHARE - 0.2:
+        return [
+            line for line, _ in kept if abs(float(line.rect[0]) - modal) <= _MARGIN_TOLERANCE_PT
+        ]
+    return [line for line, _ in kept]
+
+
+def _column_groups(records: list[dict[str, Any]], page_width: float) -> list[list[dict[str, Any]]]:
+    """Split records into left/right columns when the page really has two.
+
+    A single flat list is returned for a one-column page (or for a page where
+    one side holds too little text to be a column), which keeps the overlap
+    check identical to before on ordinary prose.
+    """
+    if page_width <= 0.0 or not records:
+        return [records]
+    split = page_width * _COLUMN_SPLIT_SHARE
+    left = [r for r in records if float(r["x0"]) < split]
+    right = [r for r in records if float(r["x0"]) >= split]
+    # Full-width prose crossing the split means the page is one column, however
+    # much text happens to start on the right (a chart, a table). One or two
+    # crossing lines are a spanning heading or caption and do not change that.
+    crossing = [r for r in records if float(r["x0"]) < split - 5.0 and float(r["x1"]) > split + 5.0]
+    if len(left) >= 3 and len(right) >= 3 and len(crossing) < 3:
+        return [left, right]
+    return [records]
 
 
 @dataclass(frozen=True)
@@ -170,13 +275,17 @@ def measure_page_lock(
         return PageLockMeasurement(measured=False, reasons=("pdfium unavailable",))
 
     try:
-        pdf = pdfium.PdfDocument(str(pdf_path))
+        # Opening and querying the page count both walk libpdfium's global
+        # state; they must hold the same lock as every other pdfium entry.
+        with PDFIUM_LOCK:
+            pdf = pdfium.PdfDocument(str(pdf_path))
+            page_count = len(pdf)
     except Exception as exc:  # noqa: BLE001
         logger.debug("Page-lock probe could not open %s: %s", pdf_path, exc)
         return PageLockMeasurement(measured=False, reasons=("document unreadable",))
 
     try:
-        page_numbers = _sample_page_numbers(len(pdf), max_pages)
+        page_numbers = _sample_page_numbers(page_count, max_pages)
         if not page_numbers:
             return PageLockMeasurement(measured=False, reasons=("no pages",))
 
@@ -185,6 +294,7 @@ def measure_page_lock(
         capacities: list[float] = []
         failing: list[int] = []
         examined = 0
+        ignored_fragments = 0
 
         for page_no in page_numbers:
             try:
@@ -192,7 +302,9 @@ def measure_page_lock(
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Page-lock probe skipped page %d: %s", page_no, exc)
                 continue
-            records, source_size, leading = _line_records(lines)
+            body_lines = _body_lines(lines)
+            ignored_fragments += len(lines) - len(body_lines)
+            records, source_size, leading = _line_records(body_lines)
             if not records or source_size <= 0.0:
                 continue
             page_area = float(page_size[0]) * float(page_size[1])
@@ -202,13 +314,14 @@ def measure_page_lock(
             examined += 1
             sampled.append(page_no)
 
-            if check_source_overlap([records]):
+            columns = _column_groups(records, float(page_size[0]))
+            if check_source_overlap(columns):
                 overlapping.append(page_no)
                 continue
 
             em_ratio = max(1.15, min(1.65, leading / source_size if source_size else 1.33))
             solution = solve_page_2d(
-                [records],
+                columns,
                 source_size_pt=source_size,
                 source_leading_pt=leading,
                 floor_pt=floor_pt,
@@ -226,11 +339,18 @@ def measure_page_lock(
 
         reasons: list[str] = []
         feasible = True
+        if ignored_fragments:
+            # Named so a reader can tell a veto from probe housekeeping: these
+            # are punctuation splits, superscripts, table cells and axis
+            # labels, none of which is a body paragraph.
+            reasons.append(
+                f"ignored {ignored_fragments} punctuation/subscript/table fragment(s) "
+                "that pdfium reports as separate lines"
+            )
         if overlapping:
             feasible = False
             reasons.append(
-                f"source boxes overlap on page(s) {', '.join(map(str, overlapping[:5]))}: "
-                "a 1:1 page lock cannot reproduce them at any size"
+                f"source body boxes overlap on page(s) {', '.join(map(str, overlapping[:5]))}"
             )
         if failing:
             feasible = False
@@ -260,4 +380,5 @@ def measure_page_lock(
     finally:
         with_close = getattr(pdf, "close", None)
         if callable(with_close):
-            with_close()
+            with PDFIUM_LOCK:
+                with_close()

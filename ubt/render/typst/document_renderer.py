@@ -2218,14 +2218,36 @@ class TypstDocumentRenderer:
         """Crop an uncompilable display formula from ``source_pdf`` at 300 DPI (§8.9)."""
         if self.source_pdf is None or not self.source_pdf.exists():
             return None
-        from ubt.render.typst.page_locked_renderer import make_formula_cropper
-
-        crop_name = make_formula_cropper(build_dir, self.source_pdf)(block)
-        if not crop_name:
-            return None
         bbox = getattr(block, "bbox", None)
+        if bbox is None or getattr(bbox, "page", 0) < 1:
+            return None
+        w = float(bbox.x1) - float(bbox.x0)
+        h = float(bbox.y1) - float(bbox.y0)
+        if w < 8.0 or h < 4.0:
+            return None
+        safe_id = re.sub(r"[^A-Za-z0-9._-]+", "-", str(block.id)).strip("-") or "formula"
+        target = build_dir / f"formula-crop-{safe_id}-p{int(bbox.page)}.png"
+        if not target.exists():
+            try:
+                from ubt.adapters.pdf.visual_scalpel import FIGURE_ASSET_DPI, delivered_crop_pil
+
+                cropped = delivered_crop_pil(
+                    self.source_pdf, int(bbox.page), bbox, dpi=FIGURE_ASSET_DPI
+                )
+                if getattr(cropped, "width", 0) < 4 or getattr(cropped, "height", 0) < 4:
+                    return None
+                restrict_dir_to_owner(build_dir)
+                cropped.save(target)
+            except Exception as exc:
+                import logging
+
+                logging.getLogger(__name__).debug(
+                    "Formula raster fallback failed for %s: %s", block.id, exc
+                )
+                return None
+        crop_name = target.name
         col_w = self.text_width_pt()
-        raw_w = float(bbox.x1 - bbox.x0) if bbox is not None else col_w
+        raw_w = float(bbox.x1 - bbox.x0)
         img_w = min(max(8.0, raw_w), col_w if col_w > 0 else raw_w)
         return f'#figure(image("{crop_name}", width: {img_w:.1f}pt), numbering: none)'
 
@@ -2252,9 +2274,17 @@ class TypstDocumentRenderer:
     ) -> str:
         """``render_prose`` bound to this renderer's compile gate."""
         if not runs:
-            from ubt.render.typst.container_repair import inject_soft_breaks
+            from ubt.render.typst.container_repair import (
+                inject_soft_breaks,
+                materialize_soft_breaks,
+            )
 
+            # Soft-break marks are materialized only after escaping: injected
+            # earlier, ``#h(0pt, weak: true)`` is escaped to visible text.
             text = inject_soft_breaks(text)
+            soft_breaks = True
+        else:
+            soft_breaks = False
         if getattr(self, "enable_kinsoku", False):
             from ubt.core.cleaners.kinsoku import (
                 apply_kinsoku_word_joiners,
@@ -2264,6 +2294,8 @@ class TypstDocumentRenderer:
             text = compress_cjk_punctuations(text)
             text = apply_kinsoku_word_joiners(text)
         rendered = render_prose(text, runs, is_math_ok=self._math_gate)
+        if soft_breaks:
+            rendered = materialize_soft_breaks(rendered)
         topology = getattr(self, "citation_topology", None)
         if topology is not None:
             from ubt.core.references.linker import inject_hyperlinks
@@ -2565,7 +2597,7 @@ class TypstDocumentRenderer:
             if block_page is not None and block_page != last_page_emitted:
                 last_page_emitted = block_page
                 if getattr(self, "enable_xref", False):
-                    body.append(f'[#metadata("page-start") <page-{last_page_emitted}>]')
+                    body.append(f'#metadata("page-start") <page-{last_page_emitted}>')
 
             if should_render_toc and i in toc_by_insertion_point:
                 flush_figure()
@@ -2691,7 +2723,7 @@ class TypstDocumentRenderer:
                     )
                     header_markup = render_chapter_header_typst(text, decor_cfg.header)
                     if anchor_suffix:
-                        header_markup = f"{header_markup}\n[#metadata(()) {anchor_suffix.strip()}]"
+                        header_markup = f"{header_markup}\n#metadata(()) {anchor_suffix.strip()}"
                     body.append(self._maybe_pair(block, header_markup))
                     chapter_needs_dropcap = True
                     self.stats.blocks_rendered += 1
@@ -3008,7 +3040,7 @@ class TypstDocumentRenderer:
                             ):
                                 self._emitted_anchors.add(anchor.anchor_id)
                                 code_anchor_prefix = (
-                                    f"[#metadata(()) <{anchor.anchor_id}>] {code_anchor_prefix}"
+                                    f"#metadata(()) <{anchor.anchor_id}> {code_anchor_prefix}"
                                 )
                     body.append(
                         f"{code_anchor_prefix}{_raw_block_markup(kept, container_width_pt=self._table_width_pt())}"
@@ -3048,7 +3080,7 @@ class TypstDocumentRenderer:
                                     break
                         if aid and aid not in self._emitted_anchors:
                             self._emitted_anchors.add(aid)
-                            anchor_prefix = f"[#metadata(()) <{aid}>] "
+                            anchor_prefix = f"#metadata(()) <{aid}> "
 
                     body.append(f"{anchor_prefix}{self._prose(kept)}")
                     self.stats.blocks_rendered += 1
@@ -3136,7 +3168,7 @@ class TypstDocumentRenderer:
                         and anchor.anchor_id not in self._emitted_anchors
                     ):
                         self._emitted_anchors.add(anchor.anchor_id)
-                        rendered_prose = f"[#metadata(()) <{anchor.anchor_id}>] {rendered_prose}"
+                        rendered_prose = f"#metadata(()) <{anchor.anchor_id}> {rendered_prose}"
             if getattr(self, "enable_notes", False):
                 from ubt.core.notes.manager import (
                     inject_endnote_links_into_text,
@@ -3267,7 +3299,7 @@ class TypstDocumentRenderer:
                     and anchor.anchor_id not in self._emitted_anchors
                 ):
                     self._emitted_anchors.add(anchor.anchor_id)
-                    anchor_prefix = f"[#metadata(()) <{anchor.anchor_id}>] {anchor_prefix}"
+                    anchor_prefix = f"#metadata(()) <{anchor.anchor_id}> {anchor_prefix}"
                     skip_anchors.add(anchor.anchor_id)
         if _keeps_source(block):
             return f"{anchor_prefix}{self._prose((block.source_text or '').strip(), skip_anchors=skip_anchors or None)}"

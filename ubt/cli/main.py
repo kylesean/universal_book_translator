@@ -334,7 +334,7 @@ def _event_label(event_type: EventType) -> str:
         EventType.REPAIR_STARTED: "Starting repair",
         EventType.REPAIR_PROGRESS: "Repair in progress",
         EventType.REPAIR_BATCH_COMPLETED: "Repair batch done",
-        EventType.RENDER_STARTED: "Rendering document with Typst",
+        EventType.RENDER_STARTED: "Rendering document",
         EventType.TRIAGE_COMPLETED: "Triage done",
         EventType.CTEXT_COMPLETED: "Context pass done",
         EventType.CHAPTER_COMPLETED: "Chapter complete",

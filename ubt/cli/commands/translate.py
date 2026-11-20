@@ -627,7 +627,7 @@ def translate(
         PdfEngine | None,
         typer.Option(
             "--pdf-engine",
-            help="PDF 解析引擎：'auto'（默认，恒用无损 docling 引擎）、'pdfium'（强制快速文本提取——其读取器无法表示表格/图/公式，交付的书会缺这些内容，仅适用于已知纯散文的文档）、或 'docling'（强制无损引擎）",
+            help="PDF 解析引擎：'auto'（默认，原生 PDF 走 1:1 原位内容流引擎 native，扫描件自动走 docling 重排）、'native'（强制 1:1 原位内容流引擎）、'docling'（Typst 重排）、或 'pdfium'（轻量纯文本快速路径）",
             show_default=False,
         ),
     ] = None,
@@ -728,14 +728,6 @@ def translate(
                 "post-editing) would ship unverified. Default refuses; when "
                 "allowed, the quality report lists every unverified block id"
             ),
-            show_default=False,
-        ),
-    ] = None,
-    enable_cels: Annotated[
-        bool | None,
-        typer.Option(
-            "--enable-cels/--no-enable-cels",
-            help="Enable CELS layout synthesis (pass --no-enable-cels to rollback to legacy 2D packing)",
             show_default=False,
         ),
     ] = None,
@@ -888,7 +880,6 @@ def translate(
         "allow_degrade": allow_degrade,
         "allow_major": allow_major,
         "export_allow_needs_human": allow_needs_human,
-        "enable_cels": enable_cels,
         "enable_dynamic_routing": dynamic_routing,
         "flagship_model": flagship_model,
         "budget_model": budget_model,

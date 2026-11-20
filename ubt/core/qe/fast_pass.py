@@ -37,6 +37,7 @@ from ubt.core.qe.omission import (
 from ubt.core.qe.term_shape import is_identifier_shaped, is_verbatim_carryover
 from ubt.core.validators.consistency import NumericConsistencyValidator
 from ubt.core.validators.html_delta import HTMLDeltaValidator
+from ubt.core.validators.inline_tags import strip_inline_tags, validate_inline_tags
 from ubt.core.validators.math_guard import (
     novel_unsupported_latex_commands,
     target_missing_math_delimiters,
@@ -138,7 +139,9 @@ _URL_RE = re.compile(
     r"https?://[^\s<>\"" + CJK_BMP_CLASS + r"]+|www\.[^\s<>\"" + CJK_BMP_CLASS + r"]+",
     re.IGNORECASE,
 )
-_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+_EMAIL_RE = re.compile(
+    r"(?:\{[A-Za-z0-9._%+-]+(?:,\s*[A-Za-z0-9._%+-]+)+\}|[A-Za-z0-9._%+-]+)@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+)
 # Untranslatable residue stripped before script-density measurement.
 # Citation markers, markdown table structure, numerals and isolated
 # single letters (K/V/x formula debris) must survive translation verbatim
@@ -162,6 +165,7 @@ _LETTER_RE = re.compile(r"[^\W\d_]")
 #: is ``[A-Z]+_MASK_`` (SOUP/MATH/CITE/CODE/EMAIL); emphasis markers such as
 #: ``⟦B⟧`` deliberately do not match.
 _RESIDUAL_MASK_TOKEN_RE = re.compile(r"[⟦\[【]?[A-Z]+_MASK_\d{4}-[0-9a-z]{1,3}[⟧\]】]?")
+_INLINE_ANCHOR_PRESENT_RE = re.compile(r"<[a-z]\d+\s*/?>")
 #: English-word-equivalent weight of one CJK glyph in the length-ratio gate.
 #: EN→ZH prose compresses to roughly 0.35–0.6 raw characters per source
 #: character; counting a Han glyph as ~2.2 source characters (one word ≈ 4.4
@@ -1097,6 +1101,19 @@ class FastPassFilter:
                 length_ratio=0.0,
             )
 
+        if not skip_translate and _INLINE_ANCHOR_PRESENT_RE.search(src_clean):
+            tag_res = validate_inline_tags(src_clean, tgt_clean)
+            if not tag_res.valid:
+                return FastPassDecision(
+                    passed=False,
+                    reason=(
+                        f"Inline anchor tag mismatch ({tag_res.errors[0]}): "
+                        "preserve every <fN/> rigid tag and balanced <bN>/<iN> style tag verbatim"
+                    ),
+                    target_ratio=0.0,
+                    length_ratio=0.0,
+                )
+
         # 1b. Verbatim echo. The reason doubles as the repair instruction.
         # Skipped for a rehearsal run: its echo is source-identical on purpose.
         if (
@@ -1343,7 +1360,10 @@ class FastPassFilter:
         # of the length band, the invented sentences actively mask the real
         # sentence they displace. The probe is 0-token and language-agnostic;
         # the reason doubles as the repair instruction (surfaced verbatim).
-        added = self.added_content_gate.evaluate(src_clean, tgt_clean)
+        added = self.added_content_gate.evaluate(
+            strip_inline_tags(src_clean).strip(),
+            strip_inline_tags(tgt_clean).strip(),
+        )
         if not added.passed:
             return FastPassDecision(
                 passed=False,
@@ -1397,6 +1417,8 @@ class FastPassFilter:
 
         src_clean = source_text.strip()
         tgt_clean = target_text.strip()
+        src_plain = strip_inline_tags(src_clean).strip()
+        tgt_plain = strip_inline_tags(tgt_clean).strip()
         _is_prose = _is_prose_block(block_type)
         # A block the run decided to ship verbatim (formula, code, table chrome)
         # is *supposed* to arrive in the source language. Every language gate
@@ -1408,7 +1430,7 @@ class FastPassFilter:
         language_identity_applies = not skip_translate
 
         # 4. Standalone number preservation check
-        num_res = self.numeric_validator.validate(src_clean, tgt_clean)
+        num_res = self.numeric_validator.validate(src_plain, tgt_plain)
         if not num_res.is_valid:
             return FastPassDecision(
                 passed=False,
@@ -1436,17 +1458,17 @@ class FastPassFilter:
         # ``_CJK_SCRIPT_RE`` is the module-level compile of this class: the
         # length gate runs per drafted block, so the count must not rebuild a
         # pattern per character.
-        cjk_chars = len(_CJK_SCRIPT_RE.findall(tgt_clean))
-        informative_tgt = len(tgt_clean) + cjk_chars * (_CJK_CHAR_WORD_EQUIVALENT - 1)
-        length_ratio = informative_tgt / max(1, len(src_clean))
+        cjk_chars = len(_CJK_SCRIPT_RE.findall(tgt_plain))
+        informative_tgt = len(tgt_plain) + cjk_chars * (_CJK_CHAR_WORD_EQUIVALENT - 1)
+        length_ratio = informative_tgt / max(1, len(src_plain))
         # Short headings/phrases (e.g. "Introduction" -> "引言", ratio 0.17) in contractive
         # language pairs (e.g. Latin to CJK with min_length_ratio < 0.5) legitimately
         # contract to 2+ characters without terminal sentence punctuation.
         is_short_heading_contraction = (
             self.min_length_ratio < 0.5
-            and len(src_clean) <= 25
-            and len(tgt_clean) >= 2
-            and not any(src_clean.endswith(p) for p in (".", "?", "!", ";", "。", "？", "！", "；"))
+            and len(src_plain) <= 25
+            and len(tgt_plain) >= 2
+            and not any(src_plain.endswith(p) for p in (".", "?", "!", ";", "。", "？", "！", "；"))
         )
         if length_ratio < self.min_length_ratio and not is_short_heading_contraction:
             return FastPassDecision(
@@ -1455,7 +1477,12 @@ class FastPassFilter:
                 target_ratio=0.0,
                 length_ratio=length_ratio,
             )
-        if length_ratio > self.max_length_ratio:
+        is_short_label_expansion = (
+            len(src_plain) <= 30
+            and len(tgt_plain) <= max(36, len(src_plain) * 3)
+            and not any(src_plain.endswith(p) for p in (".", "?", "!", ";", "。", "？", "！", "；"))
+        )
+        if length_ratio > self.max_length_ratio and not is_short_label_expansion:
             return FastPassDecision(
                 passed=False,
                 reason=f"Target text suspiciously inflated (ratio={length_ratio:.2f})",
@@ -1464,9 +1491,9 @@ class FastPassFilter:
             )
 
         omission = self.omission_gate.evaluate(
-            src_clean,
-            tgt_clean,
-            is_table=True if ((not _is_prose) or bool(markdown_grid_shape(src_clean))) else None,
+            src_plain,
+            tgt_plain,
+            is_table=True if ((not _is_prose) or bool(markdown_grid_shape(src_plain))) else None,
             block_type=block_type,
         )
         if not omission.passed and language_identity_applies:
@@ -1507,7 +1534,7 @@ class FastPassFilter:
         # an ordinary word, or the residue the density gate depends on would be
         # erased (``T5-Base`` must keep leaving ``Base`` behind).
         preserved = {
-            m.group(0) for m in _VERBATIM_TERM_RE.finditer(src_clean) if len(m.group(0)) >= 2
+            m.group(0) for m in _VERBATIM_TERM_RE.finditer(src_plain) if len(m.group(0)) >= 2
         }
         for term in preserved:
             if is_verbatim_carryover(term) or (

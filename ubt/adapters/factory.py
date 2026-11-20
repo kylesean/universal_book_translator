@@ -12,6 +12,7 @@ from ubt.adapters.html.adapter import HTMLAdapter
 from ubt.adapters.markdown.adapter import MarkdownAdapter
 from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
 from ubt.adapters.pdf.encryption import reject_encrypted_pdf
+from ubt.adapters.pdf.native_adapter import NativePDFAdapter
 from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile
 from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
 from ubt.core.exceptions import (
@@ -88,48 +89,28 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
     if engine_key == "babeldoc":
         raise UnsupportedDocumentFormatError(
             "BabelDOC engine is deprecated and removed due to licensing constraints "
-            "and upstream CLI contract incompatibility. Please use pdf_engine='docling' (MIT/Apache-2.0)."
+            "and upstream CLI contract incompatibility. Please use pdf_engine='native' or 'docling'."
         )
     if engine_key in ("auto", "pdfium"):
-        # ``auto`` is the lossless docling engine, unconditionally: the probe
-        # reports what the document contains, it does not vote on the engine.
-        # ``pdfium`` is an explicit fast-path opt-in: it stays on the fast path
-        # for every fuzzy signal, but
-        # a scanned (text-less) document still escapes to docling — pdfium
-        # extracts zero blocks from one, which is a capability boundary, not a
-        # routing preference.
-        if path is None or engine_key == "auto":
-            # No path to probe (a registry lookup) is conservative for an
-            # explicit ``pdfium``; ``auto`` never consults the probe at all.
-            engine_key = "docling" if engine_key == "auto" else "pdfium"
+        if path is None:
+            engine_key = "native" if engine_key == "auto" else "pdfium"
         else:
-            # ``inspect_pdf_profile`` is total: every return point builds a
-            # profile (``pdf_profiler``), and its own broad except returns the
-            # docling default. The old ``except → pdfium`` branch and the
-            # ``plan is None`` fallthrough were therefore unreachable, and
-            # ``plan.primary_engine`` was a constant "docling".
             plan = inspect_pdf_profile(path)
             if plan.has_scan:
                 logger.warning(
-                    "'%s' looks scanned (pages without a text layer); pdfium would "
-                    "extract 0 blocks, so routing it to docling for OCR-grade ingest.",
+                    "'%s' looks scanned (pages without a text layer); routing it to docling for OCR-grade ingest.",
                     path.name,
                 )
                 engine_key = "docling"
+            elif engine_key == "auto":
+                engine_key = "native"
             else:
-                # An explicit ``pdfium`` request is honoured, but never silently:
-                # pdfium's reader represents only headings, paragraphs, list items
-                # and code, so every table, figure and formula in the document is
-                # dropped from the rebuilt PDF. The probe's signals say how likely
-                # that is, but they cannot rule it out (a vector-drawn figure reads
-                # as zero on all of them).
                 logger.warning(
                     "pdfium requested for '%s': its reader cannot represent tables, "
                     "figures or formulas, so any the document contains are omitted "
                     "from the rebuilt PDF (probe signals — multicolumn=%s, "
                     "formulas=%s, vector-heavy=%s — are only a lower bound). "
-                    "Use --pdf-engine docling (or --preset standard) for lossless "
-                    "ingest.",
+                    "Use --pdf-engine native (default) for 1:1 in-place surgical delivery.",
                     path.name,
                     plan.has_multicolumn,
                     plan.has_formulas,
@@ -171,6 +152,7 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
 _PDF_ENGINE_REGISTRY.update(
     {
         "docling": DoclingPDFAdapter,
+        "native": NativePDFAdapter,
         "pdfium": PDFiumAdapter,
     }
 )

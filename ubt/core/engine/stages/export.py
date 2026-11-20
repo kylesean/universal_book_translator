@@ -35,8 +35,10 @@ from ubt.core.engine.reporter import (
 )
 from ubt.core.engine.stage_context import StageContext
 from ubt.core.exceptions import (
+    BudgetExceededError,
     IntegrityViolationError,
     JobInterruptedError,
+    LedgerWriterLeaseLostError,
     UBTError,
 )
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock
@@ -689,12 +691,18 @@ def _is_faithful_delivery(ctx: StageContext) -> bool:
     return mode in ("facsimile", "page_locked")
 
 
-def _faithful_expected_pages(ctx: StageContext) -> int | None:
+def _faithful_expected_pages(ctx: StageContext, rendered_path: Path | None = None) -> int | None:
     """Source page count a faithful delivery promised, or None when unknown.
 
     Only read for faithful runs. A page-count probe failure returns None, which
     the gate treats as "no contract stated" rather than comparing against a
     guess.
+
+    A ``--pages`` run promises the *slice*, not the whole document: a 5-page
+    delivery of pages 1-5 is a complete 1:1 lock. Comparing it with the source's
+    32 pages reported ``page_count_changed_faithful`` on every sliced run. The
+    delivery contract already made this distinction; the visual gate repeats it
+    here, and only when the artifact really holds exactly the requested pages.
     """
     if not _is_faithful_delivery(ctx):
         return None
@@ -705,6 +713,14 @@ def _faithful_expected_pages(ctx: StageContext) -> int | None:
     except Exception as exc:  # noqa: BLE001 - an unmeasured contract is stated as unmeasured
         logger.debug("Visual gate: source page count unavailable for %s: %s", ctx.input_path, exc)
         return None
+    selected = ctx.config.get_selected_pages()
+    if selected and rendered_path is not None and rendered_path.exists():
+        try:
+            rendered = pdf_page_count(rendered_path)
+        except Exception:  # noqa: BLE001 - fall back to the full-source contract
+            rendered = None
+        if rendered == len(selected) and count != rendered:
+            return len(selected)
     return count if count > 0 else None
 
 
@@ -714,6 +730,8 @@ async def _run_visual_gate(
     final_blocks: list[IRBlock],
     rendered_path: Path,
     render: RenderPlan,
+    *,
+    claims_finality: bool = True,
 ) -> tuple[Path, Path | None, Any]:
     """Post-render visual gate; never fatal except on cancel.
 
@@ -724,7 +742,11 @@ async def _run_visual_gate(
     """
     gate: Any = None
     visual_report_path: Path | None = None
-    if not ctx.config.visual_gate_enabled or rendered_path.suffix.lower() != ".pdf":
+    if (
+        not ctx.config.visual_gate_enabled
+        or rendered_path.suffix.lower() != ".pdf"
+        or getattr(adapter, "engine_name", None) == "native"
+    ):
         return rendered_path, visual_report_path, gate
     try:
         from ubt.core.engine.visual_verify_loop import VisualVerifyLoop
@@ -742,10 +764,11 @@ async def _run_visual_gate(
             visual_judge_enabled=ctx.config.visual_judge_enabled,
             visual_judge_model=ctx.config.visual_judge_model,
             cancel_token=ctx.cancel_token,
-            expected_page_count=_faithful_expected_pages(ctx),
+            expected_page_count=_faithful_expected_pages(ctx, rendered_path),
             faithful_pages=_is_faithful_delivery(ctx),
             thresholds=_gate_threshold_overrides(ctx),
             source_pdf=_source_pdf_for_gate(ctx),
+            claims_finality=claims_finality,
         )
         rendered_path, visual_report_path, gate = await verify_loop.run(
             rendered_path=rendered_path,
@@ -762,11 +785,10 @@ async def _run_visual_gate(
             )
         elif gate.skipped_reason:
             logger.info("Visual gate for job %s skipped: %s", ctx.job_id, gate.skipped_reason)
-    except JobInterruptedError:
-        # Cooperative cancellation (user cancel or lost lease) is raised from
-        # inside verify_loop.run and by the check below it; it must reach the
-        # pipeline's handler, not be reported as a non-fatal gate hiccup that
-        # then renders, writes the report and stamps the job "completed".
+    except (JobInterruptedError, LedgerWriterLeaseLostError, BudgetExceededError):
+        # Cooperative cancellation, lost writer lease, or hard budget exhaustion
+        # must propagate directly to the pipeline handler, not be downgraded into
+        # a non-fatal gate crash.
         raise
     except Exception as exc:
         logger.warning("Visual gate failed (non-fatal) for job %s: %s", ctx.job_id, exc)
@@ -959,6 +981,7 @@ def _delivery_translations(blocks: Sequence[IRBlock]) -> dict[str, str]:
     escaped onto the page. Stripping here keeps the PDF and the views agreeing.
     """
     from ubt.core.content.adapt import kept_in_source
+    from ubt.core.validators.inline_tags import strip_inline_tags
     from ubt.render.delivered_text import delivered_text
 
     placed: dict[str, str] = {}
@@ -969,7 +992,7 @@ def _delivery_translations(blocks: Sequence[IRBlock]) -> dict[str, str]:
             continue
         if kept_in_source(block):
             continue
-        placed[block.id] = delivered_text(block).strip()
+        placed[block.id] = strip_inline_tags(delivered_text(block)).strip()
     return placed
 
 
@@ -1502,7 +1525,12 @@ def _delivery_contract_evidence(
     actually produced this file: facsimile/page_locked promise a page-for-page
     artifact, reflow does not.
     """
-    from ubt.core.engine.delivery_contract import ContractBlock, OverflowRecord, StyleSample
+    from ubt.core.engine.delivery_contract import (
+        ContractBlock,
+        ContractTextBox,
+        OverflowRecord,
+        StyleSample,
+    )
     from ubt.core.ports import read_delivery_evidence
     from ubt.render.delivered_text import delivered_text, dropped_page_furniture, is_toc_entry
 
@@ -1517,7 +1545,10 @@ def _delivery_contract_evidence(
 
     mode = str(getattr(getattr(ctx.config, "typst", None), "delivery_mode", "") or "")
     actual_mode = str((getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_mode", "") or "")
-    if actual_mode in ("reflow", "facsimile", "page_locked"):
+    is_native = getattr(adapter, "engine_name", None) == "native"
+    if is_native:
+        contract = "readable" if actual_mode == "reflow" else "faithful"
+    elif actual_mode in ("reflow", "facsimile", "page_locked"):
         # The renderer records what it actually shipped; a facsimile run that
         # degraded to reflow must be QA'd as readable, not as faithful.
         contract = legacy_delivery_contract(actual_mode).value
@@ -1543,6 +1574,8 @@ def _delivery_contract_evidence(
     # its 5.3pt grid characters win the body vote and the document read as a
     # 4.18pt body drift).
     selected_pages = ctx.config.get_selected_pages()
+    native_units = getattr(adapter, "last_units", None) or ()
+    native_unit_by_id = {str(u.unit_id): u for u in native_units} if is_native else {}
     exhibit_texts: list[str] = []
     for block in final_blocks:
         if dropped_page_furniture(block):
@@ -1568,6 +1601,17 @@ def _delivery_contract_evidence(
         if block.block_type in (BlockType.FORMULA, BlockType.IMAGE):
             continue
         text = delivered_text(block).strip()
+        if is_native and text:
+            from ubt.core.validators.inline_tags import strip_inline_tags
+
+            unit_meta = native_unit_by_id.get(block.id)
+            if unit_meta is not None:
+                for tok in getattr(unit_meta, "tokens", ()):
+                    if getattr(tok, "kind", None) == "rigid":
+                        raw_glyph = str(tok.payload.get("raw_text", "") or "")
+                        if raw_glyph:
+                            text = text.replace(f"<{tok.tag_id}/>", raw_glyph)
+            text = strip_inline_tags(text).strip()
         if not text:
             continue
         has_multi_page_boxes = False
@@ -1617,6 +1661,8 @@ def _delivery_contract_evidence(
                     expected_pages = len(selected_pages)
                 else:
                     expected_pages = src_count
+                if is_native and actual_mode == "interleaved" and expected_pages is not None:
+                    expected_pages *= 2
             except Exception as exc:  # noqa: BLE001 - a missing count is reported, not fatal
                 logger.debug("Delivery contract: source page count unavailable: %s", exc)
 
@@ -1666,9 +1712,64 @@ def _delivery_contract_evidence(
         missing_assets=missing_assets,
         overflow_records=overflow_records,
         style_samples=style_samples,
-        read_geometry=True,
+        read_geometry=not is_native,
         declared_page_expansion=declared_page_expansion,
     )
+    if is_native:
+        from collections import Counter
+
+        native_boxes: list[ContractTextBox] = []
+        native_samples_by_page: dict[int, Counter[float]] = {}
+        block_text_by_id = {cb.block_id: cb.text for cb in blocks}
+        bounds_by_page = dict(getattr(evidence, "page_bounds", {}) or {})
+        for unit in native_units:
+            upage = int(getattr(unit, "page_no", 0) or 0)
+            if upage <= 0 or (selected_pages and upage not in selected_pages):
+                continue
+            if not getattr(unit, "translate", True):
+                continue
+            meta = getattr(unit, "codec_meta", None) or {}
+            hint = getattr(unit, "box_hint", None) or {}
+            ubbox = meta.get("bbox")
+            usize = float(hint.get("font_size_pt", 0.0) or 0.0)
+            uid = str(getattr(unit, "unit_id", "") or "")
+            utext = block_text_by_id.get(uid) or str(getattr(unit, "source_plain", "") or "")
+            if isinstance(ubbox, (list, tuple)) and len(ubbox) == 4 and usize > 0.0 and utext:
+                x0, y0, x1, y1 = float(ubbox[0]), float(ubbox[1]), float(ubbox[2]), float(ubbox[3])
+                pbounds = bounds_by_page.get(upage)
+                if pbounds is not None:
+                    x0 = max(pbounds[0], x0)
+                    y0 = max(pbounds[1], y0)
+                    x1 = min(pbounds[2], x1)
+                    y1 = min(pbounds[3], y1)
+                if x1 > x0 and y1 > y0:
+                    native_boxes.append(
+                        ContractTextBox(
+                            page=upage,
+                            x0=x0,
+                            y0=y0,
+                            x1=x1,
+                            y1=y1,
+                            font_size_pt=round(usize, 2),
+                            block_id=uid or None,
+                            text=utext,
+                        )
+                    )
+                role_val = getattr(unit, "role", None)
+                if getattr(role_val, "value", role_val) == "paragraph":
+                    native_samples_by_page.setdefault(upage, Counter())[round(usize, 2)] += max(
+                        1, len(utext)
+                    )
+        native_samples = [
+            StyleSample(page=pno, size_pt=weights.most_common(1)[0][0])
+            for pno, weights in sorted(native_samples_by_page.items())
+            if weights
+        ]
+        evidence = dataclasses.replace(
+            evidence,
+            text_boxes=tuple(native_boxes),
+            style_samples=tuple(style_samples or native_samples),
+        )
 
     # The renderer declares the document body group before it draws; the reader
     # above supplies the sizes. Keeping the two apart is what
@@ -1747,27 +1848,6 @@ def _evaluate_delivery(
         plan_meta = (getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_plan")
         if isinstance(plan_meta, dict):
             payload["delivery_plan"] = plan_meta
-        page_distortions = []
-        geometry = (
-            page_geometry
-            if page_geometry is not None
-            else (getattr(adapter, "last_page_geometry", None) or [])
-        )
-        for page in geometry:
-            if "cels_distortion_score" in page:
-                page_distortions.append(
-                    {
-                        "page": page.get("page_no"),
-                        "score": page.get("cels_distortion_score"),
-                        "verdict": page.get("cels_distortion_verdict"),
-                        "deficit_pt": page.get("cels_deficit_pt"),
-                        "track_count": page.get("cels_track_count"),
-                        "is_multicolumn": page.get("cels_is_multicolumn"),
-                    }
-                )
-        if page_distortions:
-            payload["cels_distortions"] = page_distortions
-
         atomic_write_text(
             path,
             json.dumps(payload, ensure_ascii=False, indent=2),
@@ -2198,6 +2278,57 @@ async def run_export_stage(
         render_plan=render,
     )
 
+    # Bounded LLM overflow compaction for 1:1 native PDF delivery when text
+    # still exceeds its source container at the font floor.
+    native_overflows = getattr(adapter, "last_overflows", ())
+    native_units = getattr(adapter, "last_units", ())
+    if (
+        owning_run
+        and not ctx.is_mock_run
+        and getattr(adapter, "engine_name", None) == "native"
+        and native_overflows
+        and native_units
+        and getattr(ctx, "router", None) is not None
+    ):
+        from ubt.core.engine.overflow_compactor import compact_overflowing_units
+
+        units_by_id = {u.unit_id: u for u in native_units}
+        tgt_map = {b.id: (b.target_text or "") for b in final_blocks if b.target_text}
+        compaction = await compact_overflowing_units(
+            overflows=native_overflows,
+            units_by_id=units_by_id,
+            translations=tgt_map,
+            complete_fn=ctx.router.complete_raw,
+            target_lang=target_lang,
+        )
+        if compaction.compacted:
+            by_id = {b.id: b for b in final_blocks}
+            compact_ckpts: list[dict[str, Any]] = []
+            for uid, tighter in compaction.compacted.items():
+                blk = by_id.get(uid)
+                if blk is None:
+                    continue
+                blk.target_text = tighter
+                compact_ckpts.append(
+                    {
+                        "block_id": blk.id,
+                        "target_text": tighter,
+                        "status": blk.status,
+                        "error_flags": blk.error_flags,
+                    }
+                )
+            if compact_ckpts:
+                await asyncio.to_thread(ledger.save_checkpoints_batch, compact_ckpts)
+                rendered_path = await _render_adapter_output(
+                    adapter=adapter,
+                    manifest=manifest,
+                    blocks=final_blocks,
+                    target_lang=target_lang,
+                    output_path=target_output,
+                    bilingual_mode=effective_bilingual_mode,
+                    render_plan=render,
+                )
+
     # Render skip pass-through + length conservation, before the report is
     # built (see _apply_render_skip_ledger_pass). A re-export applies them in
     # memory only.
@@ -2291,7 +2422,7 @@ async def run_export_stage(
     # Enforcement is deferred until after _build_reports (below): a refusal
     # must still leave the quality/metrics reports on disk for audit.
     rendered_path, visual_report_path, gate = await _run_visual_gate(
-        ctx, adapter, final_blocks, rendered_path, render
+        ctx, adapter, final_blocks, rendered_path, render, claims_finality=owning_run
     )
 
     # Page geometry: what the facsimile solver measured off the source and what
@@ -2551,6 +2682,25 @@ async def run_export_stage(
                 ctx.job_id,
                 contract_summary,
                 sidecar_path(rendered_path, "delivery_contract.json"),
+            )
+
+    # Reader-visible machinery is never shippable, even in the default advisory
+    # mode: ``#h(0pt, weak: true)`` inside a reference URL or ``⟦ω=0.5⟧`` in a
+    # caption is not degraded prose a human can repair, it is the renderer's own
+    # syntax leaking into the book. Recorded by the contract just above; blocked
+    # here before the artifact is finalized (and therefore downloadable).
+    if delivery_report is not None and not ctx.is_mock_run:
+        reader_leaks = tuple(
+            finding
+            for finding in delivery_report.findings
+            if finding.code in {"reader_machinery_leak", "placeholder_leak"}
+        )
+        if reader_leaks:
+            detail = "; ".join(finding.message for finding in reader_leaks)
+            raise IntegrityViolationError(
+                f"Export blocked for job {ctx.job_id}: reader text contains "
+                f"unshippable machinery — {detail}. See "
+                f"{sidecar_path(rendered_path, 'delivery_contract.json')}."
             )
 
     # Enforce AFTER the reports are on disk so a refused job keeps its audit

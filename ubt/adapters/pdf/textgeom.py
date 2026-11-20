@@ -92,6 +92,7 @@ def _aggregate_line_styles(items: Sequence[LineBox]) -> tuple[float, bool, bool]
 #: typography actually present on the page.
 
 
+@pdfium_serialized
 def _probe_rect_font_style(
     textpage: Any, left: float, bottom: float, right: float, top: float
 ) -> tuple[float, bool, bool]:

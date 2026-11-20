@@ -78,18 +78,22 @@ def apply_dropcap_typst(text: str, config: DropCapConfig | None = None) -> str:
     if not cfg.enabled or not text.strip():
         return text
 
-    # Do not apply to headings, code, equations, or list markers
+    # Do not apply to headings, code, equations, escaped markers, or list markers
     trimmed = text.lstrip()
-    if trimmed.startswith(("#", "`", "$", "-", "*", ">", "|")):
+    if trimmed.startswith(("#", "`", "$", "-", "*", ">", "|", "\\")):
         return text
 
     prefix, letter, remainder = extract_dropcap_initial(text)
     if not letter:
         return text
 
-    # Escape Typst special syntax inside the letter and prefix
-    safe_prefix = prefix.replace("[", r"\[").replace("]", r"\]").replace('"', r"\"")
-    safe_letter = letter.replace("[", r"\[").replace("]", r"\]").replace('"', r"\"")
+    # Escape Typst string specials inside the letter and prefix (backslash first)
+    safe_prefix = (
+        prefix.replace("\\", r"\\").replace("[", r"\[").replace("]", r"\]").replace('"', r"\"")
+    )
+    safe_letter = (
+        letter.replace("\\", r"\\").replace("[", r"\[").replace("]", r"\]").replace('"', r"\"")
+    )
 
     return f'#ubt-dropcap("{safe_letter}", prefix: "{safe_prefix}", lines: {cfg.lines}, fill: rgb("{cfg.color}")){remainder}'
 

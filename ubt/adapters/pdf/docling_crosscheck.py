@@ -748,27 +748,73 @@ def _is_math_token(token: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z][A-Za-z0-9]?", core))
 
 
-def _is_pile_token(token: str) -> bool:
-    """A math token, or a bare number -- Docling's end-of-paragraph math pile
-    splits ``h0`` into ``h`` ``0``, so a trailing number may belong to it."""
-    return _is_math_token(token) or bool(re.fullmatch(r"\d+(?:[.,]\d+)*", _token_core(token)))
+#: Characters that only ever occur as math fragments (operators, sub/superscript
+#: markers, primes, bracket pieces) when they arrive as a standalone token.
+_PILE_FRAGMENT_CHARS = frozenset("_^=+-−*/|()[]{},.;:′″·×÷<>≤≥∑∏∈∀∃→←↔±∓⋅`'\"")
+#: A pdfium token that glued a variable to its function call (``softmax(z``).
+_FUNC_CALL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*\(")
+#: Primes that arrive as their own pdfium token: pdfium splits the glyph off the
+#: variable it belongs to (``h′`` -> ``h`` ``′``), so a lone prime is noise.
+_LONE_PRIMES = frozenset({"′", "″", "'", "’", "`", "´"})
+#: Operator glyphs that carry meaning on their own (``ω = 0``). A bare ``_`` or
+#: ``(`` normalizes to nothing and is line-segmentation debris, not math.
+_MATH_OPERATORS = frozenset("=+−-<>≤≥≈≠±×÷·⋅")
 
 
-def _pile_len(tokens: Sequence[str]) -> int:
-    """Length of Docling's trailing math pile, or 0.
+def _is_symbol_fragment(token: str) -> bool:
+    core = token.strip()
+    return bool(core) and all(char in _PILE_FRAGMENT_CHARS for char in core)
 
-    Only a run that contains at least one *letter-bearing* math token counts: a
-    paragraph merely ending in a bare number ("in Figure 4.") is prose, not a
-    pile, and must be left alone.
+
+def _is_pile_like(token: str) -> bool:
+    """Whether a trailing token can belong to Docling's end-of-paragraph pile.
+
+    Docling emits the pile as the *glyph soup* it pulled out of the sentence, so
+    it is not tokenised the way prose is: ``lm_head(coda(h′))`` arrives glued,
+    ``z = ′`` splits a prime from its variable, and ``pR,(1)`` carries the
+    subscript tuple. Classifying the pile token-by-token with
+    :func:`_is_math_token` (which expects one clean identifier) stops at the
+    first fragment and leaves the whole pile in the sentence.
     """
-    length = 0
-    has_letter = False
-    for token in reversed(tokens):
-        if not _is_pile_token(token):
+    core = token.strip()
+    if not core:
+        return True
+    if _is_math_token(core):
+        return True
+    if re.fullmatch(r"\d+(?:[.,]\d+)*[.,]?", core):
+        return True
+    if _is_symbol_fragment(core):
+        return True
+    if any(_is_math_char(char) for char in core):
+        return True
+    if _FUNC_CALL_RE.match(core):
+        return True
+    # A subscript tuple / call fragment: ``pR,(1)``, ``softmax(z``, ``head(coda``.
+    return bool(re.match(r"[A-Za-z]", core)) and any(mark in core for mark in "()_")
+
+
+def _pile_start(tokens: Sequence[str]) -> int:
+    """Index where Docling's trailing math pile begins, or ``len(tokens)``.
+
+    The scan runs right-to-left because the pile is a suffix. ``lm``/``head``
+    inside ``lm_head`` are ordinary words, so a bare word is accepted when the
+    token to its left is a math fragment (``_``): that is the only evidence that
+    it belongs to the glue, not the sentence. A run only counts as a pile when
+    it holds at least one letter-bearing math token -- a sentence ending in a
+    bare number is prose, not a pile.
+    """
+    index = len(tokens)
+    has_math = False
+    while index > 0 and len(tokens) - index <= 40:
+        token = tokens[index - 1]
+        usable = _is_pile_like(token) or (
+            token.isalpha() and index >= 2 and _is_symbol_fragment(tokens[index - 2])
+        )
+        if not usable:
             break
-        length += 1
-        has_letter = has_letter or _is_math_token(token)
-    return length if has_letter else 0
+        index -= 1
+        has_math = has_math or _is_math_token(token)
+    return index if has_math else len(tokens)
 
 
 def _norm_token(token: str) -> str:
@@ -797,6 +843,37 @@ def _witness_tokens(witness: str) -> list[str]:
     return [token for token in out if _token_core(token)]
 
 
+def _split_trailing_punctuation(token: str) -> tuple[str, str]:
+    """Split a witness token into its glyph part and its sentence punctuation."""
+    tail = ""
+    while len(token) > 1 and token[-1] in ".,;:!?…":
+        tail = token[-1] + tail
+        token = token[:-1]
+    return token, tail
+
+
+def _witness_atoms(tokens: Sequence[str], doc_cores: frozenset[str]) -> list[tuple[str, str]]:
+    """Classify witness tokens as prose or inline math.
+
+    A token is *math* when it looks like a math fragment and its own core does not
+    occur in the doc's prose: ``lm`` in ``lm head`` is prose (Docling kept it in
+    the sentence), while ``hR`` is math (Docling pulled it out). Consulting the
+    doc is what separates the two, since both are two-letter identifiers.
+    """
+    atoms: list[tuple[str, str]] = []
+    for token in tokens:
+        core, tail = _split_trailing_punctuation(token)
+        if core in _LONE_PRIMES:
+            continue
+        kind = "prose"
+        core_norm = _norm_token(core)
+        kept_by_doc = bool(core_norm) and core_norm in doc_cores
+        if _is_pile_like(core) and (core_norm or core in _MATH_OPERATORS) and not kept_by_doc:
+            kind = "math"
+        atoms.append((kind, core + tail))
+    return [atom for atom in atoms if atom[1]]
+
+
 def reinsert_inline_math(text: str, witness: str) -> str | None:
     """``text`` with Docling's stripped inline math spliced back in, or ``None``.
 
@@ -807,33 +884,73 @@ def reinsert_inline_math(text: str, witness: str) -> str | None:
     model must not translate around; without it the sentence is a hole
     (``"let be the initial state"``).
 
-    The proof that the witness is the same sentence is that the two share the
-    same prose *token sequence* -- punctuation-insensitively, so the witness's
-    line-join noise cannot veto a real repair. When it holds, the witness's math
-    tokens are spliced in at their positions and the doc's own prose tokens are
-    kept verbatim; otherwise ``None`` leaves the block byte-identical.
+    The proof that the witness is the same sentence is that their *prose* token
+    sequences align token-for-token -- not necessarily equally, because the
+    witness carries pdfium's line-join noise (a comma split onto its own line)
+    and Docling drops or duplicates the odd word. Sequence alignment tolerates
+    that noise where strict equality could not. When the alignment is strong, the
+    witness's math atoms are spliced in at their positions and the doc's own
+    prose tokens are kept verbatim: the doc keeps its punctuation, the witness
+    contributes only what the doc lost. Anything weaker than that returns
+    ``None`` and leaves the block byte-identical.
     """
     doc_tokens = text.split()
-    pile = _pile_len(doc_tokens)
-    if pile == 0 or pile >= len(doc_tokens):
+    start = _pile_start(doc_tokens)
+    # A sentence-final period Docling kept as its own token can sit immediately
+    # before the pile; it is prose, not a glyph, and must not be swallowed.
+    while start < len(doc_tokens) and re.fullmatch(r"[.,;:!?…]+", doc_tokens[start]):
+        start += 1
+    if start == 0 or start >= len(doc_tokens):
         return None
-    doc_prose = doc_tokens[: len(doc_tokens) - pile]
-    wit_tokens = _witness_tokens(witness)
-    wit_prose = [token for token in wit_tokens if not _is_math_token(token)]
-    if not wit_prose or len(doc_prose) != len(wit_prose):
+    doc_prose = doc_tokens[:start]
+    doc_cores = frozenset(_norm_token(token) for token in doc_prose)
+    atoms = _witness_atoms(_witness_tokens(witness), doc_cores)
+    if not any(kind == "math" for kind, _ in atoms):
         return None
-    if any(_norm_token(a) != _norm_token(b) for a, b in zip(doc_prose, wit_prose, strict=True)):
+
+    # Only prose atoms with a real word core take part in the alignment: a
+    # punctuation atom ("." / "_") normalizes to "" and would otherwise match an
+    # arbitrary empty-normalized doc token, dragging a stray glyph into the
+    # sentence (measured: "evaluates both _ states").
+    prose_index = [
+        index for index, (kind, atom) in enumerate(atoms) if kind == "prose" and _norm_token(atom)
+    ]
+    doc_norm = [_norm_token(token) for token in doc_prose]
+    wit_norm = [_norm_token(atoms[index][1]) for index in prose_index]
+    matcher = difflib.SequenceMatcher(None, doc_norm, wit_norm, autojunk=False)
+    matched: dict[int, int] = {}
+    for a, b, size in matcher.get_matching_blocks():
+        for offset in range(size):
+            matched[prose_index[b + offset]] = a + offset
+    # A repair must be proven by matching most of both sides; a low score means
+    # the witness is a different sentence (or a different column) and the block
+    # must stay untouched.
+    if len(matched) < 0.75 * len(doc_norm) or len(matched) < 0.75 * len(wit_norm):
         return None
-    if not any(_is_math_token(token) for token in wit_tokens):
-        return None
+
     out: list[str] = []
-    prose_index = 0
-    for token in wit_tokens:
-        if _is_math_token(token):
-            out.append(token)
-        else:
-            out.append(doc_prose[prose_index])
-            prose_index += 1
+    last_doc = -1
+
+    def emit(token: str) -> None:
+        # The witness often attaches the period to the math glyph ("hR.") while
+        # Docling kept it as its own token; emitting both would double it.
+        if out and re.fullmatch(r"[.,;:!?…]+", token) and out[-1][-1:] == token[0]:
+            return
+        out.append(token)
+
+    for atom_index, (kind, atom) in enumerate(atoms):
+        doc_index = matched.get(atom_index)
+        if doc_index is not None:
+            for pending in range(last_doc + 1, doc_index):
+                emit(doc_prose[pending])
+            emit(doc_prose[doc_index])
+            last_doc = doc_index
+        elif kind == "math":
+            emit(atom)
+        # unmatched prose is pdfium line-join noise: dropped
+    for pending in range(last_doc + 1, len(doc_prose)):
+        emit(doc_prose[pending])
+
     repaired = " ".join(out)
     repaired = re.sub(r"\s+([.,;:!?])", r"\1", repaired)
     repaired = repaired.replace("( ", "(").replace(" )", ")")

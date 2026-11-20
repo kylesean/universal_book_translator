@@ -20,7 +20,7 @@ from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.engine.progress import live_progress_percent
 from ubt.core.engine.status_projection import project_ledger_status
-from ubt.core.job_options import JOB_ID_MAX_LEN, JOB_ID_RE
+from ubt.core.job_options import job_id_is_valid
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +28,11 @@ logger = logging.getLogger(__name__)
 def is_job_ledger_stem(stem: str) -> bool:
     """Whether a ``*.sqlite`` stem could name a job (id charset + length).
 
-    Excludes sidecar databases such as ``tm.sqlite`` by shape; a file that
-    passes this is still verified against its ``job_meta`` table before use.
+    Excludes sidecar databases such as ``tm.sqlite`` and ``job_queue.sqlite``;
+    a file that passes this is still verified against its ``job_meta`` table
+    before use.
     """
-    return bool(stem) and len(stem) <= JOB_ID_MAX_LEN and JOB_ID_RE.fullmatch(stem) is not None
+    return job_id_is_valid(stem)
 
 
 def summarize_job(db_path: Path) -> dict[str, Any] | None:

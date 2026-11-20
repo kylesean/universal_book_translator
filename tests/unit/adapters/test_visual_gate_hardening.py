@@ -103,6 +103,20 @@ def test_side_by_side_boxes_do_not_trip_the_offset_signature() -> None:
     assert _offset_overlap(a, b) is False
 
 
+def test_a_preserved_exhibit_is_not_reported_as_an_overprinted_text_block() -> None:
+    """A kept figure's bbox includes its caption band and whitespace.
+
+    Its ink is the source's and is never re-drawn, so the box overlap a source
+    layout already contains is not an overprint this delivery introduced. The
+    function compares text boxes; text drawn over an exhibit is the canvas
+    tier's ink-collision check.
+    """
+    figure = _Box(4, 68.9, 458.6, 542.2, 552.3)
+    figure.skip_translate = True  # type: ignore[attr-defined]
+    paragraph = _Box(4, 59.5, 494.7, 552.5, 529.1)
+    assert block_overlap_findings([figure, paragraph]) == []
+
+
 def test_overlap_truncation_is_reported() -> None:
     boxes = [_Box(1, 50.0, 700.0 - i, 350.0, 714.0 - i) for i in range(5)]
     truncated: list[int] = []

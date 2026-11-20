@@ -66,6 +66,7 @@ _CATEGORY_BY_MARKER: dict[str, str] = {
     "Glossary term violation": "terminology_consistency",
     "html_structure_mismatch": "html_structure_mismatch",
     "HTML delta failure": "html_formatting_drift",
+    "Inline anchor tag mismatch": "inline_anchor_mismatch",
     "email_token_corrupt": "email_token_corrupt",
     "soup_token_corrupt": "soup_token_corrupt",
     "math_token_corrupt": "math_token_corrupt",

@@ -1,3 +1,5 @@
+# ubt-pdfium-allow: single-threaded pytest; the test owns its fixture document and finishes before exit.
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -41,14 +43,12 @@ def test_pdfium_default_keeps_fast_path_on_layout_signal(tmp_path: Path) -> None
     assert isinstance(get_adapter_for_path(pdf, pdf_engine="pdfium"), PDFiumAdapter)
 
 
-def test_auto_routing_sends_two_column_to_docling(tmp_path: Path) -> None:
+def test_auto_routing_sends_born_digital_to_native_and_scanned_to_docling(tmp_path: Path) -> None:
     import importlib.util
 
     from ubt.adapters import get_adapter_for_path
     from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
-
-    if importlib.util.find_spec("docling") is None:
-        pytest.skip("docling is not installed; the refusal path is pinned separately")
+    from ubt.adapters.pdf.native_adapter import NativePDFAdapter
 
     pages = [
         (
@@ -58,7 +58,11 @@ def test_auto_routing_sends_two_column_to_docling(tmp_path: Path) -> None:
         for _ in range(10)
     ]
     pdf = write_two_column_pdf(tmp_path / "twocol.pdf", pages)
-    assert isinstance(get_adapter_for_path(pdf, pdf_engine="auto"), DoclingPDFAdapter)
+    assert isinstance(get_adapter_for_path(pdf, pdf_engine="auto"), NativePDFAdapter)
+
+    if importlib.util.find_spec("docling") is not None:
+        scan = write_text_pdf(tmp_path / "scan.pdf", [[] for _ in range(10)])
+        assert isinstance(get_adapter_for_path(scan, pdf_engine="auto"), DoclingPDFAdapter)
 
 
 def test_pdfium_default_escapes_a_scanned_pdf_to_docling(tmp_path: Path) -> None:
@@ -89,7 +93,7 @@ def test_explicit_docling_beats_everything(tmp_path: Path) -> None:
     assert isinstance(get_adapter_for_path(pdf, pdf_engine="docling"), DoclingPDFAdapter)
 
 
-def test_auto_without_docling_is_refused_not_degraded(tmp_path: Path) -> None:
+def test_docling_without_package_is_refused_not_degraded(tmp_path: Path) -> None:
     import importlib.util
 
     from ubt.adapters import get_adapter_for_path
@@ -100,4 +104,4 @@ def test_auto_without_docling_is_refused_not_degraded(tmp_path: Path) -> None:
 
     pdf = write_text_pdf(tmp_path / "prose.pdf", _prose_pages(6))
     with pytest.raises(OptionalDependencyError, match="uv sync --all-extras"):
-        get_adapter_for_path(pdf, pdf_engine="auto")
+        get_adapter_for_path(pdf, pdf_engine="docling")

@@ -13,6 +13,7 @@ from ubt.render.typst.container_repair import (
     extract_locked_numbers,
     fit_code_block,
     inject_soft_breaks,
+    materialize_soft_breaks,
     measure_line_width,
     repair_bottleneck_containers,
     repair_code_block_markup,
@@ -101,17 +102,25 @@ def test_inject_soft_breaks_url_and_paths() -> None:
     searched or pasted. ``escape._escape_slash_run`` documents the same defect
     from the other direction, so this test pins both halves — a break mark is
     there, and no zero-width character was added.
+
+    The mark is emitted as a marker before escaping and only becomes
+    ``#h(0pt, weak: true)`` after :func:`materialize_soft_breaks`: injecting the
+    call directly into prose made the escaper print it as visible text (106
+    sites inside reference URLs on a real 35-page run).
     """
     long_url = "https://github.com/universal-book-translator/blob/main/ubt/render/typst/document_renderer.py"
     prose = f"Please refer to the repository link: {long_url} for the implementation details."
     repaired = inject_soft_breaks(prose, max_token_len=30)
-    assert "#h(0pt, weak: true)" in repaired
-    assert "\u200b" not in repaired
-    assert "\u200c" not in repaired
+    assert "#h(0pt, weak: true)" not in repaired
+    assert "\ue000" in repaired
+    materialized = materialize_soft_breaks(repaired)
+    assert "#h(0pt, weak: true)" in materialized
+    assert "\u200b" not in materialized
+    assert "\u200c" not in materialized
     # Stripping the break marks must give back the exact original prose.
-    assert repaired.replace("#h(0pt, weak: true)", "") == prose
-    assert "refer" in repaired
-    assert "repository" in repaired
+    assert materialized.replace("#h(0pt, weak: true)", "") == prose
+    assert "refer" in materialized
+    assert "repository" in materialized
 
 
 def test_inject_soft_breaks_skips_math() -> None:

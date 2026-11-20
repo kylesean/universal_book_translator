@@ -137,13 +137,6 @@ class JobSubmitRequest(BaseModel):
             "instead of refusing the run (legacy modes are grandfathered)"
         ),
     )
-    enable_cels: bool | None = Field(
-        default=None,
-        description=(
-            "Whether to use Column-Aware Elastic Layout Solver (CELS) for faithful "
-            "delivery. Set false to rollback to legacy 2D packing layout"
-        ),
-    )
     pages: str | None = Field(default=None, description="Page range filter (e.g. 1-10)")
 
     @field_validator("pages")
@@ -1018,6 +1011,13 @@ class QESettingsResponse(BaseModel):
     judge_enabled: bool = Field(
         description="Whether the LLM judge wrapper is on — the switch that scores anything"
     )
+    judge_backend: Literal["llm", "gemini_decision", "jev"] = Field(
+        default="llm",
+        description=(
+            "Scoring backend when judge is enabled: generative LLM ('llm') or "
+            "zero-output-token Decision Model API ('gemini_decision' / 'jev')"
+        ),
+    )
     judge_provider: str | None = Field(
         default=None, description="Provider block that answers judge calls, when not the translator"
     )
@@ -1070,6 +1070,7 @@ class QESettingsRequest(BaseModel):
 
     qe_engine: Literal["heuristic", "tiered"] | None = None
     qe_judge_enabled: bool | None = None
+    qe_judge_backend: Literal["llm", "gemini_decision", "jev"] | None = None
     qe_judge_provider: str | None = None
     qe_judge_model: str | None = None
     qe_threshold: float | None = Field(default=None, ge=0.0, le=1.0)

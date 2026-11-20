@@ -14,13 +14,16 @@ from pathlib import Path
 import pytest
 
 from ubt.adapters.pdf.page_lock_measure import (
+    _body_lines,
     _capacity_at_floor,
+    _column_groups,
     _line_records,
     _sample_page_numbers,
     measure_page_lock,
 )
 from ubt.delivery.contracts import ExpansionRisk, PageKind
 from ubt.delivery.planning import build_delivery_signals, plan_for_document
+from ubt.render.layout_solver import check_source_overlap, solve_page_2d
 
 pytestmark = pytest.mark.fast
 
@@ -61,6 +64,69 @@ def test_line_records_measure_glyph_aspect_from_the_line() -> None:
     # 60pt advance over 10 glyphs at 12pt = 0.5em per glyph.
     assert records[0]["glyph_aspect"] == pytest.approx(0.5)
     assert leading == pytest.approx(16.0)
+
+
+class _Line:
+    def __init__(self, text: str, rect: tuple[float, float, float, float], size: float):
+        self.text = text
+        self.rect = rect
+        self.font_size = size
+
+
+def _body_line(top: float, text: str = "A reasonably long body line of prose.") -> _Line:
+    return _Line(text, (60.0, top - 11.0, 552.0, top), 10.0)
+
+
+def test_a_punctuation_fragment_is_not_a_paragraph() -> None:
+    """pdfium reports the comma after a body line as its own 1.3pt "line" that
+    sits inside the body box. Counting it vetoed every academic paper."""
+    body = _body_line(700.0)
+    fragment = _Line(",", (413.5, 709.5, 414.8, 711.5), 10.0)
+
+    kept = _body_lines([body, fragment])
+
+    assert kept == [body]
+    records, _, _ = _line_records(kept)
+    assert check_source_overlap([records]) is False
+
+
+def test_a_small_table_header_is_not_body_text() -> None:
+    lines = [_body_line(700.0 - i * 12.0) for i in range(8)]
+    header = _Line("Mean Δ", (60.0, 380.0, 90.0, 386.5), 6.5)
+
+    kept = _body_lines([*lines, header])
+
+    assert header not in kept
+
+
+def test_a_real_body_overlap_is_still_detected() -> None:
+    first = _Line("First paragraph line", (60.0, 700.0, 552.0, 712.0), 10.0)
+    second = _Line("Second paragraph line", (60.0, 705.0, 552.0, 717.0), 10.0)
+
+    records, _, _ = _line_records(_body_lines([first, second]))
+
+    assert check_source_overlap([records]) is True
+
+
+def test_two_columns_are_compared_per_column() -> None:
+    left = [
+        _Line(f"left line {i}", (60.0, 700.0 - i * 12.0, 300.0, 711.0 - i * 12.0), 10.0)
+        for i in range(6)
+    ]
+    right = [
+        _Line(f"right line {i}", (324.0, 700.0 - i * 12.0, 552.0, 711.0 - i * 12.0), 10.0)
+        for i in range(6)
+    ]
+
+    records, _, _ = _line_records(_body_lines([*left, *right]))
+
+    # Split at the page midpoint, each column has its full 12pt pitch.
+    groups = _column_groups(records, 612.0)
+    assert len(groups) == 2
+    assert check_source_overlap(groups) is False
+    for group in groups:
+        solution = solve_page_2d([group], source_size_pt=10.0, source_leading_pt=12.0, floor_pt=7.5)
+        assert solution.fits is True
 
 
 def test_capacity_shrinks_as_the_page_fills() -> None:

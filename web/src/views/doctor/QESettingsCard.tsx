@@ -47,6 +47,7 @@ export function QESettingsCard({ providerNames }: QESettingsCardProps) {
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [tiered, setTiered] = useState(false)
+  const [judgeBackend, setJudgeBackend] = useState<'llm' | 'gemini_decision' | 'jev'>('llm')
   const [judgeProvider, setJudgeProvider] = useState('')
   const [judgeModel, setJudgeModel] = useState('')
   const [threshold, setThreshold] = useState('0.75')
@@ -59,6 +60,11 @@ export function QESettingsCard({ providerNames }: QESettingsCardProps) {
     // The effective choice, not the raw engine label: a hand-edited "tiered"
     // with the judge off does not score anything.
     setTiered(Boolean(next.judge_enabled))
+    setJudgeBackend(
+      next.judge_backend === 'gemini_decision' || next.judge_backend === 'jev'
+        ? next.judge_backend
+        : 'llm'
+    )
     setJudgeProvider(next.judge_provider ?? '')
     // The raw setting: seeding the resolved model would pin an inherited value.
     setJudgeModel(next.judge_model_explicit ?? '')
@@ -106,6 +112,7 @@ export function QESettingsCard({ providerNames }: QESettingsCardProps) {
       const body: QESettingsRequest = {
         qe_engine: tiered ? 'tiered' : 'heuristic',
         qe_judge_enabled: tiered,
+        qe_judge_backend: judgeBackend,
         qe_judge_provider: judgeProvider || null,
         qe_judge_model: judgeModel.trim() || null,
         qe_threshold: thresholdValue,
@@ -179,6 +186,28 @@ export function QESettingsCard({ providerNames }: QESettingsCardProps) {
               </SelectContent>
             </Select>
           </DoctorField>
+
+          {tiered ? (
+            <DoctorField label={t.doctor.qeJudgeBackend} hint={t.doctor.qeJudgeBackendHelp}>
+              <Select
+                value={judgeBackend}
+                onValueChange={(value) =>
+                  setJudgeBackend(
+                    value === 'gemini_decision' || value === 'jev' ? value : 'llm'
+                  )
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="llm">{t.doctor.qeJudgeBackendLlm}</SelectItem>
+                  <SelectItem value="gemini_decision">{t.doctor.qeJudgeBackendGeminiDecision}</SelectItem>
+                  <SelectItem value="jev">{t.doctor.qeJudgeBackendJev}</SelectItem>
+                </SelectContent>
+              </Select>
+            </DoctorField>
+          ) : null}
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <DoctorField label={t.doctor.qeJudgeProvider}>
@@ -324,6 +353,16 @@ export function QESettingsCard({ providerNames }: QESettingsCardProps) {
               <span className="truncate font-mono">
                 {settings.judge_enabled ? t.doctor.qeJudgeOn : t.doctor.qeJudgeOff}
                 {settings.judge_model ? ` · ${settings.judge_model}` : ''}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">{t.doctor.qeJudgeBackend}</span>
+              <span className="truncate font-mono">
+                {settings.judge_backend === 'gemini_decision'
+                  ? t.doctor.qeJudgeBackendGeminiDecision
+                  : settings.judge_backend === 'jev'
+                    ? t.doctor.qeJudgeBackendJev
+                    : t.doctor.qeJudgeBackendLlm}
               </span>
             </div>
             <div className="flex items-center justify-between gap-3">

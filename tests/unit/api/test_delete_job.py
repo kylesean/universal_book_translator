@@ -97,7 +97,8 @@ def test_delete_does_not_touch_a_shared_service_database(tmp_path: Path) -> None
     client = TestClient(create_app(config))
     for service_id in ("tm", "job_queue", "backup_2026"):
         res = client.delete(f"/jobs/{service_id}", headers=_AUTH)
-        assert res.status_code == 404, (service_id, res.status_code)
+        expected = 400 if service_id in ("tm", "job_queue") else 404
+        assert res.status_code == expected, (service_id, res.status_code)
 
     assert tm.exists() and tm.read_bytes() == b"real translation memory"
     assert queue.exists() and queue.read_bytes() == b"real job queue"

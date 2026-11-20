@@ -1736,6 +1736,9 @@ class AgentTranslationService:
         mode = await asyncio.to_thread(ledger.get_job_metadata_value, job_id, "translation_mode")
         if mode != AGENT_MODE:
             raise UBTError(f"job {job_id} is not an Agent translation job")
+        persisted = await asyncio.to_thread(ledger.get_job_status, job_id)
+        if persisted in {"cancelled", "failed"}:
+            raise UBTError(f"job {job_id} is already terminal ({persisted}) and cannot continue")
 
 
 __all__ = [

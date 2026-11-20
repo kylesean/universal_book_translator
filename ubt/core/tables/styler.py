@@ -39,8 +39,8 @@ def generate_typst_table_continuation_elements(
     header_text = cfg.get_continued_header_text(lang)
     footer_text = cfg.get_next_page_footer_text(lang)
 
-    start_anchor = f'[#metadata("table-start") <ubt-tbl-start-{uid}>]'
-    end_anchor = f'[#metadata("table-end") <ubt-tbl-end-{uid}>]'
+    start_anchor = f'#metadata("table-start") <ubt-tbl-start-{uid}>'
+    end_anchor = f'#metadata("table-end") <ubt-tbl-end-{uid}>'
 
     header_cell = ""
     if cfg.enable_continued_header:

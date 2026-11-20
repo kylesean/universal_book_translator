@@ -2129,7 +2129,7 @@
         "tags": [
           "Jobs"
         ],
-        "summary": "Fetch the artifact delivery contract (11-point QA, CELS distortion, and layout invariants)",
+        "summary": "Fetch the artifact delivery contract (11-point QA and layout invariants)",
         "operationId": "get_delivery_contract_jobs__job_id__delivery_contract_get",
         "parameters": [
           {
@@ -2227,6 +2227,16 @@
             "schema": {
               "type": "string",
               "title": "Job Id"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Force"
             }
           },
           {
@@ -5837,18 +5847,6 @@
             "title": "Allow Degrade",
             "description": "When a new faithful request is ineligible, re-route to readable instead of refusing the run (legacy modes are grandfathered)"
           },
-          "enable_cels": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Cels",
-            "description": "Whether to use Column-Aware Elastic Layout Solver (CELS) for faithful delivery. Set false to rollback to legacy 2D packing layout"
-          },
           "pages": {
             "anyOf": [
               {
@@ -6962,6 +6960,22 @@
             ],
             "title": "Qe Judge Enabled"
           },
+          "qe_judge_backend": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "llm",
+                  "gemini_decision",
+                  "jev"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qe Judge Backend"
+          },
           "qe_judge_provider": {
             "anyOf": [
               {
@@ -7038,6 +7052,17 @@
             "type": "boolean",
             "title": "Judge Enabled",
             "description": "Whether the LLM judge wrapper is on \u2014 the switch that scores anything"
+          },
+          "judge_backend": {
+            "type": "string",
+            "enum": [
+              "llm",
+              "gemini_decision",
+              "jev"
+            ],
+            "title": "Judge Backend",
+            "description": "Scoring backend when judge is enabled: generative LLM ('llm') or zero-output-token Decision Model API ('gemini_decision' / 'jev')",
+            "default": "llm"
           },
           "judge_provider": {
             "anyOf": [

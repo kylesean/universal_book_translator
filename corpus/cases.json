@@ -3,14 +3,14 @@
  "cases": [
   {
    "id": "twocol-paper-2609",
-   "description": "Two-column academic paper (arXiv 2609.20519): auto-routed rigid; figures, tables and formulas must survive. One figure-legend fragment stays source: the mock echo cannot fit its narrow box at any drawn size (see corpus/README.md).",
+   "description": "Two-column academic paper (arXiv 2609.20519): auto-routed rigid; figures, tables and formulas must survive. One figure-legend fragment stays source: the mock echo cannot fit its narrow box at any drawn size (see corpus/README.md). The native codec surfaces the 52-entry bibliography as preserved (verbatim) units, so the delivered-ratio denominator is larger than the CELS-era baseline; the translation itself still accounts for every translatable block.",
    "document": "documents/2609.20519v1.pdf",
    "expect": {
     "max_errors": 1,
     "max_missing_assets": 0,
     "max_source_kept": 3,
     "min_accounted_ratio": 0.9,
-    "min_delivered_ratio": 0.55
+    "min_delivered_ratio": 0.5
    },
    "deterministic": false
   },
@@ -55,14 +55,14 @@
   },
   {
    "id": "twocol-paper-2606",
-   "description": "Two-column paper (arXiv 2606.23344, RT-DocLayout): the document that exposed every gate false positive and the two semantic losses fixed in this round — a reference list without numbers, a table whose stacked cells fused, a URL that swallowed the word after it. Tables, formulas and the 54-entry bibliography must all survive.",
+   "description": "Two-column paper (arXiv 2606.23344, RT-DocLayout): the document that exposed every gate false positive and the two semantic losses fixed in this round — a reference list without numbers, a table whose stacked cells fused, a URL that swallowed the word after it. Tables, formulas and the 54-entry bibliography must all survive. The native codec's denominator includes the 54-entry bibliography preserved verbatim, so the delivered ratio is calibrated against that larger denominator.",
    "document": "documents/2606.23344v1.pdf",
    "expect": {
     "max_errors": 0,
     "max_missing_assets": 0,
     "max_source_kept": 0,
     "min_accounted_ratio": 0.9,
-    "min_delivered_ratio": 0.66
+    "min_delivered_ratio": 0.65
    },
    "deterministic": false
   }

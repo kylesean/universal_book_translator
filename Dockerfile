@@ -57,8 +57,8 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 COPY pyproject.toml uv.lock README.md /build/
 COPY ubt /build/ubt
 
-# Build and install package into virtualenv
-RUN uv pip install --no-cache-dir /build
+# Build and install package (including [mcp] entrypoint) into virtualenv
+RUN uv pip install --no-cache-dir "/build[mcp]"
 
 # ==============================================================================
 # Stage 2: Runtime

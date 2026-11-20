@@ -80,6 +80,13 @@ dependencies = [
     "python-docx>=1.1.0",
     "pillow>=12.3.0",
     "pikepdf>=10.13.0.post1",
+    "fonttools>=4.50.0",
+    "uharfbuzz>=0.45.0",
+    "onnxruntime>=1.20.0",
+    "rapid-layout>=1.2.0",
+    "numpy>=1.26.0",
+    "lxml>=5.0.0",
+    "markdown-it-py>=3.0.0",
     "pylatexenc>=2.10",
     # ``ubt/cli/commands/doctor_deep.py`` imports it at module scope (process
     # memory/CPU sampling for the deep doctor report), so it is a runtime
@@ -176,26 +183,6 @@ academic = [
     "onnxruntime>=1.29.0",
     "numpy>=1.26.0",
 ]
-# CELS (faithful 1:1 in-place reflow) Phase 2 only. ``kiwisolver`` is the
-# Cassowary incremental simplex matplotlib has shipped for a decade: CELS
-# Stage 3B hands it the *vertical* degrees of freedom (block y, paragraph gap,
-# deficit lean) only after Stage 3A has fixed line count, size, tracking and
-# horizontal scale with real measurement. A hand-written simplex was rejected
-# for the usual reason -- degeneracy/cycling/bug surface -- and heavier
-# alternatives (scipy linprog, z3) buy nothing at this size.
-#
-# License: Modified BSD (Nucleic Development Team, PyPI classifier
-# "License :: OSI Approved :: BSD License"), compatible with this project's MIT.
-# Optional rather than default because the readable path never touches it and
-# it is a C++ extension: default installs must not acquire a compile fallback.
-cels = [
-    "kiwisolver>=1.4.0",
-    # Subsetting the target font is part of the CELS font pipeline: the corpus fonts are
-    # single-byte Type1 with no /ToUnicode, so a CJK translation needs an
-    # embedded, subsetted font with its own ToUnicode CMap. Pure Python
-    # and MIT-licensed; ``fontTools.subset`` is the only API used.
-    "fonttools>=4.50.0",
-]
 # QE dependency note: Neural CometKiwi (CC-BY-NC-SA-4.0 non-commercial) has been
 # retired from default extras to ensure 100% commercial license compliance.
 # The default qe_engine is zero-dependency "heuristic", and LLM-as-a-judge
@@ -278,6 +265,9 @@ module = [
     "onnxruntime.*",
     "kiwisolver.*",
     "fontTools.*",
+    "uharfbuzz.*",
+    "rapid_layout.*",
+    "lxml.*",
 ]
 ignore_missing_imports = true
 

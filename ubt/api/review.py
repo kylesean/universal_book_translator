@@ -91,6 +91,7 @@ _ISSUE_MARKERS: dict[str, tuple[str, ...]] = {
     "structure": (
         "html_structure_mismatch",
         "HTML delta failure",
+        "Inline anchor tag mismatch",
         "Table grid mismatch",
         "repair_structural_failure",
         "Heading label dropped",

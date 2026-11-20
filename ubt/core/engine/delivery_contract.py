@@ -630,11 +630,13 @@ def _overlap_findings(evidence: ContractEvidence) -> list[ContractFinding]:
                 a, b = boxes[index], boxes[other]
                 if a.block_id is not None and a.block_id == b.block_id:
                     continue
-                if _nested_aggregate_text(a, b) or _nested_aggregate_text(b, a):
-                    continue
                 overlap = _intersection(a, b)
+                if overlap <= 0.0:
+                    continue
                 smaller = min(_box_area(a), _box_area(b))
                 if smaller <= 0 or overlap / smaller < _OVERLAP_RATIO:
+                    continue
+                if _nested_aggregate_text(a, b) or _nested_aggregate_text(b, a):
                     continue
                 findings.append(
                     ContractFinding(
@@ -1077,6 +1079,44 @@ def _placeholder_findings(joined: str) -> list[ContractFinding]:
     ]
 
 
+_READER_MACHINERY_RE = re.compile(
+    r"#h\(|#metadata\(|\[[ \t\u00a0]?\]\s*(?:图|表|Figure|Fig\.?|Table)\s*[\dA-Z]"
+)
+
+
+def _machinery_findings(joined: str) -> list[ContractFinding]:
+    """Reader-visible machinery that must never reach a shipped artifact.
+
+    Covers Typst code fragments (``#h(0pt, weak: true)``, ``#metadata(...)``)
+    and empty ``[]``/``[ ]`` residues in front of figure/table labels. All are
+    renderer/escaping defects, not content: unlike a leaked placeholder they
+    cannot be substituted with ``⟨missing⟩``, and they are what a reader
+    literally sees.
+
+    Raw ``\\llbracket``/``\\rrbracket`` are deliberately *not* listed: the same
+    source form is legal interval math notation (see
+    ``test_legal_latex_bracket_notation_is_not_a_leak``). A leaked sentinel
+    reaches the artifact as the rendered ⟦/⟧ glyphs, which
+    :func:`_placeholder_findings` already records as critical.
+    """
+    sites = list(_READER_MACHINERY_RE.finditer(joined))
+    if not sites:
+        return []
+    contexts = tuple(_placeholder_context(joined, site.start(), site.end()) for site in sites)
+    first = sites[0]
+    return [
+        ContractFinding(
+            severity="critical",
+            code="reader_machinery_leak",
+            message=(
+                f"Artifact reader text contains {len(sites)} machinery site(s); "
+                f"first {first.group(0)!r} near {contexts[0]!r}"
+            ),
+            occurrences=contexts,
+        )
+    ]
+
+
 def evaluate_delivery_contract(evidence: ContractEvidence) -> ContractReport:
     """Evaluate all invariants and return one verdict.
 
@@ -1150,6 +1190,10 @@ def evaluate_delivery_contract(evidence: ContractEvidence) -> ContractReport:
     placeholder_findings = _placeholder_findings(joined)
     findings.extend(placeholder_findings)
     checks.append({"name": "placeholders", "status": "fail" if placeholder_findings else "pass"})
+
+    machinery_findings = _machinery_findings(joined)
+    findings.extend(machinery_findings)
+    checks.append({"name": "reader_machinery", "status": "fail" if machinery_findings else "pass"})
 
     overlap_findings = _overlap_findings(evidence)
     findings.extend(overlap_findings)

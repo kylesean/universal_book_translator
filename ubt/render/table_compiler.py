@@ -780,6 +780,7 @@ def compile_typst_booktabs(
     start_anchor = ""
     header_continuation_cell = ""
     footer_continuation_block = ""
+    end_anchor = ""
     if enable_continuation and len(rows) >= 4:
         try:
             from ubt.core.tables.models import TableContinuationConfig
@@ -790,7 +791,7 @@ def compile_typst_booktabs(
                 start_anchor,
                 header_continuation_cell,
                 footer_continuation_block,
-                _,
+                end_anchor,
             ) = generate_typst_table_continuation_elements(
                 columns=columns,
                 table_uid=table_uid or f"tbl-{abs(hash(markup)) % 100000}",
@@ -835,6 +836,8 @@ def compile_typst_booktabs(
         lines.append(footer_continuation_block)
     lines.append("    table.hline(stroke: 1.2pt),")
     lines.append("  )")
+    if end_anchor:
+        lines.append(f"  {end_anchor}")
     lines.append("]")
     return "\n".join(lines)
 

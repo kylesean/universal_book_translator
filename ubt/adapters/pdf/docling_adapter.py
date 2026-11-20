@@ -395,7 +395,6 @@ class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
         self._renderer.pdf_optimize_profile = getattr(
             runtime_config, "pdf_optimize_profile", "lossless"
         )
-        self._renderer.enable_cels = getattr(runtime_config, "enable_cels", True)
         # The analyze cache (content-addressed cache layer): the Docling layout+formula pass
         # is a pure function of the file, page range, enrichment policy and
         # parser code, so a resumed or re-run job reuses the extraction.

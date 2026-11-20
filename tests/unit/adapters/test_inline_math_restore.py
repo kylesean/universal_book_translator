@@ -70,3 +70,59 @@ def test_a_witness_with_no_math_is_rejected() -> None:
     text = "The final state matters here. hR"
     witness = "The final state matters here."
     assert reinsert_inline_math(text, witness) is None
+
+
+def test_a_glued_pile_with_primes_and_calls_is_restored() -> None:
+    """The pile Docling emits is glyph soup: ``z = ′ lm _ head(coda(h ))``.
+
+    Token-by-token math classification stops at ``′``/``_``/``))`` and leaves the
+    whole pile in the sentence (the ``ω ω = 0`` placeholder readers saw).
+    """
+    text = (
+        "The coefficient sets the strength of the contrast, with recovering the "
+        "unguided state . The combined state then passes through the coda layers "
+        "and language modeling head: . ω ω = 0 hR z = ′ lm _ head(coda(h )) ′ "
+        "lm _ head"
+    )
+    witness = (
+        "The coefficient ω sets the strength of the contrast with ω = 0 recovering "
+        "the unguided state hR. The , combined state then passes through the coda "
+        "layers and language modeling head: z′ = lm_head(coda(h′)) ."
+    )
+    assert reinsert_inline_math(text, witness) == (
+        "The coefficient ω sets the strength of the contrast, with ω = 0 recovering "
+        "the unguided state hR. The combined state then passes through the coda "
+        "layers and language modeling head: z′ = lm_head(coda(h′))."
+    )
+
+
+def test_a_pile_that_is_a_display_formula_is_dropped() -> None:
+    """``We set <equation>``: the equation is a separate formula block, and the
+    witness line stops at ``We set``. Keeping the pile would leave it dangling."""
+    text = (
+        "Let and be the two largest token probabilities in . We set "
+        "ω pR,(1) pR,(2) p = R softmax(z ) R"
+    )
+    witness = (
+        "Let pR,(1) and pR,(2) be the two largest token probabilities in pR = softmax(zR). We set"
+    )
+    assert reinsert_inline_math(text, witness) == (
+        "Let pR,(1) and pR,(2) be the two largest token probabilities in pR = softmax(zR). We set"
+    )
+
+
+def test_a_lone_prime_from_line_segmentation_is_not_inserted() -> None:
+    text = "Applying the same rule to LoopCD-Hidden would require a pass on to obtain . zR hR pR h′"
+    witness = "Applying the same rule ′ to LoopCD-Hidden would require a pass on hR to obtain pR"
+    assert reinsert_inline_math(text, witness) == (
+        "Applying the same rule to LoopCD-Hidden would require a pass on hR to obtain pR."
+    )
+
+
+def test_a_word_the_doc_kept_is_not_inserted_twice() -> None:
+    """``lm`` in ``lm head`` is prose the doc kept, not inline math to splice."""
+    text = "LoopCD-Hidden combines and (Eq. (2)) and evaluates the coda and lm _ head once. h1 hR"
+    witness = "LoopCD-Hidden combines h1 and hR (Eq. (2)) and evaluates the coda and lm head once."
+    assert reinsert_inline_math(text, witness) == (
+        "LoopCD-Hidden combines h1 and hR (Eq. (2)) and evaluates the coda and lm _ head once."
+    )

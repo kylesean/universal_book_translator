@@ -824,16 +824,51 @@ def reanchor_figure_captions(blocks: list[IRBlock]) -> list[IRBlock]:
 
         raw_txt = b.source_text.strip()
         is_table_caption = bool(table_pattern.match(raw_txt))
-        is_caption_cand = (
+        # A picture carries the figure's own BBox. Docling also labels a picture
+        # with captions as CAPTION-role, and treating it as a caption candidate
+        # re-anchored the exhibit itself: measured on the LoopCD paper, p4's
+        # figure box was dragged to the equation crop 105pt above it, so the
+        # picture box ended up covering the preceding paragraph and the CELS
+        # source-overlap check condemned the page to a reflow.
+        is_caption_cand = b.block_type is not BlockType.IMAGE and (
             b.flow_id == FlowID.CAPTION
             or b.region == RegionKind.CAPTION
             or bool(caption_pattern.match(raw_txt))
         )
 
-        if is_caption_cand and not is_table_caption and b.bbox.page in images_by_page:
-            p_images = images_by_page[b.bbox.page]
-            cap_mid_x = (b.bbox.x0 + b.bbox.x1) / 2.0
-            cap_y1 = b.bbox.y1
+        if (
+            is_caption_cand
+            and not is_table_caption
+            and (caption_bbox := b.bbox) is not None
+            and caption_bbox.page in images_by_page
+        ):
+            p_images = images_by_page[caption_bbox.page]
+            cap_mid_x = (caption_bbox.x0 + caption_bbox.x1) / 2.0
+            cap_y1 = caption_bbox.y1
+
+            # Captions sit below the artwork in most layouts, but a panel-style
+            # figure carries its caption at the top of the card. Docling already
+            # measures that position; when the caption is flush (<=24pt) with a
+            # horizontally overlapping picture *below* it, keep the measured
+            # BBox and only record the parent. Without this, the caption was
+            # dragged to an unrelated equation crop further up the page.
+            over_cap: list[tuple[float, IRBlock]] = []
+            for img in p_images:
+                img_bbox = img.bbox
+                if img_bbox is None:
+                    continue
+                overlap = min(img_bbox.x1, caption_bbox.x1) - max(img_bbox.x0, caption_bbox.x0)
+                gap = caption_bbox.y0 - img_bbox.y1
+                if overlap > 0.0 and -15.0 <= gap <= 24.0:
+                    over_cap.append((gap, img))
+            if over_cap:
+                _, nearest = min(over_cap, key=lambda item: abs(item[0]))
+                prov_dict = b.provenance.model_dump()
+                prov_dict["caption_parent_id"] = nearest.id
+                prov_dict["is_anchored_caption"] = True
+                b = b.model_copy(update={"provenance": BlockProvenance(**prov_dict)})
+                updated_blocks.append(b)
+                continue
 
             best_img: IRBlock | None = None
             best_cost = float("inf")
@@ -841,7 +876,10 @@ def reanchor_figure_captions(blocks: list[IRBlock]) -> list[IRBlock]:
                 if not img.bbox:
                     continue
                 dist = img.bbox.y0 - cap_y1
-                horiz_overlap = max(0.0, min(img.bbox.x1, b.bbox.x1) - max(img.bbox.x0, b.bbox.x0))
+                horiz_overlap = max(
+                    0.0,
+                    min(img.bbox.x1, caption_bbox.x1) - max(img.bbox.x0, caption_bbox.x0),
+                )
                 img_w = max(1.0, img.bbox.x1 - img.bbox.x0)
                 img_mid_x = (img.bbox.x0 + img.bbox.x1) / 2.0
                 horiz_dist = abs(cap_mid_x - img_mid_x)
@@ -855,17 +893,25 @@ def reanchor_figure_captions(blocks: list[IRBlock]) -> list[IRBlock]:
 
             if best_img is not None and best_img.bbox is not None:
                 anchored_y1 = round(best_img.bbox.y0 - 4.0, 2)
-                cap_h = max(12.0, b.bbox.y1 - b.bbox.y0)
+                cap_h = max(12.0, caption_bbox.y1 - caption_bbox.y0)
                 anchored_y0 = round(anchored_y1 - cap_h, 2)
                 new_span = Span(
-                    page=b.bbox.page,
-                    bbox=(b.bbox.x0, anchored_y0, b.bbox.x1, anchored_y1),
+                    page=caption_bbox.page,
+                    bbox=(caption_bbox.x0, anchored_y0, caption_bbox.x1, anchored_y1),
                 )
                 prov_dict = b.provenance.model_dump()
                 prov_dict["caption_parent_id"] = best_img.id
                 prov_dict["is_anchored_caption"] = True
                 prov_dict["physical_boxes"] = [
-                    {"page": b.bbox.page, "bbox": [b.bbox.x0, anchored_y0, b.bbox.x1, anchored_y1]}
+                    {
+                        "page": caption_bbox.page,
+                        "bbox": [
+                            caption_bbox.x0,
+                            anchored_y0,
+                            caption_bbox.x1,
+                            anchored_y1,
+                        ],
+                    }
                 ]
 
                 new_element = dataclasses.replace(b.element, span=new_span)
@@ -878,16 +924,16 @@ def reanchor_figure_captions(blocks: list[IRBlock]) -> list[IRBlock]:
 
         elif (
             is_table_caption
-            and (caption_bbox := b.bbox) is not None
-            and caption_bbox.page in tables_by_page
+            and (table_caption_bbox := b.bbox) is not None
+            and table_caption_bbox.page in tables_by_page
         ):
             # ``b`` is reassigned with ``model_copy`` in the branch above, which
             # makes mypy drop the loop-top ``b.bbox`` narrowing for the rest of
             # the chain; the local keeps every read below tied to the checked
             # value.
-            p_tables = tables_by_page[caption_bbox.page]
-            cap_mid_x = (caption_bbox.x0 + caption_bbox.x1) / 2.0
-            cap_y0 = caption_bbox.y0
+            p_tables = tables_by_page[table_caption_bbox.page]
+            cap_mid_x = (table_caption_bbox.x0 + table_caption_bbox.x1) / 2.0
+            cap_y0 = table_caption_bbox.y0
 
             best_tbl: IRBlock | None = None
             best_cost = float("inf")
@@ -898,7 +944,8 @@ def reanchor_figure_captions(blocks: list[IRBlock]) -> list[IRBlock]:
                 dist = cap_y0 - tbl.bbox.y1
                 horiz_overlap = max(
                     0.0,
-                    min(tbl.bbox.x1, caption_bbox.x1) - max(tbl.bbox.x0, caption_bbox.x0),
+                    min(tbl.bbox.x1, table_caption_bbox.x1)
+                    - max(tbl.bbox.x0, table_caption_bbox.x0),
                 )
                 tbl_w = max(1.0, tbl.bbox.x1 - tbl.bbox.x0)
                 tbl_mid_x = (tbl.bbox.x0 + tbl.bbox.x1) / 2.0
@@ -913,22 +960,22 @@ def reanchor_figure_captions(blocks: list[IRBlock]) -> list[IRBlock]:
 
             if best_tbl is not None and best_tbl.bbox is not None:
                 anchored_y0 = round(best_tbl.bbox.y1 + 4.0, 2)
-                cap_h = max(12.0, caption_bbox.y1 - caption_bbox.y0)
+                cap_h = max(12.0, table_caption_bbox.y1 - table_caption_bbox.y0)
                 anchored_y1 = round(anchored_y0 + cap_h, 2)
                 new_span = Span(
-                    page=caption_bbox.page,
-                    bbox=(caption_bbox.x0, anchored_y0, caption_bbox.x1, anchored_y1),
+                    page=table_caption_bbox.page,
+                    bbox=(table_caption_bbox.x0, anchored_y0, table_caption_bbox.x1, anchored_y1),
                 )
                 prov_dict = b.provenance.model_dump()
                 prov_dict["caption_parent_id"] = best_tbl.id
                 prov_dict["is_anchored_caption"] = True
                 prov_dict["physical_boxes"] = [
                     {
-                        "page": caption_bbox.page,
+                        "page": table_caption_bbox.page,
                         "bbox": [
-                            caption_bbox.x0,
+                            table_caption_bbox.x0,
                             anchored_y0,
-                            caption_bbox.x1,
+                            table_caption_bbox.x1,
                             anchored_y1,
                         ],
                     }

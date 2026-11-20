@@ -181,6 +181,16 @@ def repair_code_block_markup(
 #: finished book.
 _SOFT_BREAK = "#h(0pt, weak: true)"
 
+#: Placeholder for :data:`_SOFT_BREAK` while the text is still prose.
+#:
+#: ``inject_soft_breaks`` runs *before* ``render_prose`` escapes the text, and
+#: the escaper turns ``#`` into ``\#`` so a literal ``#h(0pt, weak: true)`` in
+#: the input would be typeset as visible text instead of evaluated: a 35-page
+#: paper shipped 106 of them inside reference URLs. The marker is a private-use
+#: codepoint that survives escaping untouched; :func:`materialize_soft_breaks`
+#: swaps it for the real call on the escaped markup, where Typst evaluates it.
+_SOFT_BREAK_MARKER = "\ue000"
+
 
 def inject_soft_breaks(text: str, max_token_len: int = 32) -> str:
     """Add break opportunities inside long unbreakable tokens in prose.
@@ -189,6 +199,10 @@ def inject_soft_breaks(text: str, max_token_len: int = 32) -> str:
     spills. Math spans (``$...$``) are left alone: inserted code-mode markup
     there reaches ``typstify_math`` as part of the formula body, and the previous
     U+200B version ended up inside ``sum_{i=1}``.
+
+    The returned text still carries :data:`_SOFT_BREAK_MARKER`, not the Typst
+    call: the caller must run :func:`materialize_soft_breaks` *after* escaping
+    (see ``document_renderer._prose``), or the call is escaped into visible text.
     """
     if len(text) < max_token_len:
         return text
@@ -200,13 +214,27 @@ def inject_soft_breaks(text: str, max_token_len: int = 32) -> str:
         # Skip tokens that are already Typst math, code, or a reference.
         if tok.startswith("$") or tok.startswith("#") or tok.startswith("@"):
             return tok
-        return re.sub(r"([/_.\-?&=])", lambda m: m.group(1) + _SOFT_BREAK, tok)
+        return re.sub(r"([/_.\-?&=])", lambda m: m.group(1) + _SOFT_BREAK_MARKER, tok)
 
-    # Odd-indexed segments are inside a ``$...$`` span; transform prose only.
-    segments = text.split("$")
-    for index in range(0, len(segments), 2):
-        segments[index] = token_pattern.sub(_break_token, segments[index])
-    return "$".join(segments)
+    # Skip display math ($$...$$), inline math ($...$), and inline code (`...`)
+    # verbatim so soft breaks never land inside equations or code spans.
+    protected_re = re.compile(r"(\$\$[\s\S]+?\$\$|\$(?!\s)[^$\n]+?(?<!\s)\$|`[^`\n]+`)")
+    parts = protected_re.split(text)
+    for index in range(0, len(parts), 2):
+        parts[index] = token_pattern.sub(_break_token, parts[index])
+    return "".join(parts)
+
+
+def materialize_soft_breaks(typst_markup: str) -> str:
+    """Replace :data:`_SOFT_BREAK_MARKER` with the real Typst call.
+
+    Call this on *escaped* markup (after ``render_prose``). The escaper leaves
+    the private-use marker alone, so substitution here is the only point where
+    ``#h(…)`` exists in code mode.
+    """
+    if _SOFT_BREAK_MARKER not in typst_markup:
+        return typst_markup
+    return typst_markup.replace(_SOFT_BREAK_MARKER, _SOFT_BREAK)
 
 
 class ContainerFitSpec(BaseModel):

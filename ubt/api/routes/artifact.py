@@ -445,7 +445,7 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
     @api_app.get(
         "/jobs/{job_id}/delivery-contract",
         tags=["Jobs"],
-        summary="Fetch the artifact delivery contract (11-point QA, CELS distortion, and layout invariants)",
+        summary="Fetch the artifact delivery contract (11-point QA and layout invariants)",
     )
     async def get_delivery_contract(
         job_id: str, x_ubt_tenant: str | None = Header(default=None)
@@ -479,7 +479,9 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
         tags=["Jobs"],
     )
     async def download_file(
-        job_id: str, x_ubt_tenant: str | None = Header(default=None)
+        job_id: str,
+        force: bool = False,
+        x_ubt_tenant: str | None = Header(default=None),
     ) -> FileResponse:
         valid_id = validate_job_id(job_id)
         if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):
@@ -510,6 +512,28 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
                 status_code=404,
                 detail=f"Translated file not found for job: {valid_id}",
             )
+        stale = await asyncio.to_thread(_delivery_is_stale, valid_id)
+        if stale:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "The delivered files predate the current text: this job has "
+                    "edits that were not re-rendered. Re-render the deliverable "
+                    "before downloading it."
+                ),
+            )
+        if not force:
+            verdict = await asyncio.to_thread(_delivery_verdict_sync, valid_id)
+            if verdict == "blocked":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "The quality gate blocked this delivery: some blocks were "
+                        "quarantined or failed and ship the source text instead of a "
+                        "translation. Inspect the quality report, or re-download with "
+                        "?force=1 to take it knowingly."
+                    ),
+                )
         return FileResponse(
             path=output_path,
             filename=output_path.name,

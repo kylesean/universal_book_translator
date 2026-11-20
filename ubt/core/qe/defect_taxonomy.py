@@ -73,6 +73,7 @@ STRUCTURAL_DEFECT_MARKERS: tuple[str, ...] = (
     # released by any threshold at or below it.
     "html_structure_mismatch",
     "HTML delta failure",
+    "Inline anchor tag mismatch",
     "Prompt template XML artifacts",
     "Repetitive loop hallucination",
     "repetition",
@@ -183,6 +184,7 @@ FORMAT_ONLY_MARKERS: tuple[str, ...] = (
 # and the provenance-only "Visual witness discrepancy" marker.
 CRITICAL_DEFECT_MARKERS: tuple[str, ...] = (
     "Empty target text",
+    "Inline anchor tag mismatch",
     "email_token_corrupt",
     "math_token_corrupt",
     "soup_token_corrupt",
@@ -263,6 +265,7 @@ STRUCTURAL_CATEGORIES: tuple[str, ...] = (
     "terminology_consistency",
     "html_structure_mismatch",
     "html_formatting_drift",
+    "inline_anchor_mismatch",
     "email_token_corrupt",
     "soup_token_corrupt",
     "math_token_corrupt",

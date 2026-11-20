@@ -590,7 +590,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Fetch the artifact delivery contract (11-point QA, CELS distortion, and layout invariants) */
+        /** Fetch the artifact delivery contract (11-point QA and layout invariants) */
         get: operations["get_delivery_contract_jobs__job_id__delivery_contract_get"];
         put?: never;
         post?: never;
@@ -1719,11 +1719,6 @@ export interface components {
              */
             allow_degrade?: boolean | null;
             /**
-             * Enable Cels
-             * @description Whether to use Column-Aware Elastic Layout Solver (CELS) for faithful delivery. Set false to rollback to legacy 2D packing layout
-             */
-            enable_cels?: boolean | null;
-            /**
              * Pages
              * @description Page range filter (e.g. 1-10)
              */
@@ -2234,6 +2229,8 @@ export interface components {
             qe_engine?: ("heuristic" | "tiered") | null;
             /** Qe Judge Enabled */
             qe_judge_enabled?: boolean | null;
+            /** Qe Judge Backend */
+            qe_judge_backend?: ("llm" | "gemini_decision" | "jev") | null;
             /** Qe Judge Provider */
             qe_judge_provider?: string | null;
             /** Qe Judge Model */
@@ -2267,6 +2264,13 @@ export interface components {
              * @description Whether the LLM judge wrapper is on — the switch that scores anything
              */
             judge_enabled: boolean;
+            /**
+             * Judge Backend
+             * @description Scoring backend when judge is enabled: generative LLM ('llm') or zero-output-token Decision Model API ('gemini_decision' / 'jev')
+             * @default llm
+             * @enum {string}
+             */
+            judge_backend: "llm" | "gemini_decision" | "jev";
             /**
              * Judge Provider
              * @description Provider block that answers judge calls, when not the translator
@@ -3828,7 +3832,9 @@ export interface operations {
     };
     download_file_jobs__job_id__download_get: {
         parameters: {
-            query?: never;
+            query?: {
+                force?: boolean;
+            };
             header?: {
                 "x-ubt-tenant"?: string | null;
                 "x-api-key"?: string | null;

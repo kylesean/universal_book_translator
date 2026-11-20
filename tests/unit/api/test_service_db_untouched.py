@@ -54,7 +54,7 @@ def test_a_download_for_a_service_database_id_leaves_it_untouched(tmp_path: Path
     before = _tables(service_db)
 
     response = _client(config).get("/jobs/job_queue/download", headers=_AUTH)
-    assert response.status_code in (404, 409)
+    assert response.status_code in (400, 404, 409)
     assert _tables(service_db) == before
 
 
@@ -65,7 +65,7 @@ def test_a_download_for_a_translation_memory_id_leaves_it_untouched(tmp_path: Pa
     before = _tables(tm_db)
 
     response = _client(config).get("/jobs/tm/download", headers=_AUTH)
-    assert response.status_code in (404, 409)
+    assert response.status_code in (400, 404, 409)
     assert _tables(tm_db) == before
 
 

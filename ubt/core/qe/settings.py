@@ -38,6 +38,7 @@ from typing import Any
 QE_WRITABLE_FIELDS: tuple[str, ...] = (
     "qe_engine",
     "qe_judge_enabled",
+    "qe_judge_backend",
     "qe_judge_provider",
     "qe_judge_model",
     "qe_threshold",

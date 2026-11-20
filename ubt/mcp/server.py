@@ -740,8 +740,19 @@ async def ubt_translate_book(
         # The implicit deliverable defaults to ~/Documents/UBT, which is outside
         # the MCP sandbox; REST relocates it inside the allowlist, so MCP must
         # too instead of writing outside its own contract.
-        output_path = _default_output_in_sandbox(resolved)
-        if Path(output_path).exists() and not fresh:
+        output_path = _default_output_in_sandbox(
+            resolved,
+            monolingual=(dual_mode == "mono"),
+            pages=parse_page_ranges(pages) if pages else None,
+        )
+        if Path(output_path).exists() and (
+            not fresh
+            or not own_prior_deliverable(
+                Path(output_path),
+                prior_output_of(_MANAGER.get_job(job_id) if job_id else None),
+                input_path=resolved,
+            )
+        ):
             raise ToolError(f"output_path already exists; refusing to overwrite it: {output_path}")
     base_config = UBTConfig.from_env()
     if db_dir:
@@ -780,26 +791,27 @@ async def ubt_translate_book(
     # one deliverable. The in-memory scan covers this process's own window
     # before a job's ledger exists; the shared ledger scan is the durable
     # record every writer observes.
-    in_process = await asyncio.to_thread(
-        output_path_claimant, _MANAGER, None, jid, Path(output_path)
-    )
-    cross_process = await asyncio.to_thread(
-        ledger_output_path_claimant,
-        Path(base_config.db_dir),
-        jid,
-        Path(output_path),
-    )
-    claimant = in_process or cross_process
-    if claimant is not None:
-        raise ToolError(f"output_path already claimed by live job {claimant}")
-    # One bucket per process, not per job: ``rate_limit_rpm`` is a
-    # per-credential budget, so a per-job bucket multiplied it by the number of
-    # concurrent MCP translations against the same key. ``JobManager`` passes
-    # this through to every orchestrator it builds.
-    if _MANAGER.rate_limiter is None:
-        _MANAGER.rate_limiter = _shared_rate_limiter()
-    record = _MANAGER.create_job(request, job_id=jid or None)
-    record.task = asyncio.create_task(_MANAGER.execute_job(record, base_config))
+    async with _MANAGER.claim_gate:
+        in_process = await asyncio.to_thread(
+            output_path_claimant, _MANAGER, None, jid, Path(output_path)
+        )
+        cross_process = await asyncio.to_thread(
+            ledger_output_path_claimant,
+            Path(base_config.db_dir),
+            jid,
+            Path(output_path),
+        )
+        claimant = in_process or cross_process
+        if claimant is not None:
+            raise ToolError(f"output_path already claimed by live job {claimant}")
+        # One bucket per process, not per job: ``rate_limit_rpm`` is a
+        # per-credential budget, so a per-job bucket multiplied it by the number of
+        # concurrent MCP translations against the same key. ``JobManager`` passes
+        # this through to every orchestrator it builds.
+        if _MANAGER.rate_limiter is None:
+            _MANAGER.rate_limiter = _shared_rate_limiter()
+        record = _MANAGER.create_job(request, job_id=jid or None)
+        record.task = asyncio.create_task(_MANAGER.execute_job(record, base_config))
     return {"job_id": record.job_id, "status": JobStatus.SUBMITTED, "rehearsal": rehearsal}
 
 

@@ -266,6 +266,7 @@ def subset_fonts_with_ghostscript(
 
     cmd = [
         "gs",
+        "-dSAFER",
         "-sDEVICE=pdfwrite",
         "-dCompatibilityLevel=1.7",
         f"-dPDFSETTINGS={pdf_setting}",
@@ -279,6 +280,7 @@ def subset_fonts_with_ghostscript(
         "-dPreserveAnnots=true",
         "-dPreserveMarkedContent=true",
         f"-sOutputFile={output_path}",
+        "--",
         str(input_path),
     ]
 

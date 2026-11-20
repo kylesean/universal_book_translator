@@ -131,6 +131,14 @@ def test_match_a_latex_variant() -> None:
     assert _match_term_surfaces("Vch", "see V_{ch} ok") == ["V_{ch}"]
 
 
+def test_match_an_identifier_whose_underscore_was_latex_escaped() -> None:
+    # A draft that typesets the identifier in math escapes its underscore; the
+    # identifier itself is intact, so it is not an omission.
+    assert _match_term_surfaces("lm_head", r"尾部和 $\text{lm\_head}$ 各执行一次") == ["lm_head"]
+    assert _match_term_surfaces("lm_head", r"对 lm\_head 进行评估") == ["lm_head"]
+    assert _match_term_surfaces("lm_head", "只提到了头部") is None
+
+
 def test_match_source_attested_digit_gluing() -> None:
     assert _match_term_surfaces("Vtm", "x5Vtm7", "x5Vtm7") == ["Vtm"]
 

@@ -34,7 +34,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 
 from ubt.api.job_catalog import list_job_summaries, page_scope_label, summarize_job
 from ubt.api.models import (
@@ -411,7 +411,6 @@ def _persist_accepted_placeholder(
 #: of ``GET /jobs`` serves. Resolved from the package root (``ubt/api/static``),
 #: not this file's directory -- the route modules live one level below since the
 #: app split.
-_STATIC_INDEX = Path(__file__).resolve().parent.parent / "static" / "index.html"
 
 
 def register_job_routes(
@@ -942,10 +941,6 @@ def register_job_routes(
         navigation (``Accept: text/html``) is answered with the SPA shell and
         the client router resolves the screen; API clients get the JSON queue.
         """
-        if "text/html" in request.headers.get("accept", ""):
-            index = _STATIC_INDEX
-            if index.exists():
-                return FileResponse(index, media_type="text/html")
 
         def _live_overrides() -> dict[str, dict[str, Any]]:
             overrides: dict[str, dict[str, Any]] = {}

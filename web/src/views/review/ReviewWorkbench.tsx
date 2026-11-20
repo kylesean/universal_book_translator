@@ -489,10 +489,10 @@ export function ReviewWorkbench() {
     return () => window.removeEventListener('keydown', onKeyDown)
   })
 
-  const handleSave = async (segment: Segment) => {
-    if (!jobId) return
+  const handleSave = async (segment: Segment): Promise<boolean> => {
+    if (!jobId) return false
     const draft = drafts[segment.block_id]
-    if (draft === undefined || draft === segment.delivered_text) return
+    if (draft === undefined || draft === segment.delivered_text) return true
     setSaving((prev) => ({ ...prev, [segment.block_id]: true }))
     try {
       const res = await editSegment(jobId, segment.block_id, draft)
@@ -517,6 +517,7 @@ export function ReviewWorkbench() {
       // batch a reviewer committed. It is now an explicit action (the
       // "re-render" button) so a review session re-renders once, at the end.
       setReExportPending(true)
+      return true
     } catch (err) {
       // A 409 is not "the save failed" — it means this job's ledger is held by
       // another writer (a running resume, another reviewer's edit), or the run
@@ -531,6 +532,7 @@ export function ReviewWorkbench() {
             ? err.message
             : t.review.saveFailed
       )
+      return false
     } finally {
       setSaving((prev) => ({ ...prev, [segment.block_id]: false }))
     }
@@ -566,6 +568,9 @@ export function ReviewWorkbench() {
       ...prev,
       [blockId]: t.review.cascadeDone.replace('{n}', String(replacements)),
     }))
+    if (replacements > 0) {
+      setReExportPending(true)
+    }
     if (page !== null && previewPage === page) {
       setPreviewBust(Date.now())
     }
@@ -618,7 +623,8 @@ export function ReviewWorkbench() {
   const hasMore = segments.length < segmentTotal
 
   const saveAndContinue = async (segment: Segment) => {
-    await handleSave(segment)
+    const ok = await handleSave(segment)
+    if (!ok) return
     setEditing((prev) => ({ ...prev, [segment.block_id]: false }))
     const next = moveSegment(1)
     requestAnimationFrame(() => scrollToSelected(next))

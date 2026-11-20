@@ -61,6 +61,38 @@ def test_stray_dark_pixels_suppress_a_near_white_reading(tmp_path: Path) -> None
     assert [f.code for f in findings] == ["text_occluded"]
 
 
+def test_a_box_inkless_in_the_source_is_not_reported(tmp_path: Path) -> None:
+    """A text-layer box with no ink in the source is faithful, not occluded.
+
+    Regression for the LoopCD p1 finding: the artifact carried a text box at
+    (24,228)-(41,564) whose crop was blank in the source raster too, so the
+    delivered page reproduced exactly what the source printed (nothing).
+    """
+    artifact = _page(tmp_path, name="artifact.png")
+    source = _page(tmp_path, name="source.png")
+    assert (
+        text_occlusion_findings(
+            {1: artifact}, [_BOX], {1: _MEDIA}, dpi=_DPI, source_page_pngs={1: source}
+        )
+        == []
+    )
+
+
+def test_ink_in_the_source_keeps_the_occlusion_finding(tmp_path: Path) -> None:
+    artifact = _page(tmp_path, name="artifact.png")
+    source = _page(tmp_path, ink=((20, 74, 100, 86),), name="source.png")
+    findings = text_occlusion_findings(
+        {1: artifact}, [_BOX], {1: _MEDIA}, dpi=_DPI, source_page_pngs={1: source}
+    )
+    assert [f.code for f in findings] == ["text_occluded"]
+
+
+def test_white_on_white_without_source_raster_still_reports(tmp_path: Path) -> None:
+    """No source raster -> keep the previous behaviour rather than silence it."""
+    findings = text_occlusion_findings({1: _page(tmp_path)}, [_BOX], {1: _MEDIA}, dpi=_DPI)
+    assert [f.code for f in findings] == ["text_occluded"]
+
+
 def test_rotated_page_occlusion_findings(tmp_path: Path) -> None:
     img_90 = Image.new("L", (100, 200), 255)
     draw_90 = ImageDraw.Draw(img_90)
@@ -453,7 +485,7 @@ def test_six_point_type_is_small_but_legible(tmp_path: Path) -> None:
 def test_a_matrix_scaled_font_is_measured_by_rendered_height(tmp_path: Path) -> None:
     from ubt.adapters.pdf.visual_gate import type_size_findings
 
-    body = "#scale(x: 90%, y: 90%)[The quick brown fox jumps over the lazy dog. " * 40 + "]"
+    body = "#scale(x: 90%, y: 90%)[" + "The quick brown fox jumps over the lazy dog. " * 40 + "]"
     pdf = _typst_pdf(tmp_path, body)
     assert type_size_findings(pdf, [1]) == []
 

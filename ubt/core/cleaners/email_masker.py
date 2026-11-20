@@ -26,7 +26,9 @@ _MASK_PREFIX = "⟦EMAIL_MASK_"
 
 #: A bare address. The local part and domain are conservative (no spaces, no
 #: angle brackets) so prose like ``user @ host`` is never welded together.
-_EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+_EMAIL_PATTERN = re.compile(
+    r"(?:\{[A-Za-z0-9._%+\-,\s]{2,120}\}|[A-Za-z0-9._%+\-]+)@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"
+)
 #: A scheme-prefixed locator. Closing brackets and quotes are excluded so the
 #: match stops at the end of the URL rather than swallowing a following clause.
 _URL_PATTERN = re.compile(r"(?:https?://|ftp://|mailto:)[^\s<>()\[\]{}\"']+")

@@ -12,9 +12,11 @@ from ubt.core.notes.models import (
     NotesConfig,
 )
 
+_TYPST_ESCAPE_RE = re.compile(r"([\\#\[\]$*_<>@`/])")
+
 
 def _esc_typst(s: str) -> str:
-    return s.replace("[", r"\[").replace("]", r"\]").replace("#", r"\#")
+    return _TYPST_ESCAPE_RE.sub(r"\\\1", s)
 
 
 def render_footnote_inline_typst(note: FootnoteItem) -> str:
@@ -40,7 +42,7 @@ def render_endnote_section_typst(
         )
         content = _esc_typst(n.content)
         items.append(
-            f'  #block(inset: (bottom: 0.35em))[[#metadata(()) <{n.note_id}>] #text(weight: "bold")[{marker}.] {content}{backlink}]'
+            f'  #block(inset: (bottom: 0.35em))[#metadata(()) <{n.note_id}> #text(weight: "bold")[{marker}.] {content}{backlink}]'
         )
 
     joined_items = "\n".join(items)
@@ -48,7 +50,7 @@ def render_endnote_section_typst(
         f"#v(1.2em)\n"
         f"#line(length: 30%, stroke: 0.5pt + luma(150))\n"
         f"#v(0.4em)\n"
-        f"#heading(level: 2)[{cfg.section_title}]\n"
+        f"#heading(level: 2)[{_esc_typst(cfg.section_title)}]\n"
         f"#v(0.3em)\n"
         f"#set text(size: {cfg.font_size_pt}pt, fill: luma(60))\n"
         f"{joined_items}\n"
@@ -103,10 +105,16 @@ def inject_typst_footnotes_into_text(text: str, notes_in_block: Sequence[Footnot
     out = text
     for note in notes_in_block:
         pattern = re.escape(note.callout_marker)
-        esc_variant = pattern.replace(r"\[", r"\\\[").replace(r"\]", r"\\\]")
+        esc_variant = (
+            pattern.replace(r"\[", r"\\\[").replace(r"\]", r"\\\]").replace(r"\*", r"\\\*")
+        )
         combined = f"(?:{esc_variant}|{pattern})"
         replacement = render_footnote_inline_typst(note)
-        out = re.sub(combined, replacement, out, count=1)
+
+        def _repl(_match: re.Match[str], val: str = replacement) -> str:
+            return val
+
+        out = re.sub(combined, _repl, out, count=1)
     return out
 
 
@@ -119,12 +127,18 @@ def inject_endnote_links_into_text(
     for note in notes_in_block:
         marker = note.formatted_marker(st)
         link_callout = (
-            f"[#metadata(()) <{note.note_id}-ref>]#link(<{note.note_id}>)[#super[{marker}]]"
+            f"#metadata(()) <{note.note_id}-ref>#link(<{note.note_id}>)[#super[{marker}]]"
         )
         pattern = re.escape(note.callout_marker)
-        esc_variant = pattern.replace(r"\[", r"\\\[").replace(r"\]", r"\\\]")
+        esc_variant = (
+            pattern.replace(r"\[", r"\\\[").replace(r"\]", r"\\\]").replace(r"\*", r"\\\*")
+        )
         combined = f"(?:{esc_variant}|{pattern})"
-        out = re.sub(combined, link_callout, out, count=1)
+
+        def _repl(_match: re.Match[str], val: str = link_callout) -> str:
+            return val
+
+        out = re.sub(combined, _repl, out, count=1)
     return out
 
 

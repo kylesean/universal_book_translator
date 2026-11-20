@@ -1855,6 +1855,7 @@ async def run_draft_stage(
     if rolling_enabled:
         await asyncio.to_thread(_restore_memory_state, ledger, actual_job_id, memory_mgr)
 
+    completed_cleanly = False
     try:
         cursor_spine: int | None = None
         cursor_block_id: str | None = None
@@ -1869,6 +1870,7 @@ async def run_draft_stage(
                 chapter_id=chapter_id,
             )
             if not batch:
+                completed_cleanly = True
                 break
 
             cursor_spine = batch[-1].spine_index
@@ -1959,7 +1961,7 @@ async def run_draft_stage(
             yield event
     finally:
         await flusher.close()
-        if rolling_enabled:
+        if rolling_enabled and completed_cleanly:
             # Chapter end: flush what the step threshold never reached.
             #
             # Under ``chapter_streaming`` each chapter gets its own

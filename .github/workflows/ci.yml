@@ -54,7 +54,7 @@ jobs:
         # without it uv may re-resolve and drift from what the local gate ran.
         run: |
           uv python install 3.12
-          uv sync --extra dev --extra cels --locked
+          uv sync --extra dev --locked
 
       - name: Lint (ruff)
         run: uv run ruff check
@@ -182,7 +182,7 @@ jobs:
       - name: Install Python + dev AND pdf extras
         run: |
           uv python install 3.12
-          uv sync --extra dev --extra pdf --extra cels --locked
+          uv sync --extra dev --extra pdf --locked
 
       - name: Report the resolved engine
         # A silent skip back to pdfium would make this job pass without testing

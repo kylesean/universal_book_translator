@@ -125,7 +125,7 @@ CHECK_CODES: dict[str, tuple[str, ...]] = {
         "pdf_engine.docling_ok",
         "pdf_engine.docling_missing",
         "pdf_engine.pdfium",
-        "pdf_engine.auto_docling",
+        "pdf_engine.auto_native",
         "pdf_engine.auto_missing",
         "pdf_engine.registered",
         "pdf_engine.unregistered",
@@ -1063,31 +1063,13 @@ def collect_checks(
             detail_code="pdf_engine.pdfium",
         )
     elif config.pdf_engine == "auto":
-        if importlib.util.find_spec("docling") is not None:
-            record(
-                "PDF engine",
-                "OK",
-                "auto = docling layout (unconditional)",
-                code="pdf_engine",
-                detail_code="pdf_engine.auto_docling",
-            )
-        else:
-            # ``auto`` is docling; without the package the adapter degrades to
-            # the geometric pdfium reader (warned at runtime, and namespaced in
-            # the job id). It does not fail the job \u2014 the old text claimed it
-            # would, which sent operators looking for a crash that never came
-            # while tables, figures and formulas were silently dropped.
-            record(
-                "PDF engine",
-                "WARN",
-                "auto selects docling, which is not installed \u2014 PDF jobs fall "
-                "back to the geometric pdfium reader, dropping tables, figures and "
-                "formulas from the rebuilt PDF",
-                fix="uv sync --extra pdf, or set UBT_PDF_ENGINE=pdfium to accept the fast path",
-                code="pdf_engine",
-                detail_code="pdf_engine.auto_missing",
-                fix_code="pdf_engine.auto_missing",
-            )
+        record(
+            "PDF engine",
+            "OK",
+            "auto = native in-place PDF stream (born-digital) / docling (scanned)",
+            code="pdf_engine",
+            detail_code="pdf_engine.auto_native",
+        )
     elif is_pdf_engine_registered(config.pdf_engine):
         record(
             "PDF engine",

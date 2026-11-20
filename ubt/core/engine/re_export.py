@@ -331,6 +331,9 @@ async def re_export_job(
                 )
             target = Path(str(stored_output))
 
+        owns_router = router is None
+        owns_qe = qe_runner is None
+        adapter: object | None = None
         if router is None or qe_runner is None:
             built_router, built_qe = _default_collaborators(config, router, qe_runner)
             router = router or built_router
@@ -443,6 +446,24 @@ async def re_export_job(
             with suppress(asyncio.CancelledError):
                 await renew_task
     finally:
-        lock.release()
+        # Close collaborators and the ledger BEFORE releasing the writer lock so
+        # no incoming writer observes half-flushed WAL state or leaks clients.
+        if locals().get("owns_qe") and qe_runner is not None:
+            aclose_qe = getattr(qe_runner, "aclose", None)
+            if callable(aclose_qe):
+                with suppress(Exception):
+                    await aclose_qe()
+        if locals().get("owns_router") and router is not None:
+            aclose_router = getattr(router, "aclose", None)
+            if callable(aclose_router):
+                with suppress(Exception):
+                    await aclose_router()
+        adapter_ref = locals().get("adapter")
+        if adapter_ref is not None:
+            close_adapter = getattr(adapter_ref, "close", None)
+            if callable(close_adapter):
+                with suppress(Exception):
+                    close_adapter()
         if ledger is not None:
             ledger.close()
+        lock.release()

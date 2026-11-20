@@ -51,12 +51,19 @@ def _run_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+_SIMPLE_MULTIPLIER_RE = re.compile(r"^\d+(?:\.\d+)?(?:[–\-]\d+(?:\.\d+)?)?[×x%°]$")
+
+
 def _qualifies(run: str) -> bool:
     """True when a run carries real math signal (precision-first)."""
     if len(run) < 2:
         # Lone operator: only when glued to neighbours (``e−ψ``). Spaced
         # singles (``100 ° C``, ``F ≪ F``) are ordinary prose the model
         # copies safely; masking each would litter placeholder tokens.
+        return False
+    if _SIMPLE_MULTIPLIER_RE.match(run):
+        # Plain speedup multipliers / percentages like ``21×`` or ``4–11×`` are
+        # ordinary prose; masking them into ``⟦SOUP_MASK_...⟧`` degrades phrasing.
         return False
     math_hits = (
         len(_GREEK_RE.findall(run)) + len(_MATH_OP_RE.findall(run)) + len(_SUB_SUP_RE.findall(run))
@@ -86,7 +93,7 @@ _PARAM_ASSIGN_RE = re.compile(
 )
 
 
-_TOKEN_SPAN_RE = re.compile(r"⟦[^⟧]*⟧")
+_TOKEN_SPAN_RE = re.compile(r"⟦[^⟧]*⟧|</?(?:[bic]\d+|f\d+/?)>")
 
 
 def _subtract_token_spans(spans: list[tuple[int, int]], text: str) -> list[tuple[int, int]]:
@@ -124,7 +131,10 @@ def find_soup_spans(text: str) -> list[tuple[int, int]]:
     """(start, end) spans of unicode-soup math and physical parameter assignments inside prose."""
     raw_spans = [(s, e) for s, e in _run_spans(text or "") if _qualifies(text[s:e])]
     if text:
+        protected = [(m.start(), m.end()) for m in _TOKEN_SPAN_RE.finditer(text)]
         for m in _PARAM_ASSIGN_RE.finditer(text):
+            if any(ps < m.end() and m.start() < pe for ps, pe in protected):
+                continue
             raw_spans.append((m.start(), m.end()))
     raw_spans = _subtract_token_spans(raw_spans, text)
 

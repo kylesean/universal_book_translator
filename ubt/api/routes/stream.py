@@ -335,6 +335,7 @@ def register_stream_routes(api_app: FastAPI, scope: ApiScope) -> None:
                                 record.status,
                                 public_artifact(record.progress.output_file),
                                 record.error,
+                                counters=record.progress.model_dump(),
                             ),
                         )
                         break

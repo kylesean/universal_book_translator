@@ -500,7 +500,7 @@ class TypstConfig(BaseModel):
 
     model_config = ConfigDict(extra="ignore", validate_assignment=True)
 
-    dual_mode: DualMode = "auto"
+    dual_mode: DualMode = "mono"
     layout_columns: int | None = None
     emit_both: bool = False
     #: Also write a reflow (L3) reading copy beside a facsimile/page_locked
@@ -572,6 +572,7 @@ class QualityConfig(BaseModel):
     consistency_max_repairs: int = Field(default=50, ge=0)
     qe_engine: QeEngine = "heuristic"
     qe_judge_enabled: bool = False
+    qe_judge_backend: Literal["llm", "gemini_decision", "jev"] = "llm"
     qe_judge_model: str | None = None
     qe_judge_pass_sample: float = Field(default=0.0, ge=0.0, le=1.0)
     qe_judge_base_url: str | None = None
@@ -598,7 +599,7 @@ class QualityConfig(BaseModel):
     visual_vlm_blocking_enabled: bool = False
     deterministic_glossary_long_route: bool = False
     export_min_completion_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
-    export_allow_needs_human: bool = False
+    export_allow_needs_human: bool = True
 
 
 class EngineConfig(BaseModel):
@@ -669,7 +670,6 @@ class EngineConfig(BaseModel):
     #: across books that share the same model/profile/glossary fingerprint;
     #: human PE imports remain global either way.
     tm_cross_book: bool = False
-    enable_cels: bool = Field(default=True, validation_alias="UBT_ENABLE_CELS")
 
 
 class UBTConfig(BaseSettings):
@@ -1040,8 +1040,9 @@ class UBTConfig(BaseSettings):
     consistency_max_repairs: int = Field(default=50, ge=0)
     qe_engine: QeEngine = "heuristic"
 
-    # -- L3 LLM-as-Judge (suspect-only rescoring, off by default) ------------
+    # -- L3 LLM-as-Judge / Decision Model (suspect-only rescoring, off by default)
     qe_judge_enabled: bool = False
+    qe_judge_backend: Literal["llm", "gemini_decision", "jev"] = "llm"
     qe_judge_model: str | None = None
     #: The judge is asked about blocks whose deterministic verdict is
     #: *ambiguous* — the ``STRUCTURAL_OTHER`` class (a rejection with no specific
@@ -1234,14 +1235,14 @@ class UBTConfig(BaseSettings):
     # book — the renderer falls back to ``source_text`` on an empty target —
     # and the job finalized as "completed". Set to 0 to disable the gate.
     export_min_completion_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
-    # -- export needs-human gate (fail-closed) ------------------------------
-    # NEEDS_HUMAN blocks ship their translation but are triaged "queued for
-    # human post-editing": the text is unverified. Shipping it with nothing
-    # marking it presented machine output as finished. Export refuses by
-    # default; set true (``UBT_EXPORT_ALLOW_NEEDS_HUMAN=1``, CLI
-    # ``--allow-needs-human``) to ship knowingly — the quality report then
-    # lists every unverified block id under ``summary.needs_human_block_ids``.
-    export_allow_needs_human: bool = False
+    # -- export needs-human gate (advisory by default) ----------------------
+    # NEEDS_HUMAN blocks carry advisory review flags and ship their translated
+    # text by default while listing every flagged block id under
+    # ``summary.needs_human_block_ids`` in the quality report (and Workbench).
+    # Strict publishers who want export to abort when any block is NEEDS_HUMAN
+    # can set ``UBT_EXPORT_ALLOW_NEEDS_HUMAN=0`` (CLI ``--no-allow-needs-human``).
+    # Unresolvable critical defects remain quarantined as BLOCKED_HUMAN.
+    export_allow_needs_human: bool = True
 
     # -- Concurrency / pagination ----------------------------------------------
     max_concurrency: int = Field(default=10, gt=0)
@@ -1328,7 +1329,7 @@ class UBTConfig(BaseSettings):
     # 'auto' lets the advisor decide; explicit modes only warn.
     # Default 'auto' allows the advisory layout stage to inspect document signals
     # and automatically adopt monolingual when layout is heavily structured/discouraged.
-    dual_mode: DualMode = "auto"
+    dual_mode: DualMode = "mono"
     # Physical column count for a reflowed PDF (1 or 2). ``None`` (default) aligns
     # the delivered layout to the *source* — a two-column paper stays two-column,
     # a single-column one stays single-column. Set 1 or 2 to override explicitly
@@ -1535,7 +1536,6 @@ class UBTConfig(BaseSettings):
     #: across books that share the same model/profile/glossary fingerprint;
     #: human PE imports remain global either way.
     tm_cross_book: bool = False
-    enable_cels: bool = Field(default=True, validation_alias="UBT_ENABLE_CELS")
 
     # -- Service hardening / deployment (single source of truth) ----
     # Canonical fields for the deployment knobs: env_prefix already maps

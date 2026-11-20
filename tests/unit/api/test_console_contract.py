@@ -499,6 +499,29 @@ def test_jobs_endpoint_serves_html_to_a_browser_and_json_to_api_clients(tmp_path
     assert "jobs" in api.json()
 
 
+def test_the_shell_is_public_but_the_job_queue_still_requires_a_key(tmp_path: Path) -> None:
+    """A browser gets the sign-in screen; an API client gets 401, never the queue.
+
+    The SPA shell is served for a ``text/html`` navigation to a console route
+    even without a session (the login screen is part of the app). The JSON
+    queue is the authenticated surface: the same path with an API ``Accept``
+    must reach the route's auth dependency.
+    """
+    static_index = _REPO_ROOT / "ubt" / "api" / "static" / "index.html"
+    if not static_index.exists():
+        pytest.skip("the console's built assets are not present in this checkout")
+
+    client = TestClient(create_app(_config(tmp_path)))
+    shell = client.get("/jobs", headers={"Accept": "text/html"})
+    assert shell.status_code == 200
+    assert shell.headers["content-type"].startswith("text/html")
+    assert shell.headers.get("cache-control") == "no-cache"
+
+    queue = client.get("/jobs", headers={"Accept": "application/json"})
+    assert queue.status_code == 401
+    assert not queue.headers["content-type"].startswith("text/html")
+
+
 def test_the_wizard_sends_only_fields_the_submit_endpoint_accepts() -> None:
     from ubt.api.models import JobSubmitRequest
 
@@ -1560,7 +1583,7 @@ def test_the_shell_is_never_cached_and_the_bundles_always_are(tmp_path: Path) ->
     assert asset.headers.get("cache-control") == "public, max-age=31536000, immutable"
 
 
-def test_delivery_contract_endpoint_and_cels_option(tmp_path: Path) -> None:
+def test_delivery_contract_endpoint_and_faithful_options(tmp_path: Path) -> None:
     from ubt.api.models import JobSubmitRequest
 
     req = JobSubmitRequest(
@@ -1568,9 +1591,7 @@ def test_delivery_contract_endpoint_and_cels_option(tmp_path: Path) -> None:
         target_lang="zh",
         delivery_mode="faithful",
         allow_degrade=True,
-        enable_cels=False,
     )
-    assert req.enable_cels is False
     assert req.delivery_mode == "faithful"
     assert req.allow_degrade is True
 

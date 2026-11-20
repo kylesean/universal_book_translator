@@ -88,6 +88,38 @@ def test_renumbering_a_citation_is_not_a_loss() -> None:
     assert engine.missing_literal_spans("See [1] for it.", "见[2]关于它。") == ()
 
 
+def test_a_soup_atom_retypeset_as_explicit_math_is_not_a_loss() -> None:
+    engine = default_placeholder_engine()
+    # A faithful draft may typeset delimiter-free soup as explicit LaTeX math.
+    # The atom survived, only its namespace changed.
+    assert (
+        engine.missing_literal_spans(
+            "Both forms decode from softmax(z′).",
+            r"这两种形式都从 $\text{softmax}(z')$ 解码。",
+        )
+        == ()
+    )
+    assert (
+        engine.missing_literal_spans(
+            "z′ = lm_head(coda(h′)).",
+            r"$z' = \text{lm\_head}(\text{coda}(\text{h}'))$。",
+        )
+        == ()
+    )
+
+
+def test_a_soup_atom_missing_from_both_namespaces_is_still_reported() -> None:
+    engine = default_placeholder_engine()
+    assert engine.mask("Both forms decode from softmax(z′).").soup_map
+
+    missing = engine.missing_literal_spans(
+        "Both forms decode from softmax(z′).",
+        "这两种形式都从该函数解码。",
+    )
+
+    assert ("soup", "softmax(z′)") in missing
+
+
 def test_math_and_citations_are_not_literal_span_checks() -> None:
     engine = default_placeholder_engine()
     source = "The value $x_{i}$ is defined in [1]."

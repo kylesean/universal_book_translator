@@ -171,12 +171,12 @@ def token_patterns(mask_prefix: str, core: str) -> tuple[re.Pattern[str], re.Pat
     token_body = prefix_pattern + rf"{sep}(\d{{1,6}})(?:-(?:\\_)?([0-9a-z]{{1,3}}))?"
     scan = re.compile(token_body, re.IGNORECASE)
 
-    # Left wrapper: optional LaTeX text/math markers or standard opening brackets
-    # e.g. $\text{, \text{, $, \(, ⟦, [, 【, (
-    left_wrapper = r"(?:(?:\$(?:\\(?:text|mathrm|mathbf)\s*\{)?|\\(?:text|mathrm|mathbf)\s*\{|\\\()\s*[⟦\[【(]?|[⟦\[【(])?"
-    # Right wrapper: optional closing brackets and LaTeX closers
-    # e.g. ⟧, ], 】, ), }$, }, $, \)
-    right_wrapper = r"(?:[⟧\]】)]\s*(?:\}\s*\$|\$|\}|\\\))|(?:\}\s*\$|\$|\}|\\\))|[⟧\]】)])?"
+    # Left wrapper: optional LaTeX text/math markers (including \llbracket) or standard opening brackets
+    # e.g. $\llbracket, $\text{, \text{, $, \(, ⟦, [, 【, (
+    left_wrapper = r"(?:(?:\$(?:\s*\\llbracket\s*|\s*\\(?:text|mathrm|mathbf)\s*\{)?|\\llbracket\s*|\\(?:text|mathrm|mathbf)\s*\{|\\\()\s*[⟦\[【(]?|[⟦\[【(])?"
+    # Right wrapper: optional closing brackets and LaTeX closers (including \rrbracket)
+    # e.g. ⟧, ], 】, ), \rrbracket$, }$, }, $, \)
+    right_wrapper = r"(?:[⟧\]】)]\s*(?:\\rrbracket\s*\$?|(?:\}\s*\$|\$|\}|\\\)))|(?:\s*\\rrbracket\s*\$?|\}\s*\$|\$|\}|\\\))|[⟧\]】)])?"
 
     fuzzy = re.compile(
         rf"{left_wrapper}{token_body}{right_wrapper}",
@@ -360,6 +360,12 @@ def _duplicated_indices(
     return sorted(leaked)
 
 
+_LATEX_LLBRACKET_WRAP_RE = re.compile(
+    r"\$?\s*\\llbracket\s*(⟦[A-Z]+_MASK_\d{1,6}(?:-[0-9a-z]{1,3})?⟧)\s*\\rrbracket\s*\$?",
+    re.IGNORECASE,
+)
+
+
 def restore_masked(text: str, mapping: dict[str, str], style: RestoreStyle) -> UnmaskReport:
     """Restore a masked block and verify it — the one restore implementation.
 
@@ -367,6 +373,7 @@ def restore_masked(text: str, mapping: dict[str, str], style: RestoreStyle) -> U
     citation / soup maskers each carried. Every integrity bucket is computed here
     once; a family only supplies its :class:`RestoreStyle`.
     """
+    text = _LATEX_LLBRACKET_WRAP_RE.sub(r"\1", text)
     table = _index_table(mapping)
     draft_refs = [(int(idx), checksum) for idx, checksum in style.scan_pattern.findall(text)]
     seen: dict[int, str | None] = {}

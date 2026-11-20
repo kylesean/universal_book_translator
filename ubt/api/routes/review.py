@@ -331,20 +331,51 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {valid_id}"
             )
 
-        def _meta() -> tuple[str | None, str | None]:
+        def _meta() -> tuple[str | None, str | None, str | None, str | None]:
             with SQLiteJobLedger(_job_db_path(valid_id), read_only=True) as ledger:
+                meta = ledger.get_job_metadata_value(valid_id, "manifest_metadata")
+                pdf_eng = meta.get("pdf_engine") if isinstance(meta, dict) else None
+                deliv_mode = meta.get("delivery_mode") if isinstance(meta, dict) else None
                 return (
                     ledger.get_job_source_path(valid_id),
                     ledger.get_job_target_lang(valid_id),
+                    str(pdf_eng) if pdf_eng else None,
+                    str(deliv_mode) if deliv_mode else None,
                 )
 
-        source_path, target_lang = await asyncio.to_thread(_meta)
+        source_path, target_lang, pdf_engine_used, deliv_mode = await asyncio.to_thread(_meta)
         if not source_path:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Job has no source document to preview against.",
             )
         resolved_source = resolve_secure_path(source_path, must_exist=True, config=app_config)
+        clamped_dpi = min(max(dpi, 40), 200)
+
+        if pdf_engine_used == "native" or (
+            resolved_source.suffix.lower() == ".pdf"
+            and deliv_mode not in {"reflow", "readable"}
+            and app_config.pdf_engine in {"auto", "native"}
+        ):
+            try:
+                from ubt.adapters.pdf.native_adapter import NativePDFAdapter
+
+                png = await asyncio.to_thread(
+                    NativePDFAdapter().render_page_preview_sync,
+                    resolved_source,
+                    page,
+                    blocks,
+                    target_lang or "zh",
+                    clamped_dpi,
+                )
+                return Response(content=png, media_type="image/png")
+            except Exception as native_exc:
+                # Fall back to Typst single-page preview only when the job isn't native-only.
+                if pdf_engine_used == "native":
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail=f"native page {page} preview failed: {native_exc}",
+                    ) from native_exc
 
         with tempfile.TemporaryDirectory(prefix="ubt_page_preview_") as tmp:
             try:
@@ -356,7 +387,7 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
                     page=page,
                     workdir=Path(tmp),
                     bilingual=bilingual,
-                    dpi=min(max(dpi, 40), 200),
+                    dpi=clamped_dpi,
                 )
             except PagePreviewUnavailable as exc:
                 raise HTTPException(

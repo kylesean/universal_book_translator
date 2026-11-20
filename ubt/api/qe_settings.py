@@ -60,6 +60,7 @@ def describe_qe_settings(config: Any) -> dict[str, Any]:
         # the label: a hand-edited `qe_engine="tiered"` with the judge off is a
         # real state, and the card has to be able to say so.
         "judge_enabled": judge_enabled,
+        "judge_backend": str(getattr(config, "qe_judge_backend", "llm") or "llm"),
         "judge_provider": str(judge_provider) if judge_provider else None,
         "judge_model": resolve_judge_model(config) or "",
         # Raw, not resolved: the edit form seeds its input from this, and seeding

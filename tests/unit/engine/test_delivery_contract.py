@@ -839,3 +839,20 @@ def test_a_sentinel_leaked_block_is_a_minor_advisory(
     assert finding.severity == "minor"
     assert report.passed
     assert report.deliverable
+
+
+def test_reader_machinery_leak_is_critical() -> None:
+    """Typography residue is never shippable: it is what the reader sees."""
+    text = "见 https://x.org/#h(0pt, weak: true)paper 与 [ ] 图 1，公式 ⟦ω=0.5⟧。"
+    report = evaluate_delivery_contract(_evidence(blocks=(_block("b1", text),), page_texts=(text,)))
+    assert "reader_machinery_leak" in _codes(report)
+    finding = next(f for f in report.findings if f.code == "reader_machinery_leak")
+    assert finding.severity == "critical"
+    statuses = {check["name"]: check["status"] for check in report.checks}
+    assert statuses["reader_machinery"] == "fail"
+
+
+def test_reader_machinery_allows_legitimate_brackets_and_math() -> None:
+    text = "见第 1 页图 1，公式 [ω=0.5] 与链接 https://example.org/paper.pdf。"
+    report = evaluate_delivery_contract(_evidence(blocks=(_block("b1", text),), page_texts=(text,)))
+    assert "reader_machinery_leak" not in _codes(report)

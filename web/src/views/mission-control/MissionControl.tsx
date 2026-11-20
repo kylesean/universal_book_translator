@@ -1260,10 +1260,15 @@ export function MissionControl() {
     }
   }
 
-  const issueDownload = async (jobIdToDownload: string, key: string, force = false) => {
+  const issueDownload = async (
+    jobIdToDownload: string,
+    key: string,
+    force = false,
+    prefetched?: DeliverableListing
+  ) => {
     setDownloading(true)
     try {
-      let listing = await listDeliverables(jobIdToDownload)
+      let listing = prefetched ?? (await listDeliverables(jobIdToDownload))
       if (listing.stale) {
         toast.push(t.mission.reRenderingBeforeDownload, 'info')
         await reExportJob(jobIdToDownload)
@@ -1291,17 +1296,19 @@ export function MissionControl() {
   const handleDownload = async (key?: string) => {
     if (!currentJobId || downloading) return
     const targetKey = key ?? primaryDeliverable?.key ?? 'primary'
-    let verdict: DeliverableListing['deliveryVerdict'] = null
+    setDownloading(true)
+    let listing: DeliverableListing | undefined
     try {
-      verdict = (await listDeliverables(currentJobId)).deliveryVerdict
+      listing = await listDeliverables(currentJobId)
     } catch {
-      // Fall through to download
+      // Fall through to issueDownload
     }
-    if (verdict === 'blocked') {
+    if (listing?.deliveryVerdict === 'blocked') {
+      setDownloading(false)
       setPendingBlockedDownload({ jobId: currentJobId, key: targetKey })
       return
     }
-    await issueDownload(currentJobId, targetKey)
+    await issueDownload(currentJobId, targetKey, false, listing)
   }
 
   const confirmDeleteJob = async () => {

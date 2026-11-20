@@ -152,7 +152,7 @@ def test_preflight_fails_when_no_fragment_can_be_typeset(
     _patch(monkeypatch, tmp_path, fake)
     adapter, manifest, blocks = _setup(tmp_path)
 
-    with pytest.raises(DocumentParseError, match="compile failed|no usable PDF"):
+    with pytest.raises(DocumentParseError, match="compile failed|failed to compile|no usable PDF"):
         asyncio.run(
             run_render_preflight(
                 adapter=adapter, manifest=manifest, blocks=blocks, target_lang="zh"

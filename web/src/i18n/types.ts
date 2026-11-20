@@ -221,8 +221,6 @@ export interface TranslationDictionary {
     faithfulFixHint: string
     allowDegrade: string
     allowDegradeHelp: string
-    enableCels: string
-    enableCelsHelp: string
     dualMode: string
     dualModeHelp: string
     dualModeAuto: string
@@ -657,13 +655,6 @@ export interface TranslationDictionary {
     contractCheckFonts: string
     contractCheckPageCount: string
     contractCheckReadable: string
-    celsDistortionTitle: string
-    celsDistortionScore: string
-    celsDistortionSafe: string
-    celsDistortionWarn: string
-    celsDistortionCritical: string
-    celsTracks: string
-    celsDeficit: string
     mathSummary: string
     termSummary: string
     coverageSummary: string
@@ -911,6 +902,11 @@ export interface TranslationDictionary {
     qeEngine: string
     qeEngineHeuristic: string
     qeEngineTiered: string
+    qeJudgeBackend: string
+    qeJudgeBackendHelp: string
+    qeJudgeBackendLlm: string
+    qeJudgeBackendGeminiDecision: string
+    qeJudgeBackendJev: string
     qeEngineHelp: string
     qeJudge: string
     qeJudgeOn: string

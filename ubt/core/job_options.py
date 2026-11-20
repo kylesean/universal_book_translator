@@ -135,10 +135,19 @@ PROFILE_NAME_RE = re.compile(r"[A-Za-z0-9_-]+")
 PROFILE_NAME_PATTERN = rf"^{PROFILE_NAME_RE.pattern}$"
 
 
+#: Service SQLite database stems living alongside ``{job_id}.sqlite`` in
+#: ``db_dir``. Accepting any of these as a ``job_id`` would open a shared
+#: service database as a job ledger and allow ``DELETE /jobs/<id>`` to drop it.
+RESERVED_JOB_IDS: frozenset[str] = frozenset({"tm", "job_queue", "rate_limiter"})
+
+
 def job_id_is_valid(job_id: str) -> bool:
     """Whether ``job_id`` is a legal job id on every surface (pattern + length)."""
     return (
-        bool(job_id) and len(job_id) <= JOB_ID_MAX_LEN and JOB_ID_RE.fullmatch(job_id) is not None
+        bool(job_id)
+        and len(job_id) <= JOB_ID_MAX_LEN
+        and JOB_ID_RE.fullmatch(job_id) is not None
+        and job_id.casefold() not in RESERVED_JOB_IDS
     )
 
 

@@ -1,3 +1,5 @@
+# ubt-pdfium-allow: single-threaded pytest; the test owns its fixture document and finishes before exit.
+
 from __future__ import annotations
 
 from collections.abc import Sequence

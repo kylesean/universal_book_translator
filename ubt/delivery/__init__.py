@@ -6,11 +6,11 @@ contract, the pure-function router and the structure-census planner.
 requests all funnel through it), with legacy modes mapped through
 :func:`ubt.delivery.contracts.legacy_delivery_contract`.
 
-The CELS layout and font solvers live in ``ubt.core.layout`` and
-``ubt.adapters.pdf.cels_*``. The artifact-side verdict lives in
-``ubt.core.engine.delivery_contract`` and the PDF evidence reader in
-``ubt.adapters.pdf.delivery_evidence``; this package does not duplicate those
-checks. It owns the routing contract and the ``DeliveryPlan``.
+The artifact-side verdict lives in ``ubt.core.engine.delivery_contract`` and the
+PDF evidence reader in ``ubt.adapters.pdf.delivery_evidence``; this package does
+not duplicate those checks. It owns the routing contract and the
+``DeliveryPlan``. Born-digital 1:1 in-place delivery is the native codec's
+(``ubt.codecs.pdf``), not a Typst renderer.
 """
 
 from ubt.delivery.contracts import (

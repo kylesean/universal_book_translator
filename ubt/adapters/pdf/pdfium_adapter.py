@@ -58,6 +58,7 @@ def _block_page_in_range(b: IRBlock, first: int, last: int) -> bool:
     return False
 
 
+@pdfium_serialized
 def _normalize_cropbox_origin(path: Path, blocks: list[IRBlock]) -> list[IRBlock]:
     """Translate block bounding boxes from MediaBox coordinates into CropBox coordinates.
 

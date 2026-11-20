@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ExternalLink,
@@ -53,19 +53,23 @@ export function PostEditDrawer({
   const [edits, setEdits] = useState<Record<string, string>>({})
   const [savingId, setSavingId] = useState<string | null>(null)
   const [reExporting, setReExporting] = useState(false)
+  const loadSeqRef = useRef(0)
 
   const fetchSegments = useCallback(async () => {
+    const seq = ++loadSeqRef.current
     setLoading(true)
     try {
       const res = await listSegments(jobId, {
         status: filter === 'issues' ? 'issues' : undefined,
         limit: 300,
       })
+      if (seq !== loadSeqRef.current) return
       setSegments(res.segments)
     } catch {
+      if (seq !== loadSeqRef.current) return
       toast.push('Failed to load segments', 'error')
     } finally {
-      setLoading(false)
+      if (seq === loadSeqRef.current) setLoading(false)
     }
   }, [jobId, filter, toast])
 
@@ -80,7 +84,7 @@ export function PostEditDrawer({
       (s) =>
         s.block_id.toLowerCase().includes(q) ||
         s.source_text.toLowerCase().includes(q) ||
-        (edits[s.block_id] ?? s.target_text).toLowerCase().includes(q)
+        (edits[s.block_id] ?? s.delivered_text).toLowerCase().includes(q)
     )
   }, [segments, search, edits])
 
@@ -98,7 +102,7 @@ export function PostEditDrawer({
 
   const handleSave = async (block: Segment) => {
     const textToSave = edits[block.block_id]
-    if (textToSave === undefined || textToSave === block.target_text) return
+    if (textToSave === undefined || textToSave === block.delivered_text) return
 
     setSavingId(block.block_id)
     try {
@@ -131,6 +135,7 @@ export function PostEditDrawer({
   }
 
   const handleReExport = async () => {
+    if (reExporting) return
     setReExporting(true)
     try {
       await reExportJob(jobId)
@@ -246,8 +251,8 @@ export function PostEditDrawer({
           ) : (
             <div className="space-y-4">
               {filtered.map((seg) => {
-                const currentVal = edits[seg.block_id] ?? seg.target_text
-                const isDirty = currentVal !== seg.target_text
+                const currentVal = edits[seg.block_id] ?? seg.delivered_text
+                const isDirty = currentVal !== seg.delivered_text
                 const isSaving = savingId === seg.block_id
 
                 return (

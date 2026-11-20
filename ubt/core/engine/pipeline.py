@@ -258,7 +258,9 @@ def degraded_pdf_engine(config: Any, manifest_metadata: dict[str, Any] | None) -
     """
     requested = str(getattr(config, "pdf_engine", "") or "")
     actual = str((manifest_metadata or {}).get("pdf_parser_engine", "") or "")
-    if requested in ("auto", "docling") and actual and actual != "docling":
+    if requested == "docling" and actual and actual != "docling":
+        return actual
+    if requested == "auto" and actual and actual not in ("native", "docling"):
         return actual
     return None
 
@@ -518,21 +520,39 @@ class PipelineOrchestrator:
         if self.config.qe_judge_enabled and isinstance(self.qe_runner, HeuristicQERunner):
             from ubt.core.qe.llm_judge import LLMJudgeQERunner, TieredQERunner
 
-            judge_fn, judge_model, judge_base_url, judge_provider = self._build_judge_fn(
-                self.config.qe_judge_model or self.config.repair_model
-            )
-            # Keep the provider and its endpoint on the orchestrator: the run's
-            # finally closes the pool, and billing attributes the judge's tokens
-            # to the endpoint they were actually spent at. Both were impossible
-            # while the provider lived only inside the closure.
-            self._judge_provider = judge_provider
-            self._judge_model = judge_model
-            self._judge_base_url = judge_base_url
-            judge = LLMJudgeQERunner(
-                judge_fn=judge_fn,
-                model=judge_model,
-                compare_sentences=self.config.qe_judge_sentences,
-            )
+            judge: BaseQERunner
+            if self.config.qe_judge_backend in ("gemini_decision", "jev"):
+                from ubt.core.qe.decision_judge import DecisionQERunner
+
+                raw_key = (
+                    self.config.qe_judge_api_key.get_secret_value()
+                    if self.config.qe_judge_api_key is not None
+                    else self.config.api_key.get_secret_value()
+                )
+                judge = DecisionQERunner(
+                    backend=self.config.qe_judge_backend,
+                    api_key=raw_key,
+                    model=self.config.qe_judge_model,
+                    base_url=self.config.qe_judge_base_url,
+                )
+                self._judge_model = judge._model
+                self._judge_base_url = judge._base_url
+            else:
+                judge_fn, judge_model, judge_base_url, judge_provider = self._build_judge_fn(
+                    self.config.qe_judge_model or self.config.repair_model
+                )
+                # Keep the provider and its endpoint on the orchestrator: the run's
+                # finally closes the pool, and billing attributes the judge's tokens
+                # to the endpoint they were actually spent at. Both were impossible
+                # while the provider lived only inside the closure.
+                self._judge_provider = judge_provider
+                self._judge_model = judge_model
+                self._judge_base_url = judge_base_url
+                judge = LLMJudgeQERunner(
+                    judge_fn=judge_fn,
+                    model=judge_model,
+                    compare_sentences=self.config.qe_judge_sentences,
+                )
             self.qe_runner = TieredQERunner(
                 heuristic=self.qe_runner,
                 judge=judge,

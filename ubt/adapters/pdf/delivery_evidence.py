@@ -32,6 +32,7 @@ from typing import Any
 
 import pikepdf
 
+from ubt.adapters.pdf.pdfium_gate import pdfium_serialized
 from ubt.core.engine.delivery_contract import (
     ContractBlock,
     ContractEvidence,
@@ -241,6 +242,7 @@ def _hull(boxes: Sequence[tuple[float, float, float, float]]) -> tuple[float, fl
     )
 
 
+@pdfium_serialized
 def _body_size_from_char_fonts(
     textpage: object,
     classified_rects: Sequence[tuple[float, float, float, float, str]] = (),

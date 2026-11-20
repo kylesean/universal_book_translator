@@ -23,12 +23,13 @@ from dataclasses import dataclass
 from ubt.core.cleaners.citation_masker import CitationMasker
 from ubt.core.cleaners.code_masker import CodeMasker
 from ubt.core.cleaners.email_masker import EmailMasker
-from ubt.core.cleaners.mask_tokens import UnmaskReport
+from ubt.core.cleaners.mask_tokens import TokenFactory, UnmaskReport, order_by_position
 from ubt.core.cleaners.math_masker import MathMasker
 from ubt.core.cleaners.soup_math import SoupMathMasker
 from ubt.model.segment import Placeholder
 
 _KINDS = ("email", "code", "math", "soup", "citation")
+_RIGID_ANCHOR_RE = re.compile(r"<f\d+/>")
 
 #: Citation reference identifiers, not citation spans. ``[1][2]`` and
 #: ``[1,2]`` both carry two references, so a span count would call the first
@@ -43,6 +44,27 @@ _FULLWIDTH_CITATION_RE = re.compile(r"[（），；［］]")
 _CITATION_WIDTH_TRANSLATION = str.maketrans(
     {"（": "(", "）": ")", "，": ",", "；": ";", "［": "[", "］": "]"}
 )
+
+#: ``\text{...}`` wrappers a draft puts around identifiers inside explicit math
+#: (``\text{lm\_head}``). The inner payload is the literal the source printed.
+_LATEX_TEXT_RE = re.compile(r"\\text\{([^{}]*)\}")
+#: Prime glyphs the source and the draft use for the same mark.
+_PRIME_TRANSLATION = str.maketrans({"′": "'", "″": '"', "’": "'", "´": "'"})
+
+
+def _math_normal_form(span: str) -> str:
+    """A comparison view of one math span: LaTeX wrappers and spacing removed.
+
+    A delimiter-free soup atom (``softmax(z′)``, ``lm_head(coda(h′))``) is a
+    literal the source printed. A faithful draft may typeset it as explicit
+    LaTeX math (``$\\text{softmax}(z')$``); the atom survived, so the family it
+    is filed under must not decide whether it was lost.
+    """
+    text = _LATEX_TEXT_RE.sub(r"\1", span)
+    text = text.replace("\\_", "_").replace("$", "")
+    text = text.translate(_PRIME_TRANSLATION)
+    text = re.sub(r"\\left|\\right", "", text)
+    return re.sub(r"\s+", "", text)
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +157,17 @@ class PlaceholderEngine:
         # intervals ($x \in [0, 1]$) and matrix brackets are protected as math
         # atoms and never intercepted by the citation pass.
         masked, math_map = self._math.mask(masked)
+        # Protect rigid inline formula anchors (<f1/>) inside the math mask
+        # namespace so LLMs treat them as opaque placeholders instead of
+        # rewriting angle brackets into LaTeX ($\langle f1/\rangle$).
+        if _RIGID_ANCHOR_RE.search(masked):
+            anchor_factory = TokenFactory(
+                self._math.mask_prefix,
+                mapping=dict(math_map),
+                _counter=len(math_map) + 1,
+            )
+            masked = _RIGID_ANCHOR_RE.sub(lambda m: anchor_factory.next(m.group(0)), masked)
+            math_map = order_by_position(masked, anchor_factory.mapping)
         # Gate 2b: delimiter-free unicode math merged into narrative is masked
         # behind its own namespace; restored verbatim below.
         masked, soup_map = self._soup.mask(masked)
@@ -189,11 +222,20 @@ class PlaceholderEngine:
         Citations are counted by reference identifier, not by span or value —
         renumbering and grouping are legitimate, a net deletion is not. Soup
         spans (delimiter-free unicode math mixed into prose) are literal atoms
-        and are compared exactly, like code.
+        and are compared exactly, like code -- except that a faithful draft may
+        re-typeset one as explicit LaTeX math, which counts as preserved.
         """
         source = self.mask(source_text)
         target = self.mask(target_text)
         missing: list[tuple[str, str]] = []
+        #: A soup atom re-typeset as explicit LaTeX math is preserved, not
+        #: lost: ``softmax(z′)`` comes back as ``$\text{softmax}(z')$`` and
+        #: ``lm_head(coda(h′))`` as part of ``$z' = \text{lm\_head}(...)$``.
+        #: Math spans themselves are compared by FastPass, so only the *soup*
+        #: remainder consults them, and only as an equivalence witness.
+        target_math_spans = [
+            form for form in (_math_normal_form(v) for v in target.math_map.values()) if form
+        ]
         for label, source_map, target_map in (
             ("email", source.email_map, target.email_map),
             ("code", source.code_map, target.code_map),
@@ -201,7 +243,12 @@ class PlaceholderEngine:
         ):
             remainder = Counter(source_map.values()) - Counter(target_map.values())
             for original, count in remainder.items():
-                missing.extend((label, original) for _ in range(count))
+                lost = count
+                if label == "soup":
+                    form = _math_normal_form(original)
+                    if form:
+                        lost -= min(count, sum(1 for span in target_math_spans if form in span))
+                missing.extend((label, original) for _ in range(max(0, lost)))
         # Citations may be renumbered and regrouped, so values are not compared
         # literally; a net loss of reference identifiers is what matters. A
         # repair that drops one marker leaves the reader an uncited claim,

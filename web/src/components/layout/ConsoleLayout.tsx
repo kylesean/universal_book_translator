@@ -16,7 +16,6 @@ import {
 import {
   checkHealth,
   getSystemInfo,
-  getStoredApiKey,
   signOut,
   type HealthResponse,
   type SystemInfo,
@@ -394,7 +393,7 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
     window.location.reload()
   }, [])
 
-  const canSignOut = Boolean(info?.auth_enabled) && Boolean(getStoredApiKey())
+  const canSignOut = Boolean(info?.auth_enabled)
 
   const jobMatch = useMatch('/jobs/:jobId/*')
   const currentJobId = jobMatch?.params.jobId ?? null

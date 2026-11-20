@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import (
     Cookie,
@@ -20,7 +21,7 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ubt import __version__
@@ -283,6 +284,7 @@ SPA_PUBLIC_SUFFIXES = frozenset(
         ".ico",
         ".woff",
         ".woff2",
+        ".ttf",
         ".webmanifest",
         ".txt",
     }
@@ -579,6 +581,9 @@ def create_app(
             if sse_broadcaster is not None:
                 await sse_broadcaster.close()
 
+    static_dir = Path(__file__).resolve().parent / "static"
+    has_spa_shell = (static_dir / "index.html").exists()
+
     async def _verify_request_key(
         request: Request,
         x_api_key: str | None = Header(default=None),
@@ -631,6 +636,30 @@ def create_app(
                 )
         return await call_next(request)
 
+    # Browser navigations to a console route must receive the SPA shell even
+    # when the session is absent, so the app can show its sign-in screen. This
+    # runs before routing (and therefore before the auth dependency), and it is
+    # registered before the host guard below so a rebinding Host is rejected
+    # first. It deliberately answers only ``text/html`` navigations: an API
+    # client asking for JSON still reaches the real route and its auth gate.
+    _spa_nav_prefixes = ("/wizard", "/jobs", "/assets", "/system")
+
+    @api_app.middleware("http")
+    async def _serve_spa_navigation(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        if (
+            has_spa_shell
+            and request.method == "GET"
+            and "text/html" in request.headers.get("accept", "")
+        ):
+            path = request.url.path.rstrip("/") or "/"
+            if any(path == prefix or path.startswith(prefix + "/") for prefix in _spa_nav_prefixes):
+                shell = FileResponse(static_dir / "index.html", media_type="text/html")
+                _SPAStaticFiles._apply_cache_policy("index.html", shell)
+                return shell
+        return await call_next(request)
+
     # Reject an oversized upload before Starlette spools the body to disk (and
     # before the auth gate runs), so an unauthenticated flood cannot write
     # hundreds of megabytes — see UploadSizeLimitMiddleware.
@@ -645,9 +674,17 @@ def create_app(
     async def _enforce_trusted_host(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        host_header = request.headers.get("host", "")
-        # Strip a port; a bare IPv6 literal arrives as ``[::1]:8000``.
-        hostname = host_header.rsplit(":", 1)[0].strip("[]").lower() if host_header else ""
+        host_header = request.headers.get("host", "").strip()
+        # Handle IPv4, domain names, and bracketed IPv6 literals with or without port.
+        try:
+            parsed_host = urlsplit(f"//{host_header}").hostname if host_header else None
+        except ValueError:
+            parsed_host = None
+        hostname = (
+            (parsed_host or host_header.rsplit(":", 1)[0].strip("[]")).lower()
+            if host_header
+            else ""
+        )
         if hostname and hostname not in _trusted_host_names(app_config):
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -666,8 +703,7 @@ def create_app(
     register_artifact_routes(api_app, scope)
     register_review_routes(api_app, scope)
     register_asset_routes(api_app, scope)
-    static_dir = Path(__file__).resolve().parent / "static"
-    if static_dir.exists() and (static_dir / "index.html").exists():
+    if static_dir.exists() and has_spa_shell:
         api_app.mount("/", _SPAStaticFiles(directory=str(static_dir), html=True), name="console")
 
     return api_app

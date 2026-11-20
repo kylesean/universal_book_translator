@@ -146,7 +146,9 @@ async def run_tm_writeback_stage(
             # uncapped table here would let a glossary change go undetected by
             # the TM fingerprint.
             build_global_glossary_table(
-                terminology.glossary_dicts, ctx.config.glossary_max_global_entries
+                terminology.glossary_dicts,
+                ctx.config.glossary_max_global_entries,
+                include_scoped=False,
             ),
             ctx.source_lang,
             ctx.target_lang,

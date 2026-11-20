@@ -158,3 +158,16 @@ def test_the_glossary_enforcer_still_shields_quoted_terms() -> None:
     assert any(span.startswith("“") for span in quoted), "enforcer shields the quote"
     assert not any(span.startswith("“") for span in code_like), "cleaner must not"
     assert any(span.startswith("`") for span in code_like), "code stays shielded in both"
+
+
+def test_a_latex_escaped_underscore_in_prose_is_unescaped() -> None:
+    from ubt.core.cleaners.cjk_spacing import normalize_publishing_cjk as normalize
+
+    assert (
+        normalize(r"并对尾部层和 lm\_head 进行一次评估。") == "并对尾部层和 lm_head 进行一次评估。"
+    )
+    # Math and code spans keep their escapes verbatim.
+    assert (
+        normalize(r"见 $\text{lm\_head}$ 与 `lm\_head`。")
+        == r"见 $\text{lm\_head}$ 与 `lm\_head`。"
+    )

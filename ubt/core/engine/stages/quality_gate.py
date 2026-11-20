@@ -395,11 +395,13 @@ async def run_quality_gate_stage(
         if scored:
             # Record what the audit measured for the blocks it let through, so a
             # passing block is not indistinguishable from an unmeasured one.
-            scored_ids = {b.id: b.mtqe_score for b in scored}
+            scored_map = {b.id: (b.mtqe_score, b.mtqe_score_source) for b in scored}
             for update in passed_updates:
-                score = scored_ids.get(update["block_id"])
-                if score is not None:
-                    update["mtqe_score"] = score
+                audit_score = scored_map.get(update["block_id"])
+                if audit_score is not None and audit_score[0] is not None:
+                    update["mtqe_score"] = audit_score[0]
+                    if audit_score[1] is not None:
+                        update["mtqe_score_source"] = audit_score[1]
 
     if passed_updates:
         await asyncio.to_thread(ledger.save_checkpoints_batch, passed_updates)

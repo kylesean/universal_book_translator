@@ -99,6 +99,7 @@ class VisualVerifyLoop:
         faithful_pages: bool = False,
         thresholds: Any | None = None,
         source_pdf: Path | None = None,
+        claims_finality: bool = True,
     ) -> None:
         self.adapter = adapter
         self.manifest = manifest
@@ -126,6 +127,8 @@ class VisualVerifyLoop:
         # The source document, for checks that must compare artifact geometry
         # against source geometry in one coordinate frame (furniture collision).
         self.source_pdf = source_pdf
+        # Re-export passes claims_finality=False and must never mutate block statuses.
+        self.claims_finality = claims_finality
 
     def _build_vlm_judge(self) -> Any | None:
         if not self.visual_judge_enabled:
@@ -318,7 +321,7 @@ class VisualVerifyLoop:
         bad_after = [
             f for f in gate.findings if getattr(f, "severity", "") in ("major", "critical")
         ]
-        if bad_after:
+        if bad_after and self.claims_finality:
             # A finding's ``block_id`` is only usable for block-level routing when
             # it names an IR block. The T1 geometry checks default to the
             # ARTIFACT's own pdfium text rects (``p3:rect327``), which have no

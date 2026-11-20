@@ -677,8 +677,16 @@ class ModelRouter:
         # over an hour of sleeping for a block that is going to fail anyway.
         # The per-model budget still does its job inside the primary model; this
         # cap bounds the *total* so a bad chain fails in bounded time.
+        # Bound total attempts across the chain to `max_retries + 1`, while
+        # reserving 1 probe per remaining fallback candidate so the primary
+        # model does not starve fallbacks on transient errors.
         budget = [self.max_retries + 1]
         for index, candidate in enumerate(effective_chain):
+            remaining_fallbacks = len(effective_chain) - 1 - index
+            cand_budget = [max(0, budget[0] - remaining_fallbacks)]
+            if cand_budget[0] == 0 and budget[0] > 0:
+                cand_budget[0] = 1
+            cand_budget_start = cand_budget[0]
             cand_profile = self._get_profile(candidate)
             cand_effort = reasoning_effort if cand_profile.supports_reasoning_effort else None
             if prompt_builder is not None:
@@ -699,17 +707,19 @@ class ModelRouter:
                     reasoning_effort=cand_effort,
                     max_tokens=cand_max_tokens,
                     is_repair=is_repair,
-                    attempt_budget=budget,
+                    attempt_budget=cand_budget,
                 )
+                budget[0] = max(0, budget[0] - (cand_budget_start - cand_budget[0]))
                 self._model_circuit[candidate] = (0, 0.0)
                 if return_model:
                     return res, candidate
                 return res
             except ModelProviderError as exc:
-                # Content refusal is a prompt/content policy violation, not an infrastructure
-                # failure or model outage: do not trip the model circuit breaker.
-                is_refusal = (exc.details or {}).get("reason") == "content_refusal"
-                if not is_refusal:
+                spent = cand_budget_start - cand_budget[0]
+                budget[0] = max(0, budget[0] - spent)
+                # Content refusal or zero-call budget exhaustion is not a model outage.
+                reason = (exc.details or {}).get("reason")
+                if reason not in {"content_refusal", "attempt_budget_exhausted"}:
                     # Re-read the clock: ``now`` was taken at entry, and the retries
                     # and fallback walk above can burn minutes. A cooldown computed
                     # from the entry timestamp would already be expired when
@@ -855,7 +865,8 @@ class ModelRouter:
                 if attempt_budget[0] <= 0:
                     raise ModelProviderError(
                         f"Attempt budget exhausted on {model}: the fallback chain used "
-                        "every call this block is allowed"
+                        "every call this block is allowed",
+                        details={"reason": "attempt_budget_exhausted"},
                     )
                 attempt_budget[0] -= 1
             # The TPM bucket consumes the estimated request size. Count it with

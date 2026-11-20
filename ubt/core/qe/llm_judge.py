@@ -361,11 +361,11 @@ class TieredQERunner(BaseQERunner):
     def __init__(
         self,
         heuristic: HeuristicQERunner,
-        judge: LLMJudgeQERunner | None = None,
+        judge: BaseQERunner | None = None,
         pass_sample: float = 0.0,
     ) -> None:
         self.heuristic = heuristic
-        self.judge = judge
+        self.judge: BaseQERunner | None = judge
         self.pass_sample = min(1.0, max(0.0, pass_sample))
         self.judge_calls = 0
         # Count of ambiguous pairs where the judge produced no usable score
@@ -392,7 +392,7 @@ class TieredQERunner(BaseQERunner):
         self._judged_indices: frozenset[int] = frozenset()
         # Count every paid model call, not every block. Attached to the judge so
         # a sentence-level block contributes its real number of calls.
-        if self.judge is not None:
+        if self.judge is not None and hasattr(self.judge, "_on_call"):
             self.judge._on_call = self._count_judge_call
 
     def _count_judge_call(self) -> None:
