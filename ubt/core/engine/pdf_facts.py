@@ -43,6 +43,14 @@ class PdfFactsProvider(Protocol):
 
     def probe_feasibility(self, input_path: Path) -> Any: ...
 
+    def page_count(self, input_path: Path) -> int: ...
+
+    def inspect_profile(self, input_path: Path) -> Any: ...
+
+    def profile_pages(self, input_path: Path) -> list[Any]: ...
+
+    def page_kind(self) -> Any: ...
+
 
 def configure_pdf_facts(provider: PdfFactsProvider) -> None:
     """Install the app's implementation (the composition root calls this once)."""
@@ -79,12 +87,36 @@ def probe_pdf_feasibility(input_path: Path) -> Any:
     return _provider().probe_feasibility(input_path)
 
 
+def pdf_page_count(input_path: Path) -> int:
+    """Return the source PDF's page count."""
+    return _provider().page_count(input_path)
+
+
+def inspect_pdf_profile(input_path: Path) -> Any:
+    """Return the doc-wide PDFDocumentProfile."""
+    return _provider().inspect_profile(input_path)
+
+
+def profile_pdf_pages(input_path: Path) -> list[Any]:
+    """Return the per-page profile list."""
+    return _provider().profile_pages(input_path)
+
+
+def page_kind_enum() -> Any:
+    """Return the adapter-side PageKind enum."""
+    return _provider().page_kind()
+
+
 __all__ = [
     "PdfFactsProvider",
     "PdfStructureFacts",
     "classify_pdf_structure",
     "configure_pdf_facts",
     "probe_pdf_feasibility",
+    "page_kind_enum",
+    "pdf_page_count",
     "probe_pdf_pages",
+    "inspect_pdf_profile",
+    "profile_pdf_pages",
     "sample_pdf_pages",
 ]

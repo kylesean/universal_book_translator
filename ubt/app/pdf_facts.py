@@ -74,5 +74,26 @@ class AdapterPdfFacts:
 
         return measure_native_feasibility(input_path)
 
+    def page_count(self, input_path: Path) -> int:
+        from ubt.adapters.pdf.pdf_struct import page_count
+
+        return page_count(input_path)
+
+    def inspect_profile(self, input_path: Path) -> Any:
+        from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile
+
+        return inspect_pdf_profile(input_path)
+
+    def profile_pages(self, input_path: Path) -> list[Any]:
+        from ubt.adapters.pdf.page_profiler import profile_pdf
+        from ubt.adapters.pdf.pdf_profiler import PROFILE_CACHE_DIR
+
+        return list(profile_pdf(input_path, cache_dir=PROFILE_CACHE_DIR))
+
+    def page_kind(self) -> Any:
+        from ubt.adapters.pdf.page_profiler import PageKind
+
+        return PageKind
+
 
 __all__ = ["AdapterPdfFacts"]

@@ -39,6 +39,7 @@ from ubt.core.engine.artifact_services import (
 from ubt.core.engine.delivery_freshness import record_rendered_digest, rendered_digest_for
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import NON_TERMINAL_STATUSES, SQLiteJobLedger
+from ubt.core.engine.pdf_facts import pdf_page_count
 from ubt.core.engine.reporter import (
     QualityReport,
     ReportEntityConsistency,
@@ -67,7 +68,6 @@ from ubt.core.metrics.collect import collect_kpis, save_metrics_report
 from ubt.core.policy.bilingual_advisor import SECONDARY_SUFFIX
 from ubt.core.ports import (
     optimize_pdf_deliverable,
-    pdf_page_count,
 )
 
 if TYPE_CHECKING:
@@ -685,8 +685,6 @@ def _faithful_expected_pages(ctx: StageContext, rendered_path: Path | None = Non
     if not _is_faithful_delivery(ctx):
         return None
     try:
-        from ubt.core.ports import pdf_page_count
-
         count = pdf_page_count(ctx.input_path)
     except Exception as exc:  # noqa: BLE001 - an unmeasured contract is stated as unmeasured
         logger.debug("Visual gate: source page count unavailable for %s: %s", ctx.input_path, exc)

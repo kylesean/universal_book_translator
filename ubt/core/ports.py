@@ -39,8 +39,6 @@ if TYPE_CHECKING:
     # invariant forbids *module-level* edges only; a TYPE_CHECKING edge is not one.
     from ubt.adapters.pdf.extraction_witness import PageVerdict
     from ubt.adapters.pdf.font_probe import FontStack
-    from ubt.adapters.pdf.page_profiler import PageKind
-    from ubt.adapters.pdf.pdf_profiler import PDFDocumentProfile
     from ubt.segment.placeholders import MaskedSource, PlaceholderEngine
     from ubt.translate.engine import TranslationEngine
 
@@ -112,42 +110,6 @@ def is_visual_scalpel_applicable(
     from ubt.adapters.pdf.visual_scalpel import is_visual_scalpel_applicable as _check
 
     return _check(block, source_pdf_path=source_pdf_path, vision_threshold=vision_threshold)
-
-
-def pdf_page_count(input_path: Path) -> int:
-    """Return the source PDF's page count through the adapter bridge."""
-    from ubt.adapters.pdf import pdf_struct
-
-    return pdf_struct.page_count(input_path)
-
-
-# ---------------------------------------------------------------------------
-# PDF route-assessment bridges: thin lazy helpers. The function-level import
-# keeps the module-level graph clean; see resolve_adapter for why the SPI
-# string registry this file used to route through is gone.
-# ---------------------------------------------------------------------------
-
-
-def inspect_pdf_profile(input_path: Path) -> PDFDocumentProfile:
-    """Return the doc-wide PDFDocumentProfile (primary_engine / has_* flags)."""
-    from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile as _inspect
-
-    return _inspect(input_path)
-
-
-def profile_pdf_pages(input_path: Path) -> list[Any]:
-    """Return the per-page profile list from the page profiler."""
-    from ubt.adapters.pdf.page_profiler import profile_pdf as _profile
-    from ubt.adapters.pdf.pdf_profiler import PROFILE_CACHE_DIR
-
-    return list(_profile(input_path, cache_dir=PROFILE_CACHE_DIR))
-
-
-def page_kind_enum() -> type[PageKind]:
-    """Return the adapter-side PageKind enum (kept out of the core import graph)."""
-    from ubt.adapters.pdf.page_profiler import PageKind
-
-    return PageKind
 
 
 def supported_suffixes() -> set[str]:
