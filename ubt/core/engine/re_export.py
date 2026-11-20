@@ -373,7 +373,7 @@ async def re_export_job(
         adapter = resolve_adapter(
             source_path,
             pdf_engine=engine,
-            prefer_codec=bool(getattr(config, "use_document_codecs", False)),
+            prefer_codec=True,
         )
         # The adapter decides the artifact format, the same rule a first run
         # enforces before spending anything: a contradicting output suffix must

@@ -89,10 +89,13 @@ async def test_the_rehearsal_reaches_a_delivered_artifact(tmp_path: Path) -> Non
         prose = [b for b in blocks if not b.skip_translate and b.source_text.strip()]
         assert prose
         assert all(b.target_text and REHEARSAL_MARKER in b.target_text for b in prose)
+        # The Markdown codec does not emit a block for a fenced code span: it is
+        # not a translation unit, and `apply` writes it back byte-for-byte. The
+        # old adapter modelled it as a `skip_translate` block, so assert the
+        # delivered text instead of the retired block shape.
         kept = [b for b in blocks if b.skip_translate]
-        assert kept and all(b.target_text == b.source_text for b in kept)
-        code = [b for b in kept if _CODE_LINE in b.source_text]
-        assert code
+        assert all(b.target_text == b.source_text for b in kept)
+        assert _CODE_LINE in output.read_text(encoding="utf-8")
     finally:
         ledger.close()
 

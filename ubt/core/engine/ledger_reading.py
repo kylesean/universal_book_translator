@@ -185,7 +185,7 @@ def require_output_suffix(
     ``subject`` and ``remedy`` let each surface keep its own actionable advice
     ("--output ...", "re-exporting to ...") while the rule lives in one place.
     """
-    allowed: frozenset[str] = getattr(type(adapter), "output_suffixes", frozenset())
+    allowed: frozenset[str] = getattr(adapter, "output_suffixes", frozenset())
     if not allowed:
         return
     suffix = output_path.suffix.lower()

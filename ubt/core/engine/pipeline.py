@@ -1147,7 +1147,10 @@ class PipelineOrchestrator:
         adapter = self.custom_adapter or resolve_adapter(
             input_path,
             pdf_engine=engine,
-            prefer_codec=bool(getattr(self.config, "use_document_codecs", False)),
+            # Non-PDF containers always go through the v2 codec; the old
+            # adapters survive only for the read-only inspect/decor commands
+            # that still consume their block model.
+            prefer_codec=True,
         )
         # Everything below can refuse the run (a contradicting ``--output``
         # suffix, a manifest that cannot be read), and an adapter may own

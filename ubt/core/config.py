@@ -515,11 +515,6 @@ class TypstConfig(BaseModel):
     #: Inputs without a source PDF (EPUB/DOCX/MD/HTML) can never be faithful;
     #: they route to readable and reflow.
     delivery_mode: DeliveryMode = "auto"
-    #: Use the v2 ``DocumentCodec`` bridge for non-PDF containers. PDFs always
-    #: use the native codec. Rigid anchors (code/math/images) are rendered as
-    #: their source markup for the legacy XLIFF mask, so the companion keeps
-    #: the same protected spans a reader expects.
-    use_document_codecs: bool = True
     #: Only meaningful for a ``faithful`` request (or ``auto`` resolving to
     #: faithful): when eligibility fails, re-route the whole book to readable
     #: instead of refusing the run.
