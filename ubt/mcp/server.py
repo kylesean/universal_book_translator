@@ -72,8 +72,8 @@ except ModuleNotFoundError as exc:  # pragma: no cover - install-shape guard
 from ubt import __version__
 from ubt.adapters import get_adapter_for_path
 from ubt.api.manager import JobManager
-from ubt.api.models import JobSubmitRequest
 from ubt.api.routes.shared import ledger_output_path_claimant, output_path_claimant
+from ubt.app.spec import JobSpec
 from ubt.core.config import UBTConfig, credential_required, has_real_credential
 from ubt.core.config import parse_page_ranges as parse_page_ranges
 from ubt.core.engine.agent_translation import (
@@ -278,7 +278,7 @@ def _check_lang(code: str, field: str) -> str:
 
 
 def _check_pages(pages: str | None) -> str | None:
-    """Entry-layer page-range guard, matching the REST ``JobSubmitRequest`` 422.
+    """Entry-layer page-range guard, matching the REST ``JobSpec`` 422.
 
     Without it a malformed range passed the tool and failed the job
     asynchronously (or 500'd the assess path); a multi-MB value was also
@@ -296,7 +296,7 @@ def _check_pages(pages: str | None) -> str | None:
 def _check_profile(profile: str) -> str:
     """Entry-layer guard: a profile names a packaged resource dir, never a path.
 
-    Same shape the REST ``JobSubmitRequest.profile`` enforces. Without it, a
+    Same shape the REST ``JobSpec.profile`` enforces. Without it, a
     prompt-injected agent could pass ``/tmp/x`` and read ``/tmp/x/en-zh.json``
     through ``seed_entries_for_profile``, escaping the MCP path sandbox.
     """
@@ -610,7 +610,7 @@ async def ubt_translate_book(
     start_chapter: int | None = None,
     max_chapters: int | None = None,
     fresh: bool | None = None,
-    # Engine knobs — parity with the REST ``JobSubmitRequest``, which carries
+    # Engine knobs — parity with the REST ``JobSpec``, which carries
     # the same set. None-defaults for the same reason as above; note that a
     # ``False`` default on a bool would be a *silent override* of the
     # operator's ``UBT_*`` environment, so the optionals stay ``bool | None``.
@@ -782,7 +782,7 @@ async def ubt_translate_book(
     # returned a job_id and the job only failed once the background task tried to
     # apply the value (REST 422s upfront, so this restores parity).
     validate_request_enums(payload)
-    request = JobSubmitRequest.model_validate(payload)
+    request = JobSpec.model_validate(payload)
     # The claim protocol REST enforces, from the other side of the same
     # ``db_dir``: this process's manager cannot see a run the REST server (or a
     # CLI translate) already started, so two pipelines would write — and bill —

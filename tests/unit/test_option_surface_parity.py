@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ubt.api.models import JobSubmitRequest
+from ubt.app.spec import JobSpec
 from ubt.core.exceptions import UBTError
 from ubt.core.job_options import (
     _ENUM_REQUEST_FIELDS,
@@ -38,7 +38,7 @@ _INTERNAL_KNOBS = (
 def test_an_internal_knob_is_absent_from_every_user_surface(knob: str) -> None:
     from ubt.core.config import UBTConfig
 
-    assert knob not in JobSubmitRequest.model_fields, f"{knob} is back on REST"
+    assert knob not in JobSpec.model_fields, f"{knob} is back on REST"
     assert knob not in _mcp_tool_signature_names(), f"{knob} is back on MCP"
     assert knob not in _ENUM_REQUEST_FIELDS, f"{knob} is back in the enum validator"
     if knob in UBTConfig.model_fields:
@@ -64,7 +64,7 @@ def _mcp_tool_signature_names() -> set[str]:
 
 @pytest.mark.parametrize("knob", _USER_MODE_KNOBS)
 def test_the_rest_model_exposes_the_knob(knob: str) -> None:
-    assert knob in JobSubmitRequest.model_fields
+    assert knob in JobSpec.model_fields
 
 
 @pytest.mark.parametrize("knob", _USER_MODE_KNOBS)
@@ -205,10 +205,10 @@ def _cli_translate_option_names() -> set[str]:
 
 
 def test_a_layout_knob_offered_on_one_surface_is_offered_on_all_three() -> None:
-    from ubt.api.models import JobSubmitRequest
+    from ubt.app.spec import JobSpec
 
     shared = ("layout_columns", "dual_mode", "preset", "pages")
-    rest = set(JobSubmitRequest.model_fields)
+    rest = set(JobSpec.model_fields)
     mcp = _mcp_tool_signature_names()
     cli = _cli_translate_option_names()
 

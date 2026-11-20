@@ -1522,6 +1522,227 @@ export interface components {
             jobs: components["schemas"]["JobSummary"][];
         };
         /**
+         * JobSpec
+         * @description Single submission model shared by CLI, REST API and MCP.
+         *
+         *     ``input_path`` is the public API field; ``source_path`` is accepted as a
+         *     validation alias for the codec service and for callers that speak in file
+         *     paths. The delivery contract (``delivery_mode``) and the codec layout
+         *     (``layout_mode``/``dual_mode``) are deliberately distinct.
+         */
+        JobSpec: {
+            /**
+             * Input Path
+             * @description Path to source document file
+             */
+            input_path: string;
+            /**
+             * Output Path
+             * @description Optional target path for bilingual file
+             */
+            output_path?: string | null;
+            /**
+             * Target Lang
+             * @description Target ISO language code
+             * @default zh
+             */
+            target_lang: string;
+            /**
+             * Source Lang
+             * @description Source ISO language code
+             * @default en
+             */
+            source_lang: string;
+            /**
+             * Profile
+             * @description Domain profile (auto, general, textbook, paper, etc.)
+             * @default auto
+             */
+            profile: string;
+            /**
+             * Provider
+             * @description Provider block to run this job against (must be declared in ubt.toml or be a built-in wire protocol). Endpoint and credentials still come from that block.
+             */
+            provider?: string | null;
+            /**
+             * Repair Provider
+             * @description Provider block for the repair tier (defaults to the primary provider). A name, validated like `provider`: the named block supplies the repair endpoint and credential.
+             */
+            repair_provider?: string | null;
+            /**
+             * Export Allow Needs Human
+             * @description Allow export to ship NEEDS_HUMAN blocks unverified (default: refuse)
+             */
+            export_allow_needs_human?: boolean | null;
+            /**
+             * Draft Model
+             * @description Override draft model tier
+             */
+            draft_model?: string | null;
+            /**
+             * Repair Model
+             * @description Override repair model tier
+             */
+            repair_model?: string | null;
+            /** @description Quality preset (high_fidelity, standard, vector_math, preview, fast) */
+            preset?: components["schemas"]["Preset"] | null;
+            /**
+             * Pdf Engine
+             * @description PDF extraction/parser engine (docling, pdfium, auto)
+             */
+            pdf_engine?: string | null;
+            /**
+             * Dual Mode
+             * @description What the reader receives (dual, mono, auto)
+             */
+            dual_mode?: ("mono" | "dual" | "auto") | null;
+            /**
+             * Delivery Mode
+             * @description PDF delivery contract: auto, readable or faithful
+             */
+            delivery_mode?: ("auto" | "readable" | "faithful") | null;
+            /**
+             * Allow Degrade
+             * @description When a new faithful request is ineligible, re-route to readable instead of refusing the run (legacy modes are grandfathered)
+             */
+            allow_degrade?: boolean | null;
+            /**
+             * Pages
+             * @description Page range filter (e.g. 1-10)
+             */
+            pages?: string | null;
+            /**
+             * Allow Overflow Compaction
+             * @description Let the codec compact overflowing units once
+             * @default true
+             */
+            allow_overflow_compaction: boolean;
+            /**
+             * Max Overflow Compaction Units
+             * @description Upper bound on compaction units per run
+             * @default 32
+             */
+            max_overflow_compaction_units: number;
+            /**
+             * Glossary
+             * @description Path to an external glossary file to enforce (CLI/MCP parity)
+             */
+            glossary?: string | null;
+            /**
+             * Budget Usd
+             * @description Hard USD cap for this job across every resume; the run fails once priced cost exceeds it
+             */
+            budget_usd?: number | null;
+            /**
+             * Max Concurrency
+             * @description Concurrent LLM requests for this job
+             */
+            max_concurrency?: number | null;
+            /**
+             * Batch Limit
+             * @description Blocks per draft batch
+             */
+            batch_limit?: number | null;
+            /**
+             * Macro Chunk Size
+             * @description Consecutive micro-blocks packed into one draft request (1 = single block)
+             */
+            macro_chunk_size?: number | null;
+            /**
+             * Short Max Pages
+             * @description Page ceiling for the short execution chain
+             */
+            short_max_pages?: number | null;
+            /**
+             * Enable Rolling Summary
+             * @description Carry a rolling chapter summary across draft batches
+             */
+            enable_rolling_summary?: boolean | null;
+            /**
+             * Chapter Streaming Enabled
+             * @description Translate chapter-by-chapter as discovery lands
+             */
+            chapter_streaming_enabled?: boolean | null;
+            /**
+             * Visual Judge Enabled
+             * @description Enable the VLM visual judge over rendered pages
+             */
+            visual_judge_enabled?: boolean | null;
+            /**
+             * Visual Judge Model
+             * @description Model the visual judge runs on
+             */
+            visual_judge_model?: string | null;
+            /**
+             * Translate Chrome
+             * @description Translate running heads, footers and page chrome
+             */
+            translate_chrome?: boolean | null;
+            /**
+             * Emit Both
+             * @description Emit both the primary and complementary dual_mode deliverables (e.g. mono and bilingual)
+             */
+            emit_both?: boolean | null;
+            /**
+             * Ocr Mode
+             * @description OCR engine (auto, local, cloud, off)
+             */
+            ocr_mode?: ("off" | "auto" | "local" | "cloud") | null;
+            /**
+             * Domain
+             * @description Domain descriptor used for glossary and chrome hints
+             */
+            domain?: string | null;
+            /**
+             * Job Id
+             * @description Optional stable job id (idempotency key)
+             */
+            job_id?: string | null;
+            /**
+             * Priority
+             * @description Queue priority (higher = sooner)
+             * @default 0
+             */
+            priority: number;
+            /**
+             * Dry Run
+             * @description Zero-token rehearsal run (echo provider)
+             * @default false
+             */
+            dry_run: boolean;
+            /**
+             * Rehearsal Auto
+             * @description True when the server (not the client) forced dry_run; resume then runs for real
+             * @default false
+             */
+            rehearsal_auto: boolean;
+            /**
+             * Fresh
+             * @description Discard prior ledger state instead of resuming (unset follows UBT_FRESH)
+             */
+            fresh?: boolean | null;
+            /**
+             * Start Chapter
+             * @description First chapter of the window (run-only key)
+             */
+            start_chapter?: number | null;
+            /**
+             * Max Chapters
+             * @description Chapter-window length (run-only key)
+             */
+            max_chapters?: number | null;
+            /**
+             * Layout Columns
+             * @description Physical column count for a reflowed PDF (1 single, 2 dual). Unset aligns to the source layout; --profile never forces a column count.
+             */
+            layout_columns?: number | null;
+            /**
+             * Layout Mode
+             * @description Codec layout override
+             */
+            layout_mode?: unknown;
+        };
+        /**
          * JobStatusResponse
          * @description Real-time job status and metric counters.
          *
@@ -1637,205 +1858,6 @@ export interface components {
             agent_state?: string | null;
             /** Next Action */
             next_action?: string | null;
-        };
-        /**
-         * JobSubmitRequest
-         * @description Payload to initiate an asynchronous translation job.
-         */
-        JobSubmitRequest: {
-            /**
-             * Input Path
-             * @description Path to source document file
-             */
-            input_path: string;
-            /**
-             * Output Path
-             * @description Optional target path for bilingual file
-             */
-            output_path?: string | null;
-            /**
-             * Target Lang
-             * @description Target ISO language code
-             * @default zh
-             */
-            target_lang: string;
-            /**
-             * Source Lang
-             * @description Source ISO language code
-             * @default en
-             */
-            source_lang: string;
-            /**
-             * Profile
-             * @description Domain profile (auto, general, textbook, paper, etc.)
-             * @default auto
-             */
-            profile: string;
-            /**
-             * Provider
-             * @description Provider block to run this job against (must be declared in ubt.toml or be a built-in wire protocol). Endpoint and credentials still come from that block.
-             */
-            provider?: string | null;
-            /**
-             * Repair Provider
-             * @description Provider block for the repair tier (defaults to the primary provider). A name, validated like `provider`: the named block supplies the repair endpoint and credential.
-             */
-            repair_provider?: string | null;
-            /**
-             * Export Allow Needs Human
-             * @description Allow export to ship NEEDS_HUMAN blocks unverified (default: refuse)
-             */
-            export_allow_needs_human?: boolean | null;
-            /**
-             * Draft Model
-             * @description Override draft model tier
-             */
-            draft_model?: string | null;
-            /**
-             * Repair Model
-             * @description Override repair model tier
-             */
-            repair_model?: string | null;
-            /** @description Quality preset (high_fidelity, standard, vector_math, preview, fast) */
-            preset?: components["schemas"]["Preset"] | null;
-            /**
-             * Pdf Engine
-             * @description PDF extraction/parser engine (docling, pdfium, auto)
-             */
-            pdf_engine?: string | null;
-            /**
-             * Dual Mode
-             * @description What the reader receives (dual, mono, auto)
-             */
-            dual_mode?: ("mono" | "dual" | "auto") | null;
-            /**
-             * Delivery Mode
-             * @description PDF delivery contract: auto, readable or faithful
-             */
-            delivery_mode?: ("auto" | "readable" | "faithful") | null;
-            /**
-             * Allow Degrade
-             * @description When a new faithful request is ineligible, re-route to readable instead of refusing the run (legacy modes are grandfathered)
-             */
-            allow_degrade?: boolean | null;
-            /**
-             * Pages
-             * @description Page range filter (e.g. 1-10)
-             */
-            pages?: string | null;
-            /**
-             * Glossary
-             * @description Path to an external glossary file to enforce (CLI/MCP parity)
-             */
-            glossary?: string | null;
-            /**
-             * Budget Usd
-             * @description Hard USD cap for this job across every resume; the run fails once priced cost exceeds it
-             */
-            budget_usd?: number | null;
-            /**
-             * Max Concurrency
-             * @description Concurrent LLM requests for this job
-             */
-            max_concurrency?: number | null;
-            /**
-             * Batch Limit
-             * @description Blocks per draft batch
-             */
-            batch_limit?: number | null;
-            /**
-             * Macro Chunk Size
-             * @description Consecutive micro-blocks packed into one draft request (1 = single block)
-             */
-            macro_chunk_size?: number | null;
-            /**
-             * Short Max Pages
-             * @description Page ceiling for the short execution chain
-             */
-            short_max_pages?: number | null;
-            /**
-             * Enable Rolling Summary
-             * @description Carry a rolling chapter summary across draft batches
-             */
-            enable_rolling_summary?: boolean | null;
-            /**
-             * Chapter Streaming Enabled
-             * @description Translate chapter-by-chapter as discovery lands
-             */
-            chapter_streaming_enabled?: boolean | null;
-            /**
-             * Visual Judge Enabled
-             * @description Enable the VLM visual judge over rendered pages
-             */
-            visual_judge_enabled?: boolean | null;
-            /**
-             * Visual Judge Model
-             * @description Model the visual judge runs on
-             */
-            visual_judge_model?: string | null;
-            /**
-             * Translate Chrome
-             * @description Translate running heads, footers and page chrome
-             */
-            translate_chrome?: boolean | null;
-            /**
-             * Emit Both
-             * @description Emit both the primary and complementary dual_mode deliverables (e.g. mono and bilingual)
-             */
-            emit_both?: boolean | null;
-            /**
-             * Ocr Mode
-             * @description OCR engine (auto, local, cloud, off)
-             */
-            ocr_mode?: ("off" | "auto" | "local" | "cloud") | null;
-            /**
-             * Domain
-             * @description Domain descriptor used for glossary and chrome hints
-             */
-            domain?: string | null;
-            /**
-             * Job Id
-             * @description Optional stable job id (idempotency key)
-             */
-            job_id?: string | null;
-            /**
-             * Priority
-             * @description Queue priority (higher = sooner)
-             * @default 0
-             */
-            priority: number;
-            /**
-             * Dry Run
-             * @description Zero-token rehearsal run (echo provider)
-             * @default false
-             */
-            dry_run: boolean;
-            /**
-             * Rehearsal Auto
-             * @description True when the server (not the client) forced dry_run; resume then runs for real
-             * @default false
-             */
-            rehearsal_auto: boolean;
-            /**
-             * Fresh
-             * @description Discard prior ledger state instead of resuming (unset follows UBT_FRESH)
-             */
-            fresh?: boolean | null;
-            /**
-             * Start Chapter
-             * @description First chapter of the window (run-only key)
-             */
-            start_chapter?: number | null;
-            /**
-             * Max Chapters
-             * @description Chapter-window length (run-only key)
-             */
-            max_chapters?: number | null;
-            /**
-             * Layout Columns
-             * @description Physical column count for a reflowed PDF (1 single, 2 dual). Unset aligns to the source layout; --profile never forces a column count.
-             */
-            layout_columns?: number | null;
         };
         /**
          * JobSubmitResponse
@@ -3441,7 +3463,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["JobSubmitRequest"];
+                "application/json": components["schemas"]["JobSpec"];
             };
         };
         responses: {

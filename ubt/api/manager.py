@@ -8,8 +8,8 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ubt.api.models import JobSubmitRequest
 from ubt.app.job_service import JobService
+from ubt.app.spec import JobSpec
 from ubt.core.config import UBTConfig
 from ubt.core.engine.events import TranslationProgressEvent
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 class JobRecord:
     """Internal in-memory tracking structure for an active job."""
 
-    def __init__(self, job_id: str, request: JobSubmitRequest) -> None:
+    def __init__(self, job_id: str, request: JobSpec) -> None:
         self.job_id = job_id
         self.request = request
         # A str-valued status from the shared JobStatus vocabulary; annotated so
@@ -121,7 +121,7 @@ class JobManager:
                 details={"running": running, "max": self.max_running_jobs},
             )
 
-    def create_job(self, request: JobSubmitRequest, job_id: str | None = None) -> JobRecord:
+    def create_job(self, request: JobSpec, job_id: str | None = None) -> JobRecord:
         # Cap concurrent running jobs — each job is a full pipeline with
         # provider connections; an unbounded intake would exhaust memory and
         # hammer the translation provider's rate limits.

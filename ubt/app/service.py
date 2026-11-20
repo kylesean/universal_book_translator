@@ -94,7 +94,7 @@ class SurgicalTranslationService:
             units,
             translations,
             target_lang=spec.target_lang,
-            mode=spec.delivery_mode,
+            mode=spec.codec_mode,
             output_path=out_path,
             pages=pages,
         )
@@ -123,7 +123,7 @@ class SurgicalTranslationService:
                     units,
                     translations,
                     target_lang=spec.target_lang,
-                    mode=spec.delivery_mode,
+                    mode=spec.codec_mode,
                     output_path=out_path,
                     pages=pages,
                 )

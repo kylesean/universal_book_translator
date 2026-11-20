@@ -1289,7 +1289,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/JobSubmitRequest"
+                "$ref": "#/components/schemas/JobSpec"
               }
             }
           }
@@ -5432,250 +5432,7 @@
         "title": "JobListResponse",
         "description": "The job queue, newest first."
       },
-      "JobStatusResponse": {
-        "properties": {
-          "total_blocks": {
-            "type": "integer",
-            "title": "Total Blocks",
-            "default": 0
-          },
-          "drafted_blocks": {
-            "type": "integer",
-            "title": "Drafted Blocks",
-            "default": 0
-          },
-          "repair_pending_blocks": {
-            "type": "integer",
-            "title": "Repair Pending Blocks",
-            "default": 0
-          },
-          "skipped_blocks": {
-            "type": "integer",
-            "title": "Skipped Blocks",
-            "default": 0
-          },
-          "completed_blocks": {
-            "type": "integer",
-            "title": "Completed Blocks",
-            "default": 0
-          },
-          "repaired_blocks": {
-            "type": "integer",
-            "title": "Repaired Blocks",
-            "default": 0
-          },
-          "failed_blocks": {
-            "type": "integer",
-            "title": "Failed Blocks",
-            "default": 0
-          },
-          "needs_human_blocks": {
-            "type": "integer",
-            "title": "Needs Human Blocks",
-            "default": 0
-          },
-          "blocked_human_blocks": {
-            "type": "integer",
-            "title": "Blocked Human Blocks",
-            "default": 0
-          },
-          "processed_blocks": {
-            "type": "integer",
-            "title": "Processed Blocks",
-            "default": 0
-          },
-          "progress_percent": {
-            "type": "number",
-            "title": "Progress Percent",
-            "default": 0.0
-          },
-          "current_avg_qe": {
-            "type": "number",
-            "title": "Current Avg Qe",
-            "default": 0.0
-          },
-          "bottom_15_avg_qe": {
-            "type": "number",
-            "title": "Bottom 15 Avg Qe",
-            "default": 0.0
-          },
-          "qe_measured": {
-            "type": "boolean",
-            "title": "Qe Measured",
-            "default": false
-          },
-          "estimated_cost_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Estimated Cost Usd"
-          },
-          "stage": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "extract",
-                  "segment",
-                  "tm",
-                  "translate",
-                  "qe",
-                  "repair",
-                  "render",
-                  "verify",
-                  "package"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Stage"
-          },
-          "message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Message"
-          },
-          "event_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Event Type"
-          },
-          "output_file": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Output File"
-          },
-          "report_file": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Report File"
-          },
-          "visual_report_file": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Visual Report File"
-          },
-          "job_id": {
-            "type": "string",
-            "title": "Job Id"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "queue_position": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Queue Position"
-          },
-          "rehearsal": {
-            "type": "boolean",
-            "title": "Rehearsal",
-            "default": false
-          },
-          "page_scope": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Page Scope"
-          },
-          "agent_state": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent State"
-          },
-          "next_action": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Action"
-          }
-        },
-        "type": "object",
-        "required": [
-          "job_id",
-          "status",
-          "created_at"
-        ],
-        "title": "JobStatusResponse",
-        "description": "Real-time job status and metric counters.\n\nThe telemetry fields are the shared :class:`ProgressSnapshot` -- one\ndefinition for the queue row, the in-memory record and this response."
-      },
-      "JobSubmitRequest": {
+      "JobSpec": {
         "properties": {
           "input_path": {
             "type": "string",
@@ -5855,6 +5612,20 @@
             ],
             "title": "Pages",
             "description": "Page range filter (e.g. 1-10)"
+          },
+          "allow_overflow_compaction": {
+            "type": "boolean",
+            "title": "Allow Overflow Compaction",
+            "description": "Let the codec compact overflowing units once",
+            "default": true
+          },
+          "max_overflow_compaction_units": {
+            "type": "integer",
+            "maximum": 200.0,
+            "minimum": 0.0,
+            "title": "Max Overflow Compaction Units",
+            "description": "Upper bound on compaction units per run",
+            "default": 32
           },
           "glossary": {
             "anyOf": [
@@ -6117,6 +5888,10 @@
             ],
             "title": "Layout Columns",
             "description": "Physical column count for a reflowed PDF (1 single, 2 dual). Unset aligns to the source layout; --profile never forces a column count."
+          },
+          "layout_mode": {
+            "title": "Layout Mode",
+            "description": "Codec layout override"
           }
         },
         "additionalProperties": false,
@@ -6124,8 +5899,251 @@
         "required": [
           "input_path"
         ],
-        "title": "JobSubmitRequest",
-        "description": "Payload to initiate an asynchronous translation job."
+        "title": "JobSpec",
+        "description": "Single submission model shared by CLI, REST API and MCP.\n\n``input_path`` is the public API field; ``source_path`` is accepted as a\nvalidation alias for the codec service and for callers that speak in file\npaths. The delivery contract (``delivery_mode``) and the codec layout\n(``layout_mode``/``dual_mode``) are deliberately distinct."
+      },
+      "JobStatusResponse": {
+        "properties": {
+          "total_blocks": {
+            "type": "integer",
+            "title": "Total Blocks",
+            "default": 0
+          },
+          "drafted_blocks": {
+            "type": "integer",
+            "title": "Drafted Blocks",
+            "default": 0
+          },
+          "repair_pending_blocks": {
+            "type": "integer",
+            "title": "Repair Pending Blocks",
+            "default": 0
+          },
+          "skipped_blocks": {
+            "type": "integer",
+            "title": "Skipped Blocks",
+            "default": 0
+          },
+          "completed_blocks": {
+            "type": "integer",
+            "title": "Completed Blocks",
+            "default": 0
+          },
+          "repaired_blocks": {
+            "type": "integer",
+            "title": "Repaired Blocks",
+            "default": 0
+          },
+          "failed_blocks": {
+            "type": "integer",
+            "title": "Failed Blocks",
+            "default": 0
+          },
+          "needs_human_blocks": {
+            "type": "integer",
+            "title": "Needs Human Blocks",
+            "default": 0
+          },
+          "blocked_human_blocks": {
+            "type": "integer",
+            "title": "Blocked Human Blocks",
+            "default": 0
+          },
+          "processed_blocks": {
+            "type": "integer",
+            "title": "Processed Blocks",
+            "default": 0
+          },
+          "progress_percent": {
+            "type": "number",
+            "title": "Progress Percent",
+            "default": 0.0
+          },
+          "current_avg_qe": {
+            "type": "number",
+            "title": "Current Avg Qe",
+            "default": 0.0
+          },
+          "bottom_15_avg_qe": {
+            "type": "number",
+            "title": "Bottom 15 Avg Qe",
+            "default": 0.0
+          },
+          "qe_measured": {
+            "type": "boolean",
+            "title": "Qe Measured",
+            "default": false
+          },
+          "estimated_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Cost Usd"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "extract",
+                  "segment",
+                  "tm",
+                  "translate",
+                  "qe",
+                  "repair",
+                  "render",
+                  "verify",
+                  "package"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Type"
+          },
+          "output_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output File"
+          },
+          "report_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report File"
+          },
+          "visual_report_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visual Report File"
+          },
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "queue_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Position"
+          },
+          "rehearsal": {
+            "type": "boolean",
+            "title": "Rehearsal",
+            "default": false
+          },
+          "page_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Scope"
+          },
+          "agent_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent State"
+          },
+          "next_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Action"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "status",
+          "created_at"
+        ],
+        "title": "JobStatusResponse",
+        "description": "Real-time job status and metric counters.\n\nThe telemetry fields are the shared :class:`ProgressSnapshot` -- one\ndefinition for the queue row, the in-memory record and this response."
       },
       "JobSubmitResponse": {
         "properties": {

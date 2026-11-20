@@ -523,16 +523,14 @@ def test_the_shell_is_public_but_the_job_queue_still_requires_a_key(tmp_path: Pa
 
 
 def test_the_wizard_sends_only_fields_the_submit_endpoint_accepts() -> None:
-    from ubt.api.models import JobSubmitRequest
+    from ubt.app.spec import JobSpec
 
     source = _WIZARD_TSX.read_text(encoding="utf-8")
-    match = re.search(
-        r"const buildPayload = \(\): JobSubmitRequest => \(\{(.*?)\n  \}\)", source, re.DOTALL
-    )
-    assert match, "NewJobWizard.tsx has no buildPayload(): JobSubmitRequest object"
+    match = re.search(r"const buildPayload = \(\): JobSpec => \(\{(.*?)\n  \}\)", source, re.DOTALL)
+    assert match, "NewJobWizard.tsx has no buildPayload(): JobSpec object"
 
     sent = set(re.findall(r"^\s{4}([a-z_][a-z0-9_]*)\s*:", match.group(1), re.MULTILINE))
-    accepted = set(JobSubmitRequest.model_fields)
+    accepted = set(JobSpec.model_fields)
 
     assert sent, "parsed no payload keys from the wizard"
     assert not (sent - accepted), (
@@ -659,14 +657,14 @@ def test_preset_badges_do_not_claim_a_quality_gate() -> None:
 
 
 def test_wizard_sends_layout_columns_within_the_api_range() -> None:
-    from ubt.api.models import JobSubmitRequest
+    from ubt.app.spec import JobSpec
 
     if not _WIZARD_TSX.exists():
         pytest.skip("web/ frontend is not present in this checkout")
     source = _WIZARD_TSX.read_text(encoding="utf-8")
     assert "layout_columns" in source
     assert re.search(r"layout_columns:\s*layoutColumns === 'auto' \? null", source)
-    assert "layout_columns" in JobSubmitRequest.model_fields
+    assert "layout_columns" in JobSpec.model_fields
 
 
 _WIZARD_SRC = _REPO_ROOT / "web" / "src" / "views" / "wizard" / "NewJobWizard.tsx"
@@ -750,9 +748,9 @@ def test_the_wizard_shows_total_tokens_not_just_the_source_size() -> None:
 
 
 def test_the_budget_control_has_no_zero_means_unlimited_trap() -> None:
-    from ubt.api.models import JobSubmitRequest
+    from ubt.app.spec import JobSpec
 
-    field = JobSubmitRequest.model_fields["budget_usd"]
+    field = JobSpec.model_fields["budget_usd"]
     assert field.metadata, "budget_usd lost its gt=0 bound"
     assert any(getattr(m, "gt", None) == 0 for m in field.metadata), (
         "budget_usd no longer rejects 0; the UI guard would be unnecessary"
@@ -856,13 +854,13 @@ def test_the_wizard_marks_ocr_modes_that_need_page_egress() -> None:
 
 
 def test_the_wizard_sends_ocr_mode_within_the_api_enum() -> None:
-    from ubt.api.models import JobSubmitRequest
+    from ubt.app.spec import JobSpec
 
     if not _WIZARD_SRC.exists():
         pytest.skip("web/ frontend is not present in this checkout")
     source = _WIZARD_SRC.read_text(encoding="utf-8")
     assert re.search(r"ocr_mode:\s*ocrMode === 'auto' \? null : ocrMode", source)
-    assert "ocr_mode" in JobSubmitRequest.model_fields
+    assert "ocr_mode" in JobSpec.model_fields
 
 
 def test_runtime_config_never_exposes_credentials() -> None:
@@ -1584,9 +1582,9 @@ def test_the_shell_is_never_cached_and_the_bundles_always_are(tmp_path: Path) ->
 
 
 def test_delivery_contract_endpoint_and_faithful_options(tmp_path: Path) -> None:
-    from ubt.api.models import JobSubmitRequest
+    from ubt.app.spec import JobSpec
 
-    req = JobSubmitRequest(
+    req = JobSpec(
         input_path=str(tmp_path / "book.pdf"),
         target_lang="zh",
         delivery_mode="faithful",

@@ -53,17 +53,17 @@ def _build_pdf_with_math(path: Path) -> Path:
 @pytest.mark.fast
 def test_job_spec_rejects_reserved_job_ids_and_defaults_to_mono(tmp_path: Path) -> None:
     pdf = tmp_path / "paper.pdf"
-    spec = JobSpec(source_path=pdf)
-    assert spec.delivery_mode == DeliveryMode.MONO
+    spec = JobSpec(input_path=str(pdf))
+    assert spec.codec_mode == DeliveryMode.MONO
     assert spec.resolved_output_path().name == "paper_zh_mono.pdf"
 
-    spec_slice = JobSpec(source_path=pdf, delivery_mode=DeliveryMode.INTERLEAVED, pages=[3, 5])
+    spec_slice = JobSpec(input_path=str(pdf), layout_mode=DeliveryMode.INTERLEAVED, pages="3,5")
     assert spec_slice.resolved_output_path().name == "paper_zh_interleaved_p3-5.pdf"
 
     with pytest.raises(ValueError, match="reserved"):
-        JobSpec(source_path=pdf, job_id="tm")
+        JobSpec(input_path=str(pdf), job_id="tm")
     with pytest.raises(ValueError, match="reserved"):
-        JobSpec(source_path=pdf, job_id="job_queue")
+        JobSpec(input_path=str(pdf), job_id="job_queue")
 
 
 @pytest.mark.fast
@@ -89,10 +89,10 @@ async def test_surgical_service_runs_pdf_with_overflow_compaction(tmp_path: Path
         return f"精简学术译文{tags}。"
 
     spec = JobSpec(
-        source_path=src,
+        input_path=str(src),
         target_lang="zh",
-        delivery_mode=DeliveryMode.MONO,
-        pages=[1],
+        layout_mode=DeliveryMode.MONO,
+        pages="1",
         allow_overflow_compaction=True,
     )
     res = await service.run(spec, translate_unit=translate_verbose, compact_complete=compact_llm)

@@ -43,7 +43,6 @@ from ubt.api.models import (
     JobDeleteResponse,
     JobListResponse,
     JobStatusResponse,
-    JobSubmitRequest,
     JobSubmitResponse,
     JobUploadResponse,
 )
@@ -56,6 +55,7 @@ from ubt.api.routes.shared import (
 from ubt.api.scope import ApiScope
 from ubt.api.security import resolve_secure_path, validate_job_id
 from ubt.api.uploads import UPLOAD_MAX_BYTES
+from ubt.app.spec import JobSpec
 from ubt.core.config import credential_required, has_real_credential
 from ubt.core.engine.job_queue import TERMINAL_JOB_STATUSES, JobStatus
 from ubt.core.engine.ledger import SQLiteJobLedger
@@ -89,9 +89,7 @@ background_tasks: set[asyncio.Task[None]] = set()
 logger = logging.getLogger(__name__)
 
 
-def _reconstruct_resume_request(
-    metadata: dict[str, Any], *, default_output_dir: Path
-) -> JobSubmitRequest:
+def _reconstruct_resume_request(metadata: dict[str, Any], *, default_output_dir: Path) -> JobSpec:
     """Rebuild a resumable request from a pre-request-snapshot ledger.
 
     Older ledgers (including the job that motivated this fallback) do not carry
@@ -150,7 +148,7 @@ def _reconstruct_resume_request(
     try:
         # A whole-book run recorded `[]`; an empty result from page_scope_label
         # must stay None so the ingest guard compares `[]` with `[]`.
-        return JobSubmitRequest(
+        return JobSpec(
             input_path=source_path,
             output_path=str(output_path),
             target_lang=target_lang,
@@ -252,7 +250,7 @@ async def _restore_resumable_record(
 
     if stored_request is not None:
         try:
-            request = JobSubmitRequest.model_validate(stored_request)
+            request = JobSpec.model_validate(stored_request)
         except (TypeError, ValueError) as exc:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -357,7 +355,7 @@ def _progress_from_ledger(db_dir: Path, job_id: str) -> dict[str, Any] | None:
 
 
 def _resubmit_identity(
-    req: JobSubmitRequest,
+    req: JobSpec,
     resolved_in: Path,
     *,
     config: Any,
@@ -602,7 +600,7 @@ def register_job_routes(
         tags=["Jobs"],
     )
     async def submit_job(
-        req: JobSubmitRequest,
+        req: JobSpec,
         x_ubt_tenant: str | None = Header(default=None),
     ) -> JobSubmitResponse:
         resolved_in = resolve_secure_path(req.input_path, must_exist=True, config=app_config)

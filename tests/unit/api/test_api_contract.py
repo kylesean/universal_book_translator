@@ -15,8 +15,8 @@ from pydantic import SecretStr
 
 from ubt.api.app import create_app
 from ubt.api.manager import JobManager, JobRecord
-from ubt.api.models import JobSubmitRequest
 from ubt.api.security import _require_api_key_gate, resolve_secure_path, session_cookie_value
+from ubt.app.spec import JobSpec
 from ubt.core.config import UBTConfig
 from ubt.core.engine.job_queue import JobStatus
 from ubt.core.exceptions import BudgetExceededError
@@ -315,7 +315,7 @@ def test_resume_keeps_the_output_path_claim_that_submit_guards(
     assert submitted.status_code == 202
     manager: JobManager = authed.app.state.job_manager  # type: ignore[attr-defined]
     stale = manager.create_job(
-        JobSubmitRequest(input_path=str(doc), output_path=str(out)), job_id="sharedpath02"
+        JobSpec(input_path=str(doc), output_path=str(out)), job_id="sharedpath02"
     )
     stale.status = JobStatus.FAILED
 
@@ -334,12 +334,12 @@ def test_resume_ignores_terminal_holders_of_the_output_path(
     out = tmp_path / "serial_deliverable.md"
     manager: JobManager = authed.app.state.job_manager  # type: ignore[attr-defined]
     first = manager.create_job(
-        JobSubmitRequest(input_path=str(doc), output_path=str(out), dry_run=True),
+        JobSpec(input_path=str(doc), output_path=str(out), dry_run=True),
         job_id="serialpath1",
     )
     first.status = JobStatus.FAILED
     second = manager.create_job(
-        JobSubmitRequest(input_path=str(doc), output_path=str(out), dry_run=True),
+        JobSpec(input_path=str(doc), output_path=str(out), dry_run=True),
         job_id="serialpath2",
     )
     second.status = JobStatus.CANCELLED
@@ -359,7 +359,7 @@ def test_resume_after_restart_restores_the_request_from_the_ledger(
 ) -> None:
     from ubt.core.engine.ledger import SQLiteJobLedger
 
-    resumed_requests: list[JobSubmitRequest] = []
+    resumed_requests: list[JobSpec] = []
 
     async def _capture(self: JobManager, record: JobRecord, config: Any) -> None:
         resumed_requests.append(record.request)
@@ -440,7 +440,7 @@ def test_concurrent_resumes_spawn_exactly_one_pipeline(
     app = create_app(config=_config(tmp_path))
     manager: JobManager = app.state.job_manager
     record = manager.create_job(
-        JobSubmitRequest(
+        JobSpec(
             input_path=str(doc),
             output_path=str(tmp_path / "race_out.md"),
             dry_run=True,
@@ -470,7 +470,7 @@ def test_resume_reconstructs_an_old_ledger_without_a_request_snapshot(
 ) -> None:
     from ubt.core.engine.ledger import SQLiteJobLedger
 
-    started: list[JobSubmitRequest] = []
+    started: list[JobSpec] = []
 
     async def _capture(self: JobManager, record: JobRecord, config: Any) -> None:
         started.append(record.request)
@@ -742,7 +742,7 @@ def test_a_cancelled_job_holds_its_slot_until_its_task_settles(tmp_path: Path) -
             return True
 
     manager = JobManager(max_running_jobs=1)
-    record = manager.create_job(JobSubmitRequest(input_path=str(_write_doc(tmp_path))))
+    record = manager.create_job(JobSpec(input_path=str(_write_doc(tmp_path))))
     record.status = JobStatus.CANCELLED
     record.task = _Unwinding()  # type: ignore[assignment]
     with pytest.raises(ServerCapacityError):
@@ -839,9 +839,9 @@ def test_submit_budget_exceeded_is_402(
 
 
 def test_job_submit_request_carries_emit_both() -> None:
-    from ubt.api.models import JobSubmitRequest
+    from ubt.app.spec import JobSpec
 
-    req = JobSubmitRequest(input_path="/tmp/x.pdf", emit_both=True)
+    req = JobSpec(input_path="/tmp/x.pdf", emit_both=True)
     assert req.emit_both is True
 
 
@@ -853,7 +853,7 @@ def test_output_path_claimant_sees_a_job_still_sitting_in_the_queue(tmp_path: Pa
         def __init__(self, job_id: str, output_path: str | None) -> None:
             self.job_id = job_id
             self.status = QueueStatus.RUNNING
-            self.request = JobSubmitRequest(input_path="x.md", output_path=output_path)
+            self.request = JobSpec(input_path="x.md", output_path=output_path)
 
     class _Manager:
         def __init__(self, records: list[_Record]) -> None:
@@ -969,7 +969,7 @@ async def test_job_manager_safe_error_formatting(tmp_path: Path) -> None:
     manager = JobManager()
     dummy_input = tmp_path / "dummy.md"
     dummy_input.write_text("hello", encoding="utf-8")
-    req = JobSubmitRequest(input_path=str(dummy_input))
+    req = JobSpec(input_path=str(dummy_input))
     record = JobRecord("test-err-fmt", req)
     base_config = UBTConfig(
         provider="openai",
@@ -1005,10 +1005,10 @@ async def test_job_manager_safe_error_formatting(tmp_path: Path) -> None:
 
 
 def test_job_submit_request_accepts_pdf_engine() -> None:
-    req = JobSubmitRequest(input_path="book.pdf", pdf_engine="pdfium")
+    req = JobSpec(input_path="book.pdf", pdf_engine="pdfium")
     assert req.pdf_engine == "pdfium"
 
-    req_auto = JobSubmitRequest(input_path="book.pdf", pdf_engine="auto")
+    req_auto = JobSpec(input_path="book.pdf", pdf_engine="auto")
     assert req_auto.pdf_engine == "auto"
 
 
@@ -1129,7 +1129,7 @@ def test_resume_clears_an_intake_forced_rehearsal(
     """
     from ubt.core.engine.ledger import SQLiteJobLedger
 
-    resumed_requests: list[JobSubmitRequest] = []
+    resumed_requests: list[JobSpec] = []
 
     async def _capture(self: JobManager, record: JobRecord, config: Any) -> None:
         resumed_requests.append(record.request)

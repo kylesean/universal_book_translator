@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from ubt.api.models import JobSubmitRequest
+from ubt.app.spec import JobSpec
 from ubt.core.engine.job_queue import JobStatus
 from ubt.mcp.server import mcp, ubt_translate_book
 
@@ -83,7 +83,7 @@ def test_the_new_tools_document_their_arguments() -> None:
 
 
 class _Record:
-    def __init__(self, job_id: str, request: JobSubmitRequest, status: str) -> None:
+    def __init__(self, job_id: str, request: JobSpec, status: str) -> None:
         self.job_id = job_id
         self.request = request
         self.status = status
@@ -109,7 +109,7 @@ async def test_a_repeated_submit_with_the_same_arguments_is_reused(
     source = tmp_path / "book.md"
     source.write_text("# t\n\nhello\n", encoding="utf-8")
     monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
-    request = JobSubmitRequest(
+    request = JobSpec(
         input_path=str(source.resolve()),
         target_lang="zh",
         source_lang="en",
@@ -129,7 +129,7 @@ async def test_a_repeated_submit_with_changed_arguments_is_refused(
     source = tmp_path / "book.md"
     source.write_text("# t\n\nhello\n", encoding="utf-8")
     monkeypatch.setenv("UBT_ALLOWED_DIRS", str(tmp_path))
-    request = JobSubmitRequest(
+    request = JobSpec(
         input_path=str(source.resolve()),
         target_lang="zh",
         source_lang="en",

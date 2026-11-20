@@ -30,7 +30,6 @@ from ubt.api.manager import JobManager, JobRecord
 from ubt.api.models import (
     JobAssessRequest,
     JobStatusResponse,
-    JobSubmitRequest,
     JobSubmitResponse,
     JobUploadResponse,
 )
@@ -62,6 +61,7 @@ from ubt.api.security import (
 )
 from ubt.api.sse_broadcaster import QueueSseBroadcaster
 from ubt.api.uploads import UPLOAD_MAX_BYTES, UPLOAD_PATH_SUFFIX, reap_stale_uploads
+from ubt.app.spec import JobSpec
 from ubt.core.config import UBTConfig
 from ubt.core.engine.job_queue import JobQueue
 from ubt.core.engine.ledger import SQLiteJobLedger
@@ -94,7 +94,7 @@ _output_path_claimant = output_path_claimant
 __all__ = [
     "JobManager",
     "JobRecord",
-    "JobSubmitRequest",
+    "JobSpec",
     "JobAssessRequest",
     "JobSubmitResponse",
     "JobUploadResponse",

@@ -7,7 +7,7 @@ import type { paths } from './generated-types'
 export type HealthResponse = paths['/health']['get']['responses']['200']['content']['application/json']
 export type JobAssessRequest = paths['/jobs/assess']['post']['requestBody']['content']['application/json']
 export type JobAssessResponse = paths['/jobs/assess']['post']['responses']['200']['content']['application/json']
-export type JobSubmitRequest = paths['/jobs/submit']['post']['requestBody']['content']['application/json']
+export type JobSpec = paths['/jobs/submit']['post']['requestBody']['content']['application/json']
 export type JobSubmitResponse = paths['/jobs/submit']['post']['responses']['202']['content']['application/json']
 export type JobStatusResponse = paths['/jobs/{job_id}/status']['get']['responses']['200']['content']['application/json']
 export type JobUploadResponse = paths['/jobs/upload']['post']['responses']['201']['content']['application/json']
@@ -279,7 +279,7 @@ export async function assessJob(req: JobAssessRequest): Promise<JobAssessRespons
   return res.json()
 }
 
-export async function submitJob(req: JobSubmitRequest): Promise<JobSubmitResponse> {
+export async function submitJob(req: JobSpec): Promise<JobSubmitResponse> {
   const res = await apiFetch(`${BASE_URL}/jobs/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -37,7 +37,7 @@ import {
   uploadGlossaryFile,
   uploadSourceDocument,
   type JobAssessResponse,
-  type JobSubmitRequest,
+  type JobSpec,
   type RuntimeConfig,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
@@ -568,7 +568,7 @@ export function NewJobWizard() {
   /**
    * A cap is enabled but no usable positive number was entered.
    *
-   * ``JobSubmitRequest.budget_usd`` is ``Field(gt=0)``, so sending 0 (or an
+   * ``JobSpec.budget_usd`` is ``Field(gt=0)``, so sending 0 (or an
    * empty field coerced to 0) is a 422 on every submission. Blocking it here
    * keeps the failure visible at the field instead of at the API boundary.
    */
@@ -700,7 +700,7 @@ export function NewJobWizard() {
    * The submit payload, built once so the idempotency fingerprint and the
    * request cannot drift apart.
    */
-  const buildPayload = (): JobSubmitRequest => ({
+  const buildPayload = (): JobSpec => ({
     input_path: filePath.trim(),
     target_lang: targetLang,
     source_lang: sourceLang,
@@ -713,6 +713,8 @@ export function NewJobWizard() {
     delivery_mode: deliveryMode,
     allow_degrade: deliveryMode === 'faithful' ? allowDegrade : null,
     dual_mode: dualMode === 'auto' ? null : dualMode,
+    allow_overflow_compaction: true,
+    max_overflow_compaction_units: 32,
     // null = "align to the source layout"; the engine rejects anything but 1/2.
     layout_columns: layoutColumns === 'auto' ? null : Number(layoutColumns),
     // null = follow UBTConfig's operator default, not a hard-coded false.
@@ -749,7 +751,7 @@ export function NewJobWizard() {
    * the edit.
    */
   const submitKeyRef = useRef<{ fingerprint: string; jobId: string } | null>(null)
-  const idempotencyKeyFor = (payload: JobSubmitRequest): string => {
+  const idempotencyKeyFor = (payload: JobSpec): string => {
     const fingerprint = JSON.stringify(payload)
     const memo = submitKeyRef.current
     if (memo !== null && memo.fingerprint === fingerprint) return memo.jobId
