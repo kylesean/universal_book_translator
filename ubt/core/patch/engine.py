@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ubt.core.config import UBTConfig
+from ubt.core.engine.document_services import resolve_adapter
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.ir.models import (
     TERMINAL_STATUSES,
@@ -18,7 +19,6 @@ from ubt.core.ir.models import (
 )
 from ubt.core.patch.differ import DocumentSemanticDiffer
 from ubt.core.patch.models import BlockDiffItem, PatchBlockStatus, PatchSummary
-from ubt.core.ports import resolve_adapter
 
 logger = logging.getLogger(__name__)
 

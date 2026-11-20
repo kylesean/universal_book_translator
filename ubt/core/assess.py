@@ -34,6 +34,12 @@ from ubt.core.engine.cost_estimate import (
     estimate_draft_cost_from_totals,
     measure_prefix_tokens,
 )
+from ubt.core.engine.document_services import (
+    inspect_font_encoding_damage,
+    resolve_adapter,
+    summarize_font_encoding_damage,
+    supported_suffixes,
+)
 from ubt.core.engine.pdf_facts import (
     inspect_pdf_profile,
     page_kind_enum,
@@ -41,12 +47,6 @@ from ubt.core.engine.pdf_facts import (
     profile_pdf_pages,
 )
 from ubt.core.policy.layout_policy import PROBE_MIN_CHARS
-from ubt.core.ports import (
-    inspect_font_encoding_damage,
-    resolve_adapter,
-    summarize_font_encoding_damage,
-    supported_suffixes,
-)
 from ubt.core.router.pricing import (
     price_is_known,
     resolve_model_prices,

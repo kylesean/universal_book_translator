@@ -24,6 +24,12 @@ from typing import Literal
 
 from ubt.core.config import DualMode
 from ubt.core.engine.blocks import BlockReader
+from ubt.core.engine.document_services import (
+    detect_figure_pages,
+    flag_font_encoding_damage,
+    inspect_font_encoding_damage,
+    summarize_font_encoding_damage,
+)
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import LayoutAdvisory, RenderPlan
 from ubt.core.engine.services import RunServices
@@ -35,12 +41,6 @@ from ubt.core.policy.bilingual_advisor import (
     assess_difficulty,
     resolve_effective_mode,
     secondary_mode,
-)
-from ubt.core.ports import (
-    detect_figure_pages,
-    flag_font_encoding_damage,
-    inspect_font_encoding_damage,
-    summarize_font_encoding_damage,
 )
 
 logger = logging.getLogger(__name__)

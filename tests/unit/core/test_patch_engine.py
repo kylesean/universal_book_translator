@@ -196,7 +196,7 @@ async def test_patch_engine_apply_patch(tmp_path: Path) -> None:
     assert diff_summary.added_count == 1
 
     base_job_id = "job_base_v1"
-    from ubt.core.ports import resolve_adapter
+    from ubt.core.engine.document_services import resolve_adapter
 
     ad = resolve_adapter(base_file)
     m = await ad.extract_manifest(base_file)

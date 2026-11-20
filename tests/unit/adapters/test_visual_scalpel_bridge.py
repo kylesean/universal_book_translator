@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from ubt.core.engine.document_services import is_visual_scalpel_applicable
 from ubt.core.ir.models import BlockType, BoundingBox, IRBlock, make_element
-from ubt.core.ports import is_visual_scalpel_applicable
 
 pytestmark = pytest.mark.fast
 

@@ -19,6 +19,7 @@ _PROBE_IMPORT = (
 )
 
 _PROBE_MASK = (
+    "from ubt.app.bootstrap import install_services; install_services(); "
     "from ubt.core.engine.reporter import _placeholder_engine; "
     "assert _placeholder_engine() is _placeholder_engine(), "
     "'the engine is resolved once and cached'; "

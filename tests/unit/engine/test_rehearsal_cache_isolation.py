@@ -8,12 +8,12 @@ import pytest
 
 from ubt.cache.store import DiskCacheStore
 from ubt.core.config import UBTConfig
+from ubt.core.engine.document_services import placeholder_engine
 from ubt.core.engine.dry_run import (
     create_dry_run_orchestrator,
     rehearsal_cache_dir,
     rehearsal_db_dir,
 )
-from ubt.core.ports import placeholder_engine
 from ubt.translate.engine import TranslationEngine
 
 pytestmark = pytest.mark.fast

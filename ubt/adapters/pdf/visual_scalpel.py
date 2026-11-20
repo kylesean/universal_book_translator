@@ -478,7 +478,7 @@ def is_visual_scalpel_applicable(
        (severe structural defect, omission, or hallucination).
 
     The threshold keyword is ``vision_threshold``, matching the ports bridge
-    (:func:`ubt.core.ports.is_visual_scalpel_applicable`) that calls this through
+    (:func:`ubt.core.engine.document_services.is_visual_scalpel_applicable`) that calls this through
     the SPI registry. The two names drifted (``qe_threshold_for_vision`` here,
     ``vision_threshold`` there), so every real call raised ``TypeError`` and the
     visual-repair path never ran.

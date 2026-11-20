@@ -37,6 +37,9 @@ from ubt.core.engine.artifact_services import (
     read_delivery_evidence,
 )
 from ubt.core.engine.delivery_freshness import record_rendered_digest, rendered_digest_for
+from ubt.core.engine.document_services import (
+    optimize_pdf_deliverable,
+)
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import NON_TERMINAL_STATUSES, SQLiteJobLedger
 from ubt.core.engine.pdf_facts import pdf_page_count
@@ -66,9 +69,6 @@ from ubt.core.job_options import (
 )
 from ubt.core.metrics.collect import collect_kpis, save_metrics_report
 from ubt.core.policy.bilingual_advisor import SECONDARY_SUFFIX
-from ubt.core.ports import (
-    optimize_pdf_deliverable,
-)
 
 if TYPE_CHECKING:
     from ubt.adapters.pdf.artifact_gate import VisualGateResult
@@ -1187,8 +1187,8 @@ def _write_xliff_companion(
         )
     t0 = time.perf_counter()
     try:
+        from ubt.core.engine.document_services import export_xliff
         from ubt.core.job_options import companion_path
-        from ubt.core.ports import export_xliff
 
         res = export_xliff(
             blocks,
@@ -1810,7 +1810,7 @@ def _font_delivery_for(ctx: StageContext) -> dict[str, Any] | None:
     as a measured one.
     """
     try:
-        from ubt.core.ports import resolve_font_for_render as resolve_for_render
+        from ubt.core.engine.document_services import resolve_font_for_render as resolve_for_render
 
         stack = resolve_for_render(
             ctx.manifest.target_lang,

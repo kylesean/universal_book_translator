@@ -11,8 +11,8 @@ from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from ubt.core import ports
 from ubt.core.config import UBTConfig
+from ubt.core.engine import document_services as ports
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import Terminology
 from ubt.core.engine.ledger import SQLiteJobLedger

@@ -176,31 +176,28 @@ def main() -> int:
         print("== render→adapters 模块级边（验收：0）: 0 ==")
 
     # --------------------------------------------------------------------------- #
-    # Port-boundary invariant: within ubt.core, only ubt/core/ports.py is
-    # permitted to contain function-level (lazy) bridges into ubt.adapters or the
-    # compiler packages (ubt.segment, ubt.translate).
-    # Any lazy import elsewhere in ubt.core is an architectural leak bypassing the
-    # designated port bridge.
+    # Core boundary: no module in ubt.core may lazy-import ubt.adapters or the
+    # compiler packages (ubt.segment, ubt.translate). The application injects
+    # those through the protocols in ubt.core.engine.*_services. A lazy bridge
+    # here is an architectural leak, not a sanctioned seam.
     #
-    # ``ubt.render`` is deliberately absent from this list: the render layer is
-    # not behind the port bridge, and the export stage, the render preflight and
-    # the layout coordinator lazy-import it as their normal calling shape.
+    # ``ubt.render`` is deliberately absent: the export stage, the render
+    # preflight and the layout coordinator lazy-import it as their normal
+    # calling shape.
     # --------------------------------------------------------------------------- #
     lazy_leaks: list[tuple[str, int, str]] = []
     for f in sorted(Path("ubt/core").rglob("*.py")):
-        if f.name == "ports.py":
-            continue
         for ln, mod in scan(f)[1]:
             for bad in ("ubt.adapters", "ubt.segment", "ubt.translate"):
                 if mod == bad or mod.startswith(bad + "."):
                     lazy_leaks.append((str(f), ln, mod))
 
     if lazy_leaks:
-        print("== 形式主义 lazy import 违规（核心域绕过 ports.py 验收：0）==")
+        print("== 函数级 core→adapters/compiler（验收：0）==")
         for f_str, ln, mod in lazy_leaks:
             print(f"  {f_str}:{ln} -> {mod}")
     else:
-        print("== 函数级 core→adapters/compiler（仅限 ports.py，其他模块验收：0）: 0 ==")
+        print("== 函数级 core→adapters/compiler（验收：0）: 0 ==")
 
     return (
         0

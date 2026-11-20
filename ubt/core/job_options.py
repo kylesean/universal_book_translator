@@ -183,7 +183,7 @@ def resolve_profile_name(profile: str | None, input_path: str | Path | None = No
         # of "Decryption failed ... Not authenticated" on an encrypted file
         # before the pipeline's adapter guard can refuse it. Skip the probe here;
         # the adapter guard reports the encryption with its actionable message.
-        from ubt.core.ports import reject_encrypted_pdf
+        from ubt.core.engine.document_services import reject_encrypted_pdf
 
         try:
             reject_encrypted_pdf(path)
@@ -217,7 +217,7 @@ def resolve_document_mode(
     if not path.exists():
         return "book"
     if path.suffix.lower() == ".pdf":
-        from ubt.core.ports import reject_encrypted_pdf
+        from ubt.core.engine.document_services import reject_encrypted_pdf
 
         try:
             reject_encrypted_pdf(path)

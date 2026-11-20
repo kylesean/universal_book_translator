@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+from ubt.core.engine.document_services import is_fast_lane_eligible
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import Terminology
 from ubt.core.engine.stage_context import StageContext, check_stage_cancelled
@@ -30,7 +31,6 @@ from ubt.core.memory.bible import (
 from ubt.core.memory.character_miner import mine_characters_stream
 from ubt.core.memory.seed_glossary import load_external_glossary, seed_entries_for_profile
 from ubt.core.memory.tm import PROMPT_VERSION
-from ubt.core.ports import is_fast_lane_eligible
 
 logger = logging.getLogger(__name__)
 

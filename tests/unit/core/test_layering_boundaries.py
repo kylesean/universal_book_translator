@@ -30,7 +30,7 @@ def test_core_has_no_module_level_compiler_or_adapter_edges() -> None:
     assert not forbidden_adapters, f"Forbidden module-level adapter edges: {forbidden_adapters}"
 
 
-def test_only_ports_may_hold_lazy_bridge_imports_in_core() -> None:
+def test_core_has_no_lazy_adapter_or_compiler_bridges() -> None:
     leaks: list[tuple[str, int, str]] = []
     forbidden_targets = (
         "ubt.adapters",
@@ -38,8 +38,6 @@ def test_only_ports_may_hold_lazy_bridge_imports_in_core() -> None:
     )
 
     for f in sorted(_CORE_DIR.rglob("*.py")):
-        if f.name == "ports.py":
-            continue
         _, lazy = dce.scan(f)
         for ln, mod in lazy:
             for bad in forbidden_targets:
@@ -47,7 +45,7 @@ def test_only_ports_may_hold_lazy_bridge_imports_in_core() -> None:
                     leaks.append((str(f.relative_to(_REPO_ROOT)), ln, mod))
 
     assert not leaks, (
-        "Detected lazy import leaks in core bypassing ubt/core/ports.py:\n"
+        "Detected lazy import leaks in core (no lazy adapter/compiler bridge is allowed):\n"
         + "\n".join(f"  {f}:{ln} -> {mod}" for f, ln, mod in leaks)
     )
 
@@ -56,4 +54,4 @@ def test_dump_compiler_edges_script_exits_cleanly(capsys: pytest.CaptureFixture[
     exit_code = dce.main()
     captured = capsys.readouterr()
     assert exit_code == 0, f"dump_compiler_edges failed:\n{captured.out}"
-    assert "函数级 core→adapters/compiler（仅限 ports.py，其他模块验收：0）: 0" in captured.out
+    assert "函数级 core→adapters/compiler（验收：0）: 0" in captured.out

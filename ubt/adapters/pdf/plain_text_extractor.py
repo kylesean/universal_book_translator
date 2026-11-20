@@ -2,7 +2,7 @@
 
 Consumers are the pdf_oxide fallback inside the Docling family
 (``ubt.adapters.pdf.docling_parser`` imports :func:`pages_to_blocks`) and the
-core port ``ubt.core.ports.sample_pdf_pages`` (this module's
+core port ``ubt.core.engine.document_services.sample_pdf_pages`` (this module's
 :func:`sample_pdf_pages`), so core needs neither to name this adapter module
 nor to import a PDF library. The pdfium reader does not come through here: it
 types its own blocks from real geometry in ``ubt.adapters.pdf.reader_pdf``, and

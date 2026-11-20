@@ -29,6 +29,7 @@ from ubt.core.engine.adapter_runtime import (
     apply_runtime_config,
 )
 from ubt.core.engine.blocks import BlockReader
+from ubt.core.engine.document_services import resolve_adapter
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import RunFacts
 from ubt.core.engine.ledger import SQLiteJobLedger
@@ -66,7 +67,6 @@ from ubt.core.memory.tm import (
 from ubt.core.policy.adaptive_policy import (
     resolve_adaptive_policy,
 )
-from ubt.core.ports import resolve_adapter
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.qe.heuristic import HeuristicQERunner

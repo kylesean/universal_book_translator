@@ -5,10 +5,10 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
+from ubt.core.engine.document_services import placeholder_engine
 from ubt.core.ir.emphasis import parse_emphasis
 from ubt.core.ir.models import BlockStatus, IRBlock, StyleMeta
 from ubt.core.memory.glossary_table import build_global_glossary_table
-from ubt.core.ports import placeholder_engine
 from ubt.core.qe.base import BaseQERunner
 from ubt.core.qe.defect_taxonomy import CONSTRAINT_PREFIX, classify_defect, is_format_only
 from ubt.core.qe.fast_pass import FastPassFilter
@@ -28,7 +28,7 @@ def _literal_placeholder_engine() -> Any:
     the only place the inventory exists; it is regex-only and reused across
     candidates.
 
-    Resolved through ``ubt.core.ports``: ``ubt.segment`` is a compiler-side
+    Resolved through ``ubt.core.engine.document_services``: ``ubt.segment`` is a compiler-side
     package, and the layering gate forbids a direct ``core.engine -> segment``
     edge.
     """
@@ -491,7 +491,10 @@ class RepairLoop:
         image_b64: str | None = None
         if source_pdf_path is not None:
             try:
-                from ubt.core.ports import crop_block_image, is_visual_scalpel_applicable
+                from ubt.core.engine.document_services import (
+                    crop_block_image,
+                    is_visual_scalpel_applicable,
+                )
 
                 if is_visual_scalpel_applicable(block, source_pdf_path=source_pdf_path):
                     # Renders the page at 150 dpi and PNG-optimizes the crop: CPU

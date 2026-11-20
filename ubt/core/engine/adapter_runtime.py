@@ -3,7 +3,7 @@
 These are the parts of the old ``ports`` bridge that do not name an adapter:
 the runtime config dataclass, the adapter protocol core is typed against, and
 the accessors for an adapter's render side channels. Keeping them here leaves
-``ubt.core.ports`` only the lazy adapter forwarders it exists for.
+``ubt.core.engine.document_services`` only the lazy adapter forwarders it exists for.
 """
 
 from __future__ import annotations

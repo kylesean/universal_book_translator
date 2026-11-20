@@ -5,7 +5,7 @@ Lives in ``core`` because neither consumer may reach into the other's layer:
 ``ubt.core.assess`` consumes it machine-readably and the pipeline's policy
 reads it for routing.
 Detection is zero-token and, for PDF, only ever touches pdfium through the
-serialized gate reached via ``ubt.core.ports`` (this module names no adapter
+serialized gate reached via ``ubt.core.engine.document_services`` (this module names no adapter
 module and no heavy PDF dependency directly).
 """
 

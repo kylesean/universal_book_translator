@@ -15,9 +15,9 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from ubt.core.atomic import atomic_write_text
+from ubt.core.engine.document_services import placeholder_engine
 from ubt.core.engine.ledger import SQLiteJobLedger
 from ubt.core.ir.models import BlockStatus, BlockType, BookManifest
-from ubt.core.ports import placeholder_engine
 
 # The QE-scored population policy (placeholder/skip exclusion) lives in
 # ubt.core.qe.score_policy, which both this report and the ledger's job stats

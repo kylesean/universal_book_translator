@@ -16,7 +16,7 @@ manifest.
 
 This module lives in ``ubt.core.ir`` because both the adapters (which read the
 plan and produce the outcome) and the export stage (which owns the plan) depend
-on it, and (per ``ubt.core.ports``) neither layer may depend on the other.
+on it, and (per ``ubt.core.engine.document_services``) neither layer may depend on the other.
 """
 
 from __future__ import annotations

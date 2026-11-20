@@ -134,7 +134,7 @@ def test_tj_kerning_restores_word_spaces_without_splitting_optical_kerns() -> No
 
 @pytest.mark.fast
 def test_placeholders_and_fast_pass_protect_inline_anchors_and_brace_emails() -> None:
-    from ubt.core.ports import placeholder_engine
+    from ubt.core.engine.document_services import placeholder_engine
 
     eng = placeholder_engine()
     src = "See (Section <c1>4.6</c1>) and <f1/> plus {kumboh, iskhare}@stanford.edu."

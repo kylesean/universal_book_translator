@@ -164,12 +164,15 @@ def test_write_xliff_companion_contract(tmp_path: Path) -> None:
     assert "disabled" in str(res_disabled.reason)
 
     ctx_enabled = _make_ctx(tmp_path, emit_xliff=True)
-    with patch("ubt.core.ports.export_xliff", return_value=None):
+    with patch("ubt.core.engine.document_services.export_xliff", return_value=None):
         res_empty = _write_xliff_companion(ctx_enabled, out_pdf, [block])
         assert res_empty.status == "skipped"
         assert "no extractable text segments" in str(res_empty.reason)
 
-    with patch("ubt.core.ports.export_xliff", return_value=("<xliff>bilingual content</xliff>", 1)):
+    with patch(
+        "ubt.core.engine.document_services.export_xliff",
+        return_value=("<xliff>bilingual content</xliff>", 1),
+    ):
         res_success = _write_xliff_companion(ctx_enabled, out_pdf, [block])
         assert res_success.status == "generated"
         assert res_success.path is not None
@@ -177,7 +180,10 @@ def test_write_xliff_companion_contract(tmp_path: Path) -> None:
         assert res_success.size_bytes is not None and res_success.size_bytes > 0
         assert res_success.duration_ms is not None and res_success.duration_ms >= 0
 
-    with patch("ubt.core.ports.export_xliff", side_effect=RuntimeError("XLIFF builder crash")):
+    with patch(
+        "ubt.core.engine.document_services.export_xliff",
+        side_effect=RuntimeError("XLIFF builder crash"),
+    ):
         res_fail = _write_xliff_companion(ctx_enabled, out_pdf, [block])
         assert res_fail.status == "failed"
         assert res_fail.error == "XLIFF builder crash"

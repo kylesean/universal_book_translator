@@ -42,6 +42,7 @@ from ubt.core.engine.adapter_runtime import (
     DocumentAdapter,
     apply_runtime_config,
 )
+from ubt.core.engine.document_services import resolve_adapter
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.facts import Scoring, Terminology
 from ubt.core.engine.ledger import SQLiteJobLedger
@@ -87,7 +88,6 @@ from ubt.core.memory.glossary_table import (
 )
 from ubt.core.memory.neighbor_window import NeighborContextBuilder
 from ubt.core.policy.adaptive_policy import AdaptivePolicy
-from ubt.core.ports import resolve_adapter
 from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.qe.heuristic import HeuristicQERunner
 from ubt.core.router.prompts import build_rich_draft_prompt, build_rich_repair_prompt
@@ -469,10 +469,10 @@ class AgentTranslationService:
         placeholder_engine: PlaceholderEngine | None = None,
     ) -> None:
         self.config = config
-        from ubt.core.ports import (
+        from ubt.core.engine.document_services import (
             placeholder_engine as default_placeholder_engine,
         )
-        from ubt.core.ports import (
+        from ubt.core.engine.document_services import (
             translation_engine,
         )
 
