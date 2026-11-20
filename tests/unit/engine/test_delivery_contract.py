@@ -28,6 +28,7 @@ def _block(
     page: int = 1,
     kind: str = "body",
     allow_cross_page: bool = True,
+    segments: tuple[str, ...] = (),
 ) -> ContractBlock:
     return ContractBlock(
         block_id=block_id,
@@ -35,6 +36,7 @@ def _block(
         page=page,
         kind=kind,
         allow_cross_page=allow_cross_page,
+        segments=segments,
     )
 
 
@@ -905,3 +907,46 @@ def test_reader_machinery_allows_legitimate_brackets_and_math() -> None:
     text = "见第 1 页图 1，公式 [ω=0.5] 与链接 https://example.org/paper.pdf。"
     report = evaluate_delivery_contract(_evidence(blocks=(_block("b1", text),), page_texts=(text,)))
     assert "reader_machinery_leak" not in _codes(report)
+
+
+def test_native_formula_object_verifies_the_prose_around_it() -> None:
+    """A formula XObject's glyph text can extract partially; its prose must not.
+
+    ``𝑀b`` reading back as ``𝑀`` used to report the whole block as clipped,
+    even though every translatable character was on the page. The block's prose
+    segments are the fair claim.
+    """
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(
+                _block(
+                    "b1",
+                    "maintains 𝑀b base images",
+                    segments=("maintains", "base images"),
+                ),
+            ),
+            page_texts=("maintains 𝑀 base images",),
+            contract="faithful",
+            expected_page_count=1,
+            style_samples=(StyleSample(page=1, size_pt=10.0),),
+        )
+    )
+    assert report.passed
+    assert "clipped_overflow" not in _codes(report)
+
+
+def test_a_missing_prose_segment_around_a_formula_is_still_clipped() -> None:
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(
+                _block(
+                    "b1",
+                    "maintains 𝑀b base images",
+                    segments=("maintains", "base images"),
+                ),
+            ),
+            page_texts=("maintains 𝑀 base",),
+            contract="faithful",
+        )
+    )
+    assert "clipped_overflow" in _codes(report)

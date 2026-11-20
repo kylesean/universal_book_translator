@@ -325,7 +325,10 @@ def _run_document(document: Path, case_id: str) -> ReconciliationReport:
 
     The corpus gate's ground truth is the real pipeline, not a hand-written
     fixture: this runs the entrypoint with mock translations (no API key) and
-    reads the contract it wrote. Any nonzero exit is a hard failure.
+    reads the contract it wrote. Any nonzero exit is a hard failure. The
+    artifact-level delivery contract is checked too: a dry run skips the export
+    refusal, so without this a font/citation/text-layer regression would pass
+    reconciliation while shipping a PDF the real run would block.
     """
     import os
     import shutil
@@ -334,6 +337,7 @@ def _run_document(document: Path, case_id: str) -> ReconciliationReport:
     import tempfile
 
     from ubt.core.content.verify import contract_path_for_artifact, load_contract_file
+    from ubt.core.job_options import sidecar_path
 
     out_dir = Path(tempfile.mkdtemp(prefix=f"ubt-corpus-{case_id}-"))
     try:
@@ -365,6 +369,19 @@ def _run_document(document: Path, case_id: str) -> ReconciliationReport:
         contract = contract_path_for_artifact(out_path)
         if not contract.exists():
             raise _CaseFailed(f"translation wrote no contract at {contract}")
+        delivery_path = sidecar_path(out_path, "delivery_contract.json")
+        if not delivery_path.exists():
+            raise _CaseFailed(f"translation wrote no delivery contract at {delivery_path}")
+        delivery = json.loads(delivery_path.read_text(encoding="utf-8"))
+        summary = delivery.get("summary") or {}
+        critical = int(summary.get("critical", 0) or 0)
+        if critical or delivery.get("deliverable") is False:
+            findings = delivery.get("findings") or []
+            first = findings[0].get("message", "") if findings else "no finding recorded"
+            raise _CaseFailed(
+                f"delivery contract has {critical} critical finding(s) "
+                f"(deliverable={delivery.get('deliverable')!r}): {first}"
+            )
         return load_contract_file(contract)
     finally:
         shutil.rmtree(out_dir, ignore_errors=True)

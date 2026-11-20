@@ -15,6 +15,7 @@ import dataclasses
 import html
 import json
 import logging
+import re
 import time
 from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
@@ -1612,11 +1613,30 @@ def _delivery_contract_evidence(
         if block.block_type in (BlockType.FORMULA, BlockType.IMAGE):
             continue
         text = delivered_text(block).strip()
+        segments: tuple[str, ...] = ()
         if is_native and text:
             from ubt.core.validators.inline_tags import strip_inline_tags
 
             unit_meta = native_unit_by_id.get(block.id)
             if unit_meta is not None:
+                rigid_ids = {
+                    str(getattr(tok, "tag_id", ""))
+                    for tok in getattr(unit_meta, "tokens", ())
+                    if getattr(tok, "kind", None) == "rigid" and getattr(tok, "tag_id", None)
+                }
+                if rigid_ids:
+                    rigid_pattern = re.compile(
+                        r"<\s*(?:"
+                        + "|".join(re.escape(tag_id) for tag_id in rigid_ids)
+                        + r")\s*/\s*>"
+                    )
+                    pieces = tuple(
+                        strip_inline_tags(piece).strip()
+                        for piece in rigid_pattern.split(text)
+                        if strip_inline_tags(piece).strip()
+                    )
+                    if len(pieces) >= 2:
+                        segments = pieces
                 for tok in getattr(unit_meta, "tokens", ()):
                     if getattr(tok, "kind", None) == "rigid":
                         raw_glyph = str(tok.payload.get("raw_text", "") or "")
@@ -1651,6 +1671,7 @@ def _delivery_contract_evidence(
                 allow_cross_page=(
                     (contract == "readable") or has_multi_page_boxes or declared_page_expansion
                 ),
+                segments=segments,
             )
         )
 

@@ -149,6 +149,13 @@ class ContractBlock:
     #: ``readable`` reflows, so a block may land on a different page; a
     #: ``faithful`` block without this flag must stay on its source page.
     allow_cross_page: bool = True
+    #: Prose pieces around inline rigid objects (PDF formulas/footnotes). A
+    #: native formula XObject is drawn from the source ops and its glyph text
+    #: layer can extract only partially, so an exact whole-block substring is
+    #: not a fair claim. Each piece is still required to be present, which
+    #: verifies every translatable character without trusting the object's
+    #: extraction.
+    segments: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -725,6 +732,28 @@ def _text_findings(
     for block in evidence.blocks:
         expected = _normalize(block.text)
         if not expected:
+            continue
+        if block.segments:
+            missing = [
+                segment
+                for segment in block.segments
+                if _normalize(segment) and _normalize(segment) not in body_joined
+            ]
+            if missing:
+                findings.append(
+                    ContractFinding(
+                        severity="critical",
+                        code="clipped_overflow",
+                        message=(
+                            f"Block {block.block_id} is missing "
+                            f"{len(missing)}/{len(block.segments)} prose segment(s) "
+                            "around its inline objects; first "
+                            f"{missing[0][:60]!r}"
+                        ),
+                        page=block.page,
+                        block_id=block.block_id,
+                    )
+                )
             continue
         occurrences = max(joined.count(expected), body_joined.count(expected))
         pages = [
