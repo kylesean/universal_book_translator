@@ -78,7 +78,7 @@ from ubt.delivery import (
 )
 
 if TYPE_CHECKING:
-    from ubt.adapters.pdf.page_lock_measure import PageLockMeasurement
+    from ubt.adapters.pdf.native_preflight import NativePreflight
     from ubt.core.qe.llm_judge import JudgeFn
 from ubt.core.router.rate_limiter import AdaptiveTokenBucket
 from ubt.core.router.registry import registry_from_config
@@ -165,15 +165,16 @@ _ENGINE_SIGNATURE_FIELDS: tuple[tuple[str, str], ...] = (
 
 
 def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryDecision:
-    """Resolve the requested delivery mode from the census plus a page-lock probe.
+    """Resolve the requested delivery mode from the census plus a native preflight.
 
-    The structure census supplies layout complexity and text trust; the
-    page-lock probe (:func:`ubt.adapters.pdf.page_lock_measure.measure_page_lock`)
-    supplies the measured feasibility signals — source-box overlap and
-    geometric headroom — by running the renderer's own solver on sampled
-    pages. A document the probe could not measure falls back to the census
-    defaults and is labelled provisional, so "feasibility we measured" never
-    reads the same as "we did not look".
+    The structure census supplies layout complexity and text trust; the native
+    feasibility preflight
+    (:func:`ubt.adapters.pdf.native_preflight.measure_native_feasibility`)
+    supplies the signals the in-place patcher actually depends on — source-box
+    overlap and floor-size headroom — on sampled source pages. A document the
+    preflight could not measure falls back to the census defaults and is
+    labelled provisional, so "feasibility we measured" never reads the same as
+    "we did not look".
     """
     is_pdf = input_path.suffix.lower() == ".pdf"
     requested = str(getattr(config, "delivery_mode", "auto") or "auto")
@@ -194,21 +195,24 @@ def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryD
             except Exception as exc:  # noqa: BLE001 - unmeasured page count becomes text_trust=0
                 logger.debug("Delivery plan: page count unavailable for %s: %s", input_path, exc)
 
-    # The artifact-level probe is what turns "no census objection" into a
-    # measurement. It only runs for PDFs whose census is clean — a scan or a
-    # font-damaged file has no trustworthy text layer for the solver to read,
-    # and is vetoed by the census path anyway.
-    measured: PageLockMeasurement | None = None
+    # The native preflight turns "no census objection" into a measurement. It
+    # only runs for PDFs whose census is clean — a scan or a font-damaged file
+    # has no trustworthy text layer for the probe to read, and is vetoed by the
+    # census path anyway.
+    measured: NativePreflight | None = None
     if needs_census and facts is not None and not facts.has_scan:
         try:
-            from ubt.core.ports import measure_page_lock_for_plan
+            from ubt.core.ports import probe_pdf_feasibility
 
-            measured = measure_page_lock_for_plan(input_path)
+            measured = probe_pdf_feasibility(input_path)
         except Exception as exc:  # noqa: BLE001 - a probe failure lowers, not kills, the run
-            logger.debug("Delivery plan: page-lock probe unavailable for %s: %s", input_path, exc)
+            logger.debug(
+                "Delivery plan: native feasibility probe unavailable for %s: %s", input_path, exc
+            )
         if measured is not None and not measured.measured:
             logger.info(
-                "Delivery plan: page lock unmeasured for %s (%s); eligibility stays provisional",
+                "Delivery plan: native feasibility unmeasured for %s (%s); "
+                "eligibility stays provisional",
                 input_path,
                 "; ".join(measured.reasons) or "no reason reported",
             )

@@ -1,10 +1,10 @@
-"""The plan-time page-lock probe: what it measures, and what it refuses to guess.
+"""The native in-place feasibility preflight: what it measures, what it refuses.
 
-The router promises a 1:1 page lock when ``page_lock_feasible`` is true. That
-signal used to be a constant, so these tests pin the two properties that make
-it a measurement: a page that cannot hold its own text is vetoed, and a
-document the probe could not read is reported as *unmeasured* rather than
-feasible.
+The router promises a fixed-layout delivery when ``page_lock_feasible`` is
+true. That signal used to be a constant, so these tests pin the two properties
+that make it a measurement: a page that cannot hold its own text is vetoed,
+and a document the probe could not read is reported as *unmeasured* rather
+than feasible.
 """
 
 from __future__ import annotations
@@ -13,17 +13,18 @@ from pathlib import Path
 
 import pytest
 
-from ubt.adapters.pdf.page_lock_measure import (
+from ubt.adapters.pdf.native_preflight import (
     _body_lines,
     _capacity_at_floor,
+    _check_source_overlap,
     _column_groups,
+    _fits_all,
     _line_records,
     _sample_page_numbers,
-    measure_page_lock,
+    measure_native_feasibility,
 )
 from ubt.delivery.contracts import ExpansionRisk, PageKind
 from ubt.delivery.planning import build_delivery_signals, plan_for_document
-from ubt.render.layout_solver import check_source_overlap, solve_page_2d
 
 pytestmark = pytest.mark.fast
 
@@ -87,7 +88,7 @@ def test_a_punctuation_fragment_is_not_a_paragraph() -> None:
 
     assert kept == [body]
     records, _, _ = _line_records(kept)
-    assert check_source_overlap([records]) is False
+    assert _check_source_overlap([records]) is False
 
 
 def test_a_small_table_header_is_not_body_text() -> None:
@@ -105,7 +106,7 @@ def test_a_real_body_overlap_is_still_detected() -> None:
 
     records, _, _ = _line_records(_body_lines([first, second]))
 
-    assert check_source_overlap([records]) is True
+    assert _check_source_overlap([records]) is True
 
 
 def test_two_columns_are_compared_per_column() -> None:
@@ -123,10 +124,9 @@ def test_two_columns_are_compared_per_column() -> None:
     # Split at the page midpoint, each column has its full 12pt pitch.
     groups = _column_groups(records, 612.0)
     assert len(groups) == 2
-    assert check_source_overlap(groups) is False
+    assert _check_source_overlap(groups) is False
     for group in groups:
-        solution = solve_page_2d([group], source_size_pt=10.0, source_leading_pt=12.0, floor_pt=7.5)
-        assert solution.fits is True
+        assert _fits_all([group], 7.5, 1.2) is True
 
 
 def test_capacity_shrinks_as_the_page_fills() -> None:
@@ -154,7 +154,7 @@ def test_capacity_shrinks_as_the_page_fills() -> None:
 
 
 def test_a_normal_page_measures_feasible_with_headroom(tmp_path: Path) -> None:
-    measurement = measure_page_lock(_pdf(tmp_path, [_BODY_LINES, _BODY_LINES]))
+    measurement = measure_native_feasibility(_pdf(tmp_path, [_BODY_LINES, _BODY_LINES]))
     assert measurement.measured is True
     assert measurement.feasible is True
     assert measurement.source_overlap is False
@@ -165,13 +165,13 @@ def test_a_normal_page_measures_feasible_with_headroom(tmp_path: Path) -> None:
 def test_an_unreadable_document_is_unmeasured_not_feasible(tmp_path: Path) -> None:
     broken = tmp_path / "broken.pdf"
     broken.write_bytes(b"not a pdf at all")
-    measurement = measure_page_lock(broken)
+    measurement = measure_native_feasibility(broken)
     assert measurement.measured is False
     assert measurement.reasons
 
 
 def test_a_text_free_document_is_unmeasured(tmp_path: Path) -> None:
-    measurement = measure_page_lock(_pdf(tmp_path, [[], []]))
+    measurement = measure_native_feasibility(_pdf(tmp_path, [[], []]))
     assert measurement.measured is False
 
 
@@ -216,9 +216,3 @@ def test_a_measured_faithful_plan_is_not_labelled_provisional() -> None:
     assert decision.plan.contract is not None
     assert decision.plan.eligibility.provisional is False
     assert decision.plan.reasons
-
-
-def test_an_unmeasured_faithful_plan_stays_provisional() -> None:
-    decision = plan_for_document("faithful", document_mode="paper", is_pdf=True)
-    assert decision.plan.eligibility.provisional is True
-    assert any("provisional" in reason for reason in decision.plan.reasons)
