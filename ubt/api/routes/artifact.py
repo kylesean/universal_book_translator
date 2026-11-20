@@ -57,7 +57,7 @@ def _preview_media_type(path: Path, registered: str) -> str:
 #: Effective modes that still satisfy an explicit ``faithful`` request. The
 #: planner maps ``faithful`` onto the legacy ``facsimile`` renderer, so a
 #: non-degraded run reports either name depending on which layer wrote the key.
-_FAITHFUL_EFFECTIVE_MODES: frozenset[str] = frozenset({"faithful", "facsimile", "page_locked"})
+_FAITHFUL_EFFECTIVE_MODES: frozenset[str] = frozenset({"faithful"})
 
 #: Fallback copy for a console that does not know a code. The console localizes
 #: ``degrade_reason_codes`` with the measured params first; this prose is the

@@ -12,8 +12,7 @@ this module owns the routing/request vocabulary. A parity
 test pins the two value sets together so a rename cannot split them.
 
 Compatibility note: the current public config still speaks
-``reflow`` / ``facsimile`` / ``page_locked`` (``ubt.core.config.DeliveryMode``).
-:func:`legacy_delivery_contract` is the one-way migration map the Phase 0
+``readable`` / ``faithful`` (``ubt.core.config.DeliveryMode``).
 adapter will call; it does not change stored jobs or the existing default.
 """
 
@@ -142,35 +141,9 @@ class DeliveryPlan(BaseModel):
     #: document-level routing pass; the render strategy fills it in.
     page_strategies: dict[int, PageStrategy] = Field(default_factory=dict)
     degrade_policy: DegradePolicy = DegradePolicy.FAIL
-    #: Whether a ``readable`` reflow companion copy should be emitted alongside
-    #: a ``faithful`` artifact.
-    companion_reflow: bool = False
     reasons: tuple[str, ...] = ()
     signals: DeliverySignals
 
     def to_manifest(self) -> dict[str, object]:
         """Serialize the same shape the quality report will carry."""
         return self.model_dump(mode="json")
-
-
-_LEGACY_CONTRACTS: dict[str, DeliveryContract] = {
-    "reflow": DeliveryContract.READABLE,
-    "facsimile": DeliveryContract.FAITHFUL,
-    "page_locked": DeliveryContract.FAITHFUL,
-}
-
-
-def legacy_delivery_contract(value: str) -> DeliveryContract:
-    """Map a current public delivery mode to the target contract.
-
-    Unknown values are refused rather than defaulted: a stored job resuming
-    under a name the new router does not understand must fail loudly, not
-    silently become a different contract.
-    """
-    try:
-        return _LEGACY_CONTRACTS[value]
-    except KeyError as exc:
-        allowed = ", ".join(sorted(_LEGACY_CONTRACTS))
-        raise ValueError(
-            f"unknown legacy delivery mode {value!r}; expected one of: {allowed}"
-        ) from exc

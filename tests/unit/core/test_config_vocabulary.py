@@ -38,15 +38,8 @@ def test_the_provider_allow_list_cannot_reach_secrets_or_unrelated_knobs() -> No
     assert "service_api_key" not in PROVIDER_ALLOWED_KEYS
 
 
-def test_delivery_mode_has_target_and_legacy_vocabulary() -> None:
-    assert set(get_args(DeliveryMode)) == {
-        "auto",
-        "readable",
-        "faithful",
-        "reflow",
-        "facsimile",
-        "page_locked",
-    }
+def test_delivery_mode_is_a_closed_vocabulary() -> None:
+    assert set(get_args(DeliveryMode)) == {"auto", "readable", "faithful"}
     config = UBTConfig()
     assert config.delivery_mode == "auto"
     assert config.allow_degrade is False

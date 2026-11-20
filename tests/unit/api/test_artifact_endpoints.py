@@ -358,7 +358,7 @@ def test_the_listing_reports_a_planned_faithful_downgrade(tmp_path: Path) -> Non
     _seed_delivery_metadata(
         config,
         requested="faithful",
-        effective="reflow",
+        effective="readable",
         plan={
             "schema_version": 1,
             "requested_mode": "faithful",
@@ -381,7 +381,7 @@ def test_the_listing_reports_a_planned_faithful_downgrade(tmp_path: Path) -> Non
     client = TestClient(create_app(config))
 
     body = client.get(f"/jobs/{_JOB}/deliverables", headers=_AUTH).json()
-    assert body["delivery_mode"] == "reflow"
+    assert body["delivery_mode"] == "readable"
     assert body["requested_delivery_mode"] == "faithful"
     assert body["planned_delivery_mode"] == "readable"
     assert body["degraded"] is True
@@ -393,13 +393,13 @@ def test_the_listing_reports_a_planned_faithful_downgrade(tmp_path: Path) -> Non
 
 
 def test_a_faithful_run_that_kept_its_contract_is_not_degraded(tmp_path: Path) -> None:
-    """``facsimile`` is the renderer a faithful plan maps to; it is not a loss."""
+    """``faithful`` is the contract a faithful plan maps to; it is not a loss."""
     config = _config(tmp_path)
     _seed_job(config, tmp_path)
     _seed_delivery_metadata(
         config,
         requested="faithful",
-        effective="facsimile",
+        effective="faithful",
         damaged_pages=0,
         plan={
             "schema_version": 1,
@@ -417,7 +417,7 @@ def test_a_faithful_run_that_kept_its_contract_is_not_degraded(tmp_path: Path) -
     client = TestClient(create_app(config))
 
     body = client.get(f"/jobs/{_JOB}/deliverables", headers=_AUTH).json()
-    assert body["delivery_mode"] == "facsimile"
+    assert body["delivery_mode"] == "faithful"
     assert body["degraded"] is False
     assert body["degrade_reason_codes"] == []
     assert body["degrade_reason"] is None
@@ -427,7 +427,7 @@ def test_a_post_render_fallback_to_reflow_is_reported_as_degraded(tmp_path: Path
     """The export's own faithful->reflow fallback is not a planner downgrade.
 
     That path writes the rendered mode to ``delivery_mode`` and leaves the
-    planner's ``delivery_mode_effective`` at ``facsimile``; reading the planner
+    planner's ``delivery_mode_effective`` at ``faithful``; reading the planner
     value first would report a failed 1:1 render as still 1:1. The signals were
     eligible, so the reason is the render-time contract failure, not
     ineligibility.
@@ -437,7 +437,7 @@ def test_a_post_render_fallback_to_reflow_is_reported_as_degraded(tmp_path: Path
     _seed_delivery_metadata(
         config,
         requested="faithful",
-        effective="facsimile",
+        effective="faithful",
         damaged_pages=0,
         plan={
             "schema_version": 1,
@@ -453,11 +453,11 @@ def test_a_post_render_fallback_to_reflow_is_reported_as_degraded(tmp_path: Path
         },
     )
     with SQLiteJobLedger(config.db_dir / f"{_JOB}.sqlite") as ledger:
-        ledger.set_job_metadata_value(_JOB, "delivery_mode", "reflow")
+        ledger.set_job_metadata_value(_JOB, "delivery_mode", "readable")
     client = TestClient(create_app(config))
 
     body = client.get(f"/jobs/{_JOB}/deliverables", headers=_AUTH).json()
-    assert body["delivery_mode"] == "reflow"
+    assert body["delivery_mode"] == "readable"
     assert body["requested_delivery_mode"] == "faithful"
     assert body["planned_delivery_mode"] == "faithful"
     assert body["degraded"] is True

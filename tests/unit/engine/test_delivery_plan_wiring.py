@@ -16,7 +16,7 @@ def test_auto_on_non_pdf_routes_to_readable() -> None:
         UBTConfig(delivery_mode="auto", document_mode="paper"),
         Path("notes.md"),
     )
-    assert decision.effective_mode == "reflow"
+    assert decision.effective_mode == "readable"
     assert decision.plan.contract is DeliveryContract.READABLE
     assert decision.plan.feasible
 
@@ -36,15 +36,5 @@ def test_allow_degrade_on_non_pdf_routes_to_readable() -> None:
         UBTConfig(delivery_mode="faithful", allow_degrade=True),
         Path("notes.md"),
     )
-    assert decision.effective_mode == "reflow"
+    assert decision.effective_mode == "readable"
     assert decision.plan.contract is DeliveryContract.READABLE
-
-
-def test_legacy_facsimile_is_grandfathered_on_non_pdf() -> None:
-    decision = resolve_delivery_for_input(
-        UBTConfig(delivery_mode="facsimile"),
-        Path("notes.md"),
-    )
-    assert decision.effective_mode == "facsimile"
-    assert decision.plan.contract is DeliveryContract.FAITHFUL
-    assert decision.plan.feasible

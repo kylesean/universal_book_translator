@@ -11,31 +11,10 @@ from ubt.delivery.contracts import (
     DeliverySignals,
     DocumentClass,
     LayoutComplexity,
-    legacy_delivery_contract,
 )
 from ubt.delivery.router import route_delivery
 
 pytestmark = pytest.mark.fast
-
-
-@pytest.mark.parametrize(
-    ("legacy", "expected"),
-    [
-        ("reflow", DeliveryContract.READABLE),
-        ("facsimile", DeliveryContract.FAITHFUL),
-        ("page_locked", DeliveryContract.FAITHFUL),
-    ],
-)
-def test_legacy_modes_map_to_target_contracts(
-    legacy: str,
-    expected: DeliveryContract,
-) -> None:
-    assert legacy_delivery_contract(legacy) is expected
-
-
-def test_unknown_legacy_mode_is_refused() -> None:
-    with pytest.raises(ValueError, match="unknown legacy delivery mode"):
-        legacy_delivery_contract("mystery")
 
 
 def test_delivery_contract_values_match_the_artifact_contract() -> None:

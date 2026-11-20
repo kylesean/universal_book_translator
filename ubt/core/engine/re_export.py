@@ -65,32 +65,16 @@ class ReExportError(RuntimeError):
 
 
 def _contract_from_manifest(manifest: BookManifest) -> DeliveryContract | None:
-    """The artifact promise a ledger recorded, or ``None`` for an old job.
+    """The artifact promise a ledger recorded.
 
-    The delivery plan is the durable record; a ledger that predates it still
-    carries the legacy ``delivery_mode`` (``reflow``/``facsimile``) or the
-    native codec's own mode (``mono``/``interleaved``/``side_by_side``, all
-    in-place). Mapping both here keeps a re-export on the same contract the
-    first run shipped.
+    The delivery plan is the durable record. A ledger without one predates this
+    architecture; re-export refuses to guess a contract from renderer names.
     """
     plan = (manifest.metadata or {}).get("delivery_plan")
     if isinstance(plan, dict):
         raw = str(plan.get("contract") or "")
         if raw in (DeliveryContract.READABLE, DeliveryContract.FAITHFUL):
             return DeliveryContract(raw)
-    mode = (
-        str(
-            (manifest.metadata or {}).get("delivery_mode")
-            or (manifest.metadata or {}).get("delivery_mode_effective")
-            or ""
-        )
-        .strip()
-        .lower()
-    )
-    if mode in ("reflow", "readable"):
-        return DeliveryContract.READABLE
-    if mode in ("facsimile", "page_locked", "mono", "interleaved", "side_by_side"):
-        return DeliveryContract.FAITHFUL
     return None
 
 
@@ -197,7 +181,7 @@ def _apply_delivery_override(
     """Re-target one re-export at another delivery contract, in place.
 
     Writes the same metadata keys the pipeline writes before a live run
-    (``delivery_mode``, ``delivery_plan``, requested/effective/legacy), so the
+    (``delivery_mode``, ``delivery_plan``, requested/effective), so the
     renderer and the artifact contract read one plan instead of each guessing.
     Returns the effective legacy render mode, or ``None`` when no override was
     requested.
@@ -273,7 +257,6 @@ def _apply_delivery_override(
     metadata["delivery_plan"] = decision.plan.to_manifest()
     metadata["delivery_mode_requested"] = requested
     metadata["delivery_mode_effective"] = decision.effective_mode
-    metadata["delivery_mode_legacy"] = decision.legacy
     manifest.metadata = metadata
     return decision.effective_mode
 
@@ -428,7 +411,7 @@ async def re_export_job(
         if delivery_mode is not None or recorded_mode:
             apply_runtime_config(
                 adapter,
-                adapter_runtime_config(export_config, delivery_mode=delivery_mode or recorded_mode),
+                adapter_runtime_config(export_config),
             )
         render_plan = _render_plan_from_ledger(ledger, job_id)
         services = _build_services(export_config, router, qe_runner, manifest)

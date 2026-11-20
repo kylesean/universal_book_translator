@@ -63,7 +63,6 @@ from ubt.core.ports import (
     optimize_pdf_deliverable,
     pdf_page_count,
 )
-from ubt.delivery import legacy_delivery_contract
 
 if TYPE_CHECKING:
     from ubt.adapters.pdf.artifact_gate import VisualGateResult
@@ -659,9 +658,9 @@ async def _apply_render_skip_ledger_pass(
 
 
 def _is_faithful_delivery(ctx: StageContext) -> bool:
-    """Whether this run's effective delivery mode is the page-locked contract."""
+    """Whether this run's effective delivery mode is the faithful contract."""
     mode = str((getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_mode", "") or "")
-    return mode in ("facsimile", "page_locked")
+    return mode == "faithful"
 
 
 def _faithful_expected_pages(ctx: StageContext, rendered_path: Path | None = None) -> int | None:
@@ -1169,138 +1168,6 @@ def _write_table_appendix(
         return None
 
 
-async def _write_reflow_companion(
-    ctx: StageContext,
-    adapter: DocumentAdapter,
-    final_blocks: list[IRBlock],
-    rendered_path: Path,
-    render: RenderPlan,
-) -> CompanionArtifactResult:
-    """Write an L3 reading copy beside a facsimile/page_locked delivery.
-
-    The facsimile artifact is the faithful one but its text is painted glyphs: a
-    reader cannot restyle it, search it, or re-wrap it on a small screen. This
-    renders the *same* translated blocks through the reflow channel, so the
-    companion is selectable text on the source book's own trim and no
-    background — at zero extra model cost, because nothing is translated twice.
-
-    Deliberately reuses ``render_blocks`` on the same adapter with
-    ``delivery_mode`` swapped rather than calling the Typst renderer directly:
-    the channel choice, the trim measurement and the layout audit all belong to
-    one strategy, and a second entry point would be a second place for them to
-    disagree.
-
-    Non-fatal, like every companion: a failed reading copy must not sink a
-    facsimile delivery that already succeeded. The failure is *recorded* with a
-    reason rather than swallowed, so a report can say why it is absent.
-    """
-    if not getattr(ctx.config, "companion_reflow", False):
-        return CompanionArtifactResult(
-            kind="reflow",
-            status="skipped",
-            reason="config.companion_reflow is disabled (--companion-reflow)",
-        )
-
-    delivered_mode = str(getattr(getattr(adapter, "_renderer", None), "delivery_mode", ""))
-    if delivered_mode == "reflow":
-        # Two identical PDFs is not a feature. Skip rather than duplicate, and
-        # say why: "I asked for a reading copy and got nothing" with no reason
-        # reads as a bug in the pipeline, not as a redundant request.
-        return CompanionArtifactResult(
-            kind="reflow",
-            status="skipped",
-            reason=(
-                "the primary delivery is already reflow, so a reflow companion would duplicate it"
-            ),
-        )
-
-    # Same base name, distinct suffix, so ``book_mono.pdf`` yields
-    # ``book_mono_reflow.pdf`` and never overwrites the delivery.
-    target = rendered_path.with_name(f"{rendered_path.stem}_reflow{rendered_path.suffix}")
-    # ``render_blocks`` clears the strategy's page geometry at entry. The
-    # companion render must not erase the primary artifact's measurement, which
-    # export records later (``page_geometry = adapter.last_page_geometry``).
-    # Snapshot both side channels and put them back after the swap.
-    strategy = getattr(adapter, "_renderer", None)
-    primary_geometry = list(getattr(adapter, "last_page_geometry", None) or [])
-    primary_strategy_geometry = (
-        list(getattr(strategy, "last_page_geometry", None) or [])
-        if strategy is not None and hasattr(strategy, "last_page_geometry")
-        else None
-    )
-    had_adapter_geometry = hasattr(adapter, "last_page_geometry")
-    t0 = time.perf_counter()
-    swapped = False
-    try:
-        if strategy is not None and hasattr(strategy, "delivery_mode"):
-            strategy.delivery_mode = "reflow"
-            swapped = True
-        try:
-            await _render_adapter_output(
-                adapter=adapter,
-                manifest=ctx.manifest,
-                blocks=final_blocks,
-                target_lang=ctx.target_lang,
-                output_path=target,
-                bilingual_mode=render.bilingual_mode,
-                render_plan=render,
-            )
-        finally:
-            if swapped and strategy is not None:
-                # Restore before anything else can read the strategy, so the
-                # primary's mode is never left saying "reflow".
-                strategy.delivery_mode = delivered_mode
-            if strategy is not None and primary_strategy_geometry is not None:
-                strategy.last_page_geometry = primary_strategy_geometry
-            if had_adapter_geometry:
-                cast(Any, adapter).last_page_geometry = primary_geometry
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
-        if not target.exists():
-            return CompanionArtifactResult(
-                kind="reflow",
-                status="failed",
-                duration_ms=duration_ms,
-                error="the reflow render returned without writing the artifact",
-            )
-        # The export stage owns PDF miniaturization for every delivered PDF.
-        # The reflow reading copy is user-visible and downloadable like the
-        # primary/secondary artifacts, so it gets exactly one pass here — not
-        # the old strategy-internal pass plus an export pass. An optimization
-        # failure must not turn a successfully written companion into "failed":
-        # the file is intact, only its size is unoptimized.
-        if target.suffix.lower() == ".pdf" and getattr(ctx.config, "enable_pdf_optimization", True):
-            opt_prof = getattr(ctx.config, "pdf_optimize_profile", "lossless")
-            try:
-                opt_res = await asyncio.to_thread(optimize_pdf_deliverable, target, opt_prof)
-                if getattr(opt_res, "status", None) == "failed":
-                    logger.warning(
-                        "Reflow companion optimization failed for job %s: %s",
-                        ctx.job_id,
-                        getattr(opt_res, "error", "unknown error"),
-                    )
-            except Exception as exc:  # optimization is best-effort, the file is already written
-                logger.warning(
-                    "Reflow companion optimization skipped for job %s: %s", ctx.job_id, exc
-                )
-        logger.info("Reflow reading copy generated: %s", target.name)
-        return CompanionArtifactResult(
-            kind="reflow",
-            status="generated",
-            path=target,
-            size_bytes=target.stat().st_size,
-            duration_ms=duration_ms,
-        )
-    except Exception as exc:
-        # Best-effort, but never silent: the reason is carried out on the result.
-        logger.warning("Reflow companion generation failed for job %s: %s", ctx.job_id, exc)
-        return CompanionArtifactResult(
-            kind="reflow",
-            status="failed",
-            duration_ms=round((time.perf_counter() - t0) * 1000, 2),
-            error=f"{type(exc).__name__}: {exc}",
-        )
-
-
 def _write_xliff_companion(
     ctx: StageContext, rendered_path: Path, blocks: list[IRBlock]
 ) -> CompanionArtifactResult:
@@ -1486,8 +1353,8 @@ def _delivery_contract_evidence(
 
     Reads the delivered PDF (text, boxes, page bounds) and the renderer's own
     side channels. The contract is selected from the delivery mode that
-    actually produced this file: facsimile/page_locked promise a page-for-page
-    artifact, reflow does not.
+    actually produced this file: faithful promises a page-for-page artifact,
+    readable does not.
     """
     from ubt.core.engine.delivery_contract import (
         ContractBlock,
@@ -1507,7 +1374,6 @@ def _delivery_contract_evidence(
         else (getattr(adapter, "last_page_geometry", None) or [])
     )
 
-    mode = str(getattr(getattr(ctx.config, "typst", None), "delivery_mode", "") or "")
     metadata = getattr(ctx.manifest, "metadata", {}) or {}
     actual_mode = str(metadata.get("delivery_mode", "") or "")
     plan_meta = metadata.get("delivery_plan")
@@ -1520,21 +1386,14 @@ def _delivery_contract_evidence(
     if is_native:
         # The native codec patches the source page in place. It can honestly
         # satisfy either promise, so audit the contract the plan asked for --
-        # not an assumed faithful one. A readable plan on a native run used to
-        # be audited as faithful, which turned page-movement and style checks
-        # that readable never promised into false criticals.
-        contract = plan_contract or ("readable" if actual_mode == "reflow" else "faithful")
-    elif actual_mode in ("reflow", "facsimile", "page_locked"):
-        # The renderer records what it actually shipped; a facsimile run that
-        # degraded to reflow must be QA'd as readable, not as faithful.
-        contract = legacy_delivery_contract(actual_mode).value
+        # not an assumed faithful one.
+        contract = plan_contract or "faithful"
+    elif actual_mode == "readable":
+        contract = "readable"
+    elif plan_contract:
+        contract = plan_contract
     else:
-        if plan_contract:
-            contract = plan_contract
-        elif mode in ("facsimile", "page_locked"):
-            contract = "faithful"
-        else:
-            contract = "readable"
+        contract = "readable"
 
     blocks: list[ContractBlock] = []
     # The renderer's flow-expansion declarations, read before the blocks: a
@@ -2372,9 +2231,6 @@ async def run_export_stage(
         epub_res,
         attestation_res,
     ]
-    companion_results.append(
-        await _write_reflow_companion(ctx, adapter, final_blocks, rendered_path, render)
-    )
     if getattr(ctx.config, "spill_policy", "error") in ("appendix", "warn", "source_kept_warn"):
         spill_path = await asyncio.to_thread(
             _write_spill_appendix, ctx, rendered_path, final_blocks, contract
@@ -2413,15 +2269,15 @@ async def run_export_stage(
         ctx, adapter, final_blocks, rendered_path, render, claims_finality=owning_run
     )
 
-    # Page geometry: what the facsimile solver measured off the source and what
-    # it actually delivered, per page. Persisted because this fact existed only
+    # Page geometry: what the renderer measured off the source and what it
+    # actually delivered, per page. Persisted because this fact existed only
     # inside the build until now, so "why is page 12 at 7.5pt" became
     # unanswerable once the process exited — and the QA report, the visual gate
     # and the operator all ask that question about a shipped artifact.
     #
     # Written from the adapter's side channel rather than re-measured: the
     # solver already made these decisions, and a second measurement could
-    # disagree with what actually shipped. Empty for a non-facsimile render,
+    # disagree with what actually shipped. Empty for a reflow render,
     # which measures no page — recorded as nothing rather than as zeroes.
     page_geometry = list(getattr(adapter, "last_page_geometry", None) or [])
     if page_geometry:
@@ -2585,9 +2441,6 @@ async def run_export_stage(
 
                 shutil.copy2(reflow_companion, rendered_path)
             else:
-                strategy = getattr(adapter, "_renderer", None)
-                if strategy is not None and hasattr(strategy, "delivery_mode"):
-                    strategy.delivery_mode = "reflow"
                 await _render_adapter_output(
                     adapter=adapter,
                     manifest=ctx.manifest,
@@ -2599,12 +2452,12 @@ async def run_export_stage(
                 )
 
             if hasattr(ctx.manifest, "metadata") and isinstance(ctx.manifest.metadata, dict):
-                ctx.manifest.metadata["delivery_mode"] = "reflow"
+                ctx.manifest.metadata["delivery_mode"] = "readable"
                 if "delivery_plan" in ctx.manifest.metadata and isinstance(
                     ctx.manifest.metadata["delivery_plan"], dict
                 ):
                     ctx.manifest.metadata["delivery_plan"]["contract"] = "readable"
-                    ctx.manifest.metadata["delivery_plan"]["effective_mode"] = "reflow"
+                    ctx.manifest.metadata["delivery_plan"]["effective_mode"] = "readable"
                     ctx.manifest.metadata["delivery_plan"]["degraded"] = True
                     reasons = list(ctx.manifest.metadata["delivery_plan"].get("reasons", []))
                     reasons.append(
@@ -2616,7 +2469,7 @@ async def run_export_stage(
                 ledger.set_job_metadata_value,
                 actual_job_id,
                 "delivery_mode",
-                "reflow",
+                "readable",
             )
 
             # Re-evaluate delivery under the degraded readable contract.

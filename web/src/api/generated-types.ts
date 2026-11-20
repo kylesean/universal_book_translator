@@ -1712,7 +1712,7 @@ export interface components {
              * Delivery Mode
              * @description PDF delivery contract: auto, readable or faithful; legacy reflow/facsimile/page_locked are accepted for one release
              */
-            delivery_mode?: ("auto" | "readable" | "faithful" | "reflow" | "facsimile" | "page_locked") | null;
+            delivery_mode?: ("auto" | "readable" | "faithful") | null;
             /**
              * Allow Degrade
              * @description When a new faithful request is ineligible, re-route to readable instead of refusing the run (legacy modes are grandfathered)
@@ -1783,11 +1783,6 @@ export interface components {
              * @description Emit both the primary and complementary dual_mode deliverables (e.g. mono and bilingual)
              */
             emit_both?: boolean | null;
-            /**
-             * Companion Reflow
-             * @description Also write a reflow (L3) reading copy beside a facsimile/page_locked delivery: same translation, source trim, no background, selectable text. No extra model cost
-             */
-            companion_reflow?: boolean | null;
             /**
              * Ocr Mode
              * @description OCR engine (auto, local, cloud, off)

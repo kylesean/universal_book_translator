@@ -83,17 +83,8 @@ QeEngine = Literal["heuristic", "tiered"]
 #: pick from the document's structure.
 DualMode = Literal["mono", "dual", "auto"]
 #: Document delivery request. ``auto`` routes by measured feasibility;
-#: ``readable`` reflows; ``faithful`` keeps the source page geometry. The three
-#: legacy values remain accepted for one release and are mapped by
-#: ``ubt.delivery.contracts.legacy_delivery_contract``.
-DeliveryMode = Literal[
-    "auto",
-    "readable",
-    "faithful",
-    "reflow",
-    "facsimile",
-    "page_locked",
-]
+#: ``readable`` reflows; ``faithful`` keeps the source page geometry.
+DeliveryMode = Literal["auto", "readable", "faithful"]
 
 #: What the export stage does when a block's text cannot be placed (a layout
 #: spill). ``error`` fails the delivery contract; the other three downgrade it
@@ -503,20 +494,6 @@ class TypstConfig(BaseModel):
     dual_mode: DualMode = "mono"
     layout_columns: int | None = None
     emit_both: bool = False
-    #: Also write a reflow (L3) reading copy beside a facsimile/page_locked
-    #: delivery (D13). Off by default.
-    #:
-    #: The facsimile artifact is the faithful one: a page on the source's own
-    #: background, so it looks like the book. Its text is *not* reflowable and a
-    #: reader cannot search or restyle it. Emitting this companion as well gives
-    #: a clean re-typeset copy of the same translation, on the source's own trim
-    #: (see ``ubt.render.page_trim``) with no background, at zero extra model
-    #: cost -- the blocks were already translated.
-    #:
-    #: Ignored when the primary delivery is already ``reflow``: that would
-    #: produce two identical files, so it is skipped with a recorded reason
-    #: rather than silently duplicated.
-    companion_reflow: bool = False
     emit_xliff_companion: bool = True
     emit_attestation_shadow: bool = True
     emit_html_companion: bool = True
@@ -533,17 +510,14 @@ class TypstConfig(BaseModel):
     #: How a PDF target is delivered. ``auto`` (the default) routes by document
     #: class and measured facts: paper/book -> readable, layout-sensitive
     #: documents -> faithful only when eligible. ``readable`` forces reflow;
-    #: ``faithful`` keeps the source page geometry. Legacy ``reflow`` /
-    #: ``facsimile`` / ``page_locked`` remain accepted for one release and are
-    #: mapped by ``ubt.delivery.contracts.legacy_delivery_contract``.
+    #: ``faithful`` keeps the source page geometry.
     #:
     #: Inputs without a source PDF (EPUB/DOCX/MD/HTML) can never be faithful;
     #: they route to readable and reflow.
     delivery_mode: DeliveryMode = "auto"
-    #: Only meaningful for a new ``faithful`` request (or ``auto`` resolving to
+    #: Only meaningful for a ``faithful`` request (or ``auto`` resolving to
     #: faithful): when eligibility fails, re-route the whole book to readable
-    #: instead of refusing the run. Legacy ``facsimile``/``page_locked`` are
-    #: grandfathered and do not consult this flag.
+    #: instead of refusing the run.
     allow_degrade: bool = False
     #: When False (the default), ``major`` findings in the
     #: artifact delivery contract block delivery just like ``critical``
@@ -1334,22 +1308,6 @@ class UBTConfig(BaseSettings):
     # Also render the complementary artifact (mono when primary is dual and
     # vice versa), BabelDOC no-dual/no-mono style.
     emit_both: bool = False
-    # Also write a reflow (L3) *reading copy* beside a facsimile/page_locked
-    # delivery (design decision D13: "原生数字 PDF 默认交付三级同构版，可选导出
-    # reflow 伴生版"). Default off.
-    #
-    # Why the companion exists: the facsimile artifact is the faithful one — a
-    # page drawn on the source's own stripped background, so it looks like the
-    # book — but its text is painted glyphs, not a reflowable paragraph. A reader
-    # cannot restyle it, and a small screen cannot re-wrap it. This emits a clean
-    # re-typeset copy of the same translation at ZERO extra model cost (the
-    # blocks are already translated), on the source's own trim
-    # (``ubt.render.page_trim``) and with no background.
-    #
-    # Ignored when the primary delivery is already ``reflow``: two identical
-    # files is not a feature. That case is recorded as ``skipped`` with a reason
-    # rather than silently duplicating or failing the run.
-    companion_reflow: bool = False
     # Emit a translation-ready XLIFF 2.1 companion ('*_<tag>.xliff') beside the
     # deliverable: the native reader turns the source PDF into a typed Document,
     # protected spans are masked, and one segment per element is written. It is

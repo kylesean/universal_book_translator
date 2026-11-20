@@ -1,13 +1,9 @@
 """Document facts -> DeliverySignals -> DeliveryPlan (Phase 0 wiring).
 
 The router is deliberately pure; this module is the narrow adapter between the
-PDF structure census and the router. It keeps the compatibility rule in one
-place:
+PDF structure census and the router:
 
-- legacy ``facsimile`` / ``page_locked`` keep their old renderer and are
-  grandfathered as ``faithful`` for one release (eligibility is marked
-  provisional, not silently re-evaluated);
-- new ``auto`` / ``readable`` / ``faithful`` use the router;
+- ``auto`` / ``readable`` / ``faithful`` use the router;
 - non-PDF targets can never be ``faithful`` (there is no source page to lock).
 """
 
@@ -15,34 +11,22 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from functools import cache
 
 from ubt.delivery.contracts import (
-    DegradePolicy,
     DeliveryContract,
     DeliveryMode,
     DeliveryPlan,
     DeliverySignals,
     DocumentClass,
     ExpansionRisk,
-    FaithfulEligibility,
     LayoutComplexity,
     PageKind,
-    PageStrategy,
-    legacy_delivery_contract,
 )
 from ubt.delivery.router import route_delivery
 
 logger = logging.getLogger(__name__)
 
-#: Legacy delivery values remain accepted for one release after the default
-#: delivery mode switched to ``auto``. This date is the documented sunset
-#: window; removing the values is a separate compatibility PR, not an implicit
-#: cleanup.
-LEGACY_DELIVERY_SUNSET = "2027-03-31"
-
-_LEGACY_MODES: frozenset[str] = frozenset({"reflow", "facsimile", "page_locked"})
-_TARGET_MODES: frozenset[str] = frozenset({mode.value for mode in DeliveryMode}) - _LEGACY_MODES
+_TARGET_MODES: frozenset[str] = frozenset(mode.value for mode in DeliveryMode)
 
 #: Provisional text trust for a clean native PDF with no confirmed font damage:
 #: the extraction witness has not produced a calibrated score yet, but the page
@@ -56,13 +40,11 @@ class DeliveryDecision:
     """The resolved plan plus the renderer mode it maps to.
 
     ``effective_mode=None`` means no contract is feasible; the caller must fail
-    before rendering. ``legacy=True`` records that a current public mode was
-    preserved rather than re-routed through the new eligibility rules.
+    before rendering.
     """
 
     plan: DeliveryPlan
     effective_mode: str | None
-    legacy: bool = False
 
 
 def document_class_from_mode(document_mode: str) -> DocumentClass:
@@ -169,14 +151,13 @@ def plan_for_document(
 ) -> DeliveryDecision:
     """Resolve the requested mode into a plan and an effective renderer mode.
 
-    Raises ``ValueError`` for a mode outside both vocabularies. An infeasible
-    new ``faithful`` request returns ``effective_mode=None``; the pipeline
-    raises before spending a model call. Legacy modes remain feasible by
-    compatibility decision, with provisional eligibility recorded in the plan.
+    Raises ``ValueError`` for a mode outside the vocabulary. An infeasible
+    ``faithful`` request returns ``effective_mode=None``; the pipeline raises
+    before spending a model call.
     """
     normalized = requested.strip().lower()
-    if normalized not in _LEGACY_MODES and normalized not in _TARGET_MODES:
-        allowed = ", ".join(sorted(_LEGACY_MODES | _TARGET_MODES))
+    if normalized not in _TARGET_MODES:
+        allowed = ", ".join(sorted(_TARGET_MODES))
         raise ValueError(f"unknown delivery mode {requested!r}; expected one of: {allowed}")
 
     signals = build_delivery_signals(
@@ -192,12 +173,6 @@ def plan_for_document(
         source_overlap=source_overlap,
         expansion_risk=expansion_risk,
     )
-    policy = DegradePolicy.ALLOW_DEGRADE if allow_degrade else DegradePolicy.FAIL
-
-    if normalized in _LEGACY_MODES:
-        _warn_legacy_mode(normalized)
-        return _legacy_decision(normalized, signals, policy)
-
     requested_mode = DeliveryMode(normalized)
     plan = route_delivery(signals, requested=requested_mode, allow_degrade=allow_degrade)
     if plan.contract is None:
@@ -205,30 +180,18 @@ def plan_for_document(
     if plan.contract is DeliveryContract.FAITHFUL:
         return DeliveryDecision(
             plan=_mark_faithful_provisional(plan) if not plan.signals.page_lock_measured else plan,
-            effective_mode="facsimile",
+            effective_mode=DeliveryContract.FAITHFUL.value,
         )
-    return DeliveryDecision(plan=plan, effective_mode="reflow")
-
-
-@cache
-def _warn_legacy_mode(mode: str) -> None:
-    """Emit one deprecation warning per legacy value per process."""
-    logger.warning(
-        "delivery_mode=%r is a legacy compatibility value; it maps to %r and "
-        "will be removed after %s. Use auto/readable/faithful instead.",
-        mode,
-        legacy_delivery_contract(mode).value,
-        LEGACY_DELIVERY_SUNSET,
-    )
+    return DeliveryDecision(plan=plan, effective_mode=DeliveryContract.READABLE.value)
 
 
 def _mark_faithful_provisional(plan: DeliveryPlan) -> DeliveryPlan:
     """Record that the feasibility signal is a census, not an artifact probe.
 
-    Applied only when the page-lock probe did not run (or could not measure):
-    ``page_lock_measured`` is the difference between "we looked at the pages
-    and they solve at the floor" and "the structure census found nothing
-    wrong", and the plan must not blur the two.
+    Applied only when the native preflight did not run (or could not measure):
+    ``page_lock_measured`` is the difference between "we measured the source
+    pages" and "the structure census found nothing wrong", and the plan must
+    not blur the two.
     """
     return plan.model_copy(
         update={
@@ -236,49 +199,10 @@ def _mark_faithful_provisional(plan: DeliveryPlan) -> DeliveryPlan:
             "reasons": (
                 *plan.reasons,
                 "page_lock_feasible is provisional (structure census only; "
-                "no artifact-level page-lock probe measured this document)",
+                "no source-page feasibility probe measured this document)",
             ),
         }
     )
-
-
-def _legacy_decision(
-    legacy_mode: str,
-    signals: DeliverySignals,
-    policy: DegradePolicy,
-) -> DeliveryDecision:
-    contract = legacy_delivery_contract(legacy_mode)
-    if contract is DeliveryContract.READABLE:
-        plan = DeliveryPlan(
-            requested_mode=DeliveryMode.READABLE,
-            contract=DeliveryContract.READABLE,
-            feasible=True,
-            eligibility=FaithfulEligibility(eligible=False),
-            default_page_strategy=PageStrategy.DOCUMENT_REFLOW,
-            degrade_policy=policy,
-            reasons=(f"legacy mode {legacy_mode!r} preserved",),
-            signals=signals,
-        )
-        return DeliveryDecision(plan=plan, effective_mode="reflow", legacy=True)
-
-    plan = DeliveryPlan(
-        requested_mode=DeliveryMode.FAITHFUL,
-        contract=DeliveryContract.FAITHFUL,
-        feasible=True,
-        # Legacy compatibility is not the new eligibility proof. Mark it
-        # provisional so a report cannot mistake the grandfather clause for a
-        # measured page-lock guarantee.
-        eligibility=FaithfulEligibility(
-            eligible=True,
-            provisional=True,
-            reasons=("legacy mode compatibility; eligibility not re-evaluated in Phase 0",),
-        ),
-        default_page_strategy=PageStrategy.CANVAS,
-        degrade_policy=policy,
-        reasons=(f"legacy mode {legacy_mode!r} preserved",),
-        signals=signals,
-    )
-    return DeliveryDecision(plan=plan, effective_mode=legacy_mode, legacy=True)
 
 
 #: Artifact contracts each PDF engine can honour. ``native`` patches the source

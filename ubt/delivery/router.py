@@ -252,7 +252,6 @@ def _faithful_plan(
         eligibility=eligibility,
         default_page_strategy=PageStrategy.CANVAS,
         degrade_policy=policy,
-        companion_reflow=True,
         reasons=reasons,
         signals=signals,
     )

@@ -61,14 +61,12 @@ class DoclingRenderStrategy:
         font_family: str | None = None,
         enable_layout_auto_heal: bool = True,
         layout_auto_heal_max_passes: int = 2,
-        delivery_mode: str = "reflow",
         enable_pdf_optimization: bool = True,
         pdf_optimize_profile: str = "lossless",
     ) -> None:
         self.font_family = font_family
         self.enable_layout_auto_heal = enable_layout_auto_heal
         self.layout_auto_heal_max_passes = layout_auto_heal_max_passes
-        self.delivery_mode = delivery_mode
         self.enable_pdf_optimization = enable_pdf_optimization
         self.pdf_optimize_profile = pdf_optimize_profile
         self.allow_landscape_tables: bool | None = None
@@ -260,12 +258,6 @@ class DoclingRenderStrategy:
         )
 
         if is_pdf_target:
-            if self.delivery_mode in ("facsimile", "page_locked"):
-                logger.info(
-                    "Docling delivery_mode=%r uses Typst reflow (born-digital 1:1 in-place "
-                    "PDF delivery is handled by NativePDFCodec).",
-                    self.delivery_mode,
-                )
             publish_bilingual = active_mode != "monolingual"
             return await self._render_publish(
                 manifest, list(blocks), target_lang, out_path, publish_bilingual

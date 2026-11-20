@@ -1191,14 +1191,13 @@ class PipelineOrchestrator:
         # no per-field branch is added here when a config field grows.
         apply_runtime_config(
             adapter,
-            adapter_runtime_config(self.config, delivery_mode=effective_mode),
+            adapter_runtime_config(self.config),
         )
 
         manifest = await adapter.extract_manifest(input_path)
         manifest.metadata["delivery_plan"] = delivery.plan.to_manifest()
         manifest.metadata["delivery_mode_requested"] = self.config.delivery_mode
         manifest.metadata["delivery_mode_effective"] = effective_mode
-        manifest.metadata["delivery_mode_legacy"] = delivery.legacy
         if source_lang:
             manifest.source_lang = source_lang
         else:

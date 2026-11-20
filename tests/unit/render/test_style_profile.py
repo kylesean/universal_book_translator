@@ -165,7 +165,7 @@ async def test_docling_render_manifest_metadata_style_profile(
     import ubt.adapters.pdf.typst_compile as tc
 
     monkeypatch.setattr(tc, "typst_compile", lambda *_a, **_kw: (True, ""))
-    strategy = DoclingRenderStrategy(delivery_mode="reflow")
+    strategy = DoclingRenderStrategy()
 
     blocks = [
         IRBlock(

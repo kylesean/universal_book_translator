@@ -354,7 +354,7 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
 
         if pdf_engine_used == "native" or (
             resolved_source.suffix.lower() == ".pdf"
-            and deliv_mode not in {"reflow", "readable"}
+            and deliv_mode != "readable"
             and app_config.pdf_engine in {"auto", "native"}
         ):
             try:

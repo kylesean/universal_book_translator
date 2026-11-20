@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 import pytest
 
 from ubt.delivery.contracts import (
@@ -13,7 +11,6 @@ from ubt.delivery.contracts import (
 )
 from ubt.delivery.planning import (
     DeliveryDecision,
-    _warn_legacy_mode,
     build_delivery_signals,
     document_class_from_mode,
     engine_supports_contract,
@@ -65,7 +62,7 @@ def test_non_pdf_is_never_page_lock_feasible() -> None:
 
 def test_clean_pdf_faithful_is_provisional_but_feasible() -> None:
     decision = _plan("faithful")
-    assert decision.effective_mode == "facsimile"
+    assert decision.effective_mode == "faithful"
     assert decision.plan.contract is DeliveryContract.FAITHFUL
     assert decision.plan.feasible
     assert decision.plan.eligibility.provisional is True
@@ -97,14 +94,14 @@ def test_non_pdf_new_faithful_is_infeasible() -> None:
 
 def test_new_faithful_degrades_to_readable_with_allow_degrade() -> None:
     decision = _plan("faithful", has_scan=True, allow_degrade=True)
-    assert decision.effective_mode == "reflow"
+    assert decision.effective_mode == "readable"
     assert decision.plan.contract is DeliveryContract.READABLE
     assert decision.plan.degrade_policy is DegradePolicy.ALLOW_DEGRADE
 
 
 def test_auto_paper_routes_to_readable() -> None:
     decision = _plan("auto", document_mode="paper")
-    assert decision.effective_mode == "reflow"
+    assert decision.effective_mode == "readable"
     assert decision.plan.contract is DeliveryContract.READABLE
     assert decision.plan.default_page_strategy is PageStrategy.DOCUMENT_REFLOW
 
@@ -116,7 +113,7 @@ def test_auto_structured_paper_upgrades_to_faithful() -> None:
         multicolumn_page_share=0.8,
         formula_heavy=True,
     )
-    assert decision.effective_mode == "facsimile"
+    assert decision.effective_mode == "faithful"
     assert decision.plan.contract is DeliveryContract.FAITHFUL
     assert decision.plan.degrade_policy is DegradePolicy.ALLOW_DEGRADE
     assert decision.plan.default_page_strategy is PageStrategy.CANVAS
@@ -124,42 +121,19 @@ def test_auto_structured_paper_upgrades_to_faithful() -> None:
 
 def test_auto_book_routes_to_readable() -> None:
     decision = _plan("auto", document_mode="book")
-    assert decision.effective_mode == "reflow"
+    assert decision.effective_mode == "readable"
     assert decision.plan.contract is DeliveryContract.READABLE
 
 
 def test_auto_non_pdf_routes_to_readable() -> None:
     decision = _plan("auto", is_pdf=False, document_mode="book")
-    assert decision.effective_mode == "reflow"
+    assert decision.effective_mode == "readable"
     assert decision.plan.contract is DeliveryContract.READABLE
 
 
 def test_explicit_readable_always_maps_to_reflow() -> None:
     decision = _plan("readable", document_mode="book")
-    assert decision.effective_mode == "reflow"
-    assert decision.plan.contract is DeliveryContract.READABLE
-
-
-def test_legacy_facsimile_is_grandfathered_on_a_scanned_source() -> None:
-    decision = _plan("facsimile", has_scan=True)
-    assert decision.legacy is True
-    assert decision.effective_mode == "facsimile"
-    assert decision.plan.feasible is True
-    assert decision.plan.contract is DeliveryContract.FAITHFUL
-    assert decision.plan.eligibility.provisional is True
-
-
-def test_legacy_page_locked_keeps_its_renderer() -> None:
-    decision = _plan("page_locked")
-    assert decision.legacy is True
-    assert decision.effective_mode == "page_locked"
-    assert decision.plan.contract is DeliveryContract.FAITHFUL
-
-
-def test_legacy_reflow_keeps_its_renderer() -> None:
-    decision = _plan("reflow")
-    assert decision.legacy is True
-    assert decision.effective_mode == "reflow"
+    assert decision.effective_mode == "readable"
     assert decision.plan.contract is DeliveryContract.READABLE
 
 
@@ -177,26 +151,6 @@ def test_high_complexity_does_not_veto_a_clean_native_faithful() -> None:
 def test_unknown_delivery_mode_raises() -> None:
     with pytest.raises(ValueError, match="unknown delivery mode"):
         _plan("mystery")
-
-
-def test_legacy_mode_emits_one_deprecation_warning(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    _warn_legacy_mode.cache_clear()
-    with caplog.at_level(logging.WARNING, logger="ubt.delivery.planning"):
-        _plan("facsimile")
-        _plan("facsimile")
-    assert caplog.text.count("legacy compatibility value") == 1
-    assert "2027-03-31" in caplog.text
-
-
-def test_target_mode_does_not_emit_legacy_warning(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    _warn_legacy_mode.cache_clear()
-    with caplog.at_level(logging.WARNING, logger="ubt.delivery.planning"):
-        _plan("auto")
-    assert "legacy compatibility value" not in caplog.text
 
 
 def test_auto_engine_follows_the_delivery_contract() -> None:

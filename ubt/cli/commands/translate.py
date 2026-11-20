@@ -328,36 +328,9 @@ def _report_degrades_bilingual_delivery(report_data: dict[str, Any]) -> bool:
     )
 
 
-def _resolve_delivery_mode(
-    *,
-    facsimile: bool | None,
-    page_locked: bool,
-    delivery_mode: str | None,
-) -> str | None:
-    """Turn the three delivery flags into one ``delivery_mode`` value.
-
-    ``None`` is returned when the user expressed no preference, which lets the
-    resolved config default decide — now ``auto``. The ``--facsimile`` flag
-    used to default to ``False`` and be read as "not requested", so the CLI
-    pinned ``reflow`` for every run that did not pass it and the config field was
-    unreachable from the command line.
-
-    Precedence, most explicit first:
-    ``--delivery-mode <value>`` > ``--page-locked`` > ``--facsimile/--no-facsimile``
-    > unset (config default). ``--no-facsimile`` means "reflow" and is how a user
-    opts out of the old facsimile default. New values ``auto``/``readable``/
-    ``faithful`` pass through unchanged; the pipeline resolves them through the
-    delivery router.
-    """
-    if delivery_mode:
-        return delivery_mode
-    if page_locked:
-        return "page_locked"
-    if facsimile is True:
-        return "facsimile"
-    if facsimile is False:
-        return "reflow"
-    return None
+def _resolve_delivery_mode(*, delivery_mode: str | None) -> str | None:
+    """The explicit ``--delivery-mode`` value, or ``None`` for the config default."""
+    return delivery_mode or None
 
 
 def _find_companion_paths(
@@ -655,34 +628,6 @@ def translate(
             show_default=False,
         ),
     ] = None,
-    companion_reflow: Annotated[
-        bool | None,
-        typer.Option(
-            "--companion-reflow/--no-companion-reflow",
-            help=(
-                "Also write a reflow (L3) reading copy beside the delivery: the same "
-                "translation re-typeset on the source's own trim, no background, "
-                "selectable text, at no extra model cost. Recorded as skipped (not an "
-                "error) when the primary delivery is already reflow"
-            ),
-            show_default=False,
-        ),
-    ] = None,
-    facsimile: Annotated[
-        bool | None,
-        typer.Option(
-            "--facsimile/--no-facsimile",
-            help="Legacy 1:1 facsimile delivery channel (in-place canvas isomorphism over the stripped vector background). The default is auto/readable for paper and book profiles; --facsimile forces the legacy faithful renderer",
-            show_default=False,
-        ),
-    ] = None,
-    page_locked: Annotated[
-        bool,
-        typer.Option(
-            "--page-locked/--no-page-locked",
-            help="Enable Tier L2 1:1 page-locked style-cloned reflow delivery channel (1:1 page-count conservation with cloned geometry)",
-        ),
-    ] = False,
     delivery_mode: Annotated[
         str | None,
         typer.Option(
@@ -690,8 +635,7 @@ def translate(
             "--delivery",
             help=(
                 "PDF delivery mode: 'auto' routes by measured feasibility, "
-                "'readable' reflows, 'faithful' keeps source page geometry; "
-                "legacy 'reflow', 'facsimile' and 'page_locked' remain accepted"
+                "'readable' reflows, 'faithful' keeps source page geometry"
             ),
             show_default=False,
         ),
@@ -701,9 +645,8 @@ def translate(
         typer.Option(
             "--allow-degrade/--no-allow-degrade",
             help=(
-                "When a new 'faithful' request is not eligible, re-route the whole "
-                "book to readable instead of refusing the run. Legacy facsimile/"
-                "page_locked modes are grandfathered by compatibility"
+                "When a 'faithful' request is not eligible, re-route the whole "
+                "book to readable instead of refusing the run"
             ),
             show_default=False,
         ),
@@ -874,9 +817,7 @@ def translate(
         "macro_chunk_size": macro_chunk_size,
         "chapter_streaming_enabled": chapter_streaming,
         "dual_mode": dual_mode,
-        "delivery_mode": _resolve_delivery_mode(
-            facsimile=facsimile, page_locked=page_locked, delivery_mode=delivery_mode
-        ),
+        "delivery_mode": _resolve_delivery_mode(delivery_mode=delivery_mode),
         "allow_degrade": allow_degrade,
         "allow_major": allow_major,
         "export_allow_needs_human": allow_needs_human,
@@ -887,7 +828,6 @@ def translate(
         "preset": preset,
         "pdf_engine": pdf_engine,
         "emit_both": emit_both,
-        "companion_reflow": companion_reflow,
         "fresh": fresh,
         "ocr_mode": ocr,
         "ocr_endpoint": ocr_endpoint,

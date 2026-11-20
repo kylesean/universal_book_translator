@@ -101,10 +101,6 @@ class AdapterRuntimeConfig:
     #: Enable adaptive layout auto-healing pass during Typst publication render.
     enable_layout_auto_heal: bool = True
     layout_auto_heal_max_passes: int = 2
-    #: PDF delivery channel. The pipeline passes the effective router decision;
-    #: this dataclass default is the adapter's legacy fallback for direct callers
-    #: that do not run the delivery preflight.
-    delivery_mode: str = "facsimile"
     #: Enable PDF size miniaturization and lossless stream compression.
     enable_pdf_optimization: bool = True
     pdf_optimize_profile: str = "lossless"
@@ -112,14 +108,11 @@ class AdapterRuntimeConfig:
     allow_landscape_tables: bool | None = None
 
 
-def adapter_runtime_config(config: Any, *, delivery_mode: str) -> AdapterRuntimeConfig:
+def adapter_runtime_config(config: Any) -> AdapterRuntimeConfig:
     """Build the adapter runtime config from the engine config.
 
     One factory because there are two callers that must agree: the live pipeline
-    at run start, and the re-export that re-renders from a ledger. Before this
-    existed, a re-export never applied the runtime config at all and the adapter
-    kept its constructor fallback (``facsimile``), so a ``readable`` replay
-    silently rendered page-locked and reported the wrong contract.
+    at run start and the re-export that re-renders from a ledger.
     """
     return AdapterRuntimeConfig(
         ocr_mode=config.ocr_mode,
@@ -137,7 +130,6 @@ def adapter_runtime_config(config: Any, *, delivery_mode: str) -> AdapterRuntime
         docling_isolate_process=config.docling_isolate_process,
         enable_layout_auto_heal=config.enable_layout_auto_heal,
         layout_auto_heal_max_passes=config.layout_auto_heal_max_passes,
-        delivery_mode=delivery_mode,
         enable_pdf_optimization=config.enable_pdf_optimization,
         pdf_optimize_profile=config.pdf_optimize_profile,
         allow_landscape_tables=getattr(config, "allow_landscape_tables", None),

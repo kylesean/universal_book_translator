@@ -49,7 +49,6 @@ _ARTIFACT_METADATA_KEYS = frozenset(
         "delivery_plan",
         "delivery_mode_requested",
         "delivery_mode_effective",
-        "delivery_mode_legacy",
         "document_mode",
         "has_scan",
         "page_count",

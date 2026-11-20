@@ -625,7 +625,6 @@ async def ubt_translate_book(
     visual_judge_model: str | None = None,
     translate_chrome: bool | None = None,
     emit_both: bool | None = None,
-    companion_reflow: bool | None = None,
     ocr_mode: str | None = None,
     domain: str | None = None,
     dry_run: bool = False,
@@ -671,7 +670,6 @@ async def ubt_translate_book(
         "visual_judge_model": visual_judge_model,
         "translate_chrome": translate_chrome,
         "emit_both": emit_both,
-        "companion_reflow": companion_reflow,
         "ocr_mode": ocr_mode,
         "domain": domain,
     }

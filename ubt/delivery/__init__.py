@@ -3,8 +3,7 @@
 This package carries the adaptive-delivery vocabulary: the request/response
 contract, the pure-function router and the structure-census planner.
 ``plan_for_document`` is wired into the pipeline preflight (CLI, API and MCP
-requests all funnel through it), with legacy modes mapped through
-:func:`ubt.delivery.contracts.legacy_delivery_contract`.
+requests all funnel through it).
 
 The artifact-side verdict lives in ``ubt.core.engine.delivery_contract`` and the
 PDF evidence reader in ``ubt.adapters.pdf.delivery_evidence``; this package does
@@ -25,7 +24,6 @@ from ubt.delivery.contracts import (
     LayoutComplexity,
     PageKind,
     PageStrategy,
-    legacy_delivery_contract,
 )
 from ubt.delivery.errors import DeliveryInfeasibleError
 from ubt.delivery.planning import (
@@ -56,7 +54,6 @@ __all__ = [
     "document_class_from_mode",
     "engine_supports_contract",
     "evaluate_faithful_eligibility",
-    "legacy_delivery_contract",
     "plan_for_document",
     "resolve_pdf_engine",
     "route_delivery",
