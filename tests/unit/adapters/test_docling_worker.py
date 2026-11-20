@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+from ubt.adapters.pdf.docling_adapter import ScanPDFAdapter
 from ubt.adapters.pdf.docling_parser import (
     cleanup_in_process_docling_converter,
     extract_with_docling,
@@ -166,7 +166,7 @@ def test_extract_with_docling_worker_fallback(tmp_path: Path) -> None:
 
 
 def test_docling_adapter_lifecycle_and_teardown() -> None:
-    adapter = DoclingPDFAdapter()
+    adapter = ScanPDFAdapter()
     assert adapter.docling_isolate_process is True
 
     runtime_config = AdapterRuntimeConfig(

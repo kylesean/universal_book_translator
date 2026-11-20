@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+from ubt.adapters.pdf.docling_adapter import ScanPDFAdapter
 from ubt.core.config import UBTConfig
 from ubt.core.engine.adapter_runtime import AdapterRuntimeConfig
 
@@ -38,7 +38,7 @@ def test_docling_device_rejects_unknown_value() -> None:
 
 
 def test_runtime_config_carries_device_to_adapter() -> None:
-    adapter = DoclingPDFAdapter()
+    adapter = ScanPDFAdapter()
     runtime = AdapterRuntimeConfig(
         ocr_mode="auto",
         ocr_endpoint=None,
@@ -64,7 +64,7 @@ def test_device_reaches_extract_with_docling() -> None:
         captured.update(kwargs)
         raise RuntimeError("stop before the real Docling conversion")
 
-    adapter = DoclingPDFAdapter()
+    adapter = ScanPDFAdapter()
     adapter.docling_device = "cpu"
     with (
         patch.object(da, "extract_with_docling", spy),

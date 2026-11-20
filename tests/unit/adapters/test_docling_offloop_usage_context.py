@@ -19,10 +19,10 @@ pytestmark = pytest.mark.fast
 
 
 def test_extraction_thread_inherits_the_usage_sink(monkeypatch: pytest.MonkeyPatch) -> None:
-    from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+    from ubt.adapters.pdf.docling_adapter import ScanPDFAdapter
     from ubt.core.router.transports.base import _usage_sink, attach_usage_sink
 
-    adapter = DoclingPDFAdapter()
+    adapter = ScanPDFAdapter()
     seen: dict[str, Any] = {}
 
     def _fake_extract(path: Path, page_range: tuple[int, int] | None = None) -> list[Any]:
@@ -43,10 +43,10 @@ def test_without_a_sink_the_hop_still_returns_the_blocks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Runs that never attach a sink (dry-run, scripts) must be unaffected."""
-    from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+    from ubt.adapters.pdf.docling_adapter import ScanPDFAdapter
     from ubt.core.router.transports.base import _usage_sink
 
-    adapter = DoclingPDFAdapter()
+    adapter = ScanPDFAdapter()
     marker = object()
 
     def _fake_extract(path: Path, page_range: tuple[int, int] | None = None) -> list[Any]:

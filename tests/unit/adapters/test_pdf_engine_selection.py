@@ -47,7 +47,7 @@ def test_auto_routing_sends_born_digital_to_native_and_scanned_to_docling(tmp_pa
     import importlib.util
 
     from ubt.adapters import get_adapter_for_path
-    from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+    from ubt.adapters.pdf.docling_adapter import ScanPDFAdapter
     from ubt.adapters.pdf.native_adapter import NativePDFAdapter
 
     pages = [
@@ -62,27 +62,27 @@ def test_auto_routing_sends_born_digital_to_native_and_scanned_to_docling(tmp_pa
 
     if importlib.util.find_spec("docling") is not None:
         scan = write_text_pdf(tmp_path / "scan.pdf", [[] for _ in range(10)])
-        assert isinstance(get_adapter_for_path(scan, pdf_engine="auto"), DoclingPDFAdapter)
+        assert isinstance(get_adapter_for_path(scan, pdf_engine="auto"), ScanPDFAdapter)
 
 
 def test_pdfium_default_escapes_a_scanned_pdf_to_docling(tmp_path: Path) -> None:
     import importlib.util
 
     from ubt.adapters import get_adapter_for_path
-    from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+    from ubt.adapters.pdf.docling_adapter import ScanPDFAdapter
 
     if importlib.util.find_spec("docling") is None:
         pytest.skip("docling is not installed; the refusal path is pinned separately")
 
     pdf = write_text_pdf(tmp_path / "scan.pdf", [[] for _ in range(10)])
-    assert isinstance(get_adapter_for_path(pdf, pdf_engine="pdfium"), DoclingPDFAdapter)
+    assert isinstance(get_adapter_for_path(pdf, pdf_engine="pdfium"), ScanPDFAdapter)
 
 
 def test_explicit_docling_beats_everything(tmp_path: Path) -> None:
     import importlib.util
 
     from ubt.adapters import get_adapter_for_path
-    from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+    from ubt.adapters.pdf.docling_adapter import ScanPDFAdapter
     from ubt.core.exceptions import OptionalDependencyError
 
     pdf = write_text_pdf(tmp_path / "prose.pdf", _prose_pages(6))
@@ -90,7 +90,7 @@ def test_explicit_docling_beats_everything(tmp_path: Path) -> None:
         with pytest.raises(OptionalDependencyError, match="docling"):
             get_adapter_for_path(pdf, pdf_engine="docling")
         return
-    assert isinstance(get_adapter_for_path(pdf, pdf_engine="docling"), DoclingPDFAdapter)
+    assert isinstance(get_adapter_for_path(pdf, pdf_engine="docling"), ScanPDFAdapter)
 
 
 def test_docling_without_package_is_refused_not_degraded(tmp_path: Path) -> None:

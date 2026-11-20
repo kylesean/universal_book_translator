@@ -12,14 +12,14 @@ from ubt.adapters.factory import (
 )
 from ubt.adapters.html.adapter import HTMLAdapter
 from ubt.adapters.markdown.adapter import MarkdownAdapter
-from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+from ubt.adapters.pdf.docling_adapter import ScanPDFAdapter
 from ubt.adapters.pdf.pdfium_adapter import PDFiumAdapter
 
 __all__ = [
     "BaseDocumentAdapter",
     "BasePDFEngineAdapter",
     "DOCXAdapter",
-    "DoclingPDFAdapter",
+    "ScanPDFAdapter",
     "EPUBAdapter",
     "HTMLAdapter",
     "MarkdownAdapter",

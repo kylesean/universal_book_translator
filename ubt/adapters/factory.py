@@ -11,7 +11,7 @@ from ubt.adapters.docx.adapter import DOCXAdapter
 from ubt.adapters.epub.adapter import EPUBAdapter
 from ubt.adapters.html.adapter import HTMLAdapter
 from ubt.adapters.markdown.adapter import MarkdownAdapter
-from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+from ubt.adapters.pdf.docling_adapter import ScanPDFAdapter
 from ubt.adapters.pdf.encryption import reject_encrypted_pdf
 from ubt.adapters.pdf.native_adapter import NativePDFAdapter
 from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile
@@ -152,7 +152,7 @@ def _resolve_pdf_adapter(pdf_engine: str, path: Path | None = None) -> BasePDFEn
 # name; pass ``docling`` (or ``auto``) rather than an alias.
 _PDF_ENGINE_REGISTRY.update(
     {
-        "docling": DoclingPDFAdapter,
+        "docling": ScanPDFAdapter,
         "native": NativePDFAdapter,
         "pdfium": PDFiumAdapter,
     }

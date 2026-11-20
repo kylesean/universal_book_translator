@@ -1,7 +1,10 @@
-"""IBM Docling + Typst modern PDF adapter.
+"""Scanned-PDF adapter: Docling OCR/VLM ingest + Typst reflow.
 
-Permissively licensed PDF translation and reconstruction pipeline.
-The adapter orchestrates three extracted modules:
+This adapter is the scan/reflow path. Born-digital PDFs are handled by
+``NativePDFAdapter``; a scan has no trustworthy text layer, so Docling (with
+the VLM fallback) supplies the text and Typst rebuilds the page.
+
+It orchestrates three extracted modules:
 
 - :mod:`ubt.adapters.pdf.docling_parser` — PDF → IRBlocks (Docling, pdf_oxide
   fallback, textless-page VLM tiering, page-kind profiling);
@@ -313,7 +316,7 @@ class _PDFRenderStackMixin:
             self._evict_after_chunk(blocks, chapter_ir)
 
 
-class DoclingPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
+class ScanPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
     """PDF engine adapter: IBM Docling semantic ingestion with Typst/oxide delivery."""
 
     #: Content-addressed analyze cache (content-addressed cache layer), set in apply_config.

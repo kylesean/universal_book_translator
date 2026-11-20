@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import pytest
 
-from ubt.adapters.pdf.docling_adapter import DoclingPDFAdapter
+from ubt.adapters.pdf.docling_adapter import ScanPDFAdapter
 from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
 from ubt.core.content.nodes import ReconstructionRecord
 from ubt.core.engine.adapter_runtime import get_last_render_reconstructions
@@ -37,7 +37,7 @@ def _stub_manifest() -> BookManifest:
 
 
 def test_the_adapter_carries_reconstruction_verdicts(monkeypatch: pytest.MonkeyPatch) -> None:
-    adapter = DoclingPDFAdapter.__new__(DoclingPDFAdapter)
+    adapter = ScanPDFAdapter.__new__(ScanPDFAdapter)
     adapter._renderer = cast("DoclingRenderStrategy", _FakeRenderer())
 
     import asyncio
@@ -61,7 +61,7 @@ def test_the_adapter_carries_reconstruction_verdicts(monkeypatch: pytest.MonkeyP
 def test_a_second_render_does_not_report_the_first_verdicts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    adapter = DoclingPDFAdapter.__new__(DoclingPDFAdapter)
+    adapter = ScanPDFAdapter.__new__(ScanPDFAdapter)
     renderer = _FakeRenderer()
     adapter._renderer = cast("DoclingRenderStrategy", renderer)
     import asyncio
