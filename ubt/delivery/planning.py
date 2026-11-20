@@ -279,3 +279,58 @@ def _legacy_decision(
         signals=signals,
     )
     return DeliveryDecision(plan=plan, effective_mode=legacy_mode, legacy=True)
+
+
+#: Artifact contracts each PDF engine can honour. ``native`` patches the source
+#: content stream in place, so it satisfies both promises: ``readable`` only
+#: requires delivered, selectable text, while ``faithful`` additionally holds
+#: the page grid. The Typst reflow engines rebuild the document and therefore
+#: cannot promise page identity.
+_ENGINE_CONTRACTS: dict[str, frozenset[DeliveryContract]] = {
+    "native": frozenset({DeliveryContract.READABLE, DeliveryContract.FAITHFUL}),
+    "docling": frozenset({DeliveryContract.READABLE}),
+    "pdfium": frozenset({DeliveryContract.READABLE}),
+}
+
+
+def resolve_pdf_engine(
+    configured: str,
+    *,
+    is_pdf: bool,
+    contract: DeliveryContract | None,
+) -> str:
+    """The engine that can honour ``contract`` for an ``auto`` request.
+
+    The delivery plan owns the promise; the engine follows it. ``auto`` used to
+    resolve to ``native`` for every born-digital PDF in the factory, which made
+    the plan's ``readable`` contract and the artifact's in-place delivery
+    disagree (and the artifact audit then had to guess). Resolving here keeps
+    one source of truth:
+
+    - ``faithful`` -> ``native`` (1:1 in-place content-stream patch);
+    - ``readable`` (or no plan yet) -> ``docling`` (Typst reflow / OCR path);
+    - non-PDF or an explicit engine -> unchanged.
+    """
+    engine = (configured or "auto").strip().lower()
+    if not is_pdf or engine != "auto":
+        return engine
+    if contract is DeliveryContract.READABLE:
+        return "docling"
+    return "native"
+
+
+def engine_supports_contract(engine: str, contract: DeliveryContract | None) -> bool:
+    """Whether ``engine`` can keep the artifact promise in ``contract``.
+
+    An unknown engine is not vetoed here: ``custom_adapter`` and downstream
+    extensions own their own capabilities. The three built-in PDF engines are
+    pinned so an explicit ``--pdf-engine docling --delivery faithful`` fails
+    before a single model call instead of silently rendering a different
+    contract.
+    """
+    if contract is None:
+        return True
+    supported = _ENGINE_CONTRACTS.get((engine or "").strip().lower())
+    if supported is None:
+        return True
+    return contract in supported

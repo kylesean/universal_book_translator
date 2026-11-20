@@ -1544,18 +1544,29 @@ def _delivery_contract_evidence(
     )
 
     mode = str(getattr(getattr(ctx.config, "typst", None), "delivery_mode", "") or "")
-    actual_mode = str((getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_mode", "") or "")
+    metadata = getattr(ctx.manifest, "metadata", {}) or {}
+    actual_mode = str(metadata.get("delivery_mode", "") or "")
+    plan_meta = metadata.get("delivery_plan")
+    plan_contract = (
+        str(plan_meta.get("contract") or "")
+        if isinstance(plan_meta, dict) and plan_meta.get("contract") in ("readable", "faithful")
+        else ""
+    )
     is_native = getattr(adapter, "engine_name", None) == "native"
     if is_native:
-        contract = "readable" if actual_mode == "reflow" else "faithful"
+        # The native codec patches the source page in place. It can honestly
+        # satisfy either promise, so audit the contract the plan asked for --
+        # not an assumed faithful one. A readable plan on a native run used to
+        # be audited as faithful, which turned page-movement and style checks
+        # that readable never promised into false criticals.
+        contract = plan_contract or ("readable" if actual_mode == "reflow" else "faithful")
     elif actual_mode in ("reflow", "facsimile", "page_locked"):
         # The renderer records what it actually shipped; a facsimile run that
         # degraded to reflow must be QA'd as readable, not as faithful.
         contract = legacy_delivery_contract(actual_mode).value
     else:
-        plan = (getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_plan")
-        if isinstance(plan, dict) and str(plan.get("contract", "")) in ("readable", "faithful"):
-            contract = str(plan["contract"])
+        if plan_contract:
+            contract = plan_contract
         elif mode in ("facsimile", "page_locked"):
             contract = "faithful"
         else:

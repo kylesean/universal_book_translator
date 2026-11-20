@@ -16,7 +16,9 @@ from ubt.delivery.planning import (
     _warn_legacy_mode,
     build_delivery_signals,
     document_class_from_mode,
+    engine_supports_contract,
     plan_for_document,
+    resolve_pdf_engine,
 )
 
 pytestmark = pytest.mark.fast
@@ -195,3 +197,26 @@ def test_target_mode_does_not_emit_legacy_warning(
     with caplog.at_level(logging.WARNING, logger="ubt.delivery.planning"):
         _plan("auto")
     assert "legacy compatibility value" not in caplog.text
+
+
+def test_auto_engine_follows_the_delivery_contract() -> None:
+    """The plan owns the promise; ``auto`` picks an engine that can keep it.
+
+    A readable plan must not be handed to the in-place codec (which would make
+    the artifact faithful while the plan says readable), and a faithful plan
+    must not be handed to Typst reflow (which cannot promise page identity).
+    """
+    assert resolve_pdf_engine("auto", is_pdf=True, contract=DeliveryContract.FAITHFUL) == "native"
+    assert resolve_pdf_engine("auto", is_pdf=True, contract=DeliveryContract.READABLE) == "docling"
+    assert resolve_pdf_engine("auto", is_pdf=False, contract=DeliveryContract.READABLE) == "auto"
+    assert (
+        resolve_pdf_engine("docling", is_pdf=True, contract=DeliveryContract.READABLE) == "docling"
+    )
+
+
+def test_engine_capability_pins_contracts() -> None:
+    assert engine_supports_contract("native", DeliveryContract.READABLE)
+    assert engine_supports_contract("native", DeliveryContract.FAITHFUL)
+    assert engine_supports_contract("docling", DeliveryContract.READABLE)
+    assert not engine_supports_contract("docling", DeliveryContract.FAITHFUL)
+    assert engine_supports_contract("docling", None)

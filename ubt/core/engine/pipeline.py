@@ -69,7 +69,13 @@ from ubt.core.qe.fast_pass import FastPassFilter
 from ubt.core.qe.heuristic import HeuristicQERunner
 from ubt.core.router.pricing import price_is_known
 from ubt.core.router.provider import create_model_provider, reset_usage_sink
-from ubt.delivery import DeliveryDecision, DeliveryInfeasibleError, plan_for_document
+from ubt.delivery import (
+    DeliveryDecision,
+    DeliveryInfeasibleError,
+    engine_supports_contract,
+    plan_for_document,
+    resolve_pdf_engine,
+)
 
 if TYPE_CHECKING:
     from ubt.adapters.pdf.page_lock_measure import PageLockMeasurement
@@ -1091,9 +1097,31 @@ class PipelineOrchestrator:
                 "Set UBT_QE_JUDGE_ENABLED=true to enable TieredQERunner."
             )
 
-        adapter = self.custom_adapter or resolve_adapter(
-            input_path, pdf_engine=self.config.pdf_engine
+        # The delivery contract decides which engine runs. Resolving it before
+        # the adapter is what keeps an ``auto`` request honest: the plan says
+        # ``readable`` or ``faithful``, and the engine is chosen to keep that
+        # promise instead of the factory silently forcing ``native`` for every
+        # born-digital PDF (which made the plan and the artifact disagree).
+        delivery = resolve_delivery_for_input(self.config, input_path)
+        if delivery.effective_mode is None:
+            reasons = "; ".join(delivery.plan.reasons) or "no eligible contract"
+            raise DeliveryInfeasibleError(
+                f"Delivery request {self.config.delivery_mode!r} is not feasible for "
+                f"{input_path.name}: {reasons}. Use --delivery readable or --allow-degrade."
+            )
+        engine = resolve_pdf_engine(
+            self.config.pdf_engine,
+            is_pdf=input_path.suffix.lower() == ".pdf",
+            contract=delivery.plan.contract,
         )
+        if not engine_supports_contract(engine, delivery.plan.contract):
+            raise DeliveryInfeasibleError(
+                f"PDF engine {engine!r} cannot honour the "
+                f"{delivery.plan.contract.value if delivery.plan.contract else 'requested'} "
+                f"contract for {input_path.name}. Use --pdf-engine auto (native for "
+                "faithful, docling for readable) or request a readable delivery."
+            )
+        adapter = self.custom_adapter or resolve_adapter(input_path, pdf_engine=engine)
         # Everything below can refuse the run (a contradicting ``--output``
         # suffix, a manifest that cannot be read), and an adapter may own
         # subprocesses. ``run()``'s ``finally`` cannot close it because it never
@@ -1102,6 +1130,7 @@ class PipelineOrchestrator:
         try:
             return await self._prepare_run_with_adapter(
                 adapter,
+                delivery=delivery,
                 input_path=input_path,
                 output_path=output_path,
                 target_lang=target_lang,
@@ -1121,6 +1150,7 @@ class PipelineOrchestrator:
         self,
         adapter: DocumentAdapter,
         *,
+        delivery: DeliveryDecision,
         input_path: Path,
         output_path: Path | None,
         target_lang: str,
@@ -1132,6 +1162,9 @@ class PipelineOrchestrator:
         run_session: _RunBillingSession,
     ) -> _RunPreparation:
         """The rest of ``_prepare_run`` once the adapter exists (see the caller)."""
+        effective_mode = delivery.effective_mode
+        if effective_mode is None:  # the caller refuses this before building an adapter
+            raise DeliveryInfeasibleError("delivery decision has no effective mode")
         # The adapter decides the artifact format, so a contradicting ``--output``
         # is refused here -- before a single token is spent. A Markdown adapter
         # must never write Markdown into ``book.pdf`` and still report success.
@@ -1148,29 +1181,19 @@ class PipelineOrchestrator:
                     f"{out_suffix.lstrip('.')}. Drop --output (the default keeps the "
                     f"input format) or choose one of {wanted}."
                 )
-        # Resolve the delivery contract before any model call. An infeasible new
-        # ``faithful`` request fails here, not after spending the book.
-        delivery = resolve_delivery_for_input(self.config, input_path)
-        if delivery.effective_mode is None:
-            reasons = "; ".join(delivery.plan.reasons) or "no eligible contract"
-            raise DeliveryInfeasibleError(
-                f"Delivery request {self.config.delivery_mode!r} is not feasible for "
-                f"{input_path.name}: {reasons}. Use --delivery readable or --allow-degrade."
-            )
-
         # Hand the engine-level runtime knobs to the adapter through its SPI
         # hook: the pipeline resolves the config once and the adapter that owns
         # each field (the Docling PDF family) applies the subset it consumes, so
         # no per-field branch is added here when a config field grows.
         apply_runtime_config(
             adapter,
-            adapter_runtime_config(self.config, delivery_mode=delivery.effective_mode),
+            adapter_runtime_config(self.config, delivery_mode=effective_mode),
         )
 
         manifest = await adapter.extract_manifest(input_path)
         manifest.metadata["delivery_plan"] = delivery.plan.to_manifest()
         manifest.metadata["delivery_mode_requested"] = self.config.delivery_mode
-        manifest.metadata["delivery_mode_effective"] = delivery.effective_mode
+        manifest.metadata["delivery_mode_effective"] = effective_mode
         manifest.metadata["delivery_mode_legacy"] = delivery.legacy
         if source_lang:
             manifest.source_lang = source_lang

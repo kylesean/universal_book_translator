@@ -32,7 +32,9 @@ from ubt.delivery.planning import (
     DeliveryDecision,
     build_delivery_signals,
     document_class_from_mode,
+    engine_supports_contract,
     plan_for_document,
+    resolve_pdf_engine,
 )
 from ubt.delivery.router import evaluate_faithful_eligibility, route_delivery
 
@@ -52,8 +54,10 @@ __all__ = [
     "PageStrategy",
     "build_delivery_signals",
     "document_class_from_mode",
+    "engine_supports_contract",
     "evaluate_faithful_eligibility",
     "legacy_delivery_contract",
     "plan_for_document",
+    "resolve_pdf_engine",
     "route_delivery",
 ]

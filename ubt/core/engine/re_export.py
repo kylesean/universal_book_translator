@@ -48,6 +48,8 @@ from ubt.core.ir.models import BookManifest
 from ubt.core.ir.render_plan import RenderPlan
 from ubt.core.ports import adapter_runtime_config, apply_runtime_config, resolve_adapter
 from ubt.core.qe.fast_pass import FastPassFilter
+from ubt.delivery import engine_supports_contract, resolve_pdf_engine
+from ubt.delivery.contracts import DeliveryContract
 
 if TYPE_CHECKING:
     from ubt.core.config import UBTConfig
@@ -60,6 +62,36 @@ logger = logging.getLogger(__name__)
 
 class ReExportError(RuntimeError):
     """A job cannot be re-exported (no ledger, no source, no adapter, no output)."""
+
+
+def _contract_from_manifest(manifest: BookManifest) -> DeliveryContract | None:
+    """The artifact promise a ledger recorded, or ``None`` for an old job.
+
+    The delivery plan is the durable record; a ledger that predates it still
+    carries the legacy ``delivery_mode`` (``reflow``/``facsimile``) or the
+    native codec's own mode (``mono``/``interleaved``/``side_by_side``, all
+    in-place). Mapping both here keeps a re-export on the same contract the
+    first run shipped.
+    """
+    plan = (manifest.metadata or {}).get("delivery_plan")
+    if isinstance(plan, dict):
+        raw = str(plan.get("contract") or "")
+        if raw in (DeliveryContract.READABLE, DeliveryContract.FAITHFUL):
+            return DeliveryContract(raw)
+    mode = (
+        str(
+            (manifest.metadata or {}).get("delivery_mode")
+            or (manifest.metadata or {}).get("delivery_mode_effective")
+            or ""
+        )
+        .strip()
+        .lower()
+    )
+    if mode in ("reflow", "readable"):
+        return DeliveryContract.READABLE
+    if mode in ("facsimile", "page_locked", "mono", "interleaved", "side_by_side"):
+        return DeliveryContract.FAITHFUL
+    return None
 
 
 def _render_plan_from_ledger(ledger: SQLiteJobLedger, job_id: str) -> RenderPlan:
@@ -339,7 +371,22 @@ async def re_export_job(
             router = router or built_router
             qe_runner = qe_runner or built_qe
 
-        adapter = resolve_adapter(source_path, pdf_engine=config.pdf_engine)
+        # Re-render under the contract the ledger actually shipped, not
+        # whichever engine the current config happens to name. An old ledger
+        # without a plan still resolves through its recorded render mode.
+        contract = _contract_from_manifest(manifest)
+        engine = resolve_pdf_engine(
+            config.pdf_engine,
+            is_pdf=source_path.suffix.lower() == ".pdf",
+            contract=contract,
+        )
+        if not engine_supports_contract(engine, contract):
+            raise ReExportError(
+                f"PDF engine {engine!r} cannot re-render job {job_id} under its "
+                f"{contract.value if contract else 'recorded'} contract; "
+                "use --pdf-engine auto or request a readable delivery."
+            )
+        adapter = resolve_adapter(source_path, pdf_engine=engine)
         # The adapter decides the artifact format, the same rule a first run
         # enforces before spending anything: a contradicting output suffix must
         # be refused before the render, not after a broken file is written (a

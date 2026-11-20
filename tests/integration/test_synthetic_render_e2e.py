@@ -65,9 +65,14 @@ def _config(
 async def _run(
     tmp_path: Path,
     *,
-    pdf_engine: str | None = None,
-    delivery_mode: str | None = None,
+    pdf_engine: str | None = "native",
+    delivery_mode: str | None = "faithful",
 ) -> tuple[list[TranslationProgressEvent], Path, str]:
+    # The content assertions below compare exact paragraph text. The native
+    # in-place codec is the deterministic path for that; the default ``auto``
+    # plan for a book is ``readable`` (Typst reflow), which hyphenates across
+    # lines. The Typst path gets its own test below, and the real corpus gate
+    # exercises the default plan.
     book = write_text_pdf(tmp_path / "book.pdf", [_PAGE_ONE, _PAGE_TWO])
     output = tmp_path / "book_es.pdf"
     job_id = "synthetic-render"

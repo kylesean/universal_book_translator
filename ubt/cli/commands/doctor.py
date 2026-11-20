@@ -1066,7 +1066,8 @@ def collect_checks(
         record(
             "PDF engine",
             "OK",
-            "auto = native in-place PDF stream (born-digital) / docling (scanned)",
+            "auto = follows the delivery contract: native (faithful / in-place) or "
+            "docling (readable / scanned reflow)",
             code="pdf_engine",
             detail_code="pdf_engine.auto_native",
         )
