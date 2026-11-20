@@ -749,8 +749,8 @@ class LedgerJobsMixin(_LedgerHost):
                 "memory_state",
                 "output_file",
                 "report_file",
-                "visual_report",
-                "visual_report_file",
+                "artifact_report",
+                "artifact_report_file",
                 "source_fingerprint",
             ):
                 conn.execute(
@@ -1048,14 +1048,14 @@ class LedgerJobsMixin(_LedgerHost):
                     )
             conn.execute("COMMIT;")
 
-    def record_visual_report(self, job_id: str, report: dict[str, Any]) -> None:
+    def record_artifact_report(self, job_id: str, report: dict[str, Any]) -> None:
         """Persist visual gate results into job_meta.metadata_json."""
         # One writer per metadata key: go through set_job_metadata_value, which
         # reads and writes inside BEGIN IMMEDIATE (reading the preimage outside
         # its own transaction is the lost-update shape that guard prevents).
-        self.set_job_metadata_value(job_id, "visual_report", report)
+        self.set_job_metadata_value(job_id, "artifact_report", report)
 
-    def get_visual_report(self, job_id: str) -> dict[str, Any] | None:
+    def get_artifact_report(self, job_id: str) -> dict[str, Any] | None:
         """Retrieve visual gate report from job_meta.metadata_json if present."""
         with self._get_conn() as conn:
             actual_id = self._resolve_actual_job_id(conn, job_id)
@@ -1066,15 +1066,15 @@ class LedgerJobsMixin(_LedgerHost):
             if row and row["metadata_json"]:
                 try:
                     meta = json.loads(row["metadata_json"])
-                    if isinstance(meta, dict) and "visual_report" in meta:
-                        res = meta["visual_report"]
+                    if isinstance(meta, dict) and "artifact_report" in meta:
+                        res = meta["artifact_report"]
                         if isinstance(res, dict):
                             return cast(dict[str, Any], res)
                 except Exception as exc:
                     # Corrupt metadata must not break the read, but a torn
                     # value and an absent visual report should not look
                     # identical to whoever is debugging the job.
-                    logger.debug("Unreadable visual_report metadata for %s: %s", job_id, exc)
+                    logger.debug("Unreadable artifact_report metadata for %s: %s", job_id, exc)
                     return None
             return None
 

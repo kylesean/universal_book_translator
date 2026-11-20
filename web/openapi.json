@@ -2036,13 +2036,13 @@
         }
       }
     },
-    "/jobs/{job_id}/visual-report": {
+    "/jobs/{job_id}/artifact-report": {
       "get": {
         "tags": [
           "Jobs"
         ],
-        "summary": "Get Visual Report",
-        "operationId": "get_visual_report_jobs__job_id__visual_report_get",
+        "summary": "Get Artifact Report",
+        "operationId": "get_artifact_report_jobs__job_id__artifact_report_get",
         "parameters": [
           {
             "name": "job_id",
@@ -6010,7 +6010,7 @@
             ],
             "title": "Report File"
           },
-          "visual_report_file": {
+          "artifact_report_file": {
             "anyOf": [
               {
                 "type": "string"
@@ -6019,7 +6019,7 @@
                 "type": "null"
               }
             ],
-            "title": "Visual Report File"
+            "title": "Artifact Report File"
           },
           "job_id": {
             "type": "string",

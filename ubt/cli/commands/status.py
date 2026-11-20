@@ -325,7 +325,7 @@ def job_status(
             + int(stats.get("blocked_human", 0))
         )
         pct = round(processed / total * 100, 1) if total > 0 else 0.0
-        visual = ledger.get_visual_report(job_id)
+        visual = ledger.get_artifact_report(job_id)
         visual_summary: dict[str, object] | None = None
         if visual:
             findings = visual.get("findings", [])

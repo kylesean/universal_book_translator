@@ -10,7 +10,7 @@ Muting them would hide a correctness signal, so this module does the other
 thing: count them, bucket them by how bad the guess was, and emit a handful of
 lines instead of thousands. Everything stays queryable through
 :func:`noise_report` so the pipeline can write the distribution into
-``visual_report.json``.
+``artifact_report.json``.
 
 The aggregator is a :class:`logging.Filter`, not a Handler, so it only ever
 *counts* what it matches — every other record from the same logger still
@@ -85,7 +85,7 @@ _REGISTRY: dict[str, NoiseAggregator] = {}
 
 
 def noise_report() -> dict[str, dict[str, Any]]:
-    """The aggregated counts, shaped for ``visual_report.json``."""
+    """The aggregated counts, shaped for ``artifact_report.json``."""
     return {name: agg.stats() for name, agg in _REGISTRY.items() if agg.seen}
 
 

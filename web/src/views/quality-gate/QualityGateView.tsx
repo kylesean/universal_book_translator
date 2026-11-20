@@ -24,7 +24,7 @@ import { InfoTip } from '@/components/ui/InfoTip'
 import { cn } from '@/lib/utils'
 import {
   getJobReport,
-  getVisualReport,
+  getArtifactReport,
   getDeliveryContract,
   listDeliverables,
   deliverableDownloadUrl,
@@ -146,7 +146,7 @@ export function QualityGateView() {
       setCompanionArtifacts([])
     }
     try {
-      const nextVisual = await getVisualReport(jobId)
+      const nextVisual = await getArtifactReport(jobId)
       if (!isCurrent()) return
       setVisual(nextVisual)
       setVisualMissing(false)

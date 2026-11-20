@@ -373,19 +373,19 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
             ) from exc
 
     @api_app.get(
-        "/jobs/{job_id}/visual-report",
+        "/jobs/{job_id}/artifact-report",
         tags=["Jobs"],
     )
-    async def get_visual_report(
+    async def get_artifact_report(
         job_id: str, x_ubt_tenant: str | None = Header(default=None)
     ) -> JSONResponse:
         valid_id = validate_job_id(job_id)
         if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):
             raise cross_tenant_404(valid_id)
         record = manager.get_job(valid_id)
-        vis_file = record.progress.visual_report_file if record else None
+        vis_file = record.progress.artifact_report_file if record else None
         if not vis_file:
-            vis_file = await _artifact_path_async(valid_id, "visual_report_file")
+            vis_file = await _artifact_path_async(valid_id, "artifact_report_file")
         if vis_file:
             try:
                 vis_path = resolve_secure_path(vis_file, must_exist=True, config=app_config)
@@ -416,11 +416,11 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
         if db_path.exists():
             try:
 
-                def _fetch_visual_report() -> Any:
+                def _fetch_artifact_report() -> Any:
                     with SQLiteJobLedger(db_path, read_only=True) as ledger:
-                        return ledger.get_visual_report(valid_id)
+                        return ledger.get_artifact_report(valid_id)
 
-                snap_report = await asyncio.to_thread(_fetch_visual_report)
+                snap_report = await asyncio.to_thread(_fetch_artifact_report)
                 if snap_report is not None:
                     return JSONResponse(content=snap_report)
             except Exception as exc:

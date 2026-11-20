@@ -95,7 +95,7 @@ class ApiScope:
 
         The in-memory ``JobRecord`` is pruned/evicted across restarts, so the
         path is read back from whichever durable store actually holds it:
-        ``output_file``/``report_file``/``visual_report_file`` live in the job
+        ``output_file``/``report_file``/``artifact_report_file`` live in the job
         ledger for an embedded run and in the queue row's payload for
         ``job_mode="queue"`` (the worker never writes ledger metadata). Before
         both were consulted a queued job 404'd its own download forever.

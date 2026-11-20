@@ -623,7 +623,7 @@ export const zh: TranslationDictionary = {
     deliveryContractJson: '交付契约 (delivery_contract.json)',
     secondaryDoc: '配套单语/双语文档',
     qualityReportJson: '质量报告 (JSON)',
-    visualReportJson: '视觉门禁报告 (JSON)',
+    artifactReportJson: '视觉门禁报告 (JSON)',
     metricsJson: '运行指标 (JSON)',
     attestationJson: '文本交付鉴证 (JSON)',
     htmlView: '可读 HTML 视图',

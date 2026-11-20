@@ -29,11 +29,11 @@ def _flag_count(flags: Mapping[str, int], prefix: str) -> int:
     return sum(int(value) for key, value in flags.items() if key.startswith(prefix))
 
 
-def _severity_counts(visual_report: Mapping[str, Any] | None) -> dict[str, int]:
+def _severity_counts(artifact_report: Mapping[str, Any] | None) -> dict[str, int]:
     counts = dict.fromkeys(_SEVERITIES, 0)
-    if not visual_report:
+    if not artifact_report:
         return counts
-    findings = visual_report.get("findings")
+    findings = artifact_report.get("findings")
     if not isinstance(findings, list):
         return counts
     for finding in findings:
@@ -45,7 +45,7 @@ def _severity_counts(visual_report: Mapping[str, Any] | None) -> dict[str, int]:
     return counts
 
 
-def _visual_page_count(visual_report: Mapping[str, Any] | None, route_pages: int) -> int:
+def _visual_page_count(artifact_report: Mapping[str, Any] | None, route_pages: int) -> int:
     """The denominator for the visual rate KPIs — pages a finding could hit.
 
     Prefers the real page count when the report knows it (route_pages, or the
@@ -57,13 +57,13 @@ def _visual_page_count(visual_report: Mapping[str, Any] | None, route_pages: int
     severity is unrecognised are excluded so they cannot dilute the rates, and
     a report with no counted findings keeps the historic denominator of 1.
     """
-    if visual_report is None:
+    if artifact_report is None:
         return 0
     if route_pages > 0:
         return route_pages
     page_numbers: list[int] = []
     severity_findings = 0
-    for finding in visual_report.get("findings") or []:
+    for finding in artifact_report.get("findings") or []:
         if not isinstance(finding, Mapping):
             continue
         page = finding.get("page")
@@ -78,7 +78,7 @@ def _visual_page_count(visual_report: Mapping[str, Any] | None, route_pages: int
     return max(1, severity_findings)
 
 
-def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None = None) -> KpiSet:
+def collect_kpis(report: QualityReport, artifact_report: Mapping[str, Any] | None = None) -> KpiSet:
     """Derive this job's KPI set from the artifacts the pipeline persisted.
 
     The definitions live in :mod:`ubt.core.metrics.schema` and are stamped on the
@@ -93,8 +93,8 @@ def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None 
     terminology = report.terminology
     coverage = report.render_coverage
     formula_blocks = report.formula_blocks
-    severities = _severity_counts(visual_report)
-    visual_pages = _visual_page_count(visual_report, route_pages)
+    severities = _severity_counts(artifact_report)
+    visual_pages = _visual_page_count(artifact_report, route_pages)
 
     kpis: dict[str, float] = {
         "term_consistency": 1.0 - _div(entity.terms_with_drift, entity.terms_audited),
@@ -139,7 +139,7 @@ def collect_kpis(report: QualityReport, visual_report: Mapping[str, Any] | None 
         "preserved_blocks": coverage.preserved_blocks,
         "skip_families": dict(coverage.skip_families),
         "formula_blocks": formula_blocks,
-        "visual_report": visual_report is not None,
+        "artifact_report": artifact_report is not None,
         "visual_pages": visual_pages,
         "visual_findings": severities,
         "needs_human_blocks": report.summary.needs_human_blocks,

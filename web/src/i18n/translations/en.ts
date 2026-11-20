@@ -650,7 +650,7 @@ export const en: TranslationDictionary = {
     deliveryContractJson: 'Artifact delivery contract (delivery_contract.json)',
     secondaryDoc: 'Complementary mono/dual document',
     qualityReportJson: 'Quality report (JSON)',
-    visualReportJson: 'Visual gate report (JSON)',
+    artifactReportJson: 'Artifact gate report (JSON)',
     metricsJson: 'Run metrics (JSON)',
     attestationJson: 'Text realization attestation (JSON)',
     htmlView: 'Readable HTML view',

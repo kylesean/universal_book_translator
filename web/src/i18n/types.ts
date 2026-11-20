@@ -563,7 +563,7 @@ export interface TranslationDictionary {
     deliveryContractJson: string
     secondaryDoc: string
     qualityReportJson: string
-    visualReportJson: string
+    artifactReportJson: string
     metricsJson: string
     attestationJson: string
     //: The two companions the export stage writes by default. Their keys were

@@ -43,7 +43,7 @@ def public_artifact(value: Any) -> Any:
     ``output_file``/``report_file`` — handing every caller that can reach this
     (unauthenticated-by-default) port the host's directory layout, home
     directory included. Only the *echo* changes: the
-    routes that serve the bytes (``/download``, ``/report``, the visual-report
+    routes that serve the bytes (``/download``, ``/report``, the artifact-report
     fallback) still resolve the stored absolute path server-side.
     """
     return Path(value).name if isinstance(value, str) and value else value
@@ -97,7 +97,7 @@ DELIVERABLE_LABELS: dict[str, tuple[str, str]] = {
     "contract": ("Delivery contract (JSON)", "application/json"),
     "delivery_contract": ("Artifact delivery contract (JSON)", "application/json"),
     "quality_report": ("Quality report (JSON)", "application/json"),
-    "visual_report": ("Visual gate report (JSON)", "application/json"),
+    "artifact_report": ("Artifact gate report (JSON)", "application/json"),
     "metrics": ("Run metrics (JSON)", "application/json"),
     "attestation": ("Text realization attestation (JSON)", "application/json"),
 }
@@ -122,7 +122,7 @@ def deliverable_paths(output_file: str | Path) -> dict[str, Path]:
         "contract": sidecar_path(out, "contract.json"),
         "delivery_contract": sidecar_path(out, "delivery_contract.json"),
         "quality_report": sidecar_path(out, "quality_report.json"),
-        "visual_report": sidecar_path(out, "visual_report.json"),
+        "artifact_report": sidecar_path(out, "artifact_report.json"),
         "metrics": sidecar_path(out, "metrics.json"),
         "attestation": companion_path(out, "_attestations.json"),
     }

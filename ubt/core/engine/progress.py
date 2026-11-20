@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 # Fields that only exist once a render has named them, as opposed to the
 # counters, which every row reports from the first event.
-ARTIFACT_KEYS = ("output_file", "report_file", "visual_report_file")
+ARTIFACT_KEYS = ("output_file", "report_file", "artifact_report_file")
 
 #: Pipeline stage vocabulary, coarse enough to be one stepper in the console and
 #: stable enough to be an on-disk contract (the value lands in ``progress_json``).
@@ -174,7 +174,7 @@ class ProgressSnapshot(BaseModel):
     event_type: str | None = None
     output_file: str | None = None
     report_file: str | None = None
-    visual_report_file: str | None = None
+    artifact_report_file: str | None = None
 
     @classmethod
     def from_event(cls, event: TranslationProgressEvent) -> ProgressSnapshot:
@@ -185,12 +185,12 @@ class ProgressSnapshot(BaseModel):
             # A malformed export event (no artifact location) must not fail the
             # job: the translation is done, only the pointer is missing.
             if artifact:
-                output_path, quality_report, visual_report = artifact_and_report_paths(artifact)
+                output_path, quality_report, artifact_report = artifact_and_report_paths(artifact)
                 files["output_file"] = str(output_path)
                 if quality_report is not None:
                     files["report_file"] = str(quality_report)
-                if visual_report is not None:
-                    files["visual_report_file"] = str(visual_report)
+                if artifact_report is not None:
+                    files["artifact_report_file"] = str(artifact_report)
         processed = _processed_blocks(
             event.completed_blocks,
             event.failed_blocks,
@@ -282,7 +282,7 @@ class ProgressSnapshot(BaseModel):
             event_type=_as_str(meta("event_type")),
             output_file=_as_str(meta("output_file")),
             report_file=_as_str(meta("report_file")),
-            visual_report_file=_as_str(meta("visual_report_file")),
+            artifact_report_file=_as_str(meta("artifact_report_file")),
         )
 
     def to_payload(self) -> dict[str, Any]:

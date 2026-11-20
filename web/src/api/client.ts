@@ -132,7 +132,7 @@ export interface ProgressStreamFrame {
   estimated_cost_usd?: number | null
   output_file?: string | null
   report_file?: string | null
-  visual_report_file?: string | null
+  artifact_report_file?: string | null
   error?: string | null
 }
 
@@ -377,8 +377,8 @@ export async function getJobReport(jobId: string): Promise<Record<string, unknow
   return res.json()
 }
 
-export async function getVisualReport(jobId: string): Promise<Record<string, unknown>> {
-  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/visual-report`)
+export async function getArtifactReport(jobId: string): Promise<Record<string, unknown>> {
+  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/artifact-report`)
   if (!res.ok) throw await apiError(res, "Failed to fetch visual report")
   return res.json()
 }

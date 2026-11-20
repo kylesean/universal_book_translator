@@ -41,13 +41,13 @@ def _bbox(page: int) -> Any:
 @dataclass
 class _RecordingLedger:
     batches: list[list[dict[str, Any]]] = field(default_factory=list)
-    visual_reports: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    artifact_reports: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
 
     def save_checkpoints_batch(self, checkpoints: Sequence[dict[str, Any]]) -> None:
         self.batches.append(list(checkpoints))
 
-    def record_visual_report(self, job_id: str, payload: dict[str, Any]) -> None:
-        self.visual_reports.append((job_id, payload))
+    def record_artifact_report(self, job_id: str, payload: dict[str, Any]) -> None:
+        self.artifact_reports.append((job_id, payload))
 
     def get_job_metadata_value(self, job_id: str, key: str) -> Any:
         return None
@@ -228,11 +228,11 @@ def test_the_report_sidecar_and_ledger_record_are_always_written(tmp_path: Path)
 
     from ubt.core.job_options import sidecar_path
 
-    report = sidecar_path(tmp_path / "artifact.pdf", "visual_report.json")
+    report = sidecar_path(tmp_path / "artifact.pdf", "artifact_report.json")
     assert report.exists()
-    assert ledger.visual_reports[0][0] == "job-1"
-    assert ledger.visual_reports[0][1]["passed"] is True
-    assert "parse_noise" in ledger.visual_reports[0][1]
+    assert ledger.artifact_reports[0][0] == "job-1"
+    assert ledger.artifact_reports[0][1]["passed"] is True
+    assert "parse_noise" in ledger.artifact_reports[0][1]
 
 
 def test_cancellation_before_the_gate_raises_and_touches_nothing(tmp_path: Path) -> None:
@@ -248,14 +248,14 @@ def test_cancellation_before_the_gate_raises_and_touches_nothing(tmp_path: Path)
 
     with pytest.raises(JobInterruptedError):
         asyncio.run(loop.run(tmp_path / "artifact.pdf", []))
-    assert ledger.visual_reports == []
+    assert ledger.artifact_reports == []
 
 
 def test_a_crashing_gate_is_recorded_as_a_failure_not_an_absence(tmp_path: Path) -> None:
     ledger = _RecordingLedger()
     with pytest.raises(RuntimeError, match="gate exploded"):
         _run(_loop(tmp_path, ledger, RuntimeError("gate exploded")), tmp_path, [])
-    assert ledger.visual_reports == []
+    assert ledger.artifact_reports == []
 
 
 def _finding_codes(gate: Any) -> list[str]:

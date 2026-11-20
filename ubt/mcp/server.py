@@ -858,7 +858,7 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
             "avg_qe_score": rec.progress.current_avg_qe,
             "output_file": sanitize_display_path(rec.progress.output_file),
             "report_file": sanitize_display_path(rec.progress.report_file),
-            "visual_report_file": sanitize_display_path(rec.progress.visual_report_file),
+            "artifact_report_file": sanitize_display_path(rec.progress.artifact_report_file),
             "rehearsal": rec.request.dry_run,
         }
         if rec.error:
@@ -939,7 +939,7 @@ async def ubt_job_status(job_id: str, db_dir: str | None = None) -> dict[str, An
             "avg_qe_score": progress.current_avg_qe,
             "output_file": sanitize_display_path(progress.output_file),
             "report_file": sanitize_display_path(progress.report_file),
-            "visual_report_file": sanitize_display_path(progress.visual_report_file),
+            "artifact_report_file": sanitize_display_path(progress.artifact_report_file),
             "agent_state": agent_state,
             "next_action": (
                 "ubt_agent_finish"

@@ -198,7 +198,7 @@ def setup_logging(
     access_logger.addFilter(AccessNoiseFilter(allow_all=lift_all or verbose))
 
     # Count-and-summarize, never mute: a third party that warns once per
-    # recoverable object still has to be countable for visual_report.json.
+    # recoverable object still has to be countable for artifact_report.json.
     install_noise_aggregators()
 
     # Filter known noisy third-party deprecations (e.g. jieba's legacy pkg_resources import)

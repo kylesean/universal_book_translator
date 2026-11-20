@@ -32,8 +32,8 @@ export function deliverableName(key: string, fallback: string, t: Translation): 
       return t.quality.deliveryContractJson
     case 'quality_report':
       return t.quality.qualityReportJson
-    case 'visual_report':
-      return t.quality.visualReportJson
+    case 'artifact_report':
+      return t.quality.artifactReportJson
     case 'metrics':
       return t.quality.metricsJson
     case 'html':

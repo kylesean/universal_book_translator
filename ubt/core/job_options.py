@@ -806,7 +806,7 @@ def own_prior_deliverable(
 SidecarKind = Literal[
     "quality_report.json",
     "metrics.json",
-    "visual_report.json",
+    "artifact_report.json",
     "contract.json",
     "delivery_contract.json",
 ]
@@ -963,7 +963,7 @@ CompanionExportManifest = CompanionExportSummary
 RUN_REPORT_KINDS: tuple[SidecarKind, ...] = (
     "quality_report.json",
     "metrics.json",
-    "visual_report.json",
+    "artifact_report.json",
     "contract.json",
     "delivery_contract.json",
 )
@@ -974,11 +974,11 @@ def artifact_and_report_paths(
 ) -> tuple[Path, Path | None, Path | None]:
     """Resolve an artifact path and its existing companion report files.
 
-    Returns ``(output, quality_report_or_None, visual_report_or_None)``.
+    Returns ``(output, quality_report_or_None, artifact_report_or_None)``.
     """
     output = Path(artifact)
     quality = sidecar_path(output, "quality_report.json")
-    visual = sidecar_path(output, "visual_report.json")
+    visual = sidecar_path(output, "artifact_report.json")
     return output, (quality if quality.exists() else None), (visual if visual.exists() else None)
 
 

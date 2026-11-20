@@ -717,9 +717,9 @@ async def _run_artifact_gate(
     the gate object (None when the gate is off or not a PDF).
     """
     gate: Any = None
-    visual_report_path: Path | None = None
+    artifact_report_path: Path | None = None
     if not ctx.config.visual_gate_enabled or rendered_path.suffix.lower() != ".pdf":
-        return rendered_path, visual_report_path, gate
+        return rendered_path, artifact_report_path, gate
     try:
         from ubt.core.engine.artifact_verify_loop import ArtifactVerifyLoop
 
@@ -733,7 +733,7 @@ async def _run_artifact_gate(
             faithful_pages=_is_faithful_delivery(ctx),
             claims_finality=claims_finality,
         )
-        rendered_path, visual_report_path, gate = await verify_loop.run(
+        rendered_path, artifact_report_path, gate = await verify_loop.run(
             rendered_path=rendered_path,
             blocks=final_blocks,
         )
@@ -744,7 +744,7 @@ async def _run_artifact_gate(
                 "Visual gate for job %s: %d warning(s), see %s",
                 ctx.job_id,
                 len(bad),
-                visual_report_path,
+                artifact_report_path,
             )
         elif gate.skipped_reason:
             logger.info("Visual gate for job %s skipped: %s", ctx.job_id, gate.skipped_reason)
@@ -761,8 +761,8 @@ async def _run_artifact_gate(
         gate = crashed_artifact_gate_result(
             f"visual gate did not complete: {type(exc).__name__}: {exc}"[:300]
         )
-        visual_report_path = await _persist_crashed_gate_report(ctx, rendered_path, gate)
-    return rendered_path, visual_report_path, gate
+        artifact_report_path = await _persist_crashed_gate_report(ctx, rendered_path, gate)
+    return rendered_path, artifact_report_path, gate
 
 
 async def _persist_crashed_gate_report(
@@ -784,14 +784,14 @@ async def _persist_crashed_gate_report(
             **gate.report_payload(),
             "parse_noise": noise_report(),
         }
-        visual_report_path = sidecar_path(rendered_path, "visual_report.json")
+        artifact_report_path = sidecar_path(rendered_path, "artifact_report.json")
         await asyncio.to_thread(
-            visual_report_path.write_text,
+            artifact_report_path.write_text,
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        await asyncio.to_thread(ctx.ledger.record_visual_report, ctx.job_id, payload)
-        return visual_report_path
+        await asyncio.to_thread(ctx.ledger.record_artifact_report, ctx.job_id, payload)
+        return artifact_report_path
     except Exception as persist_exc:
         logger.debug(
             "crashed-gate report persistence failed for job %s: %s", ctx.job_id, persist_exc
@@ -816,7 +816,7 @@ def _drop_stale_run_reports(rendered_path: Path) -> None:
 def _enforce_blocking_gate(
     actual_job_id: str,
     gate: Any,
-    visual_report_path: Path | None,
+    artifact_report_path: Path | None,
     blocking_enabled: bool,
     *,
     rehearsal: bool = False,
@@ -873,7 +873,7 @@ def _enforce_blocking_gate(
         f"Visual blocking gate refused export for job {actual_job_id}: "
         f"{len(tripped)} blocking finding(s) (severity: {', '.join(sorted({str(getattr(f, 'severity', 'critical')) for f in tripped}))}) "
         f"on page(s) {pages or 'document level'} "
-        f"(codes: {', '.join(codes)}). See {visual_report_path}."
+        f"(codes: {', '.join(codes)}). See {artifact_report_path}."
     )
 
 
@@ -1832,7 +1832,7 @@ async def _build_reports(
     final_blocks: list[IRBlock],
     *,
     rendered_path: Path,
-    visual_report_path: Path | None,
+    artifact_report_path: Path | None,
     glossary_dicts: list[dict[str, Any]],
     enforced_spans: int,
     run_usage: Any,
@@ -1950,18 +1950,18 @@ async def _build_reports(
     # Versioned KPI artifact: a pure derivation from the quality report plus
     # the optional visual report (no LLM, no text re-scan). Checked-in golden
     # baselines and the CI regression gate compare against it.
-    visual_report: dict[str, Any] | None = None
-    if visual_report_path is not None and visual_report_path.exists():
+    artifact_report: dict[str, Any] | None = None
+    if artifact_report_path is not None and artifact_report_path.exists():
         try:
-            visual_report = json.loads(visual_report_path.read_text(encoding="utf-8"))
+            artifact_report = json.loads(artifact_report_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning(
                 "KPI collection ignoring unreadable visual report %s: %s",
-                visual_report_path,
+                artifact_report_path,
                 exc,
             )
     metrics_path = sidecar_path(rendered_path, "metrics.json")
-    kpis = await asyncio.to_thread(collect_kpis, report, visual_report)
+    kpis = await asyncio.to_thread(collect_kpis, report, artifact_report)
     await asyncio.to_thread(save_metrics_report, kpis, metrics_path)
     return report, report_path
 
@@ -2275,7 +2275,7 @@ async def run_export_stage(
 
     # Enforcement is deferred until after _build_reports (below): a refusal
     # must still leave the quality/metrics reports on disk for audit.
-    rendered_path, visual_report_path, gate = await _run_artifact_gate(
+    rendered_path, artifact_report_path, gate = await _run_artifact_gate(
         ctx, adapter, final_blocks, rendered_path, render, claims_finality=owning_run
     )
 
@@ -2395,7 +2395,7 @@ async def run_export_stage(
         ctx,
         final_blocks,
         rendered_path=rendered_path,
-        visual_report_path=visual_report_path,
+        artifact_report_path=artifact_report_path,
         glossary_dicts=glossary_dicts,
         enforced_spans=enforced_spans,
         run_usage=run_usage,
@@ -2504,7 +2504,7 @@ async def run_export_stage(
                 ctx,
                 final_blocks,
                 rendered_path=rendered_path,
-                visual_report_path=visual_report_path,
+                artifact_report_path=artifact_report_path,
                 glossary_dicts=glossary_dicts,
                 enforced_spans=enforced_spans,
                 run_usage=run_usage,
@@ -2561,7 +2561,7 @@ async def run_export_stage(
     _enforce_blocking_gate(
         actual_job_id,
         gate,
-        visual_report_path,
+        artifact_report_path,
         artifact_blocking_gate_enabled,
         rehearsal=ctx.is_mock_run,
     )
@@ -2601,7 +2601,7 @@ async def run_export_stage(
             artifacts={
                 "output_file": str(artifact_output),
                 "report_file": str(artifact_report),
-                "visual_report_file": str(artifact_visual),
+                "artifact_report_file": str(artifact_visual),
             },
         )
     else:

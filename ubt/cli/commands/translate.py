@@ -934,7 +934,7 @@ def translate(
                 )
             raise typer.Exit(code=1)
         report_path = sidecar_path(result_path, "quality_report.json")
-        visual_path = sidecar_path(result_path, "visual_report.json")
+        visual_path = sidecar_path(result_path, "artifact_report.json")
         report_data: dict[str, Any] = {}
         if report_path.exists():
             with contextlib.suppress(Exception):
@@ -991,7 +991,7 @@ def translate(
                         "companion_file": str(companions[0]) if companions else None,
                         "companion_files": [str(p) for p in companions],
                         "quality_report": str(report_path) if report_path.exists() else None,
-                        "visual_report": str(visual_path) if visual_path.exists() else None,
+                        "artifact_report": str(visual_path) if visual_path.exists() else None,
                     }
                 )
             )

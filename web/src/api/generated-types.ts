@@ -566,15 +566,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/jobs/{job_id}/visual-report": {
+    "/jobs/{job_id}/artifact-report": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get Visual Report */
-        get: operations["get_visual_report_jobs__job_id__visual_report_get"];
+        /** Get Artifact Report */
+        get: operations["get_artifact_report_jobs__job_id__artifact_report_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1815,8 +1815,8 @@ export interface components {
             output_file?: string | null;
             /** Report File */
             report_file?: string | null;
-            /** Visual Report File */
-            visual_report_file?: string | null;
+            /** Artifact Report File */
+            artifact_report_file?: string | null;
             /** Job Id */
             job_id: string;
             /** Status */
@@ -3758,7 +3758,7 @@ export interface operations {
             };
         };
     };
-    get_visual_report_jobs__job_id__visual_report_get: {
+    get_artifact_report_jobs__job_id__artifact_report_get: {
         parameters: {
             query?: never;
             header?: {

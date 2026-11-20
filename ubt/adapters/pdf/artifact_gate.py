@@ -78,7 +78,7 @@ class ArtifactGateResult:
     skip_codes: tuple[str, ...] = ()
 
     def report_payload(self) -> dict[str, object]:
-        """Gate-owned half of the ``visual_report.json`` schema."""
+        """Gate-owned half of the ``artifact_report.json`` schema."""
         return {
             "passed": self.passed,
             "skipped_reason": self.skipped_reason,

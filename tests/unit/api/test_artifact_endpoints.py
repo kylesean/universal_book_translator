@@ -56,10 +56,10 @@ def _seed_job(config: UBTConfig, tmp_path: Path, *, blocked_human_blocks: int = 
     report = tmp_path / "out_quality_report.json"
     report.write_text(report_data, encoding="utf-8")
     sidecar_path(out, "quality_report.json").write_text(report_data, encoding="utf-8")
-    visual = tmp_path / "out_visual_report.json"
+    visual = tmp_path / "out_artifact_report.json"
     visual_data = json.dumps({"findings": [], "total_pages": 3})
     visual.write_text(visual_data, encoding="utf-8")
-    sidecar_path(out, "visual_report.json").write_text(visual_data, encoding="utf-8")
+    sidecar_path(out, "artifact_report.json").write_text(visual_data, encoding="utf-8")
 
     with SQLiteJobLedger(config.db_dir / f"{_JOB}.sqlite") as ledger:
         ledger.init_job_from_manifest(
@@ -82,7 +82,7 @@ def _seed_job(config: UBTConfig, tmp_path: Path, *, blocked_human_blocks: int = 
         )
         ledger.set_job_metadata_value(_JOB, "output_file", str(out))
         ledger.set_job_metadata_value(_JOB, "report_file", str(report))
-        ledger.set_job_metadata_value(_JOB, "visual_report_file", str(visual))
+        ledger.set_job_metadata_value(_JOB, "artifact_report_file", str(visual))
         ledger.finalize_job(_JOB, status="completed")
 
 
@@ -123,7 +123,7 @@ def test_a_known_job_without_a_report_is_409_not_404(tmp_path: Path) -> None:
 def test_an_unknown_job_is_404(tmp_path: Path) -> None:
     client = TestClient(create_app(_config(tmp_path)))
     assert client.get("/jobs/unknownjob01/report", headers=_AUTH).status_code == 404
-    assert client.get("/jobs/unknownjob01/visual-report", headers=_AUTH).status_code == 404
+    assert client.get("/jobs/unknownjob01/artifact-report", headers=_AUTH).status_code == 404
     assert client.get("/jobs/unknownjob01/deliverables", headers=_AUTH).status_code == 404
 
 
@@ -137,12 +137,12 @@ def test_a_corrupt_report_is_a_readable_400_not_a_crash(tmp_path: Path) -> None:
     assert res.status_code == 400
 
 
-def test_the_visual_report_is_served_verbatim(tmp_path: Path) -> None:
+def test_the_artifact_report_is_served_verbatim(tmp_path: Path) -> None:
     config = _config(tmp_path)
     _seed_job(config, tmp_path)
     client = TestClient(create_app(config))
 
-    res = client.get(f"/jobs/{_JOB}/visual-report", headers=_AUTH)
+    res = client.get(f"/jobs/{_JOB}/artifact-report", headers=_AUTH)
     assert res.status_code == 200
     assert res.json()["total_pages"] == 3
 

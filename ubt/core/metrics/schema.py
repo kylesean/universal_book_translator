@@ -1,7 +1,7 @@
 """Machine-readable KPI schema for a translation run.
 
 The KPIs are *derived* from artifacts the pipeline already persists
-(``*_quality_report.json`` and ``*_visual_report.json``), so collecting them
+(``*_quality_report.json`` and ``*_artifact_report.json``), so collecting them
 costs nothing and never re-scans the text. Definitions live here — the single
 source of truth — and are versioned by :data:`SCHEMA_VERSION`; the on-disk
 artifact carries only values, so a definition change forces a version bump
@@ -169,7 +169,7 @@ KPI_DEFINITIONS: tuple[KpiDefinition, ...] = (
         "ratio",
         Direction.LOWER_IS_BETTER,
         "CRITICAL visual-gate findings / pages (0 when no visual report)",
-        "visual_report.findings[severity=critical] / route.pages",
+        "artifact_report.findings[severity=critical] / route.pages",
         0.0,
         ceiling=0.0,
     ),
@@ -178,7 +178,7 @@ KPI_DEFINITIONS: tuple[KpiDefinition, ...] = (
         "ratio",
         Direction.LOWER_IS_BETTER,
         "MAJOR visual-gate findings / pages (0 when no visual report)",
-        "visual_report.findings[severity=major] / route.pages",
+        "artifact_report.findings[severity=major] / route.pages",
         0.01,
     ),
     KpiDefinition(

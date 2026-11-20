@@ -2,7 +2,7 @@
 
 Runs the deterministic artifact gate (searchability, blank pages, faithful page
 count), merges artifact-parity findings, and marks the blocks a major/critical
-finding is about as NEEDS_HUMAN. Persists ``visual_report.json`` to disk and the
+finding is about as NEEDS_HUMAN. Persists ``artifact_report.json`` to disk and the
 SQLite ledger. There is no pixel/VLM tier and no typography-retune pass: a
 defect is quarantined directly rather than re-rendered at a different scale.
 """
@@ -231,13 +231,13 @@ class ArtifactVerifyLoop:
             # may be structurally wrong even when the render looks fine.
             "parse_noise": noise_report(),
         }
-        visual_report_path = sidecar_path(rendered_path, "visual_report.json")
+        artifact_report_path = sidecar_path(rendered_path, "artifact_report.json")
         payload = json.dumps(report_dict, ensure_ascii=False, indent=2)
         # Atomic like the contract/spill/xliff companions: this file sits in
         # the delivery directory and the API serves it verbatim, so a crash
         # mid-write must not leave the frontend truncated JSON.
-        await asyncio.to_thread(atomic_write_text, visual_report_path, payload, encoding="utf-8")
+        await asyncio.to_thread(atomic_write_text, artifact_report_path, payload, encoding="utf-8")
 
-        await asyncio.to_thread(self.ledger.record_visual_report, self.job_id, report_dict)
+        await asyncio.to_thread(self.ledger.record_artifact_report, self.job_id, report_dict)
 
-        return rendered_path, visual_report_path, gate
+        return rendered_path, artifact_report_path, gate

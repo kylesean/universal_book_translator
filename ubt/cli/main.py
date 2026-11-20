@@ -193,7 +193,7 @@ async def _run_translation(
         )
 
     # Persist the artifact triple (``output_file`` / ``report_file`` /
-    # ``visual_report_file``) into the job's ledger at completion.
+    # ``artifact_report_file``) into the job's ledger at completion.
     #
     # Without this hook the CLI left every one of its jobs with a null pointer:
     # the console listed the job as completed at 100% and then answered 409

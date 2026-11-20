@@ -208,15 +208,15 @@ def test_collect_kpis_visual_rates_use_the_page_denominator() -> None:
     kpis = collect_kpis(_report(pages=10), visual)
     assert kpis.kpis["visual_critical_rate"] == pytest.approx(0.1)
     assert kpis.kpis["visual_major_rate"] == pytest.approx(0.2)
-    assert kpis.details["visual_report"] is True
+    assert kpis.details["artifact_report"] is True
     assert kpis.details["visual_findings"] == {"info": 0, "major": 2, "critical": 1}
 
 
-def test_collect_kpis_without_a_visual_report_zeroes_the_visual_rates() -> None:
+def test_collect_kpis_without_a_artifact_report_zeroes_the_visual_rates() -> None:
     kpis = collect_kpis(_report(pages=10))
     assert kpis.kpis["visual_critical_rate"] == 0.0
     assert kpis.kpis["visual_major_rate"] == 0.0
-    assert kpis.details["visual_report"] is False
+    assert kpis.details["artifact_report"] is False
 
 
 def test_collect_kpis_records_structural_details() -> None:
