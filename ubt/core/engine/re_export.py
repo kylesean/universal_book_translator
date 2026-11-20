@@ -370,7 +370,11 @@ async def re_export_job(
                 f"{contract.value if contract else 'recorded'} contract; "
                 "use --pdf-engine auto or request a readable delivery."
             )
-        adapter = resolve_adapter(source_path, pdf_engine=engine)
+        adapter = resolve_adapter(
+            source_path,
+            pdf_engine=engine,
+            prefer_codec=bool(getattr(config, "use_document_codecs", False)),
+        )
         # The adapter decides the artifact format, the same rule a first run
         # enforces before spending anything: a contradicting output suffix must
         # be refused before the render, not after a broken file is written (a

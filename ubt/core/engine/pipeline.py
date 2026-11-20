@@ -1144,7 +1144,11 @@ class PipelineOrchestrator:
                 f"contract for {input_path.name}. Use --pdf-engine auto (native for "
                 "faithful, docling for readable) or request a readable delivery."
             )
-        adapter = self.custom_adapter or resolve_adapter(input_path, pdf_engine=engine)
+        adapter = self.custom_adapter or resolve_adapter(
+            input_path,
+            pdf_engine=engine,
+            prefer_codec=bool(getattr(self.config, "use_document_codecs", False)),
+        )
         # Everything below can refuse the run (a contradicting ``--output``
         # suffix, a manifest that cannot be read), and an adapter may own
         # subprocesses. ``run()``'s ``finally`` cannot close it because it never

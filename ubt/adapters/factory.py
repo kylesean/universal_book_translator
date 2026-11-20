@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from ubt.adapters.base import BaseDocumentAdapter, BasePDFEngineAdapter
+from ubt.adapters.codec_adapter import DocumentCodecAdapter
 from ubt.adapters.docx.adapter import DOCXAdapter
 from ubt.adapters.epub.adapter import EPUBAdapter
 from ubt.adapters.html.adapter import HTMLAdapter
@@ -162,9 +163,7 @@ _ADAPTER_REGISTRY.update(
         ".epub": lambda _engine, _path: EPUBAdapter(),
         ".md": lambda _engine, _path: MarkdownAdapter(),
         ".markdown": lambda _engine, _path: MarkdownAdapter(),
-        ".txt": lambda _engine, _path: MarkdownAdapter(
-            plain_text=True
-        ),  # flat text: blank-line paragraphs, no Markdown syntax
+        ".txt": lambda _engine, _path: MarkdownAdapter(plain_text=True),
         ".html": lambda _engine, _path: HTMLAdapter(),
         ".htm": lambda _engine, _path: HTMLAdapter(),
         ".docx": lambda _engine, _path: DOCXAdapter(),
@@ -187,6 +186,7 @@ def get_adapter_for_path(
     pdf_engine: str = "auto",
     *,
     sandbox_roots: Sequence[Path] | None = None,
+    prefer_codec: bool = False,
 ) -> BaseDocumentAdapter:
     """Factory helper to resolve the appropriate document adapter by file extension.
 
@@ -209,6 +209,10 @@ def get_adapter_for_path(
     """
     file_path = Path(path)
     suffix = file_path.suffix.lower()
+
+    if prefer_codec and suffix != ".pdf" and suffix in _ADAPTER_REGISTRY:
+        _verify_input_open(file_path, sandbox_roots)
+        return DocumentCodecAdapter(file_path)
 
     factory = _ADAPTER_REGISTRY.get(suffix)
     if factory is not None:

@@ -19,7 +19,13 @@ from ubt.core.engine.adapter_runtime import AdapterRuntimeConfig, DocumentAdapte
 class DocumentServices(Protocol):
     """The document-engine operations core is allowed to call."""
 
-    def resolve_adapter(self, input_path: Path, pdf_engine: str = "auto") -> DocumentAdapter: ...
+    def resolve_adapter(
+        self,
+        input_path: Path,
+        pdf_engine: str = "auto",
+        *,
+        prefer_codec: bool = False,
+    ) -> DocumentAdapter: ...
 
     def detect_figure_pages(self, input_path: Path, blocks: list[Any]) -> set[int]: ...
 
@@ -82,8 +88,13 @@ def _provider() -> DocumentServices:
     return provider
 
 
-def resolve_adapter(input_path: Path, pdf_engine: str = "auto") -> DocumentAdapter:
-    return _provider().resolve_adapter(input_path, pdf_engine=pdf_engine)
+def resolve_adapter(
+    input_path: Path,
+    pdf_engine: str = "auto",
+    *,
+    prefer_codec: bool = False,
+) -> DocumentAdapter:
+    return _provider().resolve_adapter(input_path, pdf_engine=pdf_engine, prefer_codec=prefer_codec)
 
 
 def detect_figure_pages(input_path: Path, blocks: list[Any]) -> set[int]:
