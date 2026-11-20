@@ -714,11 +714,7 @@ async def _run_visual_gate(
     """
     gate: Any = None
     visual_report_path: Path | None = None
-    if (
-        not ctx.config.visual_gate_enabled
-        or rendered_path.suffix.lower() != ".pdf"
-        or getattr(adapter, "engine_name", None) == "native"
-    ):
+    if not ctx.config.visual_gate_enabled or rendered_path.suffix.lower() != ".pdf":
         return rendered_path, visual_report_path, gate
     try:
         from ubt.core.engine.visual_verify_loop import VisualVerifyLoop

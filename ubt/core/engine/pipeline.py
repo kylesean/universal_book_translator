@@ -1198,6 +1198,7 @@ class PipelineOrchestrator:
         manifest.metadata["delivery_plan"] = delivery.plan.to_manifest()
         manifest.metadata["delivery_mode_requested"] = self.config.delivery_mode
         manifest.metadata["delivery_mode_effective"] = effective_mode
+        manifest.metadata["delivery_mode"] = effective_mode
         if source_lang:
             manifest.source_lang = source_lang
         else:

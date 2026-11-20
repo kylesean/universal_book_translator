@@ -158,7 +158,7 @@ class NativePDFAdapter(BasePDFEngineAdapter):
                 "pdf_engine": "native",
                 "pdf_parser_engine": "native",
                 "is_scanned": profile.is_scanned,
-                "delivery_mode": profile.recommended_mode.value,
+                "pdf_recommended_mode": profile.recommended_mode.value,
             },
         )
 
@@ -222,6 +222,5 @@ class NativePDFAdapter(BasePDFEngineAdapter):
             pages=pages_set,
         )
         self.last_overflows = report.overflows
-        manifest.metadata["delivery_mode"] = report.mode.value
         manifest.metadata["native_overflow_count"] = len(report.overflows)
         return report.output_path
