@@ -1,5 +1,5 @@
 """HTML document adapter."""
 
-from ubt.adapters.html.adapter import HTMLAdapter
+from ubt.adapters.html.adapter import HTMLInspectionAdapter
 
-__all__ = ["HTMLAdapter"]
+__all__ = ["HTMLInspectionAdapter"]

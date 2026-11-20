@@ -158,7 +158,7 @@ def _core_title(path: Path) -> str:
     return (node.text or "").strip() if node is not None else ""
 
 
-class DOCXAdapter(BaseDocumentAdapter):
+class DOCXInspectionAdapter(BaseDocumentAdapter):
     """Adapter for Word documents (.docx) with in-place bilingual injection."""
 
     output_suffixes = frozenset({".docx"})

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ubt.adapters.markdown.adapter import MarkdownAdapter
+from ubt.adapters.markdown.adapter import MarkdownInspectionAdapter
 from ubt.analyze.assemble import element_text
 from ubt.analyze.bridge import blocks_from_document, document_from_blocks
 from ubt.analyze.reader_md import read_md
@@ -85,7 +85,7 @@ async def test_the_reader_loses_nothing_the_adapter_had(tmp_path: Path) -> None:
     document = read_md(book)
     reader_tokens = _tokens(" ".join(element_text(e) for e in document.elements))
 
-    adapter = MarkdownAdapter()
+    adapter = MarkdownInspectionAdapter()
     texts: list[str] = []
     async for chapter in adapter.parse_stream(book):
         texts.extend(block.source_text for block in chapter.blocks)

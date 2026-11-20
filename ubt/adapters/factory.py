@@ -7,10 +7,10 @@ from pathlib import Path
 
 from ubt.adapters.base import BaseDocumentAdapter, BasePDFEngineAdapter
 from ubt.adapters.codec_adapter import DocumentCodecAdapter
-from ubt.adapters.docx.adapter import DOCXAdapter
-from ubt.adapters.epub.adapter import EPUBAdapter
-from ubt.adapters.html.adapter import HTMLAdapter
-from ubt.adapters.markdown.adapter import MarkdownAdapter
+from ubt.adapters.docx.adapter import DOCXInspectionAdapter
+from ubt.adapters.epub.adapter import EPUBInspectionAdapter
+from ubt.adapters.html.adapter import HTMLInspectionAdapter
+from ubt.adapters.markdown.adapter import MarkdownInspectionAdapter
 from ubt.adapters.pdf.docling_adapter import ScanPDFToTypstCodec
 from ubt.adapters.pdf.encryption import reject_encrypted_pdf
 from ubt.adapters.pdf.native_adapter import NativePDFAdapter
@@ -143,13 +143,13 @@ _PDF_ENGINE_REGISTRY.update(
 
 _ADAPTER_REGISTRY.update(
     {
-        ".epub": lambda _engine, _path: EPUBAdapter(),
-        ".md": lambda _engine, _path: MarkdownAdapter(),
-        ".markdown": lambda _engine, _path: MarkdownAdapter(),
-        ".txt": lambda _engine, _path: MarkdownAdapter(plain_text=True),
-        ".html": lambda _engine, _path: HTMLAdapter(),
-        ".htm": lambda _engine, _path: HTMLAdapter(),
-        ".docx": lambda _engine, _path: DOCXAdapter(),
+        ".epub": lambda _engine, _path: EPUBInspectionAdapter(),
+        ".md": lambda _engine, _path: MarkdownInspectionAdapter(),
+        ".markdown": lambda _engine, _path: MarkdownInspectionAdapter(),
+        ".txt": lambda _engine, _path: MarkdownInspectionAdapter(plain_text=True),
+        ".html": lambda _engine, _path: HTMLInspectionAdapter(),
+        ".htm": lambda _engine, _path: HTMLInspectionAdapter(),
+        ".docx": lambda _engine, _path: DOCXInspectionAdapter(),
         ".pdf": lambda engine, path: _resolve_pdf_adapter(engine, path),
     }
 )

@@ -1,5 +1,5 @@
 """DOCX document adapter."""
 
-from ubt.adapters.docx.adapter import DOCXAdapter
+from ubt.adapters.docx.adapter import DOCXInspectionAdapter
 
-__all__ = ["DOCXAdapter"]
+__all__ = ["DOCXInspectionAdapter"]

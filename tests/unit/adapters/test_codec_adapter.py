@@ -36,7 +36,7 @@ def test_the_factory_defaults_to_the_codec_and_keeps_an_inspection_adapter(
     tmp_path: Path,
 ) -> None:
     from ubt.adapters.factory import get_inspection_adapter
-    from ubt.adapters.markdown.adapter import MarkdownAdapter
+    from ubt.adapters.markdown.adapter import MarkdownInspectionAdapter
 
     source = tmp_path / "book.md"
     source.write_text("# Title\n", encoding="utf-8")
@@ -44,7 +44,7 @@ def test_the_factory_defaults_to_the_codec_and_keeps_an_inspection_adapter(
     codec = get_adapter_for_path(source)
     inspection = get_inspection_adapter(source)
     assert isinstance(codec, DocumentCodecAdapter)
-    assert isinstance(inspection, MarkdownAdapter)
+    assert isinstance(inspection, MarkdownInspectionAdapter)
 
 
 @pytest.mark.asyncio

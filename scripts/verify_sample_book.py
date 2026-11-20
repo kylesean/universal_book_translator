@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from ubt.adapters.markdown.adapter import MarkdownAdapter  # noqa: E402
+from ubt.adapters.markdown.adapter import MarkdownInspectionAdapter  # noqa: E402
 from ubt.adapters.pdf.typst_compile import typst_available, typst_compile  # noqa: E402
 from ubt.core.ir.models import BlockType, IRBlock  # noqa: E402
 from ubt.render.typst.container_repair import fit_code_block, measure_line_width  # noqa: E402
@@ -115,8 +115,8 @@ async def run_verification(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Extraction via MarkdownAdapter
-    adapter = MarkdownAdapter()
+    # 1. Extraction via MarkdownInspectionAdapter
+    adapter = MarkdownInspectionAdapter()
     manifest = await adapter.extract_manifest(sample_path)
     result.total_chapters = len(manifest.chapters)
 

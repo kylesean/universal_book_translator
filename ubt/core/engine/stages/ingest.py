@@ -678,7 +678,7 @@ async def run_ingest_stage(
     # there, and must fail here instead of exporting an empty deliverable:
     #   * an adapter that streams chapters whose blocks all cleaned or filtered
     #     away (a fully scanned PDF with OCR off, a --pages window over nothing);
-    #   * an adapter that streams *no chapter at all* — MarkdownAdapter only
+    #   * an adapter that streams *no chapter at all* — MarkdownInspectionAdapter only
     #     yields a chapter once it has blocks, so an empty or whitespace-only
     #     .md/.txt reaches here with parsed_count == 0.
     # The former ``parsed_count > 0`` guard let the second family through (its

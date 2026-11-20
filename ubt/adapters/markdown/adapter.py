@@ -77,7 +77,7 @@ def _split_chapters(
     return title, chapters, groups
 
 
-class MarkdownAdapter(BaseDocumentAdapter):
+class MarkdownInspectionAdapter(BaseDocumentAdapter):
     """Adapter for Markdown (.md) and flat text (.txt) documents."""
 
     output_suffixes = frozenset({".md", ".markdown", ".txt"})

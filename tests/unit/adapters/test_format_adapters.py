@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from ubt.adapters.docx.adapter import DOCXAdapter
-from ubt.adapters.epub.adapter import EPUBAdapter
-from ubt.adapters.html.adapter import HTMLAdapter
+from ubt.adapters.docx.adapter import DOCXInspectionAdapter
+from ubt.adapters.epub.adapter import EPUBInspectionAdapter
+from ubt.adapters.html.adapter import HTMLInspectionAdapter
 from ubt.core.ir.models import BlockType, IRBlock
 
 pytestmark = pytest.mark.fast
@@ -106,7 +106,7 @@ async def _collect(adapter: object, book: Path) -> list[IRBlock]:
 
 
 async def test_html_inspection_adapter_reads_the_typed_blocks(html_book: Path) -> None:
-    adapter = HTMLAdapter()
+    adapter = HTMLInspectionAdapter()
     manifest = await adapter.extract_manifest(html_book)
     assert manifest.chapters[0].chapter_id == "html_main"
     blocks = await _collect(adapter, html_book)
@@ -114,7 +114,7 @@ async def test_html_inspection_adapter_reads_the_typed_blocks(html_book: Path) -
 
 
 async def test_epub_inspection_adapter_reads_spine_blocks_and_figures(epub_book: Path) -> None:
-    adapter = EPUBAdapter()
+    adapter = EPUBInspectionAdapter()
     manifest = await adapter.extract_manifest(epub_book)
     assert len(manifest.chapters) == 2
     blocks = await _collect(adapter, epub_book)
@@ -132,12 +132,12 @@ async def test_docx_manifest_reads_the_title_without_loading_the_body(
         raise AssertionError("extract_manifest loaded the whole DOCX package")
 
     monkeypatch.setattr(docx, "Document", _boom)
-    manifest = await DOCXAdapter().extract_manifest(docx_book)
+    manifest = await DOCXInspectionAdapter().extract_manifest(docx_book)
     assert manifest.title
     assert manifest.chapters[0].source_file == docx_book.name
 
 
 async def test_docx_inspection_adapter_reads_body_blocks(docx_book: Path) -> None:
-    blocks = await _collect(DOCXAdapter(), docx_book)
+    blocks = await _collect(DOCXInspectionAdapter(), docx_book)
     assert len(blocks) == 6, "the docx fixture has exactly 6 blocks"
     assert any(block.block_type is BlockType.TABLE for block in blocks)

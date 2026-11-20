@@ -261,7 +261,7 @@ def _parse_chapter_blocks(
     return chapter_blocks
 
 
-class EPUBAdapter(BaseDocumentAdapter):
+class EPUBInspectionAdapter(BaseDocumentAdapter):
     """EPUB inspection adapter: reads spine members into typed IR blocks."""
 
     output_suffixes = frozenset({".epub"})

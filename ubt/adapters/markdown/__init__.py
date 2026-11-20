@@ -1,5 +1,5 @@
 """Markdown and Flat Text Document Adapter."""
 
-from ubt.adapters.markdown.adapter import MarkdownAdapter
+from ubt.adapters.markdown.adapter import MarkdownInspectionAdapter
 
-__all__ = ["MarkdownAdapter"]
+__all__ = ["MarkdownInspectionAdapter"]

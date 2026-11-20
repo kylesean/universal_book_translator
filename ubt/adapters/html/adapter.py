@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 _MAX_HTML_BYTES = 64 * 1024 * 1024
 
 
-class HTMLAdapter(BaseDocumentAdapter):
+class HTMLInspectionAdapter(BaseDocumentAdapter):
     """Adapter for standalone HTML documents (.html/.htm) with DOM injection."""
 
     output_suffixes = frozenset({".html", ".htm"})

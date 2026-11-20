@@ -308,7 +308,7 @@ def test_the_native_reader_and_the_adapter_agree_on_the_spine() -> None:
     import tempfile
     import zipfile
 
-    from ubt.adapters.epub.adapter import EPUBAdapter
+    from ubt.adapters.epub.adapter import EPUBInspectionAdapter
     from ubt.analyze.reader_epub import read_epub, spine_chapters
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -317,7 +317,7 @@ def test_the_native_reader_and_the_adapter_agree_on_the_spine() -> None:
 
         with zipfile.ZipFile(path) as archive:
             shared = spine_chapters(archive, "OEBPS/content.opf")
-        manifest = asyncio.run(EPUBAdapter().extract_manifest(path))
+        manifest = asyncio.run(EPUBInspectionAdapter().extract_manifest(path))
         assert [c.source_file for c in manifest.chapters] == shared
         assert shared == ["OEBPS/ch1.xhtml", "OEBPS/ch2.xhtml"]
         assert not any("nav" in member for member in shared), "the nav document is not prose"

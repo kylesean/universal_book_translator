@@ -1,5 +1,5 @@
 """EPUB Bilingual Document Adapter."""
 
-from ubt.adapters.epub.adapter import EPUBAdapter
+from ubt.adapters.epub.adapter import EPUBInspectionAdapter
 
-__all__ = ["EPUBAdapter"]
+__all__ = ["EPUBInspectionAdapter"]
