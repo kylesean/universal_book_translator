@@ -331,7 +331,7 @@ def _trim_detached_bands(
     raw = grey.tobytes()
     # ``tobytes`` is one byte per pixel for mode "L" (row-major). A row counts
     # as inked when any pixel is darker than 200, the same threshold the rest of
-    # the visual gate uses for "ink" against a white page.
+    # the artifact gate uses for "ink" against a white page.
     rows = [min(raw[y * width : (y + 1) * width]) < 200 for y in range(grey.size[1])]
     if not any(rows) or all(rows):
         return image

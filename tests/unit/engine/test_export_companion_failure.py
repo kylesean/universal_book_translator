@@ -94,7 +94,7 @@ async def test_a_failed_complementary_render_is_recorded_and_the_job_completes(
         db_dir=tmp_path / "db",
         allowed_dirs=str(tmp_path),
         enable_pdf_optimization=False,
-        visual_gate_enabled=False,
+        artifact_gate_enabled=False,
         emit_xliff_companion=False,
         emit_html_companion=False,
         emit_epub_companion=False,

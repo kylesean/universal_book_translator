@@ -34,7 +34,7 @@ class AdapterArtifactServices:
             findings=(
                 ArtifactFinding(
                     severity="critical",
-                    code="visual_gate_crashed",
+                    code="artifact_gate_crashed",
                     message=message,
                 ),
             ),

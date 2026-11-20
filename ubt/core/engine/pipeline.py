@@ -920,7 +920,7 @@ class PipelineOrchestrator:
         """Fold this run's usage into the job's absolute ledger figure once.
 
         Shared by the progress-event path and the export-stage hook that persists
-        post-visual-gate spend before the report reads the ledger. The budget only
+        post-artifact-gate spend before the report reads the ledger. The budget only
         stops the job at the progress-event call site; the export event is let
         through so the artifact and report still say what the job spent.
         """
@@ -1396,7 +1396,7 @@ class PipelineOrchestrator:
         prep.manifest.run.adaptive_policy = adaptive_policy.to_dict()
 
         # One object carries the run's shared state into each stage, so a
-        # stage's signature says what is *its own* (the visual-gate knobs,
+        # stage's signature says what is *its own* (the artifact-gate knobs,
         # the repair-round cap) rather than restating ledger, job id,
         # languages, event factory and semaphore every time. The per-run
         # language-bound collaborators are built here rather than at the

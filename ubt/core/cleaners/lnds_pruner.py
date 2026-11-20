@@ -548,7 +548,7 @@ class LNDSPageCleaner:
 
 _WS_RE = re.compile(r"\s+")
 # IoU at/above which two same-text boxes are the same physical region. Set to
-# match the visual gate's overlap bar so a deduped pair can never re-surface as
+# match the artifact gate's overlap bar so a deduped pair can never re-surface as
 # a block_overlap finding.
 _DEDUP_IOU = 0.6
 
@@ -587,7 +587,7 @@ def dedup_duplicate_blocks(blocks: list[IRBlock]) -> list[IRBlock]:
     blocks with identical text and near-coincident boxes (arXiv 2609.20519
     page 1: ``(a) SoL-Pi: Scaling Auto-Research Loop`` extracted as both
     ``b0008`` and ``b0009``, IoU 0.95). The pair survives into the render as
-    two ``no_zone`` blocks whose boxes overlap, tripping the visual gate's
+    two ``no_zone`` blocks whose boxes overlap, tripping the artifact gate's
     ``block_overlap`` finding and cascading ``needs_human`` onto every block
     that shares the page. Requiring *identical normalized text* keeps
     legitimately overlapping-but-distinct content (a caption over an image, a

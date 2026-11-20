@@ -752,7 +752,7 @@ def _runtime_estimate(
             # pdfium fast reader (~0.05s/page + 1s init)
             local_overhead += 1.0 + pages * 0.05
 
-        # Visual gate & formula image crop overhead in high_fidelity preset
+        # Artifact gate & formula image crop overhead in high_fidelity preset
         if preset in ("high_fidelity", "vector_math"):
             local_overhead += pages * 0.5
 

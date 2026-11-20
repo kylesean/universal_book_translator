@@ -271,7 +271,7 @@ def _sample_pages(total: int, wanted: int = VISUAL_SAMPLE_PAGES) -> list[int]:
 
 
 def _render_page_png(pdf: Path, page_no: int, resolution: int = 110) -> bytes | None:
-    """Rasterise one page with the same pdf_oxide path the visual gate uses."""
+    """Rasterise one page with the same pdf_oxide path the artifact gate uses."""
     from ubt.adapters.pdf import oxide_render
 
     return oxide_render.render_page_png(pdf, page_no, dpi=resolution)

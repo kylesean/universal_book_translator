@@ -5,7 +5,7 @@ The entry (probe + route + shared ledger/TM/report contracts) is unified;
 the execution path is adaptive:
 
 - SHORT (<= ``UBTConfig.short_max_pages`` born-digital pages or token budget):
-  whole-chapter rewrite + reflow + full visual gate (Codex-style, 可读优先).
+  whole-chapter rewrite + reflow + full artifact gate (Codex-style, 可读优先).
 - LONG (everything else, always for scans and multi-chapter books): the staged
   block pipeline (``ubt.core.engine.plan.run_stages``).
 

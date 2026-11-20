@@ -9,7 +9,7 @@ while most of the book is untranslated.
 
 So every check here reads only the two files — the source and the artifact —
 with poppler subprocesses, and never imports pipeline modules. Findings use the
-visual gate's ``(severity, code, message)`` shape so the visual-gate loop can merge
+artifact gate's ``(severity, code, message)`` shape so the artifact-gate loop can merge
 them; ``target_language_absent`` is the one fail-closed code: an artifact
 containing none of the language it was commissioned in must not ship
 regardless of gate settings.

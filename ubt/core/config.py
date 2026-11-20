@@ -553,7 +553,7 @@ class QualityConfig(BaseModel):
     qe_judge_api_key: SecretStr | None = None
     qe_judge_api_mode: ApiMode | None = None
     qe_judge_sentences: bool = True
-    visual_gate_enabled: bool = True
+    artifact_gate_enabled: bool = True
     render_preflight_enabled: bool = True
     artifact_blocking_gate_enabled: bool = False
     deterministic_glossary_long_route: bool = False
@@ -1066,7 +1066,7 @@ class UBTConfig(BaseSettings):
     )
 
     # -- Post-render deterministic artifact gate ---------------------------------
-    visual_gate_enabled: bool = True
+    artifact_gate_enabled: bool = True
     # -- Spend-the-tokens gate (pre-flight render before Stage 3 bills) --
     # Compiles a source-text sample through the real PDF renderer so a broken
     # toolchain fails with zero tokens spent instead of at Stage 6 after the
@@ -1399,7 +1399,7 @@ class UBTConfig(BaseSettings):
     # -- Execution-mode router (unified entry, adaptive execution) --------------
     # 'auto' (default): decide() probes the PDF (pages/chars/scan) and routes
     #   <= short_max_pages born-digital pages to the short chain (whole-chapter
-    #   rewrite + reflow + full visual gate), everything else to the long
+    #   rewrite + reflow + full artifact gate), everything else to the long
     #   block pipeline (``ubt.core.engine.plan.run_stages`` is the authoritative
     #   stage list). 'short' / 'long' force one chain (short on a 300-page book
     #   raises a clear error instead of burning context).

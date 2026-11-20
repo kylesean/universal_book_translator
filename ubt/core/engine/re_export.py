@@ -377,7 +377,7 @@ async def re_export_job(
             subject="re-exporting to",
             remedy="Drop --output (the ledger's own path is kept) or choose a supported suffix.",
         )
-        # The zero-spend contract, enforced: the visual gate is driven by the
+        # The zero-spend contract, enforced: the artifact gate is driven by the
         # config bound on the ctx, and this path bills nothing (it binds no
         # usage sink), so a paid judge here would spend invisibly to every
         # budget surface.
@@ -413,7 +413,7 @@ async def re_export_job(
         services = _build_services(export_config, router, qe_runner, manifest)
         # Created before the ctx so the export stage's own boundary checks can
         # observe a reclaimed lease mid-render, not only at the two event
-        # boundaries (a whole-book render plus the visual gate routinely
+        # boundaries (a whole-book render plus the artifact gate routinely
         # outlives the default lease).
         lease_lost = asyncio.Event()
         ctx = StageContext(
@@ -432,7 +432,7 @@ async def re_export_job(
             lease_lost=lease_lost,
         )
         # Renew the lease for the life of the re-export. A whole-book Typst render
-        # plus the visual gate routinely outlives the default lease, and
+        # plus the artifact gate routinely outlives the default lease, and
         # without renewal another process may legally reclaim the job mid-render:
         # both then write the same ledger and the same output file, the later
         # writer silently winning. The live run has always renewed; a re-export

@@ -42,7 +42,7 @@ _FAIL_CLOSED = frozenset(
         "target_language_sparse",
         "text_not_searchable",
         "unreadable_pdf",
-        "visual_gate_crashed",
+        "artifact_gate_crashed",
     }
 )
 

@@ -76,7 +76,9 @@ class ArtifactVerifyLoop:
     ) -> tuple[Path, Path, Any]:
         """Run post-render visual verification and quarantine defective pages."""
         if self.cancel_token is not None and self.cancel_token.is_set():
-            raise JobInterruptedError(f"Job {self.job_id} cancelled before visual gate evaluation")
+            raise JobInterruptedError(
+                f"Job {self.job_id} cancelled before artifact gate evaluation"
+            )
         gate = await self._evaluate_gate(rendered_path, blocks)
 
         # If the gate reports major or critical findings, quarantine what each
@@ -144,7 +146,7 @@ class ArtifactVerifyLoop:
                     # that guessed "minor" would contradict the status the
                     # same loop just wrote.
                     flag = format_defect_flag(
-                        "visual_gate_failed", "major", ",".join(dict.fromkeys(codes))
+                        "artifact_gate_failed", "major", ",".join(dict.fromkeys(codes))
                     )
                     if flag not in b.error_flags:
                         b.error_flags.append(flag)

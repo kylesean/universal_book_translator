@@ -116,7 +116,7 @@ class StageContext:
     #: at render time rather than captured when the context was built.
     measure_run_usage: Callable[[], dict[str, dict[str, int]]] = lambda: {}
     #: Persist this run's usage to the ledger on demand. The export stage calls
-    #: it after the paid post-render visual gate so a report built from the
+    #: it after the paid post-render artifact gate so a report built from the
     #: ledger does not omit spend made after the last progress event. The
     #: callback may return the billed ``JobBill`` (the orchestrator's
     #: ``_bill_run`` does); the export stage ignores the return, so the field is

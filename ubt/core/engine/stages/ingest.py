@@ -560,7 +560,7 @@ async def run_ingest_stage(
             # Clean noise and monotonic page numbers across whole chapter
             cleaned_blocks = lnds_cleaner.clean_chapter_blocks(chapter.blocks)
             # Drop physically duplicated extraction fragments (same page,
-            # same text) before they trip the visual gate's overlap finding.
+            # same text) before they trip the artifact gate's overlap finding.
             cleaned_blocks = dedup_duplicate_blocks(cleaned_blocks)
             # Fuse cross-page fragmented tables into continuous-flow tables
             cleaned_blocks = stitch_multipage_tables(cleaned_blocks, drop_absorbed=True)

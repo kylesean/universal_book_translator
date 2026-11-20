@@ -5,7 +5,7 @@ bytes and extracts page text in-process, replacing the poppler ``pdftoppm``
 subprocess (a system binary plus a Popen attack surface) and the runtime
 ``pypdf`` text leg. Every entry point here is
 non-raising: render ``None`` means "no image", text ``""`` means "no text",
-so a faulty engine degrades the visual gates instead of crashing the run.
+so a faulty engine degrades the artifact gates instead of crashing the run.
 Structural reads (geometry, content-stream ops, resources) deliberately do
 NOT live here — see :mod:`ubt.adapters.pdf.pdf_struct` for why they stay on
 pikepdf.

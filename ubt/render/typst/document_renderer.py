@@ -811,7 +811,7 @@ _TABLE_TEXT_SCALE: str = "0.84"
 
 #: Floor for the computed shrink factor. A table whose columns cannot fit even
 #: here is too wide for the page at any readable size; it is laid out at the
-#: floor and the visual gate reports the overflow rather than hiding it. 0.60
+#: floor and the artifact gate reports the overflow rather than hiding it. 0.60
 #: gives a 6.3pt body -- small, but legible.
 _TABLE_MIN_TEXT_SCALE: float = 0.60
 
@@ -1877,7 +1877,7 @@ class TypstDocumentRenderer:
     def text_width_pt(self) -> float:
         """Body text width in points, for this template's page setup.
 
-        Public because the layout audit and the visual gate size their checks
+        Public because the layout audit and the artifact gate size their checks
         from it: three independent recomputations of "how wide is the text" is
         how the margins and the audit end up disagreeing.
         """

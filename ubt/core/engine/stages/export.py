@@ -2,7 +2,7 @@
 
 Everything that can only be judged against the finished artifact happens here —
 integrity guards on the text about to be written, the render-quality and skip
-flags recorded back onto the blocks, the paid post-render visual gate, and the
+flags recorded back onto the blocks, the paid post-render artifact gate, and the
 usage billing the report reads — so a run is never declared complete on
 evidence collected before the render existed.
 """
@@ -679,7 +679,7 @@ def _faithful_expected_pages(ctx: StageContext, rendered_path: Path | None = Non
     A ``--pages`` run promises the *slice*, not the whole document: a 5-page
     delivery of pages 1-5 is a complete 1:1 lock. Comparing it with the source's
     32 pages reported ``page_count_changed_faithful`` on every sliced run. The
-    delivery contract already made this distinction; the visual gate repeats it
+    delivery contract already made this distinction; the artifact gate repeats it
     here, and only when the artifact really holds exactly the requested pages.
     """
     if not _is_faithful_delivery(ctx):
@@ -687,7 +687,7 @@ def _faithful_expected_pages(ctx: StageContext, rendered_path: Path | None = Non
     try:
         count = pdf_page_count(ctx.input_path)
     except Exception as exc:  # noqa: BLE001 - an unmeasured contract is stated as unmeasured
-        logger.debug("Visual gate: source page count unavailable for %s: %s", ctx.input_path, exc)
+        logger.debug("Artifact gate: source page count unavailable for %s: %s", ctx.input_path, exc)
         return None
     selected = ctx.config.get_selected_pages()
     if selected and rendered_path is not None and rendered_path.exists():
@@ -709,7 +709,7 @@ async def _run_artifact_gate(
     *,
     claims_finality: bool = True,
 ) -> tuple[Path, Path | None, Any]:
-    """Post-render visual gate; never fatal except on cancel.
+    """Post-render artifact gate; never fatal except on cancel.
 
     T0/T1 deterministic checks + optional pixel confirmation + sampled T2
     VLM + ArtifactVerifyLoop, all driven by the config bound on ``ctx``.
@@ -718,7 +718,7 @@ async def _run_artifact_gate(
     """
     gate: Any = None
     artifact_report_path: Path | None = None
-    if not ctx.config.visual_gate_enabled or rendered_path.suffix.lower() != ".pdf":
+    if not ctx.config.artifact_gate_enabled or rendered_path.suffix.lower() != ".pdf":
         return rendered_path, artifact_report_path, gate
     try:
         from ubt.core.engine.artifact_verify_loop import ArtifactVerifyLoop
@@ -741,25 +741,25 @@ async def _run_artifact_gate(
         bad = [f for f in gate.findings if getattr(f, "severity", "") in ("major", "critical")]
         if bad:
             logger.warning(
-                "Visual gate for job %s: %d warning(s), see %s",
+                "Artifact gate for job %s: %d warning(s), see %s",
                 ctx.job_id,
                 len(bad),
                 artifact_report_path,
             )
         elif gate.skipped_reason:
-            logger.info("Visual gate for job %s skipped: %s", ctx.job_id, gate.skipped_reason)
+            logger.info("Artifact gate for job %s skipped: %s", ctx.job_id, gate.skipped_reason)
     except (JobInterruptedError, LedgerWriterLeaseLostError, BudgetExceededError):
         # Cooperative cancellation, lost writer lease, or hard budget exhaustion
         # must propagate directly to the pipeline handler, not be downgraded into
         # a non-fatal gate crash.
         raise
     except Exception as exc:
-        logger.warning("Visual gate failed (non-fatal) for job %s: %s", ctx.job_id, exc)
+        logger.warning("Artifact gate failed (non-fatal) for job %s: %s", ctx.job_id, exc)
         # A crashed gate must read as failed, not absent: blocking enforcement
         # and the KPI collector both key off this object, and None silently
         # skipped every rejection layer while metrics recorded a perfect pass.
         gate = crashed_artifact_gate_result(
-            f"visual gate did not complete: {type(exc).__name__}: {exc}"[:300]
+            f"artifact gate did not complete: {type(exc).__name__}: {exc}"[:300]
         )
         artifact_report_path = await _persist_crashed_gate_report(ctx, rendered_path, gate)
     return rendered_path, artifact_report_path, gate
@@ -772,7 +772,7 @@ async def _persist_crashed_gate_report(
 ) -> Path | None:
     """Write the crash gate where a live run would have written its report.
 
-    The crash reason rides in the gate's ``visual_gate_crashed`` finding, so the
+    The crash reason rides in the gate's ``artifact_gate_crashed`` finding, so the
     report needs no separate field for it. The sidecar, the ledger record and
     the KPI collector all read this state; best-effort only, the caller is
     already inside the failure path.
@@ -1984,7 +1984,7 @@ async def run_export_stage(
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
     # NOTE: the run's usage snapshot is deliberately taken at the very end of
-    # this stage, not here. The post-render visual gate below makes its own paid
+    # this stage, not here. The post-render artifact gate below makes its own paid
     # VLM calls; capturing before it left that spend out of the quality report,
     # so the report disagreed with the bill the job carries. The pipeline lets
     # the final event through the budget check on purpose ("so the artifact and
@@ -2282,7 +2282,7 @@ async def run_export_stage(
     # Page geometry: what the renderer measured off the source and what it
     # actually delivered, per page. Persisted because this fact existed only
     # inside the build until now, so "why is page 12 at 7.5pt" became
-    # unanswerable once the process exited — and the QA report, the visual gate
+    # unanswerable once the process exited — and the QA report, the artifact gate
     # and the operator all ask that question about a shipped artifact.
     #
     # Written from the adapter's side channel rather than re-measured: the
@@ -2312,7 +2312,7 @@ async def run_export_stage(
             )
 
     # The two artifact identities (requested target vs returned file, which the
-    # visual gate may have rewritten) named once, where the render returns.
+    # artifact gate may have rewritten) named once, where the render returns.
     from ubt.core.job_options import delivered_artifact
 
     artifact = delivered_artifact(rendered_path, target_output)
@@ -2386,7 +2386,7 @@ async def run_export_stage(
                 ctx.manifest.metadata["companion_artifacts"] = companion_summary_dict
 
     # Persist this run's spend to the ledger before the report reads it: the
-    # visual gate and complementary render above made paid calls after the last
+    # artifact gate and complementary render above made paid calls after the last
     # progress event, so the ledger's lifetime figure would otherwise omit them
     # (the terminal event is the one the budget check exempts).
     await ctx.bill_run_usage()
@@ -2567,7 +2567,7 @@ async def run_export_stage(
     )
 
     # Mark the delivered files as current. Recorded here — after the primary
-    # artifact, every companion, the visual gate's possible rewrite and the
+    # artifact, every companion, the artifact gate's possible rewrite and the
     # table appendix are all on disk — so a render that raised above leaves the
     # previous digest in place and the job still reads stale. The download
     # endpoint refuses a stale delivery, and a human edit is precisely what
@@ -2578,7 +2578,7 @@ async def run_export_stage(
     # (finalize, then digest) left a window where the job read ``completed``
     # with no digest, and a missing digest is the one state the freshness check
     # has to treat as "not stale".
-    # The last cooperative boundary before the terminal write. The visual gate
+    # The last cooperative boundary before the terminal write. The artifact gate
     # checks once after its own run, but a lease reclaimed during the companion
     # render, report writing or blocking-gate enforcement would otherwise let
     # the old owner stamp ``completed`` over the new owner's ledger.

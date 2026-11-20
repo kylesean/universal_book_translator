@@ -19,7 +19,7 @@ renderer.
 Two rules are load-bearing:
 
 * **Unmeasured is not clean.** A check that could not run reports
-  ``*_unmeasured``; silence is never a pass. The old visual gate's
+  ``*_unmeasured``; silence is never a pass. The old artifact gate's
   ``passed: true`` on pages it never sampled is the failure this rule prevents.
 * **A clipped block is not a smaller block.** ``clip: true`` stops ink from
   painting outside its box, which is correct, but the text that did not fit is
@@ -59,7 +59,7 @@ _OVERLAP_RATIO = 0.15
 #: establish a collision, and including them turns every formula page red.
 _MIN_OVERLAP_AREA_PT2 = 40.0
 
-#: Page-edge tolerance, matching the visual gate's own allowance.
+#: Page-edge tolerance, matching the artifact gate's own allowance.
 _OUT_OF_BOUNDS_TOLERANCE_PT = 1.0
 
 #: Style drift tolerance: the body group's p5–p95 spread must stay within 0.5pt.
@@ -489,7 +489,7 @@ def _style_findings(evidence: ContractEvidence) -> list[ContractFinding]:
         # cloned body group. Its pages legitimately differ (a reference list or
         # a caption-only figure page is not a body-size defect), and auditing
         # them as one group blocked real deliveries. Type legibility is the
-        # visual gate's job; the style group belongs to ``faithful``.
+        # artifact gate's job; the style group belongs to ``faithful``.
         return []
     if evidence.style_preserves_source:
         # Native faithful keeps each block's source size. The source may

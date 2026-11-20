@@ -1049,14 +1049,14 @@ class LedgerJobsMixin(_LedgerHost):
             conn.execute("COMMIT;")
 
     def record_artifact_report(self, job_id: str, report: dict[str, Any]) -> None:
-        """Persist visual gate results into job_meta.metadata_json."""
+        """Persist artifact gate results into job_meta.metadata_json."""
         # One writer per metadata key: go through set_job_metadata_value, which
         # reads and writes inside BEGIN IMMEDIATE (reading the preimage outside
         # its own transaction is the lost-update shape that guard prevents).
         self.set_job_metadata_value(job_id, "artifact_report", report)
 
     def get_artifact_report(self, job_id: str) -> dict[str, Any] | None:
-        """Retrieve visual gate report from job_meta.metadata_json if present."""
+        """Retrieve artifact gate report from job_meta.metadata_json if present."""
         with self._get_conn() as conn:
             actual_id = self._resolve_actual_job_id(conn, job_id)
             cursor = conn.execute(
@@ -1119,7 +1119,7 @@ class LedgerJobsMixin(_LedgerHost):
         with self._get_conn() as conn:
             actual_id = self._resolve_actual_job_id(conn, job_id)
             conn.execute("BEGIN IMMEDIATE;")
-            # Page geometry is recorded after the visual gate, long after the
+            # Page geometry is recorded after the artifact gate, long after the
             # render; a stale owner must not overwrite the successor's audit.
             self.assert_writer_owner(conn)
             try:

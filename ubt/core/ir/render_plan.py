@@ -3,7 +3,7 @@
 ``RenderPlan`` is what the advisories decide about *this run's* render: the mode,
 the chrome/cover treatment, and whether a companion artifact was requested. It
 is a value the plan owns and hands to the stage that acts on it; the renderer,
-the export stage and the visual gate read it as an argument rather than from the
+the export stage and the artifact gate read it as an argument rather than from the
 run manifest.
 
 There is no render-engine field: every PDF is rebuilt from the semantic IR by
