@@ -54,9 +54,7 @@ def _preview_media_type(path: Path, registered: str) -> str:
     return _INLINE_SUFFIX_TYPES.get(path.suffix.lower(), registered)
 
 
-#: Effective modes that still satisfy an explicit ``faithful`` request. The
-#: planner maps ``faithful`` onto the legacy ``facsimile`` renderer, so a
-#: non-degraded run reports either name depending on which layer wrote the key.
+#: Effective modes that still satisfy an explicit ``faithful`` request.
 _FAITHFUL_EFFECTIVE_MODES: frozenset[str] = frozenset({"faithful"})
 
 #: Fallback copy for a console that does not know a code. The console localizes
@@ -201,7 +199,7 @@ def _delivery_report(meta: dict[str, Any]) -> dict[str, Any]:
 #:
 #: Everything else in :data:`DELIVERABLE_LABELS` is an audit or handoff
 #: artifact (the quality report, the delivery contract, the XLIFF, the run
-#: metrics, the visual report). Those stay downloadable from a blocked job on
+#: metrics, the artifact report). Those stay downloadable from a blocked job on
 #: purpose: they are the only way an operator can find out *why* it was
 #: blocked, and refusing them would turn a recoverable refusal into a dead end.
 _READER_FACING_DELIVERABLES = frozenset({"primary", "secondary", "epub"})
@@ -383,12 +381,12 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
         if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):
             raise cross_tenant_404(valid_id)
         record = manager.get_job(valid_id)
-        vis_file = record.progress.artifact_report_file if record else None
-        if not vis_file:
-            vis_file = await _artifact_path_async(valid_id, "artifact_report_file")
-        if vis_file:
+        report_file = record.progress.artifact_report_file if record else None
+        if not report_file:
+            report_file = await _artifact_path_async(valid_id, "artifact_report_file")
+        if report_file:
             try:
-                vis_path = resolve_secure_path(vis_file, must_exist=True, config=app_config)
+                report_path = resolve_secure_path(report_file, must_exist=True, config=app_config)
             except HTTPException:
                 # ``resolve_secure_path`` signals a rejected or missing path with
                 # HTTPException, not ValueError/FileNotFoundError — catching the
@@ -396,19 +394,20 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
                 # the report that is actually persisted) was unreachable.
                 pass
             else:
-                if vis_path.exists():
+                if report_path.exists():
                     try:
-                        content = await asyncio.to_thread(vis_path.read_text, encoding="utf-8")
-                        visual_data: dict[str, Any] = json.loads(content)
-                        return JSONResponse(content=visual_data)
+                        content = await asyncio.to_thread(report_path.read_text, encoding="utf-8")
+                        artifact_data: dict[str, Any] = json.loads(content)
+                        return JSONResponse(content=artifact_data)
                     except Exception as exc:
                         logger.exception(
-                            "Failed to parse visual report JSON for job %s: %s", valid_id, exc
+                            "Failed to parse artifact report JSON for job %s: %s", valid_id, exc
                         )
                         raise HTTPException(
                             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail=(
-                                f"Error reading visual report; see server logs (job_id={valid_id})."
+                                f"Error reading artifact report; see server logs "
+                                f"(job_id={valid_id})."
                             ),
                         ) from exc
 
@@ -425,12 +424,12 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
                     return JSONResponse(content=snap_report)
             except Exception as exc:
                 logger.exception(
-                    "Failed to query visual report from ledger for job %s: %s", valid_id, exc
+                    "Failed to query artifact report from ledger for job %s: %s", valid_id, exc
                 )
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=(
-                        "Database error reading visual report; see server logs "
+                        "Database error reading artifact report; see server logs "
                         f"(job_id={valid_id})."
                     ),
                 ) from exc
@@ -439,7 +438,7 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
             raise HTTPException(status_code=404, detail=f"Job not found: {valid_id}")
         raise HTTPException(
             status_code=400,
-            detail="Visual report is not yet generated or available.",
+            detail="Artifact report is not yet generated or available.",
         )
 
     @api_app.get(
