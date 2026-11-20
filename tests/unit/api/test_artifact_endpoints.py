@@ -57,7 +57,15 @@ def _seed_job(config: UBTConfig, tmp_path: Path, *, blocked_human_blocks: int = 
     report.write_text(report_data, encoding="utf-8")
     sidecar_path(out, "quality_report.json").write_text(report_data, encoding="utf-8")
     visual = tmp_path / "out_artifact_report.json"
-    visual_data = json.dumps({"findings": [], "total_pages": 3})
+    visual_data = json.dumps(
+        {
+            "passed": True,
+            "skipped_reason": None,
+            "stats": {"total_pages": 3},
+            "sampled_pages": [1, 2, 3],
+            "findings": [],
+        }
+    )
     visual.write_text(visual_data, encoding="utf-8")
     sidecar_path(out, "artifact_report.json").write_text(visual_data, encoding="utf-8")
 
@@ -137,14 +145,17 @@ def test_a_corrupt_report_is_a_readable_400_not_a_crash(tmp_path: Path) -> None:
     assert res.status_code == 400
 
 
-def test_the_artifact_report_is_served_verbatim(tmp_path: Path) -> None:
+def test_the_artifact_report_matches_the_published_schema(tmp_path: Path) -> None:
     config = _config(tmp_path)
     _seed_job(config, tmp_path)
     client = TestClient(create_app(config))
 
     res = client.get(f"/jobs/{_JOB}/artifact-report", headers=_AUTH)
     assert res.status_code == 200
-    assert res.json()["total_pages"] == 3
+    body = res.json()
+    assert body["passed"] is True
+    assert body["sampled_pages"] == [1, 2, 3]
+    assert body["stats"]["total_pages"] == 3
 
 
 def test_deliverables_list_what_exists_on_disk(tmp_path: Path) -> None:
@@ -474,3 +485,18 @@ def test_a_job_with_no_report_is_not_treated_as_blocked(tmp_path: Path) -> None:
     body = client.get(f"/jobs/{_JOB}/deliverables", headers=_AUTH).json()
     assert body["delivery_verdict"] is None
     assert client.get(f"/jobs/{_JOB}/download/primary", headers=_AUTH).status_code == 200
+
+
+def test_the_gate_payload_validates_against_the_published_schema() -> None:
+    from ubt.adapters.pdf.artifact_gate import ArtifactFinding, ArtifactGateResult
+    from ubt.api.models import ArtifactReportResponse
+
+    payload = ArtifactGateResult(
+        passed=False,
+        findings=(ArtifactFinding("major", "blank_page", "blank", page=2),),
+        sampled_pages=(1, 2),
+        stats={"total_pages": 2},
+    ).report_payload()
+    parsed = ArtifactReportResponse.model_validate(payload)
+    assert parsed.findings[0].page == 2
+    assert parsed.stats["total_pages"] == 2

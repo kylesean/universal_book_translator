@@ -20,7 +20,7 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, status
 from fastapi.responses import FileResponse, JSONResponse
 
-from ubt.api.models import DeliverableListResponse
+from ubt.api.models import ArtifactReportResponse, DeliverableListResponse
 from ubt.api.routes.shared import (
     DELIVERABLE_LABELS,
     cross_tenant_404,
@@ -372,11 +372,12 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
 
     @api_app.get(
         "/jobs/{job_id}/artifact-report",
+        response_model=ArtifactReportResponse,
         tags=["Jobs"],
     )
     async def get_artifact_report(
         job_id: str, x_ubt_tenant: str | None = Header(default=None)
-    ) -> JSONResponse:
+    ) -> ArtifactReportResponse:
         valid_id = validate_job_id(job_id)
         if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):
             raise cross_tenant_404(valid_id)
@@ -397,8 +398,7 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
                 if report_path.exists():
                     try:
                         content = await asyncio.to_thread(report_path.read_text, encoding="utf-8")
-                        artifact_data: dict[str, Any] = json.loads(content)
-                        return JSONResponse(content=artifact_data)
+                        return ArtifactReportResponse.model_validate_json(content)
                     except Exception as exc:
                         logger.exception(
                             "Failed to parse artifact report JSON for job %s: %s", valid_id, exc
@@ -421,7 +421,7 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
 
                 snap_report = await asyncio.to_thread(_fetch_artifact_report)
                 if snap_report is not None:
-                    return JSONResponse(content=snap_report)
+                    return ArtifactReportResponse.model_validate(snap_report)
             except Exception as exc:
                 logger.exception(
                     "Failed to query artifact report from ledger for job %s: %s", valid_id, exc

@@ -207,6 +207,25 @@ class AssessWarning(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+class ArtifactFindingResponse(BaseModel):
+    """One deterministic artifact-gate finding."""
+
+    severity: Literal["info", "major", "critical"]
+    code: str
+    message: str
+    page: int | None = None
+
+
+class ArtifactReportResponse(BaseModel):
+    """The on-disk ``artifact_report.json``, as the REST surface publishes it."""
+
+    passed: bool
+    skipped_reason: str | None = None
+    stats: dict[str, str | int | float] = Field(default_factory=dict)
+    sampled_pages: list[int] = Field(default_factory=list)
+    findings: list[ArtifactFindingResponse] = Field(default_factory=list)
+
+
 class JobAssessResponse(BaseModel):
     """The full pre-flight assessment report."""
 

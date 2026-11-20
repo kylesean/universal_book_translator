@@ -612,6 +612,20 @@ def test_the_tenant_header_is_honored_when_the_operator_trusts_it(tmp_path: Path
     assert scope.tenant_allows("otherjob0001", scope.tenant_from_header("victim")) is True
 
 
+def test_the_console_reads_the_artifact_report_schema_not_retired_tiers() -> None:
+    source = _REPO_ROOT / "web" / "src" / "views" / "quality-gate" / "QualityGateView.tsx"
+    text = source.read_text(encoding="utf-8")
+    for key in (
+        "visual?.passed",
+        "visual?.findings",
+        "visual?.sampled_pages",
+        "visual?.skipped_reason",
+    ):
+        assert key in text, f"QualityGateView no longer reads {key}"
+    for retired in ("tiers_ran", "tiers_skipped", "skip_codes", "vlm_pages"):
+        assert retired not in text, f"QualityGateView still reads retired key {retired}"
+
+
 def test_the_wizard_offers_exactly_the_engine_presets() -> None:
     from ubt.core.presets import Preset
 

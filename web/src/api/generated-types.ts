@@ -1079,6 +1079,41 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * ArtifactFindingResponse
+         * @description One deterministic artifact-gate finding.
+         */
+        ArtifactFindingResponse: {
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "major" | "critical";
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Page */
+            page?: number | null;
+        };
+        /**
+         * ArtifactReportResponse
+         * @description The on-disk ``artifact_report.json``, as the REST surface publishes it.
+         */
+        ArtifactReportResponse: {
+            /** Passed */
+            passed: boolean;
+            /** Skipped Reason */
+            skipped_reason?: string | null;
+            /** Stats */
+            stats?: {
+                [key: string]: string | number;
+            };
+            /** Sampled Pages */
+            sampled_pages?: number[];
+            /** Findings */
+            findings?: components["schemas"]["ArtifactFindingResponse"][];
+        };
+        /**
          * AssessCost
          * @description The cost quote, split by component so the UI can show the drivers.
          */
@@ -3780,7 +3815,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ArtifactReportResponse"];
                 };
             };
             /** @description Validation Error */

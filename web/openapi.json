@@ -2107,7 +2107,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactReportResponse"
+                }
               }
             }
           },
@@ -4405,6 +4407,102 @@
   },
   "components": {
     "schemas": {
+      "ArtifactFindingResponse": {
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "major",
+              "critical"
+            ],
+            "title": "Severity"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          }
+        },
+        "type": "object",
+        "required": [
+          "severity",
+          "code",
+          "message"
+        ],
+        "title": "ArtifactFindingResponse",
+        "description": "One deterministic artifact-gate finding."
+      },
+      "ArtifactReportResponse": {
+        "properties": {
+          "passed": {
+            "type": "boolean",
+            "title": "Passed"
+          },
+          "skipped_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skipped Reason"
+          },
+          "stats": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Stats"
+          },
+          "sampled_pages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Sampled Pages"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactFindingResponse"
+            },
+            "type": "array",
+            "title": "Findings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "passed"
+        ],
+        "title": "ArtifactReportResponse",
+        "description": "The on-disk ``artifact_report.json``, as the REST surface publishes it."
+      },
       "AssessCost": {
         "properties": {
           "draft_model": {
