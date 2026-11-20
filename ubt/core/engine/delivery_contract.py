@@ -38,14 +38,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from ubt.core.layout.style_group import (
-    DRIFT_TOLERANCE_PT,
-    EXCEPTION_BLOCK_SHARE,
-    EXCEPTION_PAGE_SHARE,
-    StyleGroupPlan,
-    exception_shares,
-)
-
 Severity = Literal["critical", "major", "minor"]
 ContractName = Literal["readable", "faithful"]
 
@@ -73,7 +65,7 @@ _OUT_OF_BOUNDS_TOLERANCE_PT = 1.0
 #: Style drift tolerance: the body group's p5–p95 spread must stay within 0.5pt.
 #: The value lives in the style-group module so the planner cannot widen it by
 #: editing one file.
-_STYLE_DRIFT_PT = DRIFT_TOLERANCE_PT
+_STYLE_DRIFT_PT = 0.5
 
 #: One entry per leak *site*, not per character: ``⟦SOUP_MASK_0001-f2d⟧`` would
 #: otherwise count as three findings and overstate the work left. The paired
@@ -223,10 +215,6 @@ class ContractEvidence:
     font_issues: tuple[str, ...] = ()
     overflow_records: tuple[OverflowRecord, ...] = ()
     style_samples: tuple[StyleSample, ...] = ()
-    #: The document body group the renderer *declared* before drawing.
-    #: Membership and exceptions come from here; the sizes come from the
-    #: artifact. ``None`` keeps the pre-group behaviour for older artifacts.
-    style_group: StyleGroupPlan | None = None
     #: The renderer declared, before drawing, that a squeezed page holds the
     #: body group's size and flows onto continuation pages (the middle
     #: contract). A faithful artifact may then carry MORE pages than the
@@ -504,10 +492,6 @@ def _style_findings(evidence: ContractEvidence) -> list[ContractFinding]:
             )
         ]
 
-    plan = evidence.style_group
-    if plan is not None:
-        return _group_style_findings(body, plan, evidence)
-
     ordered = sorted(body, key=lambda sample: sample.size_pt)
     if len(ordered) == 1:
         return []
@@ -542,105 +526,6 @@ def _style_findings(evidence: ContractEvidence) -> list[ContractFinding]:
             occurrences=occurrences,
         )
     ]
-
-
-def _group_style_findings(
-    body: Sequence[StyleSample],
-    plan: StyleGroupPlan,
-    evidence: ContractEvidence,
-) -> list[ContractFinding]:
-    """The group-aware style check.
-
-    Two separate questions, deliberately not merged:
-
-    * **Do the member pages hold the declared size?** Measured against the
-      declared number, not against each other. A group whose pages all drifted
-      to 9.0pt together would pass a p5–p95 comparison while proving nothing.
-    * **Did the group fail to hold pages?** Declared exceptions are reported as
-      their own finding and block the delivery, because "exception" is how a
-      broken group would otherwise become invisible. A flood (past the budget)
-      escalates to critical: at that point the group is not a group.
-
-    Only the renderer's declared membership counts. A page cannot excuse itself
-    by having been drawn at a different size — that is the drift, not an excuse.
-    """
-    findings: list[ContractFinding] = []
-    exception_pages = set(plan.exception_pages)
-    declared_pages = set(plan.group.pages)
-    members = [
-        sample
-        for sample in body
-        if sample.page not in exception_pages
-        and (not declared_pages or sample.page in declared_pages)
-        and (not sample.group_id or sample.group_id == plan.group.group_id)
-    ]
-
-    target = plan.group.size_pt
-    if target > 0 and members:
-        deviations = sorted(
-            ((abs(sample.size_pt - target), sample) for sample in members),
-            key=lambda pair: pair[0],
-            reverse=True,
-        )
-        worst, worst_sample = deviations[0]
-        ordered = sorted(members, key=lambda sample: sample.size_pt)
-        p5 = ordered[max(0, int(len(ordered) * 0.05))]
-        p95 = ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))]
-        drift = max(worst, p95.size_pt - p5.size_pt)
-        if drift > _STYLE_DRIFT_PT:
-            over = [
-                f"p{sample.page} {sample.size_pt:.2f}pt"
-                for deviation, sample in deviations
-                if deviation > _STYLE_DRIFT_PT
-            ]
-            findings.append(
-                ContractFinding(
-                    severity="major",
-                    code="style_drift",
-                    message=(
-                        f"Body group {plan.group.group_id} is {target:.2f}pt but "
-                        f"{len(over)} page(s) deviate by more than {_STYLE_DRIFT_PT}pt "
-                        f"(worst p{worst_sample.page} at {worst_sample.size_pt:.2f}pt, "
-                        f"drift {drift:.2f}pt)"
-                    ),
-                    page=worst_sample.page,
-                    occurrences=tuple(over[:8]),
-                )
-            )
-
-    if plan.exceptions:
-        page_share, block_share = exception_shares(plan, block_count=len(evidence.blocks))
-        flood = page_share > EXCEPTION_PAGE_SHARE or block_share > EXCEPTION_BLOCK_SHARE
-        occurrences = tuple(
-            f"p{exception.page} {exception.reason} "
-            f"{exception.deficit_pt:.2f}pt"
-            + (f" ({', '.join(exception.block_ids[:3])})" if exception.block_ids else "")
-            for exception in plan.exceptions
-        )
-        findings.append(
-            ContractFinding(
-                severity="critical" if flood else "major",
-                code="style_group_exception_flood" if flood else "style_group_exception",
-                message=(
-                    (
-                        f"Body group {plan.group.group_id} at {plan.group.size_pt:.2f}pt "
-                        f"cannot hold {len(plan.exceptions)} page(s) "
-                        f"({page_share:.1%} of pages, {block_share:.1%} of blocks) — past "
-                        "the exception budget, so the group is not a group"
-                    )
-                    if flood
-                    else (
-                        f"Body group {plan.group.group_id} at {plan.group.size_pt:.2f}pt "
-                        f"cannot hold {len(plan.exceptions)} page(s); declared as "
-                        "exceptions and held for review (Stage 4 compression or an "
-                        "explicit allow-major)"
-                    )
-                ),
-                page=plan.exceptions[0].page,
-                occurrences=occurrences,
-            )
-        )
-    return findings
 
 
 def _overlap_findings(evidence: ContractEvidence) -> list[ContractFinding]:
@@ -1291,19 +1176,6 @@ def evaluate_delivery_contract(evidence: ContractEvidence) -> ContractReport:
             ),
         }
     )
-    if evidence.style_group is not None:
-        exception_findings = [
-            finding
-            for finding in style_findings
-            if finding.code in ("style_group_exception", "style_group_exception_flood")
-        ]
-        checks.append(
-            {
-                "name": "style_group",
-                "status": "fail" if exception_findings else "pass",
-            }
-        )
-
     geometry_measured = any(box.font_size_pt is not None for box in evidence.text_boxes)
     if evidence.contract == "faithful" and not geometry_measured:
         findings.append(

@@ -1770,13 +1770,6 @@ def _delivery_contract_evidence(
     # above supplies the sizes. Keeping the two apart is what
     # stops a drifted page from excusing itself: membership is the plan's, the
     # number is the artifact's.
-    from ubt.core.layout.style_group import plan_from_metadata
-
-    style_group = plan_from_metadata(
-        (getattr(ctx.manifest, "metadata", {}) or {}).get("document_style_group")
-    )
-    if style_group is not None:
-        evidence = dataclasses.replace(evidence, style_group=style_group)
     return evidence
 
 

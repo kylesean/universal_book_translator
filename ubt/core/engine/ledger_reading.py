@@ -55,7 +55,6 @@ _ARTIFACT_METADATA_KEYS = frozenset(
         "page_count",
         "confirmed_font_damage_pages",
         "font_damage_pages",
-        "document_style_group",
         "document_style_profile",
     }
 )
