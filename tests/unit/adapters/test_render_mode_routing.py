@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from ubt.adapters.pdf.docling_adapter import ScanPDFAdapter
+from ubt.adapters.pdf.docling_adapter import ScanPDFToTypstCodec
 from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
 from ubt.core.engine.adapter_runtime import AdapterRuntimeConfig
 from ubt.core.ir.models import BlockType, BookManifest, IRBlock, make_element
@@ -75,7 +75,7 @@ def test_a_pdf_target_always_reaches_the_reflow_renderer(
 
 
 def test_the_adapter_exposes_no_render_mode_knob() -> None:
-    adapter = ScanPDFAdapter()
+    adapter = ScanPDFToTypstCodec()
     assert not hasattr(adapter, "render_mode")
     adapter.apply_config(_runtime_config())
     assert not hasattr(adapter, "render_mode")

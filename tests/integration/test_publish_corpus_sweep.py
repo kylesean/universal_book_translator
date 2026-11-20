@@ -47,7 +47,7 @@ def test_the_gold_corpus_is_present() -> None:
 def test_a_real_document_extracts_and_publishes(case_id: str, tmp_path: Path) -> None:
     asyncio = pytest.importorskip("asyncio")
 
-    from ubt.adapters.pdf.docling_adapter import ScanPDFAdapter
+    from ubt.adapters.pdf.docling_adapter import ScanPDFToTypstCodec
     from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
     from ubt.core.ir.models import BookManifest, IRBlock
     from ubt.render.typst.document_renderer import TypstDocumentRenderer
@@ -55,7 +55,7 @@ def test_a_real_document_extracts_and_publishes(case_id: str, tmp_path: Path) ->
     pdf = DOCS / f"{case_id}.pdf"
 
     async def _extract() -> list[IRBlock]:
-        adapter = ScanPDFAdapter()
+        adapter = ScanPDFToTypstCodec()
         blocks: list[IRBlock] = []
         async for chapter in adapter.parse_stream(pdf):
             blocks.extend(chapter.blocks)

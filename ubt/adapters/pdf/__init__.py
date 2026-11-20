@@ -3,11 +3,11 @@
 100% permissively licensed (MIT / Apache-2.0 / BSD-3) production-grade PDF processing.
 """
 
-from ubt.adapters.pdf.docling_adapter import ScanPDFAdapter
+from ubt.adapters.pdf.docling_adapter import ScanPDFToTypstCodec
 from ubt.adapters.pdf.page_chunking import compute_pdf_page_chunks, get_pdf_page_chunk_size
 
 __all__ = [
-    "ScanPDFAdapter",
+    "ScanPDFToTypstCodec",
     "compute_pdf_page_chunks",
     "get_pdf_page_chunk_size",
 ]

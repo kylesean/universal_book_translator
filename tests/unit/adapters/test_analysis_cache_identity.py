@@ -45,10 +45,10 @@ def test_the_docling_cache_dir_is_under_the_shared_cache_root() -> None:
 def test_a_requested_enrichment_is_not_served_from_the_block_cache(tmp_path: Path) -> None:
     from unittest.mock import patch
 
-    from ubt.adapters.pdf.docling_adapter import ScanPDFAdapter
+    from ubt.adapters.pdf.docling_adapter import ScanPDFToTypstCodec
     from ubt.core.engine.adapter_runtime import AdapterRuntimeConfig
 
-    adapter = ScanPDFAdapter()
+    adapter = ScanPDFToTypstCodec()
     adapter.apply_config(
         AdapterRuntimeConfig(
             ocr_mode="off",

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from ubt.adapters.pdf.docling_adapter import ScanPDFAdapter
+from ubt.adapters.pdf.docling_adapter import ScanPDFToTypstCodec
 from ubt.adapters.pdf.page_chunking import (
     compute_pdf_page_chunks,
     get_pdf_page_chunk_size,
@@ -143,7 +143,7 @@ async def test_docling_adapter_out_of_core_streaming(tmp_path: Path) -> None:
     dummy_pdf = tmp_path / "long_manual.pdf"
     dummy_pdf.write_bytes(b"%PDF-dummy")
 
-    adapter = ScanPDFAdapter()
+    adapter = ScanPDFToTypstCodec()
 
     manifest = BookManifest(
         doc_id="docling_doc_789",

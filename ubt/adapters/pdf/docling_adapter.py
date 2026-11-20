@@ -316,7 +316,7 @@ class _PDFRenderStackMixin:
             self._evict_after_chunk(blocks, chapter_ir)
 
 
-class ScanPDFAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
+class ScanPDFToTypstCodec(_PDFRenderStackMixin, BasePDFEngineAdapter):
     """PDF engine adapter: IBM Docling semantic ingestion with Typst/oxide delivery."""
 
     #: Content-addressed analyze cache (content-addressed cache layer), set in apply_config.

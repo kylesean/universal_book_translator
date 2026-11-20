@@ -247,7 +247,7 @@ class PDFiumAdapter(_PDFRenderStackMixin, BasePDFEngineAdapter):
     ) -> list[IRBlock]:
         """Typed extraction through the native reader."""
         # No analyze cache here: ``analysis_cache`` is assigned only by
-        # ``ScanPDFAdapter.apply_config`` (the base is a no-op), so passing
+        # ``ScanPDFToTypstCodec.apply_config`` (the base is a no-op), so passing
         # ``store=`` would always be ``None`` and promise a cache path that does
         # not exist. Direct callers of the free function can still pass one.
         return extract_blocks_with_pdfium(path, page_range)
