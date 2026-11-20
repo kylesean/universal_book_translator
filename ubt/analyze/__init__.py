@@ -18,7 +18,7 @@ Two consumers build on it:
   block list into that same model and back, and the round-trip is the proof the
   model loses no document structure. This seam is exercised by the reader tests
   and by ``scripts/shadow_reader.py``'s coverage gate. The PDF reader moved to
-  its only production consumer's layer (``ubt.adapters.pdf.reader_pdf``): it is
+  its only production consumer's layer (the PDF adapter): it is
   PDF geometry, and keeping it here forced a layering-inversion whitelist.
 
 Native readers landed one at a time (incremental native reader dispatch):

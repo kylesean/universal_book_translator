@@ -2,7 +2,7 @@
 
 Extraction is a *prior*: whether a line is a listing, a page number, or math
 debris is a property of the line, decided once here -- not re-guessed by a
-second pass. The native reader (:mod:`ubt.adapters.pdf.reader_pdf`) and the plain-text
+second pass. The native PDF reader and the plain-text
 fallbacks (:mod:`ubt.adapters.pdf.plain_text_extractor`) call these, so a line
 cannot be prose to one and debris to the other.
 
@@ -14,18 +14,6 @@ measured it.
 from __future__ import annotations
 
 import re
-
-# --------------------------------------------------------------------------- #
-# Page furniture
-# --------------------------------------------------------------------------- #
-#: A bare page number (arabic or roman) and nothing else.
-_BARE_PAGE_NUMBER = re.compile(r"^\s*(?:\d{1,4}|[ivxlcdm]{1,7})\s*$", re.IGNORECASE)
-
-
-def is_bare_page_number(text: str) -> bool:
-    """True for a bare page number -- arabic or roman, nothing else."""
-    return bool(_BARE_PAGE_NUMBER.match(text or ""))
-
 
 # --------------------------------------------------------------------------- #
 # Listings
@@ -238,7 +226,6 @@ def is_gutenberg_marker(text: str) -> bool:
 
 
 __all__ = [
-    "is_bare_page_number",
     "is_display_math",
     "is_gutenberg_marker",
     "is_list_prefix",

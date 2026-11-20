@@ -297,7 +297,7 @@ _ORDERED_MARKER_RE = re.compile(
     r")$"
 )
 #: A first-line indent is this many em beyond the body margin (matches
-#: ``reader_pdf.INDENT_FACTOR``); the two readers must agree on what an indent is.
+#: the retired native reader's ``INDENT_FACTOR``); the two readers must agree on what an indent is.
 _INDENT_FACTOR = 1.0
 #: A single-line block carries no body margin to compare against, so an indent
 #: is only measurable on a block of at least this many source lines.

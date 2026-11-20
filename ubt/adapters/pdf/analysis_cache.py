@@ -1,6 +1,6 @@
 """Content-addressed caching for the analyze step.
 
-``read_pdf`` is a pure transform of a PDF's bytes into a ``Document`` (and then
+The Docling parse is a pure transform of a PDF's bytes into typed blocks (and
 into ``IRBlock``s): the same file and page range always yield the same blocks.
 It is also the first expensive step of every run, so a resumed or re-run job can
 reuse the extraction instead of re-reading the whole geometry.
@@ -47,11 +47,10 @@ def _reader_identity() -> str:
     The reader imports its list/heading/chrome rules from ``structure``, its
     text canonicalization from ``normalize``, and the pdfium line/row geometry
     (rect harvesting, row glue, column order) from ``textgeom``; keying only on
-    ``reader_pdf`` would serve stale blocks after a change to any of them — a
+    the outline/geometry pass would serve stale blocks after a change to any of them — a
     ``textgeom`` fix would be invisible on every cached re-run.
     """
     return _module_identity(
-        "ubt.adapters.pdf.reader_pdf",
         "ubt.analyze.structure",
         "ubt.analyze.normalize",
         "ubt.adapters.pdf.textgeom",

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from ubt.adapters.pdf.pdfium_gate import PDFIUM_LOCK
+from ubt.adapters.pdf.textgeom import LineBox
 from ubt.core.cleaners.lnds_pruner import normalize_academic_pdf_math
 from ubt.core.ir.models import (
     BlockProvenance,
@@ -83,6 +84,77 @@ def read_pdf_outline_entries(
             doc.close()
 
 
+# --- Table of contents ----------------------------------------------------- #
+#: A TOC title opens with a section number: ``1.``, ``1.1.``, ``4.3.``.
+_SECTION_NUM_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3})*\.?\s+\S")
+#: A TOC page number is a bare arabic/roman numeral.
+_TOC_PAGE_RE = re.compile(r"^[0-9ivxlcdmIVXLCDM]+$")
+#: Baselines within this many points are the same TOC row.
+_TOC_BASELINE_TOL_PT = 2.5
+#: A TOC page number sits in the right margin; a title starts in the left half.
+_TOC_PAGE_MIN_X_RATIO = 0.6
+_TOC_TITLE_MAX_X_RATIO = 0.6
+#: Fewer pairs than this and the page is not a TOC (a stray numbered line is not).
+_TOC_MIN_PAIRS = 3
+
+
+def _find_toc_pairs(lines: list[LineBox], width: float) -> list[tuple[LineBox, LineBox, str]]:
+    """Pair TOC title lines with their right-margin page numbers by baseline.
+
+    ``textgeom`` reads a title and its page number as two lines (the dot-leader
+    gutter separates them), so the reader must pair them back or a table of
+    contents scatters into translated titles plus a run of bare page-number
+    blocks. A page only counts as a TOC when several numbered rows pair up
+    (``_TOC_MIN_PAIRS``); once it does, unnumbered rows on the same page
+    (``Abstract``, ``References``, ``Acknowledgments``) are paired too. The
+    numbered-pair floor is what keeps an equation page -- which also has
+    right-margin numerals -- from being mistaken for a TOC.
+    """
+    if width <= 0:
+        return []
+    right_numbers = [
+        line
+        for line in lines
+        if _TOC_PAGE_RE.match(line.text.strip()) and line.rect[0] > _TOC_PAGE_MIN_X_RATIO * width
+    ]
+
+    def _left(line: LineBox) -> bool:
+        return line.rect[0] <= _TOC_TITLE_MAX_X_RATIO * width
+
+    def _baseline(line: LineBox) -> float:
+        return (line.rect[1] + line.rect[3]) / 2.0
+
+    def _pair(titles: list[LineBox], used: set[int]) -> list[tuple[LineBox, LineBox, str]]:
+        out: list[tuple[LineBox, LineBox, str]] = []
+        for line in titles:
+            baseline = _baseline(line)
+            for candidate in right_numbers:
+                if id(candidate) in used:
+                    continue
+                if abs(_baseline(candidate) - baseline) <= _TOC_BASELINE_TOL_PT:
+                    out.append((line, candidate, candidate.text.strip()))
+                    used.add(id(candidate))
+                    break
+        return out
+
+    used: set[int] = set()
+    numbered = [ln for ln in lines if _left(ln) and _SECTION_NUM_RE.match(ln.text.strip())]
+    pairs = _pair(numbered, used)
+    if len(pairs) < _TOC_MIN_PAIRS:
+        return []
+    paired_ids = {id(title) for title, _number, _page in pairs}
+    unnumbered = [
+        ln
+        for ln in lines
+        if _left(ln)
+        and id(ln) not in paired_ids
+        and not _SECTION_NUM_RE.match(ln.text.strip())
+        and any(ch.isalpha() for ch in ln.text.strip())
+    ]
+    pairs.extend(_pair(unnumbered, used))
+    return pairs
+
+
 def _toc_rows_from_lines(
     lines: list[Any],
     width: float,
@@ -99,7 +171,7 @@ def _toc_rows_from_lines(
        nothing here — measured on arXiv 2608.25512, where it returned 0 rows for
        all 62 lines of a two-page contents section. The native reader already
        solves this shape by pairing on the baseline
-       (:func:`ubt.adapters.pdf.reader_pdf._find_toc_pairs`); this reuses it
+       (:func:`_find_toc_pairs` in this module); this reuses it
        rather than growing a second pairing rule.
 
     The fallback only runs when per-line parsing produced nothing, so a
@@ -117,8 +189,6 @@ def _toc_rows_from_lines(
         rows.append((title, toc_page, has_leaders, ln, box))
     if rows:
         return rows
-
-    from ubt.adapters.pdf.reader_pdf import _find_toc_pairs
 
     for title_line, number_line, page in _find_toc_pairs(lines, width):
         # The delivered row spans the whole line -- title through page number --
