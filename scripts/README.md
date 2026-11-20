@@ -37,6 +37,12 @@ It takes `--corpus corpus` (default) and exits 0 on pass.
   (headings, math formulas, code blocks, tables), exercises container fitting, compiles
   Typst document to PDF, and confirms zero layout margin spills. Runs 100% offline.
 
+## Performance
+
+- `benchmark_native_pdf.py` — inspect/extract timing for the native PDF codec
+  (pages, units, seconds/page). Run before changing the layout detector or its
+  raster DPI; JSON output is available with `--json`.
+
 ## Utilities
 
 - `dump_compiler_edges.py` — read-only static check of the core↔compiler import
