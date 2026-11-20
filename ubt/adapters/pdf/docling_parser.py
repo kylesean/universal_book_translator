@@ -2537,11 +2537,14 @@ def vlm_fallback_missing_pages(
             logger.warning("VLM fallback: cannot open '%s': %s", path.name, exc)
             return blocks
 
+    # ``first``/``last`` stay defined even when an explicit page scope wins:
+    # the ALL-mode profile loop below filters by them, and a non-contiguous
+    # `--pages 1,50` used to raise UnboundLocalError there.
+    first = page_range[0] if page_range else 1
+    last = min(page_range[1], total) if page_range else total
     if page_scope is not None:
         required = sorted({p for p in page_scope if 1 <= p <= total})
     else:
-        first = page_range[0] if page_range else 1
-        last = min(page_range[1], total) if page_range else total
         required = list(range(first, last + 1))
     missing = [p for p in required if p not in text_covered]
     proofread_pages: set[int] = set()
