@@ -464,6 +464,7 @@ def _build_fused_block(
     inline_formula_regions: list[LayoutRegion],
     vector_rules: list[VectorRule],
     max_borrow_down_pt: float,
+    max_borrow_right_pt: float = 0.0,
 ) -> FusedBlock | None:
     lines = _group_ops_into_lines(ops)
     if not lines:
@@ -510,6 +511,8 @@ def _build_fused_block(
         max(op_y1, region_bbox[3]),
     )
     alignment, first_indent = _infer_alignment(lines, box, role)
+    if len(lines) == 1 and alignment == "left" and max_borrow_right_pt > 0.0:
+        box = (box[0], box[1], box[2] + max_borrow_right_pt, box[3])
 
     marked_parts: list[str] = []
     plain_parts: list[str] = []
@@ -744,6 +747,39 @@ def _compute_borrow_down(
     return max(0.0, y0 - nearest_below - 4.0)
 
 
+def _compute_borrow_right(
+    box: tuple[float, float, float, float],
+    all_boxes: list[tuple[float, float, float, float]],
+    page_width: float,
+    page_right_margin: float = 36.0,
+) -> float:
+    """Measure safe horizontal whitespace to the right of a single-line block within its column."""
+    x0, y0, x1, y1 = box
+    nearest_right = max(x1, page_width - page_right_margin) if page_width > 0 else x1
+    for ox0, oy0, ox1, oy1 in all_boxes:
+        if (ox0, oy0, ox1, oy1) == box:
+            continue
+        # Obstacle on the same horizontal band to the right?
+        if min(y1, oy1) - max(y0, oy0) <= 1.0:
+            continue
+        if ox0 >= x1 - 2.0:
+            nearest_right = min(nearest_right, ox0 - 6.0)
+
+    # Prefer the right edge of sibling blocks sharing the same column left margin
+    # so short single-line headings expand naturally to their column width without
+    # crossing into adjacent columns.
+    same_col_rights = [
+        ox1
+        for ox0, oy0, ox1, oy1 in all_boxes
+        if (ox0, oy0, ox1, oy1) != box
+        and abs(ox0 - x0) <= 24.0
+        and ox1 > x1
+        and ox1 <= nearest_right + 2.0
+    ]
+    target_right = min(nearest_right, max(same_col_rights)) if same_col_rights else nearest_right
+    return max(0.0, target_right - x1)
+
+
 def fuse_page(
     analysis: PageStreamAnalysis,
     regions: list[LayoutRegion],
@@ -805,6 +841,7 @@ def fuse_page(
         else:
             unit_seq += 1
             borrow = _compute_borrow_down(region.bbox, obstacle_boxes)
+            borrow_right = _compute_borrow_right(region.bbox, obstacle_boxes, analysis.page_width)
             block = _build_fused_block(
                 unit_id=f"p{analysis.page_no:04d}_u{unit_seq:04d}",
                 chapter_id=chap,
@@ -815,6 +852,7 @@ def fuse_page(
                 inline_formula_regions=inline_formulas,
                 vector_rules=analysis.vector_rules,
                 max_borrow_down_pt=borrow,
+                max_borrow_right_pt=borrow_right,
             )
             if block is not None:
                 fused.append(block)
