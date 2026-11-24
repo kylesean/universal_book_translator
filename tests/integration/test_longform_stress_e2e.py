@@ -53,8 +53,15 @@ async def test_45_page_pdf_e2e_stress_and_companion_attestation(tmp_path: Path) 
         emit_html_companion=True,
         emit_epub_companion=True,
         emit_attestation_shadow=True,
-        pdf_engine="pdfium",
+        pdf_engine="native",
+        dual_mode="dual",
     )
+
+    # Warm one-time ONNX / rapid_layout weights before snapshotting RSS so the
+    # ceiling measures per-page pipeline memory growth rather than model load.
+    from ubt.codecs.pdf.codec import NativePDFCodec
+
+    NativePDFCodec().extract(book_pdf, pages={1})
 
     proc = psutil.Process()
     rss_start = proc.memory_info().rss

@@ -146,6 +146,26 @@ jobs:
             exit 1
           fi
 
+      - name: Warm rapid_layout model cache (offline slow tests afterwards)
+        env:
+          HF_HUB_OFFLINE: "0"
+        run: |
+          uv run python - <<'PY'
+          import tempfile
+          from pathlib import Path
+          from pypdf import PdfWriter
+          from ubt.codecs.pdf.codec import NativePDFCodec
+
+          writer = PdfWriter()
+          writer.add_blank_page(width=200, height=200)
+          pdf = Path(tempfile.mkdtemp()) / "warm.pdf"
+          with pdf.open("wb") as handle:
+              writer.write(handle)
+
+          NativePDFCodec().extract(pdf)
+          print("rapid_layout model cached and verified")
+          PY
+
       - name: Slow test tier (synthetic PDF render e2e)
         env:
           PYTHONIOENCODING: "utf-8"
