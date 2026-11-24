@@ -19,6 +19,12 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useToast } from '@/components/ui/useToast'
 import { InfoTip } from '@/components/ui/InfoTip'
 import { cn } from '@/lib/utils'
@@ -26,6 +32,7 @@ import {
   getJobReport,
   getArtifactReport,
   getDeliveryContract,
+  getPageGeometry,
   listDeliverables,
   deliverableDownloadUrl,
   triggerBrowserDownload,
@@ -34,6 +41,7 @@ import {
   ApiError,
   type CompanionArtifactInfo,
   type DeliverableItem,
+  type PageGeometryResponse,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
 import { PreviewDrawer } from './PreviewDrawer'
@@ -88,7 +96,7 @@ function statusLabel(t: ReturnType<typeof useI18n>['t'], status: CheckStatus): s
 }
 
 export function QualityGateView() {
-  const { t, language } = useI18n()
+  const { t } = useI18n()
   const toast = useToast()
   const navigate = useNavigate()
   const { jobId: routeJobId } = useParams<{ jobId: string }>()
@@ -96,13 +104,16 @@ export function QualityGateView() {
   const [copiedId, setCopiedId] = useState(false)
   const [report, setReport] = useState<Record<string, any> | null>(null)
   const [deliverables, setDeliverables] = useState<DeliverableItem[]>([])
+  const [deliveryMode, setDeliveryMode] = useState<string | null>(null)
   const [companionArtifacts, setCompanionArtifacts] = useState<CompanionArtifactInfo[]>([])
   const [deliveryStale, setDeliveryStale] = useState(false)
   const [downloadBusy, setDownloadBusy] = useState(false)
+  const [reExportBusy, setReExportBusy] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [visual, setVisual] = useState<Record<string, any> | null>(null)
   const [visualMissing, setVisualMissing] = useState(false)
   const [deliveryContract, setDeliveryContract] = useState<Record<string, any> | null>(null)
+  const [pageGeometry, setPageGeometry] = useState<PageGeometryResponse | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
   const [previewItem, setPreviewItem] = useState<DeliverableItem | null>(null)
   const [postEditOpen, setPostEditOpen] = useState(false)
@@ -138,11 +149,13 @@ export function QualityGateView() {
       const listing = await listDeliverables(jobId)
       if (!isCurrent()) return
       setDeliverables(listing.items)
+      setDeliveryMode(listing.deliveryMode ?? null)
       setCompanionArtifacts(listing.companionArtifacts ?? [])
       setDeliveryStale(listing.stale)
     } catch {
       if (!isCurrent()) return
       setDeliverables([])
+      setDeliveryMode(null)
       setCompanionArtifacts([])
     }
     try {
@@ -163,6 +176,14 @@ export function QualityGateView() {
       if (!isCurrent()) return
       setDeliveryContract(null)
     }
+    try {
+      const geom = await getPageGeometry(jobId)
+      if (!isCurrent()) return
+      setPageGeometry(geom)
+    } catch {
+      if (!isCurrent()) return
+      setPageGeometry(null)
+    }
   }, [jobId])
 
   useEffect(() => {
@@ -176,6 +197,7 @@ export function QualityGateView() {
     setCompanionArtifacts([])
     setVisual(null)
     setDeliveryContract(null)
+    setPageGeometry(null)
   }, [jobId])
 
   useEffect(() => {
@@ -254,7 +276,9 @@ export function QualityGateView() {
       ? t.quality.visualGateSkipped
       : flaggedPages.length > 0
         ? `${flaggedPages.length} ${t.quality.flaggedPages}`
-        : t.quality.noVisualFindings
+        : visual?.passed === false
+          ? (String(visualFindings[0]?.message || '') || t.quality.docLevelArtifactFindings)
+          : t.quality.noVisualFindings
 
   const artifactStatus: CheckStatus =
     visualMissing || artifactSkipped
@@ -314,11 +338,11 @@ export function QualityGateView() {
     {
       title: t.quality.chipDeliveryContract,
       summary: !deliveryContract
-        ? (language === 'zh' ? '暂未生成交付契约报告' : 'Delivery contract report not available')
+        ? t.quality.contractNotAvailable
         : `${String(deliveryContract.contract ?? 'CONTRACT').toUpperCase()} · ${
             deliveryContract.deliverable
-              ? (language === 'zh' ? '准予出厂交付' : 'Deliverable')
-              : (language === 'zh' ? '阻断交付' : 'Blocked')
+              ? t.quality.contractDeliverableBadge
+              : t.quality.contractBlockedBadge
           } (${contractCritical} critical, ${contractMajor} major)`,
       status: contractStatus,
       value: !deliveryContract ? 0 : contractStatus === 'pass' ? 1 : contractStatus === 'warn' ? 0.7 : 0,
@@ -340,12 +364,14 @@ export function QualityGateView() {
                         : ''
                     )}
                   >
-                    {deliveryContract.deliverable ? 'PASS · DELIVERABLE' : 'FAIL · BLOCKED'}
+                    {deliveryContract.deliverable
+                      ? t.quality.contractDeliverableBadge
+                      : t.quality.contractBlockedBadge}
                   </Badge>
                 ) : '—',
               ],
-              [language === 'zh' ? 'Critical 违规' : 'Critical Violations', contractCritical],
-              [language === 'zh' ? 'Major 违规' : 'Major Violations', contractMajor],
+              [t.quality.contractCriticalLabel, contractCritical],
+              [t.quality.contractMajorLabel, contractMajor],
             ].map(([label, value]) => (
               <div key={String(label)} className="flex items-baseline justify-between gap-4 border-b border-border/60 pb-1.5">
                 <dt className="text-muted-foreground">{label}</dt>
@@ -356,7 +382,9 @@ export function QualityGateView() {
 
           {contractChecks.length > 0 && (
             <div className="space-y-2">
-              <div className="text-xs font-medium text-muted-foreground">{t.quality.contractChecksTitle}</div>
+              <div className="text-xs font-medium text-muted-foreground">
+                {t.quality.contractChecksTitle.replace('{count}', String(contractChecks.length))}
+              </div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {contractChecks.map((chk) => {
                   const isPass = chk.status.toLowerCase().startsWith('pass')
@@ -388,7 +416,7 @@ export function QualityGateView() {
           {contractFindings.length > 0 ? (
             <div className="space-y-2">
               <div className="text-xs font-medium text-destructive">
-                {language === 'zh' ? '违规项明细' : 'Findings Detail'} ({contractFindings.length})
+                {t.quality.contractFindingsTitle} ({contractFindings.length})
               </div>
               <ul className="max-h-48 space-y-1.5 overflow-y-auto">
                 {contractFindings.map((finding, idx) => (
@@ -413,14 +441,82 @@ export function QualityGateView() {
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">
-              {language === 'zh'
-                ? '✓ 无契约违规项，版面几何与文本实现物理不变量完全闭环。'
-                : '✓ Zero contract findings. Layout geometry and text realization invariants strictly held.'}
+              {t.quality.contractZeroFindings}
             </p>
           )}
         </div>
       ),
     },
+    ...(pageGeometry?.measured
+      ? [
+          {
+            title: t.quality.pageGeometryTitle,
+            summary:
+              t.quality.pageGeometrySummary
+                .replace('{total}', String(pageGeometry.total_pages ?? 0))
+                .replace('{scaled}', String(pageGeometry.scaled_pages ?? 0))
+                .replace('{overflow}', String(pageGeometry.overflow_pages ?? 0)) +
+              (pageGeometry.min_delivered_size_pt != null
+                ? ` · ${t.quality.pageGeometryMinFont.replace('{size}', pageGeometry.min_delivered_size_pt.toFixed(1))}`
+                : ''),
+            status: ((pageGeometry.overflow_pages ?? 0) > 0 ? 'warn' : 'pass') as CheckStatus,
+            value:
+              (pageGeometry.total_pages ?? 0) > 0
+                ? Math.max(
+                    0,
+                    ((pageGeometry.total_pages ?? 0) - (pageGeometry.overflow_pages ?? 0)) /
+                      Math.max(1, pageGeometry.total_pages ?? 1)
+                  )
+                : 1,
+            detail: (
+              <div className="max-h-60 overflow-auto rounded border border-border/70">
+                <table className="w-full text-left font-mono text-xs">
+                  <thead className="sticky top-0 bg-muted/80 text-muted-foreground">
+                    <tr>
+                      <th className="px-2.5 py-1.5">{t.quality.pageGeometryColPage}</th>
+                      <th className="px-2.5 py-1.5">{t.quality.pageGeometryColMeasured}</th>
+                      <th className="px-2.5 py-1.5">{t.quality.pageGeometryColDelivered}</th>
+                      <th className="px-2.5 py-1.5">{t.quality.pageGeometryColLeading}</th>
+                      <th className="px-2.5 py-1.5">{t.quality.pageGeometryColTier}</th>
+                      <th className="px-2.5 py-1.5">{t.quality.pageGeometryColStatus}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {(pageGeometry.pages ?? []).map((pg) => (
+                      <tr key={pg.page_no}>
+                        <td className="px-2.5 py-1.5 font-semibold">P{pg.page_no}</td>
+                        <td className="px-2.5 py-1.5">
+                          {pg.measured_size_pt != null ? `${pg.measured_size_pt.toFixed(1)} pt` : '—'}
+                        </td>
+                        <td className="px-2.5 py-1.5">
+                          {pg.delivered_size_pt != null ? `${pg.delivered_size_pt.toFixed(1)} pt` : '—'}
+                        </td>
+                        <td className="px-2.5 py-1.5">
+                          {pg.delivered_leading_em != null ? `${pg.delivered_leading_em.toFixed(2)} em` : '—'}
+                        </td>
+                        <td className="px-2.5 py-1.5">{pg.tier ?? '—'}</td>
+                        <td className="px-2.5 py-1.5">
+                          {pg.fits === false ? (
+                            <span className="text-amber-700 dark:text-amber-400">
+                              {t.quality.pageGeometryFitOverflow}
+                            </span>
+                          ) : pg.fits === true ? (
+                            <span className="text-emerald-700 dark:text-emerald-400">
+                              {t.quality.pageGeometryFitOk}
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ),
+          },
+        ]
+      : []),
     {
       title: t.quality.chipMath,
       summary: t.quality.mathSummary
@@ -491,7 +587,9 @@ export function QualityGateView() {
         <div className="space-y-3">
           {visualMissing && <p className="text-sm text-muted-foreground">{t.quality.visualNoReportDesc}</p>}
           {visualFindings.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t.quality.noVisualFindings}</p>
+            <p className="text-sm text-muted-foreground">
+              {visual?.passed === false ? t.quality.docLevelArtifactFindings : t.quality.noVisualFindings}
+            </p>
           ) : (
             <div className="space-y-2">
               <div className="text-xs font-medium text-muted-foreground">{t.quality.visualFindingsTitle}</div>
@@ -610,6 +708,20 @@ export function QualityGateView() {
     },
   ]
 
+  const handleSwitchDelivery = async (mode: 'auto' | 'readable' | 'faithful') => {
+    if (reExportBusy) return
+    setReExportBusy(true)
+    try {
+      await reExportJob(jobId, { delivery: mode })
+      toast.push(t.quality.postEditReExportSuccess, 'success')
+      await loadAll()
+    } catch (err) {
+      toast.push(err instanceof Error ? err.message : t.quality.postEditReExportFailed, 'error')
+    } finally {
+      setReExportBusy(false)
+    }
+  }
+
   const handleDownload = async (key: string) => {
     if (downloadBusy) return
     setDownloadBusy(true)
@@ -621,6 +733,7 @@ export function QualityGateView() {
         const refreshed = await listDeliverables(jobId)
         setDeliverables(refreshed.items)
         setCompanionArtifacts(refreshed.companionArtifacts ?? [])
+        setDeliveryMode(refreshed.deliveryMode ?? null)
         setDeliveryStale(refreshed.stale)
         currentItems = refreshed.items
       }
@@ -689,12 +802,50 @@ export function QualityGateView() {
             {t.quality.subtitle}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button onClick={() => setPostEditOpen(true)} variant="secondary" size="sm">
+        <div className="flex flex-wrap shrink-0 items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={reExportBusy}>
+                <RefreshCw className={cn('size-3.5', reExportBusy && 'animate-spin')} />
+                {t.quality.reExportActionLabel}
+                <ChevronDown className="size-3.5 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                disabled={deliveryMode === 'readable'}
+                className="justify-between gap-3"
+                onSelect={() => void handleSwitchDelivery('readable')}
+              >
+                <span>{t.mission.reExportReadable}</span>
+                {deliveryMode === 'readable' ? (
+                  <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
+                    {t.quality.reExportCurrentBadge}
+                  </Badge>
+                ) : null}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={deliveryMode === 'faithful'}
+                className="justify-between gap-3"
+                onSelect={() => void handleSwitchDelivery('faithful')}
+              >
+                <span>{t.mission.reExportFaithful}</span>
+                {deliveryMode === 'faithful' ? (
+                  <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
+                    {t.quality.reExportCurrentBadge}
+                  </Badge>
+                ) : null}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void handleSwitchDelivery('auto')}>
+                {t.mission.reExportAuto}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button onClick={() => setPostEditOpen(true)} variant="outline" size="sm">
             <Edit3 />
             {t.quality.postEditAction}
           </Button>
-          <Button onClick={() => navigate(`/jobs/${jobId}/review`)} variant="outline" size="sm">
+          <Button onClick={() => navigate(`/jobs/${jobId}/review`)} variant="secondary" size="sm">
             {t.mission.openWorkbench}
             <ArrowUpRight />
           </Button>
@@ -907,7 +1058,10 @@ export function QualityGateView() {
                     </div>
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-foreground">
-                        {deliverableName(primaryItem.key, primaryItem.label, t)}
+                        {deliverableName(primaryItem.key, primaryItem.label, t, {
+                          deliveryMode,
+                          filename: primaryItem.filename,
+                        })}
                       </div>
                       <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
                         {primaryItem.filename} · {fmtSize(primaryItem.size_bytes)}
@@ -979,6 +1133,7 @@ export function QualityGateView() {
           key={`${previewItem.key}:${previewItem.filename}`}
           jobId={jobId}
           item={previewItem}
+          deliveryMode={deliveryMode}
           onClose={() => setPreviewItem(null)}
         />
       )}

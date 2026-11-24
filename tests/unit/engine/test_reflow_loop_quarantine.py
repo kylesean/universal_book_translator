@@ -333,3 +333,30 @@ def test_a_page_scoped_finding_still_quarantines_the_page(tmp_path: Path) -> Non
     )
     _run(_loop(tmp_path, _RecordingLedger(), gate), tmp_path, blocks)
     assert [b.id for b in blocks if b.status is BlockStatus.NEEDS_HUMAN] == ["b1", "b2"]
+
+
+def test_comma_separated_block_ids_attribute_flags_without_leaking(tmp_path: Path) -> None:
+    blocks = [_block("b1", 3), _block("b2", 3), _block("b3", 3)]
+    gate = ArtifactGateResult(
+        passed=False,
+        findings=(
+            ArtifactFinding(
+                severity="major",
+                code="block_overlap",
+                message="b1 overlaps b2",
+                page=3,
+                block_id="b1,b2",
+            ),
+            ArtifactFinding(
+                severity="major",
+                code="other_defect",
+                message="b3 defect",
+                page=3,
+                block_id="b3",
+            ),
+        ),
+    )
+    _run(_loop(tmp_path, _RecordingLedger(), gate), tmp_path, blocks)
+    assert blocks[0].error_flags == ["artifact_gate_failed:major:block_overlap"]
+    assert blocks[1].error_flags == ["artifact_gate_failed:major:block_overlap"]
+    assert blocks[2].error_flags == ["artifact_gate_failed:major:other_defect"]

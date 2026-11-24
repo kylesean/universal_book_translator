@@ -131,3 +131,65 @@ async def test_re_export_still_reports_missing_output_after_the_terminal_check(
     config, db_path = _seed(tmp_path, blocks)
     with pytest.raises(ReExportError, match="no recorded output path"):
         await re_export_job(db_path=db_path, job_id=_JOB, config=config)
+
+
+async def test_re_export_refuses_modified_source_fingerprint(tmp_path: Path) -> None:
+    blocks = [_block(1, "Done sentence.", "已完成。", BlockStatus.MTQE_PASSED)]
+    config, db_path = _seed(tmp_path, blocks, job_status="completed")
+    with SQLiteJobLedger(db_path) as ledger:
+        ledger.set_job_metadata_value(_JOB, "output_file", str(tmp_path / "out.md"))
+        ledger.set_job_metadata_value(_JOB, "source_fingerprint", "0" * 64)
+    (tmp_path / "in.md").write_text("# modified\n\nChanged text.\n", encoding="utf-8")
+
+    with pytest.raises(ReExportError, match="source document changed"):
+        await re_export_job(db_path=db_path, job_id=_JOB, config=config)
+
+
+async def test_re_export_persists_delivery_override_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import ubt.core.engine.re_export as re_export_module
+    from ubt.core.engine.events import EventType, TranslationProgressEvent
+
+    blocks = [_block(1, "Done sentence.", "已完成。", BlockStatus.MTQE_PASSED)]
+    config, db_path = _seed(tmp_path, blocks, job_status="completed")
+    out_md = tmp_path / "out.md"
+    with SQLiteJobLedger(db_path) as ledger:
+        ledger.set_job_metadata_value(_JOB, "output_file", str(out_md))
+
+    monkeypatch.setattr(
+        re_export_module,
+        "_default_collaborators",
+        lambda config, router, qe: (object(), object()),
+    )
+
+    from collections.abc import AsyncIterator
+    from typing import Any
+
+    async def _fake_export(
+        ctx: Any,
+        _services: Any,
+        _render_plan: Any,
+        _term: Any,
+        *,
+        claims_finality: bool = True,
+    ) -> AsyncIterator[TranslationProgressEvent]:
+        del claims_finality
+        yield TranslationProgressEvent(
+            event_type=EventType.EXPORT_COMPLETED,
+            job_id=ctx.job_id,
+            total_blocks=1,
+            completed_blocks=1,
+            artifact_path=str(out_md),
+        )
+
+    monkeypatch.setattr(re_export_module, "run_export_stage", _fake_export)
+
+    event = await re_export_job(db_path=db_path, job_id=_JOB, config=config, delivery="readable")
+    assert event.event_type is EventType.EXPORT_COMPLETED
+    with SQLiteJobLedger(db_path, read_only=True) as ledger:
+        assert ledger.get_job_metadata_value(_JOB, "delivery_mode") == "readable"
+        assert ledger.get_job_metadata_value(_JOB, "delivery_mode_effective") == "readable"
+        assert ledger.get_job_metadata_value(_JOB, "delivery_mode_requested") == "readable"
+        plan = ledger.get_job_metadata_value(_JOB, "delivery_plan")
+        assert isinstance(plan, dict) and plan.get("contract") == "readable"

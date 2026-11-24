@@ -31,7 +31,9 @@ _MIN_PROBE = 4
 #: realization without mistaking layout for loss.
 _MIN_OVERLAP = 0.6
 
-_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]|[^\s\W_]+(?:-[^\s\W_]+)*")
+_TOKEN_RE = re.compile(
+    r"[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u30ff\uac00-\ud7af]|[^\s\W_]+(?:-[^\s\W_]+)*"
+)
 
 __all__ = ["ElementCheck", "ArtifactReport", "check_artifact", "artifact_tokens"]
 

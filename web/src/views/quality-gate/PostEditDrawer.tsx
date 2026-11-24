@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ExternalLink,
@@ -17,7 +17,6 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
-  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -32,6 +31,7 @@ import {
   type Segment,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
+import { AnchorIntegrityNotice } from '@/views/review/AnchorIntegrityNotice'
 
 export function PostEditDrawer({
   jobId,
@@ -55,27 +55,30 @@ export function PostEditDrawer({
   const [reExporting, setReExporting] = useState(false)
   const loadSeqRef = useRef(0)
 
-  const fetchSegments = useCallback(async () => {
-    const seq = ++loadSeqRef.current
-    setLoading(true)
-    try {
-      const res = await listSegments(jobId, {
-        status: filter === 'issues' ? 'issues' : undefined,
-        limit: 300,
-      })
-      if (seq !== loadSeqRef.current) return
-      setSegments(res.segments)
-    } catch {
-      if (seq !== loadSeqRef.current) return
-      toast.push('Failed to load segments', 'error')
-    } finally {
-      if (seq === loadSeqRef.current) setLoading(false)
-    }
-  }, [jobId, filter, toast])
-
   useEffect(() => {
-    void fetchSegments()
-  }, [fetchSegments])
+    let cancelled = false
+    const seq = ++loadSeqRef.current
+    const load = async () => {
+      setLoading(true)
+      try {
+        const res = await listSegments(jobId, {
+          status: filter === 'issues' ? 'issues' : undefined,
+          limit: 300,
+        })
+        if (cancelled || seq !== loadSeqRef.current) return
+        setSegments(res.segments)
+      } catch {
+        if (cancelled || seq !== loadSeqRef.current) return
+        toast.push(t.quality.postEditLoadFailed, 'error')
+      } finally {
+        if (!cancelled && seq === loadSeqRef.current) setLoading(false)
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [jobId, filter, toast, t.quality.postEditLoadFailed])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return segments
@@ -128,7 +131,7 @@ export function PostEditDrawer({
         return next
       })
     } catch {
-      toast.push('Failed to save segment revision', 'error')
+      toast.push(t.quality.postEditSaveFailed, 'error')
     } finally {
       setSavingId(null)
     }
@@ -142,14 +145,24 @@ export function PostEditDrawer({
       toast.push(t.quality.postEditReExportSuccess, 'success')
       onReExportComplete?.()
     } catch {
-      toast.push('Re-export failed', 'error')
+      toast.push(t.quality.postEditReExportFailed, 'error')
     } finally {
       setReExporting(false)
     }
   }
 
+  const hasUnsavedEdits = Object.keys(edits).length > 0
+
+  const requestClose = (afterConfirm?: () => void) => {
+    if (hasUnsavedEdits && !window.confirm(t.quality.postEditUnsavedConfirm)) {
+      return
+    }
+    onClose()
+    afterConfirm?.()
+  }
+
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
+    <Dialog open onOpenChange={(open) => !open && requestClose()}>
       <DialogContent
         showCloseButton={false}
         className="flex h-[min(92vh,1000px)] max-w-6xl flex-col gap-0 overflow-hidden p-0"
@@ -174,10 +187,7 @@ export function PostEditDrawer({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                onClose()
-                navigate(`/jobs/${jobId}/review`)
-              }}
+              onClick={() => requestClose(() => navigate(`/jobs/${jobId}/review`))}
             >
               <ExternalLink className="size-3.5" />
               <span className="hidden sm:inline">{t.quality.postEditOpenFullWorkbench}</span>
@@ -191,11 +201,15 @@ export function PostEditDrawer({
               <RefreshCw className={cn('size-3.5', reExporting && 'animate-spin')} />
               <span>{reExporting ? t.quality.postEditReExporting : t.quality.postEditReExportBtn}</span>
             </Button>
-            <DialogClose asChild>
-              <Button variant="ghost" size="icon" className="size-8" aria-label="Close">
-                <X className="size-4" />
-              </Button>
-            </DialogClose>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              aria-label={t.common.close}
+              onClick={() => requestClose()}
+            >
+              <X className="size-4" />
+            </Button>
           </div>
         </DialogHeader>
 
@@ -237,15 +251,15 @@ export function PostEditDrawer({
           {loading ? (
             <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
               <LoaderCircle className="size-4 animate-spin" />
-              <span>Loading segments…</span>
+              <span>{t.quality.postEditLoading}</span>
             </div>
           ) : filtered.length === 0 ? (
             <div className="flex h-64 flex-col items-center justify-center text-center">
               <p className="text-sm font-medium text-foreground">{t.quality.postEditNoSegmentsFound}</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {filter === 'issues'
-                  ? 'No outstanding defects or review flags found.'
-                  : 'Try adjusting your search criteria.'}
+                  ? t.quality.postEditNoIssuesDesc
+                  : t.quality.postEditSearchEmptyDesc}
               </p>
             </div>
           ) : (
@@ -284,7 +298,9 @@ export function PostEditDrawer({
                               'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400'
                           )}
                         >
-                          {seg.human_verified ? 'Human Edited' : seg.status.toUpperCase()}
+                          {seg.human_verified
+                            ? t.review.humanVerified
+                            : (t.review.blockStatuses[seg.status] ?? seg.status)}
                         </Badge>
                         {seg.issues?.map((iss) => (
                           <Badge
@@ -338,6 +354,15 @@ export function PostEditDrawer({
                           rows={Math.max(3, Math.min(8, Math.ceil(currentVal.length / 45)))}
                           className="min-h-[80px] resize-y font-sans text-sm leading-relaxed"
                         />
+                        <div className="mt-2">
+                          <AnchorIntegrityNotice
+                            source={seg.source_text}
+                            draft={currentVal}
+                            onInsertTag={(tag) =>
+                              handleTextChange(seg.block_id, `${currentVal} ${tag}`)
+                            }
+                          />
+                        </div>
                         <div className="mt-2.5 flex items-center justify-end gap-2">
                           {isDirty && (
                             <Button

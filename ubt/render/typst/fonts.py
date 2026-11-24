@@ -39,7 +39,19 @@ logger = logging.getLogger(__name__)
 #: install both find it, and ignored by git (see ``.gitignore``).
 #: ``fonts.py`` is ``ubt/render/typst/fonts.py``: three parents reach the root.
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_FONT_DIR = REPO_ROOT / "fonts"
+
+
+def _default_font_dir() -> Path:
+    """Locate ``fonts/`` in either a source checkout or an installed wheel."""
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = parent / "fonts"
+        if candidate.is_dir():
+            return candidate
+    return REPO_ROOT / "fonts"
+
+
+DEFAULT_FONT_DIR = _default_font_dir()
 
 #: Environment override, for an operator who ships fonts with an image.
 FONT_DIR_ENV = "UBT_FONT_DIR"

@@ -357,7 +357,7 @@ class ScanPDFToTypstCodec(_PDFRenderStackMixin, BasePDFEngineAdapter):
         #: pipeline parses once and renders later; a direct codec caller does
         #: extract() then apply(), and re-parsing would re-run Docling.
         self._reflow_cache: dict[
-            tuple[str, frozenset[int] | None],
+            tuple[Any, ...],
             tuple[BookManifest, list[IRBlock], list[TranslationUnit]],
         ] = {}
 
@@ -457,7 +457,7 @@ class ScanPDFToTypstCodec(_PDFRenderStackMixin, BasePDFEngineAdapter):
     def _extract_blocks_sync(
         self, path: Path, page_range: tuple[int, int] | None = None
     ) -> list[IRBlock]:
-        """Extract blocks synchronously via Docling, else the native reader / pdf_oxide."""
+        """Extract structured blocks synchronously via Docling (refusing if missing)."""
         if self.is_docling_installed():
             from ubt.adapters.pdf.analysis_cache import cached_blocks, docling_identity
 
@@ -576,6 +576,22 @@ class ScanPDFToTypstCodec(_PDFRenderStackMixin, BasePDFEngineAdapter):
             recommended_mode=DeliveryMode.REFLOW,
         )
 
+    def _reflow_cache_key(self, source_path: Path, pages: set[int] | None) -> tuple[Any, ...]:
+        try:
+            st = source_path.stat()
+            stamp: tuple[int, int] = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            stamp = (0, 0)
+        return (
+            str(source_path.resolve()),
+            None if pages is None else frozenset(pages),
+            stamp,
+            self.ocr_mode,
+            self.ocr_fallback,
+            self.formula_enrichment,
+            self.docling_device,
+        )
+
     async def extract(
         self,
         source_path: Path,
@@ -583,10 +599,10 @@ class ScanPDFToTypstCodec(_PDFRenderStackMixin, BasePDFEngineAdapter):
         pages: set[int] | None = None,
     ) -> tuple[DocumentProfile, list[TranslationUnit]]:
         """Run OCR ingest once and expose the blocks as translation units."""
-        key = (str(source_path.resolve()), frozenset(pages) if pages else None)
+        key = self._reflow_cache_key(source_path, pages)
         cached = self._reflow_cache.get(key)
         if cached is not None:
-            return self.inspect(source_path), cached[2]
+            return self.inspect(source_path), list(cached[2])
 
         manifest = await self.extract_manifest(source_path)
         blocks: list[IRBlock] = []
@@ -596,7 +612,7 @@ class ScanPDFToTypstCodec(_PDFRenderStackMixin, BasePDFEngineAdapter):
                 blocks.append(block)
                 units.append(_block_to_reflow_unit(block, chapter.chapter_id))
         self._reflow_cache[key] = (manifest, blocks, units)
-        return self.inspect(source_path), units
+        return self.inspect(source_path), list(units)
 
     async def apply(
         self,
@@ -610,40 +626,53 @@ class ScanPDFToTypstCodec(_PDFRenderStackMixin, BasePDFEngineAdapter):
         pages: set[int] | None = None,
     ) -> ApplyReport:
         """Apply translated units by rebuilding the document with Typst."""
-        key = (str(source_path.resolve()), frozenset(pages) if pages else None)
+        key = self._reflow_cache_key(source_path, pages)
         cached = self._reflow_cache.get(key)
         if cached is None:
             await self.extract(source_path, pages=pages)
             cached = self._reflow_cache[key]
         manifest, blocks, cached_units = cached
         by_id = {unit.unit_id: unit for unit in cached_units}
+        render_manifest = manifest.model_copy(update={"metadata": dict(manifest.metadata)})
         patched = 0
+        cloned_blocks: list[IRBlock] = []
         for block in blocks:
-            if block.id not in by_id or block.skip_translate:
-                continue
-            translated = translations.get(block.id)
-            if translated is None or not translated.strip():
-                continue
-            block.target_text = translated
-            patched += 1
+            cloned = block.model_copy(deep=False)
+            if cloned.id in by_id and not cloned.skip_translate:
+                translated = translations.get(cloned.id)
+                if translated is not None and translated.strip():
+                    cloned.target_text = translated
+                    patched += 1
+            cloned_blocks.append(cloned)
         bilingual = mode in {
             DeliveryMode.BILINGUAL,
             DeliveryMode.INTERLEAVED,
             DeliveryMode.SIDE_BY_SIDE,
         }
         output = await self.render_blocks(
-            manifest,
-            blocks,
+            render_manifest,
+            cloned_blocks,
             target_lang,
             output_path,
             bilingual_mode="bilingual" if bilingual else "monolingual",
         )
+        out_path = Path(output)
+        out_pages: int | None = None
+        if out_path.suffix.lower() == ".pdf" and out_path.exists():
+            try:
+                import pikepdf
+
+                with pikepdf.open(out_path) as pdf_doc:
+                    out_pages = len(pdf_doc.pages)
+            except Exception:  # noqa: BLE001
+                out_pages = None
         return ApplyReport(
-            output_path=Path(output),
+            output_path=out_path,
             mode=mode,
-            total_units=len(units),
+            total_units=len(cached_units),
             patched_units=patched,
             page_count_source=manifest.metadata.get("page_count"),
+            page_count_output=out_pages,
         )
 
 

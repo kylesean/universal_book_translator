@@ -171,3 +171,10 @@ def test_a_latex_escaped_underscore_in_prose_is_unescaped() -> None:
         normalize(r"见 $\text{lm\_head}$ 与 `lm\_head`。")
         == r"见 $\text{lm\_head}$ 与 `lm\_head`。"
     )
+
+
+def test_pangu_does_not_pad_inline_wrapper_tags_but_spaces_formulas() -> None:
+    assert apply_pangu_spacing("参见<b1>重要</b1>结论") == "参见<b1>重要</b1>结论"
+    assert apply_pangu_spacing("数值<r1>阿尔法</r1>和<x2/>说明") == "数值<r1>阿尔法</r1>和<x2/>说明"
+    assert apply_pangu_spacing("详见<a3>文档</a3>。") == "详见<a3>文档</a3>。"
+    assert apply_pangu_spacing("公式<f1/>表明") == "公式 <f1/> 表明"

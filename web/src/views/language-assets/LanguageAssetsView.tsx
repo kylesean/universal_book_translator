@@ -107,9 +107,13 @@ function AssetCount({ value, label }: { value: number; label: string }) {
 function TmPassage({
   text,
   source,
+  copyLabel,
+  copiedLabel,
 }: {
   text: string
   source: boolean
+  copyLabel: string
+  copiedLabel: string
 }) {
   const [copied, setCopied] = useState(false)
 
@@ -133,8 +137,8 @@ function TmPassage({
         type="button"
         onClick={handleCopy}
         className="absolute right-0 top-0 hidden size-6 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground group-hover/passage:flex"
-        title={copied ? 'Copied' : 'Copy'}
-        aria-label="Copy text"
+        title={copied ? copiedLabel : copyLabel}
+        aria-label={copyLabel}
       >
         {copied ? (
           <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
@@ -931,7 +935,7 @@ export function LanguageAssetsView() {
                         <span className="font-semibold text-foreground">{conflict.source}</span>
                         <span className="mx-2 text-muted-foreground">→</span>
                         <span className="text-xs text-muted-foreground">
-                          {conflict.targets.length} {language === 'zh' ? '种译法' : 'variants'}
+                          {conflict.targets.length} {t.assets.variantsUnit}
                         </span>
                       </div>
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -1502,6 +1506,8 @@ export function LanguageAssetsView() {
                               <TmPassage
                                 text={entry.source_text}
                                 source
+                                copyLabel={t.assets.copyText}
+                                copiedLabel={t.assets.copiedShort}
                               />
                           </dd>
                         </div>
@@ -1513,6 +1519,8 @@ export function LanguageAssetsView() {
                               <TmPassage
                                 text={entry.target_text}
                                 source={false}
+                                copyLabel={t.assets.copyText}
+                                copiedLabel={t.assets.copiedShort}
                               />
                           </dd>
                         </div>
@@ -1601,12 +1609,16 @@ export function LanguageAssetsView() {
                             <TmPassage
                               text={entry.source_text}
                               source
+                              copyLabel={t.assets.copyText}
+                              copiedLabel={t.assets.copiedShort}
                             />
                           </TableCell>
                           <TableCell className="align-top py-2.5">
                             <TmPassage
                               text={entry.target_text}
                               source={false}
+                              copyLabel={t.assets.copyText}
+                              copiedLabel={t.assets.copiedShort}
                             />
                           </TableCell>
                           <TableCell className="align-top py-2.5">

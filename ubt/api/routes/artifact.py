@@ -20,7 +20,12 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, status
 from fastapi.responses import FileResponse, JSONResponse
 
-from ubt.api.models import ArtifactReportResponse, DeliverableListResponse
+from ubt.api.models import (
+    ArtifactReportResponse,
+    DeliverableListResponse,
+    PageGeometryEntry,
+    PageGeometryResponse,
+)
 from ubt.api.routes.shared import (
     DELIVERABLE_LABELS,
     cross_tenant_404,
@@ -471,6 +476,53 @@ def register_artifact_routes(api_app: FastAPI, scope: ApiScope) -> None:
         raise HTTPException(
             status_code=400,
             detail="Delivery contract is not yet generated or available.",
+        )
+
+    @api_app.get(
+        "/jobs/{job_id}/page-geometry",
+        response_model=PageGeometryResponse,
+        tags=["Jobs"],
+        summary="Fetch native layout fitting and font compaction telemetry per page",
+    )
+    async def get_page_geometry(
+        job_id: str, x_ubt_tenant: str | None = Header(default=None)
+    ) -> PageGeometryResponse:
+        valid_id = validate_job_id(job_id)
+        if not await _tenant_allows_async(valid_id, scope.tenant_from_header(x_ubt_tenant)):
+            raise cross_tenant_404(valid_id)
+        record = manager.get_job(valid_id)
+        db_path = _job_db_path(valid_id)
+        if not db_path.exists() or not await asyncio.to_thread(_is_job_ledger_sync, valid_id):
+            if record is not None:
+                return PageGeometryResponse(job_id=valid_id, measured=False, pages=[])
+            raise HTTPException(status_code=404, detail=f"Job not found: {valid_id}")
+
+        def _read_geometry() -> dict[int, dict[str, Any]]:
+            with SQLiteJobLedger(db_path, read_only=True) as ledger:
+                return ledger.retrieve_page_geometry(valid_id)
+
+        raw = await asyncio.to_thread(_read_geometry)
+        entries = [PageGeometryEntry.model_validate(raw[p]) for p in sorted(raw)]
+        scaled_pages = sum(
+            1
+            for e in entries
+            if e.measured_size_pt is not None
+            and e.delivered_size_pt is not None
+            and e.delivered_size_pt < e.measured_size_pt - 0.05
+        )
+        overflow_pages = sum(1 for e in entries if e.fits is False)
+        min_delivered = min(
+            (e.delivered_size_pt for e in entries if e.delivered_size_pt is not None),
+            default=None,
+        )
+        return PageGeometryResponse(
+            job_id=valid_id,
+            measured=len(entries) > 0,
+            total_pages=len(entries),
+            scaled_pages=scaled_pages,
+            overflow_pages=overflow_pages,
+            min_delivered_size_pt=min_delivered,
+            pages=entries,
         )
 
     @api_app.get(

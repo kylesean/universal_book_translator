@@ -26,6 +26,7 @@ export interface TranslationDictionary {
     themeLight: string
     themeDark: string
     interfaceLanguage: string
+    remoteImageBlocked: string
   }
   nav: {
     operatorControl: string
@@ -51,6 +52,7 @@ export interface TranslationDictionary {
     categoryPreferences: string
     cmdNewJobDesc: string
     cmdMissionControlDesc: string
+    cmdCurrentJobDesc: string
     cmdReviewDesc: string
     cmdQualityDesc: string
     cmdAssetsDesc: string
@@ -308,6 +310,38 @@ export interface TranslationDictionary {
     toggleAuto: string
     toggleOn: string
     toggleOff: string
+    setBudgetCap: string
+    pdfEngineLabel: string
+    pdfEngineHelp: string
+    pdfEngineAuto: string
+    pdfEngineDocling: string
+    pdfEngineNative: string
+    pdfEnginePdfium: string
+    pdfEngineConflictFaithful: string
+    pdfEngineResetAuto: string
+    highMathModelHint: string
+    ocrFallbackLabel: string
+    ocrFallbackHelp: string
+    ocrFallbackOff: string
+    ocrFallbackMissing: string
+    ocrFallbackWeak: string
+    ocrFallbackAll: string
+    dynamicRoutingLabel: string
+    dynamicRoutingHelp: string
+    dynamicRoutingPolicyLabel: string
+    dynamicRoutingPolicyHelp: string
+    dynamicRoutingPareto: string
+    dynamicRoutingQualityFirst: string
+    dynamicRoutingCostFirst: string
+    spillPolicyLabel: string
+    spillPolicyHelp: string
+    spillError: string
+    spillWarn: string
+    spillAppendix: string
+    exportAllowNeedsHumanLabel: string
+    exportAllowNeedsHumanHelp: string
+    deliveryPlanVerdict: string
+    deliveryPlanProvisional: string
   }
   mission: {
     title: string
@@ -532,6 +566,11 @@ export interface TranslationDictionary {
       export_completed: string
       pipeline_failed: string
     }
+    qeHeuristicPass: string
+    reExportWithModeLabel: string
+    reExportReadable: string
+    reExportFaithful: string
+    reExportAuto: string
   }
   quality: {
     title: string
@@ -558,7 +597,12 @@ export interface TranslationDictionary {
     pillar5Title: string
     pillar5Desc: string
     targetPdf: string
+    targetPdfFaithful: string
+    targetPdfReadable: string
+    targetPdfDual: string
+    targetDocGeneric: string
     epub: string
+    epubMonolingual: string
     contractJson: string
     deliveryContractJson: string
     secondaryDoc: string
@@ -606,6 +650,7 @@ export interface TranslationDictionary {
     visualFindingsTitle: string
     sampledPages: string
     noVisualFindings: string
+    docLevelArtifactFindings: string
     pageAlt: string
     flaggedPages: string
     auditDraftModel: string
@@ -687,6 +732,34 @@ export interface TranslationDictionary {
     postEditTotalSegments: string
     expandDetail: string
     collapseDetail: string
+    contractNotAvailable: string
+    contractDeliverableBadge: string
+    contractBlockedBadge: string
+    contractCriticalLabel: string
+    contractMajorLabel: string
+    contractFindingsTitle: string
+    contractZeroFindings: string
+    postEditLoadFailed: string
+    postEditSaveFailed: string
+    postEditReExportFailed: string
+    postEditLoading: string
+    postEditNoIssuesDesc: string
+    postEditSearchEmptyDesc: string
+    pageGeometryTitle: string
+    pageGeometryNotMeasured: string
+    pageGeometrySummary: string
+    pageGeometryMinFont: string
+    pageGeometryColPage: string
+    pageGeometryColMeasured: string
+    pageGeometryColDelivered: string
+    pageGeometryColLeading: string
+    pageGeometryColTier: string
+    pageGeometryColStatus: string
+    pageGeometryFitOk: string
+    pageGeometryFitOverflow: string
+    reExportActionLabel: string
+    reExportCurrentBadge: string
+    postEditUnsavedConfirm: string
   }
   assets: {
     title: string
@@ -823,6 +896,9 @@ export interface TranslationDictionary {
     kpiTmHuman: string
     kpiTmHumanSubtext: string
     copySuccess: string
+    copyText: string
+    copiedShort: string
+    variantsUnit: string
   }
   doctor: {
     title: string
@@ -1197,6 +1273,12 @@ export interface TranslationDictionary {
     editShortcutHint: string
     collapseInspector: string
     expandInspector: string
+    anchorMissingWarning: string
+    anchorUnpairedWarning: string
+    anchorInsertTag: string
+    anchorBadgeFormula: string
+    anchorBadgeNote: string
+    anchorBadgeObject: string
   }
   errorBoundary: {
     title: string

@@ -81,7 +81,7 @@ _PAIR_PREFIX: dict[str, str] = {
     "cite": "i",
     "q": "i",
 }
-_TAG_PARSE_RE = re.compile(r"<(/?)([a-z]\d+)(\s*/)?\s*>")
+_TAG_PARSE_RE = re.compile(r"<\s*(/?)\s*([a-zA-Z]\d+)\s*(/?)\s*>")
 
 
 def _is_safe_member_name(name: str) -> bool:
@@ -212,7 +212,7 @@ def _rebuild_dom_children(
         pos = m.end()
 
         is_close = bool(m.group(1))
-        tag_id = m.group(2)
+        tag_id = m.group(2).lower()
         is_self = bool(m.group(3))
 
         tok = token_map.get(tag_id)

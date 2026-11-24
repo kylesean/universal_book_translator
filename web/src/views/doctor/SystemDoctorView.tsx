@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
   Check,
@@ -57,6 +58,12 @@ import {
 } from './components'
 
 type CheckFilter = 'issues' | 'all'
+type DoctorTab = 'diagnostics' | 'models' | 'security'
+
+function parseDoctorTab(raw: string | null): DoctorTab {
+  if (raw === 'models' || raw === 'security' || raw === 'diagnostics') return raw
+  return 'diagnostics'
+}
 
 function providerStatusTone(provider: RuntimeConfig['providers'][number]) {
   if (!provider.available || provider.credential_issue) return 'warn' as const
@@ -73,6 +80,23 @@ function localizedStatus(
 export function SystemDoctorView() {
   const { t, language } = useI18n()
   const toast = useToast()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = parseDoctorTab(searchParams.get('tab'))
+  const handleTabChange = useCallback(
+    (next: string) => {
+      const tab = parseDoctorTab(next)
+      setSearchParams(
+        (prev) => {
+          const updated = new URLSearchParams(prev)
+          if (tab === 'diagnostics') updated.delete('tab')
+          else updated.set('tab', tab)
+          return updated
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
   const [checks, setChecks] = useState<DoctorCheck[]>([])
   const [runtime, setRuntime] = useState<RuntimeConfig | null>(null)
   const [info, setInfo] = useState<SystemInfo | null>(null)
@@ -296,7 +320,7 @@ export function SystemDoctorView() {
         </Alert>
       ) : null}
 
-      <Tabs defaultValue="diagnostics" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
         <TabsList className="h-auto w-full justify-start gap-1 bg-transparent p-0 sm:w-auto">
           <TabsTrigger
             value="diagnostics"

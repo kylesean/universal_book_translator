@@ -1,6 +1,9 @@
-/** Whether text visibly carries Markdown / GFM / TeX structure. */
+import { hasInlineAnchors } from './inlineAnchors'
+
+/** Whether text visibly carries Markdown / GFM / TeX / UBT inline anchor structure. */
 export function hasStructuredMarkup(text: string): boolean {
   return (
+    hasInlineAnchors(text) ||
     /(^|\n)\s{0,3}(#{1,6}|[-*+]|\d+\.)\s|`|\*\*|\[[^\]]+\]\([^)]+\)|\$[^$]+\$/.test(
       text
     ) ||

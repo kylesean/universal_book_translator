@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
@@ -244,7 +244,39 @@ class JobSpec(BaseModel):
     )
     #: Codec-level layout for the surgical service (mono/interleaved/side_by_side/
     #: bilingual/reflow). When omitted it is derived from ``dual_mode``.
-    layout_mode: Any = Field(default=None, description="Codec layout override")
+    layout_mode: str | None = Field(default=None, description="Codec layout override")
+    #: Enable difficulty-aware model cascade routing between budget and flagship models.
+    enable_dynamic_routing: bool | None = Field(
+        default=None,
+        description="Enable difficulty-aware cascade routing between budget and flagship models",
+    )
+    #: Dynamic cascade routing optimization objective.
+    dynamic_routing_policy: Literal["pareto", "quality_first", "cost_first"] | None = Field(
+        default=None,
+        description="Cascade routing policy (pareto, quality_first, cost_first)",
+    )
+    #: Per-page OCR/VLM fallback policy on native PDFs.
+    ocr_fallback: Literal["off", "missing", "weak", "all"] | None = Field(
+        default=None,
+        description="Per-page OCR/VLM fallback aggressiveness (off, missing, weak, all)",
+    )
+    #: Overflow spill policy at export verification.
+    spill_policy: Literal["error", "warn", "appendix", "source_kept_warn"] | None = Field(
+        default=None,
+        description="Layout overflow handling policy (error, warn, appendix, source_kept_warn)",
+    )
+
+    @field_validator("layout_mode", mode="before")
+    @classmethod
+    def _validate_layout_mode(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        from ubt.codecs.protocol import DeliveryMode as CodecDeliveryMode
+
+        if isinstance(value, CodecDeliveryMode):
+            return value.value
+        raw = str(value).strip().lower()
+        return CodecDeliveryMode(raw).value
 
     # Reject unknown fields to fail fast on typos and prevent unwanted parameter injection.
     model_config = ConfigDict(extra="forbid")
@@ -276,9 +308,10 @@ class JobSpec(BaseModel):
 
     @property
     def codec_mode(self) -> Any:
-        if self.layout_mode is not None:
-            return self.layout_mode
         from ubt.codecs.protocol import DeliveryMode as CodecDeliveryMode
+
+        if self.layout_mode is not None:
+            return CodecDeliveryMode(str(self.layout_mode).strip().lower())
 
         return {
             "mono": CodecDeliveryMode.MONO,

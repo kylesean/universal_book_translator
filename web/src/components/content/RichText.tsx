@@ -5,6 +5,11 @@ import remarkBreaks from 'remark-breaks'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 
+import { useI18n } from '@/i18n/useI18n'
+import {
+  parseAnchorBadgeToken,
+  prepareInlineAnchorsForMarkdown,
+} from '@/lib/inlineAnchors'
 import { hasStructuredMarkup } from '@/lib/markup'
 import { cn } from '@/lib/utils'
 
@@ -62,6 +67,7 @@ export function RichText({
   className,
   density = 'default',
 }: RichTextProps) {
+  const { t } = useI18n()
   if (!text.trim()) {
     return <span className="text-muted-foreground">—</span>
   }
@@ -72,6 +78,8 @@ export function RichText({
       </p>
     )
   }
+  const renderedText = prepareInlineAnchorsForMarkdown(text)
+
   return (
     <div
       className={cn(
@@ -89,6 +97,43 @@ export function RichText({
               {children}
             </a>
           ),
+          code: ({ className: codeClassName, children, ...rest }) => {
+            const rawText = typeof children === 'string'
+              ? children
+              : Array.isArray(children) && children.every((c) => typeof c === 'string')
+                ? children.join('')
+                : null
+            const anchor = !codeClassName && rawText ? parseAnchorBadgeToken(rawText) : null
+            if (anchor) {
+              const kindLabel =
+                anchor.kind === 'f'
+                  ? t.review.anchorBadgeFormula
+                  : anchor.kind === 'n'
+                    ? t.review.anchorBadgeNote
+                    : t.review.anchorBadgeObject
+              return (
+                <span
+                  title={anchor.rawTag}
+                  className={cn(
+                    'mx-0.5 inline-flex items-center gap-1 rounded border px-1.5 py-0 font-mono text-[11px] font-medium align-baseline',
+                    anchor.kind === 'f'
+                      ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300'
+                      : anchor.kind === 'n'
+                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                        : 'border-border bg-muted/70 text-muted-foreground',
+                  )}
+                >
+                  <span>{kindLabel}</span>
+                  <span className="opacity-75">{anchor.id}</span>
+                </span>
+              )
+            }
+            return (
+              <code className={codeClassName} {...rest}>
+                {children}
+              </code>
+            )
+          },
           table: ({ children }) => (
             <div className="overflow-x-auto">
               <table>{children}</table>
@@ -96,10 +141,11 @@ export function RichText({
           ),
           img: ({ src, alt }) => {
             if (!imageIsSameOrigin(typeof src === 'string' ? src : undefined)) {
+              const host = imageHost(typeof src === 'string' ? src : undefined)
               return (
                 <span className="inline-flex items-center rounded border border-dashed border-muted-foreground/40 px-1.5 py-0.5 text-xs text-muted-foreground">
-                  远程图片（{imageHost(typeof src === 'string' ? src : undefined)}）未加载
-                  {alt ? `：${alt}` : ''}
+                  {t.common.remoteImageBlocked.replace('{host}', host)}
+                  {alt ? ` · ${alt}` : ''}
                 </span>
               )
             }
@@ -114,7 +160,7 @@ export function RichText({
           },
         }}
       >
-        {text}
+        {renderedText}
       </ReactMarkdown>
     </div>
   )

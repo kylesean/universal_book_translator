@@ -87,7 +87,7 @@ _EAST_ASIA_FONT_MAP: dict[str, str] = {
     "ko": "Noto Serif CJK KR",
 }
 
-_TAG_PARSE_RE = re.compile(r"<(/?)([a-z]\d+)(\s*/)?\s*>")
+_TAG_PARSE_RE = re.compile(r"<\s*(/?)\s*([a-zA-Z]\d+)\s*(/?)\s*>")
 _XML_ILLEGAL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
@@ -255,10 +255,14 @@ def _make_run_element(text: str, rpr_xml: bytes, east_asia_font: str | None) -> 
             rfonts.set(_W_EASTASIA, east_asia_font)
     if len(rpr) > 0:
         r.append(rpr)
-    t = etree.SubElement(r, _W_T)
-    if clean.startswith(" ") or clean.endswith(" "):
-        t.set(_XML_SPACE, "preserve")
-    t.text = clean
+    lines = clean.split("\n")
+    for idx, part in enumerate(lines):
+        if idx > 0:
+            etree.SubElement(r, f"{{{_W_NS}}}br")
+        t = etree.SubElement(r, _W_T)
+        if part.startswith(" ") or part.endswith(" "):
+            t.set(_XML_SPACE, "preserve")
+        t.text = part
     return r
 
 
@@ -290,7 +294,7 @@ def _rebuild_paragraph_xml(
         pos = m.end()
 
         is_close = bool(m.group(1))
-        tag_id = m.group(2)
+        tag_id = m.group(2).lower()
         is_self = bool(m.group(3))
         tok = token_map.get(tag_id)
         if tok is None:

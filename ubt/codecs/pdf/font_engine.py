@@ -106,8 +106,20 @@ class _LoadedFace:
         try:
             self.cmap: dict[int, str] = dict(tt.getBestCmap() or {})
             self.upem = float(tt["head"].unitsPerEm)
-            self.ascent_em = float(tt["hhea"].ascent) / self.upem
-            self.descent_em = float(tt["hhea"].descent) / self.upem
+            # Prefer OpenType OS/2 typographic metrics over hhea when available:
+            # CJK fonts (Noto Serif/Sans CJK) inflate hhea to usWinAscent (~1.15/-0.29)
+            # for legacy line spacing while their real em-box is sTypoAscender/Descender (0.88/-0.12).
+            os2 = tt.get("OS/2", None)
+            if (
+                os2 is not None
+                and getattr(os2, "sTypoAscender", 0) > 0
+                and getattr(os2, "sTypoDescender", 0) <= 0
+            ):
+                self.ascent_em = float(os2.sTypoAscender) / self.upem
+                self.descent_em = float(os2.sTypoDescender) / self.upem
+            else:
+                self.ascent_em = float(tt["hhea"].ascent) / self.upem
+                self.descent_em = float(tt["hhea"].descent) / self.upem
         finally:
             tt.close()
 

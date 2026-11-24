@@ -17,15 +17,46 @@ export function isPreviewableProduct(item: DeliverableItem): boolean {
   return ext === 'pdf' || ext === 'html' || ext === 'htm'
 }
 
-/** The friendly display name; falls back to the backend label, then the key. */
-export function deliverableName(key: string, fallback: string, t: Translation): string {
+export interface DeliverableNameContext {
+  deliveryMode?: string | null
+  filename?: string | null
+}
+
+/** The friendly display name; adapts to actual delivery mode and file type. */
+export function deliverableName(
+  key: string,
+  fallback: string,
+  t: Translation,
+  ctx?: DeliverableNameContext,
+): string {
+  const filename = (ctx?.filename ?? '').toLowerCase()
+  const ext = filename.split('.').pop() ?? ''
+  const mode = (ctx?.deliveryMode ?? '').toLowerCase()
+  const isDual = filename.includes('_dual') || filename.includes('.dual.')
+
   switch (key) {
-    case 'primary':
+    case 'primary': {
+      if (ext === 'epub') {
+        return isDual ? t.quality.epub : t.quality.epubMonolingual
+      }
+      if (ext && ext !== 'pdf') {
+        return fallback || t.quality.targetDocGeneric
+      }
+      if (isDual) {
+        return t.quality.targetPdfDual
+      }
+      if (mode === 'faithful') {
+        return t.quality.targetPdfFaithful
+      }
+      if (mode === 'readable') {
+        return t.quality.targetPdfReadable
+      }
       return t.quality.targetPdf
+    }
     case 'secondary':
       return t.quality.secondaryDoc
     case 'epub':
-      return t.quality.epub
+      return isDual ? t.quality.epub : t.quality.epubMonolingual
     case 'contract':
       return t.quality.contractJson
     case 'delivery_contract':

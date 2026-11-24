@@ -38,7 +38,7 @@ def compute_pdf_page_chunks(
         chunk_size = get_pdf_page_chunk_size()
 
     if pages is not None:
-        sorted_pages = sorted(pages)
+        sorted_pages = sorted(p for p in pages if p >= 1 and (total_pages <= 0 or p <= total_pages))
         if not sorted_pages:
             return []
         return [sorted_pages[i : i + chunk_size] for i in range(0, len(sorted_pages), chunk_size)]

@@ -135,9 +135,9 @@ class ArtifactVerifyLoop:
                     codes = [
                         getattr(f, "code", "defect")
                         for f in bad_after
-                        if getattr(f, "block_id", None) == b.id
+                        if b.id in _finding_block_ids(f)
                         or (
-                            getattr(f, "block_id", None) not in named_ids
+                            not (_finding_block_ids(f) & named_ids)
                             and getattr(f, "page", None) == page
                         )
                     ]

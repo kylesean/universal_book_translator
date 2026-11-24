@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from ubt.app.artifact_services import AdapterArtifactServices
 from ubt.app.document_services import AdapterDocumentServices
 from ubt.app.pdf_facts import AdapterPdfFacts
@@ -10,6 +12,7 @@ from ubt.core.engine.document_services import configure_document_services
 from ubt.core.engine.pdf_facts import configure_pdf_facts
 
 _installed = False
+_lock = threading.Lock()
 
 
 def install_services() -> None:
@@ -21,10 +24,20 @@ def install_services() -> None:
     global _installed
     if _installed:
         return
-    configure_pdf_facts(AdapterPdfFacts())
-    configure_artifact_services(AdapterArtifactServices())
-    configure_document_services(AdapterDocumentServices())
-    _installed = True
+    with _lock:
+        if _installed:
+            return
+        configure_pdf_facts(AdapterPdfFacts())
+        configure_artifact_services(AdapterArtifactServices())
+        configure_document_services(AdapterDocumentServices())
+        _installed = True
 
 
-__all__ = ["install_services"]
+def reset_services_for_testing() -> None:
+    """Allow tests to re-install default services after swapping fake providers."""
+    global _installed
+    with _lock:
+        _installed = False
+
+
+__all__ = ["install_services", "reset_services_for_testing"]

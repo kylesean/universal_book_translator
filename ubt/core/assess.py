@@ -1123,6 +1123,16 @@ async def assess_document_async(
         scan_page_share=pdf.get("scan_page_share"),
         selected_pages=selected_pages_count,
     )
+    delivery_plan_meta: dict[str, Any] | None = None
+    try:
+        from ubt.core.engine.pipeline import resolve_delivery_for_input
+
+        decision = await asyncio.to_thread(resolve_delivery_for_input, config, p)
+        delivery_plan_meta = dict(decision.plan.to_manifest())
+        delivery_plan_meta["effective_mode"] = decision.effective_mode
+    except Exception as exc:  # best-effort routing verdict; never block quotes
+        logger.debug("assess: delivery plan resolution unavailable (%s)", exc)
+
     report = AssessmentReport(
         schema_version=SCHEMA_VERSION,
         status="ok",
@@ -1142,6 +1152,7 @@ async def assess_document_async(
             "ocr_mode": config.ocr_mode,
             "formula_enrichment": config.formula_enrichment,
             "provider": config.provider,
+            **({"delivery_plan": delivery_plan_meta} if delivery_plan_meta is not None else {}),
         },
     )
     return report

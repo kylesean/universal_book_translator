@@ -171,6 +171,14 @@ class StyleMeta(BaseModel):
     #: rewrote and the source-derived ``inline_runs`` cannot locate. Kept apart
     #: from ``inline_runs`` so a re-draft still has the source spans to re-inject.
     target_runs: tuple[InlineRun, ...] = ()
+    #: Fixed-container geometry hints (in PDF points) recorded by in-place
+    #: codecs so the draft stage can derive a target-language character budget
+    #: before overflowing at render time. ``None`` for reflow/unconstrained docs.
+    box_width_pt: float | None = None
+    box_height_pt: float | None = None
+    line_height_pt: float | None = None
+    #: Optional precomputed target character budget (excluding inline tags).
+    char_budget: int | None = None
 
 
 # --------------------------------------------------------------------------- #

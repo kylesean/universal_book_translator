@@ -189,7 +189,11 @@ def _apply_delivery_override(
     """
     if requested is None:
         return None
-    from ubt.core.engine.pdf_facts import classify_pdf_structure, probe_pdf_pages
+    from ubt.core.engine.pdf_facts import (
+        classify_pdf_structure,
+        probe_pdf_feasibility,
+        probe_pdf_pages,
+    )
     from ubt.delivery.planning import plan_for_document
 
     metadata = dict(manifest.metadata or {})
@@ -232,6 +236,21 @@ def _apply_delivery_override(
             if requested == "faithful" and font_damage_pages == 0:
                 font_damage_pages = 1
 
+    measured_feasible: bool | None = None
+    measured_overlap: bool | None = None
+    measured_expansion: str | None = None
+    if is_pdf and source_path.exists() and requested in ("faithful", "auto") and not has_scan:
+        try:
+            measured = probe_pdf_feasibility(source_path)
+            if getattr(measured, "measured", False):
+                measured_feasible = bool(measured.feasible)
+                measured_overlap = bool(measured.source_overlap)
+                measured_expansion = measured.expansion_risk
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "Re-export native feasibility probe unavailable for %s: %s", source_path, exc
+            )
+
     decision = plan_for_document(
         requested,
         document_mode=str(metadata.get("document_mode") or ""),
@@ -243,6 +262,9 @@ def _apply_delivery_override(
         structural_page_share=structural_page_share,
         formula_heavy=formula_heavy,
         allow_degrade=allow_degrade,
+        page_lock_feasible=measured_feasible,
+        source_overlap=measured_overlap,
+        expansion_risk=measured_expansion,
     )
     if decision.effective_mode is None:
         raise ReExportError(
@@ -329,6 +351,28 @@ async def re_export_job(
                 f"job {job_id} source document is missing ({manifest.source_path!r}); "
                 "cannot re-render"
             )
+        stored_fp = ledger.get_job_metadata_value(job_id, "source_fingerprint")
+        if stored_fp and stored_fp != "unavailable":
+            from ubt.core.ir.serializer import compute_file_sha256_cached
+
+            current_fp = await asyncio.to_thread(compute_file_sha256_cached, source_path)
+            if current_fp and current_fp != "unavailable" and current_fp != stored_fp:
+                raise ReExportError(
+                    f"source document changed since job {job_id} was ingested "
+                    f"(stored {str(stored_fp)[:12]}…, current {current_fp[:12]}…); "
+                    "cannot safely re-export against a modified source"
+                )
+        if delivery_mode is not None:
+            meta = dict(manifest.metadata or {})
+            for key in (
+                "delivery_mode",
+                "delivery_mode_effective",
+                "delivery_mode_requested",
+                "delivery_plan",
+            ):
+                if key in meta:
+                    ledger.set_job_metadata_value(job_id, key, meta[key])
+            ledger.set_job_metadata_value(job_id, "manifest_metadata", meta)
         target = output_path
         if target is None:
             stored_output = ledger.get_job_metadata_value(job_id, "output_file")
@@ -390,15 +434,8 @@ async def re_export_job(
                     "typst": export_config.typst.model_copy(update={"delivery_mode": delivery_mode})
                 }
             )
-        # The runtime config must be applied here too, not only at live-run
-        # start: without it the adapter keeps its constructor fallback
-        # (``facsimile``), so a ``readable`` replay re-rendered page-locked and
-        # the artifact contract audited a contract the file was not rendered
-        # under. ``delivery_mode`` is the ledger's or ``--delivery``'s effective
-        # mode; when a ledger predates the delivery plan and records nothing, the
-        # override is skipped and the adapter's own default stands — the
-        # renderer still writes the mode it actually used into
-        # ``manifest.metadata`` for the contract to read.
+        # Apply the runtime configuration so the adapter uses the resolved
+        # Typst/font/cache knobs for this re-export.
         recorded_mode = str(
             (manifest.metadata or {}).get("delivery_mode")
             or (manifest.metadata or {}).get("delivery_mode_effective")

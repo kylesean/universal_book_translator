@@ -151,6 +151,9 @@ class _DraftInputs:
     #: heading gets the "do not expand" clause, and into the cache key so a
     #: heading and a prose block with identical source text do not collide.
     block_type: str = ""
+    #: Optional fixed-container target character budget derived from source box
+    #: geometry so tight in-place PDF paragraphs compact on the first pass.
+    char_budget: int | None = None
 
 
 def resolve_draft_policy(
@@ -347,6 +350,48 @@ def _routing_scheduler(policy: Any) -> Any | None:
     return scheduler
 
 
+def _glossary_source_terms(policy: Any) -> list[str]:
+    """Extract non-empty glossary source terms for complexity classification."""
+    return [
+        str(g.get("source", "")) for g in getattr(policy, "glossary_dicts", []) if g.get("source")
+    ]
+
+
+def _block_with_budget(block: IRBlock, char_budget: int | None) -> IRBlock:
+    """Attach computed char_budget onto a routing view without mutating ledger IR."""
+    if char_budget is None or char_budget <= 0:
+        return block
+    cur_style = getattr(block, "style", None)
+    if cur_style is not None and getattr(cur_style, "char_budget", None) == char_budget:
+        return block
+    new_style = (cur_style or StyleMeta()).model_copy(update={"char_budget": char_budget})
+    return block.model_copy(update={"style": new_style})
+
+
+def _draft_output_clean(engine: Any, block: IRBlock, raw_text: str, inputs: _DraftInputs) -> bool:
+    """Return whether a raw draft passes placeholder restore and declared inline tags."""
+    masked = ports.masked_source(
+        text=inputs.masked_source,
+        code_map=inputs.code_map,
+        math_map=inputs.math_map,
+        soup_map=inputs.soup_map,
+        cite_map=inputs.cite_map,
+        email_map=inputs.email_map,
+    )
+    result = engine.resolve(raw_text, masked)
+    if not result.clean:
+        return False
+    if not block.skip_translate and "<" in block.source_text:
+        from ubt.core.validators.inline_tags import extract_declared_tags, validate_inline_tags
+
+        rigid_tags, pair_tags = extract_declared_tags(block.source_text)
+        if rigid_tags or pair_tags:
+            clean_target, _ = parse_emphasis(result.text)
+            if not validate_inline_tags(block.source_text, clean_target).valid:
+                return False
+    return True
+
+
 def _paid_block_ids(blocks: Sequence[IRBlock]) -> set[str]:
     """Blocks whose draft already landed and must not be marked failed.
 
@@ -501,27 +546,35 @@ class _DraftProcessor:
             (block.id, inp.coref_hint) for block, inp in chunk if inp.coref_hint.strip()
         ]
         block_types = [(block.id, str(block.block_type)) for block, _ in chunk]
+        block_budgets = [
+            (block.id, inp.char_budget)
+            for block, inp in chunk
+            if inp.char_budget is not None and inp.char_budget > 0
+        ]
         from ubt.core.memory.neighbor_window import NeighborContextBuilder
 
         chunk_neighbor_ctx = NeighborContextBuilder.combine_chunk_neighbor_contexts(
             first_inp.neighbor_ctx, last_inp.neighbor_ctx
         )
-        system, user = build_macro_chunk_draft_prompt(
-            blocks=[(b.id, inp.masked_source) for b, inp in chunk],
-            glossary_table=merged_glossary,
-            neighbor_context=chunk_neighbor_ctx,
-            target_lang=self.policy.target_lang,
-            source_lang=self.policy.source_lang,
-            genre_profile=self.policy.profile_name,
-            rolling_summary=first_inp.macro_ctx,
-            global_glossary=self.policy.global_glossary_table,
-            few_shot_reference=first_inp.few_shot_reference or last_inp.few_shot_reference,
-            epoch_summary=first_inp.epoch_ctx,
-            domain=self.policy.domain,
-            section_context=section_context,
-            block_contexts=block_contexts,
-            block_types=block_types,
-        )
+        macro_prompt_kwargs: dict[str, Any] = {
+            "blocks": [(b.id, inp.masked_source) for b, inp in chunk],
+            "glossary_table": merged_glossary,
+            "neighbor_context": chunk_neighbor_ctx,
+            "target_lang": self.policy.target_lang,
+            "source_lang": self.policy.source_lang,
+            "genre_profile": self.policy.profile_name,
+            "rolling_summary": first_inp.macro_ctx,
+            "global_glossary": self.policy.global_glossary_table,
+            "few_shot_reference": first_inp.few_shot_reference or last_inp.few_shot_reference,
+            "epoch_summary": first_inp.epoch_ctx,
+            "domain": self.policy.domain,
+            "section_context": section_context,
+            "block_contexts": block_contexts,
+            "block_types": block_types,
+        }
+        if block_budgets:
+            macro_prompt_kwargs["block_char_budgets"] = block_budgets
+        system, user = build_macro_chunk_draft_prompt(**macro_prompt_kwargs)
         return step_key(
             "macro_chunk_prompt",
             [
@@ -531,6 +584,7 @@ class _DraftProcessor:
                 self.policy.target_lang,
                 self.policy.profile_name,
                 self.policy.domain or "",
+                ",".join(f"{bid}:{bgt}" for bid, bgt in block_budgets),
             ],
             {},
         )
@@ -548,21 +602,24 @@ class _DraftProcessor:
         """
         from ubt.cache.store import step_key
 
-        system, user = self.runtime.router.build_draft_prompt(
-            source_text=inputs.masked_source,
-            glossary_table=inputs.glossary_table,
-            neighbor_context=inputs.neighbor_ctx,
-            target_lang=self.policy.target_lang,
-            source_lang=self.policy.source_lang,
-            genre_profile=self.policy.profile_name,
-            rolling_summary=inputs.macro_ctx,
-            global_glossary=self.policy.global_glossary_table,
-            few_shot_reference=inputs.few_shot_reference,
-            epoch_summary=inputs.epoch_ctx,
-            model=self.runtime.router.draft_model,
-            domain=self.policy.domain,
-            block_type=inputs.block_type or None,
-        )
+        prompt_kwargs: dict[str, Any] = {
+            "source_text": inputs.masked_source,
+            "glossary_table": inputs.glossary_table,
+            "neighbor_context": inputs.neighbor_ctx,
+            "target_lang": self.policy.target_lang,
+            "source_lang": self.policy.source_lang,
+            "genre_profile": self.policy.profile_name,
+            "rolling_summary": inputs.macro_ctx,
+            "global_glossary": self.policy.global_glossary_table,
+            "few_shot_reference": inputs.few_shot_reference,
+            "epoch_summary": inputs.epoch_ctx,
+            "model": self.runtime.router.draft_model,
+            "domain": self.policy.domain,
+            "block_type": inputs.block_type or None,
+        }
+        if inputs.char_budget is not None and inputs.char_budget > 0:
+            prompt_kwargs["char_budget"] = inputs.char_budget
+        system, user = self.runtime.router.build_draft_prompt(**prompt_kwargs)
         # The prompt already carries the languages/profile/domain/block-type,
         # but fold them in explicitly too: the key must separate two runs that
         # differ on any output-bearing axis even if a future prompt builder
@@ -577,6 +634,7 @@ class _DraftProcessor:
                 self.policy.profile_name,
                 self.policy.domain or "",
                 inputs.block_type,
+                str(inputs.char_budget or ""),
             ],
             {},
         )
@@ -816,6 +874,12 @@ class _DraftProcessor:
         # Compressed L3 epoch history rides the static prompt prefix.
         epoch_ctx = self.runtime.memory_mgr.get_l3_summary()
 
+        from ubt.core.policy.layout_budget import estimate_tight_char_budget
+
+        char_budget = estimate_tight_char_budget(
+            block.style, block.source_text, self.policy.target_lang
+        )
+
         inputs = _DraftInputs(
             masked_source=masked.text,
             code_map=masked.code_map,
@@ -831,6 +895,7 @@ class _DraftProcessor:
             epoch_ctx=epoch_ctx,
             few_shot_reference=few_shot_reference,
             block_type=str(block.block_type),
+            char_budget=char_budget,
         )
 
         return inputs
@@ -911,6 +976,14 @@ class _DraftProcessor:
         # is always clean and the render can re-apply the weight the source-
         # derived inline run cannot locate.
         final_draft, target_runs = parse_emphasis(result.text)
+        if not block.skip_translate and "<" in block.source_text:
+            from ubt.core.validators.inline_tags import extract_declared_tags, validate_inline_tags
+
+            rigid_tags, pair_tags = extract_declared_tags(block.source_text)
+            if rigid_tags or pair_tags:
+                tag_res = validate_inline_tags(block.source_text, final_draft)
+                if tag_res.valid:
+                    final_draft = tag_res.normalized_text
         if block.block_type == BlockType.HEADING:
             trimmed = trim_heading_expansion(block.source_text, final_draft)
             if trimmed != final_draft:
@@ -995,6 +1068,29 @@ class _DraftProcessor:
                 if inputs is None:
                     return
 
+            routing_block = _block_with_budget(block, inputs.char_budget)
+            initial_assignment: Any | None = None
+
+            async def _invoke_router_draft(masked_source: str, model_name: str | None) -> str:
+                block_to_draft = block.with_source_text(masked_source)
+                draft_kwargs: dict[str, Any] = {
+                    "block": block_to_draft,
+                    "glossary_table": inputs.glossary_table,
+                    "neighbor_context": inputs.neighbor_ctx,
+                    "target_lang": self.policy.target_lang,
+                    "source_lang": self.policy.source_lang,
+                    "genre_profile": self.policy.profile_name,
+                    "domain": self.policy.domain,
+                    "rolling_summary": inputs.macro_ctx,
+                    "epoch_summary": inputs.epoch_ctx,
+                    "global_glossary": self.policy.global_glossary_table,
+                    "few_shot_reference": inputs.few_shot_reference,
+                    "model": model_name,
+                }
+                if inputs.char_budget is not None and inputs.char_budget > 0:
+                    draft_kwargs["char_budget"] = inputs.char_budget
+                return str(await self.runtime.router.draft(**draft_kwargs))
+
             async def generate(masked_source: str) -> str:
                 """The generate half: one provider draft, with this stage's retries.
 
@@ -1002,53 +1098,30 @@ class _DraftProcessor:
                 :meth:`~ubt.translate.engine.TranslationEngine.draft` owns the
                 cache decision around it.
                 """
-                block_to_draft = block.with_source_text(masked_source)
+                nonlocal initial_assignment
                 draft_raw: str | None = None
                 last_exc: Exception | None = None
                 model_override: str | None = None
                 if (scheduler := _routing_scheduler(self.policy)) is not None:
-                    glossary_sources = [
-                        str(g.get("source", ""))
-                        for g in getattr(self.policy, "glossary_dicts", [])
-                        if g.get("source")
-                    ]
-                    assignment = scheduler.resolve_model_for_block(
-                        block,
-                        glossary_terms=glossary_sources,
+                    initial_assignment = scheduler.resolve_model_for_block(
+                        routing_block,
+                        glossary_terms=_glossary_source_terms(self.policy),
                         is_retry_or_repair=False,
                     )
-                    model_override = assignment.assigned_model
+                    model_override = initial_assignment.assigned_model
 
                 for attempt in range(self.policy.draft_max_retries + 1):
                     current_model = model_override
                     if attempt > 0 and (scheduler := _routing_scheduler(self.policy)) is not None:
-                        glossary_sources = [
-                            str(g.get("source", ""))
-                            for g in getattr(self.policy, "glossary_dicts", [])
-                            if g.get("source")
-                        ]
                         escalated = scheduler.resolve_model_for_block(
-                            block,
-                            glossary_terms=glossary_sources,
+                            routing_block,
+                            glossary_terms=_glossary_source_terms(self.policy),
                             is_retry_or_repair=True,
                         )
                         current_model = escalated.assigned_model
 
                     try:
-                        draft_raw = await self.runtime.router.draft(
-                            block=block_to_draft,
-                            glossary_table=inputs.glossary_table,
-                            neighbor_context=inputs.neighbor_ctx,
-                            target_lang=self.policy.target_lang,
-                            source_lang=self.policy.source_lang,
-                            genre_profile=self.policy.profile_name,
-                            domain=self.policy.domain,
-                            rolling_summary=inputs.macro_ctx,
-                            epoch_summary=inputs.epoch_ctx,
-                            global_glossary=self.policy.global_glossary_table,
-                            few_shot_reference=inputs.few_shot_reference,
-                            model=current_model,
-                        )
+                        draft_raw = await _invoke_router_draft(masked_source, current_model)
                         break
                     except Exception as exc:
                         last_exc = exc
@@ -1090,6 +1163,48 @@ class _DraftProcessor:
                 draft_raw = await self.runtime.engine.draft(
                     inputs.masked_source, generate, context=context
                 )
+                if (
+                    (scheduler := _routing_scheduler(self.policy)) is not None
+                    and initial_assignment is not None
+                    and not getattr(initial_assignment, "is_escalated", False)
+                ):
+                    pre_clean = await asyncio.to_thread(
+                        _draft_output_clean,
+                        self.runtime.engine,
+                        block,
+                        draft_raw,
+                        inputs,
+                    )
+                    if not pre_clean:
+                        escalated = scheduler.resolve_model_for_block(
+                            routing_block,
+                            glossary_terms=_glossary_source_terms(self.policy),
+                            is_retry_or_repair=True,
+                        )
+                        if escalated.assigned_model != initial_assignment.assigned_model:
+                            logger.info(
+                                "Cascade escalation for block %s: %s -> %s after structural mismatch",
+                                block.id,
+                                initial_assignment.assigned_model,
+                                escalated.assigned_model,
+                            )
+                            try:
+                                draft_raw = await _invoke_router_draft(
+                                    inputs.masked_source, escalated.assigned_model
+                                )
+                            except (
+                                asyncio.CancelledError,
+                                JobInterruptedError,
+                                BudgetExceededError,
+                                LedgerWriterLeaseLostError,
+                            ):
+                                raise
+                            except Exception as cascade_exc:
+                                logger.warning(
+                                    "Cascade escalated draft failed for block %s (%s); keeping initial draft",
+                                    block.id,
+                                    cascade_exc,
+                                )
                 clean = await self.finalize_draft(block, draft_raw, inputs)
                 # Cache only a judged-clean draft: a cached defective draft
                 # replays on every later run, and only repair could recover it.
@@ -1198,21 +1313,26 @@ class _DraftProcessor:
         chunk_neighbor_ctx = NeighborContextBuilder.combine_chunk_neighbor_contexts(
             first_inp.neighbor_ctx, last_inp.neighbor_ctx
         )
+        block_budgets = [
+            (block.id, inp.char_budget)
+            for block, inp in chunk
+            if inp.char_budget is not None and inp.char_budget > 0
+        ]
         if not extracted_by_id:
             async with self.runtime.concurrency_sem:
                 blocks_to_draft = [b.with_source_text(inp.masked_source) for b, inp in chunk]
+                routing_blocks = [
+                    _block_with_budget(b.with_source_text(inp.masked_source), inp.char_budget)
+                    for b, inp in chunk
+                ]
                 chunk_model_override: str | None = None
                 if (scheduler := _routing_scheduler(self.policy)) is not None:
-                    glossary_sources = [
-                        str(g.get("source", ""))
-                        for g in getattr(self.policy, "glossary_dicts", [])
-                        if g.get("source")
-                    ]
+                    glossary_sources = _glossary_source_terms(self.policy)
                     assignments = [
                         scheduler.resolve_model_for_block(
-                            b, glossary_terms=glossary_sources, is_retry_or_repair=False
+                            rb, glossary_terms=glossary_sources, is_retry_or_repair=False
                         )
-                        for b in blocks_to_draft
+                        for rb in routing_blocks
                     ]
                     tier_ranks = {"trivial": 1, "standard": 2, "complex": 3, "extreme": 4}
                     chunk_model_override = max(
@@ -1226,16 +1346,12 @@ class _DraftProcessor:
                             attempt > 0
                             and (scheduler := _routing_scheduler(self.policy)) is not None
                         ):
-                            glossary_sources = [
-                                str(g.get("source", ""))
-                                for g in getattr(self.policy, "glossary_dicts", [])
-                                if g.get("source")
-                            ]
+                            glossary_sources = _glossary_source_terms(self.policy)
                             escalated_assignments = [
                                 scheduler.resolve_model_for_block(
-                                    b, glossary_terms=glossary_sources, is_retry_or_repair=True
+                                    rb, glossary_terms=glossary_sources, is_retry_or_repair=True
                                 )
-                                for b in blocks_to_draft
+                                for rb in routing_blocks
                             ]
                             tier_ranks = {"trivial": 1, "standard": 2, "complex": 3, "extreme": 4}
                             current_chunk_model = max(
@@ -1244,22 +1360,27 @@ class _DraftProcessor:
                             ).assigned_model
 
                         try:
+                            macro_call_kwargs: dict[str, Any] = {
+                                "blocks": blocks_to_draft,
+                                "glossary_table": merged_glossary,
+                                "neighbor_context": chunk_neighbor_ctx,
+                                "target_lang": self.policy.target_lang,
+                                "source_lang": self.policy.source_lang,
+                                "genre_profile": self.policy.profile_name,
+                                "domain": self.policy.domain,
+                                "rolling_summary": macro_ctx,
+                                "epoch_summary": epoch_ctx,
+                                "global_glossary": self.policy.global_glossary_table,
+                                "few_shot_reference": few_shot,
+                                "section_context": section_context,
+                                "block_contexts": block_contexts,
+                                "block_types": block_types,
+                                "model": current_chunk_model,
+                            }
+                            if block_budgets:
+                                macro_call_kwargs["block_char_budgets"] = block_budgets
                             extracted_by_id = await self.runtime.router.draft_macro_chunk(
-                                blocks=blocks_to_draft,
-                                glossary_table=merged_glossary,
-                                neighbor_context=chunk_neighbor_ctx,
-                                target_lang=self.policy.target_lang,
-                                source_lang=self.policy.source_lang,
-                                genre_profile=self.policy.profile_name,
-                                domain=self.policy.domain,
-                                rolling_summary=macro_ctx,
-                                epoch_summary=epoch_ctx,
-                                global_glossary=self.policy.global_glossary_table,
-                                few_shot_reference=few_shot,
-                                section_context=section_context,
-                                block_contexts=block_contexts,
-                                block_types=block_types,
-                                model=current_chunk_model,
+                                **macro_call_kwargs
                             )
                             break
                         except Exception as exc:
@@ -1755,7 +1876,7 @@ async def _build_draft_runtime(
         budget_m = getattr(config, "budget_model", None) or router.draft_model
         std_m = router.draft_model
         flagship_m = (
-            getattr(config, "flagship_model", None) or router.repair_model or "claude-3-7-sonnet"
+            getattr(config, "flagship_model", None) or router.repair_model or router.draft_model
         )
         dynamic_scheduler = DynamicParetoScheduler(
             policy=policy_enum,

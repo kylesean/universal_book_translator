@@ -86,6 +86,7 @@ class ArtifactGateResult:
                     "code": getattr(finding, "code", ""),
                     "message": getattr(finding, "message", ""),
                     "page": getattr(finding, "page", None),
+                    "block_id": getattr(finding, "block_id", None),
                 }
                 for finding in self.findings
             ],
@@ -129,31 +130,59 @@ def _count_pages(pdf_path: Path) -> int:
         return -1
 
 
-def _fonts_without_tounicode(pdf_path: Path) -> int:
-    """Count font dictionaries the artifact uses without a ``/ToUnicode`` map."""
+_NON_TEXT_PAINT_OPS: frozenset[str] = frozenset(
+    {"Do", "S", "s", "f", "F", "f*", "B", "B*", "b", "b*"}
+)
+
+
+def _inspect_pdf_resources(pdf_path: Path) -> tuple[int, set[int], set[int]]:
+    """Inspect font ``/ToUnicode`` coverage and non-text graphical pages in one pass.
+
+    Returns ``(missing_tounicode_fonts, non_text_pages, unmapped_font_pages)``.
+    """
     try:
         import pikepdf
     except Exception:  # noqa: BLE001 - pikepdf is a base dependency, but never kill a gate
-        return 0
+        return 0, set(), set()
     missing = 0
+    non_text_pages: set[int] = set()
+    unmapped_font_pages: set[int] = set()
     try:
         with pikepdf.open(pdf_path) as pdf:
-            for page in pdf.pages:
+            for page_no, page in enumerate(pdf.pages, start=1):
                 resources = page.get("/Resources")
-                if resources is None:
+                has_xobjects = False
+                if resources is not None:
+                    xobjs = resources.get("/XObject")
+                    if isinstance(xobjs, pikepdf.Dictionary) and len(xobjs) > 0:
+                        has_xobjects = True
+                    fonts = resources.get("/Font")
+                    if fonts is not None:
+                        page_fonts = 0
+                        page_missing = 0
+                        for _, font in fonts.items():
+                            if not isinstance(font, pikepdf.Dictionary):
+                                continue
+                            page_fonts += 1
+                            if "/ToUnicode" not in font:
+                                missing += 1
+                                page_missing += 1
+                        if page_fonts > 0 and page_missing == page_fonts:
+                            unmapped_font_pages.add(page_no)
+                if has_xobjects:
+                    non_text_pages.add(page_no)
                     continue
-                fonts = resources.get("/Font")
-                if fonts is None:
-                    continue
-                for _, font in fonts.items():
-                    if not isinstance(font, pikepdf.Dictionary):
-                        continue
-                    if "/ToUnicode" not in font:
-                        missing += 1
+                try:
+                    for inst in pikepdf.parse_content_stream(page):
+                        if str(inst.operator) in _NON_TEXT_PAINT_OPS:
+                            non_text_pages.add(page_no)
+                            break
+                except Exception:  # noqa: BLE001
+                    pass
     except Exception as exc:  # noqa: BLE001
         logger.debug("Artifact gate could not inspect fonts in %s: %s", pdf_path, exc)
-        return 0
-    return missing
+        return 0, set(), set()
+    return missing, non_text_pages, unmapped_font_pages
 
 
 def run_artifact_gate(
@@ -209,10 +238,12 @@ def run_artifact_gate(
             stats={"total_pages": total},
         )
 
+    missing_tounicode, non_text_pages, unmapped_font_pages = _inspect_pdf_resources(pdf_path)
+
     blank_pages = [
         page_no
         for page_no, text in enumerate(page_texts, start=1)
-        if len("".join(text.split())) < BLANK_TEXT_THRESHOLD_CHARS
+        if len("".join(text.split())) < BLANK_TEXT_THRESHOLD_CHARS and page_no not in non_text_pages
     ]
     for page_no in blank_pages:
         findings.append(
@@ -225,7 +256,7 @@ def run_artifact_gate(
         )
 
     joined = "".join(page_texts)
-    if not joined.strip():
+    if not joined.strip() and len(non_text_pages) < total:
         findings.append(
             ArtifactFinding(
                 severity="critical",
@@ -233,7 +264,7 @@ def run_artifact_gate(
                 message="The artifact carries no extractable text on any page",
             )
         )
-    else:
+    elif joined.strip():
         replacement = joined.count("\ufffd")
         if replacement:
             findings.append(
@@ -243,26 +274,45 @@ def run_artifact_gate(
                     message=f"The text layer contains {replacement} U+FFFD replacement character(s)",
                 )
             )
-        if target_lang and target_lang.lower().startswith(("zh", "ja", "ko")):
-            cjk = sum(1 for char in joined if "\u4e00" <= char <= "\u9fff")
-            if cjk == 0:
+        if target_lang:
+            from ubt.adapters.pdf.artifact_parity import _script_ranges, target_script_counts
+
+            if _script_ranges(target_lang):
+                hits, _total_chars = target_script_counts(joined, target_lang)
+                if hits == 0:
+                    findings.append(
+                        ArtifactFinding(
+                            severity="major",
+                            code="target_language_absent",
+                            message=f"The artifact's text layer carries no {target_lang} script characters",
+                        )
+                    )
+
+    if missing_tounicode:
+        unsearchable_font_pages = [
+            page_no
+            for page_no in sorted(unmapped_font_pages)
+            if 1 <= page_no <= len(page_texts)
+            and len("".join(page_texts[page_no - 1].split())) < BLANK_TEXT_THRESHOLD_CHARS
+        ]
+        if not joined.strip():
+            findings.append(
+                ArtifactFinding(
+                    severity="major",
+                    code="font_missing_tounicode",
+                    message=f"{missing_tounicode} font(s) lack /ToUnicode and no text is extractable",
+                )
+            )
+        elif unsearchable_font_pages:
+            for page_no in unsearchable_font_pages:
                 findings.append(
                     ArtifactFinding(
                         severity="major",
-                        code="target_language_absent",
-                        message="The artifact's text layer carries no CJK characters",
+                        code="font_missing_tounicode",
+                        message=f"Page {page_no} uses font(s) without /ToUnicode and yielded no searchable text",
+                        page=page_no,
                     )
                 )
-
-    missing_tounicode = _fonts_without_tounicode(pdf_path)
-    if missing_tounicode and not joined.strip():
-        findings.append(
-            ArtifactFinding(
-                severity="major",
-                code="font_missing_tounicode",
-                message=f"{missing_tounicode} font(s) lack /ToUnicode and no text is extractable",
-            )
-        )
 
     passed = not any(finding.severity in ("major", "critical") for finding in findings)
     return ArtifactGateResult(

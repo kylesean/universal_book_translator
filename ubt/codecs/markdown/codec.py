@@ -29,9 +29,10 @@ _INLINE_RIGID_RE = re.compile(
     r"(`[^`\n]+`|\$\$[^$]+\$\$|\$(?!\s)[^$\n]+?(?<!\s)\$|!\[[^\]]*\]\([^)]+\))"
 )
 _INLINE_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
-_TAG_RESTORE_RE = re.compile(r"<(/?)([a-z]\d+)(\s*/)?\s*>")
+_TAG_RESTORE_RE = re.compile(r"<\s*(/?)\s*([a-zA-Z]\d+)\s*(/?)\s*>")
 _PREFIX_RE = re.compile(r"^(\s*(?:>\s*)*(?:#{1,6}\s+|[-*+]\s+|\d+\.\s+)?)")
 _TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{1,}:?\s*(?:\|\s*:?-{1,}:?\s*)+\|?\s*$")
+_UNESCAPED_PIPE_RE = re.compile(r"(?<!\\)\|")
 
 
 def _encode_markdown_inline(text: str) -> tuple[str, str, list[InlineToken]]:
@@ -68,7 +69,7 @@ def _decode_markdown_inline(marked: str, tokens: tuple[InlineToken, ...]) -> str
         out.append(marked[pos : m.start()])
         pos = m.end()
         is_close = bool(m.group(1))
-        tid = m.group(2)
+        tid = m.group(2).lower()
         is_self = bool(m.group(3))
         tok = tok_map.get(tid)
         if tok is None:
@@ -230,10 +231,22 @@ def _extract_spans(
                 spans.append((start, end, role, prefix, {}))
         i += 1
 
-    # Deduplicate overlapping maps (e.g. tight list items) preserving order.
+    # Deduplicate overlapping maps (e.g. tight list items) and sort by document
+    # position so tables stay inside their owning chapter rather than all before
+    # the first heading.
     dedup: list[tuple[int, int, UnitRole, str, dict[str, Any]]] = []
     seen_ranges: set[tuple[int, int, str, int]] = set()
-    for sp in spans:
+    for sp in sorted(
+        spans,
+        key=lambda item: (
+            item[0],
+            item[1],
+            1 if item[4].get("table_cell") else 0,
+            int(item[4]["table_cell"]["start"])
+            if isinstance(item[4].get("table_cell"), dict)
+            else 0,
+        ),
+    ):
         cell = sp[4].get("table_cell")
         key = (
             sp[0],
@@ -353,16 +366,23 @@ class MarkdownCodec:
             restored = _decode_markdown_inline(translated.strip(), unit.tokens)
             cell = unit.codec_meta.get("table_cell")
             if isinstance(cell, dict):
-                inline_cells.setdefault(start, []).append(
-                    (int(cell["start"]), int(cell["end"]), restored)
+                cell_start = int(cell["start"])
+                cell_end = int(cell["end"])
+                single_line = " ".join(
+                    part.strip() for part in restored.splitlines() if part.strip()
                 )
+                safe_cell = _UNESCAPED_PIPE_RE.sub(r"\\|", single_line)
+                if mode == DeliveryMode.BILINGUAL and 0 <= start < len(lines):
+                    orig_cell = lines[start][cell_start:cell_end]
+                    safe_cell = f"{orig_cell} <br> {safe_cell}" if orig_cell else safe_cell
+                inline_cells.setdefault(start, []).append((cell_start, cell_end, safe_cell))
                 patched += 1
                 continue
-            rendered_line = (
-                f"{prefix}{restored}"
-                if prefix and not restored.startswith(prefix.strip())
-                else restored
+            has_prefix = bool(prefix) and (
+                restored.startswith(prefix)
+                or (prefix.lstrip().startswith("#") and restored.startswith(prefix.rstrip() + " "))
             )
+            rendered_line = restored if has_prefix else f"{prefix}{restored}"
             if mode == DeliveryMode.BILINGUAL:
                 orig_block = "\n".join(lines[start:end])
                 combined = f"{orig_block}\n\n{rendered_line}"

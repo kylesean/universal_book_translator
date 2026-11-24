@@ -93,7 +93,7 @@ _PARAM_ASSIGN_RE = re.compile(
 )
 
 
-_TOKEN_SPAN_RE = re.compile(r"⟦[^⟧]*⟧|</?(?:[bic]\d+|f\d+/?)>")
+_TOKEN_SPAN_RE = re.compile(r"⟦[^⟧]*⟧|</?(?:[abcfirsx]\d+)(?:\s*/)?>")
 
 
 def _subtract_token_spans(spans: list[tuple[int, int]], text: str) -> list[tuple[int, int]]:
@@ -129,7 +129,8 @@ def _subtract_token_spans(spans: list[tuple[int, int]], text: str) -> list[tuple
 
 def find_soup_spans(text: str) -> list[tuple[int, int]]:
     """(start, end) spans of unicode-soup math and physical parameter assignments inside prose."""
-    raw_spans = [(s, e) for s, e in _run_spans(text or "") if _qualifies(text[s:e])]
+    scrubbed = _TOKEN_SPAN_RE.sub(lambda m: " " * len(m.group(0)), text or "")
+    raw_spans = [(s, e) for s, e in _run_spans(scrubbed) if _qualifies(scrubbed[s:e])]
     if text:
         protected = [(m.start(), m.end()) for m in _TOKEN_SPAN_RE.finditer(text)]
         for m in _PARAM_ASSIGN_RE.finditer(text):

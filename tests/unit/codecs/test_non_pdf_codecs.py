@@ -259,3 +259,89 @@ def test_markdown_table_detection_ignores_fenced_code(tmp_path: Path) -> None:
     )
     _, units = MarkdownCodec().extract(src)
     assert [unit.source_plain for unit in units if unit.role is UnitRole.TABLE_CELL] == ["c", "d"]
+
+
+@pytest.mark.fast
+def test_markdown_tables_preserve_document_order_chapter_and_bilingual_safety(
+    tmp_path: Path,
+) -> None:
+    src = tmp_path / "ordered.md"
+    src.write_text(
+        "# Ch1\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n# Ch2\n\n| C | D |\n|---|---|\n| 3 | 4 |\n\n- item\n",
+        encoding="utf-8",
+    )
+    codec = MarkdownCodec()
+    _, units = codec.extract(src)
+    assert [u.source_plain for u in units] == [
+        "Ch1",
+        "A",
+        "B",
+        "1",
+        "2",
+        "Ch2",
+        "C",
+        "D",
+        "3",
+        "4",
+        "item",
+    ]
+    ch2_cells = [u for u in units if u.source_plain in {"C", "D", "3", "4"}]
+    assert all(u.chapter_id == "ch002" for u in ch2_cells)
+
+    translations = {
+        u.unit_id: (
+            "行1\n\n注 | 释"
+            if u.source_plain == "1"
+            else "-10%"
+            if u.source_plain == "item"
+            else f"译{u.source_plain}"
+        )
+        for u in units
+    }
+    out = tmp_path / "ordered_bi.md"
+    codec.apply(
+        src,
+        units,
+        translations,
+        target_lang="zh",
+        mode=DeliveryMode.BILINGUAL,
+        output_path=out,
+    )
+    rendered = out.read_text(encoding="utf-8")
+    assert "| 1 <br> 行1 注 \\| 释 | 2 <br> 译2 |" in rendered
+    assert "\n- -10%\n" in rendered
+
+
+@pytest.mark.fast
+def test_non_pdf_codecs_tolerate_uppercase_inline_tags(tmp_path: Path) -> None:
+    md_src = tmp_path / "upper.md"
+    md_src.write_text("See [docs](https://example.org) and `code`.\n", encoding="utf-8")
+    md_codec = MarkdownCodec()
+    _, md_units = md_codec.extract(md_src)
+    md_out = tmp_path / "upper_out.md"
+    md_codec.apply(
+        md_src,
+        md_units,
+        {md_units[0].unit_id: "见<A2>文档</A2>与<X1 />。"},
+        target_lang="zh",
+        mode=DeliveryMode.MONO,
+        output_path=md_out,
+    )
+    assert "见[文档](https://example.org)与`code`。" in md_out.read_text(encoding="utf-8")
+
+    epub_src = _make_sample_epub(tmp_path / "upper.epub")
+    dom_codec = DOMCodec()
+    _, dom_units = dom_codec.extract(epub_src)
+    dom_out = tmp_path / "upper_out.epub"
+    dom_codec.apply(
+        epub_src,
+        dom_units,
+        {dom_units[1].unit_id: "参见<B1>图 1</B1>和<A2>链接</A2><X3/><X4/>"},
+        target_lang="zh",
+        mode=DeliveryMode.MONO,
+        output_path=dom_out,
+    )
+    with zipfile.ZipFile(dom_out) as zf:
+        ch1 = zf.read("OEBPS/ch1.xhtml").decode("utf-8")
+    assert "<strong>图 1</strong>" in ch1
+    assert "<B1>" not in ch1 and "<X3/>" not in ch1

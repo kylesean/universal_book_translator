@@ -102,8 +102,14 @@ _SHORT_BLOCK_MAX_CHARS = 48
 #: and must not be called critical.
 _LLBRACKET_EMPHASIS = r"\\+llbracket\s*(?:/\s*)?[BbIi]\s*\\+rrbracket"
 
+# UBT v2 native-codec inline anchors (rigid `<f1/>`/`<n1/>`/`<x1/>` and paired
+# style/link `<b1>`/`<i2>`/`<c1>`/`<a1>`/`<r1>`/`<s1>`). If these ever reach a
+# rendered PDF text layer (e.g. a reflow renderer printing native-marked prose
+# verbatim), the reader sees literal machinery and the contract must block it.
+_NATIVE_INLINE_ANCHOR_RE = r"(?i:<\s*/?\s*(?:[fnx]\d+\s*/?|[bicars]\d+)\s*>)"
+
 _PLACEHOLDER_SITE_RE = re.compile(
-    rf"⟦[^⟦⟧\n]{{0,80}}⟧|{_LLBRACKET_EMPHASIS}|<v>|<m>|SOUP_MASK|\[SENTINEL_|⟦|⟧"
+    rf"⟦[^⟦⟧\n]{{0,80}}⟧|{_LLBRACKET_EMPHASIS}|{_NATIVE_INLINE_ANCHOR_RE}|<v>|<m>|SOUP_MASK|\[SENTINEL_|⟦|⟧"
 )
 
 #: Inline math and sentinel spans are not prose: a correct render draws the
@@ -121,7 +127,7 @@ _MATH_OR_MARKER_RE = re.compile(r"\$[^$]*\$|⟦[^⟧]*⟧")
 #: break between two characters is normal and whitespace-free comparison is
 #: exactly what a search index does.
 _LATIN_RUN_RE = re.compile(r"[A-Za-z]")
-_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u30ff\uac00-\ud7af]")
 _LATIN_WORD_RE = re.compile(r"[A-Za-z0-9]+")
 
 #: A prose run this long is proof of presence; shorter runs are too common to

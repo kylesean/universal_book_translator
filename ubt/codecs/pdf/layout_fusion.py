@@ -139,6 +139,9 @@ class FusedBlock:
     erase_op_indices: list[int]
     erase_rule_op_indices: list[int]
     formula_islands: list[FormulaIslandSpec] = field(default_factory=list)
+    #: Partial ``TJ`` array slices to blank when a single ``TJ`` instruction was
+    #: split across table columns: ``(op_index, start, end, text_advance, font_size_operand, tz)``.
+    erase_tj_slices: list[tuple[int, int, int, float, float, float]] = field(default_factory=list)
 
 
 def _overlap_area(
@@ -237,13 +240,15 @@ def _split_table_into_cells(
 
     rx1 = region_bbox[2]
 
-    # Split each visual line into horizontal cell clusters separated by wide gaps.
+    # Split each visual line into horizontal cell clusters separated by column gutters.
     cells: list[tuple[tuple[float, float, float, float], list[StreamTextOp]]] = []
     for ln in lines:
         if not ln:
             continue
         body_fs = sorted(o.font_size_pt for o in ln)[len(ln) // 2]
-        gap_thresh = max(8.0, body_fs * 1.15)
+        # Normal inter-word space in tables is ~0.25-0.45em; column gutters in
+        # academic booktabs tables start around ~0.95em (e.g. 8.5pt at 9pt font).
+        gap_thresh = max(7.0, body_fs * 0.95)
         clusters: list[list[StreamTextOp]] = [[ln[0]]]
         for op in ln[1:]:
             prev_x1 = max(o.bbox[2] for o in clusters[-1])
@@ -251,13 +256,18 @@ def _split_table_into_cells(
                 clusters.append([op])
             else:
                 clusters[-1].append(op)
-        for cl in clusters:
+        for c_idx, cl in enumerate(clusters):
             cx0 = min(o.bbox[0] for o in cl)
             cy0 = min(o.bbox[1] for o in cl)
             cx1 = max(o.bbox[2] for o in cl)
             cy1 = max(o.bbox[3] for o in cl)
-            # Extend cell width slightly toward right neighbor gap (never past table right)
-            cells.append(((cx0, cy0, min(rx1, cx1 + 4.0), cy1), cl))
+            # Extend cell width slightly toward right neighbor gap (never colliding with next cell)
+            right_limit = (
+                min(rx1, min(o.bbox[0] for o in clusters[c_idx + 1]) - 2.0)
+                if c_idx + 1 < len(clusters)
+                else rx1
+            )
+            cells.append(((cx0, cy0, max(cx1, min(right_limit, cx1 + 4.0)), cy1), cl))
 
     # Each visual line cluster is its own cell. The previous vertical merge
     # tried to rebuild a wrapped cell by joining lines in the same row band, but
@@ -696,9 +706,21 @@ def _build_fused_block(
     return FusedBlock(
         unit=unit,
         geometry=geom,
-        erase_op_indices=[o.op_index for o in ops],
+        erase_op_indices=[o.op_index for o in ops if o.tj_item_range is None],
         erase_rule_op_indices=sorted(set(erase_rule_ops)),
         formula_islands=formula_islands,
+        erase_tj_slices=[
+            (
+                o.op_index,
+                o.tj_item_range[0],
+                o.tj_item_range[1],
+                o.text_advance,
+                o.snapshot.font_size_operand,
+                o.snapshot.tz,
+            )
+            for o in ops
+            if o.tj_item_range is not None
+        ],
     )
 
 

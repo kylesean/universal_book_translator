@@ -1,8 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import {
   UploadCloud,
-  FileText,
   RefreshCw,
   ArrowRight,
   AlertTriangle,
@@ -16,16 +15,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Alert, AlertDescription } from '@/components/ui/Alert'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { InfoTip } from '@/components/ui/InfoTip'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { cn } from '@/lib/utils'
@@ -42,6 +33,13 @@ import {
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
 import { PreflightPanel } from './PreflightPanel'
+import {
+  ChoiceSelect,
+  FieldLabel,
+  WizardSection,
+} from './WizardPrimitives'
+import { formatFileSize, numericFieldInvalid } from './wizardHelpers'
+import { WizardAdvancedTabs } from './WizardAdvancedTabs'
 
 /**
  * The languages the engine has a profile for (`ubt/core/language_profile.py`),
@@ -65,111 +63,6 @@ const LANGUAGES: ReadonlyArray<{ code: string; label: string }> = [
   { code: 'ar', label: 'العربية (ar)' },
   { code: 'he', label: 'עברית (he)' },
 ]
-
-/**
- * Whether a numeric field holds a value the server would 422 on. Pure and
- * module-scoped: ``min={1}`` only constrains the stepper, a hand-typed 0 (or a
- * half-finished edit) still enters state, and both the assess payload and the
- * submit guard must agree on the verdict.
- */
-function numericFieldInvalid(raw: string, min: number): boolean {
-  if (!raw.trim()) return false // empty = follow the operator's default
-  const value = Number(raw)
-  return !Number.isFinite(value) || value < min
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-interface ChoiceSelectProps {
-  id: string
-  value: string
-  onValueChange: (value: string) => void
-  options: ReadonlyArray<{ value: string; label: string }>
-  placeholder?: string
-  disabled?: boolean
-}
-
-/** A thin composition of the official shadcn Select primitives. */
-function ChoiceSelect({
-  id,
-  value,
-  onValueChange,
-  options,
-  placeholder,
-  disabled,
-}: ChoiceSelectProps) {
-  return (
-    <Select value={value} onValueChange={onValueChange} disabled={disabled}>
-      <SelectTrigger id={id}>
-        <SelectValue placeholder={placeholder} />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
-            {option.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  )
-}
-
-function FieldLabel({
-  htmlFor,
-  children,
-  className,
-}: {
-  htmlFor?: string
-  children: React.ReactNode
-  className?: string
-}) {
-  return (
-    <Label
-      htmlFor={htmlFor}
-      className={cn('text-sm font-medium leading-none text-foreground', className)}
-    >
-      {children}
-    </Label>
-  )
-}
-
-function WizardSection({
-  step,
-  title,
-  meta,
-  children,
-  className,
-}: {
-  step: number
-  title: string
-  meta?: React.ReactNode
-  children: React.ReactNode
-  className?: string
-}) {
-  return (
-    <section
-      className={cn(
-        'border-t border-border/70 pt-6 first:border-t-0 first:pt-0',
-        className,
-      )}
-    >
-      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-        <div className="flex min-w-0 items-baseline gap-3">
-          <span className="font-mono text-xs font-medium text-muted-foreground tabular-nums">
-            {String(step).padStart(2, '0')}
-          </span>
-          <h2 className="text-base font-semibold tracking-tight text-foreground">{title}</h2>
-        </div>
-        {meta ? <div className="max-w-full text-xs text-muted-foreground">{meta}</div> : null}
-      </div>
-      {children}
-    </section>
-  )
-}
 
 export function NewJobWizard() {
   const { t } = useI18n()
@@ -208,6 +101,12 @@ export function NewJobWizard() {
   const [translateChrome, setTranslateChrome] = useState<'auto' | 'on' | 'off'>('auto')
   // 'auto' submits as null so the operator's UBT_OCR_MODE still applies.
   const [ocrMode, setOcrMode] = useState<'auto' | 'local' | 'cloud' | 'off'>('auto')
+  const [ocrFallback, setOcrFallback] = useState<'auto' | 'off' | 'missing' | 'weak' | 'all'>('auto')
+  const [pdfEngine, setPdfEngine] = useState<'auto' | 'docling' | 'native' | 'pdfium'>('auto')
+  const [spillPolicy, setSpillPolicy] = useState<'auto' | 'error' | 'warn' | 'appendix'>('auto')
+  const [enableDynamicRouting, setEnableDynamicRouting] = useState<'auto' | 'on' | 'off'>('auto')
+  const [dynamicRoutingPolicy, setDynamicRoutingPolicy] = useState<'pareto' | 'quality_first' | 'cost_first'>('pareto')
+  const [exportAllowNeedsHuman, setExportAllowNeedsHuman] = useState<'auto' | 'on' | 'off'>('auto')
   const [pageRange, setPageRange] = useState('')
   // Per-book glossary: a staged upload, never a typed server path. Browsers do
   // not expose filesystem paths, so the old input asked the operator to type a
@@ -304,6 +203,7 @@ export function NewJobWizard() {
   const hasUserSelectedPresetRef = useRef<boolean>(false)
   const hasUserSelectedDomainRef = useRef<boolean>(false)
   const hasUserSelectedDualModeRef = useRef<boolean>(false)
+  const hasUserSelectedDeliveryModeRef = useRef<boolean>(false)
   const assessSeqRef = useRef(0)
   const [assessStale, setAssessStale] = useState(false)
 
@@ -350,6 +250,9 @@ export function NewJobWizard() {
           provider: provider || null,
           repair_provider: repairProvider || null,
           ocr_mode: ocrMode === 'auto' ? null : ocrMode,
+          delivery_mode: deliveryMode,
+          allow_degrade: deliveryMode === 'faithful' ? allowDegrade : null,
+          pdf_engine: pdfEngine === 'auto' ? null : pdfEngine,
           // An invalid value prices as unset — the field-level guard stops the
           // submit; the quote must not 422 on the way.
           max_concurrency:
@@ -372,6 +275,9 @@ export function NewJobWizard() {
           provider,
           repairProvider,
           ocrMode,
+          deliveryMode,
+          allowDegrade ? '1' : '0',
+          pdfEngine,
           concurrency.trim(),
         ].join('\u0000')
 
@@ -405,6 +311,19 @@ export function NewJobWizard() {
               setDualMode(recDual)
             }
           }
+          if (!hasUserSelectedDeliveryModeRef.current) {
+            const assessedPlan = (
+              res.meta as
+                | { delivery_plan?: { contract?: string | null; feasible?: boolean } }
+                | undefined
+            )?.delivery_plan
+            const isPdfDoc = res.document?.format_ext?.toLowerCase().replace(/^\./, '') === 'pdf'
+            if (isPdfDoc && assessedPlan?.contract === 'faithful' && assessedPlan?.feasible !== false) {
+              setDeliveryMode('faithful')
+            } else if (isPdfDoc && assessedPlan?.contract === 'readable') {
+              setDeliveryMode('readable')
+            }
+          }
         }
       } catch (err) {
         if (seq !== assessSeqRef.current) return // stale response
@@ -431,7 +350,10 @@ export function NewJobWizard() {
             provider,
             repairProvider,
             ocrMode,
-              concurrency.trim(),
+            deliveryMode,
+            allowDegrade ? '1' : '0',
+            pdfEngine,
+            concurrency.trim(),
           ].join('\u0000')
         }
       } finally {
@@ -450,7 +372,19 @@ export function NewJobWizard() {
         }
       }
     },
-    [preset, pageRange, targetLang, sourceLang, provider, repairProvider, ocrMode, concurrency]
+    [
+      preset,
+      pageRange,
+      targetLang,
+      sourceLang,
+      provider,
+      repairProvider,
+      ocrMode,
+      deliveryMode,
+      allowDegrade,
+      pdfEngine,
+      concurrency,
+    ]
   )
 
   // The live fingerprint and the latest callback, read at completion time.
@@ -463,6 +397,9 @@ export function NewJobWizard() {
     provider,
     repairProvider,
     ocrMode,
+    deliveryMode,
+    allowDegrade ? '1' : '0',
+    pdfEngine,
     concurrency.trim(),
   ].join('\u0000')
   const runAssessRef = useRef(runAssess)
@@ -502,6 +439,7 @@ export function NewJobWizard() {
     hasUserSelectedPresetRef.current = false
     hasUserSelectedDomainRef.current = false
     hasUserSelectedDualModeRef.current = false
+    hasUserSelectedDeliveryModeRef.current = false
     try {
       const staged = await uploadSourceDocument(file)
       setFilePath(staged.file_path)
@@ -578,6 +516,8 @@ export function NewJobWizard() {
   const concurrencyInvalid = numericFieldInvalid(concurrency, 1)
   const chapterStartInvalid = numericFieldInvalid(chapterStart, 1)
   const chapterCountInvalid = numericFieldInvalid(chapterCount, 1)
+  const pdfEngineConflict =
+    deliveryMode === 'faithful' && (pdfEngine === 'docling' || pdfEngine === 'pdfium')
   const advancedNumericInvalid =
     concurrencyInvalid || chapterStartInvalid || chapterCountInvalid
   const canSubmit =
@@ -585,15 +525,18 @@ export function NewJobWizard() {
     !isSubmitting &&
     glossaryError === null &&
     !budgetInvalid &&
-    !advancedNumericInvalid
+    !advancedNumericInvalid &&
+    !pdfEngineConflict
   const submitBlockedReason = !filePath.trim()
     ? null
     : glossaryError ??
       (budgetInvalid
         ? t.wizard.budgetInvalid
-        : advancedNumericInvalid
-          ? t.wizard.fieldMinOne
-          : null)
+        : pdfEngineConflict
+          ? t.wizard.pdfEngineConflictFaithful
+          : advancedNumericInvalid
+            ? t.wizard.fieldMinOne
+            : null)
   /**
    * The engine's faithful gate is measured, not assumed: a source with
    * confirmed font-encoding damage (or a scan) has an untrustworthy text
@@ -611,10 +554,25 @@ export function NewJobWizard() {
     assessment?.document.is_scanned ||
       ((assessment?.document.scan_page_share ?? 0) > 0.5)
   )
+  const serverDeliveryPlan = (
+    assessment?.meta as
+      | {
+          delivery_plan?: {
+            contract?: string | null
+            feasible?: boolean
+            eligibility?: { provisional?: boolean }
+          }
+        }
+      | undefined
+  )?.delivery_plan
+  const serverPlannedContract = serverDeliveryPlan?.contract ?? null
+  const serverPlannedProvisional = Boolean(serverDeliveryPlan?.eligibility?.provisional)
   const faithfulInfeasible =
     deliveryMode === 'faithful' &&
     assessment !== null &&
-    (confirmedDamagePages > 0 || sourceScanned)
+    (confirmedDamagePages > 0 ||
+      sourceScanned ||
+      (serverDeliveryPlan !== undefined && serverDeliveryPlan.feasible === false))
   const faithfulInfeasibleReason =
     confirmedDamagePages > 0
       ? t.wizard.faithfulInfeasibleFontDamage
@@ -647,10 +605,8 @@ export function NewJobWizard() {
    */
   const ocrNeedsEgress = ocrMode === 'cloud'
   /**
-   * Page egress is closed on this deployment, so neither the visual judge nor a
-   * cloud/vlm OCR mode can ship a page anywhere. The judge would skip every page
-   * and bill nothing, which is worse than not offering it: the switch would
-   * promise a quality gate the run cannot perform.
+   * Page egress is closed on this deployment, so cloud/vlm OCR and remote
+   * page-image enrichment modes cannot ship a page anywhere.
    */
   const pageEgressClosed = runtime !== null && !runtime.active.allow_page_upload
 
@@ -716,6 +672,15 @@ export function NewJobWizard() {
     translate_chrome: translateChrome === 'auto' ? null : translateChrome === 'on',
     // null = follow UBT_OCR_MODE / config default.
     ocr_mode: ocrMode === 'auto' ? null : ocrMode,
+    ocr_fallback: ocrFallback === 'auto' ? null : ocrFallback,
+    pdf_engine: pdfEngine === 'auto' ? null : pdfEngine,
+    spill_policy: spillPolicy === 'auto' ? null : spillPolicy,
+    enable_dynamic_routing:
+      enableDynamicRouting === 'auto' ? null : enableDynamicRouting === 'on',
+    dynamic_routing_policy:
+      enableDynamicRouting === 'off' ? null : dynamicRoutingPolicy,
+    export_allow_needs_human:
+      exportAllowNeedsHuman === 'auto' ? null : exportAllowNeedsHuman === 'on',
     emit_both: emitBoth === 'auto' ? null : emitBoth === 'on',
     // Empty = operator default; the engine rejects anything below 1.
     max_concurrency: concurrency.trim() ? Number(concurrency) : null,
@@ -1078,6 +1043,7 @@ export function NewJobWizard() {
                     hasUserSelectedPresetRef.current = false
                     hasUserSelectedDomainRef.current = false
                     hasUserSelectedDualModeRef.current = false
+                    hasUserSelectedDeliveryModeRef.current = false
                     void runAssess(filePath, { silent: false })
                   }}
                   disabled={!filePath.trim() || isAssessing}
@@ -1191,7 +1157,12 @@ export function NewJobWizard() {
             <RadioGroup
               value={deliveryMode}
               onValueChange={(value) => {
-                setDeliveryMode(value as typeof deliveryMode)
+                const nextMode = value as typeof deliveryMode
+                hasUserSelectedDeliveryModeRef.current = true
+                setDeliveryMode(nextMode)
+                if (nextMode === 'faithful' && (pdfEngine === 'docling' || pdfEngine === 'pdfium')) {
+                  setPdfEngine('auto')
+                }
               }}
               className="mt-5 grid gap-2 md:grid-cols-3"
             >
@@ -1408,7 +1379,7 @@ export function NewJobWizard() {
                         }}
                         className="h-8 text-xs font-medium"
                       >
-                        设置限额
+                        {t.wizard.setBudgetCap}
                       </Button>
                     </div>
                   ) : (
@@ -1479,7 +1450,7 @@ export function NewJobWizard() {
                     <span className="text-xs text-muted-foreground">
                       {t.wizard.advancedOptionsSubtitle}
                     </span>
-                    {(advancedNumericInvalid || glossaryError) && (
+                    {(advancedNumericInvalid || glossaryError || pdfEngineConflict) && (
                       <Badge variant="destructive" className="gap-1">
                         <AlertTriangle className="size-3" />
                         {t.wizard.advancedErrorTag}
@@ -1496,338 +1467,109 @@ export function NewJobWizard() {
               </CollapsibleTrigger>
 
               <CollapsibleContent className="border-t border-border py-4">
-                <Tabs defaultValue="delivery">
-                  <TabsList className="grid h-auto w-full grid-cols-2 gap-1 p-1 sm:grid-cols-4">
-                    <TabsTrigger value="delivery">{t.wizard.groupDelivery}</TabsTrigger>
-                    <TabsTrigger value="content">{t.wizard.groupContent}</TabsTrigger>
-                    <TabsTrigger value="scope">{t.wizard.groupScope}</TabsTrigger>
-                    <TabsTrigger value="run">{t.wizard.groupExec}</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="delivery" className="space-y-4 pt-3">
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel htmlFor="wizard-dual-mode">{t.wizard.dualMode}</FieldLabel>
-                          <InfoTip label={t.wizard.dualMode}>{t.wizard.dualModeHelp}</InfoTip>
-                        </div>
-                        <ChoiceSelect
-                          id="wizard-dual-mode"
-                          value={dualMode}
-                          onValueChange={(value) => {
-                            hasUserSelectedDualModeRef.current = true
-                            setDualMode(value as typeof dualMode)
-                          }}
-                          options={[
-                            { value: 'auto', label: t.wizard.dualModeAuto },
-                            { value: 'dual', label: t.wizard.dualModeDual },
-                            { value: 'mono', label: t.wizard.dualModeMono },
-                          ]}
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel htmlFor="wizard-emit-both">{t.wizard.emitBoth}</FieldLabel>
-                          <InfoTip label={t.wizard.emitBoth}>{emitBothHelpText}</InfoTip>
-                        </div>
-                        <ChoiceSelect
-                          id="wizard-emit-both"
-                          value={emitBoth}
-                          onValueChange={(value) => setEmitBoth(value as typeof emitBoth)}
-                          options={[
-                            { value: 'auto', label: t.wizard.emitBothAuto },
-                            { value: 'on', label: t.wizard.emitBothOn },
-                            { value: 'off', label: t.wizard.emitBothOff },
-                          ]}
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel htmlFor="wizard-layout-columns">{t.wizard.layoutColumns}</FieldLabel>
-                          <InfoTip label={t.wizard.layoutColumns}>{t.wizard.layoutColumnsHelp}</InfoTip>
-                        </div>
-                        <ChoiceSelect
-                          id="wizard-layout-columns"
-                          value={layoutColumns}
-                          onValueChange={(value) =>
-                            setLayoutColumns(value as typeof layoutColumns)
-                          }
-                          options={[
-                            { value: 'auto', label: t.wizard.layoutColumnsAuto },
-                            { value: '1', label: t.wizard.layoutColumnsOne },
-                            { value: '2', label: t.wizard.layoutColumnsTwo },
-                          ]}
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel htmlFor="wizard-translate-chrome">{t.wizard.translateChrome}</FieldLabel>
-                          <InfoTip label={t.wizard.translateChrome}>{t.wizard.translateChromeHelp}</InfoTip>
-                        </div>
-                        <ChoiceSelect
-                          id="wizard-translate-chrome"
-                          value={translateChrome}
-                          onValueChange={(value) =>
-                            setTranslateChrome(value as typeof translateChrome)
-                          }
-                          options={[
-                            { value: 'auto', label: t.wizard.translateChromeAuto },
-                            { value: 'on', label: t.wizard.translateChromeOn },
-                            { value: 'off', label: t.wizard.translateChromeOff },
-                          ]}
-                        />
-                      </div>
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="content" className="space-y-4 pt-3">
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel htmlFor="wizard-domain-profile">{t.wizard.domainProfile}</FieldLabel>
-                          <InfoTip label={t.wizard.domainProfile}>{t.wizard.domainProfileHelp}</InfoTip>
-                        </div>
-                        <ChoiceSelect
-                          id="wizard-domain-profile"
-                          value={domainProfile}
-                          onValueChange={(value) => {
-                            hasUserSelectedDomainRef.current = true
-                            setDomainProfile(value)
-                          }}
-                          options={[
-                            { value: 'auto', label: t.wizard.domainAuto },
-                            { value: 'general', label: t.wizard.domainGeneral },
-                            { value: 'textbook', label: t.wizard.domainTextbook },
-                            { value: 'paper', label: t.wizard.domainPaper },
-                            { value: 'fiction', label: t.wizard.domainFiction },
-                            { value: 'humanities', label: t.wizard.domainHumanities },
-                          ]}
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel htmlFor="wizard-domain-hint">{t.wizard.domainHint}</FieldLabel>
-                          <InfoTip label={t.wizard.domainHint}>{t.wizard.domainHintHelp}</InfoTip>
-                        </div>
-                        <Input
-                          id="wizard-domain-hint"
-                          value={domainHint}
-                          onChange={(event) => setDomainHint(event.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel htmlFor="wizard-ocr-mode">{t.wizard.ocrMode}</FieldLabel>
-                          <InfoTip label={t.wizard.ocrMode}>{t.wizard.ocrModeHelp}</InfoTip>
-                        </div>
-                        <ChoiceSelect
-                          id="wizard-ocr-mode"
-                          value={ocrMode}
-                          onValueChange={(value) => setOcrMode(value as typeof ocrMode)}
-                          options={[
-                            { value: 'auto', label: t.wizard.ocrModeAuto },
-                            { value: 'local', label: t.wizard.ocrModeLocal },
-                            { value: 'cloud', label: t.wizard.ocrModeCloud },
-                            { value: 'off', label: t.wizard.ocrModeOff },
-                          ]}
-                        />
-                        {ocrNeedsEgress && (
-                          <p className="text-xs text-amber-700 dark:text-amber-400">
-                            {t.wizard.ocrModeEgressWarning}
-                          </p>
-                        )}
-                        {ocrNeedsEgress && pageEgressClosed && (
-                          <Button
-                            type="button"
-                            variant="link"
-                            size="sm"
-                            onClick={openEgressConfirm}
-                            className="h-auto text-xs"
-                          >
-                            {t.wizard.egressEnableBtn}
-                          </Button>
-                        )}
-                      </div>
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel>{t.wizard.glossaryPath}</FieldLabel>
-                          <InfoTip label={t.wizard.glossaryPath}>{t.wizard.glossaryPathHelp}</InfoTip>
-                        </div>
-                        <input
-                          ref={glossaryFileRef}
-                          type="file"
-                          accept=".csv,.tsv,.json"
-                          className="hidden"
-                          aria-label={t.wizard.glossaryPath}
-                          onChange={handleGlossaryInputChange}
-                        />
-                        {glossaryFile ? (
-                          <div className="flex items-center gap-2">
-                            <div className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-border bg-muted/35 px-3 text-xs">
-                              <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-                              <span className="truncate">{glossaryFile.name}</span>
-                            </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="icon"
-                              onClick={() => setGlossaryFile(null)}
-                              aria-label={t.wizard.glossaryRemove}
-                            >
-                              <X />
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="flex flex-wrap items-center gap-3">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              disabled={glossaryUploading}
-                              onClick={() => glossaryFileRef.current?.click()}
-                            >
-                              {glossaryUploading ? (
-                                <Loader2 className="animate-spin" />
-                              ) : (
-                                <UploadCloud />
-                              )}
-                              {t.wizard.glossaryUploadBtn}
-                            </Button>
-                            <Link
-                              to="/assets"
-                              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                            >
-                              {t.wizard.glossaryManageLink}
-                            </Link>
-                          </div>
-                        )}
-                        {glossaryError && (
-                          <p className="text-xs text-destructive">{glossaryError}</p>
-                        )}
-                      </div>
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="scope" className="space-y-4 pt-3">
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5">
-                            <FieldLabel htmlFor="wizard-page-range">{t.wizard.pageFilter}</FieldLabel>
-                            <InfoTip label={t.wizard.pageFilter}>{t.wizard.pageFilterHelp}</InfoTip>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="link"
-                            size="sm"
-                            onClick={() => setPageRange('1-5')}
-                            className="h-auto text-xs"
-                          >
-                            {t.wizard.sliceSampleQuickBtn}
-                          </Button>
-                        </div>
-                        <Input
-                          id="wizard-page-range"
-                          value={pageRange}
-                          onChange={(event) => setPageRange(event.target.value)}
-                          placeholder={t.wizard.pageFilterPlaceholder}
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel>{t.wizard.chapterWindow}</FieldLabel>
-                          <InfoTip label={t.wizard.chapterWindow}>{t.wizard.chapterWindowHelp}</InfoTip>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <Input
-                            type="number"
-                            min={1}
-                            value={chapterStart}
-                            onChange={(event) => setChapterStart(event.target.value)}
-                            placeholder={t.wizard.chapterStart}
-                            aria-label={t.wizard.chapterStart}
-                          />
-                          <Input
-                            type="number"
-                            min={1}
-                            value={chapterCount}
-                            onChange={(event) => setChapterCount(event.target.value)}
-                            placeholder={t.wizard.chapterCount}
-                            aria-label={t.wizard.chapterCount}
-                          />
-                        </div>
-                        {(chapterStartInvalid || chapterCountInvalid) && (
-                          <p className="text-xs text-destructive">{t.wizard.fieldMinOne}</p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                <WizardAdvancedTabs
+                  t={t}
+                  dualMode={dualMode}
+                  onDualModeChange={(val) => {
+                    hasUserSelectedDualModeRef.current = true
+                    setDualMode(val)
+                  }}
+                  emitBoth={emitBoth}
+                  emitBothHelpText={emitBothHelpText}
+                  onEmitBothChange={setEmitBoth}
+                  layoutColumns={layoutColumns}
+                  onLayoutColumnsChange={setLayoutColumns}
+                  translateChrome={translateChrome}
+                  onTranslateChromeChange={setTranslateChrome}
+                  deliveryMode={deliveryMode}
+                  pdfEngine={pdfEngine}
+                  onPdfEngineChange={setPdfEngine}
+                  pdfEngineConflict={pdfEngineConflict}
+                  spillPolicy={spillPolicy}
+                  onSpillPolicyChange={setSpillPolicy}
+                  domainProfile={domainProfile}
+                  onDomainProfileChange={(val) => {
+                    hasUserSelectedDomainRef.current = true
+                    setDomainProfile(val)
+                  }}
+                  domainHint={domainHint}
+                  onDomainHintChange={setDomainHint}
+                  ocrModeControl={
+                    <div className="space-y-1.5">
                       <div className="flex items-center gap-1.5">
-                        <FieldLabel htmlFor="wizard-dry-run" className="cursor-pointer">
-                          {t.wizard.rehearsalLabel}
-                        </FieldLabel>
-                        <InfoTip label={t.wizard.rehearsalLabel}>{t.wizard.rehearsalHelp}</InfoTip>
+                        <FieldLabel htmlFor="wizard-ocr-mode">{t.wizard.ocrMode}</FieldLabel>
+                        <InfoTip label={t.wizard.ocrMode}>{t.wizard.ocrModeHelp}</InfoTip>
                       </div>
-                      <Switch id="wizard-dry-run" checked={dryRun} onCheckedChange={setDryRun} />
+                      <ChoiceSelect
+                        id="wizard-ocr-mode"
+                        value={ocrMode}
+                        onValueChange={(value) => setOcrMode(value as typeof ocrMode)}
+                        options={[
+                          { value: 'auto', label: t.wizard.ocrModeAuto },
+                          { value: 'local', label: t.wizard.ocrModeLocal },
+                          { value: 'cloud', label: t.wizard.ocrModeCloud },
+                          { value: 'off', label: t.wizard.ocrModeOff },
+                        ]}
+                      />
+                      {ocrNeedsEgress && (
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
+                          {t.wizard.ocrModeEgressWarning}
+                        </p>
+                      )}
+                      {ocrNeedsEgress && pageEgressClosed && (
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="sm"
+                          onClick={openEgressConfirm}
+                          className="h-auto text-xs"
+                        >
+                          {t.wizard.egressEnableBtn}
+                        </Button>
+                      )}
                     </div>
-                    {dryRun && (
-                      <Alert variant="warning">
-                        <AlertTriangle className="size-4" />
-                        <AlertDescription>{t.wizard.rehearsalActiveWarning}</AlertDescription>
-                      </Alert>
-                    )}
-                  </TabsContent>
-
-                  <TabsContent value="run" className="space-y-4 pt-3">
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {declaredProviders.length > 0 ? (
-                        <div className="space-y-1.5">
-                          <div className="flex items-center gap-1.5">
-                            <FieldLabel htmlFor="wizard-repair-provider">
-                              {t.wizard.repairProvider}
-                            </FieldLabel>
-                            <InfoTip label={t.wizard.repairProvider}>
-                              {t.wizard.repairProviderHelp}
-                            </InfoTip>
-                          </div>
-                          <ChoiceSelect
-                            id="wizard-repair-provider"
-                            value={repairProvider || '__follow__'}
-                            onValueChange={(value) =>
-                              setRepairProvider(value === '__follow__' ? '' : value)
-                            }
-                            options={[
-                              {
-                                value: '__follow__',
-                                label: t.wizard.repairProviderDefault,
-                              },
-                              ...declaredProviders.map((p) => ({
-                                value: p.name,
-                                label: p.name + (p.draft_model ? ` — ${p.draft_model}` : ''),
-                              })),
-                            ]}
-                          />
-                        </div>
-                      ) : null}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel>{t.wizard.concurrency}</FieldLabel>
-                          <InfoTip label={t.wizard.concurrency}>{t.wizard.concurrencyHelp}</InfoTip>
-                        </div>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={concurrency}
-                          onChange={(event) => setConcurrency(event.target.value)}
-                          placeholder={t.wizard.concurrencyAuto}
-                        />
-                        {concurrencyInvalid && (
-                          <p className="text-xs text-destructive">{t.wizard.fieldMinOne}</p>
-                        )}
-                      </div>
-                    </div>
-                  </TabsContent>
-                </Tabs>
+                  }
+                  ocrFallback={ocrFallback}
+                  onOcrFallbackChange={setOcrFallback}
+                  enableDynamicRouting={enableDynamicRouting}
+                  onEnableDynamicRoutingChange={setEnableDynamicRouting}
+                  dynamicRoutingPolicy={dynamicRoutingPolicy}
+                  onDynamicRoutingPolicyChange={setDynamicRoutingPolicy}
+                  glossaryFile={glossaryFile}
+                  glossaryUploading={glossaryUploading}
+                  glossaryError={glossaryError}
+                  onTriggerGlossaryPick={() => glossaryFileRef.current?.click()}
+                  onClearGlossary={() => {
+                    setGlossaryFile(null)
+                    setGlossaryError(null)
+                  }}
+                  pageRange={pageRange}
+                  onPageRangeChange={setPageRange}
+                  chapterStart={chapterStart}
+                  onChapterStartChange={setChapterStart}
+                  chapterCount={chapterCount}
+                  onChapterCountChange={setChapterCount}
+                  chapterStartInvalid={chapterStartInvalid}
+                  chapterCountInvalid={chapterCountInvalid}
+                  dryRun={dryRun}
+                  onDryRunChange={setDryRun}
+                  declaredProviders={declaredProviders}
+                  repairProvider={repairProvider}
+                  onRepairProviderChange={setRepairProvider}
+                  concurrency={concurrency}
+                  onConcurrencyChange={setConcurrency}
+                  concurrencyInvalid={concurrencyInvalid}
+                  exportAllowNeedsHuman={exportAllowNeedsHuman}
+                  onExportAllowNeedsHumanChange={setExportAllowNeedsHuman}
+                />
+                <input
+                  ref={glossaryFileRef}
+                  type="file"
+                  accept=".csv,.tsv,.json"
+                  className="hidden"
+                  aria-label={t.wizard.glossaryPath}
+                  onChange={handleGlossaryInputChange}
+                />
               </CollapsibleContent>
             </div>
           </Collapsible>
@@ -1838,6 +1580,8 @@ export function NewJobWizard() {
           assessStale={assessStale}
           canSubmit={canSubmit}
           deliveryMode={deliveryMode}
+          plannedContract={serverPlannedContract}
+          plannedProvisional={serverPlannedProvisional}
           deliveryOutcomeNote={faithfulOutcomeNote}
           faithfulInfeasible={faithfulInfeasible}
           isReassessing={isReassessing}
@@ -1846,7 +1590,7 @@ export function NewJobWizard() {
           onOpenReusedJob={() => {
             if (reusedJobId) navigate(`/jobs/${reusedJobId}`)
           }}
-          onOpenSystem={() => navigate('/system')}
+          onOpenSystem={() => navigate('/system?tab=models')}
           onRequestSubmit={requestSubmit}
           rehearsalAcknowledged={rehearsalAcknowledged}
           rehearsalOnly={rehearsalOnly}

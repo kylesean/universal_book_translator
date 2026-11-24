@@ -21,7 +21,7 @@ from ubt.codecs.pdf.formula_box import InlineFormulaBox
 from ubt.codecs.pdf.layout_fusion import ParagraphGeometry
 from ubt.codecs.protocol import InlineToken, OverflowItem, UnitRole
 
-_TAG_TOKEN_RE = re.compile(r"<(/?)([a-z]\d+)(\s*/)?\s*>")
+_TAG_TOKEN_RE = re.compile(r"<\s*(/?)\s*([a-zA-Z]\d+)\s*(/?)\s*>")
 
 # CJK characters that must not start a line (避头标点).
 _NO_LINE_START: frozenset[str] = frozenset("，。、；：？！》」』）】〉》〕〗〙〛…—·.,;:!?)]}%")
@@ -167,15 +167,23 @@ def _tokenize_marked_text(
                 i = j
 
     pos = 0
+    # Defensively unwrap accidental LaTeX math wrappers around known formula anchors
+    # (e.g. lightweight models emitting `$\text{<f1/>}$`) before tokenizing.
+    if formulas and "<" in marked_text:
+        from ubt.core.validators.inline_tags import unwrap_latex_wrapped_anchors
+
+        marked_text = unwrap_latex_wrapped_anchors(marked_text, set(formulas))
     for m in _TAG_TOKEN_RE.finditer(marked_text):
         _emit_plain(marked_text[pos : m.start()])
         pos = m.end()
 
         is_close = bool(m.group(1))
-        tag_id = m.group(2)
+        tag_id = m.group(2).lower()
         is_self_close = bool(m.group(3))
 
-        if is_self_close or tag_id in formulas:
+        if tag_id in formulas:
+            if is_close:
+                continue
             fbox = formulas.get(tag_id)
             if fbox is not None:
                 atoms.append(
@@ -189,6 +197,8 @@ def _tokenize_marked_text(
                         formula=fbox,
                     )
                 )
+            continue
+        if is_self_close:
             continue
 
         if not is_close:
@@ -331,6 +341,51 @@ def _break_into_lines(
     return lines
 
 
+def _line_vertical_metrics(
+    font_size: float,
+    geom: ParagraphGeometry,
+    font_engine: FontEngine,
+) -> tuple[float, float]:
+    """Return optical ``(first_ascent, last_descent)`` in points for ``geom``.
+
+    ``stream_analyzer`` boxes every source glyph at ``[baseline - 0.22*fs, baseline + 0.78*fs]``
+    (1.00em). Clamping to the typographic em-box prevents legacy Windows-inflated font
+    ascenders from shifting CJK baselines downward or manufacturing false single-line overflows.
+    """
+    ascent_em, descent_em = font_engine.metrics(
+        font_engine.pick_slot(is_serif=geom.is_serif, is_bold=geom.is_bold)
+    )
+    first_ascent = min(max(font_size * ascent_em, font_size * 0.78), font_size * 0.90)
+    last_descent = min(max(abs(font_size * descent_em), font_size * 0.20), font_size * 0.25)
+    return first_ascent, last_descent
+
+
+def _measure_lines_height(
+    lines: list[list[tuple[_Atom, float]]],
+    geom: ParagraphGeometry,
+    font_size: float,
+    leading: float,
+    font_engine: FontEngine,
+) -> float:
+    """Exact positioned height matching :func:`_position_lines` (including inline formulas)."""
+    if not lines:
+        return 0.0
+    first_ascent, last_descent = _line_vertical_metrics(font_size, geom, font_engine)
+    height = first_ascent
+    for ln_idx, line in enumerate(lines):
+        extra_up = 0.0
+        extra_down = 0.0
+        for atom, _ in line:
+            if atom.formula is not None:
+                extra_up = max(extra_up, atom.formula.ascent_pt - first_ascent)
+                extra_down = max(extra_down, atom.formula.descent_pt - last_descent)
+        height += extra_up + extra_down
+        if ln_idx < len(lines) - 1:
+            height += leading
+    height += last_descent
+    return max(0.0, height)
+
+
 def _position_lines(
     lines: list[list[tuple[_Atom, float]]],
     geom: ParagraphGeometry,
@@ -341,11 +396,7 @@ def _position_lines(
 ) -> tuple[list[PositionedRun], float]:
     bx0, _, bx1, by1 = geom.bbox
     box_w = max(1.0, bx1 - bx0)
-    ascent_em, descent_em = font_engine.metrics(
-        font_engine.pick_slot(is_serif=geom.is_serif, is_bold=geom.is_bold)
-    )
-    first_ascent = max(font_size * ascent_em, font_size * 0.80)
-    last_descent = max(abs(font_size * descent_em), font_size * 0.22)
+    first_ascent, last_descent = _line_vertical_metrics(font_size, geom, font_engine)
 
     runs: list[PositionedRun] = []
     cur_y = by1 - first_ascent
@@ -446,7 +497,7 @@ def typeset_paragraph(
 
     bx0, by0, bx1, by1 = geom.bbox
     box_w = max(8.0, bx1 - bx0)
-    box_h = max(base_size * 1.1, by1 - by0)
+    box_h = max(base_size * 1.15, by1 - by0)
     max_h = box_h + geom.max_borrow_down_pt
     indent = geom.first_line_indent if geom.first_line_indent < box_w * 0.25 else 0.0
 
@@ -487,7 +538,9 @@ def typeset_paragraph(
         cand_size = max(min_size, base_size * scale)
         cand_leading = cand_size * lead_ratio
         lines = _break_into_lines(atoms, box_w, cand_size, indent, font_engine)
-        est_h = (len(lines) - 1) * cand_leading + cand_size * 1.12 if lines else 0.0
+        # Measure with the exact same vertical math as _position_lines so the ladder
+        # never exits early on a false fit and skips genuine shrinking steps.
+        est_h = _measure_lines_height(lines, geom, cand_size, cand_leading, font_engine)
         best_lines = lines
         best_size = cand_size
         best_leading = cand_leading

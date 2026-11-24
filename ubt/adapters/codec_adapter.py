@@ -25,6 +25,7 @@ from ubt.codecs.protocol import (
     UnitRole,
 )
 from ubt.core.ir.models import (
+    BlockStatus,
     BookManifest,
     ChapterIR,
     ChapterMeta,
@@ -34,6 +35,7 @@ from ubt.core.ir.models import (
 from ubt.core.ir.serializer import compute_file_sha256_cached
 from ubt.model.ast import Heading, ListItem, Paragraph
 from ubt.model.span import Span
+from ubt.render.delivered_text import delivered_text, is_placeholder
 
 _RIGID_ANCHOR_RE = re.compile(r"<([a-z]+\d+)/>")
 
@@ -110,12 +112,10 @@ def _unit_to_block(unit: TranslationUnit, spine_index: int) -> IRBlock:
 
 def _resolve_mode(bilingual_mode: str | None) -> DeliveryMode:
     value = (bilingual_mode or "").strip().lower()
-    if value in {"interleaved", "dual"}:
-        return DeliveryMode.INTERLEAVED
+    if value in {"interleaved", "dual", "bilingual", "both"}:
+        return DeliveryMode.BILINGUAL
     if value in {"side_by_side", "side-by-side", "spread"}:
         return DeliveryMode.SIDE_BY_SIDE
-    if value in {"bilingual", "both"}:
-        return DeliveryMode.BILINGUAL
     return DeliveryMode.MONO
 
 
@@ -129,6 +129,7 @@ class DocumentCodecAdapter(BaseDocumentAdapter):
 
         self._codec = codec or resolve_codec(source_path)
         self._source = source_path
+        self._last_source: Path | None = None
         self._units: list[TranslationUnit] = []
         self._profile: DocumentProfile | None = None
         self.output_suffixes = frozenset({source_path.suffix.lower()})
@@ -169,9 +170,10 @@ class DocumentCodecAdapter(BaseDocumentAdapter):
     async def parse_stream(
         self, input_path: Path, pages: set[int] | None = None
     ) -> AsyncIterator[ChapterIR]:
-        if not self._units:
+        if not self._units or self._last_source != input_path:
             _, units = await asyncio.to_thread(self._codec.extract, input_path, pages=pages)
             self._units = list(units)
+            self._last_source = input_path
         by_chapter: dict[str, list[TranslationUnit]] = {}
         for unit in self._units:
             by_chapter.setdefault(unit.chapter_id, []).append(unit)
@@ -200,12 +202,20 @@ class DocumentCodecAdapter(BaseDocumentAdapter):
         bilingual_mode: str | None = None,
         **kwargs: Any,
     ) -> Path:
-        del manifest, kwargs
+        del kwargs
+        src = Path(manifest.source_path) if manifest.source_path else self._source
         translations: dict[str, str] = {}
         for block in blocks:
-            if block.skip_translate or not block.target_text:
+            if block.skip_translate:
                 continue
-            text = block.target_text
+            if block.status is BlockStatus.BLOCKED_HUMAN or is_placeholder(block.target_text or ""):
+                text = (block.source_text or "").strip()
+            elif block.target_text or block.draft_text:
+                text = delivered_text(block)
+            else:
+                continue
+            if not text:
+                continue
             if is_unresolved(block.status):
                 # A codec replaces the block's own text; the old adapters
                 # rendered this note as a sibling. Keeping it in the replacement
@@ -214,16 +224,17 @@ class DocumentCodecAdapter(BaseDocumentAdapter):
                 text = f"{text}\n\n{failure_note(block.status)}"
             translations[block.id] = text
         units = self._units
-        if not units:
+        if not units or (self._last_source is not None and self._last_source != src):
             # Agent finish / re-export replace an existing ledger without a
             # fresh parse, so the codec has no units cached yet. Re-extract the
             # source to recover the line/byte spans `apply` patches; the block
             # ids are the same ones the original ingest wrote.
-            _, units = await asyncio.to_thread(self._codec.extract, self._source)
+            _, units = await asyncio.to_thread(self._codec.extract, src)
             self._units = list(units)
+            self._last_source = src
         report = await asyncio.to_thread(
             self._codec.apply,
-            self._source,
+            src,
             units,
             translations,
             target_lang=target_lang,

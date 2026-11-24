@@ -315,3 +315,158 @@ def test_mixed_script_target_resolves_a_cjk_fallback_face() -> None:
     engine = FontEngine(target_lang="es")
     assert engine.resolve_char_slot("模", FontSlot.SERIF_REGULAR) == FontSlot.CJK_FALLBACK
     assert engine.resolve_char_slot("A", FontSlot.SERIF_REGULAR) == FontSlot.SERIF_REGULAR
+
+
+@pytest.mark.fast
+def test_typesetter_single_line_table_cell_has_zero_false_overflow_and_scales_formulas() -> None:
+    """Single-line CJK table cells must not falsely report clipped overflow due to hhea inflation."""
+    engine = FontEngine(target_lang="zh")
+    cell_geom = ParagraphGeometry(
+        bbox=(105.0, 616.7, 180.0, 625.7),  # 9.0pt tall 1-line table cell
+        dominant_font_size=9.0,
+        line_height=11.2,
+        alignment="left",
+        first_line_indent=0.0,
+        is_serif=True,
+        is_bold=False,
+        color_rgb=(0.0, 0.0, 0.0),
+        max_borrow_down_pt=0.0,
+    )
+    cell_para = typeset_paragraph(
+        unit_id="p0010_u0007",
+        page_no=10,
+        role=UnitRole.TABLE_CELL,
+        marked_text="无引导",
+        tokens=(),
+        geom=cell_geom,
+        formulas={},
+        font_engine=engine,
+        target_lang="zh",
+    )
+    assert cell_para.line_count == 1
+    assert cell_para.overflow is None
+
+    # A tight multi-line paragraph with tall inline formulas must step down the font ladder
+    # rather than exiting at scale=1.0 on an inaccurate height estimate.
+    from ubt.codecs.pdf.formula_box import InlineFormulaBox
+    from ubt.codecs.protocol import InlineToken
+
+    para_geom = ParagraphGeometry(
+        bbox=(72.0, 500.0, 260.0, 526.0),  # 26pt tall (2 lines at 10.9pt)
+        dominant_font_size=10.9,
+        line_height=13.0,
+        alignment="left",
+        first_line_indent=0.0,
+        is_serif=True,
+        is_bold=False,
+        color_rgb=(0.0, 0.0, 0.0),
+        max_borrow_down_pt=0.0,
+    )
+    tall_f = InlineFormulaBox(
+        tag_id="f1",
+        resource_name="/UBT_FX_0",
+        width_pt=18.0,
+        height_pt=16.0,
+        ascent_pt=12.0,
+        descent_pt=4.0,
+        baseline_offset_pt=4.0,
+        op_indices=(),
+        rule_op_indices=(),
+        bbox=(0.0, 0.0, 18.0, 16.0),
+        xobject=None,
+    )
+    tight_para = typeset_paragraph(
+        unit_id="p0021_u0007",
+        page_no=21,
+        role=UnitRole.PARAGRAPH,
+        marked_text="其中 <f1/> 表示累积重构，因此每个因子均被归一化并用于后续层级的条件预测。",
+        tokens=(InlineToken(tag_id="f1", kind="rigid"),),
+        geom=para_geom,
+        formulas={"f1": tall_f},
+        font_engine=engine,
+        target_lang="zh",
+    )
+    assert tight_para.used_font_size_pt < para_geom.dominant_font_size * 0.92
+
+
+@pytest.mark.fast
+def test_tj_column_jump_splits_table_row_and_preserves_numeric_columns(tmp_path: Path) -> None:
+    """Single-TJ LaTeX table rows split across large jumps and blank only translated cells."""
+    from ubt.codecs.pdf.layout_detector import LayoutRegion, RegionKind
+    from ubt.codecs.pdf.layout_fusion import fuse_page
+    from ubt.codecs.pdf.stream_patcher import apply_pdf_patches
+
+    src = tmp_path / "table_tj.pdf"
+    pdf = pikepdf.new()
+    f_body = pdf.make_indirect(
+        pikepdf.Dictionary(
+            {
+                "/Type": pikepdf.Name("/Font"),
+                "/Subtype": pikepdf.Name("/Type1"),
+                "/BaseFont": pikepdf.Name("/Helvetica"),
+            }
+        )
+    )
+    page = pdf.add_blank_page(page_size=(612.0, 792.0))
+    page["/Resources"] = pikepdf.Dictionary({"/Font": pikepdf.Dictionary({"/F1": f_body})})
+    stream = (
+        "BT /F1 10 Tf 1 0 0 1 72 700 Tm "
+        "[(Unconditional) -5000 (Conditional) -4000 (Reasoning) -300 ((Sudoku))] TJ ET\n"
+        "BT /F1 10 Tf 1 0 0 1 72 680 Tm "
+        "[(Utilization) -300 ((%)) -2800 (83.10) -2000 (89.31)] TJ ET"
+    )
+    page["/Contents"] = pikepdf.Stream(pdf, stream.encode("ascii"))
+    pdf.save(src)
+    pdf.close()
+
+    with pikepdf.open(src) as doc:
+        ana = analyze_page_stream(doc.pages[0], page_no=1)
+
+    texts = [op.text.strip() for op in ana.text_ops]
+    assert "Unconditional" in texts
+    assert "Conditional" in texts
+    assert "Reasoning (Sudoku)" in texts
+    assert "Utilization (%)" in texts
+    assert "83.10" in texts
+    assert "89.31" in texts
+
+    table_region = LayoutRegion(
+        kind=RegionKind.TABLE,
+        bbox=(65.0, 670.0, 540.0, 715.0),
+        score=0.99,
+        reading_order=0,
+        raw_label="table",
+    )
+    fused = fuse_page(ana, [table_region])
+    translatable = {fb.unit.source_plain: fb.unit.unit_id for fb in fused if fb.unit.translate}
+    assert "Unconditional" in translatable
+    assert "Conditional" in translatable
+    assert "Reasoning (Sudoku)" in translatable
+    assert "Utilization (%)" in translatable
+    # Pure numeric cells must stay untouched (translate=False).
+    assert "83.10" not in translatable
+    assert "89.31" not in translatable
+
+    out = tmp_path / "table_tj_out.pdf"
+    apply_pdf_patches(
+        source_path=src,
+        analyses={1: ana},
+        fused_by_page={1: fused},
+        translations={
+            translatable["Unconditional"]: "无条件",
+            translatable["Conditional"]: "条件",
+            translatable["Reasoning (Sudoku)"]: "推理（数独）",
+            translatable["Utilization (%)"]: "利用率 (%)",
+        },
+        target_lang="zh",
+        mode=DeliveryMode.MONO,
+        output_path=out,
+    )
+    extracted = _extract_pdf_text(out, 0)
+    compact = "".join(extracted.split())
+    assert "无条件" in compact
+    assert "条件" in compact
+    assert "利用率(%)" in compact
+    # Untouched numeric columns must survive partial TJ blanking verbatim.
+    assert "83.10" in extracted
+    assert "89.31" in extracted

@@ -171,6 +171,10 @@ _PANGU_ENDS_WITH_CJK = re.compile(rf"[{_CJK}]$")
 _PANGU_STARTS_WITH_CJK = re.compile(rf"^[{_CJK}]")
 _PANGU_CJK_TRAILING_WS = re.compile(rf"([{_CJK}])[ \t\u3000]{{2,}}")
 _PANGU_CJK_LEADING_WS = re.compile(rf"[ \t\u3000]{{2,}}([{_CJK}])")
+# UBT inline formatting/link/run/non-formula rigid anchors (`<b1>`, `</b1>`,
+# `<r1>`, `<a2>`, `<x1/>`, etc.) are transparent wrapper boundaries, not math
+# or code spans, so Pangu spacing must not inject spaces around them.
+_INLINE_WRAPPER_TAG_RE = re.compile(r"^</?(?:[abcirs]\d+|x\d+\s*/)\s*>$", re.IGNORECASE)
 
 
 def apply_pangu_spacing(text: str, target_lang: str = "zh") -> str:
@@ -204,10 +208,20 @@ def apply_pangu_spacing(text: str, target_lang: str = "zh") -> str:
         seg = _BEFORE_PUNCT.sub(r"\1", seg)
         seg = _AFTER_PUNCT.sub(r"\1", seg)
 
-        # Space between CJK and adjacent protected math/mask spans
-        if i + 1 < len(parts) and seg and _PANGU_ENDS_WITH_CJK.search(seg):
+        # Space between CJK and adjacent protected math/mask spans (skip inline wrapper tags)
+        if (
+            i + 1 < len(parts)
+            and seg
+            and not _INLINE_WRAPPER_TAG_RE.match(parts[i + 1])
+            and _PANGU_ENDS_WITH_CJK.search(seg)
+        ):
             seg = seg + " "
-        if i > 0 and seg and _PANGU_STARTS_WITH_CJK.match(seg):
+        if (
+            i > 0
+            and seg
+            and not _INLINE_WRAPPER_TAG_RE.match(parts[i - 1])
+            and _PANGU_STARTS_WITH_CJK.match(seg)
+        ):
             seg = " " + seg
         parts[i] = seg
 

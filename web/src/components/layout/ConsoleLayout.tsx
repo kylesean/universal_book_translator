@@ -121,6 +121,25 @@ function NavRows({ items }: { items: NavItem[] }) {
   )
 }
 
+const LAST_JOB_STORAGE_KEY = 'ubt_last_job_id'
+
+function readRememberedJobId(): string | null {
+  try {
+    const val = window.sessionStorage.getItem(LAST_JOB_STORAGE_KEY)
+    return val && val.trim() ? val.trim() : null
+  } catch {
+    return null
+  }
+}
+
+function rememberJobId(jobId: string): void {
+  try {
+    window.sessionStorage.setItem(LAST_JOB_STORAGE_KEY, jobId)
+  } catch {
+    // ignore storage errors in restricted environments
+  }
+}
+
 function AppSidebar({
   theme,
   onSetTheme,
@@ -129,6 +148,7 @@ function AppSidebar({
   health,
   canSignOut,
   onSignOut,
+  currentJobId,
 }: {
   theme: Theme
   onSetTheme: (theme: Theme) => void
@@ -137,13 +157,12 @@ function AppSidebar({
   health: HealthResponse | null
   canSignOut: boolean
   onSignOut: () => void
+  currentJobId: string | null
 }) {
   const { t, language } = useI18n()
   const currentLanguage = languageOption(language)
   const { isMobile, setOpenMobile } = useSidebar()
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false)
-  const jobMatch = useMatch('/jobs/:jobId/*')
-  const currentJobId = jobMatch?.params.jobId ?? null
 
   const closeMobile = () => {
     if (isMobile) setOpenMobile(false)
@@ -156,26 +175,27 @@ function AppSidebar({
     { to: '/system', label: t.nav.systemDoctor, icon: Stethoscope },
   ]
 
-  const workbenchItems: NavItem[] = [
-    {
-      to: currentJobId ? `/jobs/${currentJobId}` : '/jobs',
-      label: t.nav.currentJob,
-      icon: FileText,
-      disabled: !currentJobId,
-    },
-    {
-      to: currentJobId ? `/jobs/${currentJobId}/review` : '/jobs',
-      label: t.nav.reviewWorkbench,
-      icon: SplitSquareVertical,
-      disabled: !currentJobId,
-    },
-    {
-      to: currentJobId ? `/jobs/${currentJobId}/quality` : '/jobs',
-      label: t.nav.qualityGate,
-      icon: ShieldCheck,
-      disabled: !currentJobId,
-    },
-  ]
+  const workbenchItems: NavItem[] = currentJobId
+    ? [
+        {
+          to: `/jobs/${currentJobId}`,
+          label: t.nav.currentJob,
+          icon: FileText,
+        },
+        {
+          to: `/jobs/${currentJobId}/review`,
+          label: t.nav.reviewWorkbench,
+          icon: SplitSquareVertical,
+        },
+        {
+          to: `/jobs/${currentJobId}/quality`,
+          label: t.nav.qualityGate,
+          icon: ShieldCheck,
+        },
+      ]
+    : []
+
+  const shortJobId = currentJobId ? currentJobId.slice(0, 8) : null
 
   return (
     <Sidebar variant="inset" collapsible="offcanvas">
@@ -224,14 +244,21 @@ function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <SidebarGroup>
-          <SidebarGroupLabel>
-            {t.nav.workbenches}
-          </SidebarGroupLabel>
-          <SidebarGroupContent onClick={closeMobile}>
-            <NavRows items={workbenchItems} />
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {workbenchItems.length > 0 ? (
+          <SidebarGroup>
+            <SidebarGroupLabel className="justify-between gap-2">
+              <span className="truncate">{t.nav.workbenches}</span>
+              {shortJobId ? (
+                <span className="rounded border border-sidebar-border/80 bg-background/60 px-1.5 py-0.5 font-mono text-[10px] font-normal text-muted-foreground">
+                  #{shortJobId}
+                </span>
+              ) : null}
+            </SidebarGroupLabel>
+            <SidebarGroupContent onClick={closeMobile}>
+              <NavRows items={workbenchItems} />
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : null}
       </SidebarContent>
 
       <SidebarFooter className="gap-2 border-t border-sidebar-border/70 p-3">
@@ -396,7 +423,18 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
   const canSignOut = Boolean(info?.auth_enabled)
 
   const jobMatch = useMatch('/jobs/:jobId/*')
-  const currentJobId = jobMatch?.params.jobId ?? null
+  const routeJobId = jobMatch?.params.jobId ?? null
+  const [rememberedJobId, setRememberedJobId] = useState<string | null>(readRememberedJobId)
+
+  useEffect(() => {
+    if (routeJobId) {
+      rememberJobId(routeJobId)
+      // oxlint-disable-next-line react/set-state-in-effect
+      setRememberedJobId(routeJobId)
+    }
+  }, [routeJobId])
+
+  const currentJobId = routeJobId ?? rememberedJobId
 
   return (
     <SidebarProvider defaultOpen>
@@ -417,6 +455,7 @@ export function ConsoleLayout({ children }: ConsoleLayoutProps) {
         health={health}
         canSignOut={canSignOut}
         onSignOut={() => void handleSignOut()}
+        currentJobId={currentJobId}
       />
 
       <SidebarInset className="min-w-0 overflow-hidden bg-background md:my-2 md:mr-2 md:rounded-xl md:border md:border-border/70 md:shadow-sm">

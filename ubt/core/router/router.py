@@ -420,6 +420,7 @@ class ModelRouter:
         model: str | None = None,
         domain: str | None = None,
         block_type: str | None = None,
+        char_budget: int | None = None,
     ) -> tuple[str, str]:
         """Construct draft prompt using strategy configured on the model capability profile."""
         profile = self._get_profile(model or self.draft_model)
@@ -434,6 +435,7 @@ class ModelRouter:
                 genre_profile=genre_profile,
                 domain=domain,
                 block_type=block_type,
+                char_budget=char_budget,
             )
         if profile.prompt_strategy == PromptStrategy.HYBRID:
             return build_hybrid_draft_prompt(
@@ -449,6 +451,7 @@ class ModelRouter:
                 epoch_summary=epoch_summary,
                 domain=domain,
                 block_type=block_type,
+                char_budget=char_budget,
             )
         return build_rich_draft_prompt(
             source_text=source_text,
@@ -463,6 +466,7 @@ class ModelRouter:
             epoch_summary=epoch_summary,
             domain=domain,
             block_type=block_type,
+            char_budget=char_budget,
         )
 
     def build_repair_prompt(
@@ -1294,6 +1298,7 @@ class ModelRouter:
         epoch_summary: str = "",
         model: str | None = None,
         domain: str | None = None,
+        char_budget: int | None = None,
     ) -> str:
         """Route to draft model tier with strategy-driven prompt construction and extraction.
 
@@ -1318,6 +1323,7 @@ class ModelRouter:
                 model=cand_model,
                 domain=domain,
                 block_type=block.block_type,
+                char_budget=char_budget,
             )
 
         def _calc_max_tokens(cand_model: str, cand_profile: ModelProfile) -> int | None:
@@ -1374,6 +1380,7 @@ class ModelRouter:
         section_context: str = "",
         block_contexts: list[tuple[str, str]] | None = None,
         block_types: list[tuple[str, str]] | None = None,
+        block_char_budgets: list[tuple[str, int]] | None = None,
     ) -> dict[str, str]:
         """Draft a group of blocks in a single structured XML prompt.
 
@@ -1401,6 +1408,7 @@ class ModelRouter:
                 section_context=section_context,
                 block_contexts=block_contexts,
                 block_types=block_types,
+                block_char_budgets=block_char_budgets,
             )
 
         def _calc_max_tokens(cand_model: str, cand_profile: ModelProfile) -> int | None:

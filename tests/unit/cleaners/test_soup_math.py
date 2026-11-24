@@ -153,3 +153,35 @@ def test_soup_masker_faithful_echo_restores_clean() -> None:
 def test_soup_masker_leaves_prose_untouched() -> None:
     text = "whereQ0 and 5CfinVtm are bare identifiers"
     assert SoupMathMasker().mask(text) == (text, {})
+
+
+def test_soup_masker_does_not_swallow_non_pdf_codec_tags() -> None:
+    for sample in (
+        "α<r1>new term</r1>",
+        "x_1<s1>2</s1>",
+        "foo_bar<a1>two words</a1>",
+        "Note <x1/> end",
+    ):
+        assert find_soup_spans(sample) == [], f"unexpected soup span in {sample!r}"
+
+
+def test_placeholder_engine_protects_rigid_x_anchors() -> None:
+    from ubt.core.cleaners.citation_masker import CitationMasker
+    from ubt.core.cleaners.code_masker import CodeMasker
+    from ubt.core.cleaners.email_masker import EmailMasker
+    from ubt.core.cleaners.math_masker import MathMasker
+    from ubt.segment.placeholders import PlaceholderEngine
+
+    engine = PlaceholderEngine(
+        email=EmailMasker(),
+        code=CodeMasker(),
+        math=MathMasker(),
+        soup=SoupMathMasker(),
+        citation=CitationMasker(),
+    )
+    masked = engine.mask("See <x1/> and <f2/> here.")
+    assert "<x1/>" not in masked.text
+    assert "<f2/>" not in masked.text
+    restored = engine.restore(masked.text, masked)
+    assert restored.clean
+    assert restored.text == "See <x1/> and <f2/> here."

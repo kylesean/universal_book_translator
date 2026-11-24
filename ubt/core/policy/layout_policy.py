@@ -289,7 +289,7 @@ POSTER_MAX_FONTS = 2
 RESUME_MIN_CHARS = 2000
 
 # ---------------------------------------------------------------------------
-# QA depth policy (visual_gate.py — short-doc parity)
+# QA depth policy (artifact_gate.py — short-doc parity)
 # ---------------------------------------------------------------------------
 # <= this many pages: full-page inspection (skill zero-defect-gate parity).
 QA_FULL_GATE_MAX_PAGES = 20

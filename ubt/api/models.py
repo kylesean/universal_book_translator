@@ -7,7 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ubt.api.provider_editor import ProviderEditModel
 from ubt.core.config import (
+    DeliveryMode,
+    DocumentMode,
     OcrMode,
+    PdfEngine,
     parse_page_ranges,
 )
 from ubt.core.engine.progress import ProgressSnapshot
@@ -96,6 +99,22 @@ class JobAssessRequest(BaseModel):
     )
     max_concurrency: int | None = Field(
         default=None, gt=0, description="Concurrent LLM requests (drives the runtime estimate)"
+    )
+    delivery_mode: DeliveryMode | None = Field(
+        default=None,
+        description="Requested PDF delivery contract (auto, readable, faithful)",
+    )
+    document_mode: DocumentMode | None = Field(
+        default=None,
+        description="Document archetype override (auto, paper, book)",
+    )
+    allow_degrade: bool | None = Field(
+        default=None,
+        description="Permit graceful degrade from faithful to readable when page-lock is infeasible",
+    )
+    pdf_engine: PdfEngine | None = Field(
+        default=None,
+        description="PDF ingestion/render engine selection (auto, docling, native, pdfium)",
     )
 
     @field_validator("pages")
@@ -214,6 +233,7 @@ class ArtifactFindingResponse(BaseModel):
     code: str
     message: str
     page: int | None = None
+    block_id: str | None = None
 
 
 class ArtifactReportResponse(BaseModel):
@@ -224,6 +244,7 @@ class ArtifactReportResponse(BaseModel):
     stats: dict[str, str | int | float] = Field(default_factory=dict)
     sampled_pages: list[int] = Field(default_factory=list)
     findings: list[ArtifactFindingResponse] = Field(default_factory=list)
+    parse_noise: dict[str, Any] | None = None
 
 
 class JobAssessResponse(BaseModel):
@@ -683,10 +704,10 @@ class RuntimeActiveModel(BaseModel):
     allow_page_upload: bool = Field(
         default=False,
         description=(
-            "True when rendered page images may leave this machine. The visual "
-            "judge and cloud/vlm OCR both require it; with it false the pipeline "
-            "skips them, so the console must say so instead of offering a switch "
-            "that silently does nothing"
+            "True when rendered page images may leave this machine. Cloud OCR and "
+            "VLM formula enrichment both require it; with it false the pipeline "
+            "skips them cleanly, so the console must say so instead of offering a "
+            "switch that silently does nothing"
         ),
     )
 
@@ -958,3 +979,45 @@ class ProviderDetailResponse(BaseModel):
     is_free: bool | None = None
     api_timeout: float | None = None
     fallback_models: list[str] | None = None
+
+
+class ReExportRequest(BaseModel):
+    """Optional payload overriding the delivery contract during a zero-token re-export."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    delivery: DeliveryMode | None = Field(
+        default=None,
+        description="Optional delivery contract override (auto, readable, faithful)",
+    )
+
+
+class PageGeometryEntry(BaseModel):
+    """Per-page font compaction and spatial fit telemetry recorded by the native renderer."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    page_no: int
+    page_w_pt: float | None = None
+    page_h_pt: float | None = None
+    measured_size_pt: float | None = None
+    measured_leading_pt: float | None = None
+    delivered_size_pt: float | None = None
+    delivered_leading_em: float | None = None
+    tracking_em: float | None = None
+    tier: str | None = None
+    fits: bool | None = None
+
+
+class PageGeometryResponse(BaseModel):
+    """Aggregate summary + per-page native layout fitting records for a job."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: str
+    measured: bool = False
+    total_pages: int = 0
+    scaled_pages: int = 0
+    overflow_pages: int = 0
+    min_delivered_size_pt: float | None = None
+    pages: list[PageGeometryEntry] = Field(default_factory=list)

@@ -26,6 +26,8 @@ from ubt.core.config import (
     DeliveryMode,
     DocumentMode,
     DualMode,
+    OcrFallback,
+    SpillPolicy,
     UBTConfig,
     env_var_names,
 )
@@ -45,6 +47,9 @@ _ENUM_REQUEST_FIELDS: dict[str, tuple[str, ...]] = {
     "delivery_mode": get_args(DeliveryMode),
     "preset": tuple(p.value for p in Preset),
     "document_mode": get_args(DocumentMode),
+    "ocr_fallback": get_args(OcrFallback),
+    "spill_policy": get_args(SpillPolicy),
+    "dynamic_routing_policy": ("pareto", "quality_first", "cost_first"),
 }
 
 

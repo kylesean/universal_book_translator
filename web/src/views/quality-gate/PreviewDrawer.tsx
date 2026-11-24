@@ -27,15 +27,20 @@ import { deliverableName, fmtSize, isPreviewableProduct } from './artifactMeta'
 export function PreviewDrawer({
   jobId,
   item,
+  deliveryMode,
   onClose,
 }: {
   jobId: string
   item: DeliverableItem
+  deliveryMode?: string | null
   onClose: () => void
 }) {
   const { t } = useI18n()
   const [failed, setFailed] = useState(false)
-  const name = deliverableName(item.key, item.label, t)
+  const name = deliverableName(item.key, item.label, t, {
+    deliveryMode,
+    filename: item.filename,
+  })
   const download = () =>
     triggerBrowserDownload(
       deliverableDownloadUrl(jobId, item.key),

@@ -430,6 +430,8 @@ class StreamTextOp:
     rise_pt: float
     snapshot: OpGraphicsSnapshot
     raw_operands: tuple[Any, ...]
+    text_advance: float = 0.0
+    tj_item_range: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -537,6 +539,115 @@ def _measure_and_decode_show(
         _consume_string(bytes(operands[2]))
 
     return "".join(parts), advance
+
+
+# Negative TJ kerning adjustment (in thousandths of an em) large enough to
+# indicate an inter-column / tab jump inside a single PDF ``TJ`` operator
+# (e.g. pdflatex/dvipdfm booktabs tables emitting an entire row in one ``TJ``).
+# Normal TeX word spaces are ~-250..-580; section number gaps are ~-1125;
+# table column jumps are typically <= -1300.
+_TJ_COLUMN_JUMP_THOUSANDTHS = -1250.0
+
+
+def _decode_tj_slice(
+    items: list[Any],
+    font: _ParsedFont | None,
+    font_size: float,
+    tc: float,
+    tw: float,
+    tz: float,
+) -> tuple[str, float]:
+    """Decode a contiguous slice of ``TJ`` array items and compute its advance."""
+    return _measure_and_decode_show("TJ", [pikepdf.Array(items)], font, font_size, tc, tw, tz)
+
+
+def _split_tj_segments(
+    arr: pikepdf.Array,
+    font: _ParsedFont | None,
+    font_size: float,
+    tc: float,
+    tw: float,
+    tz: float,
+) -> tuple[list[tuple[str, float, float, tuple[int, int] | None, pikepdf.Array]], float]:
+    """Split a ``TJ`` array across large horizontal jumps while preserving exact advance.
+
+    Returns ``(segments, total_advance)`` where each segment is
+    ``(decoded_text, offset_adv, seg_adv, tj_item_range_or_None, sub_array)``.
+    Leading horizontal jumps (``<= -160``) before the first string are skipped
+    into ``offset_adv`` so the segment's bbox starts at actual ink rather than
+    preceding column whitespace.
+    """
+    items = list(arr)
+    if not items:
+        return [], 0.0
+    tz_scale = tz / 100.0
+
+    # Identify string indices and split points on large column jumps.
+    raw_spans: list[tuple[int, int]] = []
+    cur_start: int | None = None
+    last_str_end = -1
+    for i, elem in enumerate(items):
+        if isinstance(elem, pikepdf.String):
+            if cur_start is None:
+                cur_start = i
+            last_str_end = i + 1
+        else:
+            try:
+                adj = float(elem)
+            except (TypeError, ValueError):
+                continue
+            if cur_start is not None and adj <= _TJ_COLUMN_JUMP_THOUSANDTHS:
+                raw_spans.append((cur_start, last_str_end))
+                cur_start = None
+                last_str_end = -1
+    if cur_start is not None and last_str_end > cur_start:
+        raw_spans.append((cur_start, last_str_end))
+
+    if not raw_spans:
+        _, total_adv = _measure_and_decode_show("TJ", [arr], font, font_size, tc, tw, tz)
+        return [], total_adv
+
+    # Check whether any leading jump or multi-segment split occurred.
+    has_leading_jump = False
+    if raw_spans[0][0] > 0:
+        for elem in items[: raw_spans[0][0]]:
+            try:
+                if float(elem) <= -160.0:
+                    has_leading_jump = True
+                    break
+            except (TypeError, ValueError):
+                pass
+    is_split = len(raw_spans) > 1 or has_leading_jump
+
+    if not is_split:
+        decoded, total_adv = _measure_and_decode_show("TJ", [arr], font, font_size, tc, tw, tz)
+        return [(decoded, 0.0, total_adv, None, arr)], total_adv
+
+    # Compute cumulative advance before each item for exact segment offsets.
+    item_advs: list[float] = []
+    for elem in items:
+        if isinstance(elem, pikepdf.String):
+            _, adv = _measure_and_decode_show("Tj", [elem], font, font_size, tc, tw, tz)
+            item_advs.append(adv)
+        else:
+            try:
+                adj = float(elem)
+                item_advs.append(-(adj / 1000.0) * font_size * tz_scale)
+            except (TypeError, ValueError):
+                item_advs.append(0.0)
+
+    prefix = [0.0]
+    for a in item_advs:
+        prefix.append(prefix[-1] + a)
+    total_adv = prefix[-1]
+
+    segments: list[tuple[str, float, float, tuple[int, int] | None, pikepdf.Array]] = []
+    for start, end in raw_spans:
+        sub_items = items[start:end]
+        decoded, seg_adv = _decode_tj_slice(sub_items, font, font_size, tc, tw, tz)
+        offset_adv = prefix[start]
+        segments.append((decoded, offset_adv, seg_adv, (start, end), pikepdf.Array(sub_items)))
+    return segments, total_adv
 
 
 def analyze_page_stream(
@@ -658,72 +769,98 @@ def analyze_page_stream(
                 tm = tlm
 
             pfont = fonts.get(cur_font_res)
-            snap = OpGraphicsSnapshot(
-                ctm=ctm,
-                text_matrix=tm,
-                font_resource=cur_font_res,
-                font_size_operand=cur_font_size,
-                tc=tc,
-                tw=tw,
-                tz=tz,
-                ts=ts,
-                color_rgb=color_rgb,
-            )
-            decoded, adv_text = _measure_and_decode_show(
-                op, operands, pfont, cur_font_size, tc, tw, tz
-            )
-
-            # Compute start/end & ascent/descent corners in logical page space.
-            trm = mat_mul(tm, ctm)
-            trm_logical = mat_mul(trm, s2l)
-            eff_size = abs(cur_font_size) * math.hypot(trm_logical[2], trm_logical[3])
-            if eff_size <= 0.05:
-                eff_size = abs(cur_font_size) * math.hypot(trm_logical[0], trm_logical[1])
-
-            x0_t, y0_t = 0.0, ts - 0.22 * abs(cur_font_size)
-            x1_t, y1_t = adv_text, ts + 0.78 * abs(cur_font_size)
-            corners = [
-                mat_apply(trm_logical, x0_t, y0_t),
-                mat_apply(trm_logical, x1_t, y0_t),
-                mat_apply(trm_logical, x0_t, y1_t),
-                mat_apply(trm_logical, x1_t, y1_t),
-            ]
-            bx0 = min(c[0] for c in corners)
-            by0 = min(c[1] for c in corners)
-            bx1 = max(c[0] for c in corners)
-            by1 = max(c[1] for c in corners)
-            _, base_y = mat_apply(trm_logical, 0.0, ts)
-
-            # Advance text matrix exactly per PDF spec.
-            tm = mat_mul((1.0, 0.0, 0.0, 1.0, adv_text, 0.0), tm)
-
-            if pfont is not None and not pfont.has_tounicode:
-                missing_tu += 1
-
-            # Record op even if decoded is empty (when ToUnicode is missing) so
-            # pdfium recovery or surgical erasure still tracks its op_index.
-            if decoded or (pfont is not None and not pfont.has_tounicode):
-                text_ops.append(
-                    StreamTextOp(
-                        op_index=op_idx,
-                        operator=op,
-                        text=decoded,
-                        bbox=(bx0, by0, bx1, by1),
-                        baseline_y=base_y,
-                        font_resource=cur_font_res,
-                        font_name=pfont.base_name if pfont else "",
-                        font_size_pt=eff_size,
-                        color_rgb=color_rgb,
-                        is_bold=pfont.is_bold if pfont else False,
-                        is_italic=pfont.is_italic if pfont else False,
-                        is_serif=pfont.is_serif if pfont else True,
-                        is_math_font=pfont.is_math_font if pfont else False,
-                        has_tounicode=pfont.has_tounicode if pfont else False,
-                        rise_pt=ts * math.hypot(trm_logical[2], trm_logical[3]),
-                        snapshot=snap,
-                        raw_operands=tuple(operands),
-                    )
+            base_tm = tm
+            tj_segments: list[tuple[str, float, float, tuple[int, int] | None, Any]]
+            if op == "TJ" and operands and isinstance(operands[0], pikepdf.Array):
+                tj_segments, total_adv = _split_tj_segments(
+                    operands[0], pfont, cur_font_size, tc, tw, tz
                 )
+            else:
+                decoded_one, total_adv = _measure_and_decode_show(
+                    op, operands, pfont, cur_font_size, tc, tw, tz
+                )
+                tj_segments = [
+                    (
+                        decoded_one,
+                        0.0,
+                        total_adv,
+                        None,
+                        operands[0] if operands else None,
+                    )
+                ]
+
+            for decoded, offset_adv, seg_adv, item_range, seg_op0 in tj_segments:
+                seg_tm = (
+                    mat_mul((1.0, 0.0, 0.0, 1.0, offset_adv, 0.0), base_tm)
+                    if abs(offset_adv) > 1e-6
+                    else base_tm
+                )
+                snap = OpGraphicsSnapshot(
+                    ctm=ctm,
+                    text_matrix=seg_tm,
+                    font_resource=cur_font_res,
+                    font_size_operand=cur_font_size,
+                    tc=tc,
+                    tw=tw,
+                    tz=tz,
+                    ts=ts,
+                    color_rgb=color_rgb,
+                )
+
+                # Compute start/end & ascent/descent corners in logical page space.
+                trm = mat_mul(seg_tm, ctm)
+                trm_logical = mat_mul(trm, s2l)
+                eff_size = abs(cur_font_size) * math.hypot(trm_logical[2], trm_logical[3])
+                if eff_size <= 0.05:
+                    eff_size = abs(cur_font_size) * math.hypot(trm_logical[0], trm_logical[1])
+
+                x0_t, y0_t = 0.0, ts - 0.22 * abs(cur_font_size)
+                x1_t, y1_t = seg_adv, ts + 0.78 * abs(cur_font_size)
+                corners = [
+                    mat_apply(trm_logical, x0_t, y0_t),
+                    mat_apply(trm_logical, x1_t, y0_t),
+                    mat_apply(trm_logical, x0_t, y1_t),
+                    mat_apply(trm_logical, x1_t, y1_t),
+                ]
+                bx0 = min(c[0] for c in corners)
+                by0 = min(c[1] for c in corners)
+                bx1 = max(c[0] for c in corners)
+                by1 = max(c[1] for c in corners)
+                _, base_y = mat_apply(trm_logical, 0.0, ts)
+
+                if pfont is not None and not pfont.has_tounicode:
+                    missing_tu += 1
+
+                seg_raw_operands = (seg_op0,) if item_range is not None else tuple(operands)
+                # Record op even if decoded is empty (when ToUnicode is missing) so
+                # pdfium recovery or surgical erasure still tracks its op_index.
+                if decoded or (pfont is not None and not pfont.has_tounicode):
+                    text_ops.append(
+                        StreamTextOp(
+                            op_index=op_idx,
+                            operator=op,
+                            text=decoded,
+                            bbox=(bx0, by0, bx1, by1),
+                            baseline_y=base_y,
+                            font_resource=cur_font_res,
+                            font_name=pfont.base_name if pfont else "",
+                            font_size_pt=eff_size,
+                            color_rgb=color_rgb,
+                            is_bold=pfont.is_bold if pfont else False,
+                            is_italic=pfont.is_italic if pfont else False,
+                            is_serif=pfont.is_serif if pfont else True,
+                            is_math_font=pfont.is_math_font if pfont else False,
+                            has_tounicode=pfont.has_tounicode if pfont else False,
+                            rise_pt=ts * math.hypot(trm_logical[2], trm_logical[3]),
+                            snapshot=snap,
+                            raw_operands=seg_raw_operands,
+                            text_advance=seg_adv,
+                            tj_item_range=item_range,
+                        )
+                    )
+
+            # Advance text matrix exactly per PDF spec over the full instruction.
+            tm = mat_mul((1.0, 0.0, 0.0, 1.0, total_adv, 0.0), base_tm)
         # Lightweight vector rule tracking (table borders & inline fraction bars).
         elif op == "re" and len(operands) >= 4:
             rx, ry, rw, rh = (float(v) for v in operands[:4])

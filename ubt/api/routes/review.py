@@ -6,13 +6,14 @@ import asyncio
 import json
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, Header, HTTPException, Query, status
+from fastapi import Body, FastAPI, Header, HTTPException, Query, status
 from fastapi.responses import JSONResponse, Response
 
 from ubt.api.models import (
     IssueCountsResponse,
+    ReExportRequest,
     SegmentEditRequest,
     SegmentListResponse,
     TermPropagationRequest,
@@ -184,14 +185,17 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
 
     @api_app.post("/jobs/{job_id}/re-export", tags=["Jobs"])
     async def re_export(
-        job_id: str, x_ubt_tenant: str | None = Header(default=None)
+        job_id: str,
+        payload: Annotated[ReExportRequest | None, Body()] = None,
+        x_ubt_tenant: str | None = Header(default=None),
     ) -> JSONResponse:
         """Re-render a finished job's deliverable from its current ledger text.
 
         A human edit lands in the ledger, but the delivered file was rendered
         before it — the reviewer saw the fix in the preview while the download
         stayed stale. This re-runs the export stage over the current text and
-        overwrites the deliverable in place. No token is spent: every block is
+        overwrites the deliverable in place, optionally overriding ``delivery``
+        (``auto``, ``readable``, ``faithful``). No token is spent: every block is
         already terminal, so only render + reports run.
         """
         valid_id = validate_job_id(job_id)
@@ -214,6 +218,7 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
                 config=app_config,
                 router=scope.manager.router,
                 qe_runner=scope.manager.qe_runner,
+                delivery=payload.delivery if payload is not None else None,
             )
         except ReExportError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -352,11 +357,27 @@ def register_review_routes(api_app: FastAPI, scope: ApiScope) -> None:
         resolved_source = resolve_secure_path(source_path, must_exist=True, config=app_config)
         clamped_dpi = min(max(dpi, 40), 200)
 
-        if pdf_engine_used == "native" or (
-            resolved_source.suffix.lower() == ".pdf"
+        use_native_preview = pdf_engine_used == "native"
+        if (
+            not use_native_preview
+            and pdf_engine_used != "docling"
+            and resolved_source.suffix.lower() == ".pdf"
             and deliv_mode != "readable"
             and app_config.pdf_engine in {"auto", "native"}
         ):
+            if app_config.pdf_engine == "native":
+                use_native_preview = True
+            else:
+                from ubt.adapters.pdf.pdf_profiler import inspect_pdf_profile
+
+                try:
+                    use_native_preview = not await asyncio.to_thread(
+                        lambda: inspect_pdf_profile(resolved_source).has_scan
+                    )
+                except Exception:  # noqa: BLE001
+                    use_native_preview = False
+
+        if use_native_preview:
             try:
                 from ubt.adapters.pdf.native_adapter import NativePDFAdapter
 

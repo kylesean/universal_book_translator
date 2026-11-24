@@ -1135,9 +1135,9 @@ class UBTConfig(BaseSettings):
         return {self.ocr_model: endpoint}
 
     # Master gate for every route that ships rendered PAGE IMAGES of the book to
-    # model endpoints: visual-scalpel repair, VLM judge, and cloud/VLM OCR (auto
-    # mode degrades to local engines; explicit --ocr cloud|vlm refuses to
-    # start). Text prompts are unaffected.
+    # model endpoints: visual-scalpel repair and cloud/VLM OCR (auto mode
+    # degrades to local engines; explicit --ocr cloud|vlm refuses to start).
+    # Text prompts are unaffected.
     # Off by default: the rendered pages of an unpublished manuscript are the
     # sensitive half of the payload, so shipping them must never be the default
     # and requires explicit, disclosed opt-in. Set UBT_ALLOW_PAGE_UPLOAD=true to

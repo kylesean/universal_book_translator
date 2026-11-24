@@ -4,7 +4,7 @@ export const en: TranslationDictionary = {
   common: {
     yes: 'Yes',
     compilerConsole: 'UBT Console',
-    consoleSubtitle: 'Book translation workspace',
+    consoleSubtitle: 'Document translation & typesetting',
     disconnected: 'DISCONNECTED',
     cancel: 'Cancel',
     confirm: 'Confirm',
@@ -26,6 +26,7 @@ export const en: TranslationDictionary = {
     themeLight: 'Light',
     themeDark: 'Dark',
     interfaceLanguage: 'Interface language',
+    remoteImageBlocked: 'Remote image ({host}) not loaded',
   },
   nav: {
     operatorControl: 'Navigation',
@@ -49,8 +50,9 @@ export const en: TranslationDictionary = {
     execute: 'Select',
     footerBrand: 'UBT STUDIO',
     categoryPreferences: 'Preferences',
-    cmdNewJobDesc: 'Upload a book and start translation',
+    cmdNewJobDesc: 'Upload a document and start translation',
     cmdMissionControlDesc: 'Monitor live jobs and history',
+    cmdCurrentJobDesc: 'Inspect progress and deliverables for job #{id}',
     cmdReviewDesc: 'Review active job #{id}',
     cmdQualityDesc: 'Inspect the delivery for job #{id}',
     cmdAssetsDesc: 'Manage shared terminology and reusable translations',
@@ -61,8 +63,8 @@ export const en: TranslationDictionary = {
   },
   wizard: {
     title: 'New Translation Job',
-    subtitle: 'Upload a book manuscript to estimate cost and time, then launch translation.',
-    dropzoneTitle: 'Drag and drop manuscript here',
+    subtitle: 'Upload a book, paper, or report to estimate cost and time, then launch translation.',
+    dropzoneTitle: 'Drag and drop document here',
     dropzoneSubtitle: 'or click to browse local files (common formats supported)',
     uploadAria: 'Choose a source document to translate',
     dropzoneActive: 'Release file to analyze...',
@@ -82,7 +84,7 @@ export const en: TranslationDictionary = {
     repairProviderDefault: 'Follow primary',
     providerUnavailable: 'Unavailable',
     providerUnavailableHelp:
-      'This provider has no usable credential or endpoint. Repair it in System, or choose another provider.',
+      'This provider has no usable credential or endpoint. Repair it in System → Models & Quality, or choose another provider.',
     targetLang: 'Target Language',
     presets: 'Profiles',
     presetHighFidelity: 'Publication-Grade',
@@ -192,21 +194,21 @@ export const en: TranslationDictionary = {
       PREFIX_UNMEASURED:
         'Could not measure the prompt prefix; fell back to the calibrated constant of 1000 tokens (prefix unmeasured).',
       PAGES_SLICE_QUOTED_WHOLE:
-        'A --pages range is set, but this quote covers the whole document (not narrowed to those pages); the real draft volume will only be lower.',
+        'A page range is set, but this quote covers the whole document (not narrowed to those pages); actual draft volume will only be lower.',
       OCR_MODEL_NOT_CONFIGURED:
-        'OCR is enabled but no recognition model is configured, so cost is unknown. Complete the OCR setup in System check.',
+        'OCR is enabled but no recognition model is configured, so cost is unknown. Complete the OCR setup in System → Models & Quality.',
       MODEL_UNPRICED:
-        'Model {models} has no price-table entry and is not on a self-hosted endpoint, so cost shows as "unknown" rather than $0. Add unit prices in ubt/core/router/pricing.py to quote it.',
+        'Model {models} has no price-table entry and is not a self-hosted free endpoint, so cost shows as "not priced" rather than $0 (translation is unaffected).',
       MODEL_NOT_CONFIGURED:
-        'No translation model is configured, so cost is unknown. Configure a model provider in System check.',
+        'No translation model is configured, so cost is unknown. Configure a model provider in System → Models & Quality.',
       SCANNED_PAGES_DOMINANT:
         'The document is mostly scanned/image pages, so the translation depends on visual transcription and both cost and latency rise sharply. An OCR pre-check is advised.',
       FONT_RESIDUE_RISK:
         'Font encoding damage: {confirmed_pages} page(s) confirmed with garbled characters ({residue_chars} residue chars in total). Brackets and equals signs are recoverable by rule; superscripts, subscripts and operators are usually lost for good. That count is a lower bound — replacements within the ASCII range cannot be detected — {remedy}. {at_risk_clause}This is a font-encoding defect, not a scan-quality one; the scanned-page share is unrelated.',
       FORMULA_HEAVY_NEEDS_ENRICHMENT:
-        'The document is formula-heavy but visual formula enrichment is off (a common trade-off of --preset preview); formula transcription quality may suffer.',
+        'The document is formula-heavy while visual formula enrichment is off (as in Quick Proof); formula transcription quality may suffer.',
       PATHOLOGICAL_PAGE_RISK:
-        'Page {page} carries {rects} text fragments over {chars} characters, and extraction pays per fragment — so this page costs the product of the two (an ordinary page is ~10⁶). Parsing it dominates the run, and --deep or a full translation will be noticeably slower.',
+        'Page {page} carries {rects} text fragments over {chars} characters; per-fragment extraction on this page will be noticeably slower.',
       SCANNED_PAGE_OCR_ESTIMATED:
         'No usable text layer was found (a pure scan or image-based layout); the draft cost is estimated from the expected OCR volume (~{chars_per_page} chars/page, ~{source_chars} chars total). Actual cost depends on how much text OCR recovers.',
       PAGE_RANGE_FILTERED:
@@ -229,7 +231,7 @@ export const en: TranslationDictionary = {
     warningAtRiskClause: 'A further {count} page(s) use fonts with no /ToUnicode map — at risk, though no residue was confirmed. ',
     listSeparator: ', ',
     advancedOptionsTitle: 'More options',
-    advancedOptionsSubtitle: 'Optional; defaults suit most books',
+    advancedOptionsSubtitle: 'Optional; defaults suit most documents',
     domainProfile: 'Content type',
     // The profile's real effects are only three: the seed-glossary directory,
     // the rolling-summary switch and the genre string in the prompt.
@@ -243,11 +245,12 @@ export const en: TranslationDictionary = {
     domainPaper: 'Academic Paper',
     domainFiction: 'Fiction',
     domainHumanities: 'Humanities',
-    deliveryMode: 'Delivery Contract',
-    deliveryModeHelp: 'auto routes by document complexity; readable produces adaptive reflow; faithful produces a 1:1 in-place publication (vector background, booktabs, formula slots). 1:1 needs a trustworthy source text layer: a scan or font-encoding damage degrades it to reflow, or refuses the run, depending on the switch below.',
+    deliveryMode: 'Layout Mode',
+    deliveryModeHelp:
+      'Auto routes by document complexity; Adaptive Reflow reflows into comfortable typography; 1:1 Faithful preserves original vector backgrounds and page count (best for papers/textbooks). 1:1 needs a trustworthy text layer: scans or damaged fonts fall back to reflow or intercept pre-flight.',
     deliveryModeAuto: 'Auto Route',
     deliveryModeReadable: 'Adaptive Reflow',
-    deliveryModeFaithful: '1:1 Physical Faithful',
+    deliveryModeFaithful: '1:1 Faithful',
     faithfulShowcaseTitle: '1:1 Faithful Options',
     faithfulShowcaseDesc: 'Preserves original geometry and vector backgrounds with adaptive typography.',
     faithfulFeatureStretch: 'Variable Font Stretch',
@@ -270,7 +273,7 @@ export const en: TranslationDictionary = {
     allowDegrade: 'Fallback to Reflow if 1:1 Infeasible',
     allowDegradeHelp:
       'Enabled: Prioritizes 1:1 in-place delivery; if scanned pages or corrupt fonts prevent layout locking, automatically delivers a reflow edition to prevent job failure.\nDisabled: Strict 1:1 mode. Only runs when the source document fully supports 1:1 geometry locking; otherwise intercepts pre-flight.\n(Note: Per-page text collision avoidance and adaptive layout fitting are handled automatically by the engine.)',
-    dualMode: 'Delivery Mode',
+    dualMode: 'Language Layout',
     dualModeHelp:
       'Smart Auto starts bilingual and lets the layout advisor step it down to target-only when the layout cannot pair cleanly.',
     dualModeAuto: 'Smart Auto',
@@ -364,6 +367,46 @@ export const en: TranslationDictionary = {
     toggleAuto: 'Follow engine default',
     toggleOn: 'On',
     toggleOff: 'Off',
+    setBudgetCap: 'Set budget cap',
+    pdfEngineLabel: 'PDF engine',
+    pdfEngineHelp:
+      'Auto picks Native for 1:1 Faithful and Docling for Adaptive Reflow; Pdfium is a fast plain-text path without OCR/layout.',
+    pdfEngineAuto: 'Auto (follow layout mode)',
+    pdfEngineDocling: 'Docling (lossless structure + reflow)',
+    pdfEngineNative: 'Native PDF (in-place patching)',
+    pdfEnginePdfium: 'Pdfium (fast text extract)',
+    pdfEngineConflictFaithful:
+      '1:1 Faithful requires Auto or Native PDF engine; the selected engine cannot lock original page geometry and will be rejected on submit.',
+    pdfEngineResetAuto: 'Reset to Auto',
+    highMathModelHint:
+      'High formula density detected with a local/free model. Verify your model preserves inline math tags accurately, or try a "First 5 pages" slice test first.',
+    ocrFallbackLabel: 'Page OCR/VLM fallback',
+    ocrFallbackHelp:
+      'Controls when per-page VLM/OCR transcription runs on non-editable PDF pages: textless scans only, sparse/weak pages, or all non-text pages.',
+    ocrFallbackOff: 'Off',
+    ocrFallbackMissing: 'Missing text scans only',
+    ocrFallbackWeak: 'Weak / sparse formula pages',
+    ocrFallbackAll: 'All non-editable pages',
+    dynamicRoutingLabel: 'Difficulty-aware cascade routing',
+    dynamicRoutingHelp:
+      'Routes routine prose through your budget model tier while escalating math, tables, and tightly boxed blocks to your flagship model.',
+    dynamicRoutingPolicyLabel: 'Cascade routing policy',
+    dynamicRoutingPolicyHelp: 'Selects how dynamic routing balances cost vs quality escalation.',
+    dynamicRoutingPareto: 'Pareto balanced',
+    dynamicRoutingQualityFirst: 'Quality first',
+    dynamicRoutingCostFirst: 'Cost first',
+    spillPolicyLabel: 'Layout overflow policy',
+    spillPolicyHelp:
+      'Policy when translated text exceeds source bounds in faithful mode: fail contract verification, warn only, or place remainder in an appendix.',
+    spillError: 'Strict fail contract',
+    spillWarn: 'Warn only',
+    spillAppendix: 'Overflow appendix',
+    exportAllowNeedsHumanLabel: 'Allow export with review flags',
+    exportAllowNeedsHumanHelp:
+      'Allows producing initial deliverables when some segments still need human verification instead of failing export.',
+    deliveryPlanVerdict: 'Planned layout mode: {contract}',
+    deliveryPlanProvisional:
+      'Provisional estimate (deep page-lock feasibility runs at pipeline ingest).',
   },
   mission: {
     title: 'Job Details',
@@ -469,9 +512,9 @@ export const en: TranslationDictionary = {
     readerProductsTitle: 'Reader products',
     degradedAlertTitle: 'Adaptive layout safety fallback',
     degradedAlertDesc:
-      'For strict 1:1: turn off “Auto-degrade when 1:1 is infeasible” in the wizard, fix the source (re-export it or repair the font encoding with OCR), then run again.',
+      'For strict 1:1: turn off “Fallback to Reflow if 1:1 Infeasible” in the wizard, fix the source (re-export it or repair the font encoding with OCR), then run again.',
     degradedAlertDescRenderFallback:
-      'For strict 1:1: turn off “Auto-degrade when 1:1 is infeasible” in the wizard. Note that in dense multi-column or figure-heavy layouts, text may undergo aggressive font scaling or risk clipping if the original bounding boxes lack sufficient vertical clearance.',
+      'For strict 1:1: turn off “Fallback to Reflow if 1:1 Infeasible” in the wizard. Note that in dense multi-column or figure-heavy layouts, text may undergo aggressive font scaling or risk clipping if the original bounding boxes lack sufficient vertical clearance.',
     degradedModeFlow: 'Requested: {requested} · Delivered: {actual}',
     degradeReasonCodes: {
       text_trust_low:
@@ -522,13 +565,13 @@ export const en: TranslationDictionary = {
       translate: 'Translate',
       qe: 'Quality',
       repair: 'Repair',
-      render: 'Typst',
+      render: 'Typeset',
       verify: 'Verify',
       package: 'Package',
     },
     pipelineContext: 'Current stage',
     qeHeuristicHint:
-      'No model graded this translation — only rule checks ran (structure, glossary, dropped text, garbled characters), so there is no average quality score. To get one, turn on model scoring under System Doctor → Quality estimation.',
+      'No model graded this translation — only rule checks ran (structure, glossary, dropped text, garbled characters), so there is no average quality score. To get one, turn on model scoring under System → Models & Quality.',
     avgQe: 'Avg QE {score}',
     pipelineCompleted: 'Pipeline Completed',
     allStagesCompleted: 'All 9 stages completed',
@@ -613,6 +656,11 @@ export const en: TranslationDictionary = {
       export_completed: 'Deliverable generated',
       pipeline_failed: 'Job failed',
     },
+    qeHeuristicPass: 'Heuristic OK (Unscored)',
+    reExportWithModeLabel: 'Re-export Layout',
+    reExportReadable: 'Adaptive Reflow',
+    reExportFaithful: '1:1 Faithful',
+    reExportAuto: 'Auto Detect',
   },
   quality: {
     title: 'Delivery Checks',
@@ -621,7 +669,7 @@ export const en: TranslationDictionary = {
     noJobDesc: 'Select a completed or running job from Jobs to view its delivery checks.',
     rehearsalBadge: 'Rehearsal — echo verification',
     rehearsalBody:
-      'This run used the offline echo provider (--dry-run). All checks pass by design to verify pipeline flow.',
+      'This run used offline rehearsal mode. All checks pass by design to verify pipeline flow.',
     decisionReady: 'Ready to Deliver',
     decisionBlocked: 'Delivery Blocked',
     decisionWarning: 'Review Before Delivery',
@@ -634,8 +682,8 @@ export const en: TranslationDictionary = {
     pillar1Desc: 'Zero dropout rate, LaTeX syntax integrity, subscript preservation.',
     pillar2Title: '2. Terminology & Drift Gate',
     pillar2Desc: 'Glossary compliance check and bidirectional translation drift.',
-    pillar3Title: '3. Layout & Pixel Witness Gate',
-    pillar3Desc: 'Text collision checks, bounding overflow, and dual-layer visual diff.',
+    pillar3Title: '3. Layout & Artifact Verification Gate',
+    pillar3Desc: 'Text collision checks, bounding box overflow, font compaction limits, and deterministic layout invariants.',
     pillar4Title: '4. Completeness & Omission Defense',
     pillar4Desc: 'Paragraph length parity, table preservation, code fence verification.',
     pillar5Title: '5. Financial Ledger & Audit',
@@ -644,8 +692,13 @@ export const en: TranslationDictionary = {
     // so the copy must not claim it happened.
     pillar5Desc:
       'Every call is itemized in an append-only ledger; automatic reconciliation against the pre-flight quote is not implemented yet.',
-    targetPdf: 'Reflowed Target PDF',
-    epub: 'Standard Bilingual EPUB 3',
+    targetPdf: 'Translated PDF',
+    targetPdfFaithful: '1:1 Faithful Translated PDF',
+    targetPdfReadable: 'Reflowed Translated PDF',
+    targetPdfDual: 'Bilingual PDF',
+    targetDocGeneric: 'Translated Document',
+    epub: 'Bilingual EPUB 3',
+    epubMonolingual: 'Translated EPUB 3',
     contractJson: 'Delivery contract (contract.json)',
     deliveryContractJson: 'Artifact delivery contract (delivery_contract.json)',
     secondaryDoc: 'Complementary mono/dual document',
@@ -675,7 +728,7 @@ export const en: TranslationDictionary = {
     qeNotMeasuredWhyJudge:
       'Model scoring was on, but no translated block actually reached the scorer (all took the fast path, hit translation memory, or kept their source text), so there was nothing to average.',
     qeNotMeasuredHow:
-      'To get an average QE, open System Doctor → Quality estimation, switch the engine to model scoring, save, then submit a new job — finished jobs are not rescored.',
+      'To get an average QE, open System → Models & Quality, switch Quality Estimation (QE) to model scoring, save, and submit a new job — finished jobs are not rescored.',
     qeMeasuredOn: 'scored {count} blocks',
     checksTitle: 'Evidence',
     pillarStatusPass: 'Pass',
@@ -687,9 +740,10 @@ export const en: TranslationDictionary = {
     colOccurrences: 'Occurrences',
     colDriftRate: 'Drift rate',
     noDrift: 'No terminology drift detected.',
-    visualFindingsTitle: 'Visual gate findings',
+    visualFindingsTitle: 'Artifact gate findings',
     sampledPages: 'Sampled pages',
     noVisualFindings: 'The artifact gate reported no problem pages.',
+    docLevelArtifactFindings: 'Document-level artifact check failed.',
     pageAlt: 'Page {n}',
     flaggedPages: 'Flagged pages',
     auditDraftModel: 'Draft model',
@@ -715,7 +769,7 @@ export const en: TranslationDictionary = {
     chipDeliveryContract: 'Delivery Contract & Layout Fidelity',
     contractModeLabel: 'Contract Mode',
     contractDeliverableLabel: 'Deliverable Verdict',
-    contractChecksTitle: 'Artifact Invariant Checks (11 Gates)',
+    contractChecksTitle: 'Artifact Invariant Checks ({count} Gates)',
     contractCheckOverlap: 'Zero Ink Overlap',
     contractCheckBounds: 'Layout Bounds Safety',
     contractCheckGeometry: 'Geometric Topology',
@@ -750,9 +804,9 @@ export const en: TranslationDictionary = {
     metricSkippedBlocks: 'Skipped',
     metricFailClosedBlocks: 'Fail-Closed',
     metricPreservedBlocks: 'Preserved',
-    postEditAction: 'Post-Editing',
-    postEditTitle: 'Post-Editing & Deliverable Re-Export',
-    postEditSubtitle: 'Review bilingual segments line-by-line, edit translations, inspect live page previews, and re-export.',
+    postEditAction: 'Quick Edit',
+    postEditTitle: 'Quick Edit & Re-Export',
+    postEditSubtitle: 'Quickly edit flagged segments, save to the ledger, and re-export. Open the full Review Workbench for side-by-side page previews.',
     postEditScopeAll: 'All Segments',
     postEditScopeIssues: 'Needs Human / Issues',
     postEditSearchPlaceholder: 'Search source, target text, or block ID…',
@@ -761,7 +815,7 @@ export const en: TranslationDictionary = {
     postEditSaveBtn: 'Save Revision',
     postEditSavedToast: 'Segment revision saved to ledger',
     postEditResetBtn: 'Reset',
-    postEditReExportBtn: 'Recompile Deliverable',
+    postEditReExportBtn: 'Re-export Deliverable',
     postEditReExporting: 'Re-rendering document…',
     postEditReExportSuccess: 'Deliverable successfully re-exported from ledger!',
     postEditOpenFullWorkbench: 'Open Full Workbench',
@@ -770,6 +824,36 @@ export const en: TranslationDictionary = {
     postEditTotalSegments: '{count} segments',
     expandDetail: 'Show more',
     collapseDetail: 'Show less',
+    contractNotAvailable: 'Delivery contract report not available',
+    contractDeliverableBadge: 'PASS · DELIVERABLE',
+    contractBlockedBadge: 'FAIL · BLOCKED',
+    contractCriticalLabel: 'Critical Violations',
+    contractMajorLabel: 'Major Violations',
+    contractFindingsTitle: 'Findings Detail',
+    contractZeroFindings:
+      '✓ Zero contract findings. Layout geometry and text realization invariants strictly held.',
+    postEditLoadFailed: 'Failed to load segments',
+    postEditSaveFailed: 'Failed to save segment revision',
+    postEditReExportFailed: 'Re-export failed',
+    postEditLoading: 'Loading segments…',
+    postEditNoIssuesDesc: 'No outstanding defects or review flags found.',
+    postEditSearchEmptyDesc: 'Try adjusting your search criteria.',
+    pageGeometryTitle: 'Native Page Fitting & Font Compaction',
+    pageGeometryNotMeasured:
+      'No per-page font compaction telemetry recorded (reflow or legacy run).',
+    pageGeometrySummary: '{total} pages measured · {scaled} compacted · {overflow} overflowing',
+    pageGeometryMinFont: 'Min delivered font: {size} pt',
+    pageGeometryColPage: 'Page',
+    pageGeometryColMeasured: 'Source Font',
+    pageGeometryColDelivered: 'Delivered Font',
+    pageGeometryColLeading: 'Leading',
+    pageGeometryColTier: 'Tier',
+    pageGeometryColStatus: 'Fit Status',
+    pageGeometryFitOk: 'Fits',
+    pageGeometryFitOverflow: 'Overflow',
+    reExportActionLabel: 'Re-export Layout',
+    reExportCurrentBadge: 'Current',
+    postEditUnsavedConfirm: 'You have unsaved edits. Close and discard them?',
   },
   assets: {
     title: 'Language assets',
@@ -906,9 +990,12 @@ export const en: TranslationDictionary = {
     kpiConflictsExist: 'unresolved conflict(s)',
     kpiTmTotal: 'TM Segments',
     kpiTmSubtext: 'bilingual pairs',
-    kpiTmHuman: 'Human PE',
-    kpiTmHumanSubtext: 'high-confidence corpus',
+    kpiTmHuman: 'Human-Revised',
+    kpiTmHumanSubtext: 'verified high-confidence pairs',
     copySuccess: 'Copied to clipboard',
+    copyText: 'Copy text',
+    copiedShort: 'Copied',
+    variantsUnit: 'variants',
   },
   doctor: {
     title: 'System settings',
@@ -950,7 +1037,7 @@ export const en: TranslationDictionary = {
     builtinProvidersHelp:
       'These names connect to compatible model services. A specific model name is still required.',
     providerConfigHint:
-      'Edit the endpoint, model name and connection type here. On a local deployment you can enter the credential here; the configuration file is kept at 0600.',
+      'Edit the endpoint, model name and connection type here. On a local deployment you can enter the credential here; the configuration file is stored with restricted permissions (0600).',
     credentialConfigured: 'credential set',
     credentialMissing: 'no credential',
     credentialLocalEndpoint: 'local endpoint, no credential needed',
@@ -987,7 +1074,7 @@ export const en: TranslationDictionary = {
     deleteProvider: 'Delete',
     deleteProviderTitle: 'Delete provider?',
     deleteProviderBody:
-      'The [providers.{name}] block will be removed from ubt.toml. This cannot be undone.',
+      'Provider "{name}" will be removed from your local configuration. This cannot be undone.',
     deleteProviderConfirm: 'Delete',
     deleteProviderReferenced:
       'This provider is still referenced by {refs}; clear that reference first.',
@@ -1128,7 +1215,7 @@ export const en: TranslationDictionary = {
     apiMode: 'Wire protocol',
     reasoningTitle: 'Reasoning',
     reasoningHelp:
-      'Thinking-mode controls sent with each request. "none" turns thinking off for the fastest, cheapest draft; the endpoint must accept the parameter for any of this to apply. Saved to ubt.toml and applied to the next job.',
+      'Thinking-mode controls sent with each request. "none" turns thinking off for the fastest, cheapest draft; the endpoint must accept the parameter for any of this to apply. Saved for the next job.',
     reasoningAccepts: 'Endpoint accepts a reasoning-effort parameter',
     reasoningAcceptsNote:
       'Unchecked (default): the parameter is never sent and the effort selectors are inert. Turn on only if the endpoint truly accepts it — thinking families bill reasoning tokens against the output cap, so this also leaves the output-token cap unset.',
@@ -1140,7 +1227,7 @@ export const en: TranslationDictionary = {
     extractionStrategyHelp:
       'A model reply can carry explanations, reasoning, or markdown fences around the translation. This decides how only the translation is kept.',
     extractionAutoNote:
-      'Leave it on the default: look for a <translation> tag, then automatically strip code fences and lead-ins like "Here is the translation:". Only an endpoint with a genuinely unusual reply format needs a different value, set in ubt.toml or UBT_EXTRACTION_STRATEGY.',
+      'Leave it on the default: look for a <translation> tag, then automatically strip code fences and lead-ins like "Here is the translation:". Only override in server configuration for endpoints with genuinely unusual reply formats.',
     deploymentBackend: 'Self-hosted backend',
     deploymentBackendHelp:
       'Set only when a local stack serves this model: it enables one retry against localhost when a gateway answers "model not supported".',
@@ -1183,7 +1270,7 @@ export const en: TranslationDictionary = {
     scopeEverything: 'All segments',
     blockPosition: 'Segment {n}',
     layoutPreview: 'View layout',
-    layoutPreviewHint: 'Compare the source page with the re-typeset translation',
+    layoutPreviewHint: 'Compare the source page with the rendered translation',
     blockTechnicalId: 'Internal block ID',
     sourceSegment: 'Source Segment',
     targetSegment: 'Target Translation (Editable)',
@@ -1228,7 +1315,7 @@ export const en: TranslationDictionary = {
     failedDraftNotice: 'Repair failed; the previous translation was kept',
     quarantinedNotice: 'Quarantined for human review — the text shown is the kept draft/source, not a machine delivery',
     sourceCanvas: 'Original page',
-    targetCanvas: 'Re-typeset translation',
+    targetCanvas: 'Rendered translation',
     sourceCanvasAlt: 'Source page {n} of the manuscript',
     targetCanvasAlt: 'Composed translation of page {n}',
     filterAll: 'All segments',
@@ -1240,16 +1327,16 @@ export const en: TranslationDictionary = {
     saved: 'Saved & fed back to TM',
     unsavedDraft: 'Unsaved edit',
     reExportDone: 'Delivered file re-rendered: {path}',
-    reExportAction: 'Re-render delivered file',
+    reExportAction: 'Re-export Deliverable',
     reExportStale: 'Re-render pending',
     reExporting: 'Re-rendering…',
-    reExportHelp: 'Rebuild the delivered file from the current ledger text. It re-renders the whole book, so batch your edits first.',
+    reExportHelp: 'Rebuild the delivered file from the current ledger text. Re-renders the full document, so batch your edits first.',
     reExportFailed: 'Edit saved, but re-rendering the delivered file failed: {msg}',
     humanVerified: 'Human verified',
     prevIssue: 'Previous issue (Shift+F8)',
     nextIssue: 'Next issue (F8)',
     previewPage: 'Page layout',
-    previewFailed: 'Page preview unavailable (needs typst and a source PDF).',
+    previewFailed: 'Page preview unavailable (requires a PDF source and a ready typesetting engine).',
     rerenderPage: 'Refresh preview',
     rerenderHint: 'Re-typeset this page from the current translation to inspect the layout',
     recommendedTerm: 'Recommended term',
@@ -1325,6 +1412,12 @@ export const en: TranslationDictionary = {
     editShortcutHint: 'Ctrl+Enter to save · Esc to cancel',
     collapseInspector: 'Collapse inspector',
     expandInspector: 'Expand inspector',
+    anchorMissingWarning: 'Missing inline anchors from source (saving may drop formulas/notes):',
+    anchorUnpairedWarning: 'Unpaired inline style tags:',
+    anchorInsertTag: 'Insert {tag}',
+    anchorBadgeFormula: 'Math',
+    anchorBadgeNote: 'Note',
+    anchorBadgeObject: 'Obj',
   },
   errorBoundary: {
     title: 'This screen failed to render',

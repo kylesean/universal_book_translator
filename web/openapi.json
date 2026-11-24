@@ -2214,6 +2214,96 @@
         }
       }
     },
+    "/jobs/{job_id}/page-geometry": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Fetch native layout fitting and font compaction telemetry per page",
+        "operationId": "get_page_geometry_jobs__job_id__page_geometry_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-ubt-tenant",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ubt-Tenant"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "ubt_session",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ubt Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageGeometryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/jobs/{job_id}/download": {
       "get": {
         "tags": [
@@ -2869,7 +2959,7 @@
           "Jobs"
         ],
         "summary": "Re Export",
-        "description": "Re-render a finished job's deliverable from its current ledger text.\n\nA human edit lands in the ledger, but the delivered file was rendered\nbefore it \u2014 the reviewer saw the fix in the preview while the download\nstayed stale. This re-runs the export stage over the current text and\noverwrites the deliverable in place. No token is spent: every block is\nalready terminal, so only render + reports run.",
+        "description": "Re-render a finished job's deliverable from its current ledger text.\n\nA human edit lands in the ledger, but the delivered file was rendered\nbefore it \u2014 the reviewer saw the fix in the preview while the download\nstayed stale. This re-runs the export stage over the current text and\noverwrites the deliverable in place, optionally overriding ``delivery``\n(``auto``, ``readable``, ``faithful``). No token is spent: every block is\nalready terminal, so only render + reports run.",
         "operationId": "re_export_jobs__job_id__re_export_post",
         "parameters": [
           {
@@ -2930,6 +3020,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReExportRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -4436,6 +4543,17 @@
               }
             ],
             "title": "Page"
+          },
+          "block_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Id"
           }
         },
         "type": "object",
@@ -4494,6 +4612,18 @@
             },
             "type": "array",
             "title": "Findings"
+          },
+          "parse_noise": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parse Noise"
           }
         },
         "type": "object",
@@ -5388,6 +5518,64 @@
             ],
             "title": "Max Concurrency",
             "description": "Concurrent LLM requests (drives the runtime estimate)"
+          },
+          "delivery_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "readable",
+                  "faithful"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery Mode",
+            "description": "Requested PDF delivery contract (auto, readable, faithful)"
+          },
+          "document_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "paper",
+                  "book"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Mode",
+            "description": "Document archetype override (auto, paper, book)"
+          },
+          "allow_degrade": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Degrade",
+            "description": "Permit graceful degrade from faithful to readable when page-lock is infeasible"
+          },
+          "pdf_engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pdf Engine",
+            "description": "PDF ingestion/render engine selection (auto, docling, native, pdfium)"
           }
         },
         "additionalProperties": false,
@@ -5947,8 +6135,81 @@
             "description": "Physical column count for a reflowed PDF (1 single, 2 dual). Unset aligns to the source layout; --profile never forces a column count."
           },
           "layout_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Layout Mode",
             "description": "Codec layout override"
+          },
+          "enable_dynamic_routing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable Dynamic Routing",
+            "description": "Enable difficulty-aware cascade routing between budget and flagship models"
+          },
+          "dynamic_routing_policy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pareto",
+                  "quality_first",
+                  "cost_first"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dynamic Routing Policy",
+            "description": "Cascade routing policy (pareto, quality_first, cost_first)"
+          },
+          "ocr_fallback": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "off",
+                  "missing",
+                  "weak",
+                  "all"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Fallback",
+            "description": "Per-page OCR/VLM fallback aggressiveness (off, missing, weak, all)"
+          },
+          "spill_policy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "error",
+                  "warn",
+                  "appendix",
+                  "source_kept_warn"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spill Policy",
+            "description": "Layout overflow handling policy (error, warn, appendix, source_kept_warn)"
           }
         },
         "additionalProperties": false,
@@ -6486,6 +6747,171 @@
         ],
         "title": "ModelProfile",
         "description": "Declarative capability profile for one model on one provider.\n\nEvery field is a statement about the endpoint, so a profile is only ever\nattached to a specific ``[providers.<name>]`` block or to the generic\nfallback \u2014 never to a model *name* alone."
+      },
+      "PageGeometryEntry": {
+        "properties": {
+          "page_no": {
+            "type": "integer",
+            "title": "Page No"
+          },
+          "page_w_pt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page W Pt"
+          },
+          "page_h_pt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page H Pt"
+          },
+          "measured_size_pt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measured Size Pt"
+          },
+          "measured_leading_pt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measured Leading Pt"
+          },
+          "delivered_size_pt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered Size Pt"
+          },
+          "delivered_leading_em": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered Leading Em"
+          },
+          "tracking_em": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracking Em"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier"
+          },
+          "fits": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fits"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page_no"
+        ],
+        "title": "PageGeometryEntry",
+        "description": "Per-page font compaction and spatial fit telemetry recorded by the native renderer."
+      },
+      "PageGeometryResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "measured": {
+            "type": "boolean",
+            "title": "Measured",
+            "default": false
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "default": 0
+          },
+          "scaled_pages": {
+            "type": "integer",
+            "title": "Scaled Pages",
+            "default": 0
+          },
+          "overflow_pages": {
+            "type": "integer",
+            "title": "Overflow Pages",
+            "default": 0
+          },
+          "min_delivered_size_pt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Delivered Size Pt"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/PageGeometryEntry"
+            },
+            "type": "array",
+            "title": "Pages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "title": "PageGeometryResponse",
+        "description": "Aggregate summary + per-page native layout fitting records for a job."
       },
       "Preset": {
         "type": "string",
@@ -7201,6 +7627,31 @@
         "title": "QESettingsResponse",
         "description": "The quality-estimation gate as the engine will run it.\n\n``engine`` and ``judge_enabled`` are reported separately on purpose: the\npipeline selects the LLM judge on ``judge_enabled`` alone and only warns when\n``engine`` says ``tiered`` without it, so the two can legitimately disagree in\na hand-edited file. ``measurable`` is the derived fact the console renders \u2014\nwithout a judge model, no block is scored and the average-QE fields stay at\ntheir ``0.0`` sentinel."
       },
+      "ReExportRequest": {
+        "properties": {
+          "delivery": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "readable",
+                  "faithful"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery",
+            "description": "Optional delivery contract override (auto, readable, faithful)"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ReExportRequest",
+        "description": "Optional payload overriding the delivery contract during a zero-token re-export."
+      },
       "RuntimeActiveModel": {
         "properties": {
           "provider": {
@@ -7321,7 +7772,7 @@
           "allow_page_upload": {
             "type": "boolean",
             "title": "Allow Page Upload",
-            "description": "True when rendered page images may leave this machine. The visual judge and cloud/vlm OCR both require it; with it false the pipeline skips them, so the console must say so instead of offering a switch that silently does nothing",
+            "description": "True when rendered page images may leave this machine. Cloud OCR and VLM formula enrichment both require it; with it false the pipeline skips them cleanly, so the console must say so instead of offering a switch that silently does nothing",
             "default": false
           }
         },

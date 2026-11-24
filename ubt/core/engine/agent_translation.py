@@ -492,7 +492,19 @@ class AgentTranslationService:
         if not input_path.exists():
             raise UBTError(f"input document does not exist: {input_path}")
         config = await self._config_for_prepare(request)
-        adapter = resolve_adapter(input_path, pdf_engine=config.pdf_engine)
+        from ubt.core.engine.pipeline import resolve_delivery_for_input
+        from ubt.delivery import DeliveryInfeasibleError, resolve_pdf_engine
+
+        delivery = resolve_delivery_for_input(config, input_path)
+        if delivery.effective_mode is None:
+            reasons = "; ".join(delivery.plan.reasons) or "delivery contract is infeasible"
+            raise DeliveryInfeasibleError(f"Delivery contract refused before prepare: {reasons}")
+        selected_pdf_engine = resolve_pdf_engine(
+            config.pdf_engine,
+            is_pdf=input_path.suffix.lower() == ".pdf",
+            contract=delivery.plan.contract,
+        )
+        adapter = resolve_adapter(input_path, pdf_engine=selected_pdf_engine)
         try:
             apply_runtime_config(
                 adapter,
@@ -513,6 +525,10 @@ class AgentTranslationService:
                 ),
             )
             manifest = await adapter.extract_manifest(input_path)
+            manifest.metadata["delivery_plan"] = delivery.plan.to_manifest()
+            manifest.metadata["delivery_mode_requested"] = config.delivery_mode
+            manifest.metadata["delivery_mode_effective"] = delivery.effective_mode
+            manifest.metadata["delivery_mode"] = delivery.effective_mode
             manifest.source_lang = request.source_lang
             manifest.target_lang = request.target_lang
             manifest.run.layout_columns = request.layout_columns
@@ -760,6 +776,16 @@ class AgentTranslationService:
         await asyncio.to_thread(
             ledger.set_job_metadata_value, job_id, "source_lang", request.source_lang
         )
+        for key in (
+            "delivery_plan",
+            "delivery_mode_requested",
+            "delivery_mode_effective",
+            "delivery_mode",
+        ):
+            if key in manifest.metadata:
+                await asyncio.to_thread(
+                    ledger.set_job_metadata_value, job_id, key, manifest.metadata[key]
+                )
         await asyncio.to_thread(
             ledger.set_job_metadata_value,
             job_id,
@@ -1583,13 +1609,40 @@ class AgentTranslationService:
         )
         terminology = await asyncio.to_thread(terminology_from_ledger, ledger, job_id)
         source_path = Path(manifest.source_path)
+        stored_fp = await asyncio.to_thread(
+            ledger.get_job_metadata_value, job_id, "source_fingerprint"
+        )
+        if stored_fp and stored_fp != "unavailable" and source_path.exists():
+            from ubt.core.ir.serializer import compute_file_sha256_cached
+
+            current_fp = await asyncio.to_thread(compute_file_sha256_cached, source_path)
+            if current_fp and current_fp != "unavailable" and current_fp != stored_fp:
+                raise UBTError(
+                    f"source document changed since job {job_id} was prepared "
+                    f"(stored {str(stored_fp)[:12]}…, current {current_fp[:12]}…); "
+                    "re-prepare with fresh=true"
+                )
         output_path = Path(
             str(
                 ledger.get_job_metadata_value(job_id, "output_file")
                 or (source_path.with_name(f"{source_path.stem}_translated{source_path.suffix}"))
             )
         )
-        adapter = resolve_adapter(source_path, pdf_engine=render_config.pdf_engine)
+        from ubt.delivery import DeliveryContract, resolve_pdf_engine
+
+        plan_meta = (manifest.metadata or {}).get("delivery_plan")
+        raw_contract = str(plan_meta.get("contract") or "") if isinstance(plan_meta, dict) else ""
+        agent_contract = (
+            DeliveryContract(raw_contract)
+            if raw_contract in (DeliveryContract.READABLE, DeliveryContract.FAITHFUL)
+            else None
+        )
+        pdf_engine = resolve_pdf_engine(
+            render_config.pdf_engine,
+            is_pdf=source_path.suffix.lower() == ".pdf",
+            contract=agent_contract,
+        )
+        adapter = resolve_adapter(source_path, pdf_engine=pdf_engine)
         require_output_suffix(
             adapter,
             output_path,

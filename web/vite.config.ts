@@ -25,6 +25,21 @@ export default defineConfig({
     // The shell + i18n dictionaries are shared by every route. Keep the
     // warning useful for route chunks instead of firing on the vendor shell.
     chunkSizeWarningLimit: 650,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/react-router')) {
+              return 'vendor-react'
+            }
+            if (id.includes('@radix-ui')) {
+              return 'vendor-radix'
+            }
+          }
+          return undefined
+        },
+      },
+    },
   },
   resolve: {
     alias: {

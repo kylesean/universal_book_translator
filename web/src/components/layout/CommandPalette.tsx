@@ -3,6 +3,7 @@ import { useI18n } from '@/i18n/useI18n'
 import {
   PlusCircle,
   Activity,
+  FileText,
   SplitSquareVertical,
   ShieldCheck,
   BookOpen,
@@ -140,10 +141,29 @@ export function CommandPalette({
         </CommandGroup>
 
         {/* Workbenches & Current Job Navigation */}
-        <CommandSeparator />
-        <CommandGroup heading={t.nav.workbenches}>
-          {currentJobId && (
-            <>
+        {currentJobId ? (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading={t.nav.workbenches}>
+              <CommandItem
+                value={`${t.nav.currentJob} ${t.palette.cmdCurrentJobDesc.replace('{id}', shortJobId)}`}
+                onSelect={() => handleSelect(() => navigate(`/jobs/${currentJobId}`))}
+                className="flex items-center justify-between py-2 px-2.5 rounded-lg cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <FileText className="size-4 text-muted-foreground shrink-0" />
+                  <div className="truncate">
+                    <span className="font-medium text-foreground text-xs">{t.nav.currentJob}</span>
+                    <span className="text-xs text-muted-foreground ml-2 truncate">
+                      {t.palette.cmdCurrentJobDesc.replace('{id}', shortJobId)}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <ArrowRight className="size-3 text-muted-foreground opacity-40 ml-1" />
+                </div>
+              </CommandItem>
+
               <CommandItem
                 value={`${t.nav.reviewWorkbench} ${t.palette.cmdReviewDesc.replace('{id}', shortJobId)}`}
                 onSelect={() => handleSelect(() => navigate(`/jobs/${currentJobId}/review`))}
@@ -181,9 +201,9 @@ export function CommandPalette({
                   <ArrowRight className="size-3 text-muted-foreground opacity-40 ml-1" />
                 </div>
               </CommandItem>
-            </>
-          )}
-        </CommandGroup>
+            </CommandGroup>
+          </>
+        ) : null}
 
         {/* Preferences */}
         <CommandSeparator />

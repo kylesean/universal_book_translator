@@ -600,6 +600,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/jobs/{job_id}/page-geometry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch native layout fitting and font compaction telemetry per page */
+        get: operations["get_page_geometry_jobs__job_id__page_geometry_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/jobs/{job_id}/download": {
         parameters: {
             query?: never;
@@ -756,7 +773,8 @@ export interface paths {
          *     A human edit lands in the ledger, but the delivered file was rendered
          *     before it — the reviewer saw the fix in the preview while the download
          *     stayed stale. This re-runs the export stage over the current text and
-         *     overwrites the deliverable in place. No token is spent: every block is
+         *     overwrites the deliverable in place, optionally overriding ``delivery``
+         *     (``auto``, ``readable``, ``faithful``). No token is spent: every block is
          *     already terminal, so only render + reports run.
          */
         post: operations["re_export_jobs__job_id__re_export_post"];
@@ -1094,6 +1112,8 @@ export interface components {
             message: string;
             /** Page */
             page?: number | null;
+            /** Block Id */
+            block_id?: string | null;
         };
         /**
          * ArtifactReportResponse
@@ -1112,6 +1132,10 @@ export interface components {
             sampled_pages?: number[];
             /** Findings */
             findings?: components["schemas"]["ArtifactFindingResponse"][];
+            /** Parse Noise */
+            parse_noise?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * AssessCost
@@ -1494,6 +1518,26 @@ export interface components {
              * @description Concurrent LLM requests (drives the runtime estimate)
              */
             max_concurrency?: number | null;
+            /**
+             * Delivery Mode
+             * @description Requested PDF delivery contract (auto, readable, faithful)
+             */
+            delivery_mode?: ("auto" | "readable" | "faithful") | null;
+            /**
+             * Document Mode
+             * @description Document archetype override (auto, paper, book)
+             */
+            document_mode?: ("auto" | "paper" | "book") | null;
+            /**
+             * Allow Degrade
+             * @description Permit graceful degrade from faithful to readable when page-lock is infeasible
+             */
+            allow_degrade?: boolean | null;
+            /**
+             * Pdf Engine
+             * @description PDF ingestion/render engine selection (auto, docling, native, pdfium)
+             */
+            pdf_engine?: string | null;
         };
         /**
          * JobAssessResponse
@@ -1758,7 +1802,27 @@ export interface components {
              * Layout Mode
              * @description Codec layout override
              */
-            layout_mode?: unknown;
+            layout_mode?: string | null;
+            /**
+             * Enable Dynamic Routing
+             * @description Enable difficulty-aware cascade routing between budget and flagship models
+             */
+            enable_dynamic_routing?: boolean | null;
+            /**
+             * Dynamic Routing Policy
+             * @description Cascade routing policy (pareto, quality_first, cost_first)
+             */
+            dynamic_routing_policy?: ("pareto" | "quality_first" | "cost_first") | null;
+            /**
+             * Ocr Fallback
+             * @description Per-page OCR/VLM fallback aggressiveness (off, missing, weak, all)
+             */
+            ocr_fallback?: ("off" | "missing" | "weak" | "all") | null;
+            /**
+             * Spill Policy
+             * @description Layout overflow handling policy (error, warn, appendix, source_kept_warn)
+             */
+            spill_policy?: ("error" | "warn" | "appendix" | "source_kept_warn") | null;
         };
         /**
          * JobStatusResponse
@@ -2042,6 +2106,64 @@ export interface components {
              * @default
              */
             deployment_backend: string;
+        };
+        /**
+         * PageGeometryEntry
+         * @description Per-page font compaction and spatial fit telemetry recorded by the native renderer.
+         */
+        PageGeometryEntry: {
+            /** Page No */
+            page_no: number;
+            /** Page W Pt */
+            page_w_pt?: number | null;
+            /** Page H Pt */
+            page_h_pt?: number | null;
+            /** Measured Size Pt */
+            measured_size_pt?: number | null;
+            /** Measured Leading Pt */
+            measured_leading_pt?: number | null;
+            /** Delivered Size Pt */
+            delivered_size_pt?: number | null;
+            /** Delivered Leading Em */
+            delivered_leading_em?: number | null;
+            /** Tracking Em */
+            tracking_em?: number | null;
+            /** Tier */
+            tier?: string | null;
+            /** Fits */
+            fits?: boolean | null;
+        };
+        /**
+         * PageGeometryResponse
+         * @description Aggregate summary + per-page native layout fitting records for a job.
+         */
+        PageGeometryResponse: {
+            /** Job Id */
+            job_id: string;
+            /**
+             * Measured
+             * @default false
+             */
+            measured: boolean;
+            /**
+             * Total Pages
+             * @default 0
+             */
+            total_pages: number;
+            /**
+             * Scaled Pages
+             * @default 0
+             */
+            scaled_pages: number;
+            /**
+             * Overflow Pages
+             * @default 0
+             */
+            overflow_pages: number;
+            /** Min Delivered Size Pt */
+            min_delivered_size_pt?: number | null;
+            /** Pages */
+            pages?: components["schemas"]["PageGeometryEntry"][];
         };
         /**
          * Preset
@@ -2357,6 +2479,17 @@ export interface components {
             config_source: string;
         };
         /**
+         * ReExportRequest
+         * @description Optional payload overriding the delivery contract during a zero-token re-export.
+         */
+        ReExportRequest: {
+            /**
+             * Delivery
+             * @description Optional delivery contract override (auto, readable, faithful)
+             */
+            delivery?: ("auto" | "readable" | "faithful") | null;
+        };
+        /**
          * RuntimeActiveModel
          * @description The provider and models the engine will actually call, right now.
          */
@@ -2440,7 +2573,7 @@ export interface components {
             can_translate: boolean;
             /**
              * Allow Page Upload
-             * @description True when rendered page images may leave this machine. The visual judge and cloud/vlm OCR both require it; with it false the pipeline skips them, so the console must say so instead of offering a switch that silently does nothing
+             * @description True when rendered page images may leave this machine. Cloud OCR and VLM formula enrichment both require it; with it false the pipeline skips them cleanly, so the console must say so instead of offering a switch that silently does nothing
              * @default false
              */
             allow_page_upload: boolean;
@@ -3865,6 +3998,42 @@ export interface operations {
             };
         };
     };
+    get_page_geometry_jobs__job_id__page_geometry_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-ubt-tenant"?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: {
+                ubt_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageGeometryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     download_file_jobs__job_id__download_get: {
         parameters: {
             query?: {
@@ -4111,7 +4280,11 @@ export interface operations {
                 ubt_session?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ReExportRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

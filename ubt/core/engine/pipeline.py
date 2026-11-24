@@ -272,14 +272,10 @@ def resolve_delivery_for_input(config: UBTConfig, input_path: Path) -> DeliveryD
 
 
 def degraded_pdf_engine(config: Any, manifest_metadata: dict[str, Any] | None) -> str | None:
-    """The engine that actually ran when the configured one could not.
+    """The engine that actually ran when the configured one did not.
 
-    ``auto`` (and an explicit ``docling`` that the factory let through) selects
-    docling; without the package the adapter silently falls back to the
-    geometric pdfium reader. The manifest records whichever parser produced the
-    blocks, so this reads it back. Returns ``None`` for a healthy run — a
-    deliberate ``--pdf-engine pdfium`` is not a degradation and must not
-    re-namespace existing ledgers.
+    The manifest records whichever parser produced the blocks, so this reads it
+    back. Returns ``None`` for a healthy run (``native`` or ``docling``).
 
     Both the derived job id and the resume identity guard call this: two
     copies of the rule would drift, and then the guard would refuse to resume
@@ -305,12 +301,8 @@ def engine_signature(config: Any, *, pdf_engine_fallback: str | None = None) -> 
     override.
 
     ``pdf_engine_fallback`` names the engine that actually ran when the
-    configured one could not (``auto`` → docling, docling missing → pdfium).
-    It is namespaced only in that case: the degraded ledger holds no tables,
-    figures or formulas, and a later run *with* docling installed must not
-    resume it as though it were a full ingest. A normal run — including an
-    explicit ``--pdf-engine pdfium`` — adds nothing, so existing ids stay
-    resumable.
+    configured one could not. It is namespaced only in that case so an earlier
+    fallback ledger is not resumed as a full ingest.
     """
     fields = getattr(type(config), "model_fields", {})
     parts: list[str] = []

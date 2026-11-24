@@ -12,9 +12,7 @@ import {
   ChevronDown,
   CheckCircle2,
   ImageOff,
-  Wand2,
   RefreshCw,
-  Sparkles,
   Filter,
   Edit3,
   X,
@@ -61,50 +59,27 @@ import {
   listDeliverables,
   editSegment,
   reExportJob,
-  getBlockTerms,
-  propagateTerm,
   pagePreviewUrl,
   sourcePageUrl,
   type Segment,
   type IssuesReport,
-  type TermViolation,
 } from '@/api/client'
 import { useI18n } from '@/i18n/useI18n'
+import { AnchorIntegrityNotice } from './AnchorIntegrityNotice'
+import { TermPanel } from './ReviewTermPanel'
+import {
+  type Scope,
+  scopeLabel,
+  segmentLocation,
+  issueLabel,
+  blockTypeLabel,
+  blockStatusLabel,
+  mqmSeverityLabel,
+  findingLabel,
+  findingKindForFlag,
+} from './reviewHelpers'
 
 type Filter = 'issues' | 'all' | 'needs_human' | string
-type Scope = 'issues' | 'all'
-
-function scopeLabel(t: ReturnType<typeof useI18n>['t'], scope: Scope): string {
-  return scope === 'issues' ? t.review.scopeToReview : t.review.scopeEverything
-}
-
-function segmentLocation(t: ReturnType<typeof useI18n>['t'], segment: Segment): string {
-  const parts: string[] = []
-  if (segment.page !== null) {
-    parts.push(t.review.pageLabel.replace('{n}', String(segment.page)))
-  }
-  parts.push(blockTypeLabel(t, segment.block_type))
-  parts.push(t.review.blockPosition.replace('{n}', String(segment.spine_index + 1)))
-  return parts.join(' · ')
-}
-
-//: Fallback label for an issue kind the dictionary does not name yet. The
-//: backend can add a kind before the console learns its translation; showing
-//: the raw key beats showing nothing. The known kinds live in the i18n tables
-//: (``t.review.issueKinds``) so the ribbon follows the selected language.
-const issueLabel = (t: ReturnType<typeof useI18n>['t'], kind: string): string =>
-  t.review.issueKinds[kind] ?? kind
-
-//: Same idea for block types and statuses, which arrive as engine identifiers.
-const blockTypeLabel = (t: ReturnType<typeof useI18n>['t'], kind: string): string =>
-  t.review.blockTypes[kind] ?? kind
-
-const blockStatusLabel = (t: ReturnType<typeof useI18n>['t'], status: string): string =>
-  t.review.blockStatuses[status] ?? status.toUpperCase()
-
-//: MQM triage tier, or an em dash when the block was never triaged.
-const mqmSeverityLabel = (t: ReturnType<typeof useI18n>['t'], severity: string | null): string =>
-  severity ? (t.review.mqmSeverities[severity] ?? severity) : '—'
 
 // Markdown, GFM and KaTeX are only needed once a segment is visible. Loading
 // that renderer with the workbench would put the whole parser and its fonts in
@@ -123,42 +98,6 @@ function RichTextFallback() {
       <div className="h-4 w-[64%] animate-pulse rounded bg-muted" />
     </div>
   )
-}
-
-function findingLabel(t: ReturnType<typeof useI18n>['t'], kind: string): string {
-  const labels: Record<string, string> = {
-    review: t.review.flagHumanReview,
-    critical: t.review.flagCritical,
-    omission: t.review.flagOmission,
-    numeric: t.review.flagNumeric,
-    terminology: t.review.flagTerminology,
-    formula: t.review.flagFormula,
-    structure: t.review.flagStructure,
-    repetition: t.review.flagRepetition,
-    fabrication: t.review.flagFabrication,
-    echo: t.review.flagEcho,
-    render: t.review.flagRender,
-  }
-  return labels[kind] ?? t.review.flagGeneric
-}
-
-function findingKindForFlag(flag: string): string {
-  const value = flag.toLowerCase()
-  if (value.includes('needs_human_review')) return 'review'
-  if (value.includes('mqm_critical_blocked')) return 'critical'
-  if (value.includes('omission') || value.includes('empty target') || value.includes('table dropped')) {
-    return 'omission'
-  }
-  if (value.includes('numeric')) return 'numeric'
-  if (value.includes('glossary') || value.includes('consistency:')) return 'terminology'
-  if (value.includes('formula') || value.includes('math') || value.includes('latex')) return 'formula'
-  if (value.includes('repetition') || value.includes('loop hallucination')) return 'repetition'
-  if (value.includes('fabrication') || value.includes('added reference') || value.includes('prompt')) {
-    return 'fabrication'
-  }
-  if (value.includes('render_skip')) return 'render'
-  if (value.includes('echo')) return 'echo'
-  return 'structure'
 }
 
 /**
@@ -1155,6 +1094,16 @@ export function ReviewWorkbench() {
                                 }}
                                 className="w-full resize-none rounded-md border border-input bg-background p-3 font-sans text-[15px] leading-7 text-foreground shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                               />
+                              <AnchorIntegrityNotice
+                                source={seg.source_text}
+                                draft={draft}
+                                onInsertTag={(tag) =>
+                                  setDrafts((prev) => ({
+                                    ...prev,
+                                    [seg.block_id]: `${prev[seg.block_id] ?? seg.delivered_text} ${tag}`,
+                                  }))
+                                }
+                              />
                               <div className="flex flex-wrap items-center justify-end gap-2">
                                 <span className="mr-auto text-xs text-muted-foreground">
                                   {t.review.editShortcutHint}
@@ -1290,6 +1239,16 @@ export function ReviewWorkbench() {
                               }}
                               className="w-full resize-none rounded-md border border-input bg-background p-3 text-[15px] leading-7"
                             />
+                            <AnchorIntegrityNotice
+                              source={seg.source_text}
+                              draft={draft}
+                              onInsertTag={(tag) =>
+                                setDrafts((prev) => ({
+                                  ...prev,
+                                  [seg.block_id]: `${prev[seg.block_id] ?? seg.delivered_text} ${tag}`,
+                                }))
+                              }
+                            />
                             <div className="flex justify-end gap-2">
                               <Button
                                 variant="outline"
@@ -1423,7 +1382,11 @@ export function ReviewWorkbench() {
                             </button>
                           )}
                         </div>
-                        <div className="whitespace-pre-wrap">{seg.source_text}</div>
+                        <div className="select-text">
+                          <React.Suspense fallback={<RichTextFallback />}>
+                            <RichText text={seg.source_text} source />
+                          </React.Suspense>
+                        </div>
                       </div>
 
                       {/* Right: Target translation */}
@@ -1451,6 +1414,16 @@ export function ReviewWorkbench() {
                                 }
                               }}
                               className="w-full text-sm font-sans bg-background border border-input p-3 rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none leading-relaxed text-foreground shadow-xs"
+                            />
+                            <AnchorIntegrityNotice
+                              source={seg.source_text}
+                              draft={draft}
+                              onInsertTag={(tag) =>
+                                setDrafts((prev) => ({
+                                  ...prev,
+                                  [seg.block_id]: `${prev[seg.block_id] ?? seg.delivered_text ?? ''} ${tag}`,
+                                }))
+                              }
                             />
                             <div className="flex items-center justify-between text-xs">
                               <span className="text-muted-foreground text-xs">{t.review.editShortcutHint}</span>
@@ -1699,15 +1672,6 @@ function AutoGrowTextarea({
 
   useEffect(fit, [fit, value])
 
-  // A width change re-wraps the text, so the height measured for the old width
-  // no longer covers it: opening the inspector narrows the target column from
-  // 446px to 286px at 1280px, and the same text needs 566px instead of 351px.
-  // Without this the textarea keeps the pre-resize height and hides its tail.
-  //
-  // Only a *width* change re-fits. This element is its own observer target and
-  // fitting changes its height, so reacting to height would re-enter on every
-  // adjustment and spin (the browser reports it as an undelivered-notification
-  // loop). Width is driven by the layout, not by this effect, so it cannot.
   useEffect(() => {
     const el = localRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
@@ -1722,252 +1686,4 @@ function AutoGrowTextarea({
   }, [fit])
 
   return <textarea {...props} ref={localRef} value={value} className={className} />
-}
-
-type TermScope = 'block' | 'subsequent' | 'all'
-
-interface TermPanelProps {
-  jobId: string
-  segment: Segment
-  onReplaced: (replacements: number) => void
-}
-
-/**
- * Terminology recommendations for one segment. Each mounted
- * segment issues its own request on mount, and the panel provides a 3-way Scope
- * Selector ('block' | 'subsequent' | 'all') with diff preview and TM feedback
- * indicators.
- */
-function TermPanel({ jobId, segment, onReplaced }: TermPanelProps) {
-  const { t } = useI18n()
-  const [violations, setViolations] = useState<TermViolation[] | null>(null)
-  const [scopes, setScopes] = useState<Record<string, TermScope>>({})
-  const [confirmViolation, setConfirmViolation] = useState<{
-    violation: TermViolation
-    scope: TermScope
-  } | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const reloadTerms = useCallback(() => {
-    getBlockTerms(jobId, segment.block_id)
-      .then((report) => setViolations(report.violations))
-      .catch(() => setViolations([]))
-  }, [jobId, segment.block_id])
-
-  useEffect(() => {
-    let alive = true
-    getBlockTerms(jobId, segment.block_id)
-      .then((report) => {
-        if (alive) setViolations(report.violations)
-      })
-      .catch(() => {
-        if (alive) setViolations([])
-      })
-    return () => {
-      alive = false
-    }
-  }, [jobId, segment.block_id, segment.delivered_text])
-
-  const getScope = (v: TermViolation): TermScope => {
-    const key = `${v.surface}:${v.expected}`
-    if (scopes[key]) return scopes[key]
-    if (v.cascade_subsequent > 1) return 'subsequent'
-    if (v.cascade_all > 1) return 'all'
-    return 'block'
-  }
-
-  const setScopeFor = (v: TermViolation, s: TermScope) => {
-    const key = `${v.surface}:${v.expected}`
-    setScopes((prev) => ({ ...prev, [key]: s }))
-    if (confirmViolation?.violation === v) {
-      setConfirmViolation({ violation: v, scope: s })
-    }
-  }
-
-  const handleTriggerReplace = (violation: TermViolation) => {
-    const currentScope = getScope(violation)
-    if (currentScope === 'block') {
-      void executeReplace(violation, 'block')
-    } else {
-      setConfirmViolation({ violation, scope: currentScope })
-    }
-  }
-
-  const executeReplace = async (violation: TermViolation, scope: TermScope) => {
-    setBusy(true)
-    setError(null)
-    setConfirmViolation(null)
-    try {
-      const res = await propagateTerm(jobId, {
-        block_id: segment.block_id,
-        surface: violation.surface,
-        expected: violation.expected,
-        scope,
-      })
-      onReplaced(res.replacements)
-      reloadTerms()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t.review.propagateFailed)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  if (violations === null || violations.length === 0) return null
-
-  return (
-    <div className="mt-3 divide-y divide-amber-600/20 rounded-lg border border-amber-600/35 bg-amber-500/5">
-      {violations.map((violation) => {
-        const key = `${violation.surface}:${violation.expected}`
-        const currentScope = getScope(violation)
-        const isConfirming = confirmViolation?.violation === violation
-        const countAll = Math.max(1, violation.cascade_all)
-        const countSubsequent = Math.max(1, violation.cascade_subsequent)
-        const targetCount =
-          currentScope === 'all'
-            ? countAll
-            : currentScope === 'subsequent'
-              ? countSubsequent
-              : 1
-
-        return (
-          <div key={key} className="px-2.5 py-2 flex flex-col gap-2 text-xs">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-muted-foreground">{t.review.recommendedTerm}</span>
-              <span className="line-through text-amber-700 dark:text-amber-400 font-mono">{violation.surface}</span>
-              <span className="text-muted-foreground">→</span>
-              <span className="font-semibold text-emerald-700 dark:text-emerald-400 font-mono">{violation.expected}</span>
-
-              {violation.cascade_all > 1 && (
-                <div className="flex items-center gap-0.5 bg-muted/40 p-0.5 rounded border border-border ml-auto">
-                  <button
-                    type="button"
-                    onClick={() => setScopeFor(violation, 'block')}
-                    className={`px-1.5 py-0.5 rounded text-xs transition-colors cursor-pointer ${
-                      currentScope === 'block'
-                        ? 'bg-card text-foreground font-bold shadow-xs'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                    title={t.review.scopeBlock}
-                  >
-                    {t.review.scopeBlock} (1)
-                  </button>
-                  {violation.cascade_subsequent > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setScopeFor(violation, 'subsequent')}
-                      className={`px-1.5 py-0.5 rounded text-xs transition-colors cursor-pointer ${
-                        currentScope === 'subsequent'
-                          ? 'bg-card text-foreground font-bold shadow-xs'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                      title={t.review.scopeSubsequent}
-                    >
-                      {t.review.scopeSubsequent} ({countSubsequent})
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setScopeFor(violation, 'all')}
-                    className={`px-1.5 py-0.5 rounded text-xs transition-colors cursor-pointer ${
-                      currentScope === 'all'
-                        ? 'bg-card text-foreground font-bold shadow-xs'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                    title={t.review.scopeAll}
-                  >
-                    {t.review.scopeAll} ({countAll})
-                  </button>
-                </div>
-              )}
-
-              <Button
-                onClick={() => handleTriggerReplace(violation)}
-                variant="default"
-                size="sm"
-                disabled={busy}
-                className={`text-xs min-h-[28px] md:min-h-0 h-7 md:h-6 px-2.5 font-bold ${violation.cascade_all <= 1 ? 'ml-auto' : ''}`}
-              >
-                {busy ? (
-                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                ) : (
-                  <Wand2 className="h-3 w-3 mr-1" />
-                )}
-                {busy
-                  ? t.review.cascadeApplying
-                  : currentScope === 'block'
-                    ? t.review.replaceTerm
-                    : `${t.review.replaceTerm} (${targetCount})`}
-              </Button>
-            </div>
-
-            {isConfirming && (
-              <div className="w-full mt-1 p-2.5 rounded-md bg-amber-500/10 border border-amber-600/25 space-y-2 animate-in fade-in duration-150">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-foreground text-xs">
-                    {currentScope === 'all'
-                      ? t.review.cascadeConfirmTitle
-                      : `${t.review.scopeSubsequent} · ${t.review.cascadeConfirmTitle}`}
-                  </span>
-                  <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 font-bold">
-                    {t.review.scopeCount.replace('{n}', String(targetCount))}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2 p-1.5 rounded bg-card border border-border font-mono text-xs">
-                  <span className="line-through text-amber-700 dark:text-amber-400 font-medium bg-amber-500/10 px-1.5 py-0.5 rounded">
-                    {violation.surface}
-                  </span>
-                  <span className="text-muted-foreground">➔</span>
-                  <span className="text-emerald-700 dark:text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                    {violation.expected}
-                  </span>
-                </div>
-
-                <div className="text-muted-foreground text-xs leading-relaxed">
-                  {t.review.cascadeConfirmDesc
-                    .replace('{n}', String(targetCount))
-                    .replace('{surface}', violation.surface)
-                    .replace('{expected}', violation.expected)}
-                </div>
-
-                <div className="flex items-center gap-1.5 text-muted-foreground text-xs pt-0.5">
-                  <Sparkles className="h-3 w-3 text-amber-500 shrink-0" />
-                  <span>{t.review.cascadeTmSync}</span>
-                </div>
-
-                <div className="flex items-center gap-2 pt-1 border-t border-amber-600/20">
-                  <Button
-                    onClick={() => executeReplace(violation, currentScope)}
-                    variant="default"
-                    size="sm"
-                    disabled={busy}
-                    className="h-7 min-h-[28px] bg-amber-600 px-2.5 text-xs font-bold text-white hover:bg-amber-700 md:h-6 md:min-h-0"
-                  >
-                    {busy ? (
-                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                    ) : (
-                      <Wand2 className="h-3 w-3 mr-1" />
-                    )}
-                    {t.review.cascadeConfirmProceed} ({targetCount})
-                  </Button>
-                  <Button
-                    onClick={() => setConfirmViolation(null)}
-                    variant="secondary"
-                    size="sm"
-                    disabled={busy}
-                    className="text-xs min-h-[28px] md:min-h-0 h-7 md:h-6 px-2.5"
-                  >
-                    {t.review.cascadeConfirmCancel}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        )
-      })}
-      {error && <div className="px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">{error}</div>}
-    </div>
-  )
 }

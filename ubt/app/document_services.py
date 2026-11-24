@@ -94,6 +94,9 @@ class AdapterDocumentServices:
     def masked_source(self, **kwargs: Any) -> Any:
         from ubt.segment.placeholders import MaskedSource
 
+        for map_key in ("email_map", "code_map", "math_map", "soup_map", "cite_map"):
+            if kwargs.get(map_key) is None:
+                kwargs[map_key] = {}
         return MaskedSource(**kwargs)
 
     def translation_engine(self, **kwargs: Any) -> Any:

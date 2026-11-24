@@ -20,6 +20,8 @@ export type QESettingsRequest = paths['/system/qe-config']['put']['requestBody']
 export type ProviderDetail = paths['/system/providers/{name}']['get']['responses']['200']['content']['application/json']
 export type ProviderEditRequest = paths['/system/providers/{name}']['put']['requestBody']['content']['application/json']
 export type SystemInfo = paths['/system/info']['get']['responses']['200']['content']['application/json']
+export type PageGeometryResponse = paths['/jobs/{job_id}/page-geometry']['get']['responses']['200']['content']['application/json']
+export type PageGeometryEntry = NonNullable<PageGeometryResponse['pages']>[number]
 
 export interface DeliverableItem {
   key: string
@@ -379,7 +381,7 @@ export async function getJobReport(jobId: string): Promise<Record<string, unknow
 
 export async function getArtifactReport(jobId: string): Promise<Record<string, unknown>> {
   const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/artifact-report`)
-  if (!res.ok) throw await apiError(res, "Failed to fetch visual report")
+  if (!res.ok) throw await apiError(res, "Failed to fetch artifact report")
   return res.json()
 }
 
@@ -890,13 +892,29 @@ export async function editSegment(
  * spent (every block is already terminal).
  */
 export async function reExportJob(
-  jobId: string
+  jobId: string,
+  opts?: { delivery?: 'auto' | 'readable' | 'faithful' }
 ): Promise<{ artifact_path: string | null; message: string }> {
+  const hasDelivery = opts?.delivery !== undefined
   const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/re-export`, {
     method: 'POST',
+    ...(hasDelivery
+      ? {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ delivery: opts?.delivery }),
+        }
+      : {}),
   })
   if (!res.ok) {
     throw await apiError(res, "Failed to re-export")
+  }
+  return res.json()
+}
+
+export async function getPageGeometry(jobId: string): Promise<PageGeometryResponse> {
+  const res = await apiFetch(`${BASE_URL}/jobs/${encodeURIComponent(jobId)}/page-geometry`)
+  if (!res.ok) {
+    throw await apiError(res, "Failed to load page geometry")
   }
   return res.json()
 }

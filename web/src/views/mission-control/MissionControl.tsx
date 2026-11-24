@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Activity,
@@ -13,7 +13,6 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronUp,
-  ChevronRight,
   Check,
   Copy,
   CheckCheck,
@@ -21,7 +20,6 @@ import {
   ArrowLeft,
   ArrowUpRight,
   FileCheck,
-  Eye,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -29,14 +27,6 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { Progress } from '@/components/ui/progress'
 import {
   DropdownMenu,
@@ -70,202 +60,32 @@ import {
 import { useI18n } from '@/i18n/useI18n'
 import { useToast } from '@/components/ui/useToast'
 import { deliverableName } from '@/views/quality-gate/artifactMeta'
-const getFormatBadge = (filename?: string): string => {
-  if (!filename) return 'FILE'
-  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
-  switch (ext) {
-    case 'pdf': return 'PDF'
-    case 'epub': return 'EPUB'
-    case 'docx': return 'DOCX'
-    case 'md':
-    case 'markdown': return 'MD'
-    case 'html':
-    case 'htm': return 'HTML'
-    case 'xliff': return 'XLIFF'
-    case 'json': return 'JSON'
-    default: return ext.toUpperCase() || 'FILE'
-  }
-}
-
-const formatBytes = (bytes?: number): string => {
-  if (!bytes || bytes <= 0 || isNaN(bytes)) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
-}
-
-function displayFileName(rawName?: string | null): string {
-  if (!rawName) return '—'
-  const match = rawName.match(/^(?:\d{8}-\d{6}-[a-f0-9]{8}-)?(.+)$/)
-  return match ? match[1] : rawName
-}
-
-function compactJobId(jobId: string): string {
-  const separator = jobId.indexOf('_')
-  if (separator < 0) return jobId
-  return `${jobId.slice(0, separator + 1)}…${jobId.slice(-6)}`
-}
-
-function formatDuration(startStr?: string | null, endStr?: string | null): string | null {
-  if (!startStr || !endStr) return null
-  const start = new Date(startStr.replace(' ', 'T')).getTime()
-  const end = new Date(endStr.replace(' ', 'T')).getTime()
-  if (isNaN(start) || isNaN(end) || end <= start) return null
-  const sec = Math.round((end - start) / 1000)
-  const m = Math.floor(sec / 60)
-  const s = sec % 60
-  if (m === 0) return `${s}s`
-  if (m < 60) return `${m}m ${s}s`
-  const h = Math.floor(m / 60)
-  const rm = m % 60
-  return `${h}h ${rm}m`
-}
-
-function formatEngineName(raw: string): string {
-  if (!raw) return ''
-  let name = raw.replace(/^dm/, '')
-  if (name.includes('gemma')) name = name.replace(/4e4b/i, ' 4B').replace(/27b/i, ' 27B')
-  else if (name.includes('qwen')) name = name.replace(/25/i, ' 2.5')
-  else if (name.includes('deepseek')) name = name.replace(/v3/i, ' V3').replace(/r1/i, ' R1')
-  return name.charAt(0).toUpperCase() + name.slice(1)
-}
-
-function parseJobIdMeta(jobId: string) {
-  const parts = jobId.split('_')
-  let targetLang = ''
-  let preset = ''
-  let engine = ''
-  if (parts.length >= 3) {
-    targetLang = parts[2].toUpperCase()
-  }
-  for (const part of parts) {
-    if (part.startsWith('pr')) {
-      preset = part.slice(2)
-    } else if (part.startsWith('eng')) {
-      const engMatch = part.match(/^eng([a-z0-9]+?)(?:rm[a-z0-9]+)?(?:ps[a-z0-9]+)?$/i)
-      engine = engMatch ? engMatch[1] : part.slice(3)
-    }
-  }
-  return { targetLang, preset, engine: formatEngineName(engine) }
-}
-
-type LogLevel = 'ALL' | 'INFO' | 'WARN' | 'ERROR'
-
-interface LogEntry {
-  text: string
-  level: 'INFO' | 'WARN' | 'ERROR'
-  at?: number
-  eventType?: string
-}
-
-function renderHighlightedText(text: string, query: string): React.ReactNode {
-  if (!query.trim()) return text
-  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const parts = text.split(new RegExp(`(${escaped})`, 'gi'))
-  if (parts.length === 1) return text
-  return parts.map((part, i) =>
-    part.toLowerCase() === query.toLowerCase() ? (
-      <mark key={i} className="bg-amber-400/35 text-amber-100 rounded-xs px-0.5 font-semibold">
-        {part}
-      </mark>
-    ) : (
-      part
-    )
-  )
-}
-
-/**
- * Live progress from the shared counters.
- *
- * ``progress_percent`` counts successful terminal work plus in-flight work,
- * never failed blocks. A dead provider must not walk the bar to 100% while
- * translating nothing. ``drafted_blocks`` is work that has started; use it
- * until successful finalization overtakes it, and reserve 100% for a
- * genuinely finalized run.
- */
-const liveProgressPct = (finalized: number, drafted: number, total: number): number => {
-  if (total <= 0) return 0
-  const finalizedWork = Math.max(0, Math.min(total, finalized))
-  const draftedWork = Math.max(0, Math.min(total, drafted))
-  if (finalizedWork >= total) return 100
-  return Math.min(99.9, Math.round((Math.max(finalizedWork, draftedWork) / total) * 1000) / 10)
-}
-
-const jobStatusLabel = (t: ReturnType<typeof useI18n>['t'], status: string): string =>
-  t.mission.jobStatuses[status] ?? status.toUpperCase()
-
-const statusBadgeClass = (status: string): string =>
-  status === 'completed'
-    ? 'border-emerald-600/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-    : status === 'failed' || status === 'cancelled'
-      ? 'border-destructive/25 bg-destructive/10 text-destructive'
-      : status === 'needs_human' || status === 'blocked_human'
-        ? 'border-amber-600/25 bg-amber-500/10 text-amber-700 dark:text-amber-400'
-        : 'border-sky-600/25 bg-sky-500/10 text-sky-700 dark:text-sky-400'
-
-const stageLabel = (t: ReturnType<typeof useI18n>['t'], stage: string): string =>
-  t.mission.stageNames[stage] ?? t.mission.jobStatuses[stage] ?? stage.toUpperCase()
-
-/** The contract that satisfies a 1:1 promise. */
-const FAITHFUL_DELIVERY_MODES = new Set(['faithful'])
-
-const deliveryModeLabel = (
-  t: ReturnType<typeof useI18n>['t'],
-  mode: string | null | undefined,
-): string =>
-  !mode
-    ? ''
-    : FAITHFUL_DELIVERY_MODES.has(mode)
-      ? t.mission.deliveryModeBadgeFaithful
-      : t.mission.deliveryModeBadgeReadable
-
-/**
- * Render one localized degrade-reason template.
- *
- * Values other than the trust ratio are integers; the ratio is measured to
- * many decimals in the ledger, so it is rounded here rather than in every
- * translation.
- */
-const degradeReasonText = (template: string, params: Record<string, unknown>): string =>
-  template.replace(/\{(\w+)\}/g, (whole, key: string) => {
-    const value = params[key]
-    if (value === undefined || value === null) return whole
-    if (key === 'text_trust' || key === 'threshold') {
-      const numeric = Number(value)
-      return Number.isFinite(numeric) ? numeric.toFixed(2) : String(value)
-    }
-    return String(value)
-  })
-
-/**
- * Turn the server's safe terminal error into one product-language sentence.
- *
- * The server already strips provider bodies and host paths; the remaining
- * exception class is still developer vocabulary, not something an operator
- * should have to parse. The raw message stays available under "Technical
- * detail" for support, collapsed by default.
- */
-const failureSummary = (
-  t: ReturnType<typeof useI18n>['t'],
-  error: string,
-): string => {
-  if (/transport_unreachable|ConnectError|All connection attempts failed/i.test(error)) {
-    return t.mission.failureProviderUnreachable
-  }
-  if (/ModelProviderError|ProviderConfigError|status_code|no router/i.test(error)) {
-    return t.mission.failureConfig
-  }
-  if (/IntegrityViolationError|completion ratio|completion floor/i.test(error)) {
-    return t.mission.failureIntegrity
-  }
-  if (/DocumentParseError|UnsupportedDocumentFormatError|Document .* produced 0/i.test(error)) {
-    return t.mission.failureDocument
-  }
-  if (/timeout|timed out|connection|503|502|504/i.test(error)) {
-    return t.mission.failureProvider
-  }
-  return t.mission.failureGeneric
-}
+import {
+  type LogLevel,
+  type LogEntry,
+  READER_PRODUCT_KEYS,
+  getFormatBadge,
+  formatBytes,
+  displayFileName,
+  compactJobId,
+  formatDuration,
+  parseJobIdMeta,
+  renderHighlightedText,
+  liveProgressPct,
+  jobStatusLabel,
+  stageLabel,
+  deliveryModeLabel,
+  degradeReasonText,
+  failureSummary,
+  formatClock,
+} from './missionHelpers'
+import {
+  LogFilters,
+  JobQueueTable,
+  DeliverableCard,
+  DeliverableRow,
+  CompanionArtifactRow,
+} from './MissionSubcomponents'
 
 const LOG_HISTORY = new Map<string, LogEntry[]>()
 const LOG_HISTORY_MAX_JOBS = 20
@@ -288,456 +108,6 @@ function rememberLogs(jobId: string | null, entries: LogEntry[]): void {
 }
 
 type QueueFilter = 'ALL' | 'ACTIVE' | 'COMPLETED' | 'FAILED'
-
-const READER_PRODUCT_KEYS = new Set(['primary', 'secondary', 'epub', 'html'])
-
-function LogFilters({
-  t,
-  search,
-  onSearchChange,
-  level,
-  onLevelChange,
-  labels,
-  counts,
-}: {
-  t: ReturnType<typeof useI18n>['t']
-  search: string
-  onSearchChange: (value: string) => void
-  level: LogLevel
-  onLevelChange: (level: LogLevel) => void
-  labels: Record<LogLevel, string>
-  counts: Record<LogLevel, number>
-}) {
-  return (
-    <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
-      <div className="relative min-w-32 flex-1 sm:max-w-48">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          type="text"
-          value={search}
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder={t.mission.logSearch}
-          aria-label={t.mission.logSearch}
-          className="h-8 bg-background pl-8 pr-2 font-mono text-xs"
-        />
-      </div>
-      <div
-        className="inline-flex h-8 items-center rounded-md border border-border/80 bg-muted/60 p-0.5"
-        role="group"
-        aria-label={t.mission.tabLogs}
-      >
-        {(['ALL', 'INFO', 'WARN', 'ERROR'] as const).map((item) => (
-          <button
-            key={item}
-            type="button"
-            onClick={() => onLevelChange(item)}
-            className={cn(
-              'flex h-7 cursor-pointer items-center gap-1 rounded px-2 font-mono text-xs transition-colors',
-              level === item
-                ? 'bg-background font-semibold text-foreground shadow-xs'
-                : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            <span>{labels[item]}</span>
-            <span
-              className={cn(
-                'tabular-nums opacity-70',
-                item === 'ERROR' && counts.ERROR > 0 && 'font-semibold text-destructive opacity-100',
-                item === 'WARN' && counts.WARN > 0 && 'font-semibold text-amber-600 opacity-100 dark:text-amber-400'
-              )}
-            >
-              {counts[item]}
-            </span>
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function JobQueueTable({
-  jobs,
-  currentJobId,
-  t,
-  onOpen,
-}: {
-  jobs: JobSummary[]
-  currentJobId: string | null
-  t: ReturnType<typeof useI18n>['t']
-  onOpen: (jobId: string) => void
-}) {
-  return (
-    <Table className="text-xs">
-      <TableHeader className="sticky top-0 z-10 bg-muted/35">
-        <TableRow className="border-border hover:bg-transparent">
-          <TableHead className="w-[38%] px-4 py-2.5 font-medium text-muted-foreground">
-            {t.mission.colFile}
-          </TableHead>
-          <TableHead className="hidden w-[20%] px-3 py-2.5 font-medium text-muted-foreground sm:table-cell">
-            {t.mission.colJob}
-          </TableHead>
-          <TableHead className="hidden w-[12%] px-3 py-2.5 font-medium text-muted-foreground md:table-cell">
-            {t.mission.colStatus}
-          </TableHead>
-          <TableHead className="hidden w-[14%] px-3 py-2.5 font-medium text-muted-foreground lg:table-cell">
-            {t.mission.colProgress}
-          </TableHead>
-          <TableHead className="hidden w-[9%] px-3 py-2.5 text-right font-medium text-muted-foreground lg:table-cell">
-            {t.mission.colCost}
-          </TableHead>
-          <TableHead className="hidden w-[10%] px-4 py-2.5 text-right font-medium text-muted-foreground xl:table-cell">
-            {t.mission.colUpdated}
-          </TableHead>
-          <TableHead className="w-12 px-3 py-2.5 text-right">
-            <span className="sr-only">{t.mission.jobActions}</span>
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody className="divide-y divide-border">
-        {jobs.map((job) => {
-          const isActive = job.job_id === currentJobId
-          const pct = liveProgressPct(
-            job.completed_blocks + job.needs_human_blocks + job.blocked_human_blocks,
-            job.drafted_blocks + (job.repair_pending_blocks ?? 0),
-            job.total_blocks
-          )
-
-          return (
-            <TableRow
-              key={job.job_id}
-              tabIndex={0}
-              aria-label={`${t.mission.openJob}: ${displayFileName(job.file_name)}`}
-              onClick={() => onOpen(job.job_id)}
-              onKeyDown={(event) => {
-                if (event.target !== event.currentTarget) return
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  onOpen(job.job_id)
-                }
-              }}
-              className={cn(
-                'group cursor-pointer border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/35',
-                isActive ? 'bg-muted/50' : 'hover:bg-muted/30'
-              )}
-            >
-              <TableCell className="relative px-4 py-3.5 text-foreground">
-                {isActive && (
-                  <span className="absolute inset-y-2 left-0 w-[3px] rounded-r bg-primary" />
-                )}
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="truncate text-[13px] font-medium text-foreground" title={job.file_name}>
-                    {displayFileName(job.file_name)}
-                  </span>
-                  {job.rehearsal && (
-                    <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-xs">
-                      {t.mission.rowRehearsal}
-                    </Badge>
-                  )}
-                  {job.page_scope && (
-                    <Badge variant="outline" className="shrink-0 px-1.5 py-0 font-mono text-xs">
-                      p{job.page_scope}
-                    </Badge>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell
-                className="hidden truncate px-3 py-3.5 font-mono text-xs text-muted-foreground sm:table-cell"
-                title={job.job_id}
-              >
-                {job.job_id}
-              </TableCell>
-              <TableCell className="hidden px-3 py-3.5 md:table-cell">
-                <Badge
-                  variant="outline"
-                  className={cn('font-normal', statusBadgeClass(job.status))}
-                >
-                  {jobStatusLabel(t, job.status)}
-                </Badge>
-              </TableCell>
-              <TableCell className="hidden px-3 py-3.5 font-mono text-xs tabular-nums text-muted-foreground lg:table-cell">
-                {job.status === 'completed' || pct >= 100 ? (
-                  <span className="font-medium text-muted-foreground">100%</span>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <Progress value={pct} className="h-1.5 w-14 bg-muted/60" />
-                    <span className="font-medium text-foreground">{pct.toFixed(1)}%</span>
-                  </div>
-                )}
-              </TableCell>
-              <TableCell className="hidden px-3 py-3.5 text-right font-mono text-xs tabular-nums lg:table-cell">
-                {job.estimated_cost_usd === null || job.estimated_cost_usd === undefined ? (
-                  <span className="text-muted-foreground">—</span>
-                ) : (
-                  <span className={job.estimated_cost_usd === 0 ? 'text-muted-foreground' : 'font-medium text-foreground'}>
-                    ${job.estimated_cost_usd.toFixed(3)}
-                  </span>
-                )}
-              </TableCell>
-              <TableCell className="hidden px-4 py-3.5 text-right font-mono text-xs tabular-nums text-muted-foreground xl:table-cell">
-                {formatTimestamp(job.updated_at)}
-              </TableCell>
-              <TableCell className="px-3 py-3 text-right text-muted-foreground">
-                <ChevronRight
-                  className="ml-auto size-4 transition-transform group-hover:translate-x-0.5"
-                  aria-hidden="true"
-                />
-              </TableCell>
-            </TableRow>
-          )
-        })}
-      </TableBody>
-    </Table>
-  )
-}
-
-function DeliverableCard({
-  item,
-  isPrimary,
-  downloadLabel,
-  previewLabel,
-  previewUrl,
-  onDownload,
-}: {
-  item: DeliverableItem
-  isPrimary: boolean
-  downloadLabel: string
-  previewLabel: string
-  previewUrl?: string
-  onDownload: () => void
-}) {
-  const { t } = useI18n()
-  const badge = getFormatBadge(item.filename)
-  const isHtml = badge === 'HTML'
-  const isPdf = badge === 'PDF'
-
-  return (
-    <Card
-      className={cn(
-        'group relative flex flex-col justify-between overflow-hidden border transition-all duration-200 hover:shadow-md',
-        isPrimary
-          ? 'border-primary/40 bg-card shadow-xs ring-1 ring-primary/20'
-          : 'border-border/80 bg-card/60'
-      )}
-    >
-      {isPrimary && (
-        <div className="absolute right-0 top-0 rounded-bl-md bg-emerald-500/15 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
-          {t.mission.exportPrimaryBadge}
-        </div>
-      )}
-      <CardContent className="space-y-3 p-3.5">
-        <div className="flex items-start gap-3">
-          <span
-            className={cn(
-              'flex size-9 shrink-0 items-center justify-center rounded-lg font-mono text-xs font-bold shadow-2xs',
-              isPdf
-                ? 'border border-rose-500/25 bg-rose-500/10 text-rose-600 dark:text-rose-400'
-                : badge === 'EPUB'
-                  ? 'border border-purple-500/25 bg-purple-500/10 text-purple-600 dark:text-purple-400'
-                  : isHtml
-                    ? 'border border-sky-500/25 bg-sky-500/10 text-sky-600 dark:text-sky-400'
-                    : badge === 'XLIFF'
-                      ? 'border border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                      : 'border border-border bg-muted text-foreground'
-            )}
-          >
-            {badge}
-          </span>
-          <div className="min-w-0 flex-1 pr-6">
-            <h4
-              className="truncate text-sm font-semibold text-foreground"
-              title={item.label || item.filename}
-            >
-              {deliverableName(item.key, item.label || item.filename, t)}
-            </h4>
-            <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
-              {formatBytes(item.size_bytes)}
-            </p>
-          </div>
-        </div>
-        <p
-          className="line-clamp-1 font-mono text-[11px] text-muted-foreground/80 truncate"
-          title={item.filename}
-        >
-          {item.filename}
-        </p>
-      </CardContent>
-      <div className="flex items-center gap-1.5 border-t border-border/60 bg-muted/20 px-3 py-2">
-        <Button
-          onClick={onDownload}
-          variant={isPrimary ? 'default' : 'secondary'}
-          size="sm"
-          className="h-7 flex-1 text-xs font-medium"
-        >
-          <Download className="mr-1.5 size-3" />
-          <span>{downloadLabel}</span>
-        </Button>
-        {previewUrl && (isHtml || isPdf) && (
-          <Button
-            asChild
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-            title={previewLabel}
-          >
-            <a href={previewUrl} target="_blank" rel="noreferrer">
-              <Eye className="size-3.5" />
-            </a>
-          </Button>
-        )}
-      </div>
-    </Card>
-  )
-}
-
-function DeliverableRow({
-  item,
-  isPrimary,
-  downloadLabel,
-  onDownload,
-}: {
-  item: DeliverableItem
-  isPrimary: boolean
-  downloadLabel: string
-  onDownload: () => void
-}) {
-  const { t } = useI18n()
-
-  return (
-    <div className="flex items-center justify-between gap-3 p-3 transition-colors hover:bg-muted/25">
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-xs font-bold text-foreground">
-          {getFormatBadge(item.filename)}
-        </span>
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="truncate text-sm font-medium text-foreground">
-              {deliverableName(item.key, item.label || item.filename, t)}
-            </span>
-            {isPrimary && (
-              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                {t.mission.exportPrimaryBadge}
-              </span>
-            )}
-          </div>
-          <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
-            {item.filename} · {formatBytes(item.size_bytes)}
-          </div>
-        </div>
-      </div>
-      <Button
-        onClick={onDownload}
-        variant={isPrimary ? 'default' : 'outline'}
-        size="sm"
-        className="h-8 shrink-0 px-3 text-xs"
-      >
-        <Download className="mr-1.5 size-3.5" />
-        <span>{downloadLabel}</span>
-      </Button>
-    </div>
-  )
-}
-
-function CompanionArtifactRow({
-  comp,
-  onDownload,
-}: {
-  comp: CompanionArtifactInfo
-  onDownload: () => void
-}) {
-  const { t } = useI18n()
-
-  const kindLabel = () => {
-    switch (comp.kind) {
-      case 'xliff':
-        return t.quality.xliffDoc
-      case 'html':
-        return t.quality.htmlView
-      case 'epub':
-        return t.quality.epub
-      case 'attestation':
-        return t.quality.attestationJson
-      default:
-        return comp.kind.toUpperCase()
-    }
-  }
-
-  const kindBadge = () => {
-    switch (comp.kind) {
-      case 'xliff':
-        return 'XLIFF'
-      case 'html':
-        return 'HTML'
-      case 'epub':
-        return 'EPUB'
-      case 'attestation':
-        return 'ATTEST'
-      default:
-        return comp.kind.toUpperCase()
-    }
-  }
-
-  const isGenerated = comp.status === 'generated'
-  const isSkipped = comp.status === 'skipped'
-  const isFailed = comp.status === 'failed'
-
-  return (
-    <div className="flex items-center justify-between gap-3 p-3 transition-colors hover:bg-muted/25">
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-xs font-bold text-foreground">
-          {kindBadge()}
-        </span>
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="truncate text-sm font-medium text-foreground">
-              {kindLabel()}
-            </span>
-            {isGenerated && (
-              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                {t.mission.companionGeneratedBadge}
-              </span>
-            )}
-            {isSkipped && (
-              <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs font-semibold text-muted-foreground">
-                {t.mission.companionSkippedBadge}
-              </span>
-            )}
-            {isFailed && (
-              <span className="rounded bg-destructive/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-destructive">
-                {t.mission.companionFailedBadge}
-              </span>
-            )}
-          </div>
-          <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
-            {isGenerated && (
-              <>
-                {comp.path ? comp.path.split('/').pop() : ''}
-                {comp.sizeBytes != null ? ` · ${formatBytes(comp.sizeBytes)}` : ''}
-                {comp.durationMs != null ? ` · ${comp.durationMs.toFixed(1)} ms` : ''}
-              </>
-            )}
-            {isSkipped && (
-              <span>{comp.reason || t.mission.companionSkippedBadge}</span>
-            )}
-            {isFailed && (
-              <span className="text-destructive/90">{comp.error || t.mission.companionFailedBadge}</span>
-            )}
-          </div>
-        </div>
-      </div>
-      {isGenerated && (
-        <Button
-          onClick={onDownload}
-          variant="outline"
-          size="sm"
-          className="h-8 shrink-0 px-3 text-xs"
-        >
-          <Download className="mr-1.5 size-3.5" />
-          <span>{t.mission.downloadPrimary}</span>
-        </Button>
-      )}
-    </div>
-  )
-}
 
 export function MissionControl() {
   const { t } = useI18n()
@@ -894,6 +264,7 @@ export function MissionControl() {
 
   const [resuming, setResuming] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [reExportingMode, setReExportingMode] = useState(false)
   const [deliverables, setDeliverables] = useState<DeliverableItem[]>([])
   const [companionArtifacts, setCompanionArtifacts] = useState<CompanionArtifactInfo[]>([])
   const [deliverableListing, setDeliverableListing] = useState<DeliverableListing | null>(null)
@@ -1711,7 +1082,10 @@ export function MissionControl() {
                                 {badge}
                               </span>
                               <span className="font-medium text-xs text-foreground truncate">
-                                {deliverableName(item.key, item.label || item.filename, t)}
+                                {deliverableName(item.key, item.label || item.filename, t, {
+                                  deliveryMode: deliverableListing?.deliveryMode,
+                                  filename: item.filename,
+                                })}
                               </span>
                             </div>
                             <div className="text-xs text-muted-foreground font-mono mt-0.5 truncate">
@@ -2167,7 +1541,7 @@ export function MissionControl() {
                   </>
                 ) : (
                   <span className="text-lg font-medium text-muted-foreground">
-                    {isCompleted ? '合格' : '—'}
+                    {isCompleted ? t.mission.qeHeuristicPass : '—'}
                   </span>
                 )}
               </div>
@@ -2462,7 +1836,7 @@ export function MissionControl() {
                       )}
 
                       <section className="space-y-3">
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <h3 className="text-xs font-semibold tracking-wide text-foreground">
                               {t.mission.featuredProductsTitle || missionT.readerProductsTitle}
@@ -2473,6 +1847,101 @@ export function MissionControl() {
                               </Badge>
                             )}
                           </div>
+                          {currentJobId && isCompleted && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={reExportingMode}
+                                  className="h-7 px-2.5 text-xs"
+                                >
+                                  <RefreshCw className={cn('mr-1.5 size-3', reExportingMode && 'animate-spin')} />
+                                  {t.mission.reExportWithModeLabel}
+                                  <ChevronDown className="ml-1 size-3 opacity-70" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  disabled={deliverableListing?.deliveryMode === 'readable'}
+                                  className="justify-between gap-3"
+                                  onSelect={() => {
+                                    void (async () => {
+                                      setReExportingMode(true)
+                                      try {
+                                        await reExportJob(currentJobId, { delivery: 'readable' })
+                                        const refreshed = await listDeliverables(currentJobId)
+                                        setDeliverables(refreshed.items)
+                                        setCompanionArtifacts(refreshed.companionArtifacts ?? [])
+                                        setDeliverableListing(refreshed)
+                                        toast.push(t.quality.postEditReExportSuccess, 'success')
+                                      } catch (err) {
+                                        toast.push(err instanceof Error ? err.message : t.quality.postEditReExportFailed, 'error')
+                                      } finally {
+                                        setReExportingMode(false)
+                                      }
+                                    })()
+                                  }}
+                                >
+                                  <span>{t.mission.reExportReadable}</span>
+                                  {deliverableListing?.deliveryMode === 'readable' ? (
+                                    <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
+                                      {t.quality.reExportCurrentBadge}
+                                    </Badge>
+                                  ) : null}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  disabled={deliverableListing?.deliveryMode === 'faithful'}
+                                  className="justify-between gap-3"
+                                  onSelect={() => {
+                                    void (async () => {
+                                      setReExportingMode(true)
+                                      try {
+                                        await reExportJob(currentJobId, { delivery: 'faithful' })
+                                        const refreshed = await listDeliverables(currentJobId)
+                                        setDeliverables(refreshed.items)
+                                        setCompanionArtifacts(refreshed.companionArtifacts ?? [])
+                                        setDeliverableListing(refreshed)
+                                        toast.push(t.quality.postEditReExportSuccess, 'success')
+                                      } catch (err) {
+                                        toast.push(err instanceof Error ? err.message : t.quality.postEditReExportFailed, 'error')
+                                      } finally {
+                                        setReExportingMode(false)
+                                      }
+                                    })()
+                                  }}
+                                >
+                                  <span>{t.mission.reExportFaithful}</span>
+                                  {deliverableListing?.deliveryMode === 'faithful' ? (
+                                    <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
+                                      {t.quality.reExportCurrentBadge}
+                                    </Badge>
+                                  ) : null}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onSelect={() => {
+                                    void (async () => {
+                                      setReExportingMode(true)
+                                      try {
+                                        await reExportJob(currentJobId, { delivery: 'auto' })
+                                        const refreshed = await listDeliverables(currentJobId)
+                                        setDeliverables(refreshed.items)
+                                        setCompanionArtifacts(refreshed.companionArtifacts ?? [])
+                                        setDeliverableListing(refreshed)
+                                        toast.push(t.quality.postEditReExportSuccess, 'success')
+                                      } catch (err) {
+                                        toast.push(err instanceof Error ? err.message : t.quality.postEditReExportFailed, 'error')
+                                      } finally {
+                                        setReExportingMode(false)
+                                      }
+                                    })()
+                                  }}
+                                >
+                                  {t.mission.reExportAuto}
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
                         </div>
                         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                           {deliverables
@@ -2482,6 +1951,7 @@ export function MissionControl() {
                                 key={item.key}
                                 item={item}
                                 isPrimary={item.key === primaryDeliverable?.key}
+                                deliveryMode={deliverableListing?.deliveryMode}
                                 downloadLabel={missionT.downloadPrimary}
                                 previewLabel={t.mission.previewAction}
                                 previewUrl={currentJobId ? deliverableDownloadUrl(currentJobId, item.key) : undefined}
@@ -2516,6 +1986,7 @@ export function MissionControl() {
                                 key={item.key}
                                 item={item}
                                 isPrimary={false}
+                                deliveryMode={deliverableListing?.deliveryMode}
                                 downloadLabel={missionT.downloadPrimary}
                                 onDownload={() => void handleDownload(item.key)}
                               />
@@ -2568,20 +2039,4 @@ export function MissionControl() {
       )}
     </div>
   )
-}
-
-function formatTimestamp(value: string | null | undefined): string {
-  if (!value) return '—'
-  const normalized = value.includes('T') ? value : value.replace(' ', 'T')
-  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(normalized)
-  const parsed = new Date(hasZone ? normalized : `${normalized}Z`)
-  if (Number.isNaN(parsed.getTime())) return value
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`
-}
-
-function formatClock(value: number): string {
-  const parsed = new Date(value)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(parsed.getHours())}:${pad(parsed.getMinutes())}:${pad(parsed.getSeconds())}`
 }

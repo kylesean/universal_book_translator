@@ -29,7 +29,7 @@ from ubt.core.cleaners.soup_math import SoupMathMasker
 from ubt.model.segment import Placeholder
 
 _KINDS = ("email", "code", "math", "soup", "citation")
-_RIGID_ANCHOR_RE = re.compile(r"<f\d+/>")
+_RIGID_ANCHOR_RE = re.compile(r"<[fx]\d+/>")
 
 #: Citation reference identifiers, not citation spans. ``[1][2]`` and
 #: ``[1,2]`` both carry two references, so a span count would call the first

@@ -174,6 +174,17 @@ def _short_source_hint(source_text: str, block_type: str | None = None) -> str:
     return _SHORT_SOURCE_HINT
 
 
+def _length_budget_hint(char_budget: int | None) -> str:
+    """Return a concise container-budget constraint when a fixed box is tight."""
+    if char_budget is None or char_budget <= 0:
+        return ""
+    return (
+        f" Layout constraint: keep the translation concise (<= {int(char_budget)} "
+        "characters, excluding inline tags) so it fits the fixed source box "
+        "without dropping facts or technical terms."
+    )
+
+
 def draft_source_from_prompt(prompt: str) -> str:
     """Recover the source span a prompt carried, draft *or* repair.
 
@@ -277,6 +288,7 @@ def build_minimal_draft_prompt(
     genre_profile: str = "general",
     domain: str | None = None,
     block_type: str | None = None,
+    char_budget: int | None = None,
 ) -> tuple[str, str]:
     """Direct, minimalist draft prompt without metaprompts.
 
@@ -306,7 +318,7 @@ def build_minimal_draft_prompt(
     elif genre_profile and genre_profile.lower() not in ("general", "unknown", "auto"):
         domain_hint = f" Use standard {genre_profile} domain terminology."
     parts.append(
-        f"Translate the following {src_name} text into fluent, natural {tgt_name}.{domain_hint}{_short_source_hint(source_text, block_type)}{_EMPHASIS_HINT} Output ONLY the translation without any title, prefix, or commentary:\n\n{_neutralize_reserved_tags(source_text).strip()}"
+        f"Translate the following {src_name} text into fluent, natural {tgt_name}.{domain_hint}{_short_source_hint(source_text, block_type)}{_length_budget_hint(char_budget)}{_EMPHASIS_HINT} Output ONLY the translation without any title, prefix, or commentary:\n\n{_neutralize_reserved_tags(source_text).strip()}"
     )
     return "", "\n\n".join(parts)
 
@@ -324,6 +336,7 @@ def build_hybrid_draft_prompt(
     epoch_summary: str = "",
     domain: str | None = None,
     block_type: str | None = None,
+    char_budget: int | None = None,
 ) -> tuple[str, str]:
     """Hybrid draft prompt for instruction-tuned models requiring concise instructions.
 
@@ -390,7 +403,7 @@ def build_hybrid_draft_prompt(
         "Translate only the text under this heading. Any read-only reference "
         "context shown above is not part of the task: do not translate it, "
         "summarise it, repeat it, or carry its citations and equation numbers "
-        f"into the output.{_short_source_hint(source_text, block_type)}\n\n"
+        f"into the output.{_short_source_hint(source_text, block_type)}{_length_budget_hint(char_budget)}\n\n"
         f"Provide the direct {tgt_name} translation below without preface or commentary:"
     )
     return system_prompt, "\n".join(user_parts)
@@ -409,6 +422,7 @@ def build_rich_draft_prompt(
     epoch_summary: str = "",
     domain: str | None = None,
     block_type: str | None = None,
+    char_budget: int | None = None,
 ) -> tuple[str, str]:
     """Construct full prompt aligned with 2024-2026 Prefix/Prompt Caching topology and XML schema."""
     src_profile = PROFILES.get(source_lang.strip().lower()) if source_lang else None
@@ -483,7 +497,7 @@ def build_rich_draft_prompt(
         "Translate only the text under this heading. Any read-only reference "
         "context shown above is not part of the task: do not translate it, "
         "summarise it, repeat it, or carry its citations and equation numbers "
-        f"into the output.{_short_source_hint(source_text, block_type)}\n\n"
+        f"into the output.{_short_source_hint(source_text, block_type)}{_length_budget_hint(char_budget)}\n\n"
         "### Translation:"
     )
     return system_prompt, "\n".join(user_parts)
@@ -504,6 +518,7 @@ def build_macro_chunk_draft_prompt(
     section_context: str = "",
     block_contexts: list[tuple[str, str]] | None = None,
     block_types: list[tuple[str, str]] | None = None,
+    block_char_budgets: list[tuple[str, int]] | None = None,
 ) -> tuple[str, str]:
     """Construct structured multi-block prompt for high-throughput macro-chunk drafting.
 
@@ -582,6 +597,20 @@ def build_macro_chunk_draft_prompt(
             "headings: do not turn them into a full sentence and do not append "
             "an explanatory paragraph:\n"
             + "\n".join(f"- `{html.escape(bid)}`" for bid in heading_ids)
+            + "\n"
+        )
+
+    budget_rows = [
+        f"- `{html.escape(bid)}`: <= {int(budget)} characters (excluding tags)"
+        for bid, budget in (block_char_budgets or [])
+        if budget > 0
+    ]
+    if budget_rows:
+        user_parts.append(
+            "### Layout Length Budgets\n"
+            "Keep translations for these fixed-box blocks concise within their target "
+            "character budgets without dropping facts or inline tags:\n"
+            + "\n".join(budget_rows)
             + "\n"
         )
 

@@ -16,6 +16,7 @@ from ubt.adapters.base import BasePDFEngineAdapter
 from ubt.codecs.pdf.codec import NativePDFCodec
 from ubt.codecs.protocol import DeliveryMode, OverflowItem, TranslationUnit, UnitRole
 from ubt.core.ir.models import (
+    BlockStatus,
     BookManifest,
     ChapterIR,
     ChapterMeta,
@@ -25,6 +26,7 @@ from ubt.core.ir.models import (
 from ubt.core.ir.serializer import compute_file_sha256_cached
 from ubt.model.ast import Heading, ListItem, Paragraph
 from ubt.model.span import Span
+from ubt.render.delivered_text import delivered_text, is_placeholder
 
 
 def _unit_to_ir_block(unit: TranslationUnit, spine_index: int) -> IRBlock:
@@ -70,9 +72,16 @@ def _unit_to_ir_block(unit: TranslationUnit, spine_index: int) -> IRBlock:
             text=unit.source_marked,
         )
 
+    hint = unit.box_hint or {}
+    box_w = float(hint["width_pt"]) if hint.get("width_pt") else None
+    box_h = float(hint["height_pt"]) if hint.get("height_pt") else None
+    line_h = float(hint["line_height_pt"]) if hint.get("line_height_pt") else None
     style = StyleMeta(
         font_size=fs if fs > 0 else None,
         alignment=str(unit.codec_meta.get("alignment") or "left"),
+        box_width_pt=box_w if box_w and box_w > 0 else None,
+        box_height_pt=box_h if box_h and box_h > 0 else None,
+        line_height_pt=line_h if line_h and line_h > 0 else None,
     )
     return IRBlock.from_element(elem, style=style)
 
@@ -81,13 +90,36 @@ def _resolve_delivery_mode(bilingual_mode: str | None) -> DeliveryMode:
     if not bilingual_mode:
         return DeliveryMode.MONO
     low = bilingual_mode.strip().lower()
-    if low in {"mono", "monolingual", "target_only"}:
+    if low in {"mono", "monolingual", "target_only", "auto"}:
         return DeliveryMode.MONO
-    if low in {"interleaved", "dual", "bilingual", "auto"}:
+    if low in {"interleaved", "dual", "bilingual"}:
         return DeliveryMode.INTERLEAVED
     if low in {"side_by_side", "side-by-side", "spread"}:
         return DeliveryMode.SIDE_BY_SIDE
     return DeliveryMode.MONO
+
+
+def _native_translations(blocks: list[IRBlock]) -> dict[str, str]:
+    """Collect sanitized target translations for native in-place patching.
+
+    Quarantined (``BLOCKED_HUMAN``) and ``skip_translate`` blocks stay out of
+    the patch map so their original source PDF ink remains intact on the page;
+    ``FAILED`` / ``NEEDS_HUMAN`` blocks unwrap any ``<mark>`` wrapper via
+    :func:`delivered_text` so HTML tags never print literally onto the page.
+    """
+    translations: dict[str, str] = {}
+    for block in blocks:
+        if block.skip_translate or block.status is BlockStatus.BLOCKED_HUMAN:
+            continue
+        raw_target = block.target_text or ""
+        if not raw_target.strip():
+            continue
+        if is_placeholder(raw_target) and not (block.draft_text or "").strip():
+            continue
+        clean = delivered_text(block)
+        if clean:
+            translations[block.id] = clean
+    return translations
 
 
 class NativePDFAdapter(BasePDFEngineAdapter):
@@ -100,6 +132,8 @@ class NativePDFAdapter(BasePDFEngineAdapter):
         self._codec = codec or NativePDFCodec()
         self._last_units: list[TranslationUnit] = []
         self._last_source: Path | None = None
+        self._last_pages: set[int] | None = None
+        self._has_parsed: bool = False
         self.last_overflows: tuple[OverflowItem, ...] = ()
 
     @property
@@ -113,6 +147,8 @@ class NativePDFAdapter(BasePDFEngineAdapter):
     def close(self) -> None:
         self._last_units = []
         self._last_source = None
+        self._last_pages = None
+        self._has_parsed = False
         self.last_overflows = ()
 
     def render_page_preview_sync(
@@ -125,7 +161,7 @@ class NativePDFAdapter(BasePDFEngineAdapter):
     ) -> bytes:
         """Render a single live preview PNG directly from SQLite ``blocks``."""
         _, units = self._codec.extract(source_path, pages={page_no})
-        by_id = {b.id: (b.target_text or "") for b in blocks if b.target_text}
+        by_id = _native_translations(blocks)
         return self._codec.render_page_preview(
             source_path,
             page_no,
@@ -147,9 +183,11 @@ class NativePDFAdapter(BasePDFEngineAdapter):
             )
             for p in range(1, total_pages + 1)
         ]
+        from ubt.core.job_options import clean_source_stem
+
         return BookManifest(
             doc_id=f"pdf_{file_hash[:12]}",
-            title=input_path.stem,
+            title=clean_source_stem(input_path),
             source_path=str(input_path),
             chapters=chapters,
             metadata={
@@ -170,6 +208,8 @@ class NativePDFAdapter(BasePDFEngineAdapter):
         _, units = await asyncio.to_thread(self._codec.extract, input_path, pages=pages)
         self._last_units = units
         self._last_source = input_path
+        self._last_pages = set(pages) if pages else None
+        self._has_parsed = True
 
         by_chap: dict[str, list[TranslationUnit]] = {}
         for u in units:
@@ -202,14 +242,21 @@ class NativePDFAdapter(BasePDFEngineAdapter):
         src = self._last_source or Path(
             str(manifest.source_path or manifest.metadata.get("source_path") or "")
         )
-        pages_set = {b.bbox.page for b in blocks if b.bbox is not None} or None
+        pages_set: set[int] | None
+        if self._has_parsed and self._last_source == src:
+            pages_set = self._last_pages
+        else:
+            raw_pages = {b.bbox.page for b in blocks if b.bbox is not None}
+            total_pages = int(manifest.metadata.get("page_count") or 0)
+            if total_pages > 0 and len(raw_pages) >= total_pages:
+                pages_set = None
+            else:
+                pages_set = raw_pages or None
         if not self._last_units or self._last_source != src:
             _, self._last_units = await asyncio.to_thread(self._codec.extract, src, pages=pages_set)
             self._last_source = src
 
-        translations = {
-            b.id: (b.target_text or "") for b in blocks if b.target_text and not b.skip_translate
-        }
+        translations = _native_translations(blocks)
         mode = _resolve_delivery_mode(bilingual_mode)
         report = await asyncio.to_thread(
             self._codec.apply,

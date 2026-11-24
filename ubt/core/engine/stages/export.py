@@ -11,75 +11,76 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import dataclasses
 import html
-import json
 import logging
-import re
-import time
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from ubt.core.atomic import atomic_write_text
 from ubt.core.cleaners.cjk_spacing import normalize_publishing_cjk
 from ubt.core.config import DualMode
 from ubt.core.engine.adapter_runtime import (
     DocumentAdapter,
-    get_last_render_flags,
     get_last_render_reconstructions,
-    get_last_render_skips,
 )
-from ubt.core.engine.artifact_services import (
-    blocking_gate_tripped,
-    check_artifact,
-    crashed_artifact_gate_result,
-    read_delivery_evidence,
-)
+from ubt.core.engine.artifact_services import check_artifact  # noqa: F401 -- patch seam
 from ubt.core.engine.delivery_freshness import record_rendered_digest, rendered_digest_for
 from ubt.core.engine.document_services import (
     optimize_pdf_deliverable,
 )
 from ubt.core.engine.events import EventType, TranslationProgressEvent
 from ubt.core.engine.ledger import NON_TERMINAL_STATUSES, SQLiteJobLedger
-from ubt.core.engine.pdf_facts import pdf_page_count
-from ubt.core.engine.reporter import (
-    QualityReport,
-    ReportEntityConsistency,
-    ReportTerminologyMetrics,
-    build_quality_report,
-    save_quality_report,
-)
 from ubt.core.engine.stage_context import StageContext
-from ubt.core.exceptions import (
-    BudgetExceededError,
-    IntegrityViolationError,
-    JobInterruptedError,
-    LedgerWriterLeaseLostError,
-    UBTError,
+from ubt.core.engine.stages.export_companions import (
+    _artifact_payload,
+    _delivery_translations,
+    _write_artifact_check,
+    _write_epub_view,
+    _write_html_view,
+    _write_spill_appendix,
+    _write_table_appendix,
+    _write_xliff_companion,
 )
-from ubt.core.ir.models import BlockStatus, BlockType, BookManifest, IRBlock
+from ubt.core.engine.stages.export_gates import (
+    RENDER_QUALITY_FLAGS,
+    _apply_render_skip_ledger_pass,
+    _check_completion_ratio,
+    _check_needs_human_gate,
+    _deliver_contract,
+    _delivery_contract_evidence,
+    _enforce_blocking_gate,
+    _evaluate_delivery,
+    _faithful_expected_pages,
+    _is_faithful_delivery,
+    _partition_render_skip_counts,
+    _persist_crashed_gate_report,
+    _run_artifact_gate,
+    apply_render_quality_flags,
+    apply_render_skip_flags,
+)
+from ubt.core.engine.stages.export_reports import (
+    _build_reports,
+    _drop_stale_run_reports,
+    _font_delivery_for,
+)
+from ubt.core.exceptions import (
+    IntegrityViolationError,
+)
+from ubt.core.ir.models import BlockStatus, BookManifest, IRBlock
 from ubt.core.job_options import (
-    RUN_REPORT_KINDS,
     CompanionArtifactResult,
     CompanionExportSummary,
     artifact_and_report_paths,
     resolve_target_output,
     sidecar_path,
 )
-from ubt.core.metrics.collect import collect_kpis, save_metrics_report
 from ubt.core.policy.bilingual_advisor import SECONDARY_SUFFIX
 
 if TYPE_CHECKING:
-    from ubt.adapters.pdf.artifact_gate import ArtifactGateResult
-    from ubt.adapters.pdf.artifact_text import ArtifactReport
-    from ubt.core.content.contract import ReconciliationReport
     from ubt.core.job_options import DeliveredArtifact
 from ubt.core.engine.facts import RenderPlan, Terminology
 from ubt.core.engine.services import RunServices
 from ubt.core.qe.defect_taxonomy import UNTRANSLATED_PREFIX
-from ubt.core.qe.term_metrics import evaluate_terms, summarize_drift
-from ubt.core.router.pricing import cache_hit_rate_from_usage, estimate_cost_usd
 from ubt.core.validators.consistency import GlossaryConsistencyValidator
 from ubt.core.validators.glossary_enforcer import DeterministicGlossaryEnforcer
 from ubt.core.validators.html_delta import HTMLDeltaValidator
@@ -140,104 +141,6 @@ async def _render_adapter_output(
         output_path=output_path,
         bilingual_mode=bilingual_mode,
     )
-
-
-def apply_render_skip_flags(
-    blocks: list[IRBlock],
-    skips: list[tuple[str, str]],
-) -> list[dict[str, Any]]:
-    """Sync ``render_skip:{reason}`` error flags with this render's skips.
-
-    Maps the adapter's ``(block_id, reason)``
-    side channel onto the finalized blocks. Unknown block ids are ignored
-    and flags already present are not duplicated. Stale flags from a
-    previous render of the same job are dropped first: a render-only rerun
-    (same ledger, different engine result) can render a block that an older
-    artifact skipped, and a kept flag would make the quality report describe an
-    artifact that does not exist. The quality report picks the flags up via
-    ``defect_flags`` with no further wiring.
-    """
-    by_id = {b.id: b for b in blocks}
-    wanted_by_block: dict[str, set[str]] = {}
-    for block_id, reason in skips:
-        wanted_by_block.setdefault(block_id, set()).add(f"render_skip:{reason}")
-    for block in blocks:
-        keep = wanted_by_block.get(block.id, set())
-        block.error_flags = [
-            flag
-            for flag in block.error_flags
-            if not flag.startswith("render_skip:") or flag in keep
-        ]
-    checkpoints: list[dict[str, Any]] = []
-    for block_id, reason in skips:
-        fb = by_id.get(block_id)
-        if fb is None:
-            continue
-        flag = f"render_skip:{reason}"
-        if flag in fb.error_flags:
-            continue
-        fb.error_flags.append(flag)
-        checkpoints.append(
-            {
-                "block_id": fb.id,
-                "status": fb.status,
-                "error_flags": fb.error_flags,
-            }
-        )
-    return checkpoints
-
-
-#: Quality flags this stage owns: a *drawn* fragment whose fitted size fell
-#: below the readable floor, a formula delivered as readable Unicode rather than
-#: typeset math, or a block whose text still carried a pipeline sentinel (a
-#: restore pass could not account for a span). Plain error flags, deliberately
-#: never ``render_skip:`` -- a skip flag would make the contract read the block
-#: as source-kept, and the whole point is that the content ships.
-RENDER_QUALITY_FLAGS: tuple[str, ...] = (
-    "low_legibility_font",
-    "formula_degraded",
-    "sentinel_leaked",
-    "table_source_preserved",
-)
-
-
-def apply_render_quality_flags(
-    blocks: list[IRBlock],
-    flags: list[tuple[str, str]],
-) -> set[str]:
-    """Sync render-quality error flags with this render's flags.
-
-    Stale flags from a previous render are dropped
-    first, mirroring ``apply_render_skip_flags``: a render-only rerun at a larger
-    size must clear a ``low_legibility_font`` that does not describe the current
-    artifact. Unknown block ids are ignored and present flags are not
-    duplicated.
-
-    Returns the ids of the blocks whose flag set changed. The caller must
-    persist them: unlike a skip, a quality flag never changes which blocks the
-    reflow gate reports, so nothing else in this stage writes them -- and the
-    quality report re-reads the ledger, not these in-memory blocks.
-    """
-    by_id = {b.id: b for b in blocks}
-    wanted_by_block: dict[str, set[str]] = {}
-    for block_id, flag in flags:
-        if flag in RENDER_QUALITY_FLAGS:
-            wanted_by_block.setdefault(block_id, set()).add(flag)
-    changed: set[str] = set()
-    for block in blocks:
-        keep = wanted_by_block.get(block.id, set())
-        before = list(block.error_flags)
-        after = [flag for flag in before if flag not in RENDER_QUALITY_FLAGS or flag in keep]
-        for flag in sorted(keep):
-            if flag not in after:
-                after.append(flag)
-        if after != before:
-            block.error_flags = after
-            changed.add(block.id)
-    for block_id in wanted_by_block:
-        if block_id not in by_id:
-            logger.debug("render quality flag for unknown block %s ignored", block_id)
-    return changed
 
 
 def _terminology_and_structure_pass(
@@ -484,399 +387,6 @@ async def _force_stale_blocks_terminal(
     return final_blocks
 
 
-def _check_completion_ratio(
-    actual_job_id: str, final_blocks: list[IRBlock], min_completion_ratio: float
-) -> None:
-    """Refuse to ship a mostly-untranslated book.
-
-    The renderers fall back to ``source_text`` when a block carries no
-    target, so a run in which most blocks failed would finalize as
-    "completed" with an untranslated book. Refusing here keeps the ledger
-    intact, so a resume retries exactly the blocks that have no target.
-
-    ``BLOCKED_HUMAN`` blocks carry a non-empty ``<mark>`` placeholder wrapping
-    the *source*, not a translation, so they must not count as delivered — an
-    all-quarantined book would otherwise pass a completion floor of 1.0.
-
-    The floor is measured over *translatable* blocks only. A ``skip_translate``
-    block (formula, image, preserved marker) is rendered verbatim by design, so
-    leaving it in the denominator let a mostly-skipped book clear the floor
-    without a single translated sentence.
-    """
-    if min_completion_ratio <= 0 or not final_blocks:
-        return
-
-    translatable = [fb for fb in final_blocks if not fb.skip_translate]
-    if not translatable:
-        return
-
-    untranslated = [
-        fb.id
-        for fb in translatable
-        if not (fb.target_text or "")
-        or fb.status in (BlockStatus.BLOCKED_HUMAN, BlockStatus.FAILED)
-        or any(isinstance(f, str) and f.startswith("render_skip:") for f in fb.error_flags)
-    ]
-    completed_ratio = 1.0 - len(untranslated) / len(translatable)
-    if completed_ratio < min_completion_ratio:
-        raise IntegrityViolationError(
-            f"Export blocked for job {actual_job_id}: only {completed_ratio:.0%} of "
-            f"{len(translatable)} translatable block(s) carry a translation, below the "
-            f"{min_completion_ratio:.0%} floor (UBT_EXPORT_MIN_COMPLETION_RATIO). "
-            f"{len(untranslated)} block(s) have no target, e.g. "
-            f"{', '.join(untranslated[:10])}. Resume the job to retry them, "
-            "or lower the floor to ship the partial book knowingly."
-        )
-
-
-def _check_needs_human_gate(
-    actual_job_id: str, final_blocks: list[IRBlock], *, allow: bool
-) -> None:
-    """Refuse to ship NEEDS_HUMAN blocks as finished output by default.
-
-    A ``NEEDS_HUMAN`` block ships its *translation* — it cleared the draft gate
-    but triage queued it for human post-editing, so the text in the book is
-    unverified. Shipping it with nothing marking it presented machine output as
-    finished: the review workbench could see the queue, the delivered PDF could
-    not. Blocking here keeps the ledger intact (review, resume and re-export
-    still work); an operator who accepts the risk sets
-    ``UBT_EXPORT_ALLOW_NEEDS_HUMAN=1`` (CLI ``--allow-needs-human``) and the
-    quality report's ``summary.needs_human_block_ids`` then names exactly what
-    shipped unverified.
-    """
-    if allow:
-        return
-    held = [fb.id for fb in final_blocks if fb.status == BlockStatus.NEEDS_HUMAN]
-    if not held:
-        return
-    raise IntegrityViolationError(
-        f"Export blocked for job {actual_job_id}: {len(held)} block(s) are queued "
-        f"for human post-editing (NEEDS_HUMAN) and would ship unverified, e.g. "
-        f"{', '.join(held[:10])}. Review them in the workbench, then re-export; "
-        "or ship knowingly with --allow-needs-human "
-        "(UBT_EXPORT_ALLOW_NEEDS_HUMAN=1) — the quality report then lists every "
-        "unverified block id."
-    )
-
-
-def _partition_render_skip_counts(
-    skip_checkpoints: list[dict[str, Any]],
-) -> tuple[int, int]:
-    """Count the fail-closed ``render_skip:`` checkpoints.
-
-    The second half of the returned pair is always 0: every ``render_skip:`` is
-    fail-closed by definition now, because the intentional families
-    (``policy``/``non_prose``/``chrome``/``footer``) never had a producer and
-    were removed. The pair survives as the named seam so the call site keeps
-    reading as a partition rather than a count with a zero bolted on.
-    """
-    fail_closed = sum(
-        1
-        for cp in skip_checkpoints
-        if any(
-            isinstance(f, str) and f.startswith("render_skip:")
-            for f in (cp.get("error_flags") or [])
-        )
-    )
-    return fail_closed, 0
-
-
-async def _apply_render_skip_ledger_pass(
-    ctx: StageContext,
-    adapter: DocumentAdapter,
-    final_blocks: list[IRBlock],
-    *,
-    persist: bool = True,
-) -> None:
-    """Land fail-closed render skips (and length-policy flips) on the ledger.
-
-    Skips collected by the adapter's side channel go on the blocks'
-    error_flags BEFORE the quality report is built, so the KDP audit lists
-    every source-visible segment. Secondary (complementary) renders are
-    excluded: their skips describe the same blocks under a different
-    artifact. Flag removal must reach the ledger too: the report re-reads
-    blocks from it, and a render-only rerun can render what an older
-    artifact skipped — a kept stale flag would make the report describe a
-    file that does not exist.
-
-    ``persist=False`` (a re-export) still applies the skip flags **in memory**
-    so this artifact's contract and report describe what was actually drawn,
-    but writes nothing back and leaves the length-policy status flip alone: a
-    re-render must not move a block into or out of NEEDS_HUMAN.
-    """
-    actual_job_id = ctx.job_id
-    ledger = ctx.ledger
-    stale_skips = {
-        b.id: [f for f in b.error_flags if f.startswith("render_skip:")] for b in final_blocks
-    }
-    render_skip_checkpoints = apply_render_skip_flags(final_blocks, get_last_render_skips(adapter))
-    # A drawn-but-below-floor fragment is a defect, not a skip: the translation
-    # ships, so the block must stay deliverable while the shrink is recorded.
-    quality_changed_ids = apply_render_quality_flags(final_blocks, get_last_render_flags(adapter))
-
-    # Persist a block whose skip set *changed*, partial removals included: the
-    # old filter only wrote when every skip flag was gone, so a block that kept
-    # one current reason while losing a stale one stayed wrong in the ledger the
-    # quality report re-reads. Snapshot AFTER the length policy pass so flipped
-    # statuses are never overwritten by an un-flipped snapshot.
-    cleared_skips = [
-        {"block_id": b.id, "status": b.status, "error_flags": b.error_flags}
-        for b in final_blocks
-        if any(f not in b.error_flags for f in stale_skips[b.id])
-    ]
-
-    if persist and (render_skip_checkpoints or cleared_skips or quality_changed_ids):
-        if render_skip_checkpoints:
-            fail_closed_count, preserved_count = _partition_render_skip_counts(
-                render_skip_checkpoints
-            )
-            if fail_closed_count > 0:
-                logger.warning(
-                    "Job %s rendered with %d fail-closed skipped block(s) left source-visible "
-                    "(%d source element(s) intentionally preserved)",
-                    actual_job_id,
-                    fail_closed_count,
-                    preserved_count,
-                )
-            elif preserved_count > 0:
-                logger.info(
-                    "Job %s preserved %d source element(s) intact (0 fail-closed skips)",
-                    actual_job_id,
-                    preserved_count,
-                )
-        by_block_id = {b.id: b for b in final_blocks}
-        # One entry per block, constructed directly from authoritative final_blocks:
-        # a block can be in a skip checkpoint, cleared_skips, and the quality set.
-        # Building directly from final_blocks ensures no order-dependent overwriting.
-        affected_block_ids = {
-            c["block_id"] for c in (*render_skip_checkpoints, *cleared_skips)
-        } | set(quality_changed_ids)
-        batch: dict[str, dict[str, Any]] = {}
-        for block_id in sorted(affected_block_ids):
-            block = by_block_id.get(block_id)
-            if block is not None:
-                batch[block_id] = {
-                    "block_id": block.id,
-                    "status": block.status,
-                    "error_flags": block.error_flags,
-                }
-        await asyncio.to_thread(ledger.save_checkpoints_batch, list(batch.values()))
-
-
-def _is_faithful_delivery(ctx: StageContext) -> bool:
-    """Whether this run's effective delivery mode is the faithful contract."""
-    mode = str((getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_mode", "") or "")
-    return mode == "faithful"
-
-
-def _faithful_expected_pages(ctx: StageContext, rendered_path: Path | None = None) -> int | None:
-    """Source page count a faithful delivery promised, or None when unknown.
-
-    Only read for faithful runs. A page-count probe failure returns None, which
-    the gate treats as "no contract stated" rather than comparing against a
-    guess.
-
-    A ``--pages`` run promises the *slice*, not the whole document: a 5-page
-    delivery of pages 1-5 is a complete 1:1 lock. Comparing it with the source's
-    32 pages reported ``page_count_changed_faithful`` on every sliced run. The
-    delivery contract already made this distinction; the artifact gate repeats it
-    here, and only when the artifact really holds exactly the requested pages.
-    """
-    if not _is_faithful_delivery(ctx):
-        return None
-    try:
-        count = pdf_page_count(ctx.input_path)
-    except Exception as exc:  # noqa: BLE001 - an unmeasured contract is stated as unmeasured
-        logger.debug("Artifact gate: source page count unavailable for %s: %s", ctx.input_path, exc)
-        return None
-    selected = ctx.config.get_selected_pages()
-    if selected and rendered_path is not None and rendered_path.exists():
-        try:
-            rendered = pdf_page_count(rendered_path)
-        except Exception:  # noqa: BLE001 - fall back to the full-source contract
-            rendered = None
-        if rendered == len(selected) and count != rendered:
-            return len(selected)
-    return count if count > 0 else None
-
-
-async def _run_artifact_gate(
-    ctx: StageContext,
-    adapter: DocumentAdapter,
-    final_blocks: list[IRBlock],
-    rendered_path: Path,
-    render: RenderPlan,
-    *,
-    claims_finality: bool = True,
-) -> tuple[Path, Path | None, Any]:
-    """Post-render artifact gate; never fatal except on cancel.
-
-    T0/T1 deterministic checks + optional pixel confirmation + sampled T2
-    VLM + ArtifactVerifyLoop, all driven by the config bound on ``ctx``.
-    Returns the (possibly re-rendered) artifact, its visual report path, and
-    the gate object (None when the gate is off or not a PDF).
-    """
-    gate: Any = None
-    artifact_report_path: Path | None = None
-    if not ctx.config.artifact_gate_enabled or rendered_path.suffix.lower() != ".pdf":
-        return rendered_path, artifact_report_path, gate
-    try:
-        from ubt.core.engine.artifact_verify_loop import ArtifactVerifyLoop
-
-        verify_loop = ArtifactVerifyLoop(
-            manifest=ctx.manifest,
-            ledger=ctx.ledger,
-            job_id=ctx.job_id,
-            target_lang=ctx.target_lang,
-            cancel_token=ctx.cancel_token,
-            expected_page_count=_faithful_expected_pages(ctx, rendered_path),
-            faithful_pages=_is_faithful_delivery(ctx),
-            claims_finality=claims_finality,
-        )
-        rendered_path, artifact_report_path, gate = await verify_loop.run(
-            rendered_path=rendered_path,
-            blocks=final_blocks,
-        )
-        ctx.check_cancelled()
-        bad = [f for f in gate.findings if getattr(f, "severity", "") in ("major", "critical")]
-        if bad:
-            logger.warning(
-                "Artifact gate for job %s: %d warning(s), see %s",
-                ctx.job_id,
-                len(bad),
-                artifact_report_path,
-            )
-        elif gate.skipped_reason:
-            logger.info("Artifact gate for job %s skipped: %s", ctx.job_id, gate.skipped_reason)
-    except (JobInterruptedError, LedgerWriterLeaseLostError, BudgetExceededError):
-        # Cooperative cancellation, lost writer lease, or hard budget exhaustion
-        # must propagate directly to the pipeline handler, not be downgraded into
-        # a non-fatal gate crash.
-        raise
-    except Exception as exc:
-        logger.warning("Artifact gate failed (non-fatal) for job %s: %s", ctx.job_id, exc)
-        # A crashed gate must read as failed, not absent: blocking enforcement
-        # and the KPI collector both key off this object, and None silently
-        # skipped every rejection layer while metrics recorded a perfect pass.
-        gate = crashed_artifact_gate_result(
-            f"artifact gate did not complete: {type(exc).__name__}: {exc}"[:300]
-        )
-        artifact_report_path = await _persist_crashed_gate_report(ctx, rendered_path, gate)
-    return rendered_path, artifact_report_path, gate
-
-
-async def _persist_crashed_gate_report(
-    ctx: StageContext,
-    rendered_path: Path,
-    gate: ArtifactGateResult,
-) -> Path | None:
-    """Write the crash gate where a live run would have written its report.
-
-    The crash reason rides in the gate's ``artifact_gate_crashed`` finding, so the
-    report needs no separate field for it. The sidecar, the ledger record and
-    the KPI collector all read this state; best-effort only, the caller is
-    already inside the failure path.
-    """
-    try:
-        from ubt.core.log_aggregate import noise_report
-
-        payload: dict[str, Any] = {
-            **gate.report_payload(),
-            "parse_noise": noise_report(),
-        }
-        artifact_report_path = sidecar_path(rendered_path, "artifact_report.json")
-        await asyncio.to_thread(
-            artifact_report_path.write_text,
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        await asyncio.to_thread(ctx.ledger.record_artifact_report, ctx.job_id, payload)
-        return artifact_report_path
-    except Exception as persist_exc:
-        logger.debug(
-            "crashed-gate report persistence failed for job %s: %s", ctx.job_id, persist_exc
-        )
-        return None
-
-
-def _drop_stale_run_reports(rendered_path: Path) -> None:
-    """Delete the previous run's derived reports sitting beside a new deliverable.
-
-    The names come from ``rendered_path.stem`` exactly as the writers build them
-    (:func:`_build_reports` in this module, ``artifact_and_report_paths`` on the
-    read side), so what gets cleared is precisely what would otherwise be read
-    back. The deliverable itself is never touched, and a missing file is not an
-    error.
-    """
-    for kind in RUN_REPORT_KINDS:
-        with contextlib.suppress(OSError):
-            sidecar_path(rendered_path, kind).unlink(missing_ok=True)
-
-
-def _enforce_blocking_gate(
-    actual_job_id: str,
-    gate: Any,
-    artifact_report_path: Path | None,
-    blocking_enabled: bool,
-    *,
-    rehearsal: bool = False,
-) -> None:
-    """Refuse export on blocking visual findings, after persistence.
-
-    Deterministic critical findings follow the existing opt-in/short-doc
-    policy. There is no sampled VLM tier any more.
-
-    Runs after the quality report is written so a refusal still leaves the
-    ``*_quality_report.json`` / ``*_metrics.json`` audit trail beside the
-    deliverable for diagnostic inspection.
-    An unreadable rendered PDF refuses here too: the gate reports
-    the pdf_page_count -1 sentinel and ``blocking_gate_tripped`` fails
-    closed on it even while the opt-in blocking gate is off.
-
-    ``rehearsal=True`` (mock/dry-run provider) downgrades the refusal to a
-    warning: a rehearsal echoes source text, so ``target_language_sparse`` is
-    guaranteed to fire and every ``--dry-run`` would exit 1 without ever
-    proving the render path. Real runs never pass
-    this flag.
-    """
-    if gate is None:
-        return
-    total_pages = 0
-    stats = getattr(gate, "stats", None)
-    if isinstance(stats, dict):
-        try:
-            total_pages = int(stats.get("total_pages", 0))
-        except (TypeError, ValueError):
-            total_pages = 0
-    tripped = blocking_gate_tripped(
-        getattr(gate, "findings", []),
-        total_pages,
-        blocking_enabled,
-    )
-    if not tripped:
-        return
-    codes = sorted({str(getattr(f, "code", "defect")) for f in tripped})
-    pages = sorted(
-        {page for page in (getattr(f, "page", None) for f in tripped) if isinstance(page, int)}
-    )
-    if rehearsal:
-        logger.warning(
-            "Rehearsal run: visual blocking gate would have refused job %s "
-            "(%d finding(s), codes: %s); downgraded to warning because a mock "
-            "draft echoes source text by design.",
-            actual_job_id,
-            len(tripped),
-            ", ".join(codes),
-        )
-        return
-    raise UBTError(
-        f"Visual blocking gate refused export for job {actual_job_id}: "
-        f"{len(tripped)} blocking finding(s) (severity: {', '.join(sorted({str(getattr(f, 'severity', 'critical')) for f in tripped}))}) "
-        f"on page(s) {pages or 'document level'} "
-        f"(codes: {', '.join(codes)}). See {artifact_report_path}."
-    )
-
-
 async def _render_complementary_artifact(
     ctx: StageContext,
     adapter: DocumentAdapter,
@@ -923,1047 +433,53 @@ async def _render_complementary_artifact(
     return secondary_path, None
 
 
-def _delivery_translations(blocks: Sequence[IRBlock]) -> dict[str, str]:
-    """The ``element id -> placed target`` map the delivered blocks describe.
-
-    Only a translation the renderer actually placed is in the map: a block kept
-    in the source has none, so the views show its source text instead.
-
-    The value is :func:`ubt.render.delivered_text.delivered_text`'s, not
-    ``target_text`` verbatim. The companion views treat a map entry as an
-    override that wins over their own ``delivered_text`` fallback (an
-    interactive PE edit is plain text, so that ordering is right for *them*),
-    which made this map the one path where the pipeline's
-    ``<mark class="ubt-failed-draft" title="Repair error: …">`` wrapper still
-    reached the reader: the PDF showed the clean sentence while the HTML and
-    EPUB companions shipped the wrapper class and the provider's exception text
-    escaped onto the page. Stripping here keeps the PDF and the views agreeing.
-    """
-    from ubt.core.content.adapt import kept_in_source
-    from ubt.core.validators.inline_tags import strip_inline_tags
-    from ubt.render.delivered_text import delivered_text
-
-    placed: dict[str, str] = {}
-    for block in blocks:
-        if not (block.target_text or "").strip():
-            continue
-        if block.block_type in (BlockType.FORMULA, BlockType.TABLE, BlockType.IMAGE):
-            continue
-        if kept_in_source(block):
-            continue
-        placed[block.id] = strip_inline_tags(delivered_text(block)).strip()
-    return placed
-
-
-def _deliver_contract(
-    ctx: StageContext,
+def _prepare_blocks_for_reflow(
     blocks: list[IRBlock],
-    rendered_path: Path,
-    reconstructions: list[Any] | None = None,
-) -> ReconciliationReport:
-    """Build the content graph, reconcile it, and persist the contract.
+    native_adapter: DocumentAdapter,
+) -> list[IRBlock]:
+    """Strip/resolve native-codec inline anchors before handing blocks to a reflow renderer.
 
-    Always writes the standalone ``*_contract.json`` and returns the report. The
-    report is advisory unless ``config.strict_contract`` is set, in which case
-    the caller aborts on an ERROR-severity violation; ``ubt verify`` applies the
-    same reconciliation to a delivered artifact or a finished job's ledger.
-
-    ``reconstructions`` is the renderer's per-asset rebuild ledger, so a table
-    the renderer rebuilt from its translated grid is recorded RECONSTRUCTED
-    (and verified or corrupt) rather than an opaque copy.
+    ``NativePDFCodec`` encodes inline formulas as ``<f1/>`` and style/link spans
+    as ``<b1>...</b1>``/``<c1>...</c1>``. Reflow renderers (Typst/Docling) do not
+    interpret those anchors and would otherwise print them verbatim into the PDF.
     """
-    from ubt.core.content.adapt import graph_from_blocks
-    from ubt.core.content.contract import reconcile
+    from ubt.core.validators.inline_tags import resolve_inline_tags_for_reflow
 
-    manifest = ctx.manifest
-    graph = graph_from_blocks(
-        blocks,
-        doc_id=str(getattr(manifest, "doc_id", "") or ""),
-        title=str(getattr(manifest, "title", "") or ""),
-        source_path=str(getattr(manifest, "source_path", "") or ""),
-        reconstructions=reconstructions,
-    )
-    allow_spill_warning = getattr(ctx.config, "spill_policy", "error") in (
-        "warn",
-        "appendix",
-        "source_kept_warn",
-    )
-    contract = reconcile(graph, allow_spill_warning=allow_spill_warning)
-    payload = contract.model_dump(mode="json")
-    contract_path = sidecar_path(rendered_path, "contract.json")
-    try:
-        atomic_write_text(
-            contract_path, json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-    except OSError as exc:  # a missing audit file must not sink the artifact
-        logger.warning("Could not write delivery contract for %s: %s", ctx.job_id, exc)
-        return contract
-    if contract.passed:
-        logger.info("Delivery contract %s: %s", contract_path.name, contract.summary_line())
-    else:
-        logger.warning(
-            "Delivery contract FAILED for job %s: %s (%d error(s)); see %s",
-            ctx.job_id,
-            contract.summary_line(),
-            len(contract.errors),
-            contract_path,
-        )
-    return contract
-
-
-def _write_spill_appendix(
-    ctx: StageContext,
-    rendered_path: Path,
-    blocks: list[IRBlock],
-    contract: ReconciliationReport,
-) -> Path | None:
-    """Write an overflow/spill appendix companion when blocks could not fit into layout boxes."""
-    from ubt.core.content.contract import _is_space_failure
-    from ubt.core.job_options import companion_path
-    from ubt.core.target_labels import appendix_labels
-
-    spill_violations = [v for v in contract.violations if _is_space_failure(v.detail)]
-    if not spill_violations:
-        return None
-    try:
-        by_id = {b.id: b for b in blocks}
-        labels = appendix_labels(ctx.target_lang)
-        items: list[dict[str, Any]] = []
-        md_lines: list[str] = [
-            labels.spill_title,
-            "",
-            f"- **Job ID**: `{ctx.job_id}`",
-            f"- **Document**: `{rendered_path.name}`",
-            f"- **{labels.spill_count}**: {len(spill_violations)}",
-            "",
-            labels.spill_intro,
-            "",
-            "| " + " | ".join(labels.spill_headers) + " |",
-            "| :--- | :---: | :--- | :--- | :--- |",
-        ]
-        for v in spill_violations:
-            block = by_id.get(v.node_id)
-            page = block.bbox.page if block and block.bbox else "—"
-            src = (block.source_text or "") if block else ""
-            tgt = (block.target_text or "") if block else ""
-            items.append(
-                {
-                    "block_id": v.node_id,
-                    "page": page,
-                    "reason": v.detail,
-                    "source_text": src,
-                    "target_text": tgt,
-                }
-            )
-            src_escaped = src.replace("\n", " ").replace("|", "\\|")[:80]
-            tgt_escaped = tgt.replace("\n", " ").replace("|", "\\|")[:80]
-            md_lines.append(
-                f"| `{v.node_id}` | P{page} | `{v.detail}` | {src_escaped} | {tgt_escaped} |"
-            )
-
-        json_path = companion_path(rendered_path, ".spill_appendix.json")
-        atomic_write_text(
-            json_path,
-            json.dumps({"job_id": ctx.job_id, "spills": items}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        md_path = companion_path(rendered_path, ".spill_appendix.md")
-        atomic_write_text(md_path, "\n".join(md_lines), encoding="utf-8")
-        logger.info("Spill appendix generated: %s (%d items)", md_path.name, len(items))
-        return md_path
-    except Exception as exc:
-        logger.warning("Spill appendix generation skipped for job %s: %s", ctx.job_id, exc)
-        return None
-
-
-def _write_table_appendix(
-    ctx: StageContext,
-    rendered_path: Path,
-    blocks: list[IRBlock],
-) -> Path | None:
-    """Write translated table appendix companion (.md / .json) and append pages to PDF when appropriate.
-
-    The renderer re-typesets every table inline
-    (``ubt/render/typst/document_renderer.py``), so appending the same tables
-    again would deliver each complex table twice. This remains only for the
-    ``--table-render-mode`` companion exports; no PDF page is appended.
-    """
-    from ubt.core.job_options import companion_path
-    from ubt.core.target_labels import appendix_labels
-    from ubt.render.table_compiler import probe_table_complexity
-
-    table_mode = getattr(ctx.config, "table_render_mode", "auto")
-    if table_mode == "skip":
-        return None
-
-    table_blocks = [
-        b
-        for b in blocks
-        if b.block_type is BlockType.TABLE
-        and not b.skip_translate
-        and bool((b.target_text or "").strip())
-    ]
-    if not table_blocks:
-        return None
-
-    appendix_tables: list[tuple[int, str, str]] = []
-    for b in table_blocks:
-        target = (b.target_text or "").strip()
-        page = b.bbox.page if b.bbox and b.bbox.page > 0 else 1
-        label = b.id
-        if table_mode == "appendix":
-            appendix_tables.append((page, label, target))
-        elif table_mode == "auto":
-            comp = probe_table_complexity(target, b.bbox)
-            if comp.is_complex:
-                appendix_tables.append((page, label, target))
-
-    if not appendix_tables:
-        return None
-
-    try:
-        items = [
-            {
-                "block_id": label,
-                "page": page,
-                "target_text": target,
-            }
-            for page, label, target in appendix_tables
-        ]
-        json_path = companion_path(rendered_path, ".table_appendix.json")
-        atomic_write_text(
-            json_path,
-            json.dumps({"job_id": ctx.job_id, "tables": items}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-
-        labels = appendix_labels(ctx.target_lang)
-        md_lines: list[str] = [
-            labels.table_title,
-            "",
-            f"- **Job ID**: `{ctx.job_id}`",
-            f"- **Document**: `{rendered_path.name}`",
-            f"- **{labels.table_count}**: {len(appendix_tables)}",
-            "",
-            labels.table_intro,
-            "",
-        ]
-        for page, label, target in appendix_tables:
-            md_lines.append(labels.table_page.format(page=page, label=label))
-            md_lines.append("")
-            md_lines.append(target)
-            md_lines.append("")
-
-        md_path = companion_path(rendered_path, ".table_appendix.md")
-        atomic_write_text(md_path, "\n".join(md_lines), encoding="utf-8")
-        logger.info("Table appendix companion generated: %s (%d items)", md_path.name, len(items))
-        return md_path
-
-    except Exception as exc:
-        logger.warning("Table appendix generation skipped for job %s: %s", ctx.job_id, exc)
-        return None
-
-
-def _write_xliff_companion(
-    ctx: StageContext, rendered_path: Path, blocks: list[IRBlock]
-) -> CompanionArtifactResult:
-    """Write a bilingual XLIFF beside the artifact for review (best-effort).
-
-    Read-only by construction: it serializes the *delivered* blocks -- each
-    source with its protected spans masked into inline codes, and the target that
-    actually shipped -- so an editor opens source and target side by side in any
-    CAT tool or XLIFF viewer. It never touches the rendered artifact, so any
-    failure is logged and skipped rather than allowed to sink the delivery.
-    """
-    if not ctx.config.emit_xliff_companion:
-        return CompanionArtifactResult(
-            kind="xliff",
-            status="skipped",
-            reason="config.emit_xliff_companion is disabled",
-        )
-    t0 = time.perf_counter()
-    try:
-        from ubt.core.engine.document_services import export_xliff
-        from ubt.core.job_options import companion_path
-
-        res = export_xliff(
-            blocks,
-            src_lang=ctx.source_lang or "en",
-            trg_lang=ctx.target_lang,
-            original=Path(ctx.input_path).name,
-            job_id=ctx.job_id,
-        )
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
-        if not res:
-            return CompanionArtifactResult(
-                kind="xliff",
-                status="skipped",
-                duration_ms=duration_ms,
-                reason="no extractable text segments in delivered blocks",
-            )
-        xml, segment_count = res
-        path = companion_path(rendered_path, ".xliff")
-        atomic_write_text(path, xml, encoding="utf-8")
-        size_bytes = path.stat().st_size if path.exists() else None
-        logger.info(
-            "XLIFF companion for job %s: %s (%d segment(s), %s bytes)",
-            ctx.job_id,
-            path.name,
-            segment_count,
-            size_bytes,
-        )
-        return CompanionArtifactResult(
-            kind="xliff",
-            status="generated",
-            path=path,
-            size_bytes=size_bytes,
-            duration_ms=duration_ms,
-        )
-    except Exception as exc:  # a companion must never sink the delivery
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
-        logger.warning("XLIFF companion skipped for job %s: %s", ctx.job_id, exc, exc_info=True)
-        return CompanionArtifactResult(
-            kind="xliff",
-            status="failed",
-            duration_ms=duration_ms,
-            error=str(exc),
-        )
-
-
-def _write_html_view(
-    ctx: StageContext,
-    rendered_path: Path,
-    translations: dict[str, str],
-    blocks: list[IRBlock],
-) -> CompanionArtifactResult:
-    """Write a semantic HTML view of the delivery beside the artifact.
-
-    A *view*, so it is read-only and best-effort: a failure is logged and
-    skipped, never allowed to sink the delivery.
-    """
-    if not ctx.config.emit_html_companion:
-        return CompanionArtifactResult(
-            kind="html",
-            status="skipped",
-            reason="config.emit_html_companion is disabled",
-        )
-    t0 = time.perf_counter()
-    try:
-        from ubt.core.job_options import companion_path
-        from ubt.layout.theme import direction_for
-        from ubt.render.html_view import compose_html
-
-        path = companion_path(rendered_path, ".html")
-        compose_html(
-            blocks,
-            translations,
-            path,
-            lang=ctx.target_lang or "en",
-            direction=direction_for(ctx.target_lang or "en").value,
-            # Bilingual by default: the companion's whole point is the
-            # three-mode reading console (target-only / stacked / side-by-side),
-            # and without this the toolbar and paired rows were never emitted.
-            bilingual=True,
-        )
-        size_bytes = path.stat().st_size if path.exists() else None
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
-        logger.info("HTML view for job %s: %s (%s bytes)", ctx.job_id, path.name, size_bytes)
-        return CompanionArtifactResult(
-            kind="html",
-            status="generated",
-            path=path,
-            size_bytes=size_bytes,
-            duration_ms=duration_ms,
-        )
-    except Exception as exc:  # a view must never sink the delivery
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
-        logger.warning("HTML view skipped for job %s: %s", ctx.job_id, exc, exc_info=True)
-        return CompanionArtifactResult(
-            kind="html",
-            status="failed",
-            duration_ms=duration_ms,
-            error=str(exc),
-        )
-
-
-def _write_epub_view(
-    ctx: StageContext,
-    rendered_path: Path,
-    translations: dict[str, str],
-    blocks: list[IRBlock],
-) -> CompanionArtifactResult:
-    """Write an EPUB 3 view of the delivery beside the artifact."""
-    if not ctx.config.emit_epub_companion:
-        return CompanionArtifactResult(
-            kind="epub",
-            status="skipped",
-            reason="config.emit_epub_companion is disabled",
-        )
-    t0 = time.perf_counter()
-    try:
-        from ubt.core.job_options import companion_path
-        from ubt.layout.theme import direction_for
-        from ubt.render.epub_view import compose_epub
-
-        path = companion_path(rendered_path, ".epub")
-        compose_epub(
-            blocks,
-            translations,
-            path,
-            title=str(getattr(ctx.manifest, "title", "") or "UBT translation"),
-            lang=ctx.target_lang or "en",
-            direction=direction_for(ctx.target_lang or "en").value,
-            doc_id=str(getattr(ctx.manifest, "doc_id", "") or ""),
-        )
-        size_bytes = path.stat().st_size if path.exists() else None
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
-        logger.info("EPUB view for job %s: %s (%s bytes)", ctx.job_id, path.name, size_bytes)
-        return CompanionArtifactResult(
-            kind="epub",
-            status="generated",
-            path=path,
-            size_bytes=size_bytes,
-            duration_ms=duration_ms,
-        )
-    except Exception as exc:  # a view must never sink the delivery
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
-        logger.warning("EPUB view skipped for job %s: %s", ctx.job_id, exc, exc_info=True)
-        return CompanionArtifactResult(
-            kind="epub",
-            status="failed",
-            duration_ms=duration_ms,
-            error=str(exc),
-        )
-
-
-def _delivery_contract_evidence(
-    ctx: StageContext,
-    adapter: DocumentAdapter,
-    final_blocks: list[IRBlock],
-    rendered_path: Path,
-    delivery_contract: dict[str, Any] | None,
-    *,
-    page_geometry: list[dict[str, Any]] | None = None,
-) -> Any:
-    """Build artifact evidence for the delivery contract.
-
-    Reads the delivered PDF (text, boxes, page bounds) and the renderer's own
-    side channels. The contract is selected from the delivery mode that
-    actually produced this file: faithful promises a page-for-page artifact,
-    readable does not.
-    """
-    from ubt.core.engine.delivery_contract import (
-        ContractBlock,
-        ContractTextBox,
-        OverflowRecord,
-        StyleSample,
-    )
-    from ubt.render.delivered_text import delivered_text, dropped_page_furniture, is_toc_entry
-
-    # A snapshot taken before the complementary render: that render replaces
-    # the adapter's side channel with the *secondary* artifact's page geometry,
-    # and the primary contract must describe the primary file.
-    geometry = (
-        page_geometry
-        if page_geometry is not None
-        else (getattr(adapter, "last_page_geometry", None) or [])
-    )
-
-    metadata = getattr(ctx.manifest, "metadata", {}) or {}
-    actual_mode = str(metadata.get("delivery_mode", "") or "")
-    plan_meta = metadata.get("delivery_plan")
-    plan_contract = (
-        str(plan_meta.get("contract") or "")
-        if isinstance(plan_meta, dict) and plan_meta.get("contract") in ("readable", "faithful")
-        else ""
-    )
-    is_native = getattr(adapter, "engine_name", None) == "native"
-    if is_native:
-        # The native codec patches the source page in place. It can honestly
-        # satisfy either promise, so audit the contract the plan asked for --
-        # not an assumed faithful one.
-        contract = plan_contract or "faithful"
-    elif actual_mode == "readable":
-        contract = "readable"
-    elif plan_contract:
-        contract = plan_contract
-    else:
-        contract = "readable"
-
-    blocks: list[ContractBlock] = []
-    # The renderer's flow-expansion declarations, read before the blocks: a
-    # page that held the body group's size and flowed onto continuation pages
-    # shifts every later block's output page, so faithful's per-page pinning
-    # yields to the declared expansion (the page-count check carries it).
-    declared_page_expansion = any(bool(pg.get("flow_expanded")) for pg in geometry)
-    # Table grids are verified as assets, not as text blocks -- but the style
-    # sampler needs their delivered text to recognize a grid's own characters
-    # on the page and keep them out of the body-size vote (a grid is its own
-    # style group; without the corpus the replay's lmbench page had
-    # its 5.3pt grid characters win the body vote and the document read as a
-    # 4.18pt body drift).
-    selected_pages = ctx.config.get_selected_pages()
-    native_units = getattr(adapter, "last_units", None) or ()
-    native_unit_by_id = {str(u.unit_id): u for u in native_units} if is_native else {}
-    exhibit_texts: list[str] = []
-    for block in final_blocks:
-        if dropped_page_furniture(block):
+    native_units = getattr(native_adapter, "last_units", ()) or ()
+    raw_by_unit: dict[str, dict[str, str]] = {}
+    for unit in native_units:
+        uid = str(getattr(unit, "unit_id", "") or "")
+        if not uid:
             continue
-        if is_toc_entry(block) or (block.provenance and block.provenance.toc_entry):
-            continue
-        page = (
-            int(block.bbox.page)
-            if block.bbox is not None
-            else int(getattr(block.provenance, "source_page", 0) or 0)
-        )
-        if page <= 0:
-            continue
-        if selected_pages and page not in selected_pages:
-            continue
-        if block.block_type is BlockType.TABLE:
-            exhibit_text = delivered_text(block).strip()
-            if exhibit_text:
-                exhibit_texts.append(exhibit_text)
-            continue
-        if block.skip_translate:
-            continue
-        if block.block_type in (BlockType.FORMULA, BlockType.IMAGE):
-            continue
-        text = delivered_text(block).strip()
-        segments: tuple[str, ...] = ()
-        if is_native and text:
-            from ubt.core.validators.inline_tags import strip_inline_tags
+        tok_map: dict[str, str] = {}
+        for tok in getattr(unit, "tokens", ()) or ():
+            if getattr(tok, "kind", None) == "rigid":
+                tid = str(getattr(tok, "tag_id", "") or "").lower()
+                raw = str((getattr(tok, "payload", None) or {}).get("raw_text", "") or "")
+                if tid and raw:
+                    tok_map[tid] = raw
+        if tok_map:
+            raw_by_unit[uid] = tok_map
 
-            unit_meta = native_unit_by_id.get(block.id)
-            if unit_meta is not None:
-                rigid_ids = {
-                    str(getattr(tok, "tag_id", ""))
-                    for tok in getattr(unit_meta, "tokens", ())
-                    if getattr(tok, "kind", None) == "rigid" and getattr(tok, "tag_id", None)
-                }
-                if rigid_ids:
-                    rigid_pattern = re.compile(
-                        r"<\s*(?:"
-                        + "|".join(re.escape(tag_id) for tag_id in rigid_ids)
-                        + r")\s*/\s*>"
-                    )
-                    pieces = tuple(
-                        strip_inline_tags(piece).strip()
-                        for piece in rigid_pattern.split(text)
-                        if strip_inline_tags(piece).strip()
-                    )
-                    if len(pieces) >= 2:
-                        segments = pieces
-                for tok in getattr(unit_meta, "tokens", ()):
-                    if getattr(tok, "kind", None) == "rigid":
-                        raw_glyph = str(tok.payload.get("raw_text", "") or "")
-                        if raw_glyph:
-                            text = text.replace(f"<{tok.tag_id}/>", raw_glyph)
-            text = strip_inline_tags(text).strip()
-        if not text:
-            continue
-        has_multi_page_boxes = False
-        if (
-            block.provenance
-            and block.provenance.physical_boxes
-            and len(block.provenance.physical_boxes) > 1
-        ):
-            box_pages = {
-                int(pbox.get("page", 0) if isinstance(pbox, dict) else getattr(pbox, "page", 0))
-                for pbox in block.provenance.physical_boxes
-            }
-            box_pages.discard(0)
-            has_multi_page_boxes = len(box_pages) > 1
-        blocks.append(
-            ContractBlock(
-                block_id=block.id,
-                text=text,
-                page=page,
-                kind=str(block.block_type.value),
-                # A reflow may move a block to another page; a faithful page
-                # must keep it where the source put it, except when the source
-                # block itself spans multiple physical pages -- or when a
-                # declared flow expansion shifted later content onto
-                # continuation pages.
-                allow_cross_page=(
-                    (contract == "readable")
-                    or has_multi_page_boxes
-                    or declared_page_expansion
-                    # A repeated table header is a cell whose source page is the
-                    # table's first page, while the header itself is drawn on
-                    # every continuation page. Its text legitimately appears on
-                    # another page.
-                    or (
-                        is_native
-                        and getattr(
-                            getattr(native_unit_by_id.get(block.id), "role", None),
-                            "value",
-                            None,
-                        )
-                        == "table_cell"
-                    )
-                ),
-                segments=segments,
-            )
-        )
-
-    expected_pages: int | None = None
-    if contract == "faithful":
-        source = str(getattr(ctx.manifest, "source_path", "") or "")
-        if source:
-            try:
-                src_count = pdf_page_count(Path(source))
-                rendered_count = None
-                if rendered_path.exists():
-                    rendered_count = pdf_page_count(rendered_path)
-                selected_pages = ctx.config.get_selected_pages()
-                if (
-                    selected_pages
-                    and rendered_count == len(selected_pages)
-                    and src_count != rendered_count
-                ):
-                    expected_pages = len(selected_pages)
-                else:
-                    expected_pages = src_count
-                if is_native and actual_mode == "interleaved" and expected_pages is not None:
-                    expected_pages *= 2
-            except Exception as exc:  # noqa: BLE001 - a missing count is reported, not fatal
-                logger.debug("Delivery contract: source page count unavailable: %s", exc)
-
-    missing_assets: list[str] = []
-    if isinstance(delivery_contract, dict):
-        for violation in delivery_contract.get("violations", []):
-            if str(violation.get("kind", "")) == "asset_missing":
-                missing_assets.append(str(violation.get("node_id", "")))
-
-    overflow_records: list[OverflowRecord] = []
-    for page_geom in geometry:
-        if page_geom.get("fits") in (0, False):
-            overflow_records.append(
-                OverflowRecord(
-                    block_id=f"page:{page_geom.get('page_no')}",
-                    page=int(page_geom.get("page_no", 0) or 0),
-                    deficit_pt=0.0,
-                    reason="page_lock_overflow",
-                )
-            )
-
-    style_samples: list[StyleSample] = []
-    for page_geom in geometry:
-        # A page the solver flagged as a style exception (shrunk past the body
-        # group to fit an exhibit) is not a body-group vote: its recorded size
-        # is the *exception's* size, and letting it vote reads the document as
-        # a body drift that is really one page's overflow -- which the
-        # overflow records above already account for.
-        if page_geom.get("style_exception"):
-            continue
-        size = page_geom.get("delivered_size_pt")
-        if isinstance(size, (int, float)) and size > 0:
-            style_samples.append(
-                StyleSample(
-                    page=int(page_geom.get("page_no", 0) or 0),
-                    size_pt=float(size),
-                    group_id=str(page_geom.get("style_group_id") or ""),
-                )
-            )
-
-    evidence = read_delivery_evidence(
-        rendered_path,
-        contract=contract,
-        blocks=blocks,
-        exhibit_texts=exhibit_texts,
-        expected_page_count=expected_pages,
-        missing_assets=missing_assets,
-        overflow_records=overflow_records,
-        style_samples=style_samples,
-        read_geometry=not is_native,
-        declared_page_expansion=declared_page_expansion,
-    )
-    if is_native:
-        from collections import Counter
-
-        native_boxes: list[ContractTextBox] = []
-        native_samples_by_page: dict[int, Counter[float]] = {}
-        block_text_by_id = {cb.block_id: cb.text for cb in blocks}
-        bounds_by_page = dict(getattr(evidence, "page_bounds", {}) or {})
-        for unit in native_units:
-            upage = int(getattr(unit, "page_no", 0) or 0)
-            if upage <= 0 or (selected_pages and upage not in selected_pages):
-                continue
-            if not getattr(unit, "translate", True):
-                continue
-            meta = getattr(unit, "codec_meta", None) or {}
-            hint = getattr(unit, "box_hint", None) or {}
-            ubbox = meta.get("bbox")
-            usize = float(hint.get("font_size_pt", 0.0) or 0.0)
-            uid = str(getattr(unit, "unit_id", "") or "")
-            utext = block_text_by_id.get(uid) or str(getattr(unit, "source_plain", "") or "")
-            if isinstance(ubbox, (list, tuple)) and len(ubbox) == 4 and usize > 0.0 and utext:
-                x0, y0, x1, y1 = float(ubbox[0]), float(ubbox[1]), float(ubbox[2]), float(ubbox[3])
-                pbounds = bounds_by_page.get(upage)
-                if pbounds is not None:
-                    x0 = max(pbounds[0], x0)
-                    y0 = max(pbounds[1], y0)
-                    x1 = min(pbounds[2], x1)
-                    y1 = min(pbounds[3], y1)
-                if x1 > x0 and y1 > y0:
-                    native_boxes.append(
-                        ContractTextBox(
-                            page=upage,
-                            x0=x0,
-                            y0=y0,
-                            x1=x1,
-                            y1=y1,
-                            font_size_pt=round(usize, 2),
-                            block_id=uid or None,
-                            text=utext,
-                        )
-                    )
-                role_val = getattr(unit, "role", None)
-                if getattr(role_val, "value", role_val) == "paragraph":
-                    native_samples_by_page.setdefault(upage, Counter())[round(usize, 2)] += max(
-                        1, len(utext)
-                    )
-        native_samples = [
-            StyleSample(page=pno, size_pt=weights.most_common(1)[0][0])
-            for pno, weights in sorted(native_samples_by_page.items())
-            if weights
-        ]
-        evidence = dataclasses.replace(
-            evidence,
-            text_boxes=tuple(native_boxes),
-            style_samples=tuple(style_samples or native_samples),
-            style_preserves_source=True,
-        )
-
-    # The renderer declares the document body group before it draws; the reader
-    # above supplies the sizes. Keeping the two apart is what
-    # stops a drifted page from excusing itself: membership is the plan's, the
-    # number is the artifact's.
-    return evidence
-
-
-def _evaluate_delivery(
-    ctx: StageContext,
-    adapter: DocumentAdapter,
-    final_blocks: list[IRBlock],
-    rendered_path: Path,
-    delivery_contract: dict[str, Any] | None,
-    page_geometry: list[dict[str, Any]] | None = None,
-) -> Any | None:
-    """Evaluate the artifact contract and write its sidecar.
-
-    The contract reads PDF text/geometry. A Markdown/EPUB/DOCX artifact has no
-    artifact text boxes to measure; it is not a failed PDF, it is out of scope.
-    Returning ``None`` keeps the caller from turning "not a PDF" into a
-    ``page_count`` critical.
-    """
-    if rendered_path.suffix.lower() != ".pdf":
-        return None
-    from ubt.core.engine.delivery_contract import evaluate_delivery_contract
-
-    evidence = _delivery_contract_evidence(
-        ctx,
-        adapter,
-        final_blocks,
-        rendered_path,
-        delivery_contract,
-        page_geometry=page_geometry,
-    )
-    report = evaluate_delivery_contract(evidence)
-    # ``sentinel_leaked`` is written by the renderers when an unrestorable
-    # protected span was replaced with ``⟨missing⟩``. The contract deliberately
-    # does not treat the marker itself as a leak (the pipeline wrote it on
-    # purpose), but the block flag must not be a dead end: surface it as a
-    # minor (informational) finding on the delivery record. Minor findings do
-    # not change ``passed`` or ``deliverable``; the artifact still ships, and
-    # the loss is now visible to every consumer of the contract sidecar.
-    sentinel_ids = [
-        block.id for block in final_blocks if "sentinel_leaked" in (block.error_flags or [])
-    ]
-    if sentinel_ids:
-        from ubt.core.engine.delivery_contract import ContractFinding
-
-        report = dataclasses.replace(
-            report,
-            findings=report.findings
-            + (
-                ContractFinding(
-                    severity="minor",
-                    code="sentinel_leaked",
-                    message=(
-                        f"{len(sentinel_ids)} block(s) shipped ⟨missing⟩ because a protected "
-                        "span could not be restored; inspect the quality report for the "
-                        f"affected block(s), starting with {sentinel_ids[0]}"
-                    ),
-                    block_id=sentinel_ids[0],
-                ),
-            ),
-        )
-    path = sidecar_path(rendered_path, "delivery_contract.json")
-    try:
-        payload = report.to_payload()
-        plan_meta = (getattr(ctx.manifest, "metadata", {}) or {}).get("delivery_plan")
-        if isinstance(plan_meta, dict):
-            payload["delivery_plan"] = plan_meta
-        atomic_write_text(
-            path,
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-    except OSError as exc:
-        logger.warning("Could not write delivery contract sidecar: %s", exc)
-    allow_major = bool(getattr(ctx.config, "allow_major", False))
-    if not (report.passed if allow_major else report.deliverable):
-        logger.warning(
-            "Delivery contract BLOCKED for job %s: %s; see %s",
-            ctx.job_id,
-            report.summary_line(),
-            path,
-        )
-    return report
-
-
-def _artifact_payload(report: ArtifactReport) -> dict[str, Any]:
-    """Serialize an :class:`~ubt.adapters.pdf.artifact_text.ArtifactReport` for the sidecar."""
-    return {
-        "total": report.total,
-        "missing": [check.element_id for check in report.missing],
-        "summary": report.summary_line(),
-    }
-
-
-def _write_artifact_check(
-    ctx: StageContext,
-    rendered_path: Path,
-    translations: Mapping[str, str],
-    blocks: list[IRBlock],
-) -> CompanionArtifactResult:
-    """Write the artifact check beside the artifact.
-
-    Records whether the delivered artifact actually carries each text block's
-    realization. Read-only and off-loop; a failure is logged and skipped and can
-    never sink the delivery.
-    """
-    if not ctx.config.emit_attestation_shadow:
-        return CompanionArtifactResult(
-            kind="attestation",
-            status="skipped",
-            reason="config.emit_attestation_shadow is disabled",
-        )
-    if rendered_path.suffix.lower() != ".pdf":
-        return CompanionArtifactResult(
-            kind="attestation",
-            status="skipped",
-            reason=f"Attestation artifact check only applies to PDF deliverables, got {rendered_path.suffix}",
-        )
-    t0 = time.perf_counter()
-    try:
-        from ubt.core.job_options import companion_path
-
-        artifact = check_artifact(blocks, translations, rendered_path)
-        payload: dict[str, Any] = {"artifact": _artifact_payload(artifact)}
-        if not artifact.passed:
-            logger.warning(
-                "Artifact check for job %s: %s (missing: %s)",
-                ctx.job_id,
-                artifact.summary_line(),
-                ", ".join(check.element_id for check in artifact.missing[:5]),
-            )
-        path = companion_path(rendered_path, "_attestations.json")
-        atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        size_bytes = path.stat().st_size if path.exists() else None
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
-        return CompanionArtifactResult(
-            kind="attestation",
-            status="generated",
-            path=path,
-            size_bytes=size_bytes,
-            duration_ms=duration_ms,
-        )
-    except Exception as exc:  # an audit companion must never sink the delivery
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
-        logger.warning("Artifact check skipped for job %s: %s", ctx.job_id, exc, exc_info=True)
-        return CompanionArtifactResult(
-            kind="attestation",
-            status="failed",
-            duration_ms=duration_ms,
-            error=str(exc),
-        )
-
-
-def _font_delivery_for(ctx: StageContext) -> dict[str, Any] | None:
-    """The font verdict the report carries, or None when nothing was measured.
-
-    A deliverable that cannot render the target script is a delivery-level
-    fact, not a log line: ``script_available=False`` means the PDF contains
-    tofu squares. Reporting it here puts it in the quality report the console
-    and the KPI artifact already read, so the reader learns it without
-    watching stderr.
-
-    ``None`` (rather than a guessed verdict) when the probe could not answer —
-    no typst binary and no fontconfig. An unmeasured fact must not be rendered
-    as a measured one.
-    """
-    try:
-        from ubt.core.engine.document_services import resolve_font_for_render as resolve_for_render
-
-        stack = resolve_for_render(
-            ctx.manifest.target_lang,
-            font_override=getattr(ctx.config, "font_family", None),
-        )
-    except Exception as exc:  # a reporting extra must never sink the delivery
-        logger.debug("font verdict unavailable for job %s: %s", ctx.job_id, exc)
-        return None
-    if not stack.probed:
-        return None
-    return {
-        "probed": stack.probed,
-        "families": list(stack.families),
-        "unavailable": list(stack.unavailable),
-        "substituted": list(stack.substituted),
-        # False = the delivered file cannot render the target script.
-        "script_available": stack.script_available,
-    }
-
-
-async def _build_reports(
-    ctx: StageContext,
-    final_blocks: list[IRBlock],
-    *,
-    rendered_path: Path,
-    artifact_report_path: Path | None,
-    glossary_dicts: list[dict[str, Any]],
-    enforced_spans: int,
-    run_usage: Any,
-    delivery_contract: dict[str, Any] | None = None,
-    mode_advisory: dict[str, Any] | None = None,
-    companion_artifacts: list[dict[str, Any]] | None = None,
-) -> tuple[QualityReport, Path]:
-    """Write the quality report + versioned KPI artifact; return both handles.
-
-    Cost/cache must describe the JOB across every resume, not this process:
-    the pipeline persists each priced delta into job_meta.usage_totals, so
-    the ledger holds the whole bill and a book finished in N sittings stops
-    reporting only the N-th one. Provider counters reset on launch, and
-    charging a job the router's cumulative totals over-reports every job
-    after the first whenever one router serves several (the API does exactly
-    that) -- so the order is ledger, then the caller's run delta, then the
-    router's own totals, and a job with no recorded usage reports unknown,
-    never $0. Terminology metrics run over the DELIVERED blocks so the
-    report measures the artifact the reader gets; ``enforced_spans`` says
-    how much of that was mechanically corrected.
-    """
-    ledger = ctx.ledger
-    actual_job_id = ctx.job_id
-    # Ledger first (its ``usage_totals`` spans every sitting of the job), then
-    # the caller's run delta, then the router's process-wide totals — the order
-    # this docstring documents. The previous ``if run_usage is not None`` always
-    # took the run delta (``measure_run_usage`` never returns None), so a
-    # resumed job reported only its final sitting's spend.
-    usage = await asyncio.to_thread(ledger.get_job_usage, actual_job_id)
-    if not usage and run_usage:
-        usage = run_usage
-    if not usage and ctx.router is not None:
-        usage = ctx.router.usage_totals_by_model()
-    token_cost_usd: float | None = (
-        estimate_cost_usd(
-            usage,
-            base_url=ctx.config.base_url,
-            # The same attribution the budget preflight bills against (see
-            # ``pipeline._bill_session``): the OCR-channel map merged with the
-            # router's per-model fallback endpoints. Passing only the former
-            # priced a model that a local fallback endpoint actually served at
-            # the primary endpoint's cloud rate, so the report and the budget
-            # quoted two different totals for one run.
-            endpoint_map={
-                **ctx.config.remote_billing_models(),
-                **(ctx.router.billing_endpoint_map() if ctx.router is not None else {}),
-            },
-        )
-        if usage
-        else None
-    )
-    cache_hit_rate: float | None = cache_hit_rate_from_usage(usage) if usage else None
-
-    if enforced_spans:
-        logger.info(
-            "Deterministic glossary enforcement rewrote %d span(s) before the "
-            "terminology metrics were computed for job %s",
-            enforced_spans,
-            actual_job_id,
-        )
-    term_metrics = await asyncio.to_thread(evaluate_terms, final_blocks, glossary_dicts)
-    terminology_metrics = ReportTerminologyMetrics(
-        terms_expected=term_metrics.terms_expected,
-        terms_rendered=term_metrics.terms_rendered,
-        term_precision=term_metrics.term_precision,
-        fuzzy_term_precision=term_metrics.fuzzy_term_precision,
-        term_recall=term_metrics.term_recall,
-    )
-    # Document-level terminology drift, derived from the same scan (no second
-    # pass). Terms without a canonical rendering are not auditable and excluded.
-    drifts = await asyncio.to_thread(summarize_drift, term_metrics)
-    entity_consistency = ReportEntityConsistency(
-        terms_audited=term_metrics.terms_expected,
-        terms_with_drift=len(drifts),
-        top_drifted=[
-            {
-                "source": d.source,
-                "expected": d.expected,
-                "occurrences": d.occurrences,
-                "exact_renderings": d.exact_renderings,
-                "drift_rate": d.drift_rate,
-                "block_ids": list(d.drifted_block_ids[:20]),
-            }
-            for d in drifts[:20]
-        ],
-    )
-
-    report = await asyncio.to_thread(
-        build_quality_report,
-        ledger=ledger,
-        job_id=actual_job_id,
-        manifest=ctx.manifest,
-        output_path=rendered_path,
-        token_cost_usd=token_cost_usd,
-        cache_hit_rate=cache_hit_rate,
-        terminology_metrics=terminology_metrics,
-        entity_consistency=entity_consistency,
-        enforced_spans=enforced_spans,
-        delivery_contract=delivery_contract,
-        mode_advisory=mode_advisory,
-        font_delivery=_font_delivery_for(ctx),
-        companion_artifacts=companion_artifacts,
-    )
-    if report.summary.failed_blocks > 0:
-        logger.warning(
-            "Job %s completed with %d FAILED block(s) (pass_rate=%.3f); see %s",
-            actual_job_id,
-            report.summary.failed_blocks,
-            report.summary.pass_rate,
-            rendered_path,
-        )
-    report_path = sidecar_path(rendered_path, "quality_report.json")
-    await asyncio.to_thread(save_quality_report, report, report_path)
-
-    # Versioned KPI artifact: a pure derivation from the quality report plus
-    # the optional visual report (no LLM, no text re-scan). Checked-in golden
-    # baselines and the CI regression gate compare against it.
-    artifact_report: dict[str, Any] | None = None
-    if artifact_report_path is not None and artifact_report_path.exists():
-        try:
-            artifact_report = json.loads(artifact_report_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning(
-                "KPI collection ignoring unreadable visual report %s: %s",
-                artifact_report_path,
-                exc,
-            )
-    metrics_path = sidecar_path(rendered_path, "metrics.json")
-    kpis = await asyncio.to_thread(collect_kpis, report, artifact_report)
-    await asyncio.to_thread(save_metrics_report, kpis, metrics_path)
-    return report, report_path
+    prepared: list[IRBlock] = []
+    for blk in blocks:
+        raw_map = raw_by_unit.get(blk.id)
+        updates: dict[str, Any] = {}
+        src = blk.source_text or ""
+        if "<" in src:
+            clean_src = resolve_inline_tags_for_reflow(src, raw_map)
+            if clean_src != src:
+                updates["source_text"] = clean_src
+        if blk.draft_text and "<" in blk.draft_text:
+            clean_draft = resolve_inline_tags_for_reflow(blk.draft_text, raw_map)
+            if clean_draft != blk.draft_text:
+                updates["draft_text"] = clean_draft
+        if blk.target_text and "<" in blk.target_text:
+            clean_tgt = resolve_inline_tags_for_reflow(blk.target_text, raw_map)
+            if clean_tgt != blk.target_text:
+                updates["target_text"] = clean_tgt
+        prepared.append(blk.model_copy(update=updates) if updates else blk)
+    return prepared
 
 
 async def run_export_stage(
@@ -1983,13 +499,8 @@ async def run_export_stage(
     """
     ledger = ctx.ledger
     actual_job_id = ctx.job_id
-    # NOTE: the run's usage snapshot is deliberately taken at the very end of
-    # this stage, not here. The post-render artifact gate below makes its own paid
-    # VLM calls; capturing before it left that spend out of the quality report,
-    # so the report disagreed with the bill the job carries. The pipeline lets
-    # the final event through the budget check on purpose ("so the artifact and
-    # report still say what the job spent") — which only holds if the report is
-    # built from the post-gate figure.
+    # NOTE: the run's usage snapshot is taken after the export stages so the
+    # quality report reflects every billed call (including overflow compaction).
     manifest = ctx.manifest
     adapter = ctx.require_adapter()
     output_path = ctx.output_path
@@ -2150,7 +661,14 @@ async def run_export_stage(
         from ubt.core.engine.overflow_compactor import compact_overflowing_units
 
         units_by_id = {u.unit_id: u for u in native_units}
-        tgt_map = {b.id: (b.target_text or "") for b in final_blocks if b.target_text}
+        tgt_map = {
+            b.id: b.target_text
+            for b in final_blocks
+            if b.target_text
+            and not b.skip_translate
+            and b.status not in (BlockStatus.FAILED, BlockStatus.BLOCKED_HUMAN)
+            and "<mark" not in b.target_text
+        }
         compaction = await compact_overflowing_units(
             overflows=native_overflows,
             units_by_id=units_by_id,
@@ -2385,10 +903,7 @@ async def run_export_stage(
             if hasattr(ctx.manifest, "metadata") and isinstance(ctx.manifest.metadata, dict):
                 ctx.manifest.metadata["companion_artifacts"] = companion_summary_dict
 
-    # Persist this run's spend to the ledger before the report reads it: the
-    # artifact gate and complementary render above made paid calls after the last
-    # progress event, so the ledger's lifetime figure would otherwise omit them
-    # (the terminal event is the one the budget check exempts).
+    # Persist this run's spend to the ledger before the report reads it.
     await ctx.bill_run_usage()
     run_usage = ctx.measure_run_usage()
     report, report_path = await _build_reports(
@@ -2437,81 +952,140 @@ async def run_export_stage(
         else:
             can_degrade = bool(getattr(ctx.config, "allow_degrade", False))
 
-        if can_degrade and getattr(delivery_report, "contract", "") == "faithful":
+        # Only degrade a native 1:1 artifact to reflow when there is a *critical*
+        # contract failure (``not delivery_report.passed``: missing/clipped/overlapping
+        # text, page-count mismatch, or leaked machinery). Major-only overflow
+        # advisories must never throw away an intact 1:1 PDF with all figures and
+        # equations to substitute a figure-less reflow copy.
+        if (
+            can_degrade
+            and not delivery_report.passed
+            and getattr(delivery_report, "contract", "") == "faithful"
+            and getattr(adapter, "engine_name", None) == "native"
+        ):
             logger.warning(
-                "Export contract failed for faithful mode (%s); degrading to reflow reading copy as permitted by policy",
+                "Export contract failed critically for faithful mode (%s); degrading to reflow reading copy as permitted by policy",
                 delivery_report.summary_line(),
             )
-            # Check if a reflow companion artifact was already successfully generated
-            reflow_companion = rendered_path.with_name(
-                f"{rendered_path.stem}_reflow{rendered_path.suffix}"
+            from ubt.core.engine.adapter_runtime import (
+                adapter_runtime_config,
+                apply_runtime_config,
             )
-            if reflow_companion.exists() and reflow_companion.stat().st_size > 0:
-                import shutil
+            from ubt.core.engine.document_services import resolve_adapter
 
-                shutil.copy2(reflow_companion, rendered_path)
-            else:
-                await _render_adapter_output(
-                    adapter=adapter,
+            reflow_adapter: DocumentAdapter | None = None
+            reflow_blocks = _prepare_blocks_for_reflow(final_blocks, adapter)
+            candidate_path = rendered_path.with_name(
+                f".{rendered_path.stem}.reflow_candidate{rendered_path.suffix}"
+            )
+            degraded_rendered = False
+            try:
+                reflow_adapter = resolve_adapter(ctx.input_path, pdf_engine="docling")
+                apply_runtime_config(reflow_adapter, adapter_runtime_config(ctx.config))
+                degraded_out = await _render_adapter_output(
+                    adapter=reflow_adapter,
                     manifest=ctx.manifest,
-                    blocks=final_blocks,
+                    blocks=reflow_blocks,
                     target_lang=ctx.target_lang,
-                    output_path=rendered_path,
-                    bilingual_mode=render.bilingual_mode,
+                    output_path=candidate_path,
+                    bilingual_mode=effective_bilingual_mode,
                     render_plan=render,
                 )
+                if degraded_out.exists() and degraded_out != rendered_path:
+                    degraded_out.replace(rendered_path)
+                degraded_rendered = True
+            except Exception as degrade_exc:
+                logger.warning(
+                    "Faithful->readable degradation to docling reflow failed for job %s: %s",
+                    actual_job_id,
+                    degrade_exc,
+                )
+            finally:
+                with contextlib.suppress(OSError):
+                    if candidate_path.exists():
+                        candidate_path.unlink()
+                if reflow_adapter is not None:
+                    close_fn = getattr(reflow_adapter, "close", None)
+                    if callable(close_fn):
+                        with contextlib.suppress(Exception):
+                            await asyncio.to_thread(close_fn)
 
-            if hasattr(ctx.manifest, "metadata") and isinstance(ctx.manifest.metadata, dict):
-                ctx.manifest.metadata["delivery_mode"] = "readable"
-                if "delivery_plan" in ctx.manifest.metadata and isinstance(
-                    ctx.manifest.metadata["delivery_plan"], dict
-                ):
-                    ctx.manifest.metadata["delivery_plan"]["contract"] = "readable"
-                    ctx.manifest.metadata["delivery_plan"]["effective_mode"] = "readable"
-                    ctx.manifest.metadata["delivery_plan"]["degraded"] = True
-                    reasons = list(ctx.manifest.metadata["delivery_plan"].get("reasons", []))
-                    reasons.append(
-                        f"faithful delivery contract failed ({delivery_report.summary_line()}); degraded to reflow reading copy"
-                    )
-                    ctx.manifest.metadata["delivery_plan"]["reasons"] = reasons
+            if degraded_rendered:
+                if hasattr(ctx.manifest, "metadata") and isinstance(ctx.manifest.metadata, dict):
+                    ctx.manifest.metadata["delivery_mode"] = "readable"
+                    ctx.manifest.metadata["delivery_mode_effective"] = "readable"
+                    if "delivery_plan" in ctx.manifest.metadata and isinstance(
+                        ctx.manifest.metadata["delivery_plan"], dict
+                    ):
+                        ctx.manifest.metadata["delivery_plan"]["contract"] = "readable"
+                        ctx.manifest.metadata["delivery_plan"]["effective_mode"] = "readable"
+                        ctx.manifest.metadata["delivery_plan"]["degraded"] = True
+                        reasons = list(ctx.manifest.metadata["delivery_plan"].get("reasons", []))
+                        reasons.append(
+                            f"faithful delivery contract failed ({delivery_report.summary_line()}); degraded to reflow reading copy"
+                        )
+                        ctx.manifest.metadata["delivery_plan"]["reasons"] = reasons
+                        await asyncio.to_thread(
+                            ledger.set_job_metadata_value,
+                            actual_job_id,
+                            "delivery_plan",
+                            ctx.manifest.metadata["delivery_plan"],
+                        )
 
-            await asyncio.to_thread(
-                ledger.set_job_metadata_value,
-                actual_job_id,
-                "delivery_mode",
-                "readable",
-            )
+                await asyncio.to_thread(
+                    ledger.set_job_metadata_value,
+                    actual_job_id,
+                    "delivery_mode",
+                    "readable",
+                )
+                await asyncio.to_thread(
+                    ledger.set_job_metadata_value,
+                    actual_job_id,
+                    "delivery_mode_effective",
+                    "readable",
+                )
 
-            # Re-evaluate delivery under the degraded readable contract.
-            # The primary geometry snapshot travels with it: reading the
-            # adapter here would return whatever the last companion render left
-            # behind, which is the secondary artifact's measurement at best.
-            delivery_report = await asyncio.to_thread(
-                _evaluate_delivery,
-                ctx,
-                adapter,
-                final_blocks,
-                rendered_path,
-                delivery_contract,
-                page_geometry,
-            )
-            contract_ok = (
-                (delivery_report.passed if allow_major else delivery_report.deliverable)
-                if delivery_report is not None
-                else True
-            )
-            report, report_path = await _build_reports(
-                ctx,
-                final_blocks,
-                rendered_path=rendered_path,
-                artifact_report_path=artifact_report_path,
-                glossary_dicts=glossary_dicts,
-                enforced_spans=enforced_spans,
-                run_usage=run_usage,
-                delivery_contract=delivery_contract,
-                mode_advisory=render.bilingual_advisory,
-                companion_artifacts=companion_summary_dict["results"],
-            )
+                eval_adapter = reflow_adapter or adapter
+                rendered_path, artifact_report_path, gate = await _run_artifact_gate(
+                    ctx,
+                    eval_adapter,
+                    reflow_blocks,
+                    rendered_path,
+                    render,
+                    claims_finality=owning_run,
+                )
+                delivery_contract = _deliver_contract(
+                    ctx,
+                    reflow_blocks,
+                    rendered_path,
+                    get_last_render_reconstructions(eval_adapter),
+                ).model_dump(mode="json")
+                delivery_report = await asyncio.to_thread(
+                    _evaluate_delivery,
+                    ctx,
+                    eval_adapter,
+                    reflow_blocks,
+                    rendered_path,
+                    delivery_contract,
+                    [],
+                )
+                contract_ok = (
+                    (delivery_report.passed if allow_major else delivery_report.deliverable)
+                    if delivery_report is not None
+                    else True
+                )
+                report, report_path = await _build_reports(
+                    ctx,
+                    reflow_blocks,
+                    rendered_path=rendered_path,
+                    artifact_report_path=artifact_report_path,
+                    glossary_dicts=glossary_dicts,
+                    enforced_spans=enforced_spans,
+                    run_usage=run_usage,
+                    delivery_contract=delivery_contract,
+                    mode_advisory=render.bilingual_advisory,
+                    companion_artifacts=companion_summary_dict["results"],
+                )
 
         if not contract_ok:
             # The report is optional in this scope; calling through it directly
@@ -2634,3 +1208,40 @@ async def run_export_stage(
     )
 
     yield event
+
+
+__all__ = [
+    "RENDER_QUALITY_FLAGS",
+    "_apply_render_skip_ledger_pass",
+    "_artifact_payload",
+    "_build_reports",
+    "_check_completion_ratio",
+    "_check_needs_human_gate",
+    "_deliver_contract",
+    "_delivery_contract_evidence",
+    "_delivery_translations",
+    "_drop_stale_run_reports",
+    "_enforce_blocking_gate",
+    "_evaluate_delivery",
+    "_faithful_expected_pages",
+    "_font_delivery_for",
+    "_force_stale_blocks_terminal",
+    "_is_faithful_delivery",
+    "_is_mono",
+    "_partition_render_skip_counts",
+    "_persist_crashed_gate_report",
+    "_render_adapter_output",
+    "_render_complementary_artifact",
+    "_run_artifact_gate",
+    "_terminology_and_structure_pass",
+    "_write_artifact_check",
+    "_write_epub_view",
+    "_write_html_view",
+    "_write_spill_appendix",
+    "_write_table_appendix",
+    "_write_xliff_companion",
+    "apply_render_quality_flags",
+    "apply_render_skip_flags",
+    "check_artifact",
+    "run_export_stage",
+]

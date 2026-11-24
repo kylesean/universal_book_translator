@@ -20,6 +20,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pikepdf
 
@@ -40,15 +41,44 @@ def _fmt(v: float) -> str:
     return "0" if s in {"", "-0"} else s
 
 
+def _blank_tj_slices(
+    arr: pikepdf.Array,
+    slices: Sequence[tuple[int, int, float, float, float]],
+) -> pikepdf.ContentStreamInstruction:
+    """Replace only selected ``[start, end)`` sub-slices of a ``TJ`` array with exact advances."""
+    items = list(arr)
+    ordered = sorted(slices, key=lambda s: (s[0], s[1]))
+    new_items: list[Any] = []
+    pos = 0
+    for start, end, seg_adv, fs, tz in ordered:
+        s = max(pos, start)
+        e = min(len(items), end)
+        if s >= e:
+            continue
+        if s > pos:
+            new_items.extend(items[pos:s])
+        denom = fs * (tz / 100.0)
+        if abs(denom) > 1e-6 and abs(seg_adv) > 1e-6:
+            new_items.append(-seg_adv / denom * 1000.0)
+        pos = e
+    if pos < len(items):
+        new_items.extend(items[pos:])
+    if not new_items:
+        return pikepdf.ContentStreamInstruction([pikepdf.String(b"")], pikepdf.Operator("Tj"))
+    return pikepdf.ContentStreamInstruction([pikepdf.Array(new_items)], pikepdf.Operator("TJ"))
+
+
 def _blank_stream_instructions(
     page: pikepdf.Page,
     erase_op_indices: set[int],
     erase_rule_op_indices: set[int],
     op_advances: dict[int, tuple[float, float, float]],  # op_index -> (adv_text, font_size, tz)
+    erase_tj_slices: dict[int, list[tuple[int, int, float, float, float]]] | None = None,
 ) -> bytes:
     """Blank selected show/rule instructions in-place while preserving exact Tm advance."""
     instructions = pikepdf.parse_content_stream(page)
     out: list[pikepdf.ContentStreamInstruction | pikepdf.ContentStreamInlineImage] = []
+    tj_map = erase_tj_slices or {}
 
     for idx, inst in enumerate(instructions):
         op = str(inst.operator)
@@ -94,6 +124,13 @@ def _blank_stream_instructions(
                         pikepdf.Operator("Tj"),
                     )
                 )
+        elif (
+            idx in tj_map
+            and op == "TJ"
+            and inst.operands
+            and isinstance(inst.operands[0], pikepdf.Array)
+        ):
+            out.append(_blank_tj_slices(inst.operands[0], tj_map[idx]))
         elif idx in erase_rule_op_indices and op in _PAINT_PATH_OPS:
             # End path without stroking/filling so graphics state stays balanced.
             out.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("n")))
@@ -217,6 +254,7 @@ class _PagePatchPlan:
     page_index: int  # 0-based index in target PDF
     analysis: PageStreamAnalysis
     erase_op_indices: set[int]
+    erase_tj_slices: dict[int, list[tuple[int, int, float, float, float]]]
     erase_rule_op_indices: set[int]
     op_advances: dict[int, tuple[float, float, float]]
     paragraphs: list[TypesetParagraph]
@@ -334,6 +372,7 @@ def apply_pdf_patches(
                 continue
 
             erase_ops: set[int] = set()
+            erase_tj_slices: dict[int, list[tuple[int, int, float, float, float]]] = {}
             erase_rules: set[int] = set()
             page_xobjs: dict[str, pikepdf.Stream] = {}
             typeset_paras: list[TypesetParagraph] = []
@@ -380,6 +419,8 @@ def apply_pdf_patches(
                 )
                 typeset_paras.append(para)
                 erase_ops.update(block.erase_op_indices)
+                for op_idx, s_idx, e_idx, s_adv, s_fs, s_tz in block.erase_tj_slices:
+                    erase_tj_slices.setdefault(op_idx, []).append((s_idx, e_idx, s_adv, s_fs, s_tz))
                 erase_rules.update(block.erase_rule_op_indices)
                 patched_units += 1
                 if para.overflow is not None:
@@ -391,6 +432,7 @@ def apply_pdf_patches(
                         page_index=pno - 1,
                         analysis=analysis,
                         erase_op_indices=erase_ops,
+                        erase_tj_slices=erase_tj_slices,
                         erase_rule_op_indices=erase_rules,
                         op_advances=_build_op_advances(analysis),
                         paragraphs=typeset_paras,
@@ -415,6 +457,7 @@ def apply_pdf_patches(
                 plan.erase_op_indices,
                 plan.erase_rule_op_indices,
                 plan.op_advances,
+                erase_tj_slices=plan.erase_tj_slices,
             )
             overlay = _emit_overlay_stream(
                 plan.paragraphs,
@@ -522,6 +565,7 @@ def render_single_page_png(
 
         page = one_pdf.pages[0]
         erase_ops: set[int] = set()
+        erase_tj_slices: dict[int, list[tuple[int, int, float, float, float]]] = {}
         erase_rules: set[int] = set()
         page_xobjs: dict[str, pikepdf.Stream] = {}
         typeset_paras: list[TypesetParagraph] = []
@@ -564,12 +608,18 @@ def render_single_page_png(
             )
             typeset_paras.append(para)
             erase_ops.update(block.erase_op_indices)
+            for op_idx, s_idx, e_idx, s_adv, s_fs, s_tz in block.erase_tj_slices:
+                erase_tj_slices.setdefault(op_idx, []).append((s_idx, e_idx, s_adv, s_fs, s_tz))
             erase_rules.update(block.erase_rule_op_indices)
 
         if typeset_paras:
             embedded_fonts = font_engine.embed_all_used(one_pdf)
             blanked = _blank_stream_instructions(
-                page, erase_ops, erase_rules, _build_op_advances(analysis)
+                page,
+                erase_ops,
+                erase_rules,
+                _build_op_advances(analysis),
+                erase_tj_slices=erase_tj_slices,
             )
             overlay = _emit_overlay_stream(
                 typeset_paras, embedded_fonts, analysis.logical_to_stream

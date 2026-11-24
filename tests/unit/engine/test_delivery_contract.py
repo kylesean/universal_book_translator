@@ -463,6 +463,22 @@ def test_a_stray_markup_tag_in_the_artifact_is_critical() -> None:
     assert "</span>" in finding.occurrences[0]
 
 
+def test_leaked_native_inline_anchor_tags_are_critical() -> None:
+    """Native codec anchors (<f1/>, <c1>...</c1>) printed verbatim in a PDF must block delivery."""
+    report = evaluate_delivery_contract(
+        _evidence(
+            blocks=(_block("b1", "平均单词熵与链接。"),),
+            page_texts=("平均单词熵（<f1/>）与链接 <c1>https://example.com</c1>。",),
+        )
+    )
+    assert not report.passed
+    assert not report.deliverable
+    finding = next(f for f in report.findings if f.code == "placeholder_leak")
+    assert finding.severity == "critical"
+    assert len(finding.occurrences) == 3
+    assert "<f1/>" in finding.occurrences[0]
+
+
 def test_a_clean_artifact_carries_no_occurrence_list() -> None:
     report = evaluate_delivery_contract(
         _evidence(blocks=(_block("b1", "完整译文。"),), page_texts=("完整译文。",))

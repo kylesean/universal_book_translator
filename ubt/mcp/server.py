@@ -73,6 +73,7 @@ from ubt import __version__
 from ubt.adapters import get_adapter_for_path
 from ubt.api.manager import JobManager
 from ubt.api.routes.shared import ledger_output_path_claimant, output_path_claimant
+from ubt.app.bootstrap import install_services as _install_services
 from ubt.app.spec import JobSpec
 from ubt.core.config import UBTConfig, credential_required, has_real_credential
 from ubt.core.config import parse_page_ranges as parse_page_ranges
@@ -143,6 +144,10 @@ mcp = MCPServer(
     ),
     version=__version__,
 )
+
+# Register adapter-backed core services even when the server is imported as an
+# ASGI/FastMCP target (`mcp run ubt/mcp/server.py:mcp`) instead of via `main()`.
+_install_services()
 
 
 def _mcp_error_boundary(func: Any) -> Any:

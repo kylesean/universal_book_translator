@@ -115,6 +115,8 @@ _MATH_DISPLAY_PATTERN = re.compile(r"\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]")
 _MATH_MACROS_PATTERN = re.compile(
     r"\\(?:frac|sum|int|prod|partial|sqrt|bmatrix|pmatrix|alpha|beta|gamma|theta|lambda|sigma|nabla|infty|approx|equiv|leq|geq|times|cdot|in|subset|forall|exists|mathbb|mathcal)\b"
 )
+_INLINE_FORMULA_TAG_PATTERN = re.compile(r"<f\d+/?\s*>|⟦MATH_MASK_[^⟧]+⟧")
+_INLINE_CODE_MASK_PATTERN = re.compile(r"⟦CODE_MASK_[^⟧]+⟧")
 _CODE_KEYWORDS_PATTERN = re.compile(
     r"\b(?:class|def|fn|function|return|import|export|struct|impl|async|await|var|let|const|int|float|char|bool|try|catch|except|finally|public|private|interface|for|while|if|else|match|switch)\b"
 )
@@ -175,12 +177,13 @@ class BlockComplexityClassifier:
         else:
             score = 0.20
 
-        # 2. Mathematical features
+        # 2. Mathematical features (LaTeX + codec inline anchors / masked tokens)
         inline_matches = _MATH_INLINE_PATTERN.findall(source_text)
         display_matches = _MATH_DISPLAY_PATTERN.findall(source_text)
         macro_matches = _MATH_MACROS_PATTERN.findall(source_text)
+        formula_tag_matches = _INLINE_FORMULA_TAG_PATTERN.findall(source_text)
 
-        math_inline_cnt = len(inline_matches)
+        math_inline_cnt = len(inline_matches) + len(formula_tag_matches)
         math_display_cnt = len(display_matches)
         math_macro_cnt = len(macro_matches)
 
@@ -197,7 +200,9 @@ class BlockComplexityClassifier:
         # 3. Code features
         lines = [line for line in source_text.splitlines() if line.strip()]
         code_line_cnt = len(lines)
-        code_kw_cnt = len(_CODE_KEYWORDS_PATTERN.findall(source_text))
+        code_kw_cnt = len(_CODE_KEYWORDS_PATTERN.findall(source_text)) + len(
+            _INLINE_CODE_MASK_PATTERN.findall(source_text)
+        )
         code_op_cnt = len(_CODE_OPERATORS_PATTERN.findall(source_text))
         code_syntax_score = min(1.0, (code_kw_cnt * 0.08) + (code_op_cnt * 0.03))
 
@@ -228,6 +233,17 @@ class BlockComplexityClassifier:
         if word_cnt > 35:
             depth_score += 0.05
         score += depth_score
+
+        # 6. Fixed-box container tightness (concise typesetting requires higher model precision)
+        style_obj = getattr(block, "style", None) or (
+            block.get("style") if isinstance(block, dict) else None
+        )
+        char_budget = getattr(style_obj, "char_budget", None) or (
+            style_obj.get("char_budget") if isinstance(style_obj, dict) else None
+        )
+        if char_budget is not None and int(char_budget) > 0:
+            score += 0.15
+            reasons.append("Fixed-box length constraint")
 
         # Short paragraph discount
         if (

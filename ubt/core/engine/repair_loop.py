@@ -44,6 +44,14 @@ def _assign_target_text(block: IRBlock, text: str) -> str:
     draft path would have removed could re-enter the delivered text.
     """
     clean_text, target_runs = parse_emphasis(text)
+    if not block.skip_translate and "<" in block.source_text:
+        from ubt.core.validators.inline_tags import extract_declared_tags, validate_inline_tags
+
+        rigid_tags, pair_tags = extract_declared_tags(block.source_text)
+        if rigid_tags or pair_tags:
+            tag_res = validate_inline_tags(block.source_text, clean_text)
+            if tag_res.valid:
+                clean_text = tag_res.normalized_text
     if target_runs or block.style is not None:
         block.style = (block.style or StyleMeta()).model_copy(update={"target_runs": target_runs})
     block.target_text = clean_text

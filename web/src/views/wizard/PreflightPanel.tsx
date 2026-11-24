@@ -107,6 +107,9 @@ export interface PreflightPanelProps {
   assessStale: boolean
   canSubmit: boolean
   deliveryMode: 'auto' | 'readable' | 'faithful'
+  /** Server-resolved delivery contract verdict from `assess` (when available). */
+  plannedContract?: string | null
+  plannedProvisional?: boolean
   /** Pre-flight verdict: the selected 1:1 contract cannot hold for this file. */
   faithfulInfeasible?: boolean
   /** What will happen instead, when ``faithfulInfeasible`` is true. */
@@ -129,6 +132,8 @@ export function PreflightPanel({
   assessStale,
   canSubmit,
   deliveryMode,
+  plannedContract = null,
+  plannedProvisional = false,
   deliveryOutcomeNote,
   faithfulInfeasible = false,
   isReassessing,
@@ -145,6 +150,18 @@ export function PreflightPanel({
 }: PreflightPanelProps) {
   const { t } = useI18n()
   const cost = assessment?.cost.total_cost_usd
+  const localizedPlannedContract =
+    plannedContract === 'faithful'
+      ? t.wizard.deliveryModeFaithful
+      : plannedContract === 'readable'
+        ? t.wizard.deliveryModeReadable
+        : plannedContract
+  const showDifferentPlannedNote =
+    Boolean(localizedPlannedContract) &&
+    deliveryMode !== 'auto' &&
+    plannedContract !== deliveryMode
+  const showHighMathLocalHint =
+    assessment?.document.math_density === 'high' && cost === 0
   const deliveryLabel =
     deliveryMode === 'faithful'
       ? faithfulInfeasible
@@ -152,7 +169,11 @@ export function PreflightPanel({
         : t.wizard.deliveryModeFaithful
       : deliveryMode === 'readable'
         ? t.wizard.deliveryModeReadable
-        : t.wizard.deliveryModeAuto
+        : plannedContract === 'faithful'
+          ? `${t.wizard.deliveryModeAuto} → ${t.wizard.deliveryModeFaithful}`
+          : plannedContract === 'readable'
+            ? `${t.wizard.deliveryModeAuto} → ${t.wizard.deliveryModeReadable}`
+            : t.wizard.deliveryModeAuto
 
   return (
     <aside className="min-w-0 self-start overflow-hidden rounded-2xl border border-border bg-card xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
@@ -311,9 +332,24 @@ export function PreflightPanel({
                   }
                 />
               </dl>
+              {showDifferentPlannedNote && localizedPlannedContract ? (
+                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                  {t.wizard.deliveryPlanVerdict.replace('{contract}', localizedPlannedContract)}
+                  {plannedProvisional ? ` · ${t.wizard.deliveryPlanProvisional}` : ''}
+                </p>
+              ) : plannedProvisional && plannedContract ? (
+                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                  {t.wizard.deliveryPlanProvisional}
+                </p>
+              ) : null}
               {faithfulInfeasible && deliveryOutcomeNote ? (
                 <p className="mt-2 text-xs leading-relaxed text-amber-700 dark:text-amber-400">
                   {deliveryOutcomeNote}
+                </p>
+              ) : null}
+              {showHighMathLocalHint ? (
+                <p className="mt-2 rounded-md bg-muted/50 px-2.5 py-2 text-xs leading-relaxed text-muted-foreground">
+                  {t.wizard.highMathModelHint}
                 </p>
               ) : null}
             </section>

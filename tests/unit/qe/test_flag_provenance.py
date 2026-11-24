@@ -344,6 +344,7 @@ LEGACY_WRITERS: frozenset[str] = frozenset(
         "ubt/core/qe/added_content.py",
         "ubt/core/qe/omission.py",
         "ubt/core/engine/stages/export.py",
+        "ubt/core/engine/stages/export_gates.py",
         "ubt/core/engine/stages/quality_gate.py",
         "ubt/core/engine/stages/consistency.py",
         "ubt/core/engine/stages/triage.py",
