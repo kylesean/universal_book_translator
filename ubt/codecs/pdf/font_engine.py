@@ -23,7 +23,18 @@ from typing import Any
 import pikepdf
 import uharfbuzz as hb
 from fontTools import subset
-from fontTools.ttLib import TTFont
+from fontTools.ttLib import TTFont, TTLibFileIsCollectionError
+
+
+def _open_ttfont(source: Any, *, lazy: bool) -> TTFont:
+    """Open a standalone TTF/OTF or face 0 of a TTC/OTC font collection."""
+    try:
+        return TTFont(source, lazy=lazy)
+    except TTLibFileIsCollectionError:
+        if hasattr(source, "seek"):
+            source.seek(0)
+        return TTFont(source, lazy=lazy, fontNumber=0)
+
 
 logging.getLogger("fontTools.subset").setLevel(logging.WARNING)
 
@@ -102,7 +113,7 @@ class _LoadedFace:
         self.raw_bytes = path.read_bytes()
         self.hb_face = hb.Face(self.raw_bytes)
         self.hb_font = hb.Font(self.hb_face)
-        tt = TTFont(io.BytesIO(self.raw_bytes), lazy=True)
+        tt = _open_ttfont(io.BytesIO(self.raw_bytes), lazy=True)
         try:
             self.cmap: dict[int, str] = dict(tt.getBestCmap() or {})
             self.upem = float(tt["head"].unitsPerEm)
@@ -479,7 +490,7 @@ class FontEngine:
         chars: set[str],
         resource_name: str,
     ) -> EmbeddedFont:
-        font = TTFont(str(font_path), lazy=False)
+        font = _open_ttfont(str(font_path), lazy=False)
         try:
             cmap = font.getBestCmap() or {}
             supported_cps = sorted({ord(ch) for ch in chars if ord(ch) in cmap})

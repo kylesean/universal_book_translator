@@ -245,7 +245,11 @@ jobs:
 
           result = DocumentConverter().convert(pdf)
           assert len(result.document.pages) == 1
-          print("docling models cached and conversion verified")
+
+          from ubt.codecs.pdf.codec import NativePdfCodec
+
+          NativePdfCodec().extract(pdf)
+          print("docling + rapid_layout models cached and conversion verified")
           PY
 
       - name: Scan/readable PDF tier (docling)
