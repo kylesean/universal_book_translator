@@ -22,8 +22,8 @@
 
 ## 核心优势与特性
 
-- **双交付契约 + 三代 PDF 引擎**：
-  - **原生原位引擎（faithful / born-digital PDF）**：直接擦除源页文字指令，把译文按实测字宽、字形与避头尾规则写回原坐标系；矢量图、公式、表格与页码位置原样保留，输出仍是可检索、可复制的文字层；
+- **双交付契约 + 双 PDF 引擎路径**：
+  - **原生原位引擎（faithful / born-digital PDF）**：直接按指令/表格列切片擦除源页原文，把译文按 HarfBuzz 实测字宽、OS/2 排版度量、单行同栏安全右借与避头尾规则写回原坐标系；行内公式以 Form XObject 锚点（`<fN/>`）原样嵌入，矢量图、表格与页码位置保持不变，支持 `.ttf`/`.otf`/`.ttc` 字体集合，输出仍是可检索、可复制的文字层；
   - **`readable`（Typst 重排）**：依据语义 IR 由 Typst 重新编排，统一正文字号、自适应表格、原生数学公式；`auto` 仅在扫描件、字体损坏或非 PDF 输入上选择 `docling`，干净的原生 PDF 默认留在原位引擎；
   - **`faithful`（版面保真）**：原位引擎天然满足页数、分页与图/公式/表位置不变；`faithful` 请求在不可行时会在消耗模型调用前拒绝，`--allow-degrade` 可改走 `readable`；
   - 路由不是拍脑袋：PDF 结构普查（分栏、公式、扫描、字体损伤）与页面级探针共同决定契约；探针测不出来时如实标注 `eligibility.provisional`，而不是当成通过。
@@ -57,10 +57,10 @@ uv sync --extra dev                            # 开发与基础运行环境
 uv sync --all-extras                           # 安装所有扩展（dev, pdf, ocr, academic, mcp 等）
 
 # 或使用标准 pip 安装：
-pip install .                                  # 基础安装（含 Docling 语义解析）
+pip install .                                  # 基础安装（含原生原位引擎与 Docling 语义解析）
 pip install '.[mcp]'                           # 安装 MCP Server 依赖
 pip install '.[ocr]'                           # 安装图片扫描件 OCR 依赖
-pip install '.[all]'                           # 全功能完整安装
+pip install '.[mcp,ocr]'                       # 同时安装 MCP 与 OCR 扩展
 ```
 
 > **外部排版编译器 Typst**：PDF 渲染需要系统 `PATH` 中具备 `typst`（推荐 v0.15.1）。
@@ -105,9 +105,9 @@ docker run -d \
 
 | 姿势 | 进入方式 | 网页填写 LLM Key | 网页编辑 Provider | 启动 / 访问门槛 |
 |------|----------|------------------|-------------------|------------------|
-| **本机**（个人默认） | `ubt console`，绑定 `127.0.0.1` |  可直接填写 |  完全可编辑（含已存钥匙的块） | 免鉴权：`ubt console` 自动带上 `UBT_ALLOW_NO_AUTH`，无需任何令牌 |
-| **局域网 / 暴露** | 绑定 `0.0.0.0`、Docker 映射宿主端口 |  拒绝，请写入 `ubt.toml` 或 `UBT_LLM_API_KEY` |  可新建/编辑**无钥匙**的 provider 块； 已存钥匙的块不可跨机改写端点 | 必须配好 `UBT_API_KEY` 与 `UBT_ALLOWED_DIRS`（缺任一，非回环请求一律 403），并用 `UBT_TRUSTED_HOSTS` 登记对外主机名 |
-| **严格** | `UBT_STRICT_AUTH=1` 或 `UBT_ENV=production` |  即使本机也拒绝 | 同暴露模式 | 覆盖 `UBT_ALLOW_NO_AUTH`，必须设置 `UBT_API_KEY`；开启鉴权后 `/docs` 与 `/openapi.json` 一并关闭 |
+| **本机**（个人默认） | `ubt console`，绑定 `127.0.0.1` | 允许直接填写 | 完全可编辑（含已存钥匙的块） | 免鉴权：`ubt console` 自动带上 `UBT_ALLOW_NO_AUTH`，无需任何令牌 |
+| **局域网 / 暴露** | 绑定 `0.0.0.0`、Docker 映射宿主端口 | 拒绝，请写入 `ubt.toml` 或 `UBT_LLM_API_KEY` | 仅可新建/编辑无钥匙的 provider 块；已存钥匙的块不可跨机改写端点 | 必须配好 `UBT_API_KEY` 与 `UBT_ALLOWED_DIRS`（缺任一，非回环请求一律 403），并用 `UBT_TRUSTED_HOSTS` 登记对外主机名 |
+| **严格** | `UBT_STRICT_AUTH=1` 或 `UBT_ENV=production` | 拒绝（即使本机也拒绝） | 同暴露模式 | 覆盖 `UBT_ALLOW_NO_AUTH`，必须设置 `UBT_API_KEY`；开启鉴权后 `/docs` 与 `/openapi.json` 一并关闭 |
 
 **反向代理下的客户端判定**：控制台把"请求来自本机"作为放开凭据写入的条件，而 `request.client.host` 在反向代理后面永远显示为回环。因此经由代理暴露时，须设置 `UBT_TRUST_PROXY=1`，让判定改用 `X-Forwarded-For` 链；不设置时，带代理头的请求一律按非本机处理（拒绝改写已存钥匙的 provider 端点）。同时建议反向代理只对可信来源设置转发头，因为链路本身可被伪造。
 
@@ -147,8 +147,8 @@ ubt translate sample.pdf -l zh --dry-run
 # 仅翻译前 5 页进行抽样验证
 ubt translate sample.pdf -l zh --pages 1-5
 
-# 默认会拒绝交付仍待人工复核（NEEDS_HUMAN）的块；确认风险后显式放行
-ubt translate sample.pdf -l zh --allow-needs-human
+# NEEDS_HUMAN 块默认随文交付并在质量报告中列出；如需严格阻断，可显式关闭放行
+ubt translate sample.pdf -l zh --no-allow-needs-human
 ```
 
 执行开始后终端会打印专属任务 ID：
@@ -182,10 +182,10 @@ uv run python scripts/verify_sample_book.py
 ubt console
 ```
 命令会自动打开浏览器访问 `http://127.0.0.1:8000/`：
-- **向导式新建任务 (`/wizard`)**：拖拽上传文档，右侧实时显示基于 `/jobs/assess` 的全书预检与预算核算；
-- **全景观控中心 (`/jobs/{id}`)**：实时 SSE 数据流展示当前翻译阶梯（Extract → Segment → TM → Translate → QE → Repair → Render）；
-- **L3 人工审校工作台 (`/jobs/{id}/review`)**：双语对齐列表沉浸式校对，集成 KaTeX 实时预览公式。在某一处修改译文后，支持**全书术语一键传播（Propagate）**，并可直接触发**无损重新排版导出（Re-export，不消耗任何模型 Token）**；
-- **系统诊断与 Provider 可视化编辑 (`/system`)**：免终端直观配置各类大模型提供商端点与密钥。
+- **向导式新建任务 (`/wizard`)**：拖拽上传文档，右侧实时显示基于 `/jobs/assess` 的全书预检与预算核算；高级选项按文档特征与交付模式自适应精简展示，并自动防范模式冲突；
+- **全景观控中心 (`/jobs/{id}`)**：实时 SSE 数据流展示当前翻译阶梯（Extract -> Segment -> TM -> Translate -> QE -> Repair -> Render），动态标识实际交付模式，区分展示启发式通过率与 LLM 语义评定分；
+- **L3 人工审校工作台 (`/jobs/{id}/review`)**：双语对齐列表沉浸式校对，集成 KaTeX 公式预览与行内锚点徽章（`<fN/>`、`<bN>` 等），编辑时实时检测锚点缺失或未配对并支持一键回填；修改译文后支持**全书术语一键传播（Propagate）**与**无损重新排版导出（Re-export，不消耗任何模型 Token）**；
+- **系统诊断与 Provider 可视化编辑 (`/system`)**：免终端直观配置各类大模型提供商端点、模型路由与质量门禁。
 
 ---
 
@@ -226,7 +226,7 @@ ubt-mcp
 
 - `NEEDS_HUMAN`（已分诊、带提示标记、建议人工复核）的块**默认随文交付**，但质量报告的 `summary.needs_human_block_ids` 会逐一列出它们，审校工作台也会高亮。要求严格阻断时用 `--no-allow-needs-human`（`UBT_EXPORT_ALLOW_NEEDS_HUMAN=0`）；不可修复的 critical 缺陷仍以 `BLOCKED_HUMAN` 隔离，不会因这个默认值放行。
 - `--min-completion-ratio`（默认 0.5）与产物门禁的致命项（不可读 PDF、空白页、文本不可搜索、目标语言缺失）同样会在导出前拒绝。
-- 质量报告的 `score_metrics.scored_coverage` 是 `avg_qe` 的计算样本占比：默认启发式引擎只对通过块抽样打分，看到 0.14 就意味着那个均值只代表 14% 的块。
+- 质量报告的 `score_metrics.scored_coverage` 是 `avg_qe` 的计算样本占比：默认启发式初筛仅对低风险规则做确定性校验，前端与报告会明确区分“启发式通过率”与“LLM 语义评定分”，不会将抽样均值伪装为全书语义得分。
 
 ### 产物门禁（确定性）
 
@@ -236,7 +236,7 @@ PDF 交付不再有像素/VLM/阈值门禁。导出前只做确定性检查：
 - 有内容的页面能提取文本（`/ToUnicode` 生效）；
 - 源页非空时目标页不为空；
 - `faithful` 交付保留源页数；
-- 不出现 U+FFFD、目标语言缺失。
+- 不出现 U+FFFD、目标语言缺失或未解析的 UBT v2 行内锚点泄露（`placeholder_leak`）。
 
 `blank_page`、`unreadable_pdf`、`text_not_searchable` 等不可读项 fail-closed；其余 finding 只记录、不阻断。`[gate]` 配置段已删除。
 
@@ -281,6 +281,7 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy --strict ubt tests
 uv run python scripts/dump_compiler_edges.py
+uv run python scripts/check_console_bundle.py
 uv run pytest -m fast -q
 ```
 
