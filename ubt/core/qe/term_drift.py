@@ -513,6 +513,25 @@ def detect_term_drift(
                         source_protected,
                         target_protected,
                     )
+                # Idiomatic technical acronym preservation: when the source
+                # itself used a short uppercase acronym (e.g. "OS", "TCB",
+                # "LLM", "CPU") and the target preserves that exact uppercase
+                # acronym verbatim, do not penalize it as terminology drift.
+                if (
+                    rendered_protected_at is None
+                    and not kept_as_label
+                    and matched.isupper()
+                    and 2 <= len(matched) <= 6
+                    and bool(
+                        find_term_occurrences(
+                            target_text,
+                            matched,
+                            target_protected,
+                            case_insensitive=False,
+                        )
+                    )
+                ):
+                    kept_as_label = True
 
         findings.append(
             TermDriftFinding(

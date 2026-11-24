@@ -361,6 +361,117 @@ _REFRAIN_EDGE_SLACK_CHARS = 5  # refrain may fall short of the text edges by thi
 _REFRAIN_COVERAGE_RATIO = 0.3  # refrain must cover this fraction of its text
 
 
+_INLINE_CODE_SPAN_RE = re.compile(r"<c\d+>.*?</c\d+>", re.DOTALL | re.IGNORECASE)
+_SPLIT_URL_SCHEME_RE = re.compile(r"\b(https?:)\s+(//)", re.IGNORECASE)
+_PROSE_FUNCTION_WORDS = frozenset(
+    {
+        "the",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "have",
+        "has",
+        "had",
+        "can",
+        "could",
+        "will",
+        "would",
+        "should",
+        "we",
+        "our",
+        "this",
+        "that",
+        "these",
+        "those",
+        "which",
+        "with",
+        "from",
+        "into",
+        "for",
+        "not",
+        "but",
+    }
+)
+
+
+def _strip_inline_code_and_urls(text: str) -> str:
+    """Strip inline ``<cN>...</cN>`` code/URL spans, remaining tags, URLs and emails."""
+    cleaned = _INLINE_CODE_SPAN_RE.sub(" ", text)
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    cleaned = _SPLIT_URL_SCHEME_RE.sub(r"\1\2", cleaned)
+    cleaned = _URL_RE.sub("", cleaned)
+    cleaned = _EMAIL_RE.sub("", cleaned)
+    return cleaned
+
+
+_CODE_SYNTAX_RE = re.compile(
+    r"(?:::[A-Za-z_]|->|=>|&(?:mut\s+)?self\b|\b[A-Za-z_]\w*\.[a-z_]\w*\s*\("
+    r"|\b[A-Za-z_]\w*\[\w+\]\s*=|\b[a-z]+_[a-z0-9_]+\b|^\s*//|\b[A-Za-z_]\w*\s*\([^)]*\)\s*$)"
+)
+_PLURAL_ACRONYM_RE = re.compile(r"^[A-Z]{2,6}s$")
+
+
+def _is_code_expression_block(text: str) -> bool:
+    """True when a short block is a raw code/API signature or benchmark identifier.
+
+    Native PDF extraction frequently emits table cells or inline API listings
+    (e.g. ``Scheduler::enqueue(&self, task)``, ``buf[idx] = *byte_ptr``,
+    ``lat_ctx 18``, ``APIs``) as ``narrative`` blocks without ``<cN>`` tags.
+    Requiring them to be translated into CJK creates massive false positives.
+    """
+    plain = _strip_inline_code_and_urls(text).strip()
+    if not plain or len(plain) > 200 or "\n" in plain:
+        return False
+    # Pluralized acronym label alone (e.g. "APIs" -> "API", "CPUs" -> "CPU").
+    if _PLURAL_ACRONYM_RE.fullmatch(plain):
+        return True
+    # Subfigure label + proper noun / acronym (e.g. "(c) SQLite", "(a) LMbench").
+    if re.fullmatch(
+        r"\([a-z0-9]\)\s+[A-Z][A-Za-z0-9_\-\.]*(?:\s+[A-Z0-9][A-Za-z0-9_\-\.]*){0,2}", plain
+    ):
+        return True
+    words = re.findall(r"[A-Za-z]+", plain)
+    if not words:
+        return False
+    # Never exempt genuine English prose sentences containing function words.
+    if {w.lower() for w in words} & _PROSE_FUNCTION_WORDS:
+        return False
+    if _CODE_SYNTAX_RE.search(plain):
+        return True
+    # Trailing fragment of a wrapped parameter list like "addr, size)" or "ptr)".
+    return plain.endswith(")") and "(" not in plain and len(words) <= 5
+
+
+def _is_pure_code_or_url_block(text: str) -> bool:
+    """True when stripping inline code spans, URLs and emails leaves no letters."""
+    return _LETTER_RE.search(
+        _strip_inline_code_and_urls(text)
+    ) is None or _is_code_expression_block(text)
+
+
+def _is_author_affiliation_block(text: str) -> bool:
+    """True when a block is a paper author/affiliation list rather than prose."""
+    plain = _strip_inline_code_and_urls(text).strip()
+    if not plain or len(plain) > 600:
+        return False
+    # Author lists do not end with sentence punctuation.
+    if plain[-1] in ".?!。？！":
+        return False
+    if plain.count(",") + plain.count(";") < 2:
+        return False
+    words = re.findall(r"[A-Za-z][A-Za-z0-9\-']*", plain)
+    if len(words) < 4:
+        return False
+    lowered = {w.lower() for w in words}
+    if lowered & _PROSE_FUNCTION_WORDS:
+        return False
+    cap_words = sum(1 for w in words if w[0].isupper())
+    return (cap_words / len(words)) >= 0.65
+
+
 def _strip_verbatim_term(residue: str, term: str) -> str:
     """Strip a source-verbatim term from the residue without eating into words.
 
@@ -1115,11 +1226,16 @@ class FastPassFilter:
                 )
 
         # 1b. Verbatim echo. The reason doubles as the repair instruction.
-        # Skipped for a rehearsal run: its echo is source-identical on purpose.
+        # Skipped for a rehearsal run, pure code/URL blocks, and paper
+        # author/affiliation lists where preserving source names is expected.
+        _echo_exempt = _is_pure_code_or_url_block(src_clean) or _is_author_affiliation_block(
+            src_clean
+        )
         if (
             not rehearsal
             and not skip_translate
             and _is_prose
+            and not _echo_exempt
             and is_verbatim_echo(src_clean, tgt_clean)
         ):
             return FastPassDecision(
@@ -1132,6 +1248,7 @@ class FastPassFilter:
             not rehearsal
             and not skip_translate
             and _is_prose
+            and not _echo_exempt
             and src_clean != tgt_clean
             and is_near_verbatim_echo(
                 src_clean,
@@ -1506,12 +1623,13 @@ class FastPassFilter:
             )
 
         # 6. Target-language identity check on stripped prose text (profile-driven).
-        # measure density over the *translatable residue* — citation
-        # markers, table pipes/separators, numerals and isolated letters are
-        # required to survive verbatim and must not dilute the ratio.
-        prose_only = re.sub(r"<[^>]+>", "", tgt_clean)
-        prose_only = _URL_RE.sub("", prose_only)
-        prose_only = _EMAIL_RE.sub("", prose_only)
+        # measure density over the *translatable residue* — inline code spans
+        # (<cN>...</cN>), URLs, citation markers, table pipes/separators,
+        # numerals and isolated letters survive verbatim and must not dilute
+        # the ratio.
+        prose_only = _strip_inline_code_and_urls(tgt_clean)
+        if _is_pure_code_or_url_block(src_clean) or _is_author_affiliation_block(src_clean):
+            language_identity_applies = False
         residue = _CITATION_SPAN_RE.sub("", prose_only)
         residue = residue.replace("|", "")
         residue = _TABLE_SEP_RE.sub("", residue)

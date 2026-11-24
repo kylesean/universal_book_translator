@@ -147,14 +147,20 @@ def _has_math_soup_residue(text: str) -> bool:
     return False
 
 
+_CODE_GENERIC_RE = re.compile(r"\b[A-Za-z_]\w*<[A-Za-z_][\w,\s]*>")
+_INLINE_CODE_TAG_RE = re.compile(r"<c\d+>.*?</c\d+>", re.DOTALL | re.IGNORECASE)
+
+
 def _strip_code_snake_case(text: str) -> str:
-    """Strip standard snake_case programming identifiers (create_task, code_change)."""
+    """Strip standard snake_case programming identifiers, code spans, and type generics."""
 
     def _repl(m: re.Match[str]) -> str:
         tok = m.group(0)
         return tok if _is_math_subscript_residue(tok) else " "
 
-    return re.sub(r"[A-Za-z0-9\\]+_[A-Za-z0-9{]+", _repl, text)
+    cleaned = _INLINE_CODE_TAG_RE.sub(" ", text)
+    cleaned = _CODE_GENERIC_RE.sub(" ", cleaned)
+    return re.sub(r"[A-Za-z0-9\\]+_[A-Za-z0-9{]+", _repl, cleaned)
 
 
 # Something repair can actually re-delimit: a letter glued to digits (Ag 0,
@@ -194,13 +200,14 @@ def target_missing_math_delimiters(source: str, target: str) -> bool:
     if extract_math_spans(source):
         return True
     src_clean_code = _strip_code_snake_case(source)
+    tgt_clean_code = _strip_code_snake_case(target)
     # No concrete math candidate => repair has nothing to re-delimit. Without
     # this, isolated-letter debris (drop-cap TOC/file-header runs) is routed to
     # repair forever and the block is quarantined as MQM-critical.
     if not _MATH_CANDIDATE_RE.search(src_clean_code):
         return False
     score = 0
-    if looks_like_math_debris(source):
+    if looks_like_math_debris(src_clean_code):
         score += 2
     if re.search(r"[\\_^]", src_clean_code):
         score += 1
@@ -208,19 +215,19 @@ def target_missing_math_delimiters(source: str, target: str) -> bool:
     # 16-token fragment but are ordinary articles in a 75-word paragraph.
     # Exclude English possessives ('s) and slash abbreviations (I/O, A/B)
     # so standard computing prose does not inflate isolated letter density.
-    src_clean_isolated = re.sub(r"['’]s\b", "", source)
+    src_clean_isolated = re.sub(r"['’]s\b", "", src_clean_code)
     src_clean_isolated = re.sub(r"\b[A-Za-z]/[A-Za-z]\b", "", src_clean_isolated)
     isolated = _ISOLATED_LETTER_RE2.findall(src_clean_isolated)
-    tokens = source.split()
+    tokens = src_clean_code.split()
     if (
         len(isolated) >= _MIN_ISOLATED_LETTERS
         and tokens
         and len(isolated) / len(tokens) >= _ISOLATED_LETTER_MIN_DENSITY
     ):
         score += 2
-    if _SUBSCRIPT_FLAT_RE.search(source):
+    if _SUBSCRIPT_FLAT_RE.search(src_clean_code):
         score += 1
-    if _has_math_soup_residue(target):
+    if _has_math_soup_residue(tgt_clean_code):
         score += 2
     return score >= 2
 

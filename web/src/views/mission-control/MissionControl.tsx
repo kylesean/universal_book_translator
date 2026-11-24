@@ -1527,7 +1527,7 @@ export function MissionControl() {
             <div className="flex min-w-0 flex-col justify-between border-b border-border p-3.5 sm:p-4 md:border-b-0 md:border-r">
               <div className="flex items-center justify-between type-group">
                 <span>{t.mission.qeScoreLabel}</span>
-                {avgQe !== null && avgQe > 0 && (
+                {avgQe !== null && avgQe >= 0.85 && needsHumanBlocks === 0 && (
                   <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
                     {t.mission.qeScoreGood}
                   </span>
@@ -1537,6 +1537,11 @@ export function MissionControl() {
                 {avgQe !== null && avgQe > 0 ? (
                   <>
                     {(avgQe * 100).toFixed(1)}
+                    <span className="text-base font-normal text-muted-foreground">%</span>
+                  </>
+                ) : isCompleted && needsHumanBlocks > 0 && totalBlocks > 0 ? (
+                  <>
+                    {Math.max(0, ((totalBlocks - needsHumanBlocks) / totalBlocks) * 100).toFixed(1)}
                     <span className="text-base font-normal text-muted-foreground">%</span>
                   </>
                 ) : (

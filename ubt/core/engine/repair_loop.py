@@ -259,6 +259,7 @@ class RepairLoop:
             block.mtqe_score = await self.qe_runner.score(
                 block.source_text or "", enforced, block.block_type
             )
+            block.mtqe_score_source = self.qe_runner.score_source()
         except Exception as exc:  # scoring must never undo a verified repair
             logger.debug("Re-score after deterministic repair failed for %s: %s", block.id, exc)
         logger.info(

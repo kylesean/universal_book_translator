@@ -243,6 +243,10 @@ export interface TranslationDictionary {
     groupContent: string
     groupScope: string
     groupExec: string
+    groupOutputScope: string
+    groupTerminology: string
+    groupExecution: string
+    advancedCustomizedCount: string
     advancedDeliveryHelp: string
     advancedContentHelp: string
     advancedScopeHelp: string

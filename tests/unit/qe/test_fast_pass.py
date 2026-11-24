@@ -615,3 +615,73 @@ def test_a_verbatim_block_is_exempt_from_language_identity(block_type: str) -> N
     decision = fp.evaluate("E = mc^2", "E = mc^2", block_type=block_type, skip_translate=True)
     assert decision.passed
     assert decision.target_ratio == 1.0
+
+
+def test_inline_code_and_split_urls_do_not_dilute_script_density() -> None:
+    fp = FastPassFilter(target_lang="zh", source_lang="en")
+    src = (
+        "[23] The Asterinas developers. Example: Writing a Kernel in 100 Lines of Safe Rust. "
+        "<c1>https:</c1> <c2>//github.com/asterinas/asterinas/blob/</c2> <c3>main/ostd/src/mm/frame.rs</c3>"
+    )
+    tgt = (
+        "[23] Asterinas 开发者。示例：用 100 行安全 Rust 编写内核。"
+        "<c1>https:</c1> <c2>//github.com/asterinas/asterinas/blob/</c2> <c3>main/ostd/src/mm/frame.rs</c3>"
+    )
+    decision = fp.evaluate(src, tgt)
+    assert decision.passed, decision.reason
+
+
+def test_code_expressions_and_author_lines_are_exempt_from_echo_and_density() -> None:
+    fp = FastPassFilter(target_lang="zh", source_lang="en")
+    for src, tgt in [
+        ("<c1>// chips/nrf52:</c1>", "<c1>// chips/nrf52:</c1>"),
+        ("Scheduler::enqueue(&self, task)", "Scheduler::enqueue(&self, task)"),
+        ("buf[idx] = *byte_ptr", "buf[idx] = *byte_ptr"),
+        ("APIs", "API"),
+        ("(c) SQLite", "(c) SQLite"),
+        (
+            "Yuke Peng, <i1>SUSTech;</i1> Hongliang Tian, <i2>Ant Group;</i2> Junyang Zhang, <i3>Peking University</i3>",
+            "Yuke Peng, <i1>SUSTech;</i1> Hongliang Tian, <i2>Ant Group;</i2> Junyang Zhang, <i3>Peking University</i3>",
+        ),
+    ]:
+        decision = fp.evaluate(src, tgt)
+        assert decision.passed, f"Unexpected failure for {src!r}: {decision.reason}"
+
+    # Genuine untranslated prose must still be rejected.
+    prose_dec = fp.evaluate(
+        "The kernel isolates unsafe code inside a small privileged framework.",
+        "The kernel isolates unsafe code inside a small privileged framework.",
+    )
+    assert not prose_dec.passed
+
+
+def test_code_generics_do_not_trigger_undelimited_math() -> None:
+    fp = FastPassFilter(target_lang="zh", source_lang="en")
+    src = "OSTD supports custom metadata by taking a type parameter M in Frame<M> (or Segment<M>)."
+    tgt = "OSTD 通过在 Frame<M>（或 Segment<M>）中接受类型参数 M 来支持自定义元数据。"
+    decision = fp.evaluate(src, tgt)
+    assert decision.passed, decision.reason
+
+
+def test_acronym_preservation_is_not_flagged_as_glossary_drift() -> None:
+    from ubt.core.qe.term_drift import detect_term_drift
+
+    glossary = [
+        {"source": "operating system", "translation": "操作系统", "aliases": ["OS"]},
+        {"source": "Trusted Computing Base", "translation": "可信计算基", "aliases": ["TCB"]},
+    ]
+    # Acronym in source preserved as acronym in Chinese target -> NOT drifted.
+    findings = detect_term_drift(
+        "We propose a novel OS architecture with a minimal TCB.",
+        "我们提出了一种具有最小 TCB 的新型 OS 架构。",
+        glossary,
+    )
+    assert all(not f.drifted for f in findings), findings
+
+    # Full phrase in source translated with wrong Chinese term -> STILL drifted.
+    drift_findings = detect_term_drift(
+        "We propose a novel operating system architecture.",
+        "我们提出了一种新型操作体系架构。",
+        glossary,
+    )
+    assert any(f.drifted and f.source == "operating system" for f in drift_findings)

@@ -213,12 +213,16 @@ def test_glossary_drift_is_fixed_without_calling_the_model() -> None:
 
 
 def test_a_deterministic_repair_is_re_scored_not_inherited() -> None:
+    from ubt.core.qe.score_policy import is_qe_scored
+
     block = _pending("我们提出了 framekernel。", [_DRIFT])
     block.mtqe_score = 0.25
     result = _try(block)
     assert result is not None
     assert result.mtqe_score is not None
     assert result.mtqe_score > 0.25, "the repaired text kept the defect's score"
+    assert result.mtqe_score_source == "heuristic"
+    assert not is_qe_scored(result), "heuristic pass-stamp must not enter calibrated QE averages"
 
 
 def test_a_drift_that_leaves_another_defect_still_reaches_the_model() -> None:

@@ -101,12 +101,6 @@ export function NewJobWizard() {
   const [translateChrome, setTranslateChrome] = useState<'auto' | 'on' | 'off'>('auto')
   // 'auto' submits as null so the operator's UBT_OCR_MODE still applies.
   const [ocrMode, setOcrMode] = useState<'auto' | 'local' | 'cloud' | 'off'>('auto')
-  const [ocrFallback, setOcrFallback] = useState<'auto' | 'off' | 'missing' | 'weak' | 'all'>('auto')
-  const [pdfEngine, setPdfEngine] = useState<'auto' | 'docling' | 'native' | 'pdfium'>('auto')
-  const [spillPolicy, setSpillPolicy] = useState<'auto' | 'error' | 'warn' | 'appendix'>('auto')
-  const [enableDynamicRouting, setEnableDynamicRouting] = useState<'auto' | 'on' | 'off'>('auto')
-  const [dynamicRoutingPolicy, setDynamicRoutingPolicy] = useState<'pareto' | 'quality_first' | 'cost_first'>('pareto')
-  const [exportAllowNeedsHuman, setExportAllowNeedsHuman] = useState<'auto' | 'on' | 'off'>('auto')
   const [pageRange, setPageRange] = useState('')
   // Per-book glossary: a staged upload, never a typed server path. Browsers do
   // not expose filesystem paths, so the old input asked the operator to type a
@@ -117,7 +111,6 @@ export function NewJobWizard() {
   // Set only when a pick or an upload fails; a working flow renders no prose.
   const [glossaryError, setGlossaryError] = useState<string | null>(null)
   const glossaryFileRef = useRef<HTMLInputElement>(null)
-  const [dryRun, setDryRun] = useState(false)
   // Delivery shape and spend knobs the REST model has always accepted but no
   // control reached. Only the ones a user can actually reason about are here;
   // ``draft_model``/``pdf_engine``/``batch_limit`` stay operator territory.
@@ -252,7 +245,6 @@ export function NewJobWizard() {
           ocr_mode: ocrMode === 'auto' ? null : ocrMode,
           delivery_mode: deliveryMode,
           allow_degrade: deliveryMode === 'faithful' ? allowDegrade : null,
-          pdf_engine: pdfEngine === 'auto' ? null : pdfEngine,
           // An invalid value prices as unset — the field-level guard stops the
           // submit; the quote must not 422 on the way.
           max_concurrency:
@@ -277,7 +269,6 @@ export function NewJobWizard() {
           ocrMode,
           deliveryMode,
           allowDegrade ? '1' : '0',
-          pdfEngine,
           concurrency.trim(),
         ].join('\u0000')
 
@@ -352,7 +343,6 @@ export function NewJobWizard() {
             ocrMode,
             deliveryMode,
             allowDegrade ? '1' : '0',
-            pdfEngine,
             concurrency.trim(),
           ].join('\u0000')
         }
@@ -382,7 +372,6 @@ export function NewJobWizard() {
       ocrMode,
       deliveryMode,
       allowDegrade,
-      pdfEngine,
       concurrency,
     ]
   )
@@ -399,7 +388,6 @@ export function NewJobWizard() {
     ocrMode,
     deliveryMode,
     allowDegrade ? '1' : '0',
-    pdfEngine,
     concurrency.trim(),
   ].join('\u0000')
   const runAssessRef = useRef(runAssess)
@@ -516,8 +504,6 @@ export function NewJobWizard() {
   const concurrencyInvalid = numericFieldInvalid(concurrency, 1)
   const chapterStartInvalid = numericFieldInvalid(chapterStart, 1)
   const chapterCountInvalid = numericFieldInvalid(chapterCount, 1)
-  const pdfEngineConflict =
-    deliveryMode === 'faithful' && (pdfEngine === 'docling' || pdfEngine === 'pdfium')
   const advancedNumericInvalid =
     concurrencyInvalid || chapterStartInvalid || chapterCountInvalid
   const canSubmit =
@@ -525,18 +511,15 @@ export function NewJobWizard() {
     !isSubmitting &&
     glossaryError === null &&
     !budgetInvalid &&
-    !advancedNumericInvalid &&
-    !pdfEngineConflict
+    !advancedNumericInvalid
   const submitBlockedReason = !filePath.trim()
     ? null
     : glossaryError ??
       (budgetInvalid
         ? t.wizard.budgetInvalid
-        : pdfEngineConflict
-          ? t.wizard.pdfEngineConflictFaithful
-          : advancedNumericInvalid
-            ? t.wizard.fieldMinOne
-            : null)
+        : advancedNumericInvalid
+          ? t.wizard.fieldMinOne
+          : null)
   /**
    * The engine's faithful gate is measured, not assumed: a source with
    * confirmed font-encoding damage (or a scan) has an untrustworthy text
@@ -672,15 +655,6 @@ export function NewJobWizard() {
     translate_chrome: translateChrome === 'auto' ? null : translateChrome === 'on',
     // null = follow UBT_OCR_MODE / config default.
     ocr_mode: ocrMode === 'auto' ? null : ocrMode,
-    ocr_fallback: ocrFallback === 'auto' ? null : ocrFallback,
-    pdf_engine: pdfEngine === 'auto' ? null : pdfEngine,
-    spill_policy: spillPolicy === 'auto' ? null : spillPolicy,
-    enable_dynamic_routing:
-      enableDynamicRouting === 'auto' ? null : enableDynamicRouting === 'on',
-    dynamic_routing_policy:
-      enableDynamicRouting === 'off' ? null : dynamicRoutingPolicy,
-    export_allow_needs_human:
-      exportAllowNeedsHuman === 'auto' ? null : exportAllowNeedsHuman === 'on',
     emit_both: emitBoth === 'auto' ? null : emitBoth === 'on',
     // Empty = operator default; the engine rejects anything below 1.
     max_concurrency: concurrency.trim() ? Number(concurrency) : null,
@@ -690,7 +664,7 @@ export function NewJobWizard() {
     pages: pageRange.trim() ? pageRange.trim() : null,
     glossary: glossaryFile?.path ?? null,
     priority: 0,
-    dry_run: dryRun,
+    dry_run: false,
     // The intake-forced-rehearsal marker is server-owned: a client request
     // always carries false, and the server normalizes it regardless.
     rehearsal_auto: false,
@@ -849,6 +823,36 @@ export function NewJobWizard() {
       desc: t.wizard.deliveryDescReadable,
     },
   ]
+
+  const hasUploadedFile = filePath.trim() !== ''
+  const detectedExt = (
+    assessment?.document?.format_ext ??
+    fileName.split('.').pop() ??
+    filePath.split('.').pop() ??
+    ''
+  )
+    .toLowerCase()
+    .replace(/^\./, '')
+  const isPdfDoc = detectedExt === 'pdf'
+  const showOcrControl =
+    isPdfDoc &&
+    (sourceScanned ||
+      confirmedDamagePages > 0 ||
+      (assessment?.document.scan_page_share ?? 0) > 0 ||
+      ocrMode !== 'auto')
+  const advancedCustomizedCount = [
+    emitBoth !== 'auto',
+    deliveryMode !== 'faithful' && layoutColumns !== 'auto',
+    translateChrome !== 'auto',
+    pageRange.trim() !== '',
+    chapterStart.trim() !== '' || chapterCount.trim() !== '',
+    domainProfile !== 'auto',
+    domainHint.trim() !== '',
+    glossaryFile !== null,
+    ocrMode !== 'auto',
+    repairProvider !== '',
+    concurrency.trim() !== '',
+  ].filter(Boolean).length
 
   return (
     <div
@@ -1157,12 +1161,8 @@ export function NewJobWizard() {
             <RadioGroup
               value={deliveryMode}
               onValueChange={(value) => {
-                const nextMode = value as typeof deliveryMode
                 hasUserSelectedDeliveryModeRef.current = true
-                setDeliveryMode(nextMode)
-                if (nextMode === 'faithful' && (pdfEngine === 'docling' || pdfEngine === 'pdfium')) {
-                  setPdfEngine('auto')
-                }
+                setDeliveryMode(value as typeof deliveryMode)
               }}
               className="mt-5 grid gap-2 md:grid-cols-3"
             >
@@ -1450,12 +1450,19 @@ export function NewJobWizard() {
                     <span className="text-xs text-muted-foreground">
                       {t.wizard.advancedOptionsSubtitle}
                     </span>
-                    {(advancedNumericInvalid || glossaryError || pdfEngineConflict) && (
+                    {(advancedNumericInvalid || glossaryError) ? (
                       <Badge variant="destructive" className="gap-1">
                         <AlertTriangle className="size-3" />
                         {t.wizard.advancedErrorTag}
                       </Badge>
-                    )}
+                    ) : advancedCustomizedCount > 0 ? (
+                      <Badge variant="secondary" className="font-normal text-xs">
+                        {t.wizard.advancedCustomizedCount.replace(
+                          '{count}',
+                          String(advancedCustomizedCount),
+                        )}
+                      </Badge>
+                    ) : null}
                   </div>
                   <ChevronDown
                     className={cn(
@@ -1469,6 +1476,10 @@ export function NewJobWizard() {
               <CollapsibleContent className="border-t border-border py-4">
                 <WizardAdvancedTabs
                   t={t}
+                  isPdfDoc={isPdfDoc}
+                  hasUploadedFile={hasUploadedFile}
+                  deliveryMode={deliveryMode}
+                  showOcrControl={showOcrControl}
                   dualMode={dualMode}
                   onDualModeChange={(val) => {
                     hasUserSelectedDualModeRef.current = true
@@ -1481,12 +1492,6 @@ export function NewJobWizard() {
                   onLayoutColumnsChange={setLayoutColumns}
                   translateChrome={translateChrome}
                   onTranslateChromeChange={setTranslateChrome}
-                  deliveryMode={deliveryMode}
-                  pdfEngine={pdfEngine}
-                  onPdfEngineChange={setPdfEngine}
-                  pdfEngineConflict={pdfEngineConflict}
-                  spillPolicy={spillPolicy}
-                  onSpillPolicyChange={setSpillPolicy}
                   domainProfile={domainProfile}
                   onDomainProfileChange={(val) => {
                     hasUserSelectedDomainRef.current = true
@@ -1529,12 +1534,6 @@ export function NewJobWizard() {
                       )}
                     </div>
                   }
-                  ocrFallback={ocrFallback}
-                  onOcrFallbackChange={setOcrFallback}
-                  enableDynamicRouting={enableDynamicRouting}
-                  onEnableDynamicRoutingChange={setEnableDynamicRouting}
-                  dynamicRoutingPolicy={dynamicRoutingPolicy}
-                  onDynamicRoutingPolicyChange={setDynamicRoutingPolicy}
                   glossaryFile={glossaryFile}
                   glossaryUploading={glossaryUploading}
                   glossaryError={glossaryError}
@@ -1551,16 +1550,12 @@ export function NewJobWizard() {
                   onChapterCountChange={setChapterCount}
                   chapterStartInvalid={chapterStartInvalid}
                   chapterCountInvalid={chapterCountInvalid}
-                  dryRun={dryRun}
-                  onDryRunChange={setDryRun}
                   declaredProviders={declaredProviders}
                   repairProvider={repairProvider}
                   onRepairProviderChange={setRepairProvider}
                   concurrency={concurrency}
                   onConcurrencyChange={setConcurrency}
                   concurrencyInvalid={concurrencyInvalid}
-                  exportAllowNeedsHuman={exportAllowNeedsHuman}
-                  onExportAllowNeedsHumanChange={setExportAllowNeedsHuman}
                 />
                 <input
                   ref={glossaryFileRef}
