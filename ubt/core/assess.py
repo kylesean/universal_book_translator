@@ -922,6 +922,61 @@ async def assess_document_async(
             "UNSUPPORTED", f"格式 .{ext} 不在适配器注册表 (支持: {', '.join(sorted(known))})"
         )
 
+    decrypt_tmp: Any = None
+    if ext == "pdf" and config.pdf_password is not None:
+        pw = config.pdf_password.get_secret_value()
+        if pw:
+            import tempfile
+
+            from ubt.core.engine.document_services import decrypt_pdf_to_dir
+            from ubt.core.exceptions import DocumentParseError
+
+            decrypt_tmp = tempfile.TemporaryDirectory(prefix="ubt_assess_decrypt_")
+            try:
+                Path(decrypt_tmp.name).chmod(0o700)
+                decrypted = await asyncio.to_thread(
+                    decrypt_pdf_to_dir, p, pw, Path(decrypt_tmp.name)
+                )
+                if decrypted == p:
+                    decrypt_tmp.cleanup()
+                    decrypt_tmp = None
+                else:
+                    p = decrypted
+            except DocumentParseError as exc:
+                decrypt_tmp.cleanup()
+                raise AssessmentError("ENCRYPTED", str(exc)) from exc
+            except BaseException:
+                decrypt_tmp.cleanup()
+                raise
+
+    try:
+        return await _assess_document_impl(
+            p,
+            config,
+            ext=ext,
+            started=started,
+            deep=deep,
+            target_lang=target_lang,
+            source_lang=source_lang,
+            pages=pages,
+        )
+    finally:
+        if decrypt_tmp is not None:
+            decrypt_tmp.cleanup()
+
+
+async def _assess_document_impl(
+    p: Path,
+    config: UBTConfig,
+    *,
+    ext: str,
+    started: float,
+    deep: bool = False,
+    target_lang: str = "zh",
+    source_lang: str = "en",
+    pages: str | None = None,
+) -> AssessmentReport:
+
     warnings: list[AssessmentWarning] = []
     quality_signals: list[str] = []
 

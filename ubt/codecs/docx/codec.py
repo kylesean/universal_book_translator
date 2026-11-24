@@ -373,21 +373,43 @@ class DOCXCodec:
             for part_name in self._translatable_parts(zf):
                 part_key = Path(part_name).stem
                 root = _parse_xml_safe(_read_zip_bytes(zf, part_name, budget))
+                paragraphs = root.findall(f".//{_W_P}")
+                split_level: int | None = None
+                if part_name == "word/document.xml":
+                    heading_levels = [
+                        lvl
+                        for p in paragraphs
+                        for is_h, lvl in (_is_heading_style(_paragraph_style_id(p)),)
+                        if is_h and lvl > 0
+                    ]
+                    if heading_levels:
+                        split_level = min(heading_levels)
                 chapter_idx = 1
-                for p_idx, p in enumerate(root.findall(f".//{_W_P}"), start=1):
+                chap_units = 0
+                chap_chars = 0
+                for p_idx, p in enumerate(paragraphs, start=1):
                     marked, plain, tokens, dom_rpr = _encode_paragraph(p)
                     if not plain.strip():
                         continue
                     is_h, level = _is_heading_style(_paragraph_style_id(p))
-                    if part_name == "word/document.xml" and is_h and level == 1 and units:
-                        chapter_idx += 1
+                    in_table = _in_table_cell(p)
+                    if part_name == "word/document.xml":
+                        if split_level is not None:
+                            if is_h and level == split_level and chap_units > 0:
+                                chapter_idx += 1
+                                chap_units = 0
+                                chap_chars = 0
+                        elif not in_table and chap_units >= 8 and chap_chars >= 12_000:
+                            chapter_idx += 1
+                            chap_units = 0
+                            chap_chars = 0
                     role = (
                         UnitRole.HEADING
                         if is_h
                         else (
                             UnitRole.FOOTNOTE
                             if part_key in {"footnotes", "endnotes"}
-                            else (UnitRole.TABLE_CELL if _in_table_cell(p) else UnitRole.PARAGRAPH)
+                            else (UnitRole.TABLE_CELL if in_table else UnitRole.PARAGRAPH)
                         )
                     )
                     uid = f"{part_key}_p{p_idx:05d}"
@@ -408,6 +430,8 @@ class DOCXCodec:
                             },
                         )
                     )
+                    chap_units += 1
+                    chap_chars += len(plain)
         return profile, units
 
     def apply(

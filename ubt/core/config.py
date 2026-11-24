@@ -573,6 +573,7 @@ class EngineConfig(BaseModel):
     env: str = "development"
     allowed_dirs: str = ""
     pdf_engine: PdfEngine = "auto"
+    pdf_password: SecretStr | None = None
     docling_device: DoclingDevice = "auto"
     docling_isolate_process: bool = True
     ocr_mode: OcrMode = "auto"
@@ -880,6 +881,10 @@ class UBTConfig(BaseSettings):
     # text layer to patch, so it takes the Docling reflow path. ``--pdf-engine``
     # always wins.
     pdf_engine: PdfEngine = "auto"
+    pdf_password: SecretStr | None = Field(
+        default=None,
+        description="Optional password for decrypting password-protected PDFs (UBT_PDF_PASSWORD).",
+    )
 
     # -- Docling accelerator device -------------------------------------------
     # Decouples *whether* Docling runs from *where* it runs. 'auto' keeps
@@ -1488,6 +1493,7 @@ class UBTConfig(BaseSettings):
     @field_validator(
         "api_mode",
         "pdf_engine",
+        "pdf_password",
         "docling_device",
         "ocr_mode",
         "qe_engine",

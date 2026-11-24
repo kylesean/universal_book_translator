@@ -260,6 +260,10 @@ def _extract_spans(
     return dedup
 
 
+_AUTO_CHAPTER_CHAR_THRESHOLD = 12_000
+_AUTO_CHAPTER_MIN_UNITS = 8
+
+
 @dataclass(slots=True)
 class MarkdownCodec:
     """AST line-range surgical codec for ``.md``, ``.markdown``, and ``.txt``."""
@@ -290,8 +294,17 @@ class MarkdownCodec:
         lines = body.splitlines()
         spans = _extract_spans(body)
 
+        heading_levels = [
+            min(6, len(prefix.lstrip()) - len(prefix.lstrip().lstrip("#")))
+            for _, _, role, prefix, _ in spans
+            if role == UnitRole.HEADING and prefix.lstrip().startswith("#")
+        ]
+        split_level: int | None = min(heading_levels) if heading_levels else None
+
         units: list[TranslationUnit] = []
         chap_idx = 1
+        chap_units = 0
+        chap_chars = 0
         for idx, (start, end, role, prefix, span_meta) in enumerate(spans, start=1):
             cell = span_meta.get("table_cell")
             if isinstance(cell, dict):
@@ -308,8 +321,24 @@ class MarkdownCodec:
             marked, plain, tokens = _encode_markdown_inline(stripped.strip())
             if not plain.strip():
                 continue
-            if role == UnitRole.HEADING and prefix.lstrip().startswith("# ") and units:
+            heading_level = (
+                min(6, len(prefix.lstrip()) - len(prefix.lstrip().lstrip("#")))
+                if role == UnitRole.HEADING and prefix.lstrip().startswith("#")
+                else 0
+            )
+            if split_level is not None:
+                if role == UnitRole.HEADING and heading_level == split_level and chap_units > 0:
+                    chap_idx += 1
+                    chap_units = 0
+                    chap_chars = 0
+            elif (
+                not isinstance(cell, dict)
+                and chap_units >= _AUTO_CHAPTER_MIN_UNITS
+                and chap_chars >= _AUTO_CHAPTER_CHAR_THRESHOLD
+            ):
                 chap_idx += 1
+                chap_units = 0
+                chap_chars = 0
             units.append(
                 TranslationUnit(
                     unit_id=f"md_b{idx:05d}",
@@ -325,14 +354,12 @@ class MarkdownCodec:
                         "fm_lines": fm_lines,
                         "prefix": prefix,
                         **span_meta,
-                        "heading_level": (
-                            min(6, len(prefix) - len(prefix.lstrip("#")))
-                            if role == UnitRole.HEADING
-                            else 0
-                        ),
+                        "heading_level": heading_level,
                     },
                 )
             )
+            chap_units += 1
+            chap_chars += len(plain)
         return profile, units
 
     def apply(

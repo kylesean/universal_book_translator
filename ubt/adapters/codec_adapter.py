@@ -132,7 +132,7 @@ class DocumentCodecAdapter(BaseDocumentAdapter):
         self._last_source: Path | None = None
         self._units: list[TranslationUnit] = []
         self._profile: DocumentProfile | None = None
-        self.output_suffixes = frozenset({source_path.suffix.lower()})
+        self.output_suffixes = frozenset({source_path.suffix.lower(), ".pdf"})
         self.last_overflows: tuple[OverflowItem, ...] = ()
 
     @property
@@ -203,6 +203,19 @@ class DocumentCodecAdapter(BaseDocumentAdapter):
         **kwargs: Any,
     ) -> Path:
         del kwargs
+        if output_path.suffix.lower() == ".pdf":
+            from ubt.adapters.pdf.docling_render import DoclingRenderStrategy
+
+            mode = _resolve_mode(bilingual_mode)
+            strategy = DoclingRenderStrategy()
+            self.last_overflows = ()
+            return await strategy._render_publish(
+                manifest,
+                list(blocks),
+                target_lang,
+                output_path,
+                bilingual=mode != DeliveryMode.MONO,
+            )
         src = Path(manifest.source_path) if manifest.source_path else self._source
         translations: dict[str, str] = {}
         for block in blocks:

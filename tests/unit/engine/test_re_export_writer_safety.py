@@ -100,13 +100,13 @@ async def test_re_export_refuses_contradicting_output_suffix(
     blocks = [_block(1, "Done sentence.", "已完成。", BlockStatus.MTQE_PASSED)]
     config, db_path = _seed(tmp_path, blocks, job_status="failed")
     with SQLiteJobLedger(db_path) as ledger:
-        ledger.set_job_metadata_value(_JOB, "output_file", str(tmp_path / "out.pdf"))
+        ledger.set_job_metadata_value(_JOB, "output_file", str(tmp_path / "out.docx"))
     monkeypatch.setattr(
         re_export_module,
         "_default_collaborators",
         lambda config, router, qe: (object(), object()),
     )
-    with pytest.raises(UnsupportedDocumentFormatError, match="would not be a readable pdf"):
+    with pytest.raises(UnsupportedDocumentFormatError, match="would not be a readable docx"):
         await re_export_job(db_path=db_path, job_id=_JOB, config=config)
 
 

@@ -81,6 +81,11 @@ class AdapterDocumentServices:
 
         reject_encrypted_pdf(path)
 
+    def decrypt_pdf_to_dir(self, path: Path, password: str, target_dir: Path) -> Path:
+        from ubt.adapters.pdf.encryption import decrypt_pdf_to_dir
+
+        return decrypt_pdf_to_dir(path, password, target_dir)
+
     def resolve_font_for_render(self, target_lang: str, font_override: str | None = None) -> Any:
         from ubt.adapters.pdf.font_probe import resolve_for_render
 

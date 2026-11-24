@@ -52,6 +52,8 @@ class DocumentServices(Protocol):
 
     def reject_encrypted_pdf(self, path: Path) -> None: ...
 
+    def decrypt_pdf_to_dir(self, path: Path, password: str, target_dir: Path) -> Path: ...
+
     def resolve_font_for_render(
         self, target_lang: str, font_override: str | None = None
     ) -> Any: ...
@@ -144,6 +146,10 @@ def reject_encrypted_pdf(path: Path) -> None:
     _provider().reject_encrypted_pdf(path)
 
 
+def decrypt_pdf_to_dir(path: Path, password: str, target_dir: Path) -> Path:
+    return _provider().decrypt_pdf_to_dir(path, password, target_dir)
+
+
 def resolve_font_for_render(target_lang: str, font_override: str | None = None) -> Any:
     return _provider().resolve_font_for_render(target_lang, font_override=font_override)
 
@@ -215,6 +221,7 @@ __all__ = [
     "DocumentServices",
     "configure_document_services",
     "crop_block_image",
+    "decrypt_pdf_to_dir",
     "detect_figure_pages",
     "export_xliff",
     "flag_font_encoding_damage",

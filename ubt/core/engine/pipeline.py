@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import tempfile
 from collections.abc import AsyncGenerator, Callable
 from contextlib import aclosing, suppress
 from dataclasses import dataclass, field
@@ -1182,7 +1183,7 @@ class PipelineOrchestrator:
         # must never write Markdown into ``book.pdf`` and still report success.
         # A suffix-less name stays allowed: the caller just gets the format
         # without saying so.
-        allowed_suffixes: frozenset[str] = getattr(type(adapter), "output_suffixes", frozenset())
+        allowed_suffixes: frozenset[str] = getattr(adapter, "output_suffixes", frozenset())
         if allowed_suffixes and output_path is not None:
             out_suffix = output_path.suffix.lower()
             if out_suffix and out_suffix not in allowed_suffixes:
@@ -1462,16 +1463,47 @@ class PipelineOrchestrator:
     ) -> AsyncGenerator[TranslationProgressEvent, None]:
         if not input_path.exists():
             raise DocumentParseError(f"Input document does not exist: {input_path}")
-        prep = await self._prepare_run(
-            input_path=input_path,
-            output_path=output_path,
-            target_lang=target_lang,
-            profile_name=profile_name,
-            job_id=job_id,
-            start_chapter=start_chapter,
-            max_chapters=max_chapters,
-            source_lang=source_lang,
-        )
+        decrypt_tmp: tempfile.TemporaryDirectory[str] | None = None
+        working_input = input_path
+        if input_path.suffix.lower() == ".pdf" and self.config.pdf_password is not None:
+            pw = self.config.pdf_password.get_secret_value()
+            if pw:
+                from ubt.core.engine.document_services import decrypt_pdf_to_dir
+
+                decrypt_tmp = tempfile.TemporaryDirectory(prefix="ubt_decrypt_")
+                try:
+                    Path(decrypt_tmp.name).chmod(0o700)
+                    working_input = await asyncio.to_thread(
+                        decrypt_pdf_to_dir, input_path, pw, Path(decrypt_tmp.name)
+                    )
+                except BaseException:
+                    decrypt_tmp.cleanup()
+                    raise
+                if working_input == input_path:
+                    decrypt_tmp.cleanup()
+                    decrypt_tmp = None
+                elif output_path is None:
+                    # Keep the default output path next to the caller's original PDF,
+                    # not inside the ephemeral decryption temp directory.
+                    output_path = input_path.with_name(
+                        f"{input_path.stem}_{target_lang}{input_path.suffix}"
+                    )
+        try:
+            prep = await self._prepare_run(
+                input_path=working_input,
+                output_path=output_path,
+                target_lang=target_lang,
+                profile_name=profile_name,
+                job_id=job_id,
+                start_chapter=start_chapter,
+                max_chapters=max_chapters,
+                source_lang=source_lang,
+            )
+        except BaseException:
+            if decrypt_tmp is not None:
+                decrypt_tmp.cleanup()
+            raise
+        input_path = working_input
         adapter = prep.adapter
         manifest = prep.manifest
         actual_job_id = prep.actual_job_id
@@ -1707,6 +1739,8 @@ class PipelineOrchestrator:
                 writer_lock=writer_lock,
                 actual_job_id=actual_job_id,
             )
+            if decrypt_tmp is not None:
+                decrypt_tmp.cleanup()
 
     async def _failure_progress_event(
         self,

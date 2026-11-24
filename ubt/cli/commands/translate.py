@@ -586,6 +586,14 @@ def translate(
             show_default=False,
         ),
     ] = None,
+    pdf_password: Annotated[
+        str | None,
+        typer.Option(
+            "--pdf-password",
+            help="Password for opening a password-protected PDF (or set UBT_PDF_PASSWORD)",
+            show_default=False,
+        ),
+    ] = None,
     dual_mode: Annotated[
         DualMode | None,
         typer.Option(
@@ -809,6 +817,7 @@ def translate(
         "translate_chrome": translate_chrome,
         "preset": preset,
         "pdf_engine": pdf_engine,
+        "pdf_password": pdf_password,
         "emit_both": emit_both,
         "fresh": fresh,
         "ocr_mode": ocr,

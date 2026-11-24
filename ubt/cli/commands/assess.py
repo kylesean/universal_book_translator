@@ -97,6 +97,17 @@ def assess_cmd(
             ),
         ),
     ] = False,
+    pdf_password: Annotated[
+        str | None,
+        typer.Option(
+            "--pdf-password",
+            help=ui_msg(
+                "Password for opening a password-protected PDF (or set UBT_PDF_PASSWORD)",
+                "打开受密码保护 PDF 的密码（也可通过环境变量 UBT_PDF_PASSWORD 提供）",
+            ),
+            show_default=False,
+        ),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option(
@@ -164,6 +175,8 @@ def assess_cmd(
         overrides["provider"] = provider
     if repair_provider is not None:
         overrides["repair_provider"] = repair_provider
+    if pdf_password is not None:
+        overrides["pdf_password"] = pdf_password
     # assess sets no explicit engine flag: quote the preset, or — with no
     # preset — the engine default (an all-None table was just {} in disguise).
     overrides.update(resolve_engine_params(preset, {}))
