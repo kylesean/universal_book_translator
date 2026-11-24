@@ -246,9 +246,9 @@ jobs:
           result = DocumentConverter().convert(pdf)
           assert len(result.document.pages) == 1
 
-          from ubt.codecs.pdf.codec import NativePdfCodec
+          from ubt.codecs.pdf.codec import NativePDFCodec
 
-          NativePdfCodec().extract(pdf)
+          NativePDFCodec().extract(pdf)
           print("docling + rapid_layout models cached and conversion verified")
           PY
 

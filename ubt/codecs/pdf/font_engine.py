@@ -245,29 +245,44 @@ def resolve_slot_paths(
             [
                 "NotoSerifCJKsc-Regular-subset.otf",
                 "NotoSerifCJKsc-Regular.otf",
+                "NotoSerifCJK-Regular.ttc",
                 "NotoSansCJKsc-Regular-subset.otf",
+                "NotoSansCJKsc-Regular.otf",
+                "NotoSansCJK-Regular.ttc",
                 "NotoSerif-Regular.ttf",
             ]
         )
         serif_bold = _find(
             [
                 "NotoSerifCJKsc-Bold-subset.otf",
+                "NotoSerifCJKsc-Bold.otf",
+                "NotoSerifCJK-Bold.ttc",
                 "NotoSansCJKsc-Bold-subset.otf",
+                "NotoSansCJKsc-Bold.otf",
+                "NotoSansCJK-Bold.ttc",
                 "NotoSerifCJKsc-Regular-subset.otf",
+                "NotoSerifCJK-Regular.ttc",
             ]
         )
         sans_reg = _find(
             [
                 "NotoSansCJKsc-Regular-subset.otf",
+                "NotoSansCJKsc-Regular.otf",
+                "NotoSansCJK-Regular.ttc",
                 "NotoSerifCJKsc-Regular-subset.otf",
+                "NotoSerifCJK-Regular.ttc",
                 "NotoSerif-Regular.ttf",
             ]
         )
         sans_bold = _find(
             [
                 "NotoSansCJKsc-Bold-subset.otf",
+                "NotoSansCJKsc-Bold.otf",
+                "NotoSansCJK-Bold.ttc",
                 "NotoSerifCJKsc-Bold-subset.otf",
+                "NotoSerifCJK-Bold.ttc",
                 "NotoSansCJKsc-Regular-subset.otf",
+                "NotoSansCJK-Regular.ttc",
             ]
         )
 
